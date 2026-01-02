@@ -4,6 +4,7 @@
 //! of combatants and watch them battle CPU vs CPU.
 
 use bevy::prelude::*;
+use bevy_egui::EguiPlugin;
 
 mod camera;
 mod combat;
@@ -29,6 +30,7 @@ fn main() {
         }))
         // Our game plugins
         .add_plugins((
+            EguiPlugin,
             StatesPlugin,
             CameraPlugin,
             CombatPlugin,

@@ -7,6 +7,7 @@ license = "MIT"
 
 [dependencies]
 bevy = "0.15"
+bevy_egui = "0.31"
 
 # Enable dynamic linking for faster compile times during development
 # Disable this for release builds
