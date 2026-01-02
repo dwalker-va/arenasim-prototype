@@ -1,0 +1,117 @@
+// Map definitions for ArenaSim
+// RON format - Rusty Object Notation
+// This file defines the available arena maps
+
+(
+    maps: [
+        (
+            id: "basic_arena",
+            name: "Basic Arena",
+            description: "A simple rectangular arena for testing",
+            // Arena dimensions in units
+            size: (
+                width: 40.0,
+                depth: 30.0,
+            ),
+            // Team spawn points
+            team_spawns: [
+                // Team 1 spawns
+                [
+                    (x: -15.0, z: 0.0),
+                    (x: -15.0, z: -5.0),
+                    (x: -15.0, z: 5.0),
+                ],
+                // Team 2 spawns
+                [
+                    (x: 15.0, z: 0.0),
+                    (x: 15.0, z: -5.0),
+                    (x: 15.0, z: 5.0),
+                ],
+            ],
+            // Gate positions (where teams wait before match starts)
+            gates: [
+                (x: -18.0, z: 0.0, facing: 0.0),
+                (x: 18.0, z: 0.0, facing: 180.0),
+            ],
+            // Colors for the arena floor and walls
+            colors: (
+                floor: "#4a4a4a",
+                walls: "#2a2a2a",
+                team_1_gate: "#2244aa",
+                team_2_gate: "#aa2222",
+            ),
+            // Grid settings for low-poly aesthetic
+            grid: (
+                tile_size: 2.0,
+                show_grid_lines: true,
+                grid_line_color: "#555555",
+            ),
+        ),
+        (
+            id: "pillared_arena",
+            name: "Pillared Arena",
+            description: "An arena with pillars providing line-of-sight breaks",
+            size: (
+                width: 50.0,
+                depth: 40.0,
+            ),
+            team_spawns: [
+                [
+                    (x: -20.0, z: 0.0),
+                    (x: -20.0, z: -8.0),
+                    (x: -20.0, z: 8.0),
+                ],
+                [
+                    (x: 20.0, z: 0.0),
+                    (x: 20.0, z: -8.0),
+                    (x: 20.0, z: 8.0),
+                ],
+            ],
+            gates: [
+                (x: -23.0, z: 0.0, facing: 0.0),
+                (x: 23.0, z: 0.0, facing: 180.0),
+            ],
+            // Obstacles in the arena
+            obstacles: [
+                (
+                    shape: Pillar,
+                    position: (x: -8.0, z: -8.0),
+                    size: (width: 3.0, height: 6.0, depth: 3.0),
+                ),
+                (
+                    shape: Pillar,
+                    position: (x: 8.0, z: -8.0),
+                    size: (width: 3.0, height: 6.0, depth: 3.0),
+                ),
+                (
+                    shape: Pillar,
+                    position: (x: -8.0, z: 8.0),
+                    size: (width: 3.0, height: 6.0, depth: 3.0),
+                ),
+                (
+                    shape: Pillar,
+                    position: (x: 8.0, z: 8.0),
+                    size: (width: 3.0, height: 6.0, depth: 3.0),
+                ),
+                (
+                    shape: Pillar,
+                    position: (x: 0.0, z: 0.0),
+                    size: (width: 4.0, height: 8.0, depth: 4.0),
+                ),
+            ],
+            colors: (
+                floor: "#3a3a3a",
+                walls: "#2a2a2a",
+                pillars: "#5a5a5a",
+                team_1_gate: "#2244aa",
+                team_2_gate: "#aa2222",
+            ),
+            grid: (
+                tile_size: 2.0,
+                show_grid_lines: true,
+                grid_line_color: "#444444",
+            ),
+        ),
+    ],
+)
+

@@ -1,0 +1,213 @@
+// Ability definitions for ArenaSim
+// RON format - Rusty Object Notation
+// This file defines all abilities and their effects
+
+(
+    abilities: [
+        // Warrior abilities
+        (
+            id: "heroic_strike",
+            name: "Heroic Strike",
+            description: "A powerful melee attack",
+            resource_cost: 15.0,
+            cooldown: 0.0,
+            cast_time: 0.0,
+            range: 5.0,
+            effects: [
+                Damage(
+                    base_amount: 80.0,
+                    scaling: AttackPower(0.5),
+                    damage_type: Physical,
+                ),
+            ],
+        ),
+        (
+            id: "shield_slam",
+            name: "Shield Slam",
+            description: "Slam the target with your shield, dealing damage and stunning them",
+            resource_cost: 20.0,
+            cooldown: 6.0,
+            cast_time: 0.0,
+            range: 5.0,
+            effects: [
+                Damage(
+                    base_amount: 60.0,
+                    scaling: AttackPower(0.3),
+                    damage_type: Physical,
+                ),
+                ApplyCC(
+                    cc_type: Stun,
+                    duration: 2.0,
+                ),
+            ],
+        ),
+        (
+            id: "charge",
+            name: "Charge",
+            description: "Charge at an enemy, stunning them briefly",
+            resource_cost: 0.0,
+            cooldown: 15.0,
+            cast_time: 0.0,
+            range: 25.0,
+            min_range: 8.0,
+            effects: [
+                Movement(ChargeToTarget),
+                ApplyCC(
+                    cc_type: Stun,
+                    duration: 1.0,
+                ),
+            ],
+        ),
+        
+        // Mage abilities
+        (
+            id: "fireball",
+            name: "Fireball",
+            description: "Hurls a fiery ball at the target",
+            resource_cost: 40.0,
+            cooldown: 0.0,
+            cast_time: 2.5,
+            range: 35.0,
+            effects: [
+                Damage(
+                    base_amount: 120.0,
+                    scaling: SpellPower(0.8),
+                    damage_type: Fire,
+                ),
+            ],
+        ),
+        (
+            id: "frost_nova",
+            name: "Frost Nova",
+            description: "Freezes all enemies within 10 yards",
+            resource_cost: 30.0,
+            cooldown: 25.0,
+            cast_time: 0.0,
+            range: 0.0, // Self-centered AoE
+            radius: 10.0,
+            effects: [
+                Damage(
+                    base_amount: 30.0,
+                    scaling: SpellPower(0.2),
+                    damage_type: Frost,
+                ),
+                ApplyCC(
+                    cc_type: Freeze,
+                    duration: 4.0,
+                ),
+            ],
+        ),
+        (
+            id: "blink",
+            name: "Blink",
+            description: "Teleport forward a short distance",
+            resource_cost: 20.0,
+            cooldown: 15.0,
+            cast_time: 0.0,
+            range: 0.0,
+            effects: [
+                Movement(BlinkForward(20.0)),
+            ],
+        ),
+        
+        // Rogue abilities
+        (
+            id: "backstab",
+            name: "Backstab",
+            description: "A vicious stab from behind",
+            resource_cost: 60.0,
+            cooldown: 0.0,
+            cast_time: 0.0,
+            range: 5.0,
+            requires_behind: true,
+            effects: [
+                Damage(
+                    base_amount: 100.0,
+                    scaling: AttackPower(0.7),
+                    damage_type: Physical,
+                ),
+            ],
+        ),
+        (
+            id: "eviscerate",
+            name: "Eviscerate",
+            description: "Finishing move that causes damage",
+            resource_cost: 35.0,
+            cooldown: 0.0,
+            cast_time: 0.0,
+            range: 5.0,
+            effects: [
+                Damage(
+                    base_amount: 150.0,
+                    scaling: AttackPower(0.9),
+                    damage_type: Physical,
+                ),
+            ],
+        ),
+        (
+            id: "stealth",
+            name: "Stealth",
+            description: "Enter stealth mode, becoming invisible",
+            resource_cost: 0.0,
+            cooldown: 10.0,
+            cast_time: 0.0,
+            range: 0.0,
+            effects: [
+                ApplyBuff(
+                    aura_id: "stealth",
+                    duration: None, // Until broken
+                ),
+            ],
+        ),
+        
+        // Priest abilities
+        (
+            id: "greater_heal",
+            name: "Greater Heal",
+            description: "A powerful healing spell",
+            resource_cost: 50.0,
+            cooldown: 0.0,
+            cast_time: 3.0,
+            range: 40.0,
+            target_type: Friendly,
+            effects: [
+                Heal(
+                    base_amount: 200.0,
+                    scaling: SpellPower(1.0),
+                ),
+            ],
+        ),
+        (
+            id: "flash_heal",
+            name: "Flash Heal",
+            description: "A fast but inefficient heal",
+            resource_cost: 40.0,
+            cooldown: 0.0,
+            cast_time: 1.5,
+            range: 40.0,
+            target_type: Friendly,
+            effects: [
+                Heal(
+                    base_amount: 80.0,
+                    scaling: SpellPower(0.5),
+                ),
+            ],
+        ),
+        (
+            id: "shadow_word_pain",
+            name: "Shadow Word: Pain",
+            description: "A word of shadow that causes pain over time",
+            resource_cost: 25.0,
+            cooldown: 0.0,
+            cast_time: 0.0,
+            range: 30.0,
+            effects: [
+                ApplyDebuff(
+                    aura_id: "shadow_word_pain_dot",
+                    duration: Some(18.0),
+                ),
+            ],
+        ),
+    ],
+)
+
