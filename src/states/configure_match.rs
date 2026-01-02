@@ -241,11 +241,19 @@ fn spawn_team_panel(parent: &mut ChildBuilder, team: u8, config: &MatchConfig) {
     parent
         .spawn((
             Node {
+                // Use flex_basis instead of flex_grow to ensure equal width
+                flex_basis: Val::Px(0.0),
                 flex_grow: 1.0,
+                flex_shrink: 1.0,
                 flex_direction: FlexDirection::Column,
                 padding: UiRect::all(Val::Px(20.0)),
                 border: UiRect::all(Val::Px(3.0)),
                 row_gap: Val::Px(15.0),
+                // Fixed height to prevent resizing when team size changes
+                // Sized to always fit max team size (3 slots)
+                height: Val::Px(400.0),
+                // Prevent stretching from parent flexbox
+                align_self: AlignSelf::Start,
                 ..default()
             },
             BorderColor(team_color),
@@ -465,6 +473,10 @@ fn spawn_map_panel(parent: &mut ChildBuilder, config: &MatchConfig) {
                 border: UiRect::all(Val::Px(2.0)),
                 row_gap: Val::Px(15.0),
                 align_items: AlignItems::Center,
+                // Fixed height to match team panels for visual consistency
+                height: Val::Px(400.0),
+                // Prevent stretching from parent flexbox
+                align_self: AlignSelf::Start,
                 ..default()
             },
             BorderColor(colors::BORDER),
