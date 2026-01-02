@@ -27,6 +27,10 @@ impl Plugin for StatesPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(GameState::MainMenu), setup_main_menu)
             .add_systems(OnExit(GameState::MainMenu), cleanup_main_menu)
+            .add_systems(
+                Update,
+                handle_main_menu_buttons.run_if(in_state(GameState::MainMenu)),
+            )
             .add_systems(OnEnter(GameState::ConfigureMatch), setup_configure_match)
             .add_systems(OnExit(GameState::ConfigureMatch), cleanup_configure_match)
             .add_systems(OnEnter(GameState::PlayMatch), setup_play_match)
@@ -52,9 +56,178 @@ pub struct PlayMatchEntity;
 #[derive(Component)]
 pub struct ResultsEntity;
 
-fn setup_main_menu(mut _commands: Commands) {
-    // TODO: Implement main menu UI
+// ============================================================================
+// Main Menu
+// ============================================================================
+
+/// Identifies which button this is in the main menu
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+pub enum MainMenuButton {
+    Match,
+    Options,
+    Exit,
+}
+
+/// Colors for button states
+mod button_colors {
+    use bevy::prelude::*;
+
+    pub const NORMAL: Color = Color::srgb(0.15, 0.15, 0.20);
+    pub const HOVERED: Color = Color::srgb(0.25, 0.25, 0.35);
+    pub const PRESSED: Color = Color::srgb(0.35, 0.35, 0.50);
+    pub const BORDER: Color = Color::srgb(0.4, 0.35, 0.25);
+    pub const BORDER_HOVERED: Color = Color::srgb(0.7, 0.6, 0.4);
+}
+
+fn setup_main_menu(mut commands: Commands) {
     info!("Entering MainMenu state");
+
+    // Spawn 2D camera for UI
+    commands.spawn((Camera2d::default(), MainMenuEntity));
+
+    // Root container - full screen, centered content
+    commands
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                row_gap: Val::Px(20.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.08, 0.08, 0.12)),
+            MainMenuEntity,
+        ))
+        .with_children(|parent| {
+            // Title
+            parent.spawn((
+                Text::new("ARENASIM"),
+                TextFont {
+                    font_size: 72.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.9, 0.8, 0.6)),
+                Node {
+                    margin: UiRect::bottom(Val::Px(40.0)),
+                    ..default()
+                },
+            ));
+
+            // Subtitle
+            parent.spawn((
+                Text::new("Arena Combat Autobattler"),
+                TextFont {
+                    font_size: 24.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.6, 0.55, 0.5)),
+                Node {
+                    margin: UiRect::bottom(Val::Px(60.0)),
+                    ..default()
+                },
+            ));
+
+            // Match button
+            spawn_menu_button(parent, "MATCH", MainMenuButton::Match);
+
+            // Options button
+            spawn_menu_button(parent, "OPTIONS", MainMenuButton::Options);
+
+            // Exit button
+            spawn_menu_button(parent, "EXIT", MainMenuButton::Exit);
+
+            // Version/footer text
+            parent.spawn((
+                Text::new("v0.1.0 - Prototype"),
+                TextFont {
+                    font_size: 14.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.4, 0.4, 0.4)),
+                Node {
+                    position_type: PositionType::Absolute,
+                    bottom: Val::Px(20.0),
+                    right: Val::Px(20.0),
+                    ..default()
+                },
+            ));
+        });
+}
+
+fn spawn_menu_button(parent: &mut ChildBuilder, text: &str, button_type: MainMenuButton) {
+    parent
+        .spawn((
+            Button,
+            Node {
+                width: Val::Px(280.0),
+                height: Val::Px(60.0),
+                border: UiRect::all(Val::Px(3.0)),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BorderColor(button_colors::BORDER),
+            BorderRadius::all(Val::Px(8.0)),
+            BackgroundColor(button_colors::NORMAL),
+            button_type,
+        ))
+        .with_child((
+            Text::new(text),
+            TextFont {
+                font_size: 28.0,
+                ..default()
+            },
+            TextColor(Color::srgb(0.9, 0.85, 0.75)),
+        ));
+}
+
+fn handle_main_menu_buttons(
+    mut interaction_query: Query<
+        (
+            &Interaction,
+            &MainMenuButton,
+            &mut BackgroundColor,
+            &mut BorderColor,
+        ),
+        (Changed<Interaction>, With<Button>),
+    >,
+    mut next_state: ResMut<NextState<GameState>>,
+    mut exit_events: EventWriter<AppExit>,
+) {
+    for (interaction, button_type, mut bg_color, mut border_color) in &mut interaction_query {
+        match *interaction {
+            Interaction::Pressed => {
+                *bg_color = button_colors::PRESSED.into();
+                *border_color = button_colors::BORDER_HOVERED.into();
+
+                // Handle button action
+                match button_type {
+                    MainMenuButton::Match => {
+                        info!("Match button pressed - transitioning to ConfigureMatch");
+                        next_state.set(GameState::ConfigureMatch);
+                    }
+                    MainMenuButton::Options => {
+                        info!("Options button pressed - transitioning to Options");
+                        next_state.set(GameState::Options);
+                    }
+                    MainMenuButton::Exit => {
+                        info!("Exit button pressed - quitting application");
+                        exit_events.send(AppExit::Success);
+                    }
+                }
+            }
+            Interaction::Hovered => {
+                *bg_color = button_colors::HOVERED.into();
+                *border_color = button_colors::BORDER_HOVERED.into();
+            }
+            Interaction::None => {
+                *bg_color = button_colors::NORMAL.into();
+                *border_color = button_colors::BORDER.into();
+            }
+        }
+    }
 }
 
 fn cleanup_main_menu(mut commands: Commands, query: Query<Entity, With<MainMenuEntity>>) {
@@ -63,9 +236,66 @@ fn cleanup_main_menu(mut commands: Commands, query: Query<Entity, With<MainMenuE
     }
 }
 
-fn setup_configure_match(mut _commands: Commands) {
-    // TODO: Implement match configuration UI
+// ============================================================================
+// Configure Match (placeholder)
+// ============================================================================
+
+fn setup_configure_match(mut commands: Commands) {
     info!("Entering ConfigureMatch state");
+
+    // Spawn 2D camera for UI
+    commands.spawn((Camera2d::default(), ConfigureMatchEntity));
+
+    // Placeholder UI
+    commands
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.08, 0.08, 0.12)),
+            ConfigureMatchEntity,
+        ))
+        .with_children(|parent| {
+            parent.spawn((
+                Text::new("Configure Match"),
+                TextFont {
+                    font_size: 48.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.9, 0.8, 0.6)),
+            ));
+
+            parent.spawn((
+                Text::new("Coming Soon..."),
+                TextFont {
+                    font_size: 24.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.6, 0.55, 0.5)),
+                Node {
+                    margin: UiRect::top(Val::Px(20.0)),
+                    ..default()
+                },
+            ));
+
+            parent.spawn((
+                Text::new("Press ESC to return to menu"),
+                TextFont {
+                    font_size: 18.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.5, 0.5, 0.5)),
+                Node {
+                    margin: UiRect::top(Val::Px(40.0)),
+                    ..default()
+                },
+            ));
+        });
 }
 
 fn cleanup_configure_match(
@@ -77,8 +307,11 @@ fn cleanup_configure_match(
     }
 }
 
+// ============================================================================
+// Play Match (placeholder)
+// ============================================================================
+
 fn setup_play_match(mut _commands: Commands) {
-    // TODO: Implement match gameplay
     info!("Entering PlayMatch state");
 }
 
@@ -88,8 +321,11 @@ fn cleanup_play_match(mut commands: Commands, query: Query<Entity, With<PlayMatc
     }
 }
 
+// ============================================================================
+// Results (placeholder)
+// ============================================================================
+
 fn setup_results(mut _commands: Commands) {
-    // TODO: Implement results UI
     info!("Entering Results state");
 }
 
@@ -98,4 +334,3 @@ fn cleanup_results(mut commands: Commands, query: Query<Entity, With<ResultsEnti
         commands.entity(entity).despawn_recursive();
     }
 }
-

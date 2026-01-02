@@ -9,14 +9,19 @@
 
 use bevy::prelude::*;
 
+use crate::states::GameState;
+
 /// Plugin for camera management
 pub struct CameraPlugin;
 
 impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CameraSettings>()
-            .add_systems(Startup, setup_camera)
-            .add_systems(Update, camera_controls);
+            .add_systems(Update, handle_escape_key)
+            .add_systems(
+                Update,
+                camera_controls.run_if(in_state(GameState::PlayMatch)),
+            );
     }
 }
 
@@ -59,39 +64,43 @@ impl Default for CameraSettings {
     }
 }
 
-/// Marker component for the main game camera
+/// Marker component for the main 3D game camera (used during PlayMatch)
 #[derive(Component)]
 pub struct MainCamera;
 
-fn setup_camera(mut commands: Commands) {
-    // Spawn a 3D camera looking down at the arena at an angle
-    commands.spawn((
-        Camera3d::default(),
-        Transform::from_xyz(0.0, 20.0, 20.0).looking_at(Vec3::ZERO, Vec3::Y),
-        MainCamera,
-    ));
-
-    // Add ambient light
-    commands.insert_resource(AmbientLight {
-        color: Color::WHITE,
-        brightness: 500.0,
-    });
-
-    // Add a directional light (sun-like)
-    commands.spawn((
-        DirectionalLight {
-            color: Color::WHITE,
-            illuminance: 10000.0,
-            shadows_enabled: true,
-            ..default()
-        },
-        Transform::from_xyz(10.0, 20.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
-    ));
+/// Handle ESC key to return to previous state/menu
+fn handle_escape_key(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    current_state: Res<State<GameState>>,
+    mut next_state: ResMut<NextState<GameState>>,
+) {
+    if keyboard.just_pressed(KeyCode::Escape) {
+        match current_state.get() {
+            GameState::MainMenu => {
+                // ESC in main menu does nothing (or could open quit confirmation)
+            }
+            GameState::Options => {
+                next_state.set(GameState::MainMenu);
+            }
+            GameState::ConfigureMatch => {
+                next_state.set(GameState::MainMenu);
+            }
+            GameState::PlayMatch => {
+                // During a match, ESC could pause or show a menu
+                // For now, just return to main menu
+                next_state.set(GameState::MainMenu);
+            }
+            GameState::Results => {
+                next_state.set(GameState::MainMenu);
+            }
+        }
+    }
 }
 
+/// Camera controls for the 3D arena view during PlayMatch
 fn camera_controls(
     mut camera_query: Query<&mut Transform, With<MainCamera>>,
-    settings: Res<CameraSettings>,
+    _settings: Res<CameraSettings>,
     keyboard: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
 ) {
@@ -100,7 +109,6 @@ fn camera_controls(
     };
 
     // Basic zoom with scroll wheel simulation via keyboard for now
-    // TODO: Add proper mouse scroll zoom
     let zoom_speed = 10.0 * time.delta_secs();
     if keyboard.pressed(KeyCode::Equal) || keyboard.pressed(KeyCode::NumpadAdd) {
         let direction = camera_transform.forward();
@@ -125,9 +133,4 @@ fn camera_controls(
     if keyboard.pressed(KeyCode::KeyD) {
         camera_transform.translation.x += move_speed;
     }
-
-    // Keep the camera looking at the center for now
-    // TODO: Implement proper camera modes (follow center, follow combatant, manual)
-    let _ = settings; // Suppress unused warning for now
 }
-
