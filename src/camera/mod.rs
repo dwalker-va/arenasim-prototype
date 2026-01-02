@@ -69,6 +69,7 @@ impl Default for CameraSettings {
 pub struct MainCamera;
 
 /// Handle ESC key to return to previous state/menu
+/// Note: ConfigureMatch has its own ESC handler to close modals first
 fn handle_escape_key(
     keyboard: Res<ButtonInput<KeyCode>>,
     current_state: Res<State<GameState>>,
@@ -83,7 +84,7 @@ fn handle_escape_key(
                 next_state.set(GameState::MainMenu);
             }
             GameState::ConfigureMatch => {
-                next_state.set(GameState::MainMenu);
+                // ConfigureMatch has its own ESC handler - skip here
             }
             GameState::PlayMatch => {
                 // During a match, ESC could pause or show a menu

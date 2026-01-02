@@ -4,6 +4,15 @@
 
 use bevy::prelude::*;
 
+pub mod configure_match;
+pub mod match_config;
+
+use configure_match::{
+    cleanup_configure_match, handle_configure_buttons, handle_configure_escape,
+    setup_configure_match, update_config_ui,
+};
+pub use match_config::MatchConfig;
+
 /// The core game states representing the main screens/modes of the game.
 #[derive(States, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum GameState {
@@ -25,16 +34,29 @@ pub struct StatesPlugin;
 
 impl Plugin for StatesPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(GameState::MainMenu), setup_main_menu)
+        app
+            // Initialize match config resource
+            .init_resource::<MatchConfig>()
+            // Main menu systems
+            .add_systems(OnEnter(GameState::MainMenu), setup_main_menu)
             .add_systems(OnExit(GameState::MainMenu), cleanup_main_menu)
             .add_systems(
                 Update,
                 handle_main_menu_buttons.run_if(in_state(GameState::MainMenu)),
             )
+            // Configure match systems
             .add_systems(OnEnter(GameState::ConfigureMatch), setup_configure_match)
             .add_systems(OnExit(GameState::ConfigureMatch), cleanup_configure_match)
+            .add_systems(
+                Update,
+                (handle_configure_buttons, update_config_ui, handle_configure_escape)
+                    .chain()
+                    .run_if(in_state(GameState::ConfigureMatch)),
+            )
+            // Play match systems
             .add_systems(OnEnter(GameState::PlayMatch), setup_play_match)
             .add_systems(OnExit(GameState::PlayMatch), cleanup_play_match)
+            // Results systems
             .add_systems(OnEnter(GameState::Results), setup_results)
             .add_systems(OnExit(GameState::Results), cleanup_results);
     }
@@ -237,14 +259,14 @@ fn cleanup_main_menu(mut commands: Commands, query: Query<Entity, With<MainMenuE
 }
 
 // ============================================================================
-// Configure Match (placeholder)
+// Play Match (placeholder)
 // ============================================================================
 
-fn setup_configure_match(mut commands: Commands) {
-    info!("Entering ConfigureMatch state");
+fn setup_play_match(mut commands: Commands) {
+    info!("Entering PlayMatch state");
 
-    // Spawn 2D camera for UI
-    commands.spawn((Camera2d::default(), ConfigureMatchEntity));
+    // Spawn 2D camera for UI (temporary - will be 3D later)
+    commands.spawn((Camera2d::default(), PlayMatchEntity));
 
     // Placeholder UI
     commands
@@ -258,11 +280,11 @@ fn setup_configure_match(mut commands: Commands) {
                 ..default()
             },
             BackgroundColor(Color::srgb(0.08, 0.08, 0.12)),
-            ConfigureMatchEntity,
+            PlayMatchEntity,
         ))
         .with_children(|parent| {
             parent.spawn((
-                Text::new("Configure Match"),
+                Text::new("Match In Progress"),
                 TextFont {
                     font_size: 48.0,
                     ..default()
@@ -271,7 +293,7 @@ fn setup_configure_match(mut commands: Commands) {
             ));
 
             parent.spawn((
-                Text::new("Coming Soon..."),
+                Text::new("Combat simulation coming soon..."),
                 TextFont {
                     font_size: 24.0,
                     ..default()
@@ -296,23 +318,6 @@ fn setup_configure_match(mut commands: Commands) {
                 },
             ));
         });
-}
-
-fn cleanup_configure_match(
-    mut commands: Commands,
-    query: Query<Entity, With<ConfigureMatchEntity>>,
-) {
-    for entity in query.iter() {
-        commands.entity(entity).despawn_recursive();
-    }
-}
-
-// ============================================================================
-// Play Match (placeholder)
-// ============================================================================
-
-fn setup_play_match(mut _commands: Commands) {
-    info!("Entering PlayMatch state");
 }
 
 fn cleanup_play_match(mut commands: Commands, query: Query<Entity, With<PlayMatchEntity>>) {
