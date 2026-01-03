@@ -497,6 +497,8 @@ fn spawn_combatant(
         base_color: combatant_color,
         perceptual_roughness: 0.5, // More reflective for better color visibility
         metallic: 0.2, // Slight metallic sheen for color pop
+        // Enable alpha mode for stealth transparency
+        alpha_mode: bevy::prelude::AlphaMode::Blend,
         ..default()
     });
 
@@ -577,10 +579,29 @@ pub fn render_health_bars(
                     let bar_width = 50.0;
                     let bar_height = 6.0;
                     let bar_spacing = 2.0; // Space between bars
-                    let bar_pos = egui::pos2(
+                    let mut bar_pos = egui::pos2(
                         screen_pos.x - bar_width / 2.0,
                         screen_pos.y - bar_height / 2.0,
                     );
+                    
+                    // STEALTH indicator (if stealthed)
+                    if combatant.stealthed {
+                        let stealth_text = "STEALTH";
+                        let stealth_font = egui::FontId::monospace(9.0);
+                        let stealth_galley = ui.fonts(|f| f.layout_no_wrap(
+                            stealth_text.to_string(),
+                            stealth_font,
+                            egui::Color32::from_rgb(150, 100, 200), // Purple tint
+                        ));
+                        let stealth_pos = egui::pos2(
+                            bar_pos.x + (bar_width - stealth_galley.size().x) / 2.0,
+                            bar_pos.y - 12.0, // Above the health bar
+                        );
+                        ui.painter().galley(stealth_pos, stealth_galley, egui::Color32::from_rgb(150, 100, 200));
+                        
+                        // Move health bar down slightly to make room for stealth label
+                        // (Actually, let's keep it in the same position for consistency)
+                    }
 
                     // Health bar background (dark gray)
                     ui.painter().rect_filled(
@@ -1023,6 +1044,49 @@ pub fn move_to_target(
                 // Rotate to face target
                 let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
                 transform.rotation = target_rotation;
+            }
+        }
+    }
+}
+
+/// Update visual appearance of stealthed combatants.
+/// 
+/// Makes stealthed Rogues semi-transparent (40% alpha) with a darker tint
+/// to clearly indicate their stealth status. When they break stealth (e.g., by using Ambush),
+/// they return to full opacity and original color.
+pub fn update_stealth_visuals(
+    combatants: Query<(&Combatant, &MeshMaterial3d<StandardMaterial>), Changed<Combatant>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    for (combatant, material_handle) in combatants.iter() {
+        if let Some(material) = materials.get_mut(&material_handle.0) {
+            let current_color = material.base_color.to_srgba();
+            let current_alpha = current_color.alpha;
+            
+            if combatant.stealthed {
+                // Only apply stealth effect if not already stealthed (alpha is 1.0)
+                if current_alpha >= 0.9 {
+                    // Semi-transparent with darker tint for stealth
+                    let color = Color::srgba(
+                        current_color.red * 0.6,
+                        current_color.green * 0.6,
+                        current_color.blue * 0.6,
+                        0.4, // 40% opacity
+                    );
+                    material.base_color = color;
+                }
+            } else {
+                // Only restore if currently stealthed (alpha is low)
+                if current_alpha < 0.9 {
+                    // Restore original color by reversing the darkening (divide by 0.6)
+                    let color = Color::srgba(
+                        (current_color.red / 0.6).min(1.0),
+                        (current_color.green / 0.6).min(1.0),
+                        (current_color.blue / 0.6).min(1.0),
+                        1.0, // Full opacity
+                    );
+                    material.base_color = color;
+                }
             }
         }
     }

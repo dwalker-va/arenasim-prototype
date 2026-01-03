@@ -64,6 +64,7 @@ impl Plugin for StatesPlugin {
                     play_match::decide_abilities,
                     play_match::process_casting,
                     play_match::move_to_target,
+                    play_match::update_stealth_visuals,
                     play_match::combat_auto_attack,
                     play_match::check_match_end,
                     play_match::update_floating_combat_text,
