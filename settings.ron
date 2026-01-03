@@ -1,0 +1,5 @@
+(
+    window_mode: Windowed,
+    resolution: HD720,
+    vsync: true,
+)
