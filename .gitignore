@@ -16,4 +16,7 @@ Thumbs.db
 # Bevy
 *.blend1
 
+# Match logs (for debugging)
+match_logs/
+
 design-docs/

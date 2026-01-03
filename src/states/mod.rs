@@ -57,10 +57,20 @@ impl Plugin for StatesPlugin {
                 Update,
                 (
                     play_match::update_play_match,
+                    play_match::regenerate_resources,
+                    play_match::update_auras,
+                    play_match::apply_pending_auras,
                     play_match::acquire_targets,
+                    play_match::decide_abilities,
+                    play_match::process_casting,
+                    play_match::move_to_target,
                     play_match::combat_auto_attack,
                     play_match::check_match_end,
+                    play_match::update_floating_combat_text,
+                    play_match::cleanup_expired_floating_text,
                     play_match::render_health_bars,
+                    play_match::render_floating_combat_text,
+                    play_match::render_combat_log,
                 )
                     .chain()
                     .run_if(in_state(GameState::PlayMatch)),
