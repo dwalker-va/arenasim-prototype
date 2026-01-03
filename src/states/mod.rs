@@ -50,10 +50,24 @@ impl Plugin for StatesPlugin {
             )
             // Play match systems
             .add_systems(OnEnter(GameState::PlayMatch), setup_play_match)
+            .add_systems(
+                Update,
+                (
+                    update_play_match,
+                    acquire_targets,
+                    combat_auto_attack,
+                    check_match_end,
+                    render_health_bars,
+                )
+                    .chain()
+                    .run_if(in_state(GameState::PlayMatch)),
+            )
             .add_systems(OnExit(GameState::PlayMatch), cleanup_play_match)
-            // Results systems
-            .add_systems(OnEnter(GameState::Results), setup_results)
-            .add_systems(OnExit(GameState::Results), cleanup_results);
+            // Results systems (now using egui)
+            .add_systems(
+                Update,
+                results_ui.run_if(in_state(GameState::Results)),
+            );
     }
 }
 
@@ -440,7 +454,6 @@ fn configure_match_ui(
     mut picker_state: Option<ResMut<CharacterPickerState>>,
     mut commands: Commands,
     keyboard: Res<ButtonInput<KeyCode>>,
-    windows: Query<&Window>,
 ) {
     // Initialize picker state if it doesn't exist
     if picker_state.is_none() {
@@ -957,83 +970,630 @@ fn render_map_panel(ui: &mut egui::Ui, config: &mut MatchConfig, max_width: f32)
 }
 
 // ============================================================================
-// Play Match (placeholder)
+// Play Match - 3D Combat Arena
 // ============================================================================
 
-fn setup_play_match(mut commands: Commands) {
-    info!("Entering PlayMatch state");
+#[derive(Component, Clone)]
+struct Combatant {
+    team: u8,
+    class: match_config::CharacterClass,
+    max_health: f32,
+    current_health: f32,
+    attack_damage: f32,
+    attack_speed: f32, // Attacks per second
+    attack_timer: f32,
+    target: Option<Entity>,
+    damage_dealt: f32,
+    damage_taken: f32,
+}
 
-    // Spawn 2D camera for UI (temporary - will be 3D later)
-    commands.spawn((Camera2d::default(), PlayMatchEntity));
+impl Combatant {
+    fn new(team: u8, class: match_config::CharacterClass) -> Self {
+        // Class-specific stats
+        let (max_health, attack_damage, attack_speed) = match class {
+            match_config::CharacterClass::Warrior => (150.0, 12.0, 1.0),
+            match_config::CharacterClass::Mage => (80.0, 20.0, 0.7),
+            match_config::CharacterClass::Rogue => (100.0, 15.0, 1.3),
+            match_config::CharacterClass::Priest => (90.0, 8.0, 0.8),
+        };
+        
+        Self {
+            team,
+            class,
+            max_health,
+            current_health: max_health,
+            attack_damage,
+            attack_speed,
+            attack_timer: 0.0,
+            target: None,
+            damage_dealt: 0.0,
+            damage_taken: 0.0,
+        }
+    }
+    
+    fn is_alive(&self) -> bool {
+        self.current_health > 0.0
+    }
+}
 
-    // Placeholder UI
-    commands
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.08, 0.08, 0.12)),
-            PlayMatchEntity,
-        ))
-        .with_children(|parent| {
-            parent.spawn((
-                Text::new("Match In Progress"),
-                TextFont {
-                    font_size: 48.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.9, 0.8, 0.6)),
-            ));
+#[derive(Resource, Clone)]
+struct MatchResults {
+    winner: Option<u8>, // None = draw, Some(1) = team 1, Some(2) = team 2
+    team1_combatants: Vec<CombatantStats>,
+    team2_combatants: Vec<CombatantStats>,
+}
 
-            parent.spawn((
-                Text::new("Combat simulation coming soon..."),
-                TextFont {
-                    font_size: 24.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.6, 0.55, 0.5)),
-                Node {
-                    margin: UiRect::top(Val::Px(20.0)),
-                    ..default()
-                },
-            ));
+#[derive(Clone)]
+struct CombatantStats {
+    class: match_config::CharacterClass,
+    damage_dealt: f32,
+    damage_taken: f32,
+    survived: bool,
+}
 
-            parent.spawn((
-                Text::new("Press ESC to return to menu"),
-                TextFont {
-                    font_size: 18.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.5, 0.5, 0.5)),
-                Node {
-                    margin: UiRect::top(Val::Px(40.0)),
-                    ..default()
-                },
-            ));
+fn setup_play_match(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    config: Res<MatchConfig>,
+) {
+    info!("Setting up Play Match scene with config: {:?}", *config);
+
+    // Spawn 3D camera with isometric-ish view
+    commands.spawn((
+        Camera3d::default(),
+        Transform::from_xyz(0.0, 20.0, 25.0).looking_at(Vec3::ZERO, Vec3::Y),
+        PlayMatchEntity,
+    ));
+
+    // Add lighting
+    commands.spawn((
+        DirectionalLight {
+            illuminance: 20000.0,
+            shadows_enabled: false,
+            ..default()
+        },
+        Transform::from_xyz(4.0, 8.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
+        PlayMatchEntity,
+    ));
+
+    // Ambient light
+    commands.insert_resource(AmbientLight {
+        color: Color::srgb(0.3, 0.3, 0.4),
+        brightness: 300.0,
+    });
+
+    // Spawn arena floor - 30x30 units
+    let floor_size = 30.0;
+    commands.spawn((
+        Mesh3d(meshes.add(Plane3d::default().mesh().size(floor_size, floor_size))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgb(0.2, 0.25, 0.3),
+            perceptual_roughness: 0.9,
+            ..default()
+        })),
+        PlayMatchEntity,
+    ));
+
+    // Count class occurrences for each team to apply darkening to duplicates
+    use std::collections::HashMap;
+    let mut team1_class_counts: HashMap<match_config::CharacterClass, usize> = HashMap::new();
+    let mut team2_class_counts: HashMap<match_config::CharacterClass, usize> = HashMap::new();
+
+    // Spawn Team 1 combatants (left side)
+    let team1_spawn_x = -10.0;
+    for (i, character_opt) in config.team1.iter().enumerate() {
+        if let Some(character) = character_opt {
+            let count = *team1_class_counts.get(character).unwrap_or(&0);
+            *team1_class_counts.entry(*character).or_insert(0) += 1;
+            
+            spawn_combatant(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                1,
+                *character,
+                Vec3::new(team1_spawn_x, 1.0, (i as f32 - 1.0) * 3.0),
+                count,
+            );
+        }
+    }
+
+    // Spawn Team 2 combatants (right side)
+    let team2_spawn_x = 10.0;
+    for (i, character_opt) in config.team2.iter().enumerate() {
+        if let Some(character) = character_opt {
+            let count = *team2_class_counts.get(character).unwrap_or(&0);
+            *team2_class_counts.entry(*character).or_insert(0) += 1;
+            
+            spawn_combatant(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                2,
+                *character,
+                Vec3::new(team2_spawn_x, 1.0, (i as f32 - 1.0) * 3.0),
+                count,
+            );
+        }
+    }
+}
+
+fn spawn_combatant(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    team: u8,
+    class: match_config::CharacterClass,
+    position: Vec3,
+    duplicate_index: usize,
+) {
+    // Get more vibrant class colors for 3D visibility
+    let base_color = match class {
+        match_config::CharacterClass::Warrior => Color::srgb(0.9, 0.6, 0.3), // Orange/brown
+        match_config::CharacterClass::Mage => Color::srgb(0.3, 0.6, 1.0),    // Bright blue
+        match_config::CharacterClass::Rogue => Color::srgb(1.0, 0.9, 0.2),   // Bright yellow
+        match_config::CharacterClass::Priest => Color::srgb(0.95, 0.95, 0.95), // White
+    };
+    
+    // Apply stronger darkening for duplicates (0.65 multiplier per duplicate)
+    let darken_factor = 0.65f32.powi(duplicate_index as i32);
+    let combatant_color = Color::srgb(
+        base_color.to_srgba().red * darken_factor,
+        base_color.to_srgba().green * darken_factor,
+        base_color.to_srgba().blue * darken_factor,
+    );
+
+    // Create combatant mesh (capsule for body)
+    let mesh = meshes.add(Capsule3d::new(0.5, 1.5));
+    let material = materials.add(StandardMaterial {
+        base_color: combatant_color,
+        perceptual_roughness: 0.5, // More reflective to show color better
+        metallic: 0.2, // Slight metallic for better color pop
+        ..default()
+    });
+
+    commands.spawn((
+        Mesh3d(mesh),
+        MeshMaterial3d(material),
+        Transform::from_translation(position),
+        Combatant::new(team, class),
+        PlayMatchEntity,
+    ));
+}
+
+fn update_play_match(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut next_state: ResMut<NextState<GameState>>,
+) {
+    // ESC key returns to main menu
+    if keyboard.just_pressed(KeyCode::Escape) {
+        next_state.set(GameState::MainMenu);
+    }
+}
+
+fn render_health_bars(
+    mut contexts: EguiContexts,
+    combatants: Query<(&Combatant, &Transform)>,
+    camera_query: Query<(&Camera, &GlobalTransform)>,
+) {
+    let ctx = contexts.ctx_mut();
+    
+    let Ok((camera, camera_transform)) = camera_query.get_single() else {
+        return;
+    };
+
+    egui::Area::new(egui::Id::new("health_bars"))
+        .fixed_pos(egui::pos2(0.0, 0.0))
+        .show(ctx, |ui| {
+            for (combatant, transform) in combatants.iter() {
+                if !combatant.is_alive() {
+                    continue;
+                }
+
+                // Project 3D position to 2D screen space
+                let health_bar_offset = Vec3::new(0.0, 2.5, 0.0); // Above head
+                let world_pos = transform.translation + health_bar_offset;
+                
+                if let Ok(screen_pos) = camera.world_to_viewport(camera_transform, world_pos) {
+                    let health_percent = combatant.current_health / combatant.max_health;
+                    
+                    // Health bar dimensions
+                    let bar_width = 50.0;
+                    let bar_height = 6.0;
+                    let bar_pos = egui::pos2(
+                        screen_pos.x - bar_width / 2.0,
+                        screen_pos.y - bar_height / 2.0,
+                    );
+
+                    // Background (dark gray)
+                    ui.painter().rect_filled(
+                        egui::Rect::from_min_size(bar_pos, egui::vec2(bar_width, bar_height)),
+                        2.0,
+                        egui::Color32::from_rgb(30, 30, 30),
+                    );
+
+                    // Health bar (colored)
+                    let health_color = if health_percent > 0.5 {
+                        egui::Color32::from_rgb(0, 200, 0) // Green
+                    } else if health_percent > 0.25 {
+                        egui::Color32::from_rgb(255, 200, 0) // Yellow
+                    } else {
+                        egui::Color32::from_rgb(200, 0, 0) // Red
+                    };
+
+                    ui.painter().rect_filled(
+                        egui::Rect::from_min_size(
+                            bar_pos,
+                            egui::vec2(bar_width * health_percent, bar_height),
+                        ),
+                        2.0,
+                        health_color,
+                    );
+
+                    // Border
+                    ui.painter().rect_stroke(
+                        egui::Rect::from_min_size(bar_pos, egui::vec2(bar_width, bar_height)),
+                        2.0,
+                        egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 200, 200)),
+                    );
+                }
+            }
         });
 }
 
-fn cleanup_play_match(mut commands: Commands, query: Query<Entity, With<PlayMatchEntity>>) {
-    for entity in query.iter() {
-        commands.entity(entity).despawn_recursive();
+fn acquire_targets(
+    mut combatants: Query<(Entity, &mut Combatant, &Transform)>,
+) {
+    // Build list of alive combatants with their info
+    let alive_combatants: Vec<(Entity, u8, Vec3)> = combatants
+        .iter()
+        .filter(|(_, c, _)| c.is_alive())
+        .map(|(entity, c, transform)| (entity, c.team, transform.translation))
+        .collect();
+
+    // For each combatant without a valid target, find nearest enemy
+    for (_entity, mut combatant, transform) in combatants.iter_mut() {
+        if !combatant.is_alive() {
+            combatant.target = None;
+            continue;
+        }
+
+        // Check if current target is still valid (alive and exists)
+        let target_valid = combatant.target.and_then(|target_entity| {
+            alive_combatants
+                .iter()
+                .find(|(e, _, _)| *e == target_entity)
+                .filter(|(_, team, _)| *team != combatant.team)
+        }).is_some();
+
+        // If no valid target, find nearest enemy
+        if !target_valid {
+            let my_pos = transform.translation;
+            let nearest_enemy = alive_combatants
+                .iter()
+                .filter(|(_, team, _)| *team != combatant.team)
+                .min_by(|(_, _, pos_a), (_, _, pos_b)| {
+                    let dist_a = my_pos.distance(*pos_a);
+                    let dist_b = my_pos.distance(*pos_b);
+                    dist_a.partial_cmp(&dist_b).unwrap()
+                });
+
+            combatant.target = nearest_enemy.map(|(entity, _, _)| *entity);
+        }
     }
 }
 
-// ============================================================================
-// Results (placeholder)
-// ============================================================================
+fn combat_auto_attack(
+    time: Res<Time>,
+    mut combatants: Query<(Entity, &mut Combatant)>,
+) {
+    let dt = time.delta_secs();
+    
+    // Collect attacks that will happen this frame (attacker, target, damage)
+    let mut attacks = Vec::new();
+    
+    for (attacker_entity, mut combatant) in combatants.iter_mut() {
+        if !combatant.is_alive() {
+            continue;
+        }
 
-fn setup_results(mut _commands: Commands) {
-    info!("Entering Results state");
+        // Update attack timer
+        combatant.attack_timer += dt;
+
+        // Check if ready to attack and has target
+        let attack_interval = 1.0 / combatant.attack_speed;
+        if combatant.attack_timer >= attack_interval {
+            if let Some(target_entity) = combatant.target {
+                attacks.push((attacker_entity, target_entity, combatant.attack_damage));
+                combatant.attack_timer = 0.0;
+            }
+        }
+    }
+
+    // Apply damage to targets and collect damage dealt stats
+    let mut damage_dealt_updates: Vec<(Entity, f32)> = Vec::new();
+    
+    for (attacker_entity, target_entity, damage) in attacks {
+        if let Ok((_, mut target)) = combatants.get_mut(target_entity) {
+            if target.is_alive() {
+                let actual_damage = damage.min(target.current_health);
+                target.current_health = (target.current_health - damage).max(0.0);
+                target.damage_taken += actual_damage;
+                
+                // Collect attacker damage for later
+                damage_dealt_updates.push((attacker_entity, actual_damage));
+                
+                if !target.is_alive() {
+                    info!("Combatant died! Team {} {} eliminated", target.team, target.class.name());
+                }
+            }
+        }
+    }
+    
+    // Update attacker damage dealt stats
+    for (attacker_entity, damage) in damage_dealt_updates {
+        if let Ok((_, mut attacker)) = combatants.get_mut(attacker_entity) {
+            attacker.damage_dealt += damage;
+        }
+    }
 }
 
-fn cleanup_results(mut commands: Commands, query: Query<Entity, With<ResultsEntity>>) {
+fn check_match_end(
+    combatants: Query<&Combatant>,
+    mut commands: Commands,
+    mut next_state: ResMut<NextState<GameState>>,
+) {
+    let team1_alive = combatants.iter().any(|c| c.team == 1 && c.is_alive());
+    let team2_alive = combatants.iter().any(|c| c.team == 2 && c.is_alive());
+
+    if !team1_alive || !team2_alive {
+        // Determine winner: None if both dead (draw), otherwise winning team
+        let winner = if !team1_alive && !team2_alive {
+            info!("Match ended in a DRAW!");
+            None
+        } else if team1_alive {
+            info!("Match ended! Team 1 wins!");
+            Some(1)
+        } else {
+            info!("Match ended! Team 2 wins!");
+            Some(2)
+        };
+        
+        // Collect stats for all combatants
+        let mut team1_stats = Vec::new();
+        let mut team2_stats = Vec::new();
+        
+        for combatant in combatants.iter() {
+            let stats = CombatantStats {
+                class: combatant.class,
+                damage_dealt: combatant.damage_dealt,
+                damage_taken: combatant.damage_taken,
+                survived: combatant.is_alive(),
+            };
+            
+            if combatant.team == 1 {
+                team1_stats.push(stats);
+            } else {
+                team2_stats.push(stats);
+            }
+        }
+        
+        // Store match results
+        commands.insert_resource(MatchResults {
+            winner,
+            team1_combatants: team1_stats,
+            team2_combatants: team2_stats,
+        });
+        
+        next_state.set(GameState::Results);
+    }
+}
+
+fn cleanup_play_match(
+    mut commands: Commands,
+    query: Query<Entity, With<PlayMatchEntity>>,
+) {
     for entity in query.iter() {
         commands.entity(entity).despawn_recursive();
     }
+    
+    // Remove ambient light
+    commands.remove_resource::<AmbientLight>();
+}
+
+// ============================================================================
+// Results Scene (egui)
+// ============================================================================
+
+fn results_ui(
+    mut contexts: EguiContexts,
+    results: Option<Res<MatchResults>>,
+    mut next_state: ResMut<NextState<GameState>>,
+    mut commands: Commands,
+) {
+    let ctx = contexts.ctx_mut();
+    
+    // Configure dark theme
+    let mut style = (*ctx.style()).clone();
+    style.visuals.window_fill = egui::Color32::from_rgb(20, 20, 30);
+    style.visuals.panel_fill = egui::Color32::from_rgb(20, 20, 30);
+    ctx.set_style(style);
+
+    egui::CentralPanel::default()
+        .frame(
+            egui::Frame::none()
+                .fill(egui::Color32::from_rgb(20, 20, 30))
+                .inner_margin(egui::Margin::same(20.0))
+        )
+        .show(ctx, |ui| {
+            ui.add_space(20.0);
+
+            // Title
+            ui.vertical_centered(|ui| {
+                ui.heading(
+                    egui::RichText::new("MATCH RESULTS")
+                        .size(48.0)
+                        .color(egui::Color32::from_rgb(230, 204, 153)),
+                );
+            });
+
+            ui.add_space(30.0);
+
+            // Get results or show error
+            let Some(results) = results else {
+                ui.vertical_centered(|ui| {
+                    ui.label(
+                        egui::RichText::new("No match results available")
+                            .size(24.0)
+                            .color(egui::Color32::from_rgb(200, 100, 100)),
+                    );
+                });
+                return;
+            };
+
+            // Winner announcement
+            ui.vertical_centered(|ui| {
+                let (winner_text, winner_color) = match results.winner {
+                    None => (
+                        "DRAW!".to_string(),
+                        egui::Color32::from_rgb(200, 200, 100), // Yellow
+                    ),
+                    Some(1) => (
+                        "TEAM 1 WINS!".to_string(),
+                        egui::Color32::from_rgb(100, 150, 255), // Blue
+                    ),
+                    Some(2) => (
+                        "TEAM 2 WINS!".to_string(),
+                        egui::Color32::from_rgb(255, 100, 100), // Red
+                    ),
+                    Some(_) => (
+                        "ERROR: Invalid winner".to_string(),
+                        egui::Color32::from_rgb(200, 100, 100),
+                    ),
+                };
+                
+                ui.heading(
+                    egui::RichText::new(winner_text)
+                        .size(36.0)
+                        .color(winner_color),
+                );
+            });
+
+            ui.add_space(40.0);
+
+            // Stats tables side-by-side
+            ui.horizontal(|ui| {
+                let available_width = ui.available_width();
+                let table_width = (available_width - 40.0) / 2.0;
+
+                // Team 1 Stats
+                ui.vertical(|ui| {
+                    ui.set_width(table_width);
+                    render_team_stats(ui, "TEAM 1", &results.team1_combatants, egui::Color32::from_rgb(51, 102, 204));
+                });
+
+                ui.add_space(40.0);
+
+                // Team 2 Stats
+                ui.vertical(|ui| {
+                    ui.set_width(table_width);
+                    render_team_stats(ui, "TEAM 2", &results.team2_combatants, egui::Color32::from_rgb(204, 51, 51));
+                });
+            });
+
+            ui.add_space(40.0);
+
+            // Done button
+            ui.vertical_centered(|ui| {
+                let button = egui::Button::new(
+                    egui::RichText::new("DONE")
+                        .size(24.0)
+                        .color(egui::Color32::from_rgb(230, 242, 230)),
+                )
+                .min_size(egui::vec2(200.0, 50.0));
+
+                if ui.add(button).clicked() {
+                    // Clean up results resource
+                    commands.remove_resource::<MatchResults>();
+                    next_state.set(GameState::MainMenu);
+                }
+            });
+
+            ui.add_space(20.0);
+        });
+}
+
+fn render_team_stats(ui: &mut egui::Ui, title: &str, combatants: &[CombatantStats], color: egui::Color32) {
+    ui.group(|ui| {
+        ui.set_min_height(250.0);
+        ui.set_min_width(ui.available_width()); // Expand to fill available width
+        
+        // Team title
+        ui.heading(egui::RichText::new(title).size(20.0).color(color));
+        ui.add_space(10.0);
+
+        // Use egui::Grid for proper table alignment with expanded columns
+        let available = ui.available_width();
+        egui::Grid::new(format!("{}_stats_grid", title))
+            .striped(false)
+            .spacing([30.0, 8.0]) // horizontal, vertical spacing
+            .min_col_width(available * 0.2) // Each column gets ~20% of width
+            .show(ui, |ui| {
+                // Header row
+                ui.label(egui::RichText::new("Class").size(14.0).strong());
+                ui.label(egui::RichText::new("Status").size(14.0).strong());
+                ui.label(egui::RichText::new("Dmg Taken").size(14.0).strong());
+                ui.label(egui::RichText::new("Dmg Dealt").size(14.0).strong());
+                ui.end_row();
+                
+                // Separator
+                ui.separator();
+                ui.separator();
+                ui.separator();
+                ui.separator();
+                ui.end_row();
+                
+                // Data rows
+                for stats in combatants {
+                    let class_color = stats.class.color();
+                    let egui_class_color = egui::Color32::from_rgb(
+                        (class_color.to_srgba().red * 255.0) as u8,
+                        (class_color.to_srgba().green * 255.0) as u8,
+                        (class_color.to_srgba().blue * 255.0) as u8,
+                    );
+                    
+                    // Class
+                    ui.label(
+                        egui::RichText::new(stats.class.name())
+                            .size(16.0)
+                            .color(egui_class_color)
+                    );
+                    
+                    // Status
+                    let (status_text, status_color) = if stats.survived {
+                        ("✓", egui::Color32::from_rgb(100, 255, 100))
+                    } else {
+                        ("✗", egui::Color32::from_rgb(150, 150, 150))
+                    };
+                    ui.label(egui::RichText::new(status_text).size(18.0).color(status_color));
+                    
+                    // Damage Taken
+                    ui.label(
+                        egui::RichText::new(format!("{:.0}", stats.damage_taken))
+                            .size(16.0)
+                            .color(egui::Color32::from_rgb(255, 100, 100))
+                    );
+                    
+                    // Damage Dealt
+                    ui.label(
+                        egui::RichText::new(format!("{:.0}", stats.damage_dealt))
+                            .size(16.0)
+                            .color(egui::Color32::from_rgb(255, 150, 100))
+                    );
+                    
+                    ui.end_row();
+                }
+            });
+    });
 }
