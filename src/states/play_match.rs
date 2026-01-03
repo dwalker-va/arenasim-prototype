@@ -612,7 +612,7 @@ pub fn handle_time_controls(
     }
 }
 
-/// Render time control UI panel in the top-left corner.
+/// Render time control UI panel in the top-right corner.
 /// 
 /// Shows current speed and clickable buttons for speed control.
 pub fn render_time_controls(
@@ -622,13 +622,19 @@ pub fn render_time_controls(
 ) {
     let ctx = contexts.ctx_mut();
     
+    // Position in top-right corner
+    let screen_width = ctx.screen_rect().width();
+    let panel_width = 180.0;
+    
     egui::Window::new("Time Controls")
-        .fixed_pos(egui::pos2(10.0, 10.0))
+        .fixed_pos(egui::pos2(screen_width - panel_width - 10.0, 10.0))
         .resizable(false)
         .collapsible(false)
         .title_bar(false)
+        .frame(egui::Frame::window(&ctx.style())
+            .fill(egui::Color32::from_black_alpha(200))) // Semi-transparent
         .show(ctx, |ui| {
-            ui.set_width(180.0);
+            ui.set_width(panel_width);
             
             ui.horizontal(|ui| {
                 ui.label(
@@ -945,22 +951,24 @@ pub fn render_combat_log(
 ) {
     let ctx = contexts.ctx_mut();
     
-    // Combat log panel on the left side
+    // Combat log panel on the left side - semi-transparent to reduce obstruction
     egui::SidePanel::left("combat_log_panel")
-        .default_width(350.0)
-        .max_width(450.0)
+        .default_width(320.0)
+        .max_width(400.0)
         .min_width(250.0)
         .resizable(true)
+        .frame(egui::Frame::side_top_panel(&ctx.style())
+            .fill(egui::Color32::from_black_alpha(180))) // Semi-transparent background
         .show(ctx, |ui| {
             ui.heading(
                 egui::RichText::new("Combat Log")
-                    .size(20.0)
+                    .size(18.0)
                     .color(egui::Color32::from_rgb(230, 204, 153))
             );
             
-            ui.add_space(5.0);
+            ui.add_space(3.0);
             ui.separator();
-            ui.add_space(5.0);
+            ui.add_space(3.0);
             
             // Scrollable area for log entries
             egui::ScrollArea::vertical()
@@ -985,14 +993,14 @@ pub fn render_combat_log(
                             // Timestamp in gray
                             ui.label(
                                 egui::RichText::new(&timestamp_str)
-                                    .size(12.0)
+                                    .size(11.0)
                                     .color(egui::Color32::from_rgb(150, 150, 150))
                             );
                             
                             // Event message in color
                             ui.label(
                                 egui::RichText::new(&entry.message)
-                                    .size(13.0)
+                                    .size(12.0)
                                     .color(color)
                             );
                         });
