@@ -55,6 +55,18 @@ const STOP_DISTANCE: f32 = 2.0;
 #[derive(Component)]
 pub struct PlayMatchEntity;
 
+/// Resource type for combatants (Mana, Energy, Rage).
+/// Different classes use different resources with different mechanics.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ResourceType {
+    /// Mana - Used by Mages and Priests. Regenerates over time. Starts full.
+    Mana,
+    /// Energy - Used by Rogues. Regenerates rapidly. Starts full. Caps at 100.
+    Energy,
+    /// Rage - Used by Warriors. Starts at 0. Builds from auto-attacks and taking damage.
+    Rage,
+}
+
 /// Floating combat text component for damage/healing numbers.
 /// These appear above combatants and float upward before fading out.
 #[derive(Component)]
@@ -78,6 +90,8 @@ pub struct Combatant {
     pub team: u8,
     /// Character class (Warrior, Mage, Rogue, Priest)
     pub class: match_config::CharacterClass,
+    /// Resource type (Mana, Energy, Rage)
+    pub resource_type: ResourceType,
     /// Maximum health points
     pub max_health: f32,
     /// Current health points (combatant dies when this reaches 0)
@@ -109,22 +123,23 @@ pub struct Combatant {
 impl Combatant {
     /// Create a new combatant with class-specific stats.
     pub fn new(team: u8, class: match_config::CharacterClass) -> Self {
-        // Class-specific stats (health, mana, damage, attack speed, movement speed, mana regen)
-        let (max_health, max_mana, mana_regen, attack_damage, attack_speed, movement_speed) = match class {
-            match_config::CharacterClass::Warrior => (150.0, 100.0, 0.0, 12.0, 1.0, 5.0),  // Rage (no regen)
-            match_config::CharacterClass::Mage => (80.0, 200.0, 10.0, 20.0, 0.7, 4.5),     // High mana pool
-            match_config::CharacterClass::Rogue => (100.0, 100.0, 5.0, 15.0, 1.3, 6.0),    // Energy
-            match_config::CharacterClass::Priest => (90.0, 150.0, 8.0, 8.0, 0.8, 5.0),     // Medium mana
+        // Class-specific stats (resource_type, health, max_resource, resource_regen, starting_resource, damage, attack speed, movement speed)
+        let (resource_type, max_health, max_resource, resource_regen, starting_resource, attack_damage, attack_speed, movement_speed) = match class {
+            match_config::CharacterClass::Warrior => (ResourceType::Rage, 150.0, 100.0, 0.0, 0.0, 12.0, 1.0, 5.0),  // Rage: starts at 0
+            match_config::CharacterClass::Mage => (ResourceType::Mana, 80.0, 200.0, 10.0, 200.0, 20.0, 0.7, 4.5),   // Mana: starts full
+            match_config::CharacterClass::Rogue => (ResourceType::Energy, 100.0, 100.0, 20.0, 100.0, 15.0, 1.3, 6.0), // Energy: starts full, fast regen
+            match_config::CharacterClass::Priest => (ResourceType::Mana, 90.0, 150.0, 8.0, 150.0, 8.0, 0.8, 5.0),    // Mana: starts full
         };
         
         Self {
             team,
             class,
+            resource_type,
             max_health,
             current_health: max_health,
-            max_mana,
-            current_mana: max_mana,
-            mana_regen,
+            max_mana: max_resource,
+            current_mana: starting_resource,
+            mana_regen: resource_regen,
             attack_damage,
             attack_speed,
             attack_timer: 0.0,
@@ -482,12 +497,15 @@ pub fn update_play_match(
     }
 }
 
-/// Render 2D health, mana, and cast bars above each living combatant's 3D position.
+/// Render 2D health, resource, and cast bars above each living combatant's 3D position.
 /// 
 /// This system uses egui to draw bars in screen space, converting 3D world positions
 /// to 2D screen coordinates. Displays:
 /// - **Health bar** (always): Green/yellow/red based on HP percentage
-/// - **Mana bar** (if applicable): Blue bar showing resource level
+/// - **Resource bar** (if applicable): Colored by resource type
+///   - Mana (blue): Mages, Priests - regenerates slowly, starts full
+///   - Energy (yellow): Rogues - regenerates rapidly, starts full
+///   - Rage (red): Warriors - starts at 0, builds from attacks and taking damage
 /// - **Cast bar** (when casting): Orange bar with spell name showing cast progress
 pub fn render_health_bars(
     mut contexts: EguiContexts,
@@ -556,41 +574,57 @@ pub fn render_health_bars(
                         egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 200, 200)),
                     );
                     
-                    // Mana bar (only for classes with mana regeneration)
+                    // Resource bar (mana/energy/rage)
                     let mut next_bar_y_offset = bar_height + bar_spacing;
                     if combatant.max_mana > 0.0 {
-                        let mana_percent = combatant.current_mana / combatant.max_mana;
-                        let mana_bar_pos = egui::pos2(
+                        let resource_percent = combatant.current_mana / combatant.max_mana;
+                        let resource_bar_pos = egui::pos2(
                             bar_pos.x,
                             bar_pos.y + next_bar_y_offset,
                         );
-                        let mana_bar_height = 4.0; // Slightly smaller than health bar
+                        let resource_bar_height = 4.0; // Slightly smaller than health bar
                         
-                        // Mana bar background
+                        // Determine resource color based on type
+                        let (resource_color, border_color) = match combatant.resource_type {
+                            ResourceType::Mana => (
+                                egui::Color32::from_rgb(80, 150, 255),  // Blue
+                                egui::Color32::from_rgb(150, 150, 200),
+                            ),
+                            ResourceType::Energy => (
+                                egui::Color32::from_rgb(255, 255, 100), // Yellow
+                                egui::Color32::from_rgb(200, 200, 150),
+                            ),
+                            ResourceType::Rage => (
+                                egui::Color32::from_rgb(255, 80, 80),   // Red
+                                egui::Color32::from_rgb(200, 150, 150),
+                            ),
+                        };
+                        
+                        // Resource bar background
                         ui.painter().rect_filled(
-                            egui::Rect::from_min_size(mana_bar_pos, egui::vec2(bar_width, mana_bar_height)),
+                            egui::Rect::from_min_size(resource_bar_pos, egui::vec2(bar_width, resource_bar_height)),
                             2.0,
                             egui::Color32::from_rgb(20, 20, 30),
                         );
                         
-                        // Mana bar fill (blue)
+                        // Resource bar fill (colored by resource type)
                         ui.painter().rect_filled(
                             egui::Rect::from_min_size(
-                                mana_bar_pos,
-                                egui::vec2(bar_width * mana_percent, mana_bar_height),
+                                resource_bar_pos,
+                                egui::vec2(bar_width * resource_percent, resource_bar_height),
                             ),
                             2.0,
-                            egui::Color32::from_rgb(80, 150, 255), // Blue
+                            resource_color,
                         );
                         
-                        // Mana bar border
+                        // Resource bar border
                         ui.painter().rect_stroke(
-                            egui::Rect::from_min_size(mana_bar_pos, egui::vec2(bar_width, mana_bar_height)),
+                            egui::Rect::from_min_size(resource_bar_pos, egui::vec2(bar_width, resource_bar_height)),
                             2.0,
-                            egui::Stroke::new(1.0, egui::Color32::from_rgb(150, 150, 200)),
+                            egui::Stroke::new(1.0, border_color),
                         );
                         
-                        next_bar_y_offset += mana_bar_height + bar_spacing;
+                        next_bar_y_offset += resource_bar_height + bar_spacing;
                     }
                     
                     // Cast bar (only when actively casting)
@@ -1018,6 +1052,12 @@ pub fn combat_auto_attack(
                     if combatant.in_attack_range(my_pos, target_pos) {
                         attacks.push((attacker_entity, target_entity, combatant.attack_damage));
                         combatant.attack_timer = 0.0;
+                        
+                        // Warriors generate Rage from auto-attacks
+                        if combatant.resource_type == ResourceType::Rage {
+                            let rage_gain = 10.0; // Gain 10 rage per auto-attack
+                            combatant.current_mana = (combatant.current_mana + rage_gain).min(combatant.max_mana);
+                        }
                     }
                     // If not in range, timer keeps building up so they attack immediately when in range
                 }
@@ -1034,6 +1074,12 @@ pub fn combat_auto_attack(
                 let actual_damage = damage.min(target.current_health);
                 target.current_health = (target.current_health - damage).max(0.0);
                 target.damage_taken += actual_damage;
+                
+                // Warriors generate Rage from taking damage
+                if target.resource_type == ResourceType::Rage {
+                    let rage_gain = actual_damage * 0.15; // Gain 15% of damage taken as Rage
+                    target.current_mana = (target.current_mana + rage_gain).min(target.max_mana);
+                }
                 
                 // Batch damage for floating combat text (sum all damage to same target)
                 *damage_per_target.entry(target_entity).or_insert(0.0) += actual_damage;
@@ -1355,6 +1401,12 @@ pub fn process_casting(
             let actual_damage = damage.min(target.current_health);
             target.current_health = (target.current_health - damage).max(0.0);
             target.damage_taken += actual_damage;
+            
+            // Warriors generate Rage from taking damage
+            if target.resource_type == ResourceType::Rage {
+                let rage_gain = actual_damage * 0.15; // Gain 15% of damage taken as Rage
+                target.current_mana = (target.current_mana + rage_gain).min(target.max_mana);
+            }
             
             // Track damage dealt for caster (update later to avoid double borrow)
             if is_self_target {
