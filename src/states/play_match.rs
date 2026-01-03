@@ -118,6 +118,8 @@ pub struct Combatant {
     pub damage_taken: f32,
     /// Total healing this combatant has done
     pub healing_done: f32,
+    /// Bonus damage for the next auto-attack (from abilities like Heroic Strike)
+    pub next_attack_bonus_damage: f32,
 }
 
 impl Combatant {
@@ -148,6 +150,7 @@ impl Combatant {
             damage_dealt: 0.0,
             damage_taken: 0.0,
             healing_done: 0.0,
+            next_attack_bonus_damage: 0.0,
         }
     }
     
@@ -233,6 +236,7 @@ pub enum AuraType {
 pub enum AbilityType {
     Frostbolt,
     FlashHeal,
+    HeroicStrike,
     // Future: Fireball, Backstab, etc.
 }
 
@@ -262,6 +266,18 @@ impl AbilityType {
                 damage_max: 0.0,
                 healing_min: 30.0,
                 healing_max: 40.0,
+                applies_aura: None,
+            },
+            AbilityType::HeroicStrike => AbilityDefinition {
+                name: "Heroic Strike",
+                cast_time: 0.0, // Instant cast
+                range: MELEE_RANGE,
+                mana_cost: 15.0, // Costs 15 Rage
+                cooldown: 0.0, // No cooldown
+                damage_min: 0.0, // No direct damage - enhances next auto-attack
+                damage_max: 0.0,
+                healing_min: 0.0,
+                healing_max: 0.0,
                 applies_aura: None,
             },
         }
@@ -1050,8 +1066,15 @@ pub fn combat_auto_attack(
                     let my_pos = transform.translation;
                     
                     if combatant.in_attack_range(my_pos, target_pos) {
-                        attacks.push((attacker_entity, target_entity, combatant.attack_damage));
+                        // Calculate total damage (base + bonus from Heroic Strike, etc.)
+                        let total_damage = combatant.attack_damage + combatant.next_attack_bonus_damage;
+                        let has_bonus = combatant.next_attack_bonus_damage > 0.0;
+                        
+                        attacks.push((attacker_entity, target_entity, total_damage, has_bonus));
                         combatant.attack_timer = 0.0;
+                        
+                        // Consume the bonus damage after queueing the attack
+                        combatant.next_attack_bonus_damage = 0.0;
                         
                         // Warriors generate Rage from auto-attacks
                         if combatant.resource_type == ResourceType::Rage {
@@ -1068,7 +1091,7 @@ pub fn combat_auto_attack(
     // Apply damage to targets and track damage dealt
     let mut damage_dealt_updates: Vec<(Entity, f32)> = Vec::new();
     
-    for (attacker_entity, target_entity, damage) in attacks {
+    for (attacker_entity, target_entity, damage, has_bonus) in attacks {
         if let Ok((_, _, mut target, _)) = combatants.get_mut(target_entity) {
             if target.is_alive() {
                 let actual_damage = damage.min(target.current_health);
@@ -1090,10 +1113,16 @@ pub fn combat_auto_attack(
                 // Log the attack with position data
                 if let (Some(&(attacker_team, attacker_class)), Some(&(target_team, target_class))) = 
                     (combatant_info.get(&attacker_entity), combatant_info.get(&target_entity)) {
+                    let attack_name = if has_bonus {
+                        "Heroic Strike" // Enhanced auto-attack
+                    } else {
+                        "Auto Attack"
+                    };
                     let message = format!(
-                        "Team {} {}'s Auto Attack hits Team {} {} for {:.0} damage",
+                        "Team {} {}'s {} hits Team {} {} for {:.0} damage",
                         attacker_team,
                         attacker_class.name(),
+                        attack_name,
                         target_team,
                         target_class.name(),
                         actual_damage
@@ -1194,7 +1223,7 @@ pub fn regenerate_resources(
 /// Future: More complex decision trees, cooldowns, priorities, etc.
 pub fn decide_abilities(
     mut commands: Commands,
-    combatants: Query<(Entity, &Combatant, &Transform), Without<CastingState>>,
+    mut combatants: Query<(Entity, &mut Combatant, &Transform), Without<CastingState>>,
 ) {
     // Build position and info maps from all combatants
     let positions: std::collections::HashMap<Entity, Vec3> = combatants
@@ -1209,7 +1238,7 @@ pub fn decide_abilities(
         })
         .collect();
     
-    for (entity, combatant, transform) in combatants.iter() {
+    for (entity, mut combatant, transform) in combatants.iter_mut() {
         if !combatant.is_alive() {
             continue;
         }
@@ -1229,7 +1258,7 @@ pub fn decide_abilities(
             
             // Try to cast Frostbolt
             let ability = AbilityType::Frostbolt;
-            if ability.can_cast(combatant, target_pos, my_pos) {
+            if ability.can_cast(&combatant, target_pos, my_pos) {
                 let def = ability.definition();
                 
                 // Start casting
@@ -1282,7 +1311,7 @@ pub fn decide_abilities(
             // Cast heal on lowest HP ally if found
             if let Some((heal_target, _, target_pos)) = lowest_hp_ally {
                 let ability = AbilityType::FlashHeal;
-                if ability.can_cast(combatant, target_pos, my_pos) {
+                if ability.can_cast(&combatant, target_pos, my_pos) {
                     let def = ability.definition();
                     
                     // Start casting
@@ -1299,6 +1328,45 @@ pub fn decide_abilities(
                         def.name
                     );
                 }
+            }
+        }
+        
+        // Warriors use Heroic Strike (instant cast, enhances next auto-attack)
+        if combatant.class == match_config::CharacterClass::Warrior {
+            // Check if we have an enemy target and already have bonus damage queued
+            let Some(target_entity) = combatant.target else {
+                continue;
+            };
+            
+            // Don't queue another Heroic Strike if one is already pending
+            if combatant.next_attack_bonus_damage > 0.0 {
+                continue;
+            }
+            
+            let Some(&target_pos) = positions.get(&target_entity) else {
+                continue;
+            };
+            
+            // Try to use Heroic Strike if we have enough rage and target is in melee range
+            let ability = AbilityType::HeroicStrike;
+            if ability.can_cast(&combatant, target_pos, my_pos) {
+                let def = ability.definition();
+                
+                // Since it's instant, apply the effect immediately
+                // Consume rage
+                combatant.current_mana -= def.mana_cost;
+                
+                // Set bonus damage for next auto-attack (50% of base attack damage)
+                let bonus_damage = combatant.attack_damage * 0.5;
+                combatant.next_attack_bonus_damage = bonus_damage;
+                
+                info!(
+                    "Team {} {} uses {} (next attack +{:.0} damage)",
+                    combatant.team,
+                    combatant.class.name(),
+                    def.name,
+                    bonus_damage
+                );
             }
         }
     }
