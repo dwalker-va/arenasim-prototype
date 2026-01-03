@@ -28,7 +28,7 @@
 
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
-use super::{GameState, play_match::{MatchResults, CombatantStats}, match_config};
+use super::{GameState, play_match::{MatchResults, CombatantStats}};
 
 /// Main UI system for the Results screen.
 /// 
@@ -97,33 +97,36 @@ pub fn results_ui(
 
             ui.add_space(40.0);
 
-            // Stats tables side-by-side
-            ui.horizontal(|ui| {
-                let available_width = ui.available_width();
-                let table_width = (available_width - 40.0) / 2.0;
+            // Stats tables side-by-side - centered
+            ui.vertical_centered(|ui| {
+                ui.horizontal(|ui| {
+                    let available_width = ui.available_width();
+                    let spacing = 30.0;
+                    let table_width = (available_width - spacing) / 2.0;
 
-                // Team 1 Stats
-                ui.vertical(|ui| {
-                    ui.set_width(table_width);
-                    render_team_stats(
-                        ui,
-                        "TEAM 1",
-                        &results.team1_combatants,
-                        egui::Color32::from_rgb(51, 102, 204)
-                    );
-                });
+                    // Team 1 Stats
+                    ui.vertical(|ui| {
+                        ui.set_max_width(table_width);
+                        render_team_stats(
+                            ui,
+                            "TEAM 1",
+                            &results.team1_combatants,
+                            egui::Color32::from_rgb(51, 102, 204)
+                        );
+                    });
 
-                ui.add_space(40.0);
+                    ui.add_space(spacing);
 
-                // Team 2 Stats
-                ui.vertical(|ui| {
-                    ui.set_width(table_width);
-                    render_team_stats(
-                        ui,
-                        "TEAM 2",
-                        &results.team2_combatants,
-                        egui::Color32::from_rgb(204, 51, 51)
-                    );
+                    // Team 2 Stats
+                    ui.vertical(|ui| {
+                        ui.set_max_width(table_width);
+                        render_team_stats(
+                            ui,
+                            "TEAM 2",
+                            &results.team2_combatants,
+                            egui::Color32::from_rgb(204, 51, 51)
+                        );
+                    });
                 });
             });
 
@@ -182,8 +185,9 @@ fn get_winner_display(winner: Option<u8>) -> (String, egui::Color32) {
 /// - Grid-based stats table with columns:
 ///   - Class (colored by class)
 ///   - Status (✓ survived / ✗ eliminated)
-///   - Damage Taken (red)
-///   - Damage Dealt (orange)
+///   - Dmg Tkn - Damage Taken (red)
+///   - Dmg Dlt - Damage Dealt (orange)
+///   - Healing - Healing Done (green)
 fn render_team_stats(
     ui: &mut egui::Ui,
     title: &str,
@@ -192,7 +196,6 @@ fn render_team_stats(
 ) {
     ui.group(|ui| {
         ui.set_min_height(250.0);
-        ui.set_min_width(ui.available_width()); // Expand to fill available width
         
         // Team title
         ui.heading(egui::RichText::new(title).size(20.0).color(color));
@@ -202,17 +205,19 @@ fn render_team_stats(
         let available = ui.available_width();
         egui::Grid::new(format!("{}_stats_grid", title))
             .striped(false)
-            .spacing([30.0, 8.0]) // horizontal, vertical spacing
-            .min_col_width(available * 0.2) // Each column gets ~20% of width
+            .spacing([15.0, 8.0]) // horizontal, vertical spacing
+            .min_col_width(available * 0.16) // Each column gets ~16% of width (5 columns)
             .show(ui, |ui| {
                 // Header row
-                ui.label(egui::RichText::new("Class").size(14.0).strong());
-                ui.label(egui::RichText::new("Status").size(14.0).strong());
-                ui.label(egui::RichText::new("Dmg Taken").size(14.0).strong());
-                ui.label(egui::RichText::new("Dmg Dealt").size(14.0).strong());
+                ui.label(egui::RichText::new("Class").size(13.0).strong());
+                ui.label(egui::RichText::new("Status").size(13.0).strong());
+                ui.label(egui::RichText::new("Dmg Tkn").size(13.0).strong());
+                ui.label(egui::RichText::new("Dmg Dlt").size(13.0).strong());
+                ui.label(egui::RichText::new("Healing").size(13.0).strong());
                 ui.end_row();
                 
                 // Separator row
+                ui.separator();
                 ui.separator();
                 ui.separator();
                 ui.separator();
@@ -231,10 +236,11 @@ fn render_team_stats(
 /// Render a single combatant's stats row.
 /// 
 /// Displays:
-/// - Class name (colored)
-/// - Survival status (✓ green or ✗ gray)
-/// - Damage taken (red)
-/// - Damage dealt (orange)
+/// - Class name (colored, 15px)
+/// - Survival status (✓ green or ✗ gray, 16px)
+/// - Damage taken (red, 15px)
+/// - Damage dealt (orange, 15px)
+/// - Healing done (green, 15px)
 fn render_combatant_row(ui: &mut egui::Ui, stats: &CombatantStats) {
     // Get class color for the name
     let class_color = stats.class.color();
@@ -247,7 +253,7 @@ fn render_combatant_row(ui: &mut egui::Ui, stats: &CombatantStats) {
     // Class name (colored)
     ui.label(
         egui::RichText::new(stats.class.name())
-            .size(16.0)
+            .size(15.0)
             .color(egui_class_color)
     );
     
@@ -257,20 +263,27 @@ fn render_combatant_row(ui: &mut egui::Ui, stats: &CombatantStats) {
     } else {
         ("✗", egui::Color32::from_rgb(150, 150, 150)) // Gray X
     };
-    ui.label(egui::RichText::new(status_text).size(18.0).color(status_color));
+    ui.label(egui::RichText::new(status_text).size(16.0).color(status_color));
     
     // Damage Taken (red)
     ui.label(
         egui::RichText::new(format!("{:.0}", stats.damage_taken))
-            .size(16.0)
+            .size(15.0)
             .color(egui::Color32::from_rgb(255, 100, 100))
     );
     
     // Damage Dealt (orange)
     ui.label(
         egui::RichText::new(format!("{:.0}", stats.damage_dealt))
-            .size(16.0)
+            .size(15.0)
             .color(egui::Color32::from_rgb(255, 150, 100))
+    );
+    
+    // Healing Done (green)
+    ui.label(
+        egui::RichText::new(format!("{:.0}", stats.healing_done))
+            .size(15.0)
+            .color(egui::Color32::from_rgb(100, 255, 100))
     );
 }
 

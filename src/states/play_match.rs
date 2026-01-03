@@ -102,6 +102,8 @@ pub struct Combatant {
     pub damage_dealt: f32,
     /// Total damage this combatant has taken
     pub damage_taken: f32,
+    /// Total healing this combatant has done
+    pub healing_done: f32,
 }
 
 impl Combatant {
@@ -130,6 +132,7 @@ impl Combatant {
             target: None,
             damage_dealt: 0.0,
             damage_taken: 0.0,
+            healing_done: 0.0,
         }
     }
     
@@ -162,6 +165,7 @@ pub struct CombatantStats {
     pub class: match_config::CharacterClass,
     pub damage_dealt: f32,
     pub damage_taken: f32,
+    pub healing_done: f32,
     pub survived: bool,
 }
 
@@ -213,7 +217,8 @@ pub enum AuraType {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum AbilityType {
     Frostbolt,
-    // Future: Fireball, Heal, Backstab, etc.
+    FlashHeal,
+    // Future: Fireball, Backstab, etc.
 }
 
 impl AbilityType {
@@ -225,10 +230,24 @@ impl AbilityType {
                 cast_time: 2.5,
                 range: 30.0,
                 mana_cost: 20.0,
-                cooldown: 0.0, // No cooldown for now
+                cooldown: 0.0,
                 damage_min: 25.0,
                 damage_max: 30.0,
+                healing_min: 0.0,
+                healing_max: 0.0,
                 applies_aura: Some((AuraType::MovementSpeedSlow, 5.0, 0.7)), // 30% slow for 5s
+            },
+            AbilityType::FlashHeal => AbilityDefinition {
+                name: "Flash Heal",
+                cast_time: 1.5,
+                range: 40.0, // Longer range than Frostbolt
+                mana_cost: 25.0,
+                cooldown: 0.0,
+                damage_min: 0.0,
+                damage_max: 0.0,
+                healing_min: 30.0,
+                healing_max: 40.0,
+                applies_aura: None,
             },
         }
     }
@@ -263,12 +282,28 @@ pub struct AbilityDefinition {
     pub mana_cost: f32,
     /// Cooldown after cast (in seconds)
     pub cooldown: f32,
-    /// Minimum damage dealt
+    /// Minimum damage dealt (0 for healing spells)
     pub damage_min: f32,
-    /// Maximum damage dealt
+    /// Maximum damage dealt (0 for healing spells)
     pub damage_max: f32,
+    /// Minimum healing done (0 for damage spells)
+    pub healing_min: f32,
+    /// Maximum healing done (0 for damage spells)
+    pub healing_max: f32,
     /// Optional aura to apply: (AuraType, duration, magnitude)
     pub applies_aura: Option<(AuraType, f32, f32)>,
+}
+
+impl AbilityDefinition {
+    /// Returns true if this is a healing ability
+    pub fn is_heal(&self) -> bool {
+        self.healing_max > 0.0
+    }
+    
+    /// Returns true if this is a damage ability
+    pub fn is_damage(&self) -> bool {
+        self.damage_max > 0.0
+    }
 }
 
 // ============================================================================
@@ -865,7 +900,7 @@ pub fn move_to_target(
         .collect();
     
     // Move each combatant towards their target if needed
-    for (entity, mut transform, combatant, auras, casting_state) in combatants.iter_mut() {
+    for (_entity, mut transform, combatant, auras, casting_state) in combatants.iter_mut() {
         if !combatant.is_alive() {
             continue;
         }
@@ -926,6 +961,7 @@ pub fn move_to_target(
 /// range and attack their target.
 /// 
 /// **Range Check**: Only melee attacks for now, must be within MELEE_RANGE.
+/// **WoW Mechanic**: Cannot auto-attack while casting (checked via `CastingState`).
 /// 
 /// Damage is applied immediately and stats are updated for both attacker and target.
 /// All attacks are logged to the combat log for display.
@@ -933,7 +969,7 @@ pub fn combat_auto_attack(
     time: Res<Time>,
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
-    mut combatants: Query<(Entity, &Transform, &mut Combatant)>,
+    mut combatants: Query<(Entity, &Transform, &mut Combatant, Option<&CastingState>)>,
 ) {
     let dt = time.delta_secs();
     
@@ -943,13 +979,13 @@ pub fn combat_auto_attack(
     // Build a snapshot of positions for range checks
     let positions: std::collections::HashMap<Entity, Vec3> = combatants
         .iter()
-        .map(|(entity, transform, _)| (entity, transform.translation))
+        .map(|(entity, transform, _, _)| (entity, transform.translation))
         .collect();
     
     // Build a snapshot of combatant info for logging
     let combatant_info: std::collections::HashMap<Entity, (u8, match_config::CharacterClass)> = combatants
         .iter()
-        .map(|(entity, _, combatant)| (entity, (combatant.team, combatant.class)))
+        .map(|(entity, _, combatant, _)| (entity, (combatant.team, combatant.class)))
         .collect();
     
     // Collect attacks that will happen this frame (attacker, target, damage)
@@ -958,8 +994,13 @@ pub fn combat_auto_attack(
     // Track damage per target for batching floating combat text
     let mut damage_per_target: std::collections::HashMap<Entity, f32> = std::collections::HashMap::new();
     
-    for (attacker_entity, transform, mut combatant) in combatants.iter_mut() {
+    for (attacker_entity, transform, mut combatant, casting_state) in combatants.iter_mut() {
         if !combatant.is_alive() {
+            continue;
+        }
+        
+        // WoW Mechanic: Cannot auto-attack while casting
+        if casting_state.is_some() {
             continue;
         }
 
@@ -988,7 +1029,7 @@ pub fn combat_auto_attack(
     let mut damage_dealt_updates: Vec<(Entity, f32)> = Vec::new();
     
     for (attacker_entity, target_entity, damage) in attacks {
-        if let Ok((_, _, mut target)) = combatants.get_mut(target_entity) {
+        if let Ok((_, _, mut target, _)) = combatants.get_mut(target_entity) {
             if target.is_alive() {
                 let actual_damage = damage.min(target.current_health);
                 target.current_health = (target.current_health - damage).max(0.0);
@@ -1072,7 +1113,7 @@ pub fn combat_auto_attack(
     
     // Update attacker damage dealt stats
     for (attacker_entity, damage) in damage_dealt_updates {
-        if let Ok((_, _, mut attacker)) = combatants.get_mut(attacker_entity) {
+        if let Ok((_, _, mut attacker, _)) = combatants.get_mut(attacker_entity) {
             attacker.damage_dealt += damage;
         }
     }
@@ -1101,18 +1142,25 @@ pub fn regenerate_resources(
 
 /// Ability decision system: AI decides when to cast abilities.
 /// 
-/// For now, Mages will cast Frostbolt if they have mana and target is in range.
-/// Future: More complex decision trees for other classes and abilities.
+/// - **Mages**: Cast Frostbolt on enemies when in range and have mana
+/// - **Priests**: Cast Flash Heal on lowest HP ally (including self) when needed
 /// 
-/// Note: Rotation to face target is handled by the movement system naturally.
+/// Future: More complex decision trees, cooldowns, priorities, etc.
 pub fn decide_abilities(
     mut commands: Commands,
     combatants: Query<(Entity, &Combatant, &Transform), Without<CastingState>>,
 ) {
-    // Build position map from all combatants
+    // Build position and info maps from all combatants
     let positions: std::collections::HashMap<Entity, Vec3> = combatants
         .iter()
         .map(|(entity, _, transform)| (entity, transform.translation))
+        .collect();
+    
+    let combatant_info: std::collections::HashMap<Entity, (u8, f32, f32)> = combatants
+        .iter()
+        .map(|(entity, combatant, _)| {
+            (entity, (combatant.team, combatant.current_health, combatant.max_health))
+        })
         .collect();
     
     for (entity, combatant, transform) in combatants.iter() {
@@ -1120,40 +1168,92 @@ pub fn decide_abilities(
             continue;
         }
         
-        // Only Mages can cast Frostbolt for now
-        if combatant.class != match_config::CharacterClass::Mage {
-            continue;
-        }
-        
-        // Check if we have a target
-        let Some(target_entity) = combatant.target else {
-            continue;
-        };
-        
-        let Some(&target_pos) = positions.get(&target_entity) else {
-            continue;
-        };
-        
         let my_pos = transform.translation;
         
-        // Try to cast Frostbolt
-        let ability = AbilityType::Frostbolt;
-        if ability.can_cast(combatant, target_pos, my_pos) {
-            let def = ability.definition();
+        // Mages cast Frostbolt on enemies
+        if combatant.class == match_config::CharacterClass::Mage {
+            // Check if we have an enemy target
+            let Some(target_entity) = combatant.target else {
+                continue;
+            };
             
-            // Start casting
-            commands.entity(entity).insert(CastingState {
-                ability,
-                time_remaining: def.cast_time,
-                target: Some(target_entity),
-            });
+            let Some(&target_pos) = positions.get(&target_entity) else {
+                continue;
+            };
             
-            info!(
-                "Team {} {} starts casting {} on target",
-                combatant.team,
-                combatant.class.name(),
-                def.name
-            );
+            // Try to cast Frostbolt
+            let ability = AbilityType::Frostbolt;
+            if ability.can_cast(combatant, target_pos, my_pos) {
+                let def = ability.definition();
+                
+                // Start casting
+                commands.entity(entity).insert(CastingState {
+                    ability,
+                    time_remaining: def.cast_time,
+                    target: Some(target_entity),
+                });
+                
+                info!(
+                    "Team {} {} starts casting {} on enemy",
+                    combatant.team,
+                    combatant.class.name(),
+                    def.name
+                );
+            }
+        }
+        // Priests cast Flash Heal on injured allies
+        else if combatant.class == match_config::CharacterClass::Priest {
+            // Find the lowest HP ally (including self)
+            let mut lowest_hp_ally: Option<(Entity, f32, Vec3)> = None;
+            
+            for (ally_entity, &(ally_team, ally_hp, ally_max_hp)) in combatant_info.iter() {
+                // Must be same team and alive
+                if ally_team != combatant.team {
+                    continue;
+                }
+                
+                // Only heal if damaged (below 90% health)
+                let hp_percent = ally_hp / ally_max_hp;
+                if hp_percent >= 0.9 {
+                    continue;
+                }
+                
+                // Get position
+                let Some(&ally_pos) = positions.get(ally_entity) else {
+                    continue;
+                };
+                
+                // Track lowest HP ally
+                match lowest_hp_ally {
+                    None => lowest_hp_ally = Some((*ally_entity, hp_percent, ally_pos)),
+                    Some((_, lowest_percent, _)) if hp_percent < lowest_percent => {
+                        lowest_hp_ally = Some((*ally_entity, hp_percent, ally_pos));
+                    }
+                    _ => {}
+                }
+            }
+            
+            // Cast heal on lowest HP ally if found
+            if let Some((heal_target, _, target_pos)) = lowest_hp_ally {
+                let ability = AbilityType::FlashHeal;
+                if ability.can_cast(combatant, target_pos, my_pos) {
+                    let def = ability.definition();
+                    
+                    // Start casting
+                    commands.entity(entity).insert(CastingState {
+                        ability,
+                        time_remaining: def.cast_time,
+                        target: Some(heal_target),
+                    });
+                    
+                    info!(
+                        "Team {} {} starts casting {} on ally",
+                        combatant.team,
+                        combatant.class.name(),
+                        def.name
+                    );
+                }
+            }
         }
     }
 }
@@ -1162,23 +1262,27 @@ pub fn decide_abilities(
 /// 
 /// Reduces cast timers each frame. When a cast completes:
 /// 1. Consume mana
-/// 2. Deal damage
-/// 3. Apply auras
-/// 4. Spawn floating combat text
-/// 5. Log to combat log
+/// 2. Deal damage (for damage spells) or heal (for healing spells)
+/// 3. Apply auras (if applicable)
+/// 4. Spawn floating combat text (yellow for damage, green for healing)
+/// 5. Log to combat log with position data
 pub fn process_casting(
     time: Res<Time>,
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
-    mut casters: Query<(Entity, &Transform, &mut Combatant, &mut CastingState)>,
-    mut targets: Query<(&Transform, &mut Combatant), Without<CastingState>>,
+    mut combatants: Query<(Entity, &Transform, &mut Combatant, Option<&mut CastingState>)>,
 ) {
     let dt = time.delta_secs();
     
     // Track completed casts
     let mut completed_casts = Vec::new();
     
-    for (caster_entity, caster_transform, mut caster, mut casting) in casters.iter_mut() {
+    // First pass: update cast timers and collect completed casts
+    for (caster_entity, caster_transform, mut caster, casting_state) in combatants.iter_mut() {
+        let Some(mut casting) = casting_state else {
+            continue;
+        };
+        
         if !caster.is_alive() {
             // Cancel cast if caster dies
             commands.entity(caster_entity).remove::<CastingState>();
@@ -1212,6 +1316,11 @@ pub fn process_casting(
         }
     }
     
+    // Track damage_dealt updates for casters (to apply after processing all casts)
+    let mut caster_damage_updates: Vec<(Entity, f32)> = Vec::new();
+    // Track healing_done updates for healers (to apply after processing all casts)
+    let mut caster_healing_updates: Vec<(Entity, f32)> = Vec::new();
+    
     // Process completed casts
     for (caster_entity, caster_team, caster_class, caster_pos, ability, target_entity) in completed_casts {
         let def = ability.definition();
@@ -1221,7 +1330,11 @@ pub fn process_casting(
             continue;
         };
         
-        let Ok((target_transform, mut target)) = targets.get_mut(target_entity) else {
+        // Check if this is self-targeting (e.g., priest healing themselves)
+        let is_self_target = target_entity == caster_entity;
+        
+        // Get target combatant
+        let Ok((_, target_transform, mut target, _)) = combatants.get_mut(target_entity) else {
             continue;
         };
         
@@ -1229,59 +1342,124 @@ pub fn process_casting(
             continue;
         }
         
-        // Calculate damage (random between min and max)
-        let damage_range = def.damage_max - def.damage_min;
-        let damage = def.damage_min + (rand::random::<f32>() * damage_range);
-        
-        let actual_damage = damage.min(target.current_health);
-        target.current_health = (target.current_health - damage).max(0.0);
-        target.damage_taken += actual_damage;
-        
-        // Update caster stats (need to re-query)
-        if let Ok((_, _, mut caster, _)) = casters.get_mut(caster_entity) {
-            caster.damage_dealt += actual_damage;
-        }
-        
-        // Spawn floating combat text (yellow for abilities)
-        let text_position = target_transform.translation + Vec3::new(0.0, 2.0, 0.0);
-        commands.spawn((
-            FloatingCombatText {
-                world_position: text_position,
-                text: format!("{:.0}", actual_damage),
-                color: egui::Color32::from_rgb(255, 255, 0), // Yellow for abilities
-                lifetime: 1.5,
-                vertical_offset: 0.0,
-            },
-            PlayMatchEntity,
-        ));
-        
-        // Log the ability with position data
         let target_pos = target_transform.translation;
         let distance = caster_pos.distance(target_pos);
-        let message = format!(
-            "Team {} {}'s {} hits Team {} {} for {:.0} damage",
-            caster_team,
-            caster_class.name(),
-            def.name,
-            target.team,
-            target.class.name(),
-            actual_damage
-        );
-        combat_log.log_with_position(
-            CombatLogEventType::Damage,
-            message,
-            PositionData {
-                entities: vec![
-                    format!("Team {} {} (caster)", caster_team, caster_class.name()),
-                    format!("Team {} {} (target)", target.team, target.class.name()),
-                ],
-                positions: vec![
-                    (caster_pos.x, caster_pos.y, caster_pos.z),
-                    (target_pos.x, target_pos.y, target_pos.z),
-                ],
-                distance: Some(distance),
-            },
-        );
+        let text_position = target_transform.translation + Vec3::new(0.0, 2.0, 0.0);
+        
+        // Handle damage spells
+        if def.is_damage() {
+            // Calculate damage (random between min and max)
+            let damage_range = def.damage_max - def.damage_min;
+            let damage = def.damage_min + (rand::random::<f32>() * damage_range);
+            
+            let actual_damage = damage.min(target.current_health);
+            target.current_health = (target.current_health - damage).max(0.0);
+            target.damage_taken += actual_damage;
+            
+            // Track damage dealt for caster (update later to avoid double borrow)
+            if is_self_target {
+                // Self-damage: target IS caster, so update now
+                target.damage_dealt += actual_damage;
+            } else {
+                // Different target: collect for later update
+                caster_damage_updates.push((caster_entity, actual_damage));
+            }
+            
+            // Spawn floating combat text (yellow for damage abilities)
+            commands.spawn((
+                FloatingCombatText {
+                    world_position: text_position,
+                    text: format!("{:.0}", actual_damage),
+                    color: egui::Color32::from_rgb(255, 255, 0), // Yellow for abilities
+                    lifetime: 1.5,
+                    vertical_offset: 0.0,
+                },
+                PlayMatchEntity,
+            ));
+            
+            // Log the damage
+            let message = format!(
+                "Team {} {}'s {} hits Team {} {} for {:.0} damage",
+                caster_team,
+                caster_class.name(),
+                def.name,
+                target.team,
+                target.class.name(),
+                actual_damage
+            );
+            combat_log.log_with_position(
+                CombatLogEventType::Damage,
+                message,
+                PositionData {
+                    entities: vec![
+                        format!("Team {} {} (caster)", caster_team, caster_class.name()),
+                        format!("Team {} {} (target)", target.team, target.class.name()),
+                    ],
+                    positions: vec![
+                        (caster_pos.x, caster_pos.y, caster_pos.z),
+                        (target_pos.x, target_pos.y, target_pos.z),
+                    ],
+                    distance: Some(distance),
+                },
+            );
+        }
+        // Handle healing spells
+        else if def.is_heal() {
+            // Calculate healing (random between min and max)
+            let healing_range = def.healing_max - def.healing_min;
+            let healing = def.healing_min + (rand::random::<f32>() * healing_range);
+            
+            // Apply healing (don't overheal)
+            let actual_healing = healing.min(target.max_health - target.current_health);
+            target.current_health = (target.current_health + healing).min(target.max_health);
+            
+            // Track healing done for healer (update later to avoid double borrow)
+            if is_self_target {
+                // Self-healing: target IS caster, so update now
+                target.healing_done += actual_healing;
+            } else {
+                // Different target: collect for later update
+                caster_healing_updates.push((caster_entity, actual_healing));
+            }
+            
+            // Spawn floating combat text (green for healing)
+            commands.spawn((
+                FloatingCombatText {
+                    world_position: text_position,
+                    text: format!("+{:.0}", actual_healing),
+                    color: egui::Color32::from_rgb(100, 255, 100), // Green for healing
+                    lifetime: 1.5,
+                    vertical_offset: 0.0,
+                },
+                PlayMatchEntity,
+            ));
+            
+            // Log the healing
+            let message = format!(
+                "Team {} {}'s {} heals Team {} {} for {:.0}",
+                caster_team,
+                caster_class.name(),
+                def.name,
+                target.team,
+                target.class.name(),
+                actual_healing
+            );
+            combat_log.log_with_position(
+                CombatLogEventType::Healing,
+                message,
+                PositionData {
+                    entities: vec![
+                        format!("Team {} {} (caster)", caster_team, caster_class.name()),
+                        format!("Team {} {} (target)", target.team, target.class.name()),
+                    ],
+                    positions: vec![
+                        (caster_pos.x, caster_pos.y, caster_pos.z),
+                        (target_pos.x, target_pos.y, target_pos.z),
+                    ],
+                    distance: Some(distance),
+                },
+            );
+        }
         
         // Apply aura if applicable (store for later application)
         if let Some((aura_type, duration, magnitude)) = def.applies_aura {
@@ -1316,6 +1494,20 @@ pub fn process_casting(
                 target.class.name()
             );
             combat_log.log(CombatLogEventType::Death, message);
+        }
+    }
+    
+    // Apply collected caster damage updates
+    for (caster_entity, damage) in caster_damage_updates {
+        if let Ok((_, _, mut caster, _)) = combatants.get_mut(caster_entity) {
+            caster.damage_dealt += damage;
+        }
+    }
+    
+    // Apply collected healer healing updates
+    for (healer_entity, healing) in caster_healing_updates {
+        if let Ok((_, _, mut healer, _)) = combatants.get_mut(healer_entity) {
+            healer.healing_done += healing;
         }
     }
 }
@@ -1419,6 +1611,7 @@ pub fn check_match_end(
                 class: combatant.class,
                 damage_dealt: combatant.damage_dealt,
                 damage_taken: combatant.damage_taken,
+                healing_done: combatant.healing_done,
                 survived: combatant.is_alive(),
             };
             
