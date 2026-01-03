@@ -1,11 +1,18 @@
 //! Camera system
 //!
-//! Handles camera setup and controls for viewing the arena.
-//! Supports multiple camera modes as specified in the design doc:
-//! - Follow midpoint/center
-//! - Zoom in/out
-//! - Follow combatant
-//! - Manual drag
+//! Handles camera setup and basic keyboard controls for viewing the 3D arena during matches.
+//! 
+//! **Current Features:**
+//! - Fixed isometric camera position
+//! - Keyboard-based zoom (+/- or numpad +/-)
+//! - Keyboard-based panning (WASD)
+//! - ESC key handling for navigation
+//!
+//! **Future Enhancements:**
+//! - Follow midpoint/center of combat
+//! - Follow specific combatant
+//! - Mouse-based drag controls
+//! - Smooth camera transitions
 
 use bevy::prelude::*;
 
@@ -16,8 +23,7 @@ pub struct CameraPlugin;
 
 impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<CameraSettings>()
-            .add_systems(Update, handle_escape_key)
+        app.add_systems(Update, handle_escape_key)
             .add_systems(
                 Update,
                 camera_controls.run_if(in_state(GameState::PlayMatch)),
@@ -25,51 +31,15 @@ impl Plugin for CameraPlugin {
     }
 }
 
-/// Camera control mode
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum CameraMode {
-    /// Follow the midpoint between all combatants
-    #[default]
-    FollowCenter,
-    /// Follow a specific combatant
-    FollowCombatant(Entity),
-    /// Manual camera control via drag
-    Manual,
-}
-
-/// Global camera settings
-#[derive(Resource)]
-pub struct CameraSettings {
-    /// Current camera mode
-    pub mode: CameraMode,
-    /// Current zoom level (distance from target)
-    pub zoom: f32,
-    /// Minimum zoom distance
-    pub zoom_min: f32,
-    /// Maximum zoom distance
-    pub zoom_max: f32,
-    /// Camera movement smoothing factor
-    pub smoothing: f32,
-}
-
-impl Default for CameraSettings {
-    fn default() -> Self {
-        Self {
-            mode: CameraMode::FollowCenter,
-            zoom: 20.0,
-            zoom_min: 5.0,
-            zoom_max: 50.0,
-            smoothing: 5.0,
-        }
-    }
-}
-
-/// Marker component for the main 3D game camera (used during PlayMatch)
+/// Marker component for the main 3D game camera (used during PlayMatch).
+/// 
+/// The camera is spawned in `setup_play_match` and despawned in `cleanup_play_match`.
 #[derive(Component)]
 pub struct MainCamera;
 
-/// Handle ESC key to return to previous state/menu
-/// Note: ConfigureMatch has its own ESC handler to close modals first
+/// Handle ESC key to return to previous state/menu.
+/// 
+/// Note: ConfigureMatch has its own ESC handler to close modals first.
 fn handle_escape_key(
     keyboard: Res<ButtonInput<KeyCode>>,
     current_state: Res<State<GameState>>,
@@ -87,8 +57,8 @@ fn handle_escape_key(
                 // ConfigureMatch has its own ESC handler - skip here
             }
             GameState::PlayMatch => {
-                // During a match, ESC could pause or show a menu
-                // For now, just return to main menu
+                // During a match, ESC returns to main menu
+                // Future: Could show pause menu instead
                 next_state.set(GameState::MainMenu);
             }
             GameState::Results => {
@@ -98,10 +68,14 @@ fn handle_escape_key(
     }
 }
 
-/// Camera controls for the 3D arena view during PlayMatch
+/// Camera controls for the 3D arena view during PlayMatch.
+/// 
+/// **Controls:**
+/// - `+` / `Numpad +`: Zoom in
+/// - `-` / `Numpad -`: Zoom out
+/// - `WASD`: Pan camera (move viewpoint)
 fn camera_controls(
     mut camera_query: Query<&mut Transform, With<MainCamera>>,
-    _settings: Res<CameraSettings>,
     keyboard: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
 ) {
@@ -109,7 +83,7 @@ fn camera_controls(
         return;
     };
 
-    // Basic zoom with scroll wheel simulation via keyboard for now
+    // Zoom controls (move camera forward/backward along view direction)
     let zoom_speed = 10.0 * time.delta_secs();
     if keyboard.pressed(KeyCode::Equal) || keyboard.pressed(KeyCode::NumpadAdd) {
         let direction = camera_transform.forward();
@@ -120,7 +94,7 @@ fn camera_controls(
         camera_transform.translation -= direction * zoom_speed;
     }
 
-    // Basic WASD camera movement in manual mode
+    // Pan controls (move camera in world space)
     let move_speed = 15.0 * time.delta_secs();
     if keyboard.pressed(KeyCode::KeyW) {
         camera_transform.translation.z -= move_speed;

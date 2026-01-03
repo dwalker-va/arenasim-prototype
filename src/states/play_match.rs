@@ -120,6 +120,8 @@ pub struct Combatant {
     pub healing_done: f32,
     /// Bonus damage for the next auto-attack (from abilities like Heroic Strike)
     pub next_attack_bonus_damage: f32,
+    /// Whether this combatant is currently stealthed (Rogues only)
+    pub stealthed: bool,
 }
 
 impl Combatant {
@@ -132,6 +134,9 @@ impl Combatant {
             match_config::CharacterClass::Rogue => (ResourceType::Energy, 100.0, 100.0, 20.0, 100.0, 15.0, 1.3, 6.0), // Energy: starts full, fast regen
             match_config::CharacterClass::Priest => (ResourceType::Mana, 90.0, 150.0, 8.0, 150.0, 8.0, 0.8, 5.0),    // Mana: starts full
         };
+        
+        // Rogues start stealthed
+        let stealthed = class == match_config::CharacterClass::Rogue;
         
         Self {
             team,
@@ -151,6 +156,7 @@ impl Combatant {
             damage_taken: 0.0,
             healing_done: 0.0,
             next_attack_bonus_damage: 0.0,
+            stealthed,
         }
     }
     
@@ -237,6 +243,7 @@ pub enum AbilityType {
     Frostbolt,
     FlashHeal,
     HeroicStrike,
+    Ambush,
     // Future: Fireball, Backstab, etc.
 }
 
@@ -280,6 +287,18 @@ impl AbilityType {
                 healing_max: 0.0,
                 applies_aura: None,
             },
+            AbilityType::Ambush => AbilityDefinition {
+                name: "Ambush",
+                cast_time: 0.0, // Instant cast
+                range: MELEE_RANGE,
+                mana_cost: 60.0, // High energy cost
+                cooldown: 0.0,
+                damage_min: 50.0, // High burst damage
+                damage_max: 60.0,
+                healing_min: 0.0,
+                healing_max: 0.0,
+                applies_aura: None,
+            },
         }
     }
     
@@ -287,7 +306,7 @@ impl AbilityType {
     pub fn can_cast(&self, caster: &Combatant, target_position: Vec3, caster_position: Vec3) -> bool {
         let def = self.definition();
         
-        // Check mana
+        // Check mana/resource
         if caster.current_mana < def.mana_cost {
             return false;
         }
@@ -295,6 +314,11 @@ impl AbilityType {
         // Check range
         let distance = caster_position.distance(target_position);
         if distance > def.range {
+            return false;
+        }
+        
+        // Ambush requires stealth
+        if matches!(self, AbilityType::Ambush) && !caster.stealthed {
             return false;
         }
         
@@ -888,11 +912,11 @@ pub fn cleanup_expired_floating_text(
 pub fn acquire_targets(
     mut combatants: Query<(Entity, &mut Combatant, &Transform)>,
 ) {
-    // Build list of all alive combatants with their info
-    let alive_combatants: Vec<(Entity, u8, Vec3)> = combatants
+    // Build list of all alive combatants with their info (excluding stealthed enemies)
+    let alive_combatants: Vec<(Entity, u8, Vec3, bool)> = combatants
         .iter()
         .filter(|(_, c, _)| c.is_alive())
-        .map(|(entity, c, transform)| (entity, c.team, transform.translation))
+        .map(|(entity, c, transform)| (entity, c.team, transform.translation, c.stealthed))
         .collect();
 
     // For each combatant, ensure they have a valid target
@@ -902,27 +926,27 @@ pub fn acquire_targets(
             continue;
         }
 
-        // Check if current target is still valid (alive and on enemy team)
+        // Check if current target is still valid (alive, on enemy team, and not stealthed)
         let target_valid = combatant.target.and_then(|target_entity| {
             alive_combatants
                 .iter()
-                .find(|(e, _, _)| *e == target_entity)
-                .filter(|(_, team, _)| *team != combatant.team)
+                .find(|(e, _, _, _)| *e == target_entity)
+                .filter(|(_, team, _, stealthed)| *team != combatant.team && !stealthed)
         }).is_some();
 
-        // If no valid target, find nearest enemy
+        // If no valid target, find nearest enemy (excluding stealthed)
         if !target_valid {
             let my_pos = transform.translation;
             let nearest_enemy = alive_combatants
                 .iter()
-                .filter(|(_, team, _)| *team != combatant.team)
-                .min_by(|(_, _, pos_a), (_, _, pos_b)| {
+                .filter(|(_, team, _, stealthed)| *team != combatant.team && !stealthed)
+                .min_by(|(_, _, pos_a, _), (_, _, pos_b, _)| {
                     let dist_a = my_pos.distance(*pos_a);
                     let dist_b = my_pos.distance(*pos_b);
                     dist_a.partial_cmp(&dist_b).unwrap()
                 });
 
-            combatant.target = nearest_enemy.map(|(entity, _, _)| *entity);
+            combatant.target = nearest_enemy.map(|(entity, _, _, _)| *entity);
         }
     }
 }
@@ -1053,6 +1077,11 @@ pub fn combat_auto_attack(
         if casting_state.is_some() {
             continue;
         }
+        
+        // WoW Mechanic: Cannot auto-attack while stealthed (Rogues must use abilities)
+        if combatant.stealthed {
+            continue;
+        }
 
         // Update attack timer
         combatant.attack_timer += dt;
@@ -1075,6 +1104,16 @@ pub fn combat_auto_attack(
                         
                         // Consume the bonus damage after queueing the attack
                         combatant.next_attack_bonus_damage = 0.0;
+                        
+                        // Break stealth on auto-attack
+                        if combatant.stealthed {
+                            combatant.stealthed = false;
+                            info!(
+                                "Team {} {} breaks stealth with auto-attack!",
+                                combatant.team,
+                                combatant.class.name()
+                            );
+                        }
                         
                         // Warriors generate Rage from auto-attacks
                         if combatant.resource_type == ResourceType::Rage {
@@ -1219,10 +1258,12 @@ pub fn regenerate_resources(
 /// 
 /// - **Mages**: Cast Frostbolt on enemies when in range and have mana
 /// - **Priests**: Cast Flash Heal on lowest HP ally (including self) when needed
+/// - **Rogues**: Use Ambush from stealth for high burst damage
 /// 
 /// Future: More complex decision trees, cooldowns, priorities, etc.
 pub fn decide_abilities(
     mut commands: Commands,
+    mut combat_log: ResMut<CombatLog>,
     mut combatants: Query<(Entity, &mut Combatant, &Transform), Without<CastingState>>,
 ) {
     // Build position and info maps from all combatants
@@ -1231,12 +1272,15 @@ pub fn decide_abilities(
         .map(|(entity, _, transform)| (entity, transform.translation))
         .collect();
     
-    let combatant_info: std::collections::HashMap<Entity, (u8, f32, f32)> = combatants
+    let combatant_info: std::collections::HashMap<Entity, (u8, match_config::CharacterClass, f32, f32)> = combatants
         .iter()
         .map(|(entity, combatant, _)| {
-            (entity, (combatant.team, combatant.current_health, combatant.max_health))
+            (entity, (combatant.team, combatant.class, combatant.current_health, combatant.max_health))
         })
         .collect();
+    
+    // Queue for Ambush attacks (attacker, target, damage, team, class)
+    let mut ambush_attacks: Vec<(Entity, Entity, f32, u8, match_config::CharacterClass)> = Vec::new();
     
     for (entity, mut combatant, transform) in combatants.iter_mut() {
         if !combatant.is_alive() {
@@ -1281,7 +1325,7 @@ pub fn decide_abilities(
             // Find the lowest HP ally (including self)
             let mut lowest_hp_ally: Option<(Entity, f32, Vec3)> = None;
             
-            for (ally_entity, &(ally_team, ally_hp, ally_max_hp)) in combatant_info.iter() {
+            for (ally_entity, &(ally_team, _ally_class, ally_hp, ally_max_hp)) in combatant_info.iter() {
                 // Must be same team and alive
                 if ally_team != combatant.team {
                     continue;
@@ -1369,6 +1413,126 @@ pub fn decide_abilities(
                 );
             }
         }
+        
+        // Rogues use Ambush from stealth (instant ability, high damage)
+        if combatant.class == match_config::CharacterClass::Rogue && combatant.stealthed {
+            // Check if we have an enemy target
+            let Some(target_entity) = combatant.target else {
+                continue;
+            };
+            
+            let Some(&target_pos) = positions.get(&target_entity) else {
+                continue;
+            };
+            
+            // Try to use Ambush if we have enough energy and target is in melee range
+            let ability = AbilityType::Ambush;
+            if ability.can_cast(&combatant, target_pos, my_pos) {
+                let def = ability.definition();
+                
+                // Consume energy
+                combatant.current_mana -= def.mana_cost;
+                
+                // Break stealth immediately
+                combatant.stealthed = false;
+                
+                // Calculate damage (random between min and max)
+                let damage_range = def.damage_max - def.damage_min;
+                let damage = def.damage_min + (rand::random::<f32>() * damage_range);
+                
+                // Queue the Ambush attack to be applied after the loop
+                ambush_attacks.push((entity, target_entity, damage, combatant.team, combatant.class));
+                
+                info!(
+                    "Team {} {} uses {} from stealth!",
+                    combatant.team,
+                    combatant.class.name(),
+                    def.name
+                );
+            }
+        }
+    }
+    
+    // Process queued Ambush attacks
+    for (attacker_entity, target_entity, damage, attacker_team, attacker_class) in ambush_attacks {
+        let mut actual_damage = 0.0;
+        let mut target_team = 0;
+        let mut target_class = match_config::CharacterClass::Warrior; // Default, will be overwritten
+        
+        if let Ok((_, mut target, target_transform)) = combatants.get_mut(target_entity) {
+            if target.is_alive() {
+                actual_damage = damage.min(target.current_health);
+                target.current_health = (target.current_health - damage).max(0.0);
+                target.damage_taken += actual_damage;
+                target_team = target.team;
+                target_class = target.class;
+                
+                // Warriors generate Rage from taking damage
+                if target.resource_type == ResourceType::Rage {
+                    let rage_gain = actual_damage * 0.15;
+                    target.current_mana = (target.current_mana + rage_gain).min(target.max_mana);
+                }
+                
+                info!(
+                    "Team {} {}'s Ambush hits Team {} {} for {:.0} damage!",
+                    attacker_team,
+                    attacker_class.name(),
+                    target_team,
+                    target_class.name(),
+                    actual_damage
+                );
+                
+                // Spawn floating combat text (yellow for abilities)
+                let text_position = target_transform.translation + Vec3::new(0.0, 2.0, 0.0);
+                commands.spawn((
+                    FloatingCombatText {
+                        world_position: text_position,
+                        text: format!("{:.0}", actual_damage),
+                        color: egui::Color32::from_rgb(255, 255, 0), // Yellow for abilities
+                        lifetime: 1.5,
+                        vertical_offset: 0.0,
+                    },
+                    PlayMatchEntity,
+                ));
+                
+                // Log the Ambush attack with position data
+                let message = format!(
+                    "Team {} {}'s Ambush hits Team {} {} for {:.0} damage",
+                    attacker_team,
+                    attacker_class.name(),
+                    target_team,
+                    target_class.name(),
+                    actual_damage
+                );
+                
+                if let (Some(&attacker_pos), Some(&target_pos)) = 
+                    (positions.get(&attacker_entity), positions.get(&target_entity)) {
+                    let distance = attacker_pos.distance(target_pos);
+                    combat_log.log_with_position(
+                        CombatLogEventType::Damage,
+                        message,
+                        PositionData {
+                            entities: vec![
+                                format!("Team {} {} (attacker)", attacker_team, attacker_class.name()),
+                                format!("Team {} {} (target)", target_team, target_class.name()),
+                            ],
+                            positions: vec![
+                                (attacker_pos.x, attacker_pos.y, attacker_pos.z),
+                                (target_pos.x, target_pos.y, target_pos.z),
+                            ],
+                            distance: Some(distance),
+                        },
+                    );
+                } else {
+                    combat_log.log(CombatLogEventType::Damage, message);
+                }
+            }
+        }
+        
+        // Update attacker's damage dealt
+        if let Ok((_, mut attacker, _)) = combatants.get_mut(attacker_entity) {
+            attacker.damage_dealt += actual_damage;
+        }
     }
 }
 
@@ -1434,6 +1598,8 @@ pub fn process_casting(
     let mut caster_damage_updates: Vec<(Entity, f32)> = Vec::new();
     // Track healing_done updates for healers (to apply after processing all casts)
     let mut caster_healing_updates: Vec<(Entity, f32)> = Vec::new();
+    // Track casters who should have stealth broken (offensive abilities)
+    let mut break_stealth: Vec<Entity> = Vec::new();
     
     // Process completed casts
     for (caster_entity, caster_team, caster_class, caster_pos, ability, target_entity) in completed_casts {
@@ -1475,6 +1641,9 @@ pub fn process_casting(
                 let rage_gain = actual_damage * 0.15; // Gain 15% of damage taken as Rage
                 target.current_mana = (target.current_mana + rage_gain).min(target.max_mana);
             }
+            
+            // Break stealth on offensive ability use
+            break_stealth.push(caster_entity);
             
             // Track damage dealt for caster (update later to avoid double borrow)
             if is_self_target {
@@ -1628,6 +1797,20 @@ pub fn process_casting(
     for (healer_entity, healing) in caster_healing_updates {
         if let Ok((_, _, mut healer, _)) = combatants.get_mut(healer_entity) {
             healer.healing_done += healing;
+        }
+    }
+    
+    // Break stealth for casters who used offensive abilities
+    for caster_entity in break_stealth {
+        if let Ok((_, _, mut caster, _)) = combatants.get_mut(caster_entity) {
+            if caster.stealthed {
+                caster.stealthed = false;
+                info!(
+                    "Team {} {} breaks stealth!",
+                    caster.team,
+                    caster.class.name()
+                );
+            }
         }
     }
 }
