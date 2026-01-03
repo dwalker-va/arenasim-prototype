@@ -47,6 +47,28 @@ const MELEE_RANGE: f32 = 2.5;
 const STOP_DISTANCE: f32 = 2.0;
 
 // ============================================================================
+// Resources
+// ============================================================================
+
+/// Controls the speed of combat simulation
+#[derive(Resource)]
+pub struct SimulationSpeed {
+    pub multiplier: f32,
+}
+
+impl Default for SimulationSpeed {
+    fn default() -> Self {
+        Self { multiplier: 1.0 }
+    }
+}
+
+impl SimulationSpeed {
+    pub fn is_paused(&self) -> bool {
+        self.multiplier == 0.0
+    }
+}
+
+// ============================================================================
 // Components
 // ============================================================================
 
@@ -405,6 +427,9 @@ pub fn setup_play_match(
         color: Color::srgb(0.3, 0.3, 0.4),
         brightness: 300.0,
     });
+    
+    // Initialize simulation speed control
+    commands.insert_resource(SimulationSpeed { multiplier: 1.0 });
 
     // Spawn arena floor - 30x30 unit plane
     let floor_size = 30.0;
@@ -520,13 +545,172 @@ pub fn cleanup_play_match(
         commands.entity(entity).despawn_recursive();
     }
     
-    // Remove ambient light resource
+    // Remove resources
     commands.remove_resource::<AmbientLight>();
+    commands.remove_resource::<SimulationSpeed>();
 }
 
 // ============================================================================
 // Update & Input Systems
 // ============================================================================
+
+/// Handle time control keyboard shortcuts and apply time multiplier to simulation.
+/// 
+/// **Keyboard Shortcuts:**
+/// - `Space`: Pause/Unpause
+/// - `1`: 0.5x speed
+/// - `2`: 1x speed (normal)
+/// - `3`: 2x speed
+/// - `4`: 3x speed
+pub fn handle_time_controls(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut sim_speed: ResMut<SimulationSpeed>,
+    mut time: ResMut<Time<Virtual>>,
+) {
+    let mut speed_changed = false;
+    let old_multiplier = sim_speed.multiplier;
+    
+    // Space toggles pause
+    if keyboard.just_pressed(KeyCode::Space) {
+        if sim_speed.is_paused() {
+            sim_speed.multiplier = 1.0; // Resume at normal speed
+        } else {
+            sim_speed.multiplier = 0.0; // Pause
+        }
+        speed_changed = true;
+    }
+    
+    // Number keys set specific speeds
+    if keyboard.just_pressed(KeyCode::Digit1) {
+        sim_speed.multiplier = 0.5;
+        speed_changed = true;
+    }
+    if keyboard.just_pressed(KeyCode::Digit2) {
+        sim_speed.multiplier = 1.0;
+        speed_changed = true;
+    }
+    if keyboard.just_pressed(KeyCode::Digit3) {
+        sim_speed.multiplier = 2.0;
+        speed_changed = true;
+    }
+    if keyboard.just_pressed(KeyCode::Digit4) {
+        sim_speed.multiplier = 3.0;
+        speed_changed = true;
+    }
+    
+    // Apply speed to virtual time if changed
+    if speed_changed {
+        time.set_relative_speed(sim_speed.multiplier);
+        
+        if sim_speed.is_paused() {
+            info!("Simulation PAUSED");
+        } else if old_multiplier == 0.0 {
+            info!("Simulation RESUMED at {}x speed", sim_speed.multiplier);
+        } else {
+            info!("Simulation speed changed to {}x", sim_speed.multiplier);
+        }
+    }
+}
+
+/// Render time control UI panel in the top-left corner.
+/// 
+/// Shows current speed and clickable buttons for speed control.
+pub fn render_time_controls(
+    mut contexts: EguiContexts,
+    mut sim_speed: ResMut<SimulationSpeed>,
+    mut time: ResMut<Time<Virtual>>,
+) {
+    let ctx = contexts.ctx_mut();
+    
+    egui::Window::new("Time Controls")
+        .fixed_pos(egui::pos2(10.0, 10.0))
+        .resizable(false)
+        .collapsible(false)
+        .title_bar(false)
+        .show(ctx, |ui| {
+            ui.set_width(180.0);
+            
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("Speed:")
+                        .size(14.0)
+                        .color(egui::Color32::from_rgb(200, 200, 200))
+                );
+                
+                let speed_text = if sim_speed.is_paused() {
+                    "PAUSED"
+                } else {
+                    match sim_speed.multiplier {
+                        x if (x - 0.5).abs() < 0.01 => "0.5x",
+                        x if (x - 1.0).abs() < 0.01 => "1x",
+                        x if (x - 2.0).abs() < 0.01 => "2x",
+                        x if (x - 3.0).abs() < 0.01 => "3x",
+                        _ => "??",
+                    }
+                };
+                
+                ui.label(
+                    egui::RichText::new(speed_text)
+                        .size(14.0)
+                        .color(if sim_speed.is_paused() {
+                            egui::Color32::from_rgb(255, 100, 100)
+                        } else {
+                            egui::Color32::from_rgb(100, 255, 100)
+                        })
+                        .strong()
+                );
+            });
+            
+            ui.add_space(5.0);
+            
+            ui.horizontal(|ui| {
+                // Pause button
+                let pause_btn = egui::Button::new(
+                    egui::RichText::new(if sim_speed.is_paused() { "▶" } else { "⏸" })
+                        .size(16.0)
+                ).min_size(egui::vec2(35.0, 30.0));
+                
+                if ui.add(pause_btn).clicked() {
+                    if sim_speed.is_paused() {
+                        sim_speed.multiplier = 1.0;
+                    } else {
+                        sim_speed.multiplier = 0.0;
+                    }
+                    time.set_relative_speed(sim_speed.multiplier);
+                }
+                
+                // Speed buttons
+                for &speed in &[0.5, 1.0, 2.0, 3.0] {
+                    let is_active = !sim_speed.is_paused() && (sim_speed.multiplier - speed).abs() < 0.01;
+                    let label = if speed == 0.5 { "½x" } else { &format!("{}x", speed as u8) };
+                    
+                    let btn = egui::Button::new(
+                        egui::RichText::new(label).size(12.0)
+                    )
+                    .min_size(egui::vec2(32.0, 30.0))
+                    .fill(if is_active {
+                        egui::Color32::from_rgb(60, 80, 120)
+                    } else {
+                        egui::Color32::from_rgb(40, 40, 50)
+                    });
+                    
+                    if ui.add(btn).clicked() {
+                        sim_speed.multiplier = speed;
+                        time.set_relative_speed(sim_speed.multiplier);
+                    }
+                }
+            });
+            
+            ui.add_space(3.0);
+            
+            // Keyboard shortcuts hint
+            ui.label(
+                egui::RichText::new("Space=Pause 1-4=Speed")
+                    .size(10.0)
+                    .color(egui::Color32::from_rgb(120, 120, 120))
+            );
+        });
+}
 
 /// Handle player input during the match.
 /// Currently only handles ESC key to return to main menu.
@@ -579,7 +763,7 @@ pub fn render_health_bars(
                     let bar_width = 50.0;
                     let bar_height = 6.0;
                     let bar_spacing = 2.0; // Space between bars
-                    let mut bar_pos = egui::pos2(
+                    let bar_pos = egui::pos2(
                         screen_pos.x - bar_width / 2.0,
                         screen_pos.y - bar_height / 2.0,
                     );

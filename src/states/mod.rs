@@ -56,6 +56,7 @@ impl Plugin for StatesPlugin {
             .add_systems(
                 Update,
                 (
+                    play_match::handle_time_controls,
                     play_match::update_play_match,
                     play_match::regenerate_resources,
                     play_match::update_auras,
@@ -69,6 +70,7 @@ impl Plugin for StatesPlugin {
                     play_match::check_match_end,
                     play_match::update_floating_combat_text,
                     play_match::cleanup_expired_floating_text,
+                    play_match::render_time_controls,
                     play_match::render_health_bars,
                     play_match::render_floating_combat_text,
                     play_match::render_combat_log,
