@@ -75,10 +75,6 @@ impl Plugin for StatesPlugin {
 #[derive(Component)]
 pub struct PlayMatchEntity;
 
-/// Marker component for results entities
-#[derive(Component)]
-pub struct ResultsEntity;
-
 // ============================================================================
 // Main Menu (egui)
 // ============================================================================
@@ -220,30 +216,24 @@ fn options_ui(
         .show(ctx, |ui| {
             ui.add_space(10.0);
             
-            // Header with perfectly centered title
-            ui.horizontal(|ui| {
-                // Left column: Back button (fixed width)
-                ui.allocate_ui_with_layout(
-                    egui::vec2(100.0, 40.0),
-                    egui::Layout::left_to_right(egui::Align::Center),
-                    |ui| {
-                        if ui.button(egui::RichText::new("← BACK").size(20.0)).clicked() {
-                            next_state.set(GameState::MainMenu);
-                        }
-                    }
+            // Back button - positioned in top-left
+            let back_rect = egui::Rect::from_min_size(
+                egui::pos2(20.0, 20.0),
+                egui::vec2(80.0, 36.0)
+            );
+            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(back_rect), |ui| {
+                if ui.button(egui::RichText::new("← BACK").size(20.0)).clicked() {
+                    next_state.set(GameState::MainMenu);
+                }
+            });
+            
+            // Title - centered relative to full width
+            ui.vertical_centered(|ui| {
+                ui.heading(
+                    egui::RichText::new("OPTIONS")
+                        .size(42.0)
+                        .color(egui::Color32::from_rgb(230, 204, 153)),
                 );
-                
-                // Middle column: Title (takes remaining space, centered)
-                ui.with_layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight), |ui| {
-                    ui.heading(
-                        egui::RichText::new("OPTIONS")
-                            .size(42.0)
-                            .color(egui::Color32::from_rgb(230, 204, 153)),
-                    );
-                });
-                
-                // Right column: Empty spacer (same width as left to balance)
-                ui.allocate_space(egui::vec2(100.0, 40.0));
             });
 
             ui.add_space(60.0);
@@ -494,32 +484,28 @@ fn configure_match_ui(
         )
         .show(ctx, |ui| {
             ui.add_space(10.0);
+            
+            // Back button - positioned in top-left
+            let back_rect = egui::Rect::from_min_size(
+                egui::pos2(20.0, 20.0),
+                egui::vec2(80.0, 36.0)
+            );
+            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(back_rect), |ui| {
+                if ui.button(egui::RichText::new("← BACK").size(20.0)).clicked() {
+                    next_state.set(GameState::MainMenu);
+                }
+            });
+            
+            // Title - centered relative to full width (same as VS and SELECT CHARACTERS)
+            ui.vertical_centered(|ui| {
+                ui.heading(
+                    egui::RichText::new("CONFIGURE MATCH")
+                        .size(42.0)
+                        .color(egui::Color32::from_rgb(230, 204, 153)),
+                );
+            });
 
-                    // Back button - positioned absolutely in top-left
-                    let back_response = ui.allocate_ui_at_rect(
-                        egui::Rect::from_min_size(
-                            egui::pos2(20.0, 20.0),
-                            egui::vec2(100.0, 40.0)
-                        ),
-                        |ui| {
-                            ui.horizontal(|ui| {
-                                if ui.button(egui::RichText::new("← BACK").size(20.0)).clicked() {
-                                    next_state.set(GameState::MainMenu);
-                                }
-                            });
-                        }
-                    );
-
-                    // Title - centered relative to full viewport
-                    ui.vertical_centered(|ui| {
-                        ui.heading(
-                            egui::RichText::new("CONFIGURE MATCH")
-                                .size(42.0)
-                                .color(egui::Color32::from_rgb(230, 204, 153)),
-                        );
-                    });
-
-                    ui.add_space(30.0);
+            ui.add_space(30.0);
 
                     // Main content area with 3 panels - use egui's screen rect
                     // This accounts for egui's coordinate system and scale factor correctly

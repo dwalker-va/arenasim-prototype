@@ -134,11 +134,5 @@ impl MatchConfig {
         self.team1.iter().all(|slot| slot.is_some())
             && self.team2.iter().all(|slot| slot.is_some())
     }
-
-    /// Get the total number of empty slots
-    pub fn empty_slots(&self) -> usize {
-        self.team1.iter().filter(|s| s.is_none()).count()
-            + self.team2.iter().filter(|s| s.is_none()).count()
-    }
 }
 
