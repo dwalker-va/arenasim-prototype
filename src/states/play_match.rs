@@ -149,6 +149,10 @@ pub struct Combatant {
     pub attack_speed: f32,
     /// Timer tracking time until next attack
     pub attack_timer: f32,
+    /// Attack Power - scales physical damage abilities and auto-attacks
+    pub attack_power: f32,
+    /// Spell Power - scales magical damage and healing abilities
+    pub spell_power: f32,
     /// Base movement speed in units per second (modified by auras/debuffs)
     pub base_movement_speed: f32,
     /// Current target entity (None if no valid target)
@@ -176,12 +180,16 @@ pub struct Combatant {
 impl Combatant {
     /// Create a new combatant with class-specific stats.
     pub fn new(team: u8, class: match_config::CharacterClass) -> Self {
-        // Class-specific stats (resource_type, health, max_resource, resource_regen, starting_resource, damage, attack speed, movement speed)
-        let (resource_type, max_health, max_resource, resource_regen, starting_resource, attack_damage, attack_speed, movement_speed) = match class {
-            match_config::CharacterClass::Warrior => (ResourceType::Rage, 150.0, 100.0, 0.0, 0.0, 12.0, 1.0, 5.0),  // Rage: starts at 0
-            match_config::CharacterClass::Mage => (ResourceType::Mana, 80.0, 200.0, 10.0, 200.0, 20.0, 0.7, 4.5),   // Mana: starts full
-            match_config::CharacterClass::Rogue => (ResourceType::Energy, 100.0, 100.0, 20.0, 100.0, 10.0, 1.3, 6.0), // Energy: starts full, fast regen, reduced base damage (has Sinister Strike)
-            match_config::CharacterClass::Priest => (ResourceType::Mana, 90.0, 150.0, 8.0, 150.0, 8.0, 0.8, 5.0),    // Mana: starts full
+        // Class-specific stats (resource_type, health, max_resource, resource_regen, starting_resource, damage, attack speed, attack_power, spell_power, movement speed)
+        let (resource_type, max_health, max_resource, resource_regen, starting_resource, attack_damage, attack_speed, attack_power, spell_power, movement_speed) = match class {
+            // Warriors: High HP, physical damage, scales with Attack Power
+            match_config::CharacterClass::Warrior => (ResourceType::Rage, 150.0, 100.0, 0.0, 0.0, 12.0, 1.0, 30.0, 0.0, 5.0),
+            // Mages: Low HP, magical damage, scales with Spell Power
+            match_config::CharacterClass::Mage => (ResourceType::Mana, 80.0, 200.0, 10.0, 200.0, 20.0, 0.7, 0.0, 50.0, 4.5),
+            // Rogues: Medium HP, physical burst damage, scales with Attack Power
+            match_config::CharacterClass::Rogue => (ResourceType::Energy, 100.0, 100.0, 20.0, 100.0, 10.0, 1.3, 35.0, 0.0, 6.0),
+            // Priests: Medium HP, healing & damage, scales with Spell Power
+            match_config::CharacterClass::Priest => (ResourceType::Mana, 90.0, 150.0, 8.0, 150.0, 8.0, 0.8, 0.0, 40.0, 5.0),
         };
         
         // Rogues start stealthed
@@ -199,6 +207,8 @@ impl Combatant {
             attack_damage,
             attack_speed,
             attack_timer: 0.0,
+            attack_power,
+            spell_power,
             base_movement_speed: movement_speed,
             target: None,
             damage_dealt: 0.0,
@@ -221,6 +231,34 @@ impl Combatant {
     /// Check if this combatant is in range to attack the target position.
     pub fn in_attack_range(&self, my_position: Vec3, target_position: Vec3) -> bool {
         my_position.distance(target_position) <= MELEE_RANGE
+    }
+    
+    /// Calculate damage for an ability based on character stats.
+    /// Formula: Base Damage + (Scaling Stat × Coefficient)
+    pub fn calculate_ability_damage(&self, ability_def: &AbilityDefinition) -> f32 {
+        // Calculate base damage (random between min and max)
+        let damage_range = ability_def.damage_base_max - ability_def.damage_base_min;
+        let base_damage = ability_def.damage_base_min + (rand::random::<f32>() * damage_range);
+        
+        // Add stat scaling
+        let stat_value = match ability_def.damage_scales_with {
+            ScalingStat::AttackPower => self.attack_power,
+            ScalingStat::SpellPower => self.spell_power,
+            ScalingStat::None => 0.0,
+        };
+        
+        base_damage + (stat_value * ability_def.damage_coefficient)
+    }
+    
+    /// Calculate healing for an ability based on character stats.
+    /// Formula: Base Healing + (Spell Power × Coefficient)
+    pub fn calculate_ability_healing(&self, ability_def: &AbilityDefinition) -> f32 {
+        // Calculate base healing (random between min and max)
+        let healing_range = ability_def.healing_base_max - ability_def.healing_base_min;
+        let base_healing = ability_def.healing_base_min + (rand::random::<f32>() * healing_range);
+        
+        // Add spell power scaling (healing always scales with spell power in WoW)
+        base_healing + (self.spell_power * ability_def.healing_coefficient)
     }
 }
 
@@ -354,10 +392,13 @@ impl AbilityType {
                 range: 30.0,
                 mana_cost: 20.0,
                 cooldown: 0.0,
-                damage_min: 25.0,
-                damage_max: 30.0,
-                healing_min: 0.0,
-                healing_max: 0.0,
+                damage_base_min: 10.0,
+                damage_base_max: 15.0,
+                damage_coefficient: 0.8, // 80% of Spell Power added to damage
+                damage_scales_with: ScalingStat::SpellPower,
+                healing_base_min: 0.0,
+                healing_base_max: 0.0,
+                healing_coefficient: 0.0,
                 applies_aura: Some((AuraType::MovementSpeedSlow, 5.0, 0.7, 0.0)), // 30% slow for 5s, doesn't break on damage
                 projectile_speed: Some(20.0), // Travels at 20 units/second
             },
@@ -367,10 +408,13 @@ impl AbilityType {
                 range: 40.0, // Longer range than Frostbolt
                 mana_cost: 25.0,
                 cooldown: 0.0,
-                damage_min: 0.0,
-                damage_max: 0.0,
-                healing_min: 30.0,
-                healing_max: 40.0,
+                damage_base_min: 0.0,
+                damage_base_max: 0.0,
+                damage_coefficient: 0.0,
+                damage_scales_with: ScalingStat::None,
+                healing_base_min: 15.0,
+                healing_base_max: 20.0,
+                healing_coefficient: 0.75, // 75% of Spell Power added to healing
                 applies_aura: None,
                 projectile_speed: None, // Instant effect, no projectile
             },
@@ -380,10 +424,13 @@ impl AbilityType {
                 range: MELEE_RANGE,
                 mana_cost: 15.0, // Costs 15 Rage
                 cooldown: 0.0, // No cooldown
-                damage_min: 0.0, // No direct damage - enhances next auto-attack
-                damage_max: 0.0,
-                healing_min: 0.0,
-                healing_max: 0.0,
+                damage_base_min: 0.0, // No direct damage - enhances next auto-attack
+                damage_base_max: 0.0,
+                damage_coefficient: 0.0,
+                damage_scales_with: ScalingStat::None,
+                healing_base_min: 0.0,
+                healing_base_max: 0.0,
+                healing_coefficient: 0.0,
                 applies_aura: None,
                 projectile_speed: None, // Melee ability, no projectile
             },
@@ -393,10 +440,13 @@ impl AbilityType {
                 range: MELEE_RANGE,
                 mana_cost: 60.0, // High energy cost
                 cooldown: 0.0,
-                damage_min: 50.0, // High burst damage
-                damage_max: 60.0,
-                healing_min: 0.0,
-                healing_max: 0.0,
+                damage_base_min: 20.0, // High burst damage
+                damage_base_max: 30.0,
+                damage_coefficient: 1.2, // 120% of Attack Power - very high!
+                damage_scales_with: ScalingStat::AttackPower,
+                healing_base_min: 0.0,
+                healing_base_max: 0.0,
+                healing_coefficient: 0.0,
                 applies_aura: None,
                 projectile_speed: None, // Melee ability, no projectile
             },
@@ -406,10 +456,13 @@ impl AbilityType {
                 range: 10.0, // AOE range - affects all enemies within this distance
                 mana_cost: 30.0,
                 cooldown: 25.0, // 25 second cooldown
-                damage_min: 10.0, // Small AOE damage
-                damage_max: 15.0,
-                healing_min: 0.0,
-                healing_max: 0.0,
+                damage_base_min: 5.0, // Small AOE damage
+                damage_base_max: 10.0,
+                damage_coefficient: 0.2, // 20% of Spell Power
+                damage_scales_with: ScalingStat::SpellPower,
+                healing_base_min: 0.0,
+                healing_base_max: 0.0,
+                healing_coefficient: 0.0,
                 applies_aura: Some((AuraType::Root, 6.0, 1.0, 35.0)), // Root for 6s, breaks on 35+ damage
                 projectile_speed: None, // Instant AOE, no projectile
             },
@@ -419,10 +472,13 @@ impl AbilityType {
                 range: 30.0, // Ranged spell
                 mana_cost: 25.0,
                 cooldown: 8.0, // Short cooldown for consistent damage
-                damage_min: 30.0, // Good damage - between Frostbolt and Flash Heal cost
-                damage_max: 40.0,
-                healing_min: 0.0,
-                healing_max: 0.0,
+                damage_base_min: 15.0, // Good damage
+                damage_base_max: 20.0,
+                damage_coefficient: 0.85, // 85% of Spell Power
+                damage_scales_with: ScalingStat::SpellPower,
+                healing_base_min: 0.0,
+                healing_base_max: 0.0,
+                healing_coefficient: 0.0,
                 applies_aura: None, // Pure damage, no debuff
                 projectile_speed: None, // Instant effect (shadow magic)
             },
@@ -432,10 +488,13 @@ impl AbilityType {
                 range: MELEE_RANGE, // Melee ability
                 mana_cost: 40.0, // 40 energy cost
                 cooldown: 0.0, // No inherent cooldown, uses GCD
-                damage_min: 0.0, // Damage calculated as weapon damage + bonus
-                damage_max: 0.0,
-                healing_min: 0.0,
-                healing_max: 0.0,
+                damage_base_min: 5.0, // Base weapon damage
+                damage_base_max: 10.0,
+                damage_coefficient: 0.5, // 50% of Attack Power
+                damage_scales_with: ScalingStat::AttackPower,
+                healing_base_min: 0.0,
+                healing_base_max: 0.0,
+                healing_coefficient: 0.0,
                 applies_aura: None,
                 projectile_speed: None, // Instant melee strike
             },
@@ -445,10 +504,13 @@ impl AbilityType {
                 range: 25.0, // Max 25 units (minimum 8 units checked separately)
                 mana_cost: 0.0, // No rage cost (generates rage in WoW, but we'll keep it simple)
                 cooldown: 15.0, // Medium cooldown - can't spam it
-                damage_min: 0.0, // No damage
-                damage_max: 0.0,
-                healing_min: 0.0,
-                healing_max: 0.0,
+                damage_base_min: 0.0, // No damage
+                damage_base_max: 0.0,
+                damage_coefficient: 0.0,
+                damage_scales_with: ScalingStat::None,
+                healing_base_min: 0.0,
+                healing_base_max: 0.0,
+                healing_coefficient: 0.0,
                 applies_aura: None,
                 projectile_speed: None, // Movement ability, not a projectile
             },
@@ -458,10 +520,13 @@ impl AbilityType {
                 range: MELEE_RANGE, // Melee ability
                 mana_cost: 60.0, // 60 energy cost (significant)
                 cooldown: 30.0, // Long cooldown - powerful CC
-                damage_min: 0.0, // No damage
-                damage_max: 0.0,
-                healing_min: 0.0,
-                healing_max: 0.0,
+                damage_base_min: 0.0, // No damage
+                damage_base_max: 0.0,
+                damage_coefficient: 0.0,
+                damage_scales_with: ScalingStat::None,
+                healing_base_min: 0.0,
+                healing_base_max: 0.0,
+                healing_coefficient: 0.0,
                 // Stun for 6 seconds, doesn't break on damage (break_threshold = 0.0)
                 applies_aura: Some((AuraType::Stun, 6.0, 1.0, 0.0)),
                 projectile_speed: None, // Instant melee strike
@@ -494,6 +559,17 @@ impl AbilityType {
 }
 
 /// Ability definition with all parameters.
+/// What stat an ability scales with for damage/healing
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum ScalingStat {
+    /// Scales with Attack Power (physical abilities and auto-attacks)
+    AttackPower,
+    /// Scales with Spell Power (magical abilities and healing)
+    SpellPower,
+    /// Doesn't scale with any stat (CC abilities, utility)
+    None,
+}
+
 pub struct AbilityDefinition {
     pub name: &'static str,
     /// Cast time in seconds (0.0 = instant)
@@ -504,14 +580,22 @@ pub struct AbilityDefinition {
     pub mana_cost: f32,
     /// Cooldown after cast (in seconds)
     pub cooldown: f32,
-    /// Minimum damage dealt (0 for healing spells)
-    pub damage_min: f32,
-    /// Maximum damage dealt (0 for healing spells)
-    pub damage_max: f32,
-    /// Minimum healing done (0 for damage spells)
-    pub healing_min: f32,
-    /// Maximum healing done (0 for damage spells)
-    pub healing_max: f32,
+    /// Base minimum damage (before stat scaling)
+    pub damage_base_min: f32,
+    /// Base maximum damage (before stat scaling)
+    pub damage_base_max: f32,
+    /// Coefficient: how much damage per point of Attack Power or Spell Power
+    /// Formula: Damage = Base + (Stat × Coefficient)
+    pub damage_coefficient: f32,
+    /// What stat this ability's damage scales with
+    pub damage_scales_with: ScalingStat,
+    /// Base minimum healing (before stat scaling)
+    pub healing_base_min: f32,
+    /// Base maximum healing (before stat scaling)
+    pub healing_base_max: f32,
+    /// Coefficient: how much healing per point of Spell Power
+    /// Formula: Healing = Base + (Spell Power × Coefficient)
+    pub healing_coefficient: f32,
     /// Optional aura to apply: (AuraType, duration, magnitude, break_on_damage_threshold)
     /// break_on_damage_threshold: 0.0 = never breaks on damage
     pub applies_aura: Option<(AuraType, f32, f32, f32)>,
@@ -520,14 +604,14 @@ pub struct AbilityDefinition {
 }
 
 impl AbilityDefinition {
-    /// Returns true if this is a healing ability
-    pub fn is_heal(&self) -> bool {
-        self.healing_max > 0.0
-    }
-    
     /// Returns true if this is a damage ability
     pub fn is_damage(&self) -> bool {
-        self.damage_max > 0.0
+        self.damage_base_max > 0.0 || self.damage_coefficient > 0.0
+    }
+    
+    /// Returns true if this is a healing ability
+    pub fn is_heal(&self) -> bool {
+        self.healing_base_max > 0.0 || self.healing_coefficient > 0.0
     }
 }
 
@@ -2117,9 +2201,8 @@ pub fn decide_abilities(
                     
                     // Queue damage and apply root to all targets
                     for (target_entity, target_pos, target_team, target_class) in &frost_nova_targets {
-                        // Calculate random damage
-                        let damage_range = nova_def.damage_max - nova_def.damage_min;
-                        let damage = nova_def.damage_min + (rand::random::<f32>() * damage_range);
+                        // Calculate damage (with stat scaling)
+                        let damage = combatant.calculate_ability_damage(&nova_def);
                         
                         // Queue damage for later application
                         frost_nova_damage.push((entity, *target_entity, damage, combatant.team, combatant.class, *target_pos));
@@ -2424,9 +2507,8 @@ pub fn decide_abilities(
                 // Break stealth immediately
                 combatant.stealthed = false;
                 
-                // Calculate damage (random between min and max)
-                let damage_range = def.damage_max - def.damage_min;
-                let damage = def.damage_min + (rand::random::<f32>() * damage_range);
+                // Calculate damage (with stat scaling)
+                let damage = combatant.calculate_ability_damage(&def);
                 
                 // Queue the Ambush attack to be applied after the loop
                 instant_attacks.push((entity, target_entity, damage, combatant.team, combatant.class, ability));
@@ -2518,9 +2600,8 @@ pub fn decide_abilities(
                 // Consume energy
                 combatant.current_mana -= def.mana_cost;
                 
-                // Calculate damage: weapon damage + 10 bonus
-                let bonus_damage = 10.0;
-                let damage = combatant.attack_damage + bonus_damage;
+                // Calculate damage (with stat scaling)
+                let damage = combatant.calculate_ability_damage(&def);
                 
                 // Queue the Sinister Strike attack to be applied after the loop
                 instant_attacks.push((entity, target_entity, damage, combatant.team, combatant.class, ability));
@@ -2749,12 +2830,18 @@ pub fn process_casting(
             // Consume mana
             caster.current_mana -= def.mana_cost;
             
+            // Pre-calculate damage/healing (using caster's stats)
+            let ability_damage = caster.calculate_ability_damage(&def);
+            let ability_healing = caster.calculate_ability_healing(&def);
+            
             // Store cast info for processing
             completed_casts.push((
                 caster_entity,
                 caster.team,
                 caster.class,
                 caster_transform.translation,
+                ability_damage,
+                ability_healing,
                 ability,
                 target_entity,
             ));
@@ -2773,7 +2860,7 @@ pub fn process_casting(
     let mut break_stealth: Vec<Entity> = Vec::new();
     
     // Process completed casts
-    for (caster_entity, caster_team, caster_class, caster_pos, ability, target_entity) in completed_casts {
+    for (caster_entity, caster_team, caster_class, caster_pos, ability_damage, ability_healing, ability, target_entity) in completed_casts {
         let def = ability.definition();
         
         // Get target
@@ -2816,9 +2903,8 @@ pub fn process_casting(
         
         // Handle damage spells
         if def.is_damage() {
-            // Calculate damage (random between min and max)
-            let damage_range = def.damage_max - def.damage_min;
-            let damage = def.damage_min + (rand::random::<f32>() * damage_range);
+            // Use pre-calculated damage (already includes stat scaling)
+            let damage = ability_damage;
             
             let actual_damage = damage.min(target.current_health);
             target.current_health = (target.current_health - damage).max(0.0);
@@ -2901,9 +2987,8 @@ pub fn process_casting(
         }
         // Handle healing spells
         else if def.is_heal() {
-            // Calculate healing (random between min and max)
-            let healing_range = def.healing_max - def.healing_min;
-            let healing = def.healing_min + (rand::random::<f32>() * healing_range);
+            // Use pre-calculated healing (already includes stat scaling)
+            let healing = ability_healing;
             
             // Apply healing (don't overheal)
             let actual_healing = healing.min(target.max_health - target.current_health);
@@ -3319,7 +3404,8 @@ pub fn process_projectile_hits(
     const HIT_DISTANCE: f32 = 0.5; // Projectile hits when within 0.5 units of target
     
     // Collect hits to process (to avoid borrow checker issues)
-    let mut hits_to_process: Vec<(Entity, Entity, Entity, AbilityType, u8, match_config::CharacterClass, Vec3, Vec3)> = Vec::new();
+    // Format: (projectile_entity, caster_entity, target_entity, ability, caster_team, caster_class, caster_pos, target_pos, ability_damage, ability_healing)
+    let mut hits_to_process: Vec<(Entity, Entity, Entity, AbilityType, u8, match_config::CharacterClass, Vec3, Vec3, f32, f32)> = Vec::new();
     
     for (projectile_entity, projectile, projectile_transform) in projectiles.iter() {
         // Get target position (immutable borrow)
@@ -3351,6 +3437,16 @@ pub fn process_projectile_hits(
             let caster_pos = caster_transform.translation;
             let target_world_pos = target_transform.translation;
             
+            // Get caster's combatant to calculate damage/healing with stats
+            let Ok((_, caster_combatant)) = combatants.get(projectile.caster) else {
+                commands.entity(projectile_entity).despawn_recursive();
+                continue;
+            };
+            
+            let def = projectile.ability.definition();
+            let ability_damage = caster_combatant.calculate_ability_damage(&def);
+            let ability_healing = caster_combatant.calculate_ability_healing(&def);
+            
             // Queue this hit for processing
             hits_to_process.push((
                 projectile_entity,
@@ -3361,20 +3457,22 @@ pub fn process_projectile_hits(
                 projectile.caster_class,
                 caster_pos,
                 target_world_pos,
+                ability_damage,
+                ability_healing,
             ));
         }
     }
     
     // Process all queued hits
-    for (projectile_entity, caster_entity, target_entity, ability, caster_team, caster_class, caster_pos, target_pos) in hits_to_process {
+    for (projectile_entity, caster_entity, target_entity, ability, caster_team, caster_class, caster_pos, target_pos, ability_damage, ability_healing) in hits_to_process {
         let def = ability.definition();
         let text_position = target_pos + Vec3::new(0.0, 2.0, 0.0);
         let ability_range = caster_pos.distance(target_pos);
         
         // Apply damage
         if def.is_damage() {
-            let damage_range = def.damage_max - def.damage_min;
-            let damage = def.damage_min + (rand::random::<f32>() * damage_range);
+            // Use pre-calculated damage (already includes stat scaling)
+            let damage = ability_damage;
             
             // Get target info and apply damage
             let (actual_damage, target_team, target_class_name, is_warrior_target) = {
