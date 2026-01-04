@@ -108,6 +108,22 @@ pub struct FloatingCombatText {
     pub vertical_offset: f32,
 }
 
+/// Visual effect for spell impacts (Mind Blast, etc.)
+/// Displays as an expanding sphere that fades out
+#[derive(Component)]
+pub struct SpellImpactEffect {
+    /// World position where the effect should appear
+    pub position: Vec3,
+    /// Time remaining before effect disappears (in seconds)
+    pub lifetime: f32,
+    /// Initial lifetime for calculating fade/scale
+    pub initial_lifetime: f32,
+    /// Initial scale of the sphere
+    pub initial_scale: f32,
+    /// Final scale of the sphere (expands to this)
+    pub final_scale: f32,
+}
+
 /// Core combatant component containing all combat state and stats.
 #[derive(Component, Clone)]
 pub struct Combatant {
@@ -309,6 +325,7 @@ pub enum AbilityType {
     HeroicStrike,
     Ambush,
     FrostNova,
+    MindBlast,
     // Future: Fireball, Backstab, etc.
 }
 
@@ -380,6 +397,19 @@ impl AbilityType {
                 healing_max: 0.0,
                 applies_aura: Some((AuraType::Root, 6.0, 1.0, 35.0)), // Root for 6s, breaks on 35+ damage
                 projectile_speed: None, // Instant AOE, no projectile
+            },
+            AbilityType::MindBlast => AbilityDefinition {
+                name: "Mind Blast",
+                cast_time: 1.5, // Same as Frostbolt
+                range: 30.0, // Ranged spell
+                mana_cost: 25.0,
+                cooldown: 8.0, // Short cooldown for consistent damage
+                damage_min: 30.0, // Good damage - between Frostbolt and Flash Heal cost
+                damage_max: 40.0,
+                healing_min: 0.0,
+                healing_max: 0.0,
+                applies_aura: None, // Pure damage, no debuff
+                projectile_speed: None, // Instant effect (shadow magic)
             },
         }
     }
@@ -1195,6 +1225,77 @@ pub fn cleanup_expired_floating_text(
     }
 }
 
+/// Spawn visual meshes for newly created spell impact effects.
+pub fn spawn_spell_impact_visuals(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    new_effects: Query<(Entity, &SpellImpactEffect), (Added<SpellImpactEffect>, Without<Mesh3d>)>,
+) {
+    for (effect_entity, effect) in new_effects.iter() {
+        // Create a sphere mesh
+        let mesh = meshes.add(Sphere::new(effect.initial_scale));
+        
+        // Purple/shadow color with emissive glow and transparency
+        let material = materials.add(StandardMaterial {
+            base_color: Color::srgba(0.5, 0.2, 0.8, 0.8), // Purple with alpha
+            emissive: LinearRgba::rgb(0.8, 0.3, 1.5), // Bright purple/magenta glow
+            alpha_mode: AlphaMode::Blend,
+            ..default()
+        });
+        
+        // Add visual mesh to the effect entity at the target's position
+        commands.entity(effect_entity).insert((
+            Mesh3d(mesh),
+            MeshMaterial3d(material),
+            Transform::from_translation(effect.position + Vec3::new(0.0, 1.0, 0.0)), // Centered at chest height
+        ));
+    }
+}
+
+/// Update spell impact effects: fade and scale them over time.
+pub fn update_spell_impact_effects(
+    time: Res<Time>,
+    mut effects: Query<(&mut SpellImpactEffect, &mut Transform, &MeshMaterial3d<StandardMaterial>)>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let dt = time.delta_secs();
+    
+    for (mut effect, mut transform, material_handle) in effects.iter_mut() {
+        effect.lifetime -= dt;
+        
+        if effect.lifetime <= 0.0 {
+            continue; // Will be cleaned up by cleanup system
+        }
+        
+        // Calculate progress (1.0 = just spawned, 0.0 = expired)
+        let progress = effect.lifetime / effect.initial_lifetime;
+        
+        // Scale: expand from initial to final
+        let current_scale = effect.initial_scale + (effect.final_scale - effect.initial_scale) * (1.0 - progress);
+        transform.scale = Vec3::splat(current_scale);
+        
+        // Fade out: alpha goes from 1.0 to 0.0
+        if let Some(material) = materials.get_mut(&material_handle.0) {
+            let alpha = progress * 0.8; // Max alpha 0.8 for translucency
+            material.base_color = Color::srgba(0.5, 0.2, 0.8, alpha);
+            material.alpha_mode = AlphaMode::Blend;
+        }
+    }
+}
+
+/// Cleanup expired spell impact effects.
+pub fn cleanup_expired_spell_impacts(
+    mut commands: Commands,
+    effects: Query<(Entity, &SpellImpactEffect)>,
+) {
+    for (entity, effect) in effects.iter() {
+        if effect.lifetime <= 0.0 {
+            commands.entity(entity).despawn_recursive();
+        }
+    }
+}
+
 // ============================================================================
 // Combat Systems
 // ============================================================================
@@ -1960,7 +2061,7 @@ pub fn decide_abilities(
                 }
             }
             
-            // Cast heal on lowest HP ally if found
+            // Priority 1: Cast heal on lowest HP ally if found
             if let Some((heal_target, _, target_pos)) = lowest_hp_ally {
                 let ability = AbilityType::FlashHeal;
                 if ability.can_cast(&combatant, target_pos, my_pos) {
@@ -1979,7 +2080,43 @@ pub fn decide_abilities(
                         combatant.class.name(),
                         def.name
                     );
+                    
+                    continue; // Done this frame
                 }
+            }
+            
+            // Priority 2: Cast Mind Blast on enemy if no healing needed
+            let Some(target_entity) = combatant.target else {
+                continue;
+            };
+            
+            let Some(&target_pos) = positions.get(&target_entity) else {
+                continue;
+            };
+            
+            // Check if Mind Blast is off cooldown
+            let ability = AbilityType::MindBlast;
+            let on_cooldown = combatant.ability_cooldowns.contains_key(&ability);
+            
+            if !on_cooldown && ability.can_cast(&combatant, target_pos, my_pos) {
+                let def = ability.definition();
+                
+                // Put on cooldown
+                combatant.ability_cooldowns.insert(ability, def.cooldown);
+                
+                // Start casting
+                commands.entity(entity).insert(CastingState {
+                    ability,
+                    time_remaining: def.cast_time,
+                    target: Some(target_entity),
+                });
+                
+                info!(
+                    "Team {} {} starts casting {} on enemy",
+                    combatant.team,
+                    combatant.class.name(),
+                    def.name
+                );
             }
         }
         
@@ -2377,6 +2514,20 @@ pub fn process_casting(
                 },
                 PlayMatchEntity,
             ));
+            
+            // Spawn visual effect for Mind Blast (shadow impact)
+            if ability == AbilityType::MindBlast {
+                commands.spawn((
+                    SpellImpactEffect {
+                        position: target_pos,
+                        lifetime: 0.5,
+                        initial_lifetime: 0.5,
+                        initial_scale: 0.5,
+                        final_scale: 2.0,
+                    },
+                    PlayMatchEntity,
+                ));
+            }
             
             // Log the damage
             let message = format!(
