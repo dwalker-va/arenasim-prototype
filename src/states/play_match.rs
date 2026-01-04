@@ -252,6 +252,12 @@ pub struct AuraPending {
     pub aura: Aura,
 }
 
+/// Component tracking damage taken this frame for aura breaking purposes.
+#[derive(Component, Default)]
+pub struct DamageTakenThisFrame {
+    pub amount: f32,
+}
+
 /// Component for spell projectiles that travel from caster to target.
 /// When the projectile reaches its target, damage/effects are applied.
 #[derive(Component)]
@@ -279,6 +285,10 @@ pub struct Aura {
     pub duration: f32,
     /// Magnitude of the effect (e.g., 0.7 = 30% slow)
     pub magnitude: f32,
+    /// Damage threshold before the aura breaks (0.0 = never breaks on damage)
+    pub break_on_damage_threshold: f32,
+    /// Accumulated damage taken while this aura is active
+    pub accumulated_damage: f32,
 }
 
 /// Types of aura effects.
@@ -316,7 +326,7 @@ impl AbilityType {
                 damage_max: 30.0,
                 healing_min: 0.0,
                 healing_max: 0.0,
-                applies_aura: Some((AuraType::MovementSpeedSlow, 5.0, 0.7)), // 30% slow for 5s
+                applies_aura: Some((AuraType::MovementSpeedSlow, 5.0, 0.7, 0.0)), // 30% slow for 5s, doesn't break on damage
                 projectile_speed: Some(20.0), // Travels at 20 units/second
             },
             AbilityType::FlashHeal => AbilityDefinition {
@@ -368,7 +378,7 @@ impl AbilityType {
                 damage_max: 15.0,
                 healing_min: 0.0,
                 healing_max: 0.0,
-                applies_aura: Some((AuraType::Root, 6.0, 1.0)), // Root for 6 seconds
+                applies_aura: Some((AuraType::Root, 6.0, 1.0, 35.0)), // Root for 6s, breaks on 35+ damage
                 projectile_speed: None, // Instant AOE, no projectile
             },
         }
@@ -417,8 +427,9 @@ pub struct AbilityDefinition {
     pub healing_min: f32,
     /// Maximum healing done (0 for damage spells)
     pub healing_max: f32,
-    /// Optional aura to apply: (AuraType, duration, magnitude)
-    pub applies_aura: Option<(AuraType, f32, f32)>,
+    /// Optional aura to apply: (AuraType, duration, magnitude, break_on_damage_threshold)
+    /// break_on_damage_threshold: 0.0 = never breaks on damage
+    pub applies_aura: Option<(AuraType, f32, f32, f32)>,
     /// Projectile travel speed in units/second (None = instant effect, no projectile)
     pub projectile_speed: Option<f32>,
 }
@@ -1544,6 +1555,8 @@ pub fn combat_auto_attack(
     
     // Track damage per target for batching floating combat text
     let mut damage_per_target: std::collections::HashMap<Entity, f32> = std::collections::HashMap::new();
+    // Track damage per target for aura breaking
+    let mut damage_per_aura_break: std::collections::HashMap<Entity, f32> = std::collections::HashMap::new();
     
     for (attacker_entity, transform, mut combatant, casting_state) in combatants.iter_mut() {
         if !combatant.is_alive() {
@@ -1619,6 +1632,9 @@ pub fn combat_auto_attack(
                     let rage_gain = actual_damage * 0.15; // Gain 15% of damage taken as Rage
                     target.current_mana = (target.current_mana + rage_gain).min(target.max_mana);
                 }
+                
+                // Track damage for aura breaking
+                *damage_per_aura_break.entry(target_entity).or_insert(0.0) += actual_damage;
                 
                 // Batch damage for floating combat text (sum all damage to same target)
                 *damage_per_target.entry(target_entity).or_insert(0.0) += actual_damage;
@@ -1707,6 +1723,13 @@ pub fn combat_auto_attack(
         if let Ok((_, _, mut attacker, _)) = combatants.get_mut(attacker_entity) {
             attacker.damage_dealt += damage;
         }
+    }
+    
+    // Track damage for aura breaking
+    for (target_entity, total_damage) in damage_per_aura_break {
+        commands.entity(target_entity).insert(DamageTakenThisFrame {
+            amount: total_damage,
+        });
     }
 }
 
@@ -1838,13 +1861,15 @@ pub fn decide_abilities(
                         frost_nova_damage.push((entity, *target_entity, damage, combatant.team, combatant.class, *target_pos));
                         
                         // Apply aura (spawn separate AuraPending entity)
-                        if let Some((aura_type, duration, magnitude)) = nova_def.applies_aura {
+                        if let Some((aura_type, duration, magnitude, break_threshold)) = nova_def.applies_aura {
                             commands.spawn(AuraPending {
                                 target: *target_entity,
                                 aura: Aura {
                                     effect_type: aura_type,
                                     duration,
                                     magnitude,
+                                    break_on_damage_threshold: break_threshold,
+                                    accumulated_damage: 0.0,
                                 },
                             });
                         }
@@ -2056,6 +2081,11 @@ pub fn decide_abilities(
                     target.current_mana = (target.current_mana + rage_gain).min(target.max_mana);
                 }
                 
+                // Track damage for aura breaking
+                commands.entity(target_entity).insert(DamageTakenThisFrame {
+                    amount: actual_damage,
+                });
+                
                 info!(
                     "Team {} {}'s Ambush hits Team {} {} for {:.0} damage!",
                     attacker_team,
@@ -2137,6 +2167,11 @@ pub fn decide_abilities(
                     let rage_gain = actual_damage * 0.15;
                     target.current_mana = (target.current_mana + rage_gain).min(target.max_mana);
                 }
+                
+                // Track damage for aura breaking
+                commands.entity(target_entity).insert(DamageTakenThisFrame {
+                    amount: actual_damage,
+                });
                 
                 // Spawn floating combat text (yellow for abilities)
                 let text_position = target_transform.translation + Vec3::new(0.0, 2.0, 0.0);
@@ -2314,6 +2349,11 @@ pub fn process_casting(
                 target.current_mana = (target.current_mana + rage_gain).min(target.max_mana);
             }
             
+            // Track damage for aura breaking
+            commands.entity(target_entity).insert(DamageTakenThisFrame {
+                amount: actual_damage,
+            });
+            
             // Break stealth on offensive ability use
             break_stealth.push(caster_entity);
             
@@ -2423,7 +2463,7 @@ pub fn process_casting(
         }
         
         // Apply aura if applicable (store for later application)
-        if let Some((aura_type, duration, magnitude)) = def.applies_aura {
+        if let Some((aura_type, duration, magnitude, break_threshold)) = def.applies_aura {
             // We'll apply auras in a separate pass to avoid borrow issues
             commands.spawn((
                 AuraPending {
@@ -2432,6 +2472,8 @@ pub fn process_casting(
                         effect_type: aura_type.clone(),
                         duration,
                         magnitude,
+                        break_on_damage_threshold: break_threshold,
+                        accumulated_damage: 0.0,
                     },
                 },
                 PlayMatchEntity,
@@ -2539,6 +2581,65 @@ pub fn apply_pending_auras(
         
         // Remove the pending aura entity
         commands.entity(pending_entity).despawn();
+    }
+}
+
+/// Process damage-based aura breaking.
+/// 
+/// When a combatant takes damage, accumulate it on their breakable auras.
+/// If accumulated damage exceeds the break threshold, remove the aura.
+pub fn process_aura_breaks(
+    mut commands: Commands,
+    mut combat_log: ResMut<CombatLog>,
+    mut combatants: Query<(Entity, &Combatant, &mut ActiveAuras, Option<&DamageTakenThisFrame>)>,
+) {
+    for (entity, combatant, mut active_auras, damage_taken) in combatants.iter_mut() {
+        let Some(damage_taken) = damage_taken else {
+            continue; // No damage this frame
+        };
+        
+        if damage_taken.amount <= 0.0 {
+            continue;
+        }
+        
+        // Track which auras to remove
+        let mut auras_to_remove = Vec::new();
+        
+        // Accumulate damage on breakable auras
+        for (index, aura) in active_auras.auras.iter_mut().enumerate() {
+            if aura.break_on_damage_threshold > 0.0 {
+                aura.accumulated_damage += damage_taken.amount;
+                
+                // Check if aura should break
+                if aura.accumulated_damage >= aura.break_on_damage_threshold {
+                    auras_to_remove.push(index);
+                    
+                    // Log the break
+                    let aura_name = match aura.effect_type {
+                        AuraType::Root => "Root",
+                        AuraType::MovementSpeedSlow => "Movement Speed Slow",
+                    };
+                    
+                    let message = format!(
+                        "Team {} {}'s {} broke from damage ({:.0}/{:.0})",
+                        combatant.team,
+                        combatant.class.name(),
+                        aura_name,
+                        aura.accumulated_damage,
+                        aura.break_on_damage_threshold
+                    );
+                    combat_log.log(CombatLogEventType::MatchEvent, message);
+                }
+            }
+        }
+        
+        // Remove broken auras (in reverse order to preserve indices)
+        for &index in auras_to_remove.iter().rev() {
+            active_auras.auras.remove(index);
+        }
+        
+        // Clear damage taken component
+        commands.entity(entity).remove::<DamageTakenThisFrame>();
     }
 }
 
@@ -2796,6 +2897,11 @@ pub fn process_projectile_hits(
                     target.current_mana = (target.current_mana + rage_gain).min(target.max_mana);
                 }
                 
+                // Track damage for aura breaking
+                commands.entity(target_entity).insert(DamageTakenThisFrame {
+                    amount: actual_damage,
+                });
+                
                 (actual_damage, target.team, target.class.name().to_string(), target.resource_type == ResourceType::Rage)
             }; // target borrow dropped here
             
@@ -2847,13 +2953,15 @@ pub fn process_projectile_hits(
             );
             
             // Apply aura if ability has one
-            if let Some((aura_type, duration, magnitude)) = def.applies_aura {
+            if let Some((aura_type, duration, magnitude, break_threshold)) = def.applies_aura {
                 commands.spawn(AuraPending {
                     target: target_entity,
                     aura: Aura {
                         effect_type: aura_type,
                         duration,
                         magnitude,
+                        break_on_damage_threshold: break_threshold,
+                        accumulated_damage: 0.0,
                     },
                 });
             }
