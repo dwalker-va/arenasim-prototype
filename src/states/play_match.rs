@@ -46,8 +46,8 @@ const MELEE_RANGE: f32 = 2.5;
 /// Distance threshold for stopping movement (slightly less than melee range to avoid jitter)
 const STOP_DISTANCE: f32 = 2.0;
 
-/// Arena size (60x60 plane centered at origin)
-const ARENA_HALF_SIZE: f32 = 30.0;
+/// Arena size (80x80 plane centered at origin, includes starting areas)
+const ARENA_HALF_SIZE: f32 = 40.0;
 
 // ============================================================================
 // Resources
@@ -865,8 +865,8 @@ pub fn setup_play_match(
     // Initialize match countdown (10 seconds before gates open)
     commands.insert_resource(MatchCountdown::default());
 
-    // Spawn arena floor - 60x60 unit plane
-    let floor_size = 60.0;
+    // Spawn arena floor - 80x80 unit plane (includes starting areas)
+    let floor_size = 80.0;
     commands.spawn((
         Mesh3d(meshes.add(Plane3d::default().mesh().size(floor_size, floor_size))),
         MeshMaterial3d(materials.add(StandardMaterial {
@@ -2113,6 +2113,44 @@ pub fn move_to_target(
         
         // NORMAL MOVEMENT: Get target position
         let Some(target_entity) = combatant.target else {
+            // No target available (likely facing all-stealth team)
+            // Move to defensive position in center of arena to anticipate stealth openers
+            let defensive_pos = Vec3::ZERO; // Center of arena
+            let distance_to_defensive = my_pos.distance(defensive_pos);
+            
+            // Only move if we're far from the defensive position (> 5 units)
+            if distance_to_defensive > 5.0 {
+                let direction = Vec3::new(
+                    defensive_pos.x - my_pos.x,
+                    0.0,
+                    defensive_pos.z - my_pos.z,
+                ).normalize_or_zero();
+                
+                if direction != Vec3::ZERO {
+                    // Calculate effective movement speed
+                    let mut movement_speed = combatant.base_movement_speed;
+                    if let Some(auras) = auras {
+                        for aura in &auras.auras {
+                            if aura.effect_type == AuraType::MovementSpeedSlow {
+                                movement_speed *= aura.magnitude;
+                            }
+                        }
+                    }
+                    
+                    // Move towards defensive position
+                    let move_distance = movement_speed * dt;
+                    transform.translation += direction * move_distance;
+                    
+                    // Clamp position to arena bounds
+                    transform.translation.x = transform.translation.x.clamp(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
+                    transform.translation.z = transform.translation.z.clamp(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
+                    
+                    // Rotate to face center
+                    let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
+                    transform.rotation = target_rotation;
+                }
+            }
+            
             continue;
         };
         
