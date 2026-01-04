@@ -257,6 +257,13 @@ pub struct CastingState {
     pub target: Option<Entity>,
 }
 
+/// Component tracking an active Charge (Warrior gap closer).
+#[derive(Component)]
+pub struct ChargingState {
+    /// Target entity being charged toward
+    pub target: Entity,
+}
+
 /// Component tracking active auras/debuffs on a combatant.
 #[derive(Component, Default)]
 pub struct ActiveAuras {
@@ -330,6 +337,7 @@ pub enum AbilityType {
     FrostNova,
     MindBlast,
     SinisterStrike,
+    Charge,
     // Future: Fireball, Backstab, etc.
 }
 
@@ -427,6 +435,19 @@ impl AbilityType {
                 healing_max: 0.0,
                 applies_aura: None,
                 projectile_speed: None, // Instant melee strike
+            },
+            AbilityType::Charge => AbilityDefinition {
+                name: "Charge",
+                cast_time: 0.0, // Instant cast
+                range: 25.0, // Max 25 units (minimum 8 units checked separately)
+                mana_cost: 0.0, // No rage cost (generates rage in WoW, but we'll keep it simple)
+                cooldown: 15.0, // Medium cooldown - can't spam it
+                damage_min: 0.0, // No damage
+                damage_max: 0.0,
+                healing_min: 0.0,
+                healing_max: 0.0,
+                applies_aura: None,
+                projectile_speed: None, // Movement ability, not a projectile
             },
         }
     }
@@ -1454,18 +1475,19 @@ fn find_best_kiting_direction(
 
 pub fn move_to_target(
     time: Res<Time>,
-    mut combatants: Query<(Entity, &mut Transform, &Combatant, Option<&ActiveAuras>, Option<&CastingState>)>,
+    mut commands: Commands,
+    mut combatants: Query<(Entity, &mut Transform, &Combatant, Option<&ActiveAuras>, Option<&CastingState>, Option<&ChargingState>)>,
 ) {
     let dt = time.delta_secs();
     
     // Build a snapshot of all combatant positions and team info for lookups
     let positions: std::collections::HashMap<Entity, (Vec3, u8)> = combatants
         .iter()
-        .map(|(entity, transform, combatant, _, _)| (entity, (transform.translation, combatant.team)))
+        .map(|(entity, transform, combatant, _, _, _)| (entity, (transform.translation, combatant.team)))
         .collect();
     
     // Move each combatant towards their target if needed
-    for (entity, mut transform, combatant, auras, casting_state) in combatants.iter_mut() {
+    for (entity, mut transform, combatant, auras, casting_state, charging_state) in combatants.iter_mut() {
         if !combatant.is_alive() {
             continue;
         }
@@ -1487,6 +1509,57 @@ pub fn move_to_target(
         }
         
         let my_pos = transform.translation;
+        
+        // CHARGING BEHAVIOR: If charging, move at high speed toward target ignoring slows
+        if let Some(charge_state) = charging_state {
+            let Some(&(target_pos, _)) = positions.get(&charge_state.target) else {
+                // Target doesn't exist, cancel charge
+                commands.entity(entity).remove::<ChargingState>();
+                continue;
+            };
+            
+            let distance = my_pos.distance(target_pos);
+            
+            // If we've reached melee range, end the charge
+            if distance <= MELEE_RANGE {
+                commands.entity(entity).remove::<ChargingState>();
+                
+                info!(
+                    "Team {} {} completes charge!",
+                    combatant.team,
+                    combatant.class.name()
+                );
+                
+                continue; // Will use normal movement/combat next frame
+            }
+            
+            // Calculate direction to target
+            let direction = Vec3::new(
+                target_pos.x - my_pos.x,
+                0.0,
+                target_pos.z - my_pos.z,
+            ).normalize_or_zero();
+            
+            if direction != Vec3::ZERO {
+                // Charge speed: 4x normal movement speed, ignores slows
+                const CHARGE_SPEED_MULTIPLIER: f32 = 4.0;
+                let charge_speed = combatant.base_movement_speed * CHARGE_SPEED_MULTIPLIER;
+                let move_distance = charge_speed * dt;
+                
+                // Move towards target
+                transform.translation += direction * move_distance;
+                
+                // Clamp position to arena bounds
+                transform.translation.x = transform.translation.x.clamp(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
+                transform.translation.z = transform.translation.z.clamp(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
+                
+                // Rotate to face target
+                let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
+                transform.rotation = target_rotation;
+            }
+            
+            continue; // Skip normal movement logic while charging
+        }
         
         // KITING BEHAVIOR: If kiting_timer > 0, move away from nearest enemy
         // Uses intelligent pathfinding that considers arena boundaries
@@ -1910,17 +1983,17 @@ pub fn regenerate_resources(
 pub fn decide_abilities(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
-    mut combatants: Query<(Entity, &mut Combatant, &Transform), Without<CastingState>>,
+    mut combatants: Query<(Entity, &mut Combatant, &Transform, Option<&ActiveAuras>), Without<CastingState>>,
 ) {
     // Build position and info maps from all combatants
     let positions: std::collections::HashMap<Entity, Vec3> = combatants
         .iter()
-        .map(|(entity, _, transform)| (entity, transform.translation))
+        .map(|(entity, _, transform, _)| (entity, transform.translation))
         .collect();
     
     let combatant_info: std::collections::HashMap<Entity, (u8, match_config::CharacterClass, f32, f32)> = combatants
         .iter()
-        .map(|(entity, combatant, _)| {
+        .map(|(entity, combatant, _, _)| {
             (entity, (combatant.team, combatant.class, combatant.current_health, combatant.max_health))
         })
         .collect();
@@ -1933,7 +2006,7 @@ pub fn decide_abilities(
     // Queue for Frost Nova damage (caster, target, damage, caster_team, caster_class, target_pos)
     let mut frost_nova_damage: Vec<(Entity, Entity, f32, u8, match_config::CharacterClass, Vec3)> = Vec::new();
     
-    for (entity, mut combatant, transform) in combatants.iter_mut() {
+    for (entity, mut combatant, transform, auras) in combatants.iter_mut() {
         if !combatant.is_alive() {
             continue;
         }
@@ -2181,26 +2254,72 @@ pub fn decide_abilities(
             }
         }
         
-        // Warriors use Heroic Strike (instant cast, enhances next auto-attack)
+        // Warriors use Charge (gap closer) and Heroic Strike (damage)
         if combatant.class == match_config::CharacterClass::Warrior {
             // Check if global cooldown is active
             if combatant.global_cooldown > 0.0 {
                 continue; // Can't use abilities during GCD
             }
             
-            // Check if we have an enemy target and already have bonus damage queued
+            // Check if we have an enemy target
             let Some(target_entity) = combatant.target else {
                 continue;
             };
             
+            let Some(&target_pos) = positions.get(&target_entity) else {
+                continue;
+            };
+            
+            let distance_to_target = my_pos.distance(target_pos);
+            
+            // Priority 1: Use Charge to close distance if target is at medium range
+            // Charge requirements:
+            // - Minimum 8 units (can't waste at melee range)
+            // - Maximum 25 units (ability range)
+            // - Not rooted (can't charge while rooted)
+            // - Off cooldown
+            const CHARGE_MIN_RANGE: f32 = 8.0;
+            let charge = AbilityType::Charge;
+            let charge_def = charge.definition();
+            let charge_on_cooldown = combatant.ability_cooldowns.contains_key(&charge);
+            
+            // Check if rooted
+            let is_rooted = if let Some(auras) = auras {
+                auras.auras.iter().any(|aura| matches!(aura.effect_type, AuraType::Root))
+            } else {
+                false
+            };
+            
+            if !charge_on_cooldown 
+                && !is_rooted
+                && distance_to_target >= CHARGE_MIN_RANGE 
+                && distance_to_target <= charge_def.range {
+                
+                // Use Charge!
+                combatant.ability_cooldowns.insert(charge, charge_def.cooldown);
+                combatant.global_cooldown = 1.5;
+                
+                // Add ChargingState component to enable high-speed movement
+                commands.entity(entity).insert(ChargingState {
+                    target: target_entity,
+                });
+                
+                info!(
+                    "Team {} {} uses {} on enemy (distance: {:.1} units)",
+                    combatant.team,
+                    combatant.class.name(),
+                    charge_def.name,
+                    distance_to_target
+                );
+                
+                continue; // Done this frame
+            }
+            
+            // Priority 2: Use Heroic Strike if target is in melee range
             // Don't queue another Heroic Strike if one is already pending
             if combatant.next_attack_bonus_damage > 0.0 {
                 continue;
             }
-            
-            let Some(&target_pos) = positions.get(&target_entity) else {
-                continue;
-            };
             
             // Try to use Heroic Strike if we have enough rage and target is in melee range
             let ability = AbilityType::HeroicStrike;
@@ -2320,7 +2439,7 @@ pub fn decide_abilities(
         let mut target_team = 0;
         let mut target_class = match_config::CharacterClass::Warrior; // Default, will be overwritten
         
-        if let Ok((_, mut target, target_transform)) = combatants.get_mut(target_entity) {
+        if let Ok((_, mut target, target_transform, _)) = combatants.get_mut(target_entity) {
             if target.is_alive() {
                 actual_damage = damage.min(target.current_health);
                 target.current_health = (target.current_health - damage).max(0.0);
@@ -2398,7 +2517,7 @@ pub fn decide_abilities(
         }
         
         // Update attacker's damage dealt
-        if let Ok((_, mut attacker, _)) = combatants.get_mut(attacker_entity) {
+        if let Ok((_, mut attacker, _, _)) = combatants.get_mut(attacker_entity) {
             attacker.damage_dealt += actual_damage;
         }
     }
@@ -2409,7 +2528,7 @@ pub fn decide_abilities(
         let mut target_team = 0;
         let mut target_class = match_config::CharacterClass::Warrior;
         
-        if let Ok((_, mut target, target_transform)) = combatants.get_mut(target_entity) {
+        if let Ok((_, mut target, target_transform, _)) = combatants.get_mut(target_entity) {
             if target.is_alive() {
                 actual_damage = damage.min(target.current_health);
                 target.current_health = (target.current_health - damage).max(0.0);
@@ -2475,7 +2594,7 @@ pub fn decide_abilities(
         }
         
         // Update caster's damage dealt
-        if let Ok((_, mut caster, _)) = combatants.get_mut(caster_entity) {
+        if let Ok((_, mut caster, _, _)) = combatants.get_mut(caster_entity) {
             caster.damage_dealt += actual_damage;
         }
     }
