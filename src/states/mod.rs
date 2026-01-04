@@ -62,6 +62,7 @@ impl Plugin for StatesPlugin {
                     play_match::update_auras,
                     play_match::apply_pending_auras,
                     play_match::process_aura_breaks,
+                    play_match::process_dot_ticks,
                     play_match::acquire_targets,
                     play_match::decide_abilities,
                     play_match::process_casting,

@@ -353,6 +353,12 @@ pub struct Aura {
     pub break_on_damage_threshold: f32,
     /// Accumulated damage taken while this aura is active
     pub accumulated_damage: f32,
+    /// For DoT effects: how often damage is applied (in seconds)
+    pub tick_interval: f32,
+    /// For DoT effects: time remaining until next tick
+    pub time_until_next_tick: f32,
+    /// For DoT effects: who applied this aura (for damage attribution)
+    pub caster: Option<Entity>,
 }
 
 /// Types of aura effects.
@@ -366,7 +372,9 @@ pub enum AuraType {
     Stun,
     /// Increases maximum health by a flat amount (magnitude = HP bonus)
     MaxHealthIncrease,
-    // Future: Silence, Damage-over-time, Healing-over-time, Attack Power buffs, etc.
+    /// Deals damage periodically (magnitude = damage per tick, tick_interval determines frequency)
+    DamageOverTime,
+    // Future: Silence, Healing-over-time, Attack Power buffs, etc.
 }
 
 /// Enum representing available abilities.
@@ -382,6 +390,7 @@ pub enum AbilityType {
     Charge,
     KidneyShot,
     PowerWordFortitude,
+    Rend,
     // Future: Fireball, Backstab, etc.
 }
 
@@ -551,6 +560,24 @@ impl AbilityType {
                 // Magnitude = 30 HP, duration = 600s, no damage breaking
                 applies_aura: Some((AuraType::MaxHealthIncrease, 600.0, 30.0, 0.0)),
                 projectile_speed: None, // Instant buff
+            },
+            AbilityType::Rend => AbilityDefinition {
+                name: "Rend",
+                cast_time: 0.0, // Instant cast
+                range: MELEE_RANGE, // Melee ability
+                mana_cost: 10.0, // 10 rage cost
+                cooldown: 0.0, // No cooldown, but can't be reapplied if target already has it
+                damage_base_min: 0.0, // No direct damage
+                damage_base_max: 0.0,
+                damage_coefficient: 0.0,
+                damage_scales_with: ScalingStat::None,
+                healing_base_min: 0.0,
+                healing_base_max: 0.0,
+                healing_coefficient: 0.0,
+                // Apply DoT: 15 second duration, 8 damage per tick (ticks every 3 seconds = 5 ticks total)
+                // Magnitude = damage per tick, tick_interval stored separately in Aura
+                applies_aura: Some((AuraType::DamageOverTime, 15.0, 8.0, 0.0)),
+                projectile_speed: None, // Instant melee application
             },
         }
     }
@@ -2247,6 +2274,9 @@ pub fn decide_abilities(
                                     magnitude,
                                     break_on_damage_threshold: break_threshold,
                                     accumulated_damage: 0.0,
+                                    tick_interval: 0.0,
+                                    time_until_next_tick: 0.0,
+                                    caster: Some(entity),
                                 },
                             });
                         }
@@ -2374,6 +2404,9 @@ pub fn decide_abilities(
                                 magnitude,
                                 break_on_damage_threshold: break_threshold,
                                 accumulated_damage: 0.0,
+                                tick_interval: 0.0,
+                                time_until_next_tick: 0.0,
+                                caster: Some(entity),
                             },
                         });
                     }
@@ -2546,7 +2579,52 @@ pub fn decide_abilities(
                 continue; // Done this frame
             }
             
-            // Priority 2: Use Heroic Strike if target is in melee range
+            // Priority 2: Apply Rend if target doesn't have it
+            let target_has_rend = if let Some(auras) = active_auras_map.get(&target_entity) {
+                auras.iter().any(|a| a.effect_type == AuraType::DamageOverTime)
+            } else {
+                false
+            };
+            
+            if !target_has_rend {
+                let rend = AbilityType::Rend;
+                if rend.can_cast(&combatant, target_pos, my_pos) {
+                    let def = rend.definition();
+                    
+                    // Consume rage
+                    combatant.current_mana -= def.mana_cost;
+                    
+                    // Trigger global cooldown
+                    combatant.global_cooldown = 1.5;
+                    
+                    // Apply the DoT aura
+                    if let Some((aura_type, duration, magnitude, break_threshold)) = def.applies_aura {
+                        commands.spawn(AuraPending {
+                            target: target_entity,
+                            aura: Aura {
+                                effect_type: aura_type,
+                                duration,
+                                magnitude,
+                                break_on_damage_threshold: break_threshold,
+                                accumulated_damage: 0.0,
+                                tick_interval: 3.0, // Tick every 3 seconds
+                                time_until_next_tick: 3.0, // First tick after 3 seconds
+                                caster: Some(entity),
+                            },
+                        });
+                    }
+                    
+                    info!(
+                        "Team {} {} applies Rend to enemy (8 damage per 3s for 15s)",
+                        combatant.team,
+                        combatant.class.name()
+                    );
+                    
+                    continue; // Done this frame
+                }
+            }
+            
+            // Priority 3: Use Heroic Strike if target is in melee range
             // Don't queue another Heroic Strike if one is already pending
             if combatant.next_attack_bonus_damage > 0.0 {
                 continue;
@@ -2660,6 +2738,9 @@ pub fn decide_abilities(
                             magnitude,
                             break_on_damage_threshold: break_threshold,
                             accumulated_damage: 0.0,
+                            tick_interval: 0.0,
+                            time_until_next_tick: 0.0,
+                            caster: Some(entity),
                         },
                     });
                 }
@@ -3142,11 +3223,14 @@ pub fn process_casting(
                 AuraPending {
                     target: target_entity,
                     aura: Aura {
-                        effect_type: aura_type.clone(),
+                        effect_type: aura_type,
                         duration,
                         magnitude,
                         break_on_damage_threshold: break_threshold,
                         accumulated_damage: 0.0,
+                        tick_interval: 0.0,
+                        time_until_next_tick: 0.0,
+                        caster: Some(caster_entity),
                     },
                 },
                 PlayMatchEntity,
@@ -3327,6 +3411,7 @@ pub fn process_aura_breaks(
                         AuraType::MovementSpeedSlow => "Movement Speed Slow",
                         AuraType::Stun => "Stun",
                         AuraType::MaxHealthIncrease => "Power Word: Fortitude", // Should never break on damage
+                        AuraType::DamageOverTime => "Rend", // Should never break on damage (has 0.0 threshold)
                     };
                     
                     let message = format!(
@@ -3684,6 +3769,9 @@ pub fn process_projectile_hits(
                         magnitude,
                         break_on_damage_threshold: break_threshold,
                         accumulated_damage: 0.0,
+                        tick_interval: if aura_type == AuraType::DamageOverTime { 3.0 } else { 0.0 },
+                        time_until_next_tick: if aura_type == AuraType::DamageOverTime { 3.0 } else { 0.0 },
+                        caster: Some(caster_entity),
                     },
                 });
             }
@@ -3691,6 +3779,151 @@ pub fn process_projectile_hits(
         
         // Despawn the projectile
         commands.entity(projectile_entity).despawn_recursive();
+    }
+}
+
+/// Process damage-over-time ticks.
+/// 
+/// For each combatant with DoT auras:
+/// 1. Tick down time_until_next_tick
+/// 2. When it reaches 0, apply damage
+/// 3. Reset timer for next tick
+/// 4. Spawn floating combat text
+/// 5. Log to combat log
+pub fn process_dot_ticks(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut combat_log: ResMut<CombatLog>,
+    mut combatants: Query<(Entity, &mut Combatant, &Transform, &mut ActiveAuras)>,
+) {
+    let dt = time.delta_secs();
+    
+    // Build a map of entity -> (team, class) for quick lookups
+    let combatant_info: std::collections::HashMap<Entity, (u8, match_config::CharacterClass)> = combatants
+        .iter()
+        .map(|(entity, combatant, _, _)| (entity, (combatant.team, combatant.class)))
+        .collect();
+    
+    // Build a map of entity -> position
+    let positions: std::collections::HashMap<Entity, Vec3> = combatants
+        .iter()
+        .map(|(entity, _, transform, _)| (entity, transform.translation))
+        .collect();
+    
+    // Track DoT damage to apply (to avoid borrow issues)
+    // Format: (target_entity, caster_entity, damage, target_pos, caster_team, caster_class)
+    let mut dot_damage_to_apply: Vec<(Entity, Entity, f32, Vec3, u8, match_config::CharacterClass)> = Vec::new();
+    
+    // First pass: tick down DoT timers and queue damage
+    for (entity, combatant, _transform, mut active_auras) in combatants.iter_mut() {
+        if !combatant.is_alive() {
+            continue;
+        }
+        
+        let target_pos = positions.get(&entity).copied().unwrap_or(Vec3::ZERO);
+        
+        for aura in active_auras.auras.iter_mut() {
+            if aura.effect_type != AuraType::DamageOverTime {
+                continue;
+            }
+            
+            // Tick down duration (auras expire naturally)
+            aura.duration -= dt;
+            
+            // Tick down time until next damage application
+            aura.time_until_next_tick -= dt;
+            
+            if aura.time_until_next_tick <= 0.0 {
+                // Time to apply DoT damage!
+                let damage = aura.magnitude;
+                
+                // Get caster info (if still exists)
+                if let Some(caster_entity) = aura.caster {
+                    if let Some(&(caster_team, caster_class)) = combatant_info.get(&caster_entity) {
+                        dot_damage_to_apply.push((
+                            entity,
+                            caster_entity,
+                            damage,
+                            target_pos,
+                            caster_team,
+                            caster_class,
+                        ));
+                    }
+                }
+                
+                // Reset tick timer
+                aura.time_until_next_tick = aura.tick_interval;
+            }
+        }
+    }
+    
+    // Track caster damage dealt updates
+    let mut caster_damage_updates: Vec<(Entity, f32)> = Vec::new();
+    
+    // Second pass: apply queued DoT damage to targets
+    for (target_entity, caster_entity, damage, target_pos, caster_team, caster_class) in dot_damage_to_apply {
+        // Get target combatant
+        let Ok((_, mut target, _, _)) = combatants.get_mut(target_entity) else {
+            continue;
+        };
+        
+        if !target.is_alive() {
+            continue;
+        }
+        
+        let target_team = target.team;
+        let target_class = target.class;
+        
+        // Apply damage
+        let actual_damage = damage.min(target.current_health);
+        target.current_health = (target.current_health - damage).max(0.0);
+        target.damage_taken += actual_damage;
+        
+        // Track damage for aura breaking
+        commands.entity(target_entity).insert(DamageTakenThisFrame {
+            amount: actual_damage,
+        });
+        
+        // Warriors generate Rage from taking damage
+        if target.resource_type == ResourceType::Rage {
+            let rage_gain = actual_damage * 0.15;
+            target.current_mana = (target.current_mana + rage_gain).min(target.max_mana);
+        }
+        
+        // Queue caster damage_dealt update
+        caster_damage_updates.push((caster_entity, actual_damage));
+        
+        // Spawn floating combat text (yellow for DoT ticks, like ability damage)
+        commands.spawn((
+            FloatingCombatText {
+                world_position: target_pos + Vec3::new(0.0, 2.0, 0.0),
+                text: format!("{:.0}", actual_damage),
+                color: egui::Color32::from_rgb(255, 255, 0), // Yellow for ability damage
+                lifetime: 1.5,
+                vertical_offset: 0.0,
+            },
+            PlayMatchEntity,
+        ));
+        
+        // Log to combat log
+        combat_log.log(
+            CombatLogEventType::Damage,
+            format!(
+                "Team {} {}'s Rend ticks for {:.0} damage on Team {} {}",
+                caster_team,
+                caster_class.name(),
+                actual_damage,
+                target_team,
+                target_class.name()
+            ),
+        );
+    }
+    
+    // Third pass: update caster damage_dealt stats
+    for (caster_entity, damage_dealt) in caster_damage_updates {
+        if let Ok((_, mut caster, _, _)) = combatants.get_mut(caster_entity) {
+            caster.damage_dealt += damage_dealt;
+        }
     }
 }
 
