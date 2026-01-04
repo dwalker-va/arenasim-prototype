@@ -324,7 +324,9 @@ pub enum AuraType {
     MovementSpeedSlow,
     /// Prevents movement (rooted in place) - magnitude unused
     Root,
-    // Future: Stun, Silence, Damage-over-time, Healing-over-time, etc.
+    /// Prevents all actions (movement, casting, auto-attacks, abilities) - magnitude unused
+    Stun,
+    // Future: Silence, Damage-over-time, Healing-over-time, etc.
 }
 
 /// Enum representing available abilities.
@@ -338,6 +340,7 @@ pub enum AbilityType {
     MindBlast,
     SinisterStrike,
     Charge,
+    KidneyShot,
     // Future: Fireball, Backstab, etc.
 }
 
@@ -448,6 +451,20 @@ impl AbilityType {
                 healing_max: 0.0,
                 applies_aura: None,
                 projectile_speed: None, // Movement ability, not a projectile
+            },
+            AbilityType::KidneyShot => AbilityDefinition {
+                name: "Kidney Shot",
+                cast_time: 0.0, // Instant cast
+                range: MELEE_RANGE, // Melee ability
+                mana_cost: 60.0, // 60 energy cost (significant)
+                cooldown: 30.0, // Long cooldown - powerful CC
+                damage_min: 0.0, // No damage
+                damage_max: 0.0,
+                healing_min: 0.0,
+                healing_max: 0.0,
+                // Stun for 6 seconds, doesn't break on damage (break_threshold = 0.0)
+                applies_aura: Some((AuraType::Stun, 6.0, 1.0, 0.0)),
+                projectile_speed: None, // Instant melee strike
             },
         }
     }
@@ -926,8 +943,26 @@ pub fn render_health_bars(
                         status_offset -= 10.0; // Move next label up
                     }
                     
-                    // ROOTED indicator (if has Root aura)
+                    // Status effect indicators (if has auras)
                     if let Some(auras) = active_auras {
+                        // STUNNED indicator (if has Stun aura)
+                        if auras.auras.iter().any(|a| a.effect_type == AuraType::Stun) {
+                            let stun_text = "STUNNED";
+                            let stun_font = egui::FontId::monospace(9.0);
+                            let stun_galley = ui.fonts(|f| f.layout_no_wrap(
+                                stun_text.to_string(),
+                                stun_font,
+                                egui::Color32::from_rgb(255, 100, 100), // Red
+                            ));
+                            let stun_pos = egui::pos2(
+                                bar_pos.x + (bar_width - stun_galley.size().x) / 2.0,
+                                bar_pos.y + status_offset,
+                            );
+                            ui.painter().galley(stun_pos, stun_galley, egui::Color32::from_rgb(255, 100, 100));
+                            status_offset -= 10.0; // Move next label up
+                        }
+                        
+                        // ROOTED indicator (if has Root aura)
                         if auras.auras.iter().any(|a| a.effect_type == AuraType::Root) {
                             let root_text = "ROOTED";
                             let root_font = egui::FontId::monospace(9.0);
@@ -1497,14 +1532,14 @@ pub fn move_to_target(
             continue;
         }
         
-        // Check if rooted - if so, cannot move
-        let is_rooted = if let Some(auras) = auras {
-            auras.auras.iter().any(|a| a.effect_type == AuraType::Root)
+        // Check if rooted or stunned - if so, cannot move
+        let is_cc_locked = if let Some(auras) = auras {
+            auras.auras.iter().any(|a| matches!(a.effect_type, AuraType::Root | AuraType::Stun))
         } else {
             false
         };
         
-        if is_rooted {
+        if is_cc_locked {
             continue;
         }
         
@@ -1722,7 +1757,7 @@ pub fn combat_auto_attack(
     time: Res<Time>,
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
-    mut combatants: Query<(Entity, &Transform, &mut Combatant, Option<&CastingState>)>,
+    mut combatants: Query<(Entity, &Transform, &mut Combatant, Option<&CastingState>, Option<&ActiveAuras>)>,
 ) {
     let dt = time.delta_secs();
     
@@ -1732,13 +1767,13 @@ pub fn combat_auto_attack(
     // Build a snapshot of positions for range checks
     let positions: std::collections::HashMap<Entity, Vec3> = combatants
         .iter()
-        .map(|(entity, transform, _, _)| (entity, transform.translation))
+        .map(|(entity, transform, _, _, _)| (entity, transform.translation))
         .collect();
     
     // Build a snapshot of combatant info for logging
     let combatant_info: std::collections::HashMap<Entity, (u8, match_config::CharacterClass)> = combatants
         .iter()
-        .map(|(entity, _, combatant, _)| (entity, (combatant.team, combatant.class)))
+        .map(|(entity, _, combatant, _, _)| (entity, (combatant.team, combatant.class)))
         .collect();
     
     // Collect attacks that will happen this frame (attacker, target, damage)
@@ -1749,8 +1784,18 @@ pub fn combat_auto_attack(
     // Track damage per target for aura breaking
     let mut damage_per_aura_break: std::collections::HashMap<Entity, f32> = std::collections::HashMap::new();
     
-    for (attacker_entity, transform, mut combatant, casting_state) in combatants.iter_mut() {
+    for (attacker_entity, transform, mut combatant, casting_state, auras) in combatants.iter_mut() {
         if !combatant.is_alive() {
+            continue;
+        }
+        
+        // WoW Mechanic: Cannot auto-attack while stunned
+        let is_stunned = if let Some(auras) = auras {
+            auras.auras.iter().any(|a| a.effect_type == AuraType::Stun)
+        } else {
+            false
+        };
+        if is_stunned {
             continue;
         }
         
@@ -1812,7 +1857,7 @@ pub fn combat_auto_attack(
     let mut damage_dealt_updates: Vec<(Entity, f32)> = Vec::new();
     
     for (attacker_entity, target_entity, damage, has_bonus) in attacks {
-        if let Ok((_, _, mut target, _)) = combatants.get_mut(target_entity) {
+        if let Ok((_, _, mut target, _, _)) = combatants.get_mut(target_entity) {
             if target.is_alive() {
                 let actual_damage = damage.min(target.current_health);
                 target.current_health = (target.current_health - damage).max(0.0);
@@ -1911,7 +1956,7 @@ pub fn combat_auto_attack(
     
     // Update attacker damage dealt stats
     for (attacker_entity, damage) in damage_dealt_updates {
-        if let Ok((_, _, mut attacker, _)) = combatants.get_mut(attacker_entity) {
+        if let Ok((_, _, mut attacker, _, _)) = combatants.get_mut(attacker_entity) {
             attacker.damage_dealt += damage;
         }
     }
@@ -2008,6 +2053,16 @@ pub fn decide_abilities(
     
     for (entity, mut combatant, transform, auras) in combatants.iter_mut() {
         if !combatant.is_alive() {
+            continue;
+        }
+        
+        // WoW Mechanic: Cannot use abilities while stunned
+        let is_stunned = if let Some(auras) = auras {
+            auras.auras.iter().any(|a| a.effect_type == AuraType::Stun)
+        } else {
+            false
+        };
+        if is_stunned {
             continue;
         }
         
@@ -2388,7 +2443,7 @@ pub fn decide_abilities(
             }
         }
         
-        // Rogues use Sinister Strike when out of stealth (instant energy spender)
+        // Rogues use Kidney Shot and Sinister Strike when out of stealth
         if combatant.class == match_config::CharacterClass::Rogue && !combatant.stealthed {
             // Check if we have an enemy target
             let Some(target_entity) = combatant.target else {
@@ -2404,7 +2459,58 @@ pub fn decide_abilities(
                 continue; // Can't use abilities during GCD
             }
             
-            // Try to use Sinister Strike if we have enough energy and target is in melee range
+            // Priority 1: Use Kidney Shot (stun) if available
+            let kidney_shot = AbilityType::KidneyShot;
+            let ks_on_cooldown = combatant.ability_cooldowns.contains_key(&kidney_shot);
+            
+            if !ks_on_cooldown && kidney_shot.can_cast(&combatant, target_pos, my_pos) {
+                let def = kidney_shot.definition();
+                
+                // Consume energy
+                combatant.current_mana -= def.mana_cost;
+                
+                // Put on cooldown
+                combatant.ability_cooldowns.insert(kidney_shot, def.cooldown);
+                
+                // Trigger global cooldown
+                combatant.global_cooldown = 1.5;
+                
+                // Spawn pending aura (stun effect)
+                if let Some((aura_type, duration, magnitude, break_threshold)) = def.applies_aura {
+                    commands.spawn(AuraPending {
+                        target: target_entity,
+                        aura: Aura {
+                            effect_type: aura_type,
+                            duration,
+                            magnitude,
+                            break_on_damage_threshold: break_threshold,
+                            accumulated_damage: 0.0,
+                        },
+                    });
+                }
+                
+                info!(
+                    "Team {} {} uses {} on enemy!",
+                    combatant.team,
+                    combatant.class.name(),
+                    def.name
+                );
+                
+                // Log to combat log
+                let message = format!(
+                    "Team {} {} uses {} on Team {} {}",
+                    combatant.team,
+                    combatant.class.name(),
+                    def.name,
+                    combatant_info.get(&target_entity).map(|(t, _, _, _)| *t).unwrap_or(0),
+                    combatant_info.get(&target_entity).map(|(_, c, _, _)| c.name()).unwrap_or("Unknown")
+                );
+                combat_log.log(CombatLogEventType::CrowdControl, message);
+                
+                continue; // Done this frame
+            }
+            
+            // Priority 2: Use Sinister Strike if we have enough energy and target is in melee range
             let ability = AbilityType::SinisterStrike;
             if ability.can_cast(&combatant, target_pos, my_pos) {
                 let def = ability.definition();
@@ -3007,6 +3113,7 @@ pub fn process_aura_breaks(
                     let aura_name = match aura.effect_type {
                         AuraType::Root => "Root",
                         AuraType::MovementSpeedSlow => "Movement Speed Slow",
+                        AuraType::Stun => "Stun",
                     };
                     
                     let message = format!(
