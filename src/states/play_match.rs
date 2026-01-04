@@ -167,6 +167,8 @@ pub struct Combatant {
     pub original_color: Color,
     /// Cooldown timers for abilities (ability type -> remaining cooldown in seconds)
     pub ability_cooldowns: std::collections::HashMap<AbilityType, f32>,
+    /// Global cooldown timer - prevents ability spam (1.5s standard GCD in WoW)
+    pub global_cooldown: f32,
     /// When > 0, combatant will move away from enemies (kiting). Decrements over time.
     pub kiting_timer: f32,
 }
@@ -178,7 +180,7 @@ impl Combatant {
         let (resource_type, max_health, max_resource, resource_regen, starting_resource, attack_damage, attack_speed, movement_speed) = match class {
             match_config::CharacterClass::Warrior => (ResourceType::Rage, 150.0, 100.0, 0.0, 0.0, 12.0, 1.0, 5.0),  // Rage: starts at 0
             match_config::CharacterClass::Mage => (ResourceType::Mana, 80.0, 200.0, 10.0, 200.0, 20.0, 0.7, 4.5),   // Mana: starts full
-            match_config::CharacterClass::Rogue => (ResourceType::Energy, 100.0, 100.0, 20.0, 100.0, 15.0, 1.3, 6.0), // Energy: starts full, fast regen
+            match_config::CharacterClass::Rogue => (ResourceType::Energy, 100.0, 100.0, 20.0, 100.0, 10.0, 1.3, 6.0), // Energy: starts full, fast regen, reduced base damage (has Sinister Strike)
             match_config::CharacterClass::Priest => (ResourceType::Mana, 90.0, 150.0, 8.0, 150.0, 8.0, 0.8, 5.0),    // Mana: starts full
         };
         
@@ -206,6 +208,7 @@ impl Combatant {
             stealthed,
             original_color: Color::WHITE, // Will be set correctly when spawning the visual mesh
             ability_cooldowns: std::collections::HashMap::new(),
+            global_cooldown: 0.0,
             kiting_timer: 0.0,
         }
     }
@@ -326,6 +329,7 @@ pub enum AbilityType {
     Ambush,
     FrostNova,
     MindBlast,
+    SinisterStrike,
     // Future: Fireball, Backstab, etc.
 }
 
@@ -410,6 +414,19 @@ impl AbilityType {
                 healing_max: 0.0,
                 applies_aura: None, // Pure damage, no debuff
                 projectile_speed: None, // Instant effect (shadow magic)
+            },
+            AbilityType::SinisterStrike => AbilityDefinition {
+                name: "Sinister Strike",
+                cast_time: 0.0, // Instant cast
+                range: MELEE_RANGE, // Melee ability
+                mana_cost: 40.0, // 40 energy cost
+                cooldown: 0.0, // No inherent cooldown, uses GCD
+                damage_min: 0.0, // Damage calculated as weapon damage + bonus
+                damage_max: 0.0,
+                healing_min: 0.0,
+                healing_max: 0.0,
+                applies_aura: None,
+                projectile_speed: None, // Instant melee strike
             },
         }
     }
@@ -1865,6 +1882,14 @@ pub fn regenerate_resources(
             }
         }
         
+        // Tick down global cooldown
+        if combatant.global_cooldown > 0.0 {
+            combatant.global_cooldown -= dt;
+            if combatant.global_cooldown < 0.0 {
+                combatant.global_cooldown = 0.0;
+            }
+        }
+        
         // Tick down kiting timer
         if combatant.kiting_timer > 0.0 {
             combatant.kiting_timer -= dt;
@@ -1901,7 +1926,9 @@ pub fn decide_abilities(
         .collect();
     
     // Queue for Ambush attacks (attacker, target, damage, team, class)
-    let mut ambush_attacks: Vec<(Entity, Entity, f32, u8, match_config::CharacterClass)> = Vec::new();
+    // Queue for instant ability attacks (Ambush, Sinister Strike)
+    // Format: (attacker_entity, target_entity, damage, attacker_team, attacker_class, ability_type)
+    let mut instant_attacks: Vec<(Entity, Entity, f32, u8, match_config::CharacterClass, AbilityType)> = Vec::new();
     
     // Queue for Frost Nova damage (caster, target, damage, caster_team, caster_class, target_pos)
     let mut frost_nova_damage: Vec<(Entity, Entity, f32, u8, match_config::CharacterClass, Vec3)> = Vec::new();
@@ -1915,6 +1942,11 @@ pub fn decide_abilities(
         
         // Mages cast spells on enemies
         if combatant.class == match_config::CharacterClass::Mage {
+            // Check if global cooldown is active
+            if combatant.global_cooldown > 0.0 {
+                continue; // Can't use abilities during GCD
+            }
+            
             // First priority: Use Frost Nova if enemies are in melee range (defensive ability)
             let frost_nova = AbilityType::FrostNova;
             let nova_def = frost_nova.definition();
@@ -1938,6 +1970,9 @@ pub fn decide_abilities(
                     
                     // Put ability on cooldown
                     combatant.ability_cooldowns.insert(frost_nova, nova_def.cooldown);
+                    
+                    // Trigger global cooldown (1.5s standard WoW GCD)
+                    combatant.global_cooldown = 1.5;
                     
                     // Collect enemies in range for damage and root
                     let mut frost_nova_targets: Vec<(Entity, Vec3, u8, match_config::CharacterClass)> = Vec::new();
@@ -2009,10 +2044,19 @@ pub fn decide_abilities(
                 continue; // Too close while kiting, focus on movement
             }
             
+            // Check if global cooldown is active
+            if combatant.global_cooldown > 0.0 {
+                continue; // Can't start casting during GCD
+            }
+            
             // Try to cast Frostbolt
             let ability = AbilityType::Frostbolt;
             if ability.can_cast(&combatant, target_pos, my_pos) {
                 let def = ability.definition();
+                
+                // Trigger global cooldown (1.5s standard WoW GCD)
+                // GCD starts when cast BEGINS, not when it completes
+                combatant.global_cooldown = 1.5;
                 
                 // Start casting
                 commands.entity(entity).insert(CastingState {
@@ -2061,11 +2105,20 @@ pub fn decide_abilities(
                 }
             }
             
+            // Check if global cooldown is active
+            if combatant.global_cooldown > 0.0 {
+                continue; // Can't start casting during GCD
+            }
+            
             // Priority 1: Cast heal on lowest HP ally if found
             if let Some((heal_target, _, target_pos)) = lowest_hp_ally {
                 let ability = AbilityType::FlashHeal;
                 if ability.can_cast(&combatant, target_pos, my_pos) {
                     let def = ability.definition();
+                    
+                    // Trigger global cooldown (1.5s standard WoW GCD)
+                    // GCD starts when cast BEGINS, not when it completes
+                    combatant.global_cooldown = 1.5;
                     
                     // Start casting
                     commands.entity(entity).insert(CastingState {
@@ -2094,7 +2147,11 @@ pub fn decide_abilities(
                 continue;
             };
             
-            // Check if Mind Blast is off cooldown
+            // Check if Mind Blast is off cooldown and GCD is not active
+            if combatant.global_cooldown > 0.0 {
+                continue; // Can't start casting during GCD
+            }
+            
             let ability = AbilityType::MindBlast;
             let on_cooldown = combatant.ability_cooldowns.contains_key(&ability);
             
@@ -2103,6 +2160,10 @@ pub fn decide_abilities(
                 
                 // Put on cooldown
                 combatant.ability_cooldowns.insert(ability, def.cooldown);
+                
+                // Trigger global cooldown (1.5s standard WoW GCD)
+                // GCD starts when cast BEGINS, not when it completes
+                combatant.global_cooldown = 1.5;
                 
                 // Start casting
                 commands.entity(entity).insert(CastingState {
@@ -2122,6 +2183,11 @@ pub fn decide_abilities(
         
         // Warriors use Heroic Strike (instant cast, enhances next auto-attack)
         if combatant.class == match_config::CharacterClass::Warrior {
+            // Check if global cooldown is active
+            if combatant.global_cooldown > 0.0 {
+                continue; // Can't use abilities during GCD
+            }
+            
             // Check if we have an enemy target and already have bonus damage queued
             let Some(target_entity) = combatant.target else {
                 continue;
@@ -2148,6 +2214,9 @@ pub fn decide_abilities(
                 // Set bonus damage for next auto-attack (50% of base attack damage)
                 let bonus_damage = combatant.attack_damage * 0.5;
                 combatant.next_attack_bonus_damage = bonus_damage;
+                
+                // Trigger global cooldown (1.5s standard WoW GCD)
+                combatant.global_cooldown = 1.5;
                 
                 info!(
                     "Team {} {} uses {} (next attack +{:.0} damage)",
@@ -2186,7 +2255,10 @@ pub fn decide_abilities(
                 let damage = def.damage_min + (rand::random::<f32>() * damage_range);
                 
                 // Queue the Ambush attack to be applied after the loop
-                ambush_attacks.push((entity, target_entity, damage, combatant.team, combatant.class));
+                instant_attacks.push((entity, target_entity, damage, combatant.team, combatant.class, ability));
+                
+                // Trigger global cooldown (1.5s standard WoW GCD)
+                combatant.global_cooldown = 1.5;
                 
                 info!(
                     "Team {} {} uses {} from stealth!",
@@ -2196,10 +2268,54 @@ pub fn decide_abilities(
                 );
             }
         }
+        
+        // Rogues use Sinister Strike when out of stealth (instant energy spender)
+        if combatant.class == match_config::CharacterClass::Rogue && !combatant.stealthed {
+            // Check if we have an enemy target
+            let Some(target_entity) = combatant.target else {
+                continue;
+            };
+            
+            let Some(&target_pos) = positions.get(&target_entity) else {
+                continue;
+            };
+            
+            // Check if global cooldown is active
+            if combatant.global_cooldown > 0.0 {
+                continue; // Can't use abilities during GCD
+            }
+            
+            // Try to use Sinister Strike if we have enough energy and target is in melee range
+            let ability = AbilityType::SinisterStrike;
+            if ability.can_cast(&combatant, target_pos, my_pos) {
+                let def = ability.definition();
+                
+                // Consume energy
+                combatant.current_mana -= def.mana_cost;
+                
+                // Calculate damage: weapon damage + 10 bonus
+                let bonus_damage = 10.0;
+                let damage = combatant.attack_damage + bonus_damage;
+                
+                // Queue the Sinister Strike attack to be applied after the loop
+                instant_attacks.push((entity, target_entity, damage, combatant.team, combatant.class, ability));
+                
+                // Trigger global cooldown (1.5s standard WoW GCD)
+                combatant.global_cooldown = 1.5;
+                
+                info!(
+                    "Team {} {} uses {}!",
+                    combatant.team,
+                    combatant.class.name(),
+                    def.name
+                );
+            }
+        }
     }
     
-    // Process queued Ambush attacks
-    for (attacker_entity, target_entity, damage, attacker_team, attacker_class) in ambush_attacks {
+    // Process queued instant attacks (Ambush, Sinister Strike)
+    for (attacker_entity, target_entity, damage, attacker_team, attacker_class, ability) in instant_attacks {
+        let ability_name = ability.definition().name;
         let mut actual_damage = 0.0;
         let mut target_team = 0;
         let mut target_class = match_config::CharacterClass::Warrior; // Default, will be overwritten
@@ -2224,9 +2340,10 @@ pub fn decide_abilities(
                 });
                 
                 info!(
-                    "Team {} {}'s Ambush hits Team {} {} for {:.0} damage!",
+                    "Team {} {}'s {} hits Team {} {} for {:.0} damage!",
                     attacker_team,
                     attacker_class.name(),
+                    ability_name,
                     target_team,
                     target_class.name(),
                     actual_damage
@@ -2245,11 +2362,12 @@ pub fn decide_abilities(
                     PlayMatchEntity,
                 ));
                 
-                // Log the Ambush attack with position data
+                // Log the instant attack with position data
                 let message = format!(
-                    "Team {} {}'s Ambush hits Team {} {} for {:.0} damage",
+                    "Team {} {}'s {} hits Team {} {} for {:.0} damage",
                     attacker_team,
                     attacker_class.name(),
+                    ability_name,
                     target_team,
                     target_class.name(),
                     actual_damage
@@ -2417,6 +2535,7 @@ pub fn process_casting(
             ));
             
             // Remove casting state
+            // Note: GCD was already triggered when the cast began, not here
             commands.entity(caster_entity).remove::<CastingState>();
         }
     }
