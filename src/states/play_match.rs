@@ -46,6 +46,9 @@ const MELEE_RANGE: f32 = 2.5;
 /// Distance threshold for stopping movement (slightly less than melee range to avoid jitter)
 const STOP_DISTANCE: f32 = 2.0;
 
+/// Arena size (30x30 plane centered at origin)
+const ARENA_HALF_SIZE: f32 = 15.0;
+
 // ============================================================================
 // Resources
 // ============================================================================
@@ -1243,6 +1246,83 @@ pub fn acquire_targets(
 /// - Movement speed modified by auras (e.g., Frostbolt's slow)
 /// 
 /// This creates the WoW-like behavior where melee combatants chase each other around the arena.
+
+/// Find the best direction to move while kiting that maximizes distance from enemy
+/// while staying within arena bounds.
+/// 
+/// Strategy:
+/// 1. Try the direct "away from enemy" direction first
+/// 2. If that would hit a boundary, test multiple candidate directions
+/// 3. Pick the direction that maximizes distance from enemy while staying in bounds
+fn find_best_kiting_direction(
+    current_pos: Vec3,
+    enemy_pos: Vec3,
+    move_distance: f32,
+) -> Vec3 {
+    // Calculate ideal direction (directly away from enemy)
+    let ideal_direction = Vec3::new(
+        current_pos.x - enemy_pos.x,
+        0.0,
+        current_pos.z - enemy_pos.z,
+    ).normalize_or_zero();
+    
+    if ideal_direction == Vec3::ZERO {
+        return Vec3::ZERO; // Already on top of enemy, can't kite
+    }
+    
+    // Check if ideal direction keeps us in bounds
+    let ideal_next_pos = current_pos + ideal_direction * move_distance;
+    let ideal_in_bounds = 
+        ideal_next_pos.x >= -ARENA_HALF_SIZE && ideal_next_pos.x <= ARENA_HALF_SIZE &&
+        ideal_next_pos.z >= -ARENA_HALF_SIZE && ideal_next_pos.z <= ARENA_HALF_SIZE;
+    
+    if ideal_in_bounds {
+        return ideal_direction; // Ideal direction works, use it!
+    }
+    
+    // Ideal direction would hit boundary - find best alternative
+    // Test 16 directions around a circle and pick the one that:
+    // 1. Stays in bounds
+    // 2. Maximizes distance from enemy
+    let mut best_direction = Vec3::ZERO;
+    let mut best_score = f32::MIN;
+    
+    for i in 0..16 {
+        let angle = (i as f32) * std::f32::consts::TAU / 16.0;
+        let candidate_direction = Vec3::new(
+            angle.cos(),
+            0.0,
+            angle.sin(),
+        );
+        
+        // Calculate where we'd end up with this direction
+        let candidate_next_pos = current_pos + candidate_direction * move_distance;
+        
+        // Check if this keeps us in bounds
+        let in_bounds = 
+            candidate_next_pos.x >= -ARENA_HALF_SIZE && candidate_next_pos.x <= ARENA_HALF_SIZE &&
+            candidate_next_pos.z >= -ARENA_HALF_SIZE && candidate_next_pos.z <= ARENA_HALF_SIZE;
+        
+        if !in_bounds {
+            continue; // Skip directions that go out of bounds
+        }
+        
+        // Score this direction based on:
+        // 1. Distance from enemy (higher = better)
+        // 2. Alignment with ideal direction (bonus for moving away, not sideways)
+        let distance_from_enemy = candidate_next_pos.distance(enemy_pos);
+        let alignment_with_ideal = candidate_direction.dot(ideal_direction).max(0.0);
+        let score = distance_from_enemy * 2.0 + alignment_with_ideal * 5.0;
+        
+        if score > best_score {
+            best_score = score;
+            best_direction = candidate_direction;
+        }
+    }
+    
+    best_direction
+}
+
 pub fn move_to_target(
     time: Res<Time>,
     mut combatants: Query<(Entity, &mut Transform, &Combatant, Option<&ActiveAuras>, Option<&CastingState>)>,
@@ -1280,6 +1360,7 @@ pub fn move_to_target(
         let my_pos = transform.translation;
         
         // KITING BEHAVIOR: If kiting_timer > 0, move away from nearest enemy
+        // Uses intelligent pathfinding that considers arena boundaries
         if combatant.kiting_timer > 0.0 {
             // Find nearest enemy
             let mut nearest_enemy_pos: Option<Vec3> = None;
@@ -1295,32 +1376,38 @@ pub fn move_to_target(
                 }
             }
             
-            // Move away from nearest enemy
+            // Intelligent kiting: maximize distance from nearest enemy
             if let Some(enemy_pos) = nearest_enemy_pos {
-                // Calculate direction AWAY from enemy (only in XZ plane, keep Y constant)
-                let direction = Vec3::new(
-                    my_pos.x - enemy_pos.x,
-                    0.0, // Don't move vertically
-                    my_pos.z - enemy_pos.z,
-                ).normalize_or_zero();
-                
-                if direction != Vec3::ZERO {
-                    // Calculate effective movement speed (base * aura modifiers)
-                    let mut movement_speed = combatant.base_movement_speed;
-                    if let Some(auras) = auras {
-                        for aura in &auras.auras {
-                            if aura.effect_type == AuraType::MovementSpeedSlow {
-                                movement_speed *= aura.magnitude;
-                            }
+                // Calculate effective movement speed (base * aura modifiers)
+                let mut movement_speed = combatant.base_movement_speed;
+                if let Some(auras) = auras {
+                    for aura in &auras.auras {
+                        if aura.effect_type == AuraType::MovementSpeedSlow {
+                            movement_speed *= aura.magnitude;
                         }
                     }
+                }
+                
+                let move_distance = movement_speed * dt;
+                
+                // Find the best direction to move that maximizes distance from enemy
+                // while staying within arena bounds
+                let best_direction = find_best_kiting_direction(
+                    my_pos,
+                    enemy_pos,
+                    move_distance,
+                );
+                
+                if best_direction != Vec3::ZERO {
+                    // Move in the best direction
+                    transform.translation += best_direction * move_distance;
                     
-                    // Move away from enemy
-                    let move_distance = movement_speed * dt;
-                    transform.translation += direction * move_distance;
+                    // Ensure we stay in bounds (in case of floating point errors)
+                    transform.translation.x = transform.translation.x.clamp(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
+                    transform.translation.z = transform.translation.z.clamp(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
                     
                     // Rotate to face direction of travel
-                    let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
+                    let target_rotation = Quat::from_rotation_y(best_direction.x.atan2(best_direction.z));
                     transform.rotation = target_rotation;
                 }
             }
@@ -1362,6 +1449,10 @@ pub fn move_to_target(
                 // Move towards target
                 let move_distance = movement_speed * dt;
                 transform.translation += direction * move_distance;
+                
+                // Clamp position to arena bounds
+                transform.translation.x = transform.translation.x.clamp(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
+                transform.translation.z = transform.translation.z.clamp(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
                 
                 // Rotate to face target
                 let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
@@ -1773,12 +1864,8 @@ pub fn decide_abilities(
                 }
             }
             
-            // Second priority: Cast Frostbolt on target (but not while kiting!)
-            // If kiting, focus on movement, don't cast
-            if combatant.kiting_timer > 0.0 {
-                continue;
-            }
-            
+            // Second priority: Cast Frostbolt on target
+            // While kiting, only cast if we're at a safe distance (beyond melee range + buffer)
             let Some(target_entity) = combatant.target else {
                 continue;
             };
@@ -1786,6 +1873,15 @@ pub fn decide_abilities(
             let Some(&target_pos) = positions.get(&target_entity) else {
                 continue;
             };
+            
+            let distance_to_target = my_pos.distance(target_pos);
+            
+            // While kiting, only cast if we're at a safe distance
+            // Safe distance = beyond melee range + buffer (8 units gives good tactical spacing)
+            const SAFE_KITING_DISTANCE: f32 = 8.0;
+            if combatant.kiting_timer > 0.0 && distance_to_target < SAFE_KITING_DISTANCE {
+                continue; // Too close while kiting, focus on movement
+            }
             
             // Try to cast Frostbolt
             let ability = AbilityType::Frostbolt;
