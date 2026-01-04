@@ -124,6 +124,24 @@ pub struct SpellImpactEffect {
     pub final_scale: f32,
 }
 
+/// Match countdown state - tracks the pre-combat countdown phase
+#[derive(Resource)]
+pub struct MatchCountdown {
+    /// Time remaining in countdown (in seconds). When <= 0, gates open and combat starts.
+    pub time_remaining: f32,
+    /// Whether the gates have opened (combat has started)
+    pub gates_opened: bool,
+}
+
+impl Default for MatchCountdown {
+    fn default() -> Self {
+        Self {
+            time_remaining: 10.0, // 10 second countdown as per design doc
+            gates_opened: false,
+        }
+    }
+}
+
 /// Core combatant component containing all combat state and stats.
 #[derive(Component, Clone)]
 pub struct Combatant {
@@ -710,6 +728,9 @@ pub fn setup_play_match(
     
     // Initialize simulation speed control
     commands.insert_resource(SimulationSpeed { multiplier: 1.0 });
+    
+    // Initialize match countdown (10 seconds before gates open)
+    commands.insert_resource(MatchCountdown::default());
 
     // Spawn arena floor - 60x60 unit plane
     let floor_size = 60.0;
@@ -728,8 +749,9 @@ pub fn setup_play_match(
     let mut team1_class_counts: HashMap<match_config::CharacterClass, usize> = HashMap::new();
     let mut team2_class_counts: HashMap<match_config::CharacterClass, usize> = HashMap::new();
 
-    // Spawn Team 1 combatants (left side of arena)
-    let team1_spawn_x = -20.0;
+    // Spawn Team 1 combatants (left side of arena, in starting pen)
+    // Teams start further back (-35/+35) and will move forward when gates open
+    let team1_spawn_x = -35.0;
     for (i, character_opt) in config.team1.iter().enumerate() {
         if let Some(character) = character_opt {
             let count = *team1_class_counts.get(character).unwrap_or(&0);
@@ -747,8 +769,8 @@ pub fn setup_play_match(
         }
     }
 
-    // Spawn Team 2 combatants (right side of arena)
-    let team2_spawn_x = 20.0;
+    // Spawn Team 2 combatants (right side of arena, in starting pen)
+    let team2_spawn_x = 35.0;
     for (i, character_opt) in config.team2.iter().enumerate() {
         if let Some(character) = character_opt {
             let count = *team2_class_counts.get(character).unwrap_or(&0);
@@ -828,11 +850,52 @@ pub fn cleanup_play_match(
     // Remove resources
     commands.remove_resource::<AmbientLight>();
     commands.remove_resource::<SimulationSpeed>();
+    commands.remove_resource::<MatchCountdown>();
 }
 
 // ============================================================================
 // Update & Input Systems
 // ============================================================================
+
+/// Countdown system: Manage pre-combat countdown and gate opening.
+/// 
+/// During countdown (10 seconds):
+/// - Mana is restored to 100% every second (encourages pre-buffing)
+/// - Combatants can cast buffs but cannot move or attack
+/// - Countdown timer ticks down
+/// 
+/// When countdown reaches 0:
+/// - Gates open (sets gates_opened flag)
+/// - Combat begins normally
+pub fn update_countdown(
+    time: Res<Time>,
+    mut countdown: ResMut<MatchCountdown>,
+    mut combat_log: ResMut<CombatLog>,
+    mut combatants: Query<&mut Combatant>,
+) {
+    if countdown.gates_opened {
+        return; // Gates already opened, nothing to do
+    }
+    
+    let dt = time.delta_secs();
+    countdown.time_remaining -= dt;
+    
+    // Restore all combatants' mana to full during countdown (every frame)
+    // This ensures no penalty for pre-match buffing
+    for mut combatant in combatants.iter_mut() {
+        combatant.current_mana = combatant.max_mana;
+    }
+    
+    // Check if countdown finished
+    if countdown.time_remaining <= 0.0 {
+        countdown.gates_opened = true;
+        combat_log.log(
+            CombatLogEventType::MatchEvent,
+            "Gates open! Combat begins!".to_string()
+        );
+        info!("Gates opened - combat begins!");
+    }
+}
 
 /// Handle time control keyboard shortcuts and apply time multiplier to simulation.
 /// 
@@ -1014,6 +1077,57 @@ pub fn update_play_match(
 /// This system uses egui to draw bars in screen space, converting 3D world positions
 /// to 2D screen coordinates. Displays:
 /// - **Health bar** (always): Green/yellow/red based on HP percentage
+/// Render the countdown timer during the pre-combat phase.
+/// 
+/// Displays a large centered countdown timer showing remaining seconds until gates open.
+/// Also shows "Prepare for battle!" message to indicate pre-buffing phase.
+pub fn render_countdown(
+    mut contexts: EguiContexts,
+    countdown: Res<MatchCountdown>,
+) {
+    // Only show countdown if gates haven't opened yet
+    if countdown.gates_opened {
+        return;
+    }
+    
+    let ctx = contexts.ctx_mut();
+    
+    // Display countdown in center of screen
+    egui::Area::new(egui::Id::new("match_countdown"))
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, -50.0])
+        .show(ctx, |ui| {
+            ui.vertical_centered(|ui| {
+                // Large countdown number
+                let seconds_remaining = countdown.time_remaining.ceil() as i32;
+                ui.label(
+                    egui::RichText::new(format!("{}", seconds_remaining))
+                        .size(120.0)
+                        .color(egui::Color32::from_rgb(255, 215, 0)) // Gold color
+                        .strong()
+                );
+                
+                ui.add_space(10.0);
+                
+                // "Prepare for battle!" message
+                ui.label(
+                    egui::RichText::new("Prepare for battle!")
+                        .size(32.0)
+                        .color(egui::Color32::from_rgb(230, 230, 230))
+                );
+                
+                ui.add_space(5.0);
+                
+                // Hint about buffing
+                ui.label(
+                    egui::RichText::new("Apply buffs to your team!")
+                        .size(18.0)
+                        .color(egui::Color32::from_rgb(180, 180, 180))
+                        .italics()
+                );
+            });
+        });
+}
+
 /// - **Resource bar** (if applicable): Colored by resource type
 ///   - Mana (blue): Mages, Priests - regenerates slowly, starts full
 ///   - Energy (yellow): Rogues - regenerates rapidly, starts full
@@ -1513,9 +1627,14 @@ pub fn cleanup_expired_spell_impacts(
 /// - Their current target has died
 /// - A closer enemy becomes available (future enhancement)
 pub fn acquire_targets(
+    countdown: Res<MatchCountdown>,
     config: Res<match_config::MatchConfig>,
     mut combatants: Query<(Entity, &mut Combatant, &Transform)>,
 ) {
+    // Don't acquire targets until gates open
+    if !countdown.gates_opened {
+        return;
+    }
     // Build list of all alive combatants with their info (excluding stealthed enemies)
     // Also track spawn order for each team to respect kill target priorities
     let mut team1_combatants: Vec<(Entity, Vec3, bool)> = Vec::new();
@@ -1676,10 +1795,16 @@ fn find_best_kiting_direction(
 }
 
 pub fn move_to_target(
+    countdown: Res<MatchCountdown>,
     time: Res<Time>,
     mut commands: Commands,
     mut combatants: Query<(Entity, &mut Transform, &Combatant, Option<&ActiveAuras>, Option<&CastingState>, Option<&ChargingState>)>,
 ) {
+    // Don't allow movement until gates open
+    if !countdown.gates_opened {
+        return;
+    }
+    
     let dt = time.delta_secs();
     
     // Build a snapshot of all combatant positions and team info for lookups
@@ -1921,6 +2046,7 @@ pub fn update_stealth_visuals(
 /// Damage is applied immediately and stats are updated for both attacker and target.
 /// All attacks are logged to the combat log for display.
 pub fn combat_auto_attack(
+    countdown: Res<MatchCountdown>,
     time: Res<Time>,
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
@@ -1928,8 +2054,15 @@ pub fn combat_auto_attack(
 ) {
     let dt = time.delta_secs();
     
-    // Update match time in combat log
-    combat_log.match_time += dt;
+    // Update match time in combat log (countdown doesn't count against match time)
+    if countdown.gates_opened {
+        combat_log.match_time += dt;
+    }
+    
+    // Don't allow auto-attacks until gates open
+    if !countdown.gates_opened {
+        return;
+    }
     
     // Build a snapshot of positions for range checks
     let positions: std::collections::HashMap<Entity, Vec3> = combatants

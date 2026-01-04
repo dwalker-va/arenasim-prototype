@@ -57,6 +57,7 @@ impl Plugin for StatesPlugin {
                 Update,
                 (
                     play_match::handle_time_controls,
+                    play_match::update_countdown,
                     play_match::update_play_match,
                     play_match::regenerate_resources,
                     play_match::update_auras,
@@ -86,6 +87,7 @@ impl Plugin for StatesPlugin {
                     play_match::update_spell_impact_effects,
                     play_match::cleanup_expired_spell_impacts,
                     play_match::render_time_controls,
+                    play_match::render_countdown,
                     play_match::render_health_bars,
                     play_match::render_floating_combat_text,
                     play_match::render_combat_log,
