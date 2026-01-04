@@ -1513,14 +1513,25 @@ pub fn cleanup_expired_spell_impacts(
 /// - Their current target has died
 /// - A closer enemy becomes available (future enhancement)
 pub fn acquire_targets(
+    config: Res<match_config::MatchConfig>,
     mut combatants: Query<(Entity, &mut Combatant, &Transform)>,
 ) {
     // Build list of all alive combatants with their info (excluding stealthed enemies)
-    let alive_combatants: Vec<(Entity, u8, Vec3, bool)> = combatants
-        .iter()
-        .filter(|(_, c, _)| c.is_alive())
-        .map(|(entity, c, transform)| (entity, c.team, transform.translation, c.stealthed))
-        .collect();
+    // Also track spawn order for each team to respect kill target priorities
+    let mut team1_combatants: Vec<(Entity, Vec3, bool)> = Vec::new();
+    let mut team2_combatants: Vec<(Entity, Vec3, bool)> = Vec::new();
+    
+    for (entity, c, transform) in combatants.iter() {
+        if !c.is_alive() {
+            continue;
+        }
+        
+        if c.team == 1 {
+            team1_combatants.push((entity, transform.translation, c.stealthed));
+        } else {
+            team2_combatants.push((entity, transform.translation, c.stealthed));
+        }
+    }
 
     // For each combatant, ensure they have a valid target
     for (_entity, mut combatant, transform) in combatants.iter_mut() {
@@ -1529,27 +1540,50 @@ pub fn acquire_targets(
             continue;
         }
 
+        // Get enemy team combatants and kill target priority
+        let (enemy_combatants, kill_target_index) = if combatant.team == 1 {
+            (&team2_combatants, config.team1_kill_target)
+        } else {
+            (&team1_combatants, config.team2_kill_target)
+        };
+
         // Check if current target is still valid (alive, on enemy team, and not stealthed)
         let target_valid = combatant.target.and_then(|target_entity| {
-            alive_combatants
+            enemy_combatants
                 .iter()
-                .find(|(e, _, _, _)| *e == target_entity)
-                .filter(|(_, team, _, stealthed)| *team != combatant.team && !stealthed)
+                .find(|(e, _, _)| *e == target_entity)
+                .filter(|(_, _, stealthed)| !stealthed)
         }).is_some();
 
-        // If no valid target, find nearest enemy (excluding stealthed)
+        // If no valid target, acquire a new one
         if !target_valid {
-            let my_pos = transform.translation;
-            let nearest_enemy = alive_combatants
-                .iter()
-                .filter(|(_, team, _, stealthed)| *team != combatant.team && !stealthed)
-                .min_by(|(_, _, pos_a, _), (_, _, pos_b, _)| {
-                    let dist_a = my_pos.distance(*pos_a);
-                    let dist_b = my_pos.distance(*pos_b);
-                    dist_a.partial_cmp(&dist_b).unwrap()
-                });
+            // Priority 1: Check if kill target is set and valid
+            let kill_target = if let Some(index) = kill_target_index {
+                enemy_combatants
+                    .get(index)
+                    .filter(|(_, _, stealthed)| !stealthed)
+                    .map(|(entity, _, _)| *entity)
+            } else {
+                None
+            };
+            
+            if let Some(priority_target) = kill_target {
+                // Use the kill target
+                combatant.target = Some(priority_target);
+            } else {
+                // Priority 2: Fall back to nearest enemy (excluding stealthed)
+                let my_pos = transform.translation;
+                let nearest_enemy = enemy_combatants
+                    .iter()
+                    .filter(|(_, _, stealthed)| !stealthed)
+                    .min_by(|(_, pos_a, _), (_, pos_b, _)| {
+                        let dist_a = my_pos.distance(*pos_a);
+                        let dist_b = my_pos.distance(*pos_b);
+                        dist_a.partial_cmp(&dist_b).unwrap()
+                    });
 
-            combatant.target = nearest_enemy.map(|(entity, _, _, _)| *entity);
+                combatant.target = nearest_enemy.map(|(entity, _, _)| *entity);
+            }
         }
     }
 }

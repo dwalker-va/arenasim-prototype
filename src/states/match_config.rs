@@ -100,6 +100,10 @@ pub struct MatchConfig {
     pub team2: Vec<Option<CharacterClass>>,
     /// Selected map
     pub map: ArenaMap,
+    /// Team 1's kill target priority (index into enemy team, None = no priority)
+    pub team1_kill_target: Option<usize>,
+    /// Team 2's kill target priority (index into enemy team, None = no priority)
+    pub team2_kill_target: Option<usize>,
 }
 
 impl Default for MatchConfig {
@@ -110,6 +114,8 @@ impl Default for MatchConfig {
             team1: vec![None],
             team2: vec![None],
             map: ArenaMap::BasicArena,
+            team1_kill_target: None, // No priority by default
+            team2_kill_target: None, // No priority by default
         }
     }
 }

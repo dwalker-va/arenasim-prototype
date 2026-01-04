@@ -358,6 +358,80 @@ fn render_team_panel(
             ui.add_space(12.0);
         }
     }
+    
+    ui.add_space(20.0);
+    
+    // Kill Target Selection
+    ui.vertical(|ui| {
+        ui.label(egui::RichText::new("Kill Target Priority").size(16.0).color(team_color));
+        ui.add_space(8.0);
+        
+        // Get enemy team info
+        let (enemy_team_size, enemy_slots) = if team == 1 {
+            (config.team2_size, config.team2.clone())
+        } else {
+            (config.team1_size, config.team1.clone())
+        };
+        
+        let current_kill_target = if team == 1 {
+            config.team1_kill_target
+        } else {
+            config.team2_kill_target
+        };
+        
+        // Show enemy characters as kill target options
+        for slot in 0..enemy_team_size {
+            if let Some(Some(enemy_class)) = enemy_slots.get(slot) {
+                let is_selected = current_kill_target == Some(slot);
+                
+                let button_text = format!("{}. {}", slot + 1, enemy_class.name());
+                let button_color = if is_selected {
+                    team_color
+                } else {
+                    egui::Color32::from_rgb(102, 102, 102)
+                };
+                
+                let button = egui::Button::new(
+                    egui::RichText::new(button_text)
+                        .size(14.0)
+                        .color(button_color)
+                )
+                .min_size(egui::vec2(max_width, 30.0));
+                
+                if ui.add(button).clicked() {
+                    // Toggle selection
+                    if is_selected {
+                        // Deselect
+                        if team == 1 {
+                            config.team1_kill_target = None;
+                        } else {
+                            config.team2_kill_target = None;
+                        }
+                    } else {
+                        // Select this target
+                        if team == 1 {
+                            config.team1_kill_target = Some(slot);
+                        } else {
+                            config.team2_kill_target = Some(slot);
+                        }
+                    }
+                }
+                
+                if slot < enemy_team_size - 1 {
+                    ui.add_space(4.0);
+                }
+            }
+        }
+        
+        if current_kill_target.is_none() {
+            ui.add_space(8.0);
+            ui.label(
+                egui::RichText::new("No priority - team targets freely")
+                    .size(12.0)
+                    .color(egui::Color32::from_rgb(153, 153, 153))
+            );
+        }
+    });
 }
 
 /// Render a single character slot.
