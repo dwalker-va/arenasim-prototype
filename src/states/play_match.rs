@@ -142,6 +142,24 @@ impl Default for MatchCountdown {
     }
 }
 
+/// Victory celebration state - tracks post-match victory animation
+#[derive(Resource)]
+pub struct VictoryCelebration {
+    /// Which team won (None = draw)
+    pub winner: Option<u8>,
+    /// Time remaining in celebration (in seconds). When <= 0, transition to Results.
+    pub time_remaining: f32,
+    /// Stored match results to pass to Results scene
+    pub match_results: MatchResults,
+}
+
+/// Component marking a combatant as celebrating (for bounce animation)
+#[derive(Component)]
+pub struct Celebrating {
+    /// Time offset for staggered bounce timing
+    pub bounce_offset: f32,
+}
+
 /// Core combatant component containing all combat state and stats.
 #[derive(Component, Clone)]
 pub struct Combatant {
@@ -851,6 +869,8 @@ pub fn cleanup_play_match(
     commands.remove_resource::<AmbientLight>();
     commands.remove_resource::<SimulationSpeed>();
     commands.remove_resource::<MatchCountdown>();
+    // Remove optional resources (may not exist if match didn't finish)
+    commands.remove_resource::<VictoryCelebration>();
 }
 
 // ============================================================================
@@ -3613,14 +3633,19 @@ pub fn process_aura_breaks(
 /// 4. Insert `MatchResults` resource for the Results scene
 /// 5. Transition to Results state
 pub fn check_match_end(
-    combatants: Query<(&Combatant, &Transform)>,
+    combatants: Query<(Entity, &Combatant, &Transform)>,
     config: Res<MatchConfig>,
     combat_log: Res<CombatLog>,
+    celebration: Option<Res<VictoryCelebration>>,
     mut commands: Commands,
-    mut next_state: ResMut<NextState<GameState>>,
 ) {
-    let team1_alive = combatants.iter().any(|(c, _)| c.team == 1 && c.is_alive());
-    let team2_alive = combatants.iter().any(|(c, _)| c.team == 2 && c.is_alive());
+    // If celebration is already active, don't check for match end again
+    if celebration.is_some() {
+        return;
+    }
+    
+    let team1_alive = combatants.iter().any(|(_, c, _)| c.team == 1 && c.is_alive());
+    let team2_alive = combatants.iter().any(|(_, c, _)| c.team == 2 && c.is_alive());
 
     if !team1_alive || !team2_alive {
         // Determine winner: None if both dead (draw), otherwise winning team
@@ -3643,7 +3668,7 @@ pub fn check_match_end(
         let mut team1_metadata = Vec::new();
         let mut team2_metadata = Vec::new();
         
-        for (combatant, transform) in combatants.iter() {
+        for (entity, combatant, transform) in combatants.iter() {
             let stats = CombatantStats {
                 class: combatant.class,
                 damage_dealt: combatant.damage_dealt,
@@ -3674,6 +3699,13 @@ pub fn check_match_end(
                 team2_stats.push(stats);
                 team2_metadata.push(metadata);
             }
+            
+            // Mark winners as celebrating (for bounce animation)
+            if combatant.is_alive() && Some(combatant.team) == winner {
+                // Stagger bounce timing for visual variety
+                let bounce_offset = (team1_stats.len() + team2_stats.len()) as f32 * 0.2;
+                commands.entity(entity).insert(Celebrating { bounce_offset });
+            }
         }
         
         // Save combat log to file for debugging
@@ -3693,15 +3725,123 @@ pub fn check_match_end(
             }
         }
         
-        // Store match results for the Results scene
-        commands.insert_resource(MatchResults {
+        // Start victory celebration (5 seconds before transitioning to Results)
+        commands.insert_resource(VictoryCelebration {
             winner,
-            team1_combatants: team1_stats,
-            team2_combatants: team2_stats,
+            time_remaining: 5.0,
+            match_results: MatchResults {
+                winner,
+                team1_combatants: team1_stats,
+                team2_combatants: team2_stats,
+            },
         });
         
-        next_state.set(GameState::Results);
+        info!("Victory celebration started! {} seconds", 5.0);
     }
+}
+
+/// Update victory celebration: animate winners bouncing and countdown to Results.
+/// 
+/// During celebration (5 seconds):
+/// - Winning combatants bounce up and down
+/// - Victory text is displayed
+/// - Timer counts down
+/// 
+/// When timer reaches 0:
+/// - Transition to Results scene
+pub fn update_victory_celebration(
+    time: Res<Time>,
+    mut celebration: Option<ResMut<VictoryCelebration>>,
+    mut commands: Commands,
+    mut next_state: ResMut<NextState<GameState>>,
+    mut celebrating_combatants: Query<(&mut Transform, &Celebrating)>,
+) {
+    // Only run if celebration is active
+    let Some(mut celebration) = celebration else {
+        return;
+    };
+    let dt = time.delta_secs();
+    celebration.time_remaining -= dt;
+    
+    // Animate celebrating combatants (bounce up and down)
+    let celebration_time = 5.0 - celebration.time_remaining; // Elapsed time
+    for (mut transform, celebrating) in celebrating_combatants.iter_mut() {
+        // Sine wave for smooth bounce (frequency = 2 Hz for lively bounce)
+        let bounce_time = celebration_time + celebrating.bounce_offset;
+        let bounce_height = (bounce_time * std::f32::consts::TAU * 2.0).sin().max(0.0) * 0.8;
+        
+        // Set Y position (base height = 1.0 + bounce)
+        transform.translation.y = 1.0 + bounce_height;
+    }
+    
+    // Check if celebration finished
+    if celebration.time_remaining <= 0.0 {
+        // Store match results for Results scene
+        commands.insert_resource(celebration.match_results.clone());
+        
+        // Transition to Results
+        next_state.set(GameState::Results);
+        info!("Victory celebration complete - transitioning to Results");
+    }
+}
+
+/// Render victory celebration text.
+/// 
+/// Displays:
+/// - "TEAM X WINS!" or "DRAW!" in large text
+/// - Victory message below
+pub fn render_victory_celebration(
+    mut contexts: EguiContexts,
+    celebration: Option<Res<VictoryCelebration>>,
+) {
+    // Only render if celebration is active
+    let Some(celebration) = celebration else {
+        return;
+    };
+    
+    let ctx = contexts.ctx_mut();
+    
+    // Display victory message in center of screen
+    egui::Area::new(egui::Id::new("victory_celebration"))
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, -80.0])
+        .show(ctx, |ui| {
+            ui.vertical_centered(|ui| {
+                // Victory text based on winner
+                let (victory_text, victory_color) = match celebration.winner {
+                    Some(1) => ("TEAM 1 WINS!", egui::Color32::from_rgb(100, 150, 255)), // Blue
+                    Some(2) => ("TEAM 2 WINS!", egui::Color32::from_rgb(255, 100, 100)), // Red
+                    None => ("DRAW!", egui::Color32::from_rgb(200, 200, 100)),           // Yellow
+                    _ => ("MATCH OVER", egui::Color32::from_rgb(200, 200, 200)),        // Gray
+                };
+                
+                // Large victory text
+                ui.label(
+                    egui::RichText::new(victory_text)
+                        .size(96.0)
+                        .color(victory_color)
+                        .strong()
+                );
+                
+                ui.add_space(15.0);
+                
+                // Victory message
+                ui.label(
+                    egui::RichText::new("Victory!")
+                        .size(42.0)
+                        .color(egui::Color32::from_rgb(255, 215, 0)) // Gold
+                );
+                
+                ui.add_space(10.0);
+                
+                // Countdown to results
+                let seconds_remaining = celebration.time_remaining.ceil() as i32;
+                ui.label(
+                    egui::RichText::new(format!("Results in {}...", seconds_remaining))
+                        .size(20.0)
+                        .color(egui::Color32::from_rgb(180, 180, 180))
+                );
+            });
+        });
 }
 
 /// Spawn visual meshes for newly created projectiles.
