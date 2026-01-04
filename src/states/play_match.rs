@@ -249,6 +249,24 @@ pub struct AuraPending {
     pub aura: Aura,
 }
 
+/// Component for spell projectiles that travel from caster to target.
+/// When the projectile reaches its target, damage/effects are applied.
+#[derive(Component)]
+pub struct Projectile {
+    /// The entity that cast this projectile
+    pub caster: Entity,
+    /// The target entity this projectile is traveling towards
+    pub target: Entity,
+    /// The ability this projectile represents (for damage calculation)
+    pub ability: AbilityType,
+    /// Travel speed in units per second
+    pub speed: f32,
+    /// Team of the caster (for combat log)
+    pub caster_team: u8,
+    /// Class of the caster (for combat log)
+    pub caster_class: match_config::CharacterClass,
+}
+
 /// An active aura/debuff effect on a combatant.
 #[derive(Clone)]
 pub struct Aura {
@@ -287,7 +305,7 @@ impl AbilityType {
         match self {
             AbilityType::Frostbolt => AbilityDefinition {
                 name: "Frostbolt",
-                cast_time: 2.5,
+                cast_time: 1.5, // Reduced from 2.5s to see projectiles more often
                 range: 30.0,
                 mana_cost: 20.0,
                 cooldown: 0.0,
@@ -296,6 +314,7 @@ impl AbilityType {
                 healing_min: 0.0,
                 healing_max: 0.0,
                 applies_aura: Some((AuraType::MovementSpeedSlow, 5.0, 0.7)), // 30% slow for 5s
+                projectile_speed: Some(20.0), // Travels at 20 units/second
             },
             AbilityType::FlashHeal => AbilityDefinition {
                 name: "Flash Heal",
@@ -308,6 +327,7 @@ impl AbilityType {
                 healing_min: 30.0,
                 healing_max: 40.0,
                 applies_aura: None,
+                projectile_speed: None, // Instant effect, no projectile
             },
             AbilityType::HeroicStrike => AbilityDefinition {
                 name: "Heroic Strike",
@@ -320,6 +340,7 @@ impl AbilityType {
                 healing_min: 0.0,
                 healing_max: 0.0,
                 applies_aura: None,
+                projectile_speed: None, // Melee ability, no projectile
             },
             AbilityType::Ambush => AbilityDefinition {
                 name: "Ambush",
@@ -332,6 +353,7 @@ impl AbilityType {
                 healing_min: 0.0,
                 healing_max: 0.0,
                 applies_aura: None,
+                projectile_speed: None, // Melee ability, no projectile
             },
             AbilityType::FrostNova => AbilityDefinition {
                 name: "Frost Nova",
@@ -344,6 +366,7 @@ impl AbilityType {
                 healing_min: 0.0,
                 healing_max: 0.0,
                 applies_aura: Some((AuraType::Root, 6.0, 1.0)), // Root for 6 seconds
+                projectile_speed: None, // Instant AOE, no projectile
             },
         }
     }
@@ -393,6 +416,8 @@ pub struct AbilityDefinition {
     pub healing_max: f32,
     /// Optional aura to apply: (AuraType, duration, magnitude)
     pub applies_aura: Option<(AuraType, f32, f32)>,
+    /// Projectile travel speed in units/second (None = instant effect, no projectile)
+    pub projectile_speed: Option<f32>,
 }
 
 impl AbilityDefinition {
@@ -2144,6 +2169,23 @@ pub fn process_casting(
             continue;
         };
         
+        // If this ability uses a projectile, spawn it and skip immediate effect application
+        if let Some(projectile_speed) = def.projectile_speed {
+            // Spawn projectile visual and logic entity
+            commands.spawn((
+                Projectile {
+                    caster: caster_entity,
+                    target: target_entity,
+                    ability,
+                    speed: projectile_speed,
+                    caster_team,
+                    caster_class,
+                },
+                PlayMatchEntity,
+            ));
+            continue; // Skip immediate damage/healing - projectile will handle it on impact
+        }
+        
         // Check if this is self-targeting (e.g., priest healing themselves)
         let is_self_target = target_entity == caster_entity;
         
@@ -2501,6 +2543,228 @@ pub fn check_match_end(
         });
         
         next_state.set(GameState::Results);
+    }
+}
+
+/// Spawn visual meshes for newly created projectiles.
+/// Projectiles are represented as glowing ice-blue spheres with a trail effect.
+pub fn spawn_projectile_visuals(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    new_projectiles: Query<(Entity, &Projectile), (Added<Projectile>, Without<Mesh3d>)>,
+    combatants: Query<&Transform, With<Combatant>>,
+) {
+    for (projectile_entity, projectile) in new_projectiles.iter() {
+        // Get caster position to spawn projectile at that location
+        let Ok(caster_transform) = combatants.get(projectile.caster) else {
+            continue;
+        };
+        
+        let caster_pos = caster_transform.translation;
+        
+        // Create a small sphere mesh for the projectile
+        let mesh = meshes.add(Sphere::new(0.3));
+        
+        // Ice blue color with emissive glow
+        let material = materials.add(StandardMaterial {
+            base_color: Color::srgb(0.4, 0.7, 1.0), // Ice blue
+            emissive: LinearRgba::rgb(0.6, 0.9, 1.5), // Bright ice glow
+            ..default()
+        });
+        
+        // Add visual mesh to the projectile entity
+        commands.entity(projectile_entity).insert((
+            Mesh3d(mesh),
+            MeshMaterial3d(material),
+            Transform::from_translation(caster_pos + Vec3::new(0.0, 1.5, 0.0)), // Start at chest height
+        ));
+    }
+}
+
+/// Move projectiles towards their targets.
+/// Projectiles travel in a straight line at their defined speed.
+pub fn move_projectiles(
+    time: Res<Time>,
+    mut projectiles: Query<(&Projectile, &mut Transform)>,
+    targets: Query<&Transform, (With<Combatant>, Without<Projectile>)>,
+) {
+    let dt = time.delta_secs();
+    
+    for (projectile, mut projectile_transform) in projectiles.iter_mut() {
+        // Get target position
+        let Ok(target_transform) = targets.get(projectile.target) else {
+            continue; // Target no longer exists
+        };
+        
+        let target_pos = target_transform.translation + Vec3::new(0.0, 1.0, 0.0); // Aim at center mass
+        let current_pos = projectile_transform.translation;
+        
+        // Calculate direction to target
+        let direction = (target_pos - current_pos).normalize_or_zero();
+        
+        if direction != Vec3::ZERO {
+            // Move towards target
+            let move_distance = projectile.speed * dt;
+            projectile_transform.translation += direction * move_distance;
+            
+            // Rotate to face direction of travel
+            let target_rotation = Quat::from_rotation_arc(Vec3::Z, direction);
+            projectile_transform.rotation = target_rotation;
+        }
+    }
+}
+
+/// Check if projectiles have reached their targets and apply effects.
+/// When a projectile gets close enough to its target, it "hits" and applies damage/healing/auras.
+pub fn process_projectile_hits(
+    mut commands: Commands,
+    mut combat_log: ResMut<CombatLog>,
+    projectiles: Query<(Entity, &Projectile, &Transform)>,
+    mut combatants: Query<(&Transform, &mut Combatant)>,
+) {
+    const HIT_DISTANCE: f32 = 0.5; // Projectile hits when within 0.5 units of target
+    
+    // Collect hits to process (to avoid borrow checker issues)
+    let mut hits_to_process: Vec<(Entity, Entity, Entity, AbilityType, u8, match_config::CharacterClass, Vec3, Vec3)> = Vec::new();
+    
+    for (projectile_entity, projectile, projectile_transform) in projectiles.iter() {
+        // Get target position (immutable borrow)
+        let Ok((target_transform, target)) = combatants.get(projectile.target) else {
+            // Target no longer exists, despawn projectile
+            commands.entity(projectile_entity).despawn_recursive();
+            continue;
+        };
+        
+        if !target.is_alive() {
+            // Target already dead, despawn projectile
+            commands.entity(projectile_entity).despawn_recursive();
+            continue;
+        }
+        
+        let target_pos = target_transform.translation + Vec3::new(0.0, 1.0, 0.0); // Center mass
+        let projectile_pos = projectile_transform.translation;
+        let distance = projectile_pos.distance(target_pos);
+        
+        // Check if projectile has reached target
+        if distance <= HIT_DISTANCE {
+            // Get caster position (immutable borrow)
+            let Ok((caster_transform, _)) = combatants.get(projectile.caster) else {
+                // Caster no longer exists, despawn projectile
+                commands.entity(projectile_entity).despawn_recursive();
+                continue;
+            };
+            
+            let caster_pos = caster_transform.translation;
+            let target_world_pos = target_transform.translation;
+            
+            // Queue this hit for processing
+            hits_to_process.push((
+                projectile_entity,
+                projectile.caster,
+                projectile.target,
+                projectile.ability,
+                projectile.caster_team,
+                projectile.caster_class,
+                caster_pos,
+                target_world_pos,
+            ));
+        }
+    }
+    
+    // Process all queued hits
+    for (projectile_entity, caster_entity, target_entity, ability, caster_team, caster_class, caster_pos, target_pos) in hits_to_process {
+        let def = ability.definition();
+        let text_position = target_pos + Vec3::new(0.0, 2.0, 0.0);
+        let ability_range = caster_pos.distance(target_pos);
+        
+        // Apply damage
+        if def.is_damage() {
+            let damage_range = def.damage_max - def.damage_min;
+            let damage = def.damage_min + (rand::random::<f32>() * damage_range);
+            
+            // Get target info and apply damage
+            let (actual_damage, target_team, target_class_name, is_warrior_target) = {
+                let Ok((_, mut target)) = combatants.get_mut(target_entity) else {
+                    commands.entity(projectile_entity).despawn_recursive();
+                    continue;
+                };
+                
+                let actual_damage = damage.min(target.current_health);
+                target.current_health = (target.current_health - damage).max(0.0);
+                target.damage_taken += actual_damage;
+                
+                // Warriors generate Rage from taking damage
+                if target.resource_type == ResourceType::Rage {
+                    let rage_gain = actual_damage * 0.15;
+                    target.current_mana = (target.current_mana + rage_gain).min(target.max_mana);
+                }
+                
+                (actual_damage, target.team, target.class.name().to_string(), target.resource_type == ResourceType::Rage)
+            }; // target borrow dropped here
+            
+            // Update caster damage dealt
+            {
+                let Ok((_, mut caster)) = combatants.get_mut(caster_entity) else {
+                    commands.entity(projectile_entity).despawn_recursive();
+                    continue;
+                };
+                caster.damage_dealt += actual_damage;
+            } // caster borrow dropped here
+            
+            // Spawn yellow floating combat text for ability damage
+            commands.spawn((
+                FloatingCombatText {
+                    world_position: text_position,
+                    text: format!("{:.0}", actual_damage),
+                    color: egui::Color32::from_rgb(255, 255, 0), // Yellow
+                    lifetime: 1.5,
+                    vertical_offset: 0.0,
+                },
+                PlayMatchEntity,
+            ));
+            
+            // Log the damage
+            let message = format!(
+                "Team {} {}'s {} hits Team {} {} for {:.0} damage",
+                caster_team,
+                caster_class.name(),
+                def.name,
+                target_team,
+                target_class_name,
+                actual_damage
+            );
+            combat_log.log_with_position(
+                CombatLogEventType::Damage,
+                message,
+                PositionData {
+                    entities: vec![
+                        format!("Team {} {} (caster)", caster_team, caster_class.name()),
+                        format!("Team {} {} (target)", target_team, target_class_name),
+                    ],
+                    positions: vec![
+                        (caster_pos.x, caster_pos.y, caster_pos.z),
+                        (target_pos.x, target_pos.y, target_pos.z),
+                    ],
+                    distance: Some(ability_range),
+                },
+            );
+            
+            // Apply aura if ability has one
+            if let Some((aura_type, duration, magnitude)) = def.applies_aura {
+                commands.spawn(AuraPending {
+                    target: target_entity,
+                    aura: Aura {
+                        effect_type: aura_type,
+                        duration,
+                        magnitude,
+                    },
+                });
+            }
+        }
+        
+        // Despawn the projectile
+        commands.entity(projectile_entity).despawn_recursive();
     }
 }
 

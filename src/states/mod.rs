@@ -64,7 +64,17 @@ impl Plugin for StatesPlugin {
                     play_match::acquire_targets,
                     play_match::decide_abilities,
                     play_match::process_casting,
+                    play_match::spawn_projectile_visuals,
+                    play_match::move_projectiles,
+                    play_match::process_projectile_hits,
                     play_match::move_to_target,
+                )
+                    .chain()
+                    .run_if(in_state(GameState::PlayMatch)),
+            )
+            .add_systems(
+                Update,
+                (
                     play_match::update_stealth_visuals,
                     play_match::combat_auto_attack,
                     play_match::check_match_end,
@@ -75,7 +85,6 @@ impl Plugin for StatesPlugin {
                     play_match::render_floating_combat_text,
                     play_match::render_combat_log,
                 )
-                    .chain()
                     .run_if(in_state(GameState::PlayMatch)),
             )
             .add_systems(OnExit(GameState::PlayMatch), play_match::cleanup_play_match)
