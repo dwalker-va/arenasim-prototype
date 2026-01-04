@@ -364,7 +364,9 @@ pub enum AuraType {
     Root,
     /// Prevents all actions (movement, casting, auto-attacks, abilities) - magnitude unused
     Stun,
-    // Future: Silence, Damage-over-time, Healing-over-time, etc.
+    /// Increases maximum health by a flat amount (magnitude = HP bonus)
+    MaxHealthIncrease,
+    // Future: Silence, Damage-over-time, Healing-over-time, Attack Power buffs, etc.
 }
 
 /// Enum representing available abilities.
@@ -379,6 +381,7 @@ pub enum AbilityType {
     SinisterStrike,
     Charge,
     KidneyShot,
+    PowerWordFortitude,
     // Future: Fireball, Backstab, etc.
 }
 
@@ -530,6 +533,24 @@ impl AbilityType {
                 // Stun for 6 seconds, doesn't break on damage (break_threshold = 0.0)
                 applies_aura: Some((AuraType::Stun, 6.0, 1.0, 0.0)),
                 projectile_speed: None, // Instant melee strike
+            },
+            AbilityType::PowerWordFortitude => AbilityDefinition {
+                name: "Power Word: Fortitude",
+                cast_time: 0.0, // Instant cast
+                range: 40.0, // Same range as Flash Heal
+                mana_cost: 30.0, // Moderate mana cost
+                cooldown: 0.0, // No cooldown - can buff entire team quickly
+                damage_base_min: 0.0, // No damage
+                damage_base_max: 0.0,
+                damage_coefficient: 0.0,
+                damage_scales_with: ScalingStat::None,
+                healing_base_min: 0.0, // Not a heal
+                healing_base_max: 0.0,
+                healing_coefficient: 0.0,
+                // Increase max HP by 30 for 600 seconds (10 minutes, effectively permanent)
+                // Magnitude = 30 HP, duration = 600s, no damage breaking
+                applies_aura: Some((AuraType::MaxHealthIncrease, 600.0, 30.0, 0.0)),
+                projectile_speed: None, // Instant buff
             },
         }
     }
@@ -1251,6 +1272,7 @@ pub fn render_combat_log(
                         let color = match entry.event_type {
                             CombatLogEventType::Damage => egui::Color32::from_rgb(255, 180, 180), // Light red
                             CombatLogEventType::Healing => egui::Color32::from_rgb(180, 255, 180), // Light green
+                            CombatLogEventType::Buff => egui::Color32::from_rgb(180, 220, 255), // Light blue/cyan
                             CombatLogEventType::Death => egui::Color32::from_rgb(200, 100, 100), // Dark red
                             CombatLogEventType::MatchEvent => egui::Color32::from_rgb(200, 200, 100), // Yellow
                             _ => egui::Color32::from_rgb(200, 200, 200), // Gray
@@ -2127,6 +2149,14 @@ pub fn decide_abilities(
         })
         .collect();
     
+    // Map of entities to their active auras (for checking buffs/debuffs)
+    let active_auras_map: std::collections::HashMap<Entity, Vec<Aura>> = combatants
+        .iter()
+        .filter_map(|(entity, _, _, auras_opt)| {
+            auras_opt.map(|auras| (entity, auras.auras.clone()))
+        })
+        .collect();
+    
     // Queue for Ambush attacks (attacker, target, damage, team, class)
     // Queue for instant ability attacks (Ambush, Sinister Strike)
     // Format: (attacker_entity, target_entity, damage, attacker_team, attacker_class, ability_type)
@@ -2286,6 +2316,78 @@ pub fn decide_abilities(
         }
         // Priests cast Flash Heal on injured allies
         else if combatant.class == match_config::CharacterClass::Priest {
+            // Check if global cooldown is active (check once for all abilities)
+            if combatant.global_cooldown > 0.0 {
+                continue; // Can't cast during GCD
+            }
+            
+            // Priority 0: Cast Power Word: Fortitude on allies who don't have it
+            // (Pre-combat buffing phase)
+            let mut unbuffed_ally: Option<(Entity, Vec3)> = None;
+            
+            for (ally_entity, &(ally_team, _ally_class, ally_hp, _ally_max_hp)) in combatant_info.iter() {
+                // Must be same team and alive
+                if ally_team != combatant.team || ally_hp <= 0.0 {
+                    continue;
+                }
+                
+                // Check if ally already has MaxHealthIncrease buff
+                let has_fortitude = if let Some(auras) = active_auras_map.get(ally_entity) {
+                    auras.iter().any(|a| a.effect_type == AuraType::MaxHealthIncrease)
+                } else {
+                    false
+                };
+                
+                if has_fortitude {
+                    continue; // Already buffed
+                }
+                
+                // Get position
+                let Some(&ally_pos) = positions.get(ally_entity) else {
+                    continue;
+                };
+                
+                // Found an unbuffed ally
+                unbuffed_ally = Some((*ally_entity, ally_pos));
+                break; // Buff one ally at a time
+            }
+            
+            // Cast Fortitude on unbuffed ally
+            if let Some((buff_target, target_pos)) = unbuffed_ally {
+                let ability = AbilityType::PowerWordFortitude;
+                if ability.can_cast(&combatant, target_pos, my_pos) {
+                    let def = ability.definition();
+                    
+                    // Consume mana
+                    combatant.current_mana -= def.mana_cost;
+                    
+                    // Trigger global cooldown
+                    combatant.global_cooldown = 1.5;
+                    
+                    // Apply the buff aura immediately (instant cast)
+                    if let Some((aura_type, duration, magnitude, break_threshold)) = def.applies_aura {
+                        commands.spawn(AuraPending {
+                            target: buff_target,
+                            aura: Aura {
+                                effect_type: aura_type,
+                                duration,
+                                magnitude,
+                                break_on_damage_threshold: break_threshold,
+                                accumulated_damage: 0.0,
+                            },
+                        });
+                    }
+                    
+                    info!(
+                        "Team {} {} casts Power Word: Fortitude on ally",
+                        combatant.team,
+                        combatant.class.name()
+                    );
+                    
+                    continue; // Done this frame
+                }
+            }
+            
             // Find the lowest HP ally (including self)
             let mut lowest_hp_ally: Option<(Entity, f32, Vec3)> = None;
             
@@ -2314,11 +2416,6 @@ pub fn decide_abilities(
                     }
                     _ => {}
                 }
-            }
-            
-            // Check if global cooldown is active
-            if combatant.global_cooldown > 0.0 {
-                continue; // Can't start casting during GCD
             }
             
             // Priority 1: Cast heal on lowest HP ally if found
@@ -2358,11 +2455,7 @@ pub fn decide_abilities(
                 continue;
             };
             
-            // Check if Mind Blast is off cooldown and GCD is not active
-            if combatant.global_cooldown > 0.0 {
-                continue; // Can't start casting during GCD
-            }
-            
+            // Check if Mind Blast is off cooldown
             let ability = AbilityType::MindBlast;
             let on_cooldown = combatant.ability_cooldowns.contains_key(&ability);
             
@@ -3144,12 +3237,46 @@ pub fn update_auras(
 /// to their targets. It handles both new auras and stacking existing auras.
 pub fn apply_pending_auras(
     mut commands: Commands,
+    mut combat_log: ResMut<CombatLog>,
     pending_auras: Query<(Entity, &AuraPending)>,
-    mut combatants: Query<&mut ActiveAuras>,
+    mut combatants: Query<(&mut Combatant, Option<&mut ActiveAuras>)>,
 ) {
     for (pending_entity, pending) in pending_auras.iter() {
+        // Get target combatant
+        let Ok((mut target_combatant, active_auras)) = combatants.get_mut(pending.target) else {
+            commands.entity(pending_entity).despawn();
+            continue;
+        };
+        
+        // Handle MaxHealthIncrease aura - apply HP buff immediately
+        if pending.aura.effect_type == AuraType::MaxHealthIncrease {
+            let hp_bonus = pending.aura.magnitude;
+            target_combatant.max_health += hp_bonus;
+            target_combatant.current_health += hp_bonus; // Give them the extra HP
+            
+            info!(
+                "Team {} {} receives Power Word: Fortitude (+{:.0} max HP, now {:.0}/{:.0})",
+                target_combatant.team,
+                target_combatant.class.name(),
+                hp_bonus,
+                target_combatant.current_health,
+                target_combatant.max_health
+            );
+            
+            // Log to combat log
+            combat_log.log(
+                CombatLogEventType::Buff,
+                format!(
+                    "Team {} {} gains Power Word: Fortitude (+{:.0} max HP)",
+                    target_combatant.team,
+                    target_combatant.class.name(),
+                    hp_bonus
+                )
+            );
+        }
+        
         // Try to get existing auras on target
-        if let Ok(mut active_auras) = combatants.get_mut(pending.target) {
+        if let Some(mut active_auras) = active_auras {
             // Add to existing auras
             active_auras.auras.push(pending.aura.clone());
         } else {
@@ -3199,6 +3326,7 @@ pub fn process_aura_breaks(
                         AuraType::Root => "Root",
                         AuraType::MovementSpeedSlow => "Movement Speed Slow",
                         AuraType::Stun => "Stun",
+                        AuraType::MaxHealthIncrease => "Power Word: Fortitude", // Should never break on damage
                     };
                     
                     let message = format!(

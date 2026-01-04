@@ -43,6 +43,8 @@ pub enum CombatLogEventType {
     AuraRemoved,
     /// Crowd control applied
     CrowdControl,
+    /// Friendly buff applied (like Power Word: Fortitude)
+    Buff,
     /// Combatant died
     Death,
     /// Match event (start, end, etc.)
@@ -217,6 +219,7 @@ impl CombatLog {
                 CombatLogEventType::AuraApplied => "[AURA+]",
                 CombatLogEventType::AuraRemoved => "[AURA-]",
                 CombatLogEventType::CrowdControl => "[CC]",
+                CombatLogEventType::Buff => "[BUFF]",
                 CombatLogEventType::Death => "[DEATH]",
                 CombatLogEventType::MatchEvent => "[EVENT]",
             };
