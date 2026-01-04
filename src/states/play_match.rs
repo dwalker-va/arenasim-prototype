@@ -4236,14 +4236,15 @@ pub fn render_victory_celebration(
                 
                 ui.add_space(15.0);
                 
-                // Victory message
-                ui.label(
-                    egui::RichText::new("Victory!")
-                        .size(42.0)
-                        .color(egui::Color32::from_rgb(255, 215, 0)) // Gold
-                );
-                
-                ui.add_space(10.0);
+                // Celebration message (only show "Victory!" if not a draw)
+                if celebration.winner.is_some() {
+                    ui.label(
+                        egui::RichText::new("Victory!")
+                            .size(42.0)
+                            .color(egui::Color32::from_rgb(255, 215, 0)) // Gold
+                    );
+                    ui.add_space(10.0);
+                }
                 
                 // Countdown to results
                 let seconds_remaining = celebration.time_remaining.ceil() as i32;
