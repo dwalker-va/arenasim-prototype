@@ -15,7 +15,7 @@
 //! - 3D capsule meshes represent combatants, colored by class
 //! - Health bars rendered above each combatant's head using 2D overlay
 //! - Combatants rotate to face their targets
-//! - Simple arena floor (30x30 plane)
+//! - Simple arena floor (60x60 plane)
 //! - Isometric camera view
 //!
 //! ## Flow
@@ -46,8 +46,8 @@ const MELEE_RANGE: f32 = 2.5;
 /// Distance threshold for stopping movement (slightly less than melee range to avoid jitter)
 const STOP_DISTANCE: f32 = 2.0;
 
-/// Arena size (30x30 plane centered at origin)
-const ARENA_HALF_SIZE: f32 = 15.0;
+/// Arena size (60x60 plane centered at origin)
+const ARENA_HALF_SIZE: f32 = 30.0;
 
 // ============================================================================
 // Resources
@@ -470,7 +470,7 @@ pub fn setup_play_match(
     // Spawn 3D camera with isometric-ish view
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(0.0, 20.0, 25.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_xyz(0.0, 40.0, 50.0).looking_at(Vec3::ZERO, Vec3::Y),
         PlayMatchEntity,
     ));
 
@@ -494,8 +494,8 @@ pub fn setup_play_match(
     // Initialize simulation speed control
     commands.insert_resource(SimulationSpeed { multiplier: 1.0 });
 
-    // Spawn arena floor - 30x30 unit plane
-    let floor_size = 30.0;
+    // Spawn arena floor - 60x60 unit plane
+    let floor_size = 60.0;
     commands.spawn((
         Mesh3d(meshes.add(Plane3d::default().mesh().size(floor_size, floor_size))),
         MeshMaterial3d(materials.add(StandardMaterial {
@@ -512,7 +512,7 @@ pub fn setup_play_match(
     let mut team2_class_counts: HashMap<match_config::CharacterClass, usize> = HashMap::new();
 
     // Spawn Team 1 combatants (left side of arena)
-    let team1_spawn_x = -10.0;
+    let team1_spawn_x = -20.0;
     for (i, character_opt) in config.team1.iter().enumerate() {
         if let Some(character) = character_opt {
             let count = *team1_class_counts.get(character).unwrap_or(&0);
@@ -531,7 +531,7 @@ pub fn setup_play_match(
     }
 
     // Spawn Team 2 combatants (right side of arena)
-    let team2_spawn_x = 10.0;
+    let team2_spawn_x = 20.0;
     for (i, character_opt) in config.team2.iter().enumerate() {
         if let Some(character) = character_opt {
             let count = *team2_class_counts.get(character).unwrap_or(&0);
