@@ -144,6 +144,12 @@ pub struct Combatant {
     pub next_attack_bonus_damage: f32,
     /// Whether this combatant is currently stealthed (Rogues only)
     pub stealthed: bool,
+    /// Original color before stealth visual effects were applied
+    pub original_color: Color,
+    /// Cooldown timers for abilities (ability type -> remaining cooldown in seconds)
+    pub ability_cooldowns: std::collections::HashMap<AbilityType, f32>,
+    /// When > 0, combatant will move away from enemies (kiting). Decrements over time.
+    pub kiting_timer: f32,
 }
 
 impl Combatant {
@@ -179,6 +185,9 @@ impl Combatant {
             healing_done: 0.0,
             next_attack_bonus_damage: 0.0,
             stealthed,
+            original_color: Color::WHITE, // Will be set correctly when spawning the visual mesh
+            ability_cooldowns: std::collections::HashMap::new(),
+            kiting_timer: 0.0,
         }
     }
     
@@ -252,20 +261,23 @@ pub struct Aura {
 }
 
 /// Types of aura effects.
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum AuraType {
     /// Reduces movement speed by a percentage (magnitude = multiplier, e.g., 0.7 = 30% slow)
     MovementSpeedSlow,
-    // Future: Stun, Root, Silence, Damage-over-time, Healing-over-time, etc.
+    /// Prevents movement (rooted in place) - magnitude unused
+    Root,
+    // Future: Stun, Silence, Damage-over-time, Healing-over-time, etc.
 }
 
 /// Enum representing available abilities.
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum AbilityType {
     Frostbolt,
     FlashHeal,
     HeroicStrike,
     Ambush,
+    FrostNova,
     // Future: Fireball, Backstab, etc.
 }
 
@@ -320,6 +332,18 @@ impl AbilityType {
                 healing_min: 0.0,
                 healing_max: 0.0,
                 applies_aura: None,
+            },
+            AbilityType::FrostNova => AbilityDefinition {
+                name: "Frost Nova",
+                cast_time: 0.0, // Instant cast
+                range: 10.0, // AOE range - affects all enemies within this distance
+                mana_cost: 30.0,
+                cooldown: 25.0, // 25 second cooldown
+                damage_min: 10.0, // Small AOE damage
+                damage_max: 15.0,
+                healing_min: 0.0,
+                healing_max: 0.0,
+                applies_aura: Some((AuraType::Root, 6.0, 1.0)), // Root for 6 seconds
             },
         }
     }
@@ -741,7 +765,7 @@ pub fn update_play_match(
 /// - **Cast bar** (when casting): Orange bar with spell name showing cast progress
 pub fn render_health_bars(
     mut contexts: EguiContexts,
-    combatants: Query<(&Combatant, &Transform, Option<&CastingState>)>,
+    combatants: Query<(&Combatant, &Transform, Option<&CastingState>, Option<&ActiveAuras>)>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
 ) {
     let ctx = contexts.ctx_mut();
@@ -753,7 +777,7 @@ pub fn render_health_bars(
     egui::Area::new(egui::Id::new("health_bars"))
         .fixed_pos(egui::pos2(0.0, 0.0))
         .show(ctx, |ui| {
-            for (combatant, transform, casting_state) in combatants.iter() {
+            for (combatant, transform, casting_state, active_auras) in combatants.iter() {
                 if !combatant.is_alive() {
                     continue;
                 }
@@ -775,6 +799,10 @@ pub fn render_health_bars(
                     );
                     
                     // STEALTH indicator (if stealthed)
+                    // Status indicators above health bar
+                    let mut status_offset = -12.0; // Starting position above health bar
+                    
+                    // STEALTH indicator (if stealthed)
                     if combatant.stealthed {
                         let stealth_text = "STEALTH";
                         let stealth_font = egui::FontId::monospace(9.0);
@@ -785,12 +813,28 @@ pub fn render_health_bars(
                         ));
                         let stealth_pos = egui::pos2(
                             bar_pos.x + (bar_width - stealth_galley.size().x) / 2.0,
-                            bar_pos.y - 12.0, // Above the health bar
+                            bar_pos.y + status_offset,
                         );
                         ui.painter().galley(stealth_pos, stealth_galley, egui::Color32::from_rgb(150, 100, 200));
-                        
-                        // Move health bar down slightly to make room for stealth label
-                        // (Actually, let's keep it in the same position for consistency)
+                        status_offset -= 10.0; // Move next label up
+                    }
+                    
+                    // ROOTED indicator (if has Root aura)
+                    if let Some(auras) = active_auras {
+                        if auras.auras.iter().any(|a| a.effect_type == AuraType::Root) {
+                            let root_text = "ROOTED";
+                            let root_font = egui::FontId::monospace(9.0);
+                            let root_galley = ui.fonts(|f| f.layout_no_wrap(
+                                root_text.to_string(),
+                                root_font,
+                                egui::Color32::from_rgb(100, 180, 255), // Ice blue
+                            ));
+                            let root_pos = egui::pos2(
+                                bar_pos.x + (bar_width - root_galley.size().x) / 2.0,
+                                bar_pos.y + status_offset,
+                            );
+                            ui.painter().galley(root_pos, root_galley, egui::Color32::from_rgb(100, 180, 255));
+                        }
                     }
 
                     // Health bar background (dark gray)
@@ -1180,14 +1224,14 @@ pub fn move_to_target(
 ) {
     let dt = time.delta_secs();
     
-    // Build a snapshot of all combatant positions for lookups
-    let positions: std::collections::HashMap<Entity, Vec3> = combatants
+    // Build a snapshot of all combatant positions and team info for lookups
+    let positions: std::collections::HashMap<Entity, (Vec3, u8)> = combatants
         .iter()
-        .map(|(entity, transform, _, _, _)| (entity, transform.translation))
+        .map(|(entity, transform, combatant, _, _)| (entity, (transform.translation, combatant.team)))
         .collect();
     
     // Move each combatant towards their target if needed
-    for (_entity, mut transform, combatant, auras, casting_state) in combatants.iter_mut() {
+    for (entity, mut transform, combatant, auras, casting_state) in combatants.iter_mut() {
         if !combatant.is_alive() {
             continue;
         }
@@ -1197,16 +1241,77 @@ pub fn move_to_target(
             continue;
         }
         
-        // Get target position
+        // Check if rooted - if so, cannot move
+        let is_rooted = if let Some(auras) = auras {
+            auras.auras.iter().any(|a| a.effect_type == AuraType::Root)
+        } else {
+            false
+        };
+        
+        if is_rooted {
+            continue;
+        }
+        
+        let my_pos = transform.translation;
+        
+        // KITING BEHAVIOR: If kiting_timer > 0, move away from nearest enemy
+        if combatant.kiting_timer > 0.0 {
+            // Find nearest enemy
+            let mut nearest_enemy_pos: Option<Vec3> = None;
+            let mut nearest_distance = f32::MAX;
+            
+            for (other_entity, &(other_pos, other_team)) in positions.iter() {
+                if *other_entity != entity && other_team != combatant.team {
+                    let distance = my_pos.distance(other_pos);
+                    if distance < nearest_distance {
+                        nearest_distance = distance;
+                        nearest_enemy_pos = Some(other_pos);
+                    }
+                }
+            }
+            
+            // Move away from nearest enemy
+            if let Some(enemy_pos) = nearest_enemy_pos {
+                // Calculate direction AWAY from enemy (only in XZ plane, keep Y constant)
+                let direction = Vec3::new(
+                    my_pos.x - enemy_pos.x,
+                    0.0, // Don't move vertically
+                    my_pos.z - enemy_pos.z,
+                ).normalize_or_zero();
+                
+                if direction != Vec3::ZERO {
+                    // Calculate effective movement speed (base * aura modifiers)
+                    let mut movement_speed = combatant.base_movement_speed;
+                    if let Some(auras) = auras {
+                        for aura in &auras.auras {
+                            if aura.effect_type == AuraType::MovementSpeedSlow {
+                                movement_speed *= aura.magnitude;
+                            }
+                        }
+                    }
+                    
+                    // Move away from enemy
+                    let move_distance = movement_speed * dt;
+                    transform.translation += direction * move_distance;
+                    
+                    // Rotate to face direction of travel
+                    let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
+                    transform.rotation = target_rotation;
+                }
+            }
+            
+            continue; // Skip normal movement logic
+        }
+        
+        // NORMAL MOVEMENT: Get target position
         let Some(target_entity) = combatant.target else {
             continue;
         };
         
-        let Some(&target_pos) = positions.get(&target_entity) else {
+        let Some(&(target_pos, _)) = positions.get(&target_entity) else {
             continue;
         };
         
-        let my_pos = transform.translation;
         let distance = my_pos.distance(target_pos);
         
         // If out of range, move towards target
@@ -1492,6 +1597,7 @@ pub fn combat_auto_attack(
 /// Resource regeneration system: Regenerate mana for all combatants.
 /// 
 /// Each combatant with mana regeneration gains mana per second up to their max.
+/// Also ticks down ability cooldowns over time.
 pub fn regenerate_resources(
     time: Res<Time>,
     mut combatants: Query<&mut Combatant>,
@@ -1503,9 +1609,28 @@ pub fn regenerate_resources(
             continue;
         }
         
-        // Regenerate mana
+        // Regenerate mana/resources
         if combatant.mana_regen > 0.0 {
             combatant.current_mana = (combatant.current_mana + combatant.mana_regen * dt).min(combatant.max_mana);
+        }
+        
+        // Tick down ability cooldowns
+        let abilities_on_cooldown: Vec<AbilityType> = combatant.ability_cooldowns.keys().copied().collect();
+        for ability in abilities_on_cooldown {
+            if let Some(cooldown) = combatant.ability_cooldowns.get_mut(&ability) {
+                *cooldown -= dt;
+                if *cooldown <= 0.0 {
+                    combatant.ability_cooldowns.remove(&ability);
+                }
+            }
+        }
+        
+        // Tick down kiting timer
+        if combatant.kiting_timer > 0.0 {
+            combatant.kiting_timer -= dt;
+            if combatant.kiting_timer < 0.0 {
+                combatant.kiting_timer = 0.0;
+            }
         }
     }
 }
@@ -1538,6 +1663,9 @@ pub fn decide_abilities(
     // Queue for Ambush attacks (attacker, target, damage, team, class)
     let mut ambush_attacks: Vec<(Entity, Entity, f32, u8, match_config::CharacterClass)> = Vec::new();
     
+    // Queue for Frost Nova damage (caster, target, damage, caster_team, caster_class, target_pos)
+    let mut frost_nova_damage: Vec<(Entity, Entity, f32, u8, match_config::CharacterClass, Vec3)> = Vec::new();
+    
     for (entity, mut combatant, transform) in combatants.iter_mut() {
         if !combatant.is_alive() {
             continue;
@@ -1545,9 +1673,87 @@ pub fn decide_abilities(
         
         let my_pos = transform.translation;
         
-        // Mages cast Frostbolt on enemies
+        // Mages cast spells on enemies
         if combatant.class == match_config::CharacterClass::Mage {
-            // Check if we have an enemy target
+            // First priority: Use Frost Nova if enemies are in melee range (defensive ability)
+            let frost_nova = AbilityType::FrostNova;
+            let nova_def = frost_nova.definition();
+            let nova_on_cooldown = combatant.ability_cooldowns.contains_key(&frost_nova);
+            
+            if !nova_on_cooldown && combatant.current_mana >= nova_def.mana_cost {
+                // Check if any enemies are within Frost Nova range (melee range for threat detection)
+                let enemies_in_melee_range = positions.iter().any(|(enemy_entity, &enemy_pos)| {
+                    if let Some(&(enemy_team, _, _, _)) = combatant_info.get(enemy_entity) {
+                        if enemy_team != combatant.team {
+                            let distance = my_pos.distance(enemy_pos);
+                            return distance <= MELEE_RANGE;
+                        }
+                    }
+                    false
+                });
+                
+                if enemies_in_melee_range {
+                    // Consume mana
+                    combatant.current_mana -= nova_def.mana_cost;
+                    
+                    // Put ability on cooldown
+                    combatant.ability_cooldowns.insert(frost_nova, nova_def.cooldown);
+                    
+                    // Collect enemies in range for damage and root
+                    let mut frost_nova_targets: Vec<(Entity, Vec3, u8, match_config::CharacterClass)> = Vec::new();
+                    for (enemy_entity, &enemy_pos) in positions.iter() {
+                        if let Some(&(enemy_team, enemy_class, _, _)) = combatant_info.get(enemy_entity) {
+                            if enemy_team != combatant.team {
+                                let distance = my_pos.distance(enemy_pos);
+                                if distance <= nova_def.range {
+                                    frost_nova_targets.push((*enemy_entity, enemy_pos, enemy_team, enemy_class));
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Queue damage and apply root to all targets
+                    for (target_entity, target_pos, target_team, target_class) in &frost_nova_targets {
+                        // Calculate random damage
+                        let damage_range = nova_def.damage_max - nova_def.damage_min;
+                        let damage = nova_def.damage_min + (rand::random::<f32>() * damage_range);
+                        
+                        // Queue damage for later application
+                        frost_nova_damage.push((entity, *target_entity, damage, combatant.team, combatant.class, *target_pos));
+                        
+                        // Apply aura (spawn separate AuraPending entity)
+                        if let Some((aura_type, duration, magnitude)) = nova_def.applies_aura {
+                            commands.spawn(AuraPending {
+                                target: *target_entity,
+                                aura: Aura {
+                                    effect_type: aura_type,
+                                    duration,
+                                    magnitude,
+                                },
+                            });
+                        }
+                    }
+                    
+                    // Set kiting timer - mage should move away from enemies for the root duration
+                    combatant.kiting_timer = nova_def.applies_aura.unwrap().1; // Root duration (6.0s)
+                    
+                    info!(
+                        "Team {} {} casts Frost Nova! (AOE root) - {} enemies affected",
+                        combatant.team,
+                        combatant.class.name(),
+                        frost_nova_targets.len()
+                    );
+                    
+                    continue; // Don't cast Frostbolt this frame
+                }
+            }
+            
+            // Second priority: Cast Frostbolt on target (but not while kiting!)
+            // If kiting, focus on movement, don't cast
+            if combatant.kiting_timer > 0.0 {
+                continue;
+            }
+            
             let Some(target_entity) = combatant.target else {
                 continue;
             };
@@ -1788,6 +1994,78 @@ pub fn decide_abilities(
         // Update attacker's damage dealt
         if let Ok((_, mut attacker, _)) = combatants.get_mut(attacker_entity) {
             attacker.damage_dealt += actual_damage;
+        }
+    }
+    
+    // Process queued Frost Nova damage
+    for (caster_entity, target_entity, damage, caster_team, caster_class, target_pos) in frost_nova_damage {
+        let mut actual_damage = 0.0;
+        let mut target_team = 0;
+        let mut target_class = match_config::CharacterClass::Warrior;
+        
+        if let Ok((_, mut target, target_transform)) = combatants.get_mut(target_entity) {
+            if target.is_alive() {
+                actual_damage = damage.min(target.current_health);
+                target.current_health = (target.current_health - damage).max(0.0);
+                target.damage_taken += actual_damage;
+                target_team = target.team;
+                target_class = target.class;
+                
+                // Warriors generate Rage from taking damage
+                if target.resource_type == ResourceType::Rage {
+                    let rage_gain = actual_damage * 0.15;
+                    target.current_mana = (target.current_mana + rage_gain).min(target.max_mana);
+                }
+                
+                // Spawn floating combat text (yellow for abilities)
+                let text_position = target_transform.translation + Vec3::new(0.0, 2.0, 0.0);
+                commands.spawn((
+                    FloatingCombatText {
+                        world_position: text_position,
+                        text: format!("{:.0}", actual_damage),
+                        color: egui::Color32::from_rgb(255, 255, 0), // Yellow for abilities
+                        lifetime: 1.5,
+                        vertical_offset: 0.0,
+                    },
+                    PlayMatchEntity,
+                ));
+                
+                // Log the Frost Nova damage with position data
+                let message = format!(
+                    "Team {} {}'s Frost Nova hits Team {} {} for {:.0} damage",
+                    caster_team,
+                    caster_class.name(),
+                    target_team,
+                    target_class.name(),
+                    actual_damage
+                );
+                
+                if let Some(&caster_pos) = positions.get(&caster_entity) {
+                    let distance = caster_pos.distance(target_pos);
+                    combat_log.log_with_position(
+                        CombatLogEventType::Damage,
+                        message,
+                        PositionData {
+                            entities: vec![
+                                format!("Team {} {} (caster)", caster_team, caster_class.name()),
+                                format!("Team {} {} (target)", target_team, target_class.name()),
+                            ],
+                            positions: vec![
+                                (caster_pos.x, caster_pos.y, caster_pos.z),
+                                (target_pos.x, target_pos.y, target_pos.z),
+                            ],
+                            distance: Some(distance),
+                        },
+                    );
+                } else {
+                    combat_log.log(CombatLogEventType::Damage, message);
+                }
+            }
+        }
+        
+        // Update caster's damage dealt
+        if let Ok((_, mut caster, _)) = combatants.get_mut(caster_entity) {
+            caster.damage_dealt += actual_damage;
         }
     }
 }
