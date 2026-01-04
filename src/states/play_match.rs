@@ -329,6 +329,10 @@ pub struct CastingState {
     pub time_remaining: f32,
     /// Target entity for the ability (if single-target)
     pub target: Option<Entity>,
+    /// Whether this cast was interrupted (for visual feedback)
+    pub interrupted: bool,
+    /// Time remaining to show interrupted state (before removing CastingState)
+    pub interrupted_display_time: f32,
 }
 
 /// Component tracking an active Charge (Warrior gap closer).
@@ -350,6 +354,20 @@ pub struct ActiveAuras {
 pub struct AuraPending {
     pub target: Entity,
     pub aura: Aura,
+}
+
+/// Component for pending interrupt attempts.
+/// Spawned as a temporary entity to interrupt a target's cast.
+#[derive(Component)]
+pub struct InterruptPending {
+    /// The entity that cast the interrupt
+    pub caster: Entity,
+    /// The target entity to interrupt
+    pub target: Entity,
+    /// The interrupt ability used (Pummel, Kick, etc.)
+    pub ability: AbilityType,
+    /// Duration of the spell school lockout (in seconds)
+    pub lockout_duration: f32,
 }
 
 /// Component tracking damage taken this frame for aura breaking purposes.
@@ -397,6 +415,21 @@ pub struct Aura {
     pub caster: Option<Entity>,
 }
 
+/// Spell schools - determines which spells share lockouts when interrupted.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum SpellSchool {
+    /// Physical abilities (melee attacks, weapon strikes)
+    Physical,
+    /// Frost magic (Frostbolt, Frost Nova)
+    Frost,
+    /// Holy magic (Flash Heal, Power Word: Fortitude)
+    Holy,
+    /// Shadow magic (Mind Blast)
+    Shadow,
+    /// No spell school (can't be locked out)
+    None,
+}
+
 /// Types of aura effects.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum AuraType {
@@ -410,6 +443,9 @@ pub enum AuraType {
     MaxHealthIncrease,
     /// Deals damage periodically (magnitude = damage per tick, tick_interval determines frequency)
     DamageOverTime,
+    /// Spell school lockout - prevents casting spells of a specific school
+    /// The magnitude field stores the locked school as f32 (cast from SpellSchool enum)
+    SpellSchoolLockout,
     // Future: Silence, Healing-over-time, Attack Power buffs, etc.
 }
 
@@ -427,6 +463,8 @@ pub enum AbilityType {
     KidneyShot,
     PowerWordFortitude,
     Rend,
+    Pummel,    // Warrior interrupt
+    Kick,      // Rogue interrupt
     // Future: Fireball, Backstab, etc.
 }
 
@@ -449,6 +487,9 @@ impl AbilityType {
                 healing_coefficient: 0.0,
                 applies_aura: Some((AuraType::MovementSpeedSlow, 5.0, 0.7, 0.0)), // 30% slow for 5s, doesn't break on damage
                 projectile_speed: Some(20.0), // Travels at 20 units/second
+                spell_school: SpellSchool::Frost,
+                is_interrupt: false,
+                lockout_duration: 0.0,
             },
             AbilityType::FlashHeal => AbilityDefinition {
                 name: "Flash Heal",
@@ -465,6 +506,9 @@ impl AbilityType {
                 healing_coefficient: 0.75, // 75% of Spell Power added to healing
                 applies_aura: None,
                 projectile_speed: None, // Instant effect, no projectile
+                spell_school: SpellSchool::Holy,
+                is_interrupt: false,
+                lockout_duration: 0.0,
             },
             AbilityType::HeroicStrike => AbilityDefinition {
                 name: "Heroic Strike",
@@ -481,6 +525,9 @@ impl AbilityType {
                 healing_coefficient: 0.0,
                 applies_aura: None,
                 projectile_speed: None, // Melee ability, no projectile
+                spell_school: SpellSchool::Physical,
+                is_interrupt: false,
+                lockout_duration: 0.0,
             },
             AbilityType::Ambush => AbilityDefinition {
                 name: "Ambush",
@@ -497,6 +544,9 @@ impl AbilityType {
                 healing_coefficient: 0.0,
                 applies_aura: None,
                 projectile_speed: None, // Melee ability, no projectile
+                spell_school: SpellSchool::Physical,
+                is_interrupt: false,
+                lockout_duration: 0.0,
             },
             AbilityType::FrostNova => AbilityDefinition {
                 name: "Frost Nova",
@@ -513,6 +563,9 @@ impl AbilityType {
                 healing_coefficient: 0.0,
                 applies_aura: Some((AuraType::Root, 6.0, 1.0, 35.0)), // Root for 6s, breaks on 35+ damage
                 projectile_speed: None, // Instant AOE, no projectile
+                spell_school: SpellSchool::Frost,
+                is_interrupt: false,
+                lockout_duration: 0.0,
             },
             AbilityType::MindBlast => AbilityDefinition {
                 name: "Mind Blast",
@@ -529,6 +582,9 @@ impl AbilityType {
                 healing_coefficient: 0.0,
                 applies_aura: None, // Pure damage, no debuff
                 projectile_speed: None, // Instant effect (shadow magic)
+                spell_school: SpellSchool::Shadow,
+                is_interrupt: false,
+                lockout_duration: 0.0,
             },
             AbilityType::SinisterStrike => AbilityDefinition {
                 name: "Sinister Strike",
@@ -545,6 +601,9 @@ impl AbilityType {
                 healing_coefficient: 0.0,
                 applies_aura: None,
                 projectile_speed: None, // Instant melee strike
+                spell_school: SpellSchool::Physical,
+                is_interrupt: false,
+                lockout_duration: 0.0,
             },
             AbilityType::Charge => AbilityDefinition {
                 name: "Charge",
@@ -561,6 +620,9 @@ impl AbilityType {
                 healing_coefficient: 0.0,
                 applies_aura: None,
                 projectile_speed: None, // Movement ability, not a projectile
+                spell_school: SpellSchool::Physical,
+                is_interrupt: false,
+                lockout_duration: 0.0,
             },
             AbilityType::KidneyShot => AbilityDefinition {
                 name: "Kidney Shot",
@@ -578,6 +640,9 @@ impl AbilityType {
                 // Stun for 6 seconds, doesn't break on damage (break_threshold = 0.0)
                 applies_aura: Some((AuraType::Stun, 6.0, 1.0, 0.0)),
                 projectile_speed: None, // Instant melee strike
+                spell_school: SpellSchool::Physical,
+                is_interrupt: false,
+                lockout_duration: 0.0,
             },
             AbilityType::PowerWordFortitude => AbilityDefinition {
                 name: "Power Word: Fortitude",
@@ -596,6 +661,9 @@ impl AbilityType {
                 // Magnitude = 30 HP, duration = 600s, no damage breaking
                 applies_aura: Some((AuraType::MaxHealthIncrease, 600.0, 30.0, 0.0)),
                 projectile_speed: None, // Instant buff
+                spell_school: SpellSchool::Holy,
+                is_interrupt: false,
+                lockout_duration: 0.0,
             },
             AbilityType::Rend => AbilityDefinition {
                 name: "Rend",
@@ -614,6 +682,47 @@ impl AbilityType {
                 // Magnitude = damage per tick, tick_interval stored separately in Aura
                 applies_aura: Some((AuraType::DamageOverTime, 15.0, 8.0, 0.0)),
                 projectile_speed: None, // Instant melee application
+                spell_school: SpellSchool::Physical,
+                is_interrupt: false,
+                lockout_duration: 0.0,
+            },
+            AbilityType::Pummel => AbilityDefinition {
+                name: "Pummel",
+                cast_time: 0.0, // Instant cast
+                range: MELEE_RANGE, // Melee ability
+                mana_cost: 10.0, // 10 rage cost
+                cooldown: 12.0, // Medium cooldown
+                damage_base_min: 0.0, // No damage
+                damage_base_max: 0.0,
+                damage_coefficient: 0.0,
+                damage_scales_with: ScalingStat::None,
+                healing_base_min: 0.0,
+                healing_base_max: 0.0,
+                healing_coefficient: 0.0,
+                applies_aura: None, // Interrupt is handled specially
+                projectile_speed: None, // Instant melee interrupt
+                spell_school: SpellSchool::Physical,
+                is_interrupt: true,
+                lockout_duration: 4.0, // 4 second lockout
+            },
+            AbilityType::Kick => AbilityDefinition {
+                name: "Kick",
+                cast_time: 0.0, // Instant cast
+                range: MELEE_RANGE, // Melee ability
+                mana_cost: 25.0, // 25 energy cost
+                cooldown: 12.0, // Medium cooldown
+                damage_base_min: 0.0, // No damage
+                damage_base_max: 0.0,
+                damage_coefficient: 0.0,
+                damage_scales_with: ScalingStat::None,
+                healing_base_min: 0.0,
+                healing_base_max: 0.0,
+                healing_coefficient: 0.0,
+                applies_aura: None, // Interrupt is handled specially
+                projectile_speed: None, // Instant melee interrupt
+                spell_school: SpellSchool::Physical,
+                is_interrupt: true,
+                lockout_duration: 4.0, // 4 second lockout
             },
         }
     }
@@ -685,6 +794,12 @@ pub struct AbilityDefinition {
     pub applies_aura: Option<(AuraType, f32, f32, f32)>,
     /// Projectile travel speed in units/second (None = instant effect, no projectile)
     pub projectile_speed: Option<f32>,
+    /// Spell school (determines lockout when interrupted)
+    pub spell_school: SpellSchool,
+    /// Whether this ability interrupts the target's casting
+    pub is_interrupt: bool,
+    /// Lockout duration in seconds (for interrupt abilities)
+    pub lockout_duration: f32,
 }
 
 impl AbilityDefinition {
@@ -1333,7 +1448,6 @@ pub fn render_health_bars(
                     // Cast bar (only when actively casting)
                     if let Some(casting) = casting_state {
                         let ability_def = casting.ability.definition();
-                        let cast_progress = 1.0 - (casting.time_remaining / ability_def.cast_time);
                         
                         let cast_bar_pos = egui::pos2(
                             bar_pos.x,
@@ -1348,42 +1462,75 @@ pub fn render_health_bars(
                             cast_bar_pos.y,
                         );
                         
-                        // Cast bar background (darker)
-                        ui.painter().rect_filled(
-                            egui::Rect::from_min_size(cast_bar_pos, egui::vec2(cast_bar_width, cast_bar_height)),
-                            2.0,
-                            egui::Color32::from_rgb(15, 15, 20),
-                        );
-                        
-                        // Cast bar fill (orange/yellow, WoW-style)
-                        ui.painter().rect_filled(
-                            egui::Rect::from_min_size(
-                                cast_bar_pos,
-                                egui::vec2(cast_bar_width * cast_progress, cast_bar_height),
-                            ),
-                            2.0,
-                            egui::Color32::from_rgb(255, 180, 50), // Orange
-                        );
-                        
-                        // Cast bar border
-                        ui.painter().rect_stroke(
-                            egui::Rect::from_min_size(cast_bar_pos, egui::vec2(cast_bar_width, cast_bar_height)),
-                            2.0,
-                            egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 200, 100)),
-                        );
-                        
-                        // Spell name text (centered on cast bar)
-                        let text_pos = egui::pos2(
-                            cast_bar_pos.x + cast_bar_width / 2.0,
-                            cast_bar_pos.y + cast_bar_height / 2.0,
-                        );
-                        ui.painter().text(
-                            text_pos,
-                            egui::Align2::CENTER_CENTER,
-                            ability_def.name,
-                            egui::FontId::proportional(10.0),
-                            egui::Color32::WHITE,
-                        );
+                        // Interrupted casts show in RED
+                        if casting.interrupted {
+                            // Red background for interrupted
+                            ui.painter().rect_filled(
+                                egui::Rect::from_min_size(cast_bar_pos, egui::vec2(cast_bar_width, cast_bar_height)),
+                                2.0,
+                                egui::Color32::from_rgb(150, 20, 20), // Dark red
+                            );
+                            
+                            // Red border
+                            ui.painter().rect_stroke(
+                                egui::Rect::from_min_size(cast_bar_pos, egui::vec2(cast_bar_width, cast_bar_height)),
+                                2.0,
+                                egui::Stroke::new(1.5, egui::Color32::from_rgb(220, 50, 50)),
+                            );
+                            
+                            // "INTERRUPTED" text in white
+                            let text_pos = egui::pos2(
+                                cast_bar_pos.x + cast_bar_width / 2.0,
+                                cast_bar_pos.y + cast_bar_height / 2.0,
+                            );
+                            ui.painter().text(
+                                text_pos,
+                                egui::Align2::CENTER_CENTER,
+                                "INTERRUPTED",
+                                egui::FontId::proportional(10.0),
+                                egui::Color32::WHITE,
+                            );
+                        } else {
+                            // Normal cast bar
+                            let cast_progress = 1.0 - (casting.time_remaining / ability_def.cast_time);
+                            
+                            // Cast bar background (darker)
+                            ui.painter().rect_filled(
+                                egui::Rect::from_min_size(cast_bar_pos, egui::vec2(cast_bar_width, cast_bar_height)),
+                                2.0,
+                                egui::Color32::from_rgb(15, 15, 20),
+                            );
+                            
+                            // Cast bar fill (orange/yellow, WoW-style)
+                            ui.painter().rect_filled(
+                                egui::Rect::from_min_size(
+                                    cast_bar_pos,
+                                    egui::vec2(cast_bar_width * cast_progress, cast_bar_height),
+                                ),
+                                2.0,
+                                egui::Color32::from_rgb(255, 180, 50), // Orange
+                            );
+                            
+                            // Cast bar border
+                            ui.painter().rect_stroke(
+                                egui::Rect::from_min_size(cast_bar_pos, egui::vec2(cast_bar_width, cast_bar_height)),
+                                2.0,
+                                egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 200, 100)),
+                            );
+                            
+                            // Spell name text (centered on cast bar)
+                            let text_pos = egui::pos2(
+                                cast_bar_pos.x + cast_bar_width / 2.0,
+                                cast_bar_pos.y + cast_bar_height / 2.0,
+                            );
+                            ui.painter().text(
+                                text_pos,
+                                egui::Align2::CENTER_CENTER,
+                                ability_def.name,
+                                egui::FontId::proportional(10.0),
+                                egui::Color32::WHITE,
+                            );
+                        }
                     }
                 }
             }
@@ -2509,6 +2656,33 @@ pub fn decide_abilities(
             
             // Try to cast Frostbolt
             let ability = AbilityType::Frostbolt;
+            let def = ability.definition();
+            
+            // Check if spell school is locked out
+            let is_locked_out = if let Some(auras) = auras {
+                auras.auras.iter().any(|aura| {
+                    if aura.effect_type == AuraType::SpellSchoolLockout {
+                        // Convert magnitude back to spell school
+                        let locked_school = match aura.magnitude as u8 {
+                            0 => SpellSchool::Physical,
+                            1 => SpellSchool::Frost,
+                            2 => SpellSchool::Holy,
+                            3 => SpellSchool::Shadow,
+                            _ => SpellSchool::None,
+                        };
+                        locked_school == def.spell_school
+                    } else {
+                        false
+                    }
+                })
+            } else {
+                false
+            };
+            
+            if is_locked_out {
+                continue; // Can't cast - spell school is locked
+            }
+            
             if ability.can_cast(&combatant, target_pos, my_pos) {
                 let def = ability.definition();
                 
@@ -2521,6 +2695,8 @@ pub fn decide_abilities(
                     ability,
                     time_remaining: def.cast_time,
                     target: Some(target_entity),
+                    interrupted: false,
+                    interrupted_display_time: 0.0,
                 });
                 
                 info!(
@@ -2653,6 +2829,8 @@ pub fn decide_abilities(
                         ability,
                         time_remaining: def.cast_time,
                         target: Some(heal_target),
+                        interrupted: false,
+                        interrupted_display_time: 0.0,
                     });
                     
                     info!(
@@ -2694,6 +2872,8 @@ pub fn decide_abilities(
                     ability,
                     time_remaining: def.cast_time,
                     target: Some(target_entity),
+                    interrupted: false,
+                    interrupted_display_time: 0.0,
                 });
                 
                 info!(
@@ -2707,11 +2887,6 @@ pub fn decide_abilities(
         
         // Warriors use Charge (gap closer) and Heroic Strike (damage)
         if combatant.class == match_config::CharacterClass::Warrior {
-            // Check if global cooldown is active
-            if combatant.global_cooldown > 0.0 {
-                continue; // Can't use abilities during GCD
-            }
-            
             // Check if we have an enemy target
             let Some(target_entity) = combatant.target else {
                 continue;
@@ -2722,6 +2897,14 @@ pub fn decide_abilities(
             };
             
             let distance_to_target = my_pos.distance(target_pos);
+            
+            // NOTE: Interrupt checking (Pummel) is now handled in the dedicated check_interrupts system
+            // which runs after apply_deferred so it can see CastingState components from this frame
+            
+            // Check if global cooldown is active for other abilities
+            if combatant.global_cooldown > 0.0 {
+                continue; // Can't use other abilities during GCD
+            }
             
             // Priority 1: Use Charge to close distance if target is at medium range
             // Charge requirements:
@@ -2775,17 +2958,18 @@ pub fn decide_abilities(
             
             if !target_has_rend {
                 let rend = AbilityType::Rend;
-                if rend.can_cast(&combatant, target_pos, my_pos) {
-                    let def = rend.definition();
-                    
+                let rend_def = rend.definition();
+                let can_cast_rend = rend.can_cast(&combatant, target_pos, my_pos);
+                
+                if can_cast_rend {
                     // Consume rage
-                    combatant.current_mana -= def.mana_cost;
+                    combatant.current_mana -= rend_def.mana_cost;
                     
                     // Trigger global cooldown
                     combatant.global_cooldown = 1.5;
                     
                     // Apply the DoT aura
-                    if let Some((aura_type, duration, magnitude, break_threshold)) = def.applies_aura {
+                    if let Some((aura_type, duration, magnitude, break_threshold)) = rend_def.applies_aura {
                         commands.spawn(AuraPending {
                             target: target_entity,
                             aura: Aura {
@@ -2801,6 +2985,16 @@ pub fn decide_abilities(
                         });
                     }
                     
+                    // Log Rend application to combat log
+                    combat_log.log(
+                        CombatLogEventType::Buff,
+                        format!(
+                            "Team {} {} applies Rend to enemy (8 damage per 3s for 15s)",
+                            combatant.team,
+                            combatant.class.name()
+                        )
+                    );
+                    
                     info!(
                         "Team {} {} applies Rend to enemy (8 damage per 3s for 15s)",
                         combatant.team,
@@ -2812,6 +3006,7 @@ pub fn decide_abilities(
             }
             
             // Priority 3: Use Heroic Strike if target is in melee range
+            // Only use Heroic Strike if we have excess rage (save rage for Rend/Pummel)
             // Don't queue another Heroic Strike if one is already pending
             if combatant.next_attack_bonus_damage > 0.0 {
                 continue;
@@ -2819,9 +3014,14 @@ pub fn decide_abilities(
             
             // Try to use Heroic Strike if we have enough rage and target is in melee range
             let ability = AbilityType::HeroicStrike;
-            if ability.can_cast(&combatant, target_pos, my_pos) {
-                let def = ability.definition();
-                
+            let def = ability.definition();
+            
+            // Only use if we have enough rage for both Heroic Strike AND Rend+Pummel reserve
+            // Reserve: 10 (Rend) + 10 (Pummel) = 20 rage minimum
+            const RAGE_RESERVE: f32 = 20.0;
+            let can_afford_heroic_strike = combatant.current_mana >= (def.mana_cost + RAGE_RESERVE);
+            
+            if can_afford_heroic_strike && ability.can_cast(&combatant, target_pos, my_pos) {
                 // Since it's instant, apply the effect immediately
                 // Consume rage
                 combatant.current_mana -= def.mana_cost;
@@ -2883,7 +3083,7 @@ pub fn decide_abilities(
             }
         }
         
-        // Rogues use Kidney Shot and Sinister Strike when out of stealth
+        // Rogues use Kick, Kidney Shot and Sinister Strike when out of stealth
         if combatant.class == match_config::CharacterClass::Rogue && !combatant.stealthed {
             // Check if we have an enemy target
             let Some(target_entity) = combatant.target else {
@@ -2894,9 +3094,12 @@ pub fn decide_abilities(
                 continue;
             };
             
-            // Check if global cooldown is active
+            // NOTE: Interrupt checking (Kick) is now handled in the dedicated check_interrupts system
+            // which runs after apply_deferred so it can see CastingState components from this frame
+            
+            // Check if global cooldown is active for other abilities
             if combatant.global_cooldown > 0.0 {
-                continue; // Can't use abilities during GCD
+                continue; // Can't use other abilities during GCD
             }
             
             // Priority 1: Use Kidney Shot (stun) if available
@@ -3149,8 +3352,203 @@ pub fn decide_abilities(
 }
 
 /// Casting system: Process active casts, complete them when time is up.
+/// Check if any combatants should interrupt their targets
+/// This runs AFTER apply_deferred so it can see CastingState components added this frame
+pub fn check_interrupts(
+    mut commands: Commands,
+    mut combat_log: ResMut<CombatLog>,
+    mut combatants: Query<(Entity, &mut Combatant, &Transform), Without<CastingState>>,
+    casting_targets: Query<&CastingState>,
+    positions: Query<&Transform>,
+) {
+    for (entity, mut combatant, transform) in combatants.iter_mut() {
+        if !combatant.is_alive() {
+            continue;
+        }
+        
+        // Only Warriors and Rogues have interrupts
+        if combatant.class != match_config::CharacterClass::Warrior 
+            && combatant.class != match_config::CharacterClass::Rogue {
+            continue;
+        }
+        
+        let Some(target_entity) = combatant.target else {
+            continue;
+        };
+        
+        let Ok(target_transform) = positions.get(target_entity) else {
+            continue;
+        };
+        
+        let my_pos = transform.translation;
+        let target_pos = target_transform.translation;
+        let distance = my_pos.distance(target_pos);
+        
+        // Check if target is casting
+        let Ok(cast_state) = casting_targets.get(target_entity) else {
+            continue; // Target not casting
+        };
+        
+        if cast_state.interrupted {
+            continue; // Already interrupted
+        }
+        
+        // Determine which interrupt ability to use based on class
+        let interrupt_ability = match combatant.class {
+            match_config::CharacterClass::Warrior => AbilityType::Pummel,
+            match_config::CharacterClass::Rogue => AbilityType::Kick,
+            _ => continue,
+        };
+        
+        let ability_def = interrupt_ability.definition();
+        
+        // Check if interrupt is on cooldown
+        if combatant.ability_cooldowns.contains_key(&interrupt_ability) {
+            continue;
+        }
+        
+        // Check if we can cast the interrupt (range, resources, etc.)
+        if !interrupt_ability.can_cast(&combatant, target_pos, my_pos) {
+            continue;
+        }
+        
+        // Use the interrupt!
+        info!(
+            "[INTERRUPT] Team {} {} uses {} to interrupt {}'s cast (distance: {:.1}, time_remaining: {:.2}s)",
+            combatant.team,
+            combatant.class.name(),
+            ability_def.name,
+            cast_state.ability.definition().name,
+            distance,
+            cast_state.time_remaining
+        );
+        
+        // Consume resources
+        combatant.current_mana -= ability_def.mana_cost;
+        
+        // Put on cooldown
+        combatant.ability_cooldowns.insert(interrupt_ability, ability_def.cooldown);
+        
+        // Interrupts do NOT trigger GCD in WoW!
+        
+        // Queue the interrupt for processing
+        commands.spawn(InterruptPending {
+            caster: entity,
+            target: target_entity,
+            ability: interrupt_ability,
+            lockout_duration: ability_def.lockout_duration,
+        });
+        
+        // Log to combat log
+        combat_log.log(
+            CombatLogEventType::AbilityUsed,
+            format!(
+                "Team {} {} uses {} to interrupt enemy cast",
+                combatant.team,
+                combatant.class.name(),
+                ability_def.name
+            )
+        );
+    }
+}
+
 /// 
 /// Reduces cast timers each frame. When a cast completes:
+/// Process interrupt attempts: interrupt target's cast and apply spell school lockout.
+pub fn process_interrupts(
+    mut commands: Commands,
+    mut combat_log: ResMut<CombatLog>,
+    interrupts: Query<(Entity, &InterruptPending)>,
+    mut targets: Query<(&mut CastingState, &Combatant)>,
+    combatants: Query<&Combatant>,
+) {
+    for (interrupt_entity, interrupt) in interrupts.iter() {
+        // Check if target is still casting
+        if let Ok((mut cast_state, target_combatant)) = targets.get_mut(interrupt.target) {
+            // Don't interrupt if already interrupted
+            if cast_state.interrupted {
+                commands.entity(interrupt_entity).despawn();
+                continue;
+            }
+            
+            // Get the spell school of the interrupted spell
+            let interrupted_ability_def = cast_state.ability.definition();
+            let interrupted_school = interrupted_ability_def.spell_school;
+            let interrupted_spell_name = interrupted_ability_def.name;
+            
+            // Mark cast as interrupted
+            cast_state.interrupted = true;
+            cast_state.interrupted_display_time = 0.5; // Show "INTERRUPTED" for 0.5 seconds
+            
+            // Get caster info for logging
+            let caster_info = if let Ok(caster) = combatants.get(interrupt.caster) {
+                (caster.team, caster.class)
+            } else {
+                (0, match_config::CharacterClass::Warrior) // Fallback
+            };
+            
+            // Apply spell school lockout aura
+            // Store the locked school as the magnitude (cast to f32)
+            let locked_school_value = match interrupted_school {
+                SpellSchool::Physical => 0.0,
+                SpellSchool::Frost => 1.0,
+                SpellSchool::Holy => 2.0,
+                SpellSchool::Shadow => 3.0,
+                SpellSchool::None => 4.0,
+            };
+            
+            commands.spawn(AuraPending {
+                target: interrupt.target,
+                aura: Aura {
+                    effect_type: AuraType::SpellSchoolLockout,
+                    duration: interrupt.lockout_duration,
+                    magnitude: locked_school_value,
+                    break_on_damage_threshold: 0.0,
+                    accumulated_damage: 0.0,
+                    tick_interval: 0.0,
+                    time_until_next_tick: 0.0,
+                    caster: Some(interrupt.caster),
+                },
+            });
+            
+            // Log the interrupt
+            let school_name = match interrupted_school {
+                SpellSchool::Physical => "Physical",
+                SpellSchool::Frost => "Frost",
+                SpellSchool::Holy => "Holy",
+                SpellSchool::Shadow => "Shadow",
+                SpellSchool::None => "None",
+            };
+            
+            let message = format!(
+                "Team {} {} interrupts Team {} {}'s {} - {} school locked for {:.1}s",
+                caster_info.0,
+                caster_info.1.name(),
+                target_combatant.team,
+                target_combatant.class.name(),
+                interrupted_spell_name,
+                school_name,
+                interrupt.lockout_duration
+            );
+            combat_log.log(CombatLogEventType::AbilityUsed, message);
+            
+            info!(
+                "Team {} {} interrupted! {} school locked for {:.1}s",
+                target_combatant.team,
+                target_combatant.class.name(),
+                school_name,
+                interrupt.lockout_duration
+            );
+        }
+        
+        // Despawn the interrupt entity
+        commands.entity(interrupt_entity).despawn();
+    }
+}
+
+/// Process casting: update cast timers and apply effects when casts complete.
+///
+/// When a cast completes:
 /// 1. Consume mana
 /// 2. Deal damage (for damage spells) or heal (for healing spells)
 /// 3. Apply auras (if applicable)
@@ -3176,6 +3574,20 @@ pub fn process_casting(
         if !caster.is_alive() {
             // Cancel cast if caster dies
             commands.entity(caster_entity).remove::<CastingState>();
+            continue;
+        }
+        
+        // Handle interrupted casts
+        if casting.interrupted {
+            // Tick down the interrupted display timer
+            casting.interrupted_display_time -= dt;
+            
+            // Remove CastingState once display time expires
+            if casting.interrupted_display_time <= 0.0 {
+                commands.entity(caster_entity).remove::<CastingState>();
+            }
+            
+            // Don't process interrupted casts
             continue;
         }
         
@@ -3545,7 +3957,6 @@ pub fn apply_pending_auras(
                 )
             );
         }
-        
         // Try to get existing auras on target
         if let Some(mut active_auras) = active_auras {
             // Add to existing auras
@@ -3599,6 +4010,7 @@ pub fn process_aura_breaks(
                         AuraType::Stun => "Stun",
                         AuraType::MaxHealthIncrease => "Power Word: Fortitude", // Should never break on damage
                         AuraType::DamageOverTime => "Rend", // Should never break on damage (has 0.0 threshold)
+                        AuraType::SpellSchoolLockout => "Lockout", // Should never break on damage (has 0.0 threshold)
                     };
                     
                     let message = format!(
@@ -4101,18 +4513,26 @@ pub fn process_dot_ticks(
     time: Res<Time>,
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
-    mut combatants: Query<(Entity, &mut Combatant, &Transform, &mut ActiveAuras)>,
+    mut combatants_with_auras: Query<(Entity, &mut Combatant, &Transform, &mut ActiveAuras)>,
+    combatants_without_auras: Query<(Entity, &Combatant), Without<ActiveAuras>>,
 ) {
     let dt = time.delta_secs();
     
     // Build a map of entity -> (team, class) for quick lookups
-    let combatant_info: std::collections::HashMap<Entity, (u8, match_config::CharacterClass)> = combatants
-        .iter()
-        .map(|(entity, combatant, _, _)| (entity, (combatant.team, combatant.class)))
-        .collect();
+    // Include BOTH combatants with auras AND combatants without auras (like the Warrior caster)
+    let mut combatant_info: std::collections::HashMap<Entity, (u8, match_config::CharacterClass)> = 
+        combatants_with_auras
+            .iter()
+            .map(|(entity, combatant, _, _)| (entity, (combatant.team, combatant.class)))
+            .collect();
+    
+    // Add combatants without auras to the map
+    for (entity, combatant) in combatants_without_auras.iter() {
+        combatant_info.insert(entity, (combatant.team, combatant.class));
+    }
     
     // Build a map of entity -> position
-    let positions: std::collections::HashMap<Entity, Vec3> = combatants
+    let positions: std::collections::HashMap<Entity, Vec3> = combatants_with_auras
         .iter()
         .map(|(entity, _, transform, _)| (entity, transform.translation))
         .collect();
@@ -4122,7 +4542,7 @@ pub fn process_dot_ticks(
     let mut dot_damage_to_apply: Vec<(Entity, Entity, f32, Vec3, u8, match_config::CharacterClass)> = Vec::new();
     
     // First pass: tick down DoT timers and queue damage
-    for (entity, combatant, _transform, mut active_auras) in combatants.iter_mut() {
+    for (entity, combatant, _transform, mut active_auras) in combatants_with_auras.iter_mut() {
         if !combatant.is_alive() {
             continue;
         }
@@ -4134,10 +4554,8 @@ pub fn process_dot_ticks(
                 continue;
             }
             
-            // Tick down duration (auras expire naturally)
-            aura.duration -= dt;
-            
             // Tick down time until next damage application
+            // (Duration is already handled by update_auras system)
             aura.time_until_next_tick -= dt;
             
             if aura.time_until_next_tick <= 0.0 {
@@ -4170,7 +4588,7 @@ pub fn process_dot_ticks(
     // Second pass: apply queued DoT damage to targets
     for (target_entity, caster_entity, damage, target_pos, caster_team, caster_class) in dot_damage_to_apply {
         // Get target combatant
-        let Ok((_, mut target, _, _)) = combatants.get_mut(target_entity) else {
+        let Ok((_, mut target, _, _)) = combatants_with_auras.get_mut(target_entity) else {
             continue;
         };
         
@@ -4228,7 +4646,7 @@ pub fn process_dot_ticks(
     
     // Third pass: update caster damage_dealt stats
     for (caster_entity, damage_dealt) in caster_damage_updates {
-        if let Ok((_, mut caster, _, _)) = combatants.get_mut(caster_entity) {
+        if let Ok((_, mut caster, _, _)) = combatants_with_auras.get_mut(caster_entity) {
             caster.damage_dealt += damage_dealt;
         }
     }

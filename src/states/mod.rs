@@ -62,10 +62,25 @@ impl Plugin for StatesPlugin {
                     play_match::regenerate_resources,
                     play_match::update_auras,
                     play_match::apply_pending_auras,
+                )
+                    .chain()
+                    .run_if(in_state(GameState::PlayMatch)),
+            )
+            // Apply deferred commands (e.g., inserting ActiveAuras) before processing them
+            .add_systems(
+                Update,
+                apply_deferred.run_if(in_state(GameState::PlayMatch)),
+            )
+            .add_systems(
+                Update,
+                (
                     play_match::process_aura_breaks,
                     play_match::process_dot_ticks,
                     play_match::acquire_targets,
                     play_match::decide_abilities,
+                    apply_deferred,  // Flush commands so CastingState is visible
+                    play_match::check_interrupts,  // Check for interrupts after CastingState is visible
+                    play_match::process_interrupts,
                     play_match::process_casting,
                     play_match::spawn_projectile_visuals,
                     play_match::move_projectiles,
