@@ -53,6 +53,14 @@ const STOP_DISTANCE: f32 = 2.0;
 /// Arena size (80x80 plane centered at origin, includes starting areas)
 const ARENA_HALF_SIZE: f32 = 40.0;
 
+/// Floating combat text horizontal spread (multiplied by -0.5 to +0.5 range)
+/// Adjust this to control how far left/right numbers can appear from their spawn point
+const FCT_HORIZONTAL_SPREAD: f32 = 1.2; // Default: 0.8 (range: -0.4 to +0.4)
+
+/// Floating combat text vertical spread (0.0 to this value)
+/// Adjust this to control the vertical stagger of numbers
+const FCT_VERTICAL_SPREAD: f32 = 0.8; // Default: 0.5 (range: 0.0 to 0.5)
+
 // ============================================================================
 // Resources
 // ============================================================================
@@ -205,6 +213,13 @@ pub struct VictoryCelebration {
 pub struct Celebrating {
     /// Time offset for staggered bounce timing
     pub bounce_offset: f32,
+}
+
+/// Component tracking floating combat text pattern state for deterministic spreading
+#[derive(Component)]
+pub struct FloatingTextState {
+    /// Pattern index for next text spawn: 0 (center), 1 (right), 2 (left), cycles
+    pub next_pattern_index: u8,
 }
 
 /// Core combatant component containing all combat state and stats.
@@ -916,6 +931,22 @@ fn is_spell_school_locked(spell_school: SpellSchool, auras: Option<&ActiveAuras>
     }
 }
 
+/// Helper function to get next floating combat text offset and update pattern state
+/// Returns (x_offset, y_offset) based on deterministic alternating pattern
+fn get_next_fct_offset(state: &mut FloatingTextState) -> (f32, f32) {
+    let (x_offset, y_offset) = match state.next_pattern_index {
+        0 => (0.0, 0.0),  // Center
+        1 => (FCT_HORIZONTAL_SPREAD * 0.4, FCT_VERTICAL_SPREAD * 0.3),  // Right side, slight up
+        2 => (FCT_HORIZONTAL_SPREAD * -0.4, FCT_VERTICAL_SPREAD * 0.6), // Left side, more up
+        _ => (0.0, 0.0),  // Fallback to center
+    };
+    
+    // Cycle to next pattern: 0 -> 1 -> 2 -> 0
+    state.next_pattern_index = (state.next_pattern_index + 1) % 3;
+    
+    (x_offset, y_offset)
+}
+
 // ============================================================================
 // Setup & Cleanup Systems
 // ============================================================================
@@ -1073,6 +1104,9 @@ fn spawn_combatant(
         MeshMaterial3d(material),
         Transform::from_translation(position),
         Combatant::new(team, class),
+        FloatingTextState {
+            next_pattern_index: 0,
+        },
         PlayMatchEntity,
     ));
 }
@@ -2731,6 +2765,7 @@ pub fn combat_auto_attack(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
     mut combatants: Query<(Entity, &Transform, &mut Combatant, Option<&CastingState>, Option<&ActiveAuras>)>,
+    mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
     // Don't deal damage during victory celebration
@@ -2930,13 +2965,21 @@ pub fn combat_auto_attack(
             // Spawn floating text slightly above the combatant
             let text_position = target_pos + Vec3::new(0.0, 2.0, 0.0);
             
+            // Get deterministic offset based on pattern state
+            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
+                get_next_fct_offset(&mut fct_state)
+            } else {
+                // Fallback to center if state not found
+                (0.0, 0.0)
+            };
+            
             commands.spawn((
                 FloatingCombatText {
-                    world_position: text_position,
+                    world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
                     text: format!("{:.0}", total_damage),
                     color: egui::Color32::WHITE, // White for auto-attacks
                     lifetime: 1.5, // Display for 1.5 seconds
-                    vertical_offset: 0.0,
+                    vertical_offset: offset_y,
                 },
                 PlayMatchEntity,
             ));
@@ -3018,6 +3061,7 @@ pub fn decide_abilities(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
     mut combatants: Query<(Entity, &mut Combatant, &Transform, Option<&ActiveAuras>), Without<CastingState>>,
+    mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
     // Don't cast abilities during victory celebration
@@ -3607,13 +3651,19 @@ pub fn decide_abilities(
                 );
                 
                 // Spawn floating combat text (yellow for abilities)
+                // Get deterministic offset based on pattern state
+                let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
+                    get_next_fct_offset(&mut fct_state)
+                } else {
+                    (0.0, 0.0)
+                };
                 commands.spawn((
                     FloatingCombatText {
-                        world_position: target_pos + Vec3::new(0.0, 2.0, 0.0),
+                        world_position: target_pos + Vec3::new(offset_x, 2.0 + offset_y, 0.0),
                         text: format!("{:.0}", damage),
                         color: egui::Color32::from_rgb(255, 255, 100), // Yellow for abilities
                         lifetime: 1.5,
-                        vertical_offset: 0.0,
+                        vertical_offset: offset_y,
                     },
                     PlayMatchEntity,
                 ));
@@ -3837,13 +3887,19 @@ pub fn decide_abilities(
                 
                 // Spawn floating combat text (yellow for abilities)
                 let text_position = target_transform.translation + Vec3::new(0.0, 2.0, 0.0);
+                // Get deterministic offset based on pattern state
+                let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
+                    get_next_fct_offset(&mut fct_state)
+                } else {
+                    (0.0, 0.0)
+                };
                 commands.spawn((
                     FloatingCombatText {
-                        world_position: text_position,
+                        world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
                         text: format!("{:.0}", actual_damage),
                         color: egui::Color32::from_rgb(255, 255, 0), // Yellow for abilities
                         lifetime: 1.5,
-                        vertical_offset: 0.0,
+                        vertical_offset: offset_y,
                     },
                     PlayMatchEntity,
                 ));
@@ -3916,13 +3972,19 @@ pub fn decide_abilities(
                 
                 // Spawn floating combat text (yellow for abilities)
                 let text_position = target_transform.translation + Vec3::new(0.0, 2.0, 0.0);
+                // Get deterministic offset based on pattern state
+                let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
+                    get_next_fct_offset(&mut fct_state)
+                } else {
+                    (0.0, 0.0)
+                };
                 commands.spawn((
                     FloatingCombatText {
-                        world_position: text_position,
+                        world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
                         text: format!("{:.0}", actual_damage),
                         color: egui::Color32::from_rgb(255, 255, 0), // Yellow for abilities
                         lifetime: 1.5,
-                        vertical_offset: 0.0,
+                        vertical_offset: offset_y,
                     },
                     PlayMatchEntity,
                 ));
@@ -4187,6 +4249,7 @@ pub fn process_casting(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
     mut combatants: Query<(Entity, &Transform, &mut Combatant, Option<&mut CastingState>, Option<&ActiveAuras>)>,
+    mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
     // Don't complete casts during victory celebration
@@ -4341,13 +4404,19 @@ pub fn process_casting(
             }
             
             // Spawn floating combat text (yellow for damage abilities)
+            // Get deterministic offset based on pattern state
+            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
+                get_next_fct_offset(&mut fct_state)
+            } else {
+                (0.0, 0.0)
+            };
             commands.spawn((
                 FloatingCombatText {
-                    world_position: text_position,
+                    world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
                     text: format!("{:.0}", actual_damage),
                     color: egui::Color32::from_rgb(255, 255, 0), // Yellow for abilities
                     lifetime: 1.5,
-                    vertical_offset: 0.0,
+                    vertical_offset: offset_y,
                 },
                 PlayMatchEntity,
             ));
@@ -4421,13 +4490,19 @@ pub fn process_casting(
             }
             
             // Spawn floating combat text (green for healing)
+            // Get deterministic offset based on pattern state
+            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
+                get_next_fct_offset(&mut fct_state)
+            } else {
+                (0.0, 0.0)
+            };
             commands.spawn((
                 FloatingCombatText {
-                    world_position: text_position,
+                    world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
                     text: format!("+{:.0}", actual_healing),
                     color: egui::Color32::from_rgb(100, 255, 100), // Green for healing
                     lifetime: 1.5,
-                    vertical_offset: 0.0,
+                    vertical_offset: offset_y,
                 },
                 PlayMatchEntity,
             ));
@@ -4993,6 +5068,7 @@ pub fn process_projectile_hits(
     mut combat_log: ResMut<CombatLog>,
     projectiles: Query<(Entity, &Projectile, &Transform)>,
     mut combatants: Query<(&Transform, &mut Combatant)>,
+    mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
     // Don't apply projectile damage during victory celebration
@@ -5108,13 +5184,19 @@ pub fn process_projectile_hits(
             } // caster borrow dropped here
             
             // Spawn yellow floating combat text for ability damage
+            // Get deterministic offset based on pattern state
+            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
+                get_next_fct_offset(&mut fct_state)
+            } else {
+                (0.0, 0.0)
+            };
             commands.spawn((
                 FloatingCombatText {
-                    world_position: text_position,
+                    world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
                     text: format!("{:.0}", actual_damage),
                     color: egui::Color32::from_rgb(255, 255, 0), // Yellow
                     lifetime: 1.5,
-                    vertical_offset: 0.0,
+                    vertical_offset: (rand::random::<f32>() * 0.5), // Random initial offset
                 },
                 PlayMatchEntity,
             ));
@@ -5182,6 +5264,7 @@ pub fn process_dot_ticks(
     mut combat_log: ResMut<CombatLog>,
     mut combatants_with_auras: Query<(Entity, &mut Combatant, &Transform, &mut ActiveAuras)>,
     combatants_without_auras: Query<(Entity, &Combatant), Without<ActiveAuras>>,
+    mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
     // Don't tick DoTs during victory celebration (prevents killing winners)
@@ -5291,13 +5374,19 @@ pub fn process_dot_ticks(
         caster_damage_updates.push((caster_entity, actual_damage));
         
         // Spawn floating combat text (yellow for DoT ticks, like ability damage)
+        // Get deterministic offset based on pattern state
+        let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
+            get_next_fct_offset(&mut fct_state)
+        } else {
+            (0.0, 0.0)
+        };
         commands.spawn((
             FloatingCombatText {
-                world_position: target_pos + Vec3::new(0.0, 2.0, 0.0),
+                world_position: target_pos + Vec3::new(offset_x, 2.0 + offset_y, 0.0),
                 text: format!("{:.0}", actual_damage),
                 color: egui::Color32::from_rgb(255, 255, 0), // Yellow for ability damage
                 lifetime: 1.5,
-                vertical_offset: 0.0,
+                vertical_offset: offset_y,
             },
             PlayMatchEntity,
         ));
