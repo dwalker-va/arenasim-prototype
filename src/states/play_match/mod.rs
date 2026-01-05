@@ -83,6 +83,11 @@ const FCT_HORIZONTAL_SPREAD: f32 = 1.2; // Default: 0.8 (range: -0.4 to +0.4)
 /// Adjust this to control the vertical stagger of numbers
 const FCT_VERTICAL_SPREAD: f32 = 0.8; // Default: 0.5 (range: 0.0 to 0.5)
 
+/// Floating combat text base height above combatants (in world space Y units)
+/// Adjust this to control how high damage/healing numbers appear above characters
+/// Should be high enough to avoid overlapping with status effect labels
+const FCT_HEIGHT: f32 = 4.0;
+
 
 // ============================================================================
 // Helper Functions

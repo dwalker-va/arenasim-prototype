@@ -38,6 +38,11 @@ pub fn acquire_targets(
             team2_combatants.push((entity, transform.translation, c.stealthed));
         }
     }
+    
+    // Sort by entity ID to ensure deterministic ordering matching spawn order
+    // Entity IDs are assigned sequentially at spawn time
+    team1_combatants.sort_by_key(|(entity, _, _)| entity.index());
+    team2_combatants.sort_by_key(|(entity, _, _)| entity.index());
 
     // For each combatant, ensure they have a valid target
     for (_entity, mut combatant, transform) in combatants.iter_mut() {
@@ -649,35 +654,8 @@ pub fn decide_abilities(
                     });
                 }
                 
-                // Log to combat log
-                let message = format!(
-                    "Team {} {}'s Mortal Strike hits Team {} {} for {:.0} damage",
-                    combatant.team,
-                    combatant.class.name(),
-                    target_team,
-                    target_class.name(),
-                    damage
-                );
-                
-                if let (Some(&attacker_pos), Some(&target_pos_val)) = 
-                    (positions.get(&entity), positions.get(&target_entity)) {
-                    let distance = attacker_pos.distance(target_pos_val);
-                    combat_log.log_with_position(
-                        CombatLogEventType::Damage,
-                        message,
-                        PositionData {
-                            entities: vec![
-                                format!("Team {} {} (attacker)", combatant.team, combatant.class.name()),
-                                format!("Team {} {} (target)", target_team, target_class.name()),
-                            ],
-                            positions: vec![
-                                (attacker_pos.x, attacker_pos.y, attacker_pos.z),
-                                (target_pos_val.x, target_pos_val.y, target_pos_val.z),
-                            ],
-                            distance: Some(distance),
-                        },
-                    );
-                }
+                // Note: Combat log and FCT are handled in the instant_attacks processing loop
+                // to avoid duplicate entries
                 
                 info!(
                     "Team {} {} uses Mortal Strike for {:.0} damage!",
@@ -685,24 +663,6 @@ pub fn decide_abilities(
                     combatant.class.name(),
                     damage
                 );
-                
-                // Spawn floating combat text (yellow for abilities)
-                // Get deterministic offset based on pattern state
-                let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
-                    get_next_fct_offset(&mut fct_state)
-                } else {
-                    (0.0, 0.0)
-                };
-                commands.spawn((
-                    FloatingCombatText {
-                        world_position: target_pos + Vec3::new(offset_x, 2.0 + offset_y, 0.0),
-                        text: format!("{:.0}", damage),
-                        color: egui::Color32::from_rgb(255, 255, 100), // Yellow for abilities
-                        lifetime: 1.5,
-                        vertical_offset: offset_y,
-                    },
-                    PlayMatchEntity,
-                ));
                 
                 continue; // Done this frame
             }
@@ -922,7 +882,7 @@ pub fn decide_abilities(
                 );
                 
                 // Spawn floating combat text (yellow for abilities)
-                let text_position = target_transform.translation + Vec3::new(0.0, 2.0, 0.0);
+                let text_position = target_transform.translation + Vec3::new(0.0, super::FCT_HEIGHT, 0.0);
                 // Get deterministic offset based on pattern state
                 let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
                     get_next_fct_offset(&mut fct_state)
@@ -1007,7 +967,7 @@ pub fn decide_abilities(
                 });
                 
                 // Spawn floating combat text (yellow for abilities)
-                let text_position = target_transform.translation + Vec3::new(0.0, 2.0, 0.0);
+                let text_position = target_transform.translation + Vec3::new(0.0, super::FCT_HEIGHT, 0.0);
                 // Get deterministic offset based on pattern state
                 let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
                     get_next_fct_offset(&mut fct_state)

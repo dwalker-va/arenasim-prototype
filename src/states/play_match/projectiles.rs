@@ -159,7 +159,7 @@ pub fn process_projectile_hits(
     // Process all queued hits
     for (projectile_entity, caster_entity, target_entity, ability, caster_team, caster_class, caster_pos, target_pos, ability_damage, _ability_healing) in hits_to_process {
         let def = ability.definition();
-        let text_position = target_pos + Vec3::new(0.0, 2.0, 0.0);
+        let text_position = target_pos + Vec3::new(0.0, super::FCT_HEIGHT, 0.0);
         let ability_range = caster_pos.distance(target_pos);
         
         // Apply damage

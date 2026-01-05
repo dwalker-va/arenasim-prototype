@@ -296,7 +296,7 @@ pub fn process_dot_ticks(
         };
         commands.spawn((
             FloatingCombatText {
-                world_position: target_pos + Vec3::new(offset_x, 2.0 + offset_y, 0.0),
+                world_position: target_pos + Vec3::new(offset_x, super::FCT_HEIGHT + offset_y, 0.0),
                 text: format!("{:.0}", actual_damage),
                 color: egui::Color32::from_rgb(255, 255, 0), // Yellow for ability damage
                 lifetime: 1.5,

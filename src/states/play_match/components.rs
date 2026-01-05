@@ -250,13 +250,13 @@ impl Combatant {
         // Class-specific stats (resource_type, health, max_resource, resource_regen, starting_resource, damage, attack speed, attack_power, spell_power, movement speed)
         let (resource_type, max_health, max_resource, resource_regen, starting_resource, attack_damage, attack_speed, attack_power, spell_power, movement_speed) = match class {
             // Warriors: High HP, physical damage, scales with Attack Power
-            match_config::CharacterClass::Warrior => (ResourceType::Rage, 150.0, 100.0, 0.0, 0.0, 12.0, 1.0, 30.0, 0.0, 5.0),
+            match_config::CharacterClass::Warrior => (ResourceType::Rage, 200.0, 100.0, 0.0, 0.0, 12.0, 1.0, 30.0, 0.0, 5.0),
             // Mages: Low HP, magical damage (wand), scales with Spell Power
-            match_config::CharacterClass::Mage => (ResourceType::Mana, 80.0, 200.0, 10.0, 200.0, 10.0, 0.7, 0.0, 50.0, 4.5),
+            match_config::CharacterClass::Mage => (ResourceType::Mana, 150.0, 200.0, 10.0, 200.0, 10.0, 0.7, 0.0, 50.0, 4.5),
             // Rogues: Medium HP, physical burst damage, scales with Attack Power
-            match_config::CharacterClass::Rogue => (ResourceType::Energy, 100.0, 100.0, 20.0, 100.0, 10.0, 1.3, 35.0, 0.0, 6.0),
+            match_config::CharacterClass::Rogue => (ResourceType::Energy, 175.0, 100.0, 20.0, 100.0, 10.0, 1.3, 35.0, 0.0, 6.0),
             // Priests: Medium HP, healing & wand damage, scales with Spell Power
-            match_config::CharacterClass::Priest => (ResourceType::Mana, 90.0, 150.0, 8.0, 150.0, 6.0, 0.8, 0.0, 40.0, 5.0),
+            match_config::CharacterClass::Priest => (ResourceType::Mana, 150.0, 150.0, 8.0, 150.0, 6.0, 0.8, 0.0, 40.0, 5.0),
         };
         
         // Rogues start stealthed

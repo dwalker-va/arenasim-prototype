@@ -589,7 +589,7 @@ pub fn combat_auto_attack(
     for (target_entity, total_damage) in damage_per_target {
         if let Some(&target_pos) = positions.get(&target_entity) {
             // Spawn floating text slightly above the combatant
-            let text_position = target_pos + Vec3::new(0.0, 2.0, 0.0);
+            let text_position = target_pos + Vec3::new(0.0, super::FCT_HEIGHT, 0.0);
             
             // Get deterministic offset based on pattern state
             let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
@@ -907,7 +907,7 @@ pub fn process_casting(
         
         let target_pos = target_transform.translation;
         let distance = caster_pos.distance(target_pos);
-        let text_position = target_transform.translation + Vec3::new(0.0, 2.0, 0.0);
+        let text_position = target_transform.translation + Vec3::new(0.0, super::FCT_HEIGHT, 0.0);
         
         // Handle damage spells
         if def.is_damage() {
