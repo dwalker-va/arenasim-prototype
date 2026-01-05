@@ -162,8 +162,8 @@ impl AbilityType {
                 range: MELEE_RANGE,
                 mana_cost: 60.0, // High energy cost
                 cooldown: 0.0,
-                damage_base_min: 20.0, // High burst damage
-                damage_base_max: 30.0,
+                damage_base_min: 10.0, // High burst damage
+                damage_base_max: 15.0,
                 damage_coefficient: 1.2, // 120% of Attack Power - very high!
                 damage_scales_with: ScalingStat::AttackPower,
                 healing_base_min: 0.0,
@@ -202,7 +202,7 @@ impl AbilityType {
                 cooldown: 8.0, // Short cooldown for consistent damage
                 damage_base_min: 15.0, // Good damage
                 damage_base_max: 20.0,
-                damage_coefficient: 0.85, // 85% of Spell Power
+                damage_coefficient: 0.6, // 60% of Spell Power
                 damage_scales_with: ScalingStat::SpellPower,
                 healing_base_min: 0.0,
                 healing_base_max: 0.0,
