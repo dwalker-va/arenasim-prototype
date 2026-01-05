@@ -43,6 +43,10 @@ use crate::combat::log::{CombatLog, CombatLogEventType, PositionData, MatchMetad
 /// Similar to WoW's melee range of ~5 yards.
 const MELEE_RANGE: f32 = 2.5;
 
+/// Ranged wand attack range for caster classes (Mage, Priest).
+/// Similar to WoW's wand range of ~30 yards.
+const WAND_RANGE: f32 = 30.0;
+
 /// Distance threshold for stopping movement (slightly less than melee range to avoid jitter)
 const STOP_DISTANCE: f32 = 2.0;
 
@@ -263,12 +267,12 @@ impl Combatant {
         let (resource_type, max_health, max_resource, resource_regen, starting_resource, attack_damage, attack_speed, attack_power, spell_power, movement_speed) = match class {
             // Warriors: High HP, physical damage, scales with Attack Power
             match_config::CharacterClass::Warrior => (ResourceType::Rage, 150.0, 100.0, 0.0, 0.0, 12.0, 1.0, 30.0, 0.0, 5.0),
-            // Mages: Low HP, magical damage, scales with Spell Power
-            match_config::CharacterClass::Mage => (ResourceType::Mana, 80.0, 200.0, 10.0, 200.0, 20.0, 0.7, 0.0, 50.0, 4.5),
+            // Mages: Low HP, magical damage (wand), scales with Spell Power
+            match_config::CharacterClass::Mage => (ResourceType::Mana, 80.0, 200.0, 10.0, 200.0, 10.0, 0.7, 0.0, 50.0, 4.5),
             // Rogues: Medium HP, physical burst damage, scales with Attack Power
             match_config::CharacterClass::Rogue => (ResourceType::Energy, 100.0, 100.0, 20.0, 100.0, 10.0, 1.3, 35.0, 0.0, 6.0),
-            // Priests: Medium HP, healing & damage, scales with Spell Power
-            match_config::CharacterClass::Priest => (ResourceType::Mana, 90.0, 150.0, 8.0, 150.0, 8.0, 0.8, 0.0, 40.0, 5.0),
+            // Priests: Medium HP, healing & wand damage, scales with Spell Power
+            match_config::CharacterClass::Priest => (ResourceType::Mana, 90.0, 150.0, 8.0, 150.0, 6.0, 0.8, 0.0, 40.0, 5.0),
         };
         
         // Rogues start stealthed
@@ -308,8 +312,17 @@ impl Combatant {
     }
     
     /// Check if this combatant is in range to attack the target position.
+    /// Mages and Priests use wands (ranged), Warriors and Rogues use melee weapons.
     pub fn in_attack_range(&self, my_position: Vec3, target_position: Vec3) -> bool {
-        my_position.distance(target_position) <= MELEE_RANGE
+        let distance = my_position.distance(target_position);
+        match self.class {
+            match_config::CharacterClass::Mage | match_config::CharacterClass::Priest => {
+                distance <= WAND_RANGE
+            }
+            match_config::CharacterClass::Warrior | match_config::CharacterClass::Rogue => {
+                distance <= MELEE_RANGE
+            }
+        }
     }
     
     /// Calculate damage for an ability based on character stats.
@@ -2588,8 +2601,19 @@ pub fn move_to_target(
         
         let distance = my_pos.distance(target_pos);
         
+        // Determine stop distance based on attack range (melee or wand)
+        // Stop slightly before attack range to avoid jitter
+        let stop_distance = match combatant.class {
+            match_config::CharacterClass::Mage | match_config::CharacterClass::Priest => {
+                WAND_RANGE - 1.0 // Stop 1 unit before wand range
+            }
+            match_config::CharacterClass::Warrior | match_config::CharacterClass::Rogue => {
+                STOP_DISTANCE // Use standard melee stop distance
+            }
+        };
+        
         // If out of range, move towards target
-        if distance > STOP_DISTANCE {
+        if distance > stop_distance {
             // Calculate direction to target (only in XZ plane, keep Y constant)
             let direction = Vec3::new(
                 target_pos.x - my_pos.x,
@@ -2817,7 +2841,11 @@ pub fn combat_auto_attack(
                     let attack_name = if has_bonus {
                         "Heroic Strike" // Enhanced auto-attack
                     } else {
-                        "Auto Attack"
+                        // Distinguish between melee and wand attacks based on class
+                        match attacker_class {
+                            match_config::CharacterClass::Mage | match_config::CharacterClass::Priest => "Wand Shot",
+                            _ => "Auto Attack",
+                        }
                     };
                     let message = format!(
                         "Team {} {}'s {} hits Team {} {} for {:.0} damage",
