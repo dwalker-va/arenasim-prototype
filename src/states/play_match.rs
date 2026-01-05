@@ -502,6 +502,8 @@ pub enum AuraType {
     /// Spell school lockout - prevents casting spells of a specific school
     /// The magnitude field stores the locked school as f32 (cast from SpellSchool enum)
     SpellSchoolLockout,
+    /// Reduces healing received by a percentage (magnitude = multiplier, e.g., 0.65 = 35% reduction)
+    HealingReduction,
     // Future: Silence, Healing-over-time, Attack Power buffs, etc.
 }
 
@@ -519,6 +521,7 @@ pub enum AbilityType {
     KidneyShot,
     PowerWordFortitude,
     Rend,
+    MortalStrike, // Warrior damage + healing reduction
     Pummel,    // Warrior interrupt
     Kick,      // Rogue interrupt
     // Future: Fireball, Backstab, etc.
@@ -738,6 +741,26 @@ impl AbilityType {
                 // Magnitude = damage per tick, tick_interval stored separately in Aura
                 applies_aura: Some((AuraType::DamageOverTime, 15.0, 8.0, 0.0)),
                 projectile_speed: None, // Instant melee application
+                spell_school: SpellSchool::Physical,
+                is_interrupt: false,
+                lockout_duration: 0.0,
+            },
+            AbilityType::MortalStrike => AbilityDefinition {
+                name: "Mortal Strike",
+                cast_time: 0.0, // Instant cast
+                range: MELEE_RANGE, // Melee ability
+                mana_cost: 30.0, // 30 rage cost (expensive)
+                cooldown: 6.0, // 6 second cooldown
+                damage_base_min: 15.0, // Good physical damage
+                damage_base_max: 25.0,
+                damage_coefficient: 1.0, // 100% of Attack Power
+                damage_scales_with: ScalingStat::AttackPower,
+                healing_base_min: 0.0,
+                healing_base_max: 0.0,
+                healing_coefficient: 0.0,
+                // Apply healing reduction: 10 second duration, 0.65 magnitude = 35% healing reduction
+                applies_aura: Some((AuraType::HealingReduction, 10.0, 0.65, 0.0)),
+                projectile_speed: None, // Instant melee strike
                 spell_school: SpellSchool::Physical,
                 is_interrupt: false,
                 lockout_duration: 0.0,
@@ -3023,7 +3046,7 @@ pub fn decide_abilities(
         .collect();
     
     // Queue for Ambush attacks (attacker, target, damage, team, class)
-    // Queue for instant ability attacks (Ambush, Sinister Strike)
+    // Queue for instant ability attacks (Ambush, Sinister Strike, Mortal Strike)
     // Format: (attacker_entity, target_entity, damage, attacker_team, attacker_class, ability_type)
     let mut instant_attacks: Vec<(Entity, Entity, f32, u8, match_config::CharacterClass, AbilityType)> = Vec::new();
     
@@ -3380,7 +3403,7 @@ pub fn decide_abilities(
             }
         }
         
-        // Warriors use Charge (gap closer) and Heroic Strike (damage)
+        // Warriors use Charge (gap closer), Mortal Strike, Rend, and Heroic Strike
         if combatant.class == match_config::CharacterClass::Warrior {
             // Check if we have an enemy target
             let Some(target_entity) = combatant.target else {
@@ -3500,8 +3523,106 @@ pub fn decide_abilities(
                 }
             }
             
-            // Priority 3: Use Heroic Strike if target is in melee range
-            // Only use Heroic Strike if we have excess rage (save rage for Rend/Pummel)
+            // Priority 3: Use Mortal Strike if off cooldown and enough rage (high priority cooldown)
+            let mortal_strike = AbilityType::MortalStrike;
+            let ms_def = mortal_strike.definition();
+            let ms_on_cooldown = combatant.ability_cooldowns.contains_key(&mortal_strike);
+            let can_cast_ms = mortal_strike.can_cast(&combatant, target_pos, my_pos);
+            
+            if !ms_on_cooldown && can_cast_ms && combatant.current_mana >= ms_def.mana_cost {
+                // Get target info
+                let (target_team, target_class) = if let Some(&(team, class, _, _)) = combatant_info.get(&target_entity) {
+                    (team, class)
+                } else {
+                    continue;
+                };
+                
+                // Consume rage
+                combatant.current_mana -= ms_def.mana_cost;
+                
+                // Put on cooldown
+                combatant.ability_cooldowns.insert(mortal_strike, ms_def.cooldown);
+                
+                // Trigger global cooldown
+                combatant.global_cooldown = 1.5;
+                
+                // Calculate damage
+                let damage = combatant.calculate_ability_damage(&ms_def);
+                
+                // Queue damage to apply (collect for later to avoid borrow issues)
+                instant_attacks.push((entity, target_entity, damage, combatant.team, combatant.class, mortal_strike));
+                
+                // Apply healing reduction aura
+                if let Some((aura_type, duration, magnitude, break_threshold)) = ms_def.applies_aura {
+                    commands.spawn(AuraPending {
+                        target: target_entity,
+                        aura: Aura {
+                            effect_type: aura_type,
+                            duration,
+                            magnitude,
+                            break_on_damage_threshold: break_threshold,
+                            accumulated_damage: 0.0,
+                            tick_interval: 0.0,
+                            time_until_next_tick: 0.0,
+                            caster: Some(entity),
+                        },
+                    });
+                }
+                
+                // Log to combat log
+                let message = format!(
+                    "Team {} {}'s Mortal Strike hits Team {} {} for {:.0} damage",
+                    combatant.team,
+                    combatant.class.name(),
+                    target_team,
+                    target_class.name(),
+                    damage
+                );
+                
+                if let (Some(&attacker_pos), Some(&target_pos_val)) = 
+                    (positions.get(&entity), positions.get(&target_entity)) {
+                    let distance = attacker_pos.distance(target_pos_val);
+                    combat_log.log_with_position(
+                        CombatLogEventType::Damage,
+                        message,
+                        PositionData {
+                            entities: vec![
+                                format!("Team {} {} (attacker)", combatant.team, combatant.class.name()),
+                                format!("Team {} {} (target)", target_team, target_class.name()),
+                            ],
+                            positions: vec![
+                                (attacker_pos.x, attacker_pos.y, attacker_pos.z),
+                                (target_pos_val.x, target_pos_val.y, target_pos_val.z),
+                            ],
+                            distance: Some(distance),
+                        },
+                    );
+                }
+                
+                info!(
+                    "Team {} {} uses Mortal Strike for {:.0} damage!",
+                    combatant.team,
+                    combatant.class.name(),
+                    damage
+                );
+                
+                // Spawn floating combat text (yellow for abilities)
+                commands.spawn((
+                    FloatingCombatText {
+                        world_position: target_pos + Vec3::new(0.0, 2.0, 0.0),
+                        text: format!("{:.0}", damage),
+                        color: egui::Color32::from_rgb(255, 255, 100), // Yellow for abilities
+                        lifetime: 1.5,
+                        vertical_offset: 0.0,
+                    },
+                    PlayMatchEntity,
+                ));
+                
+                continue; // Done this frame
+            }
+            
+            // Priority 4: Use Heroic Strike if target is in melee range
+            // Only use Heroic Strike if we have excess rage (save rage for Rend/Pummel/MortalStrike)
             // Don't queue another Heroic Strike if one is already pending
             if combatant.next_attack_bonus_damage > 0.0 {
                 continue;
@@ -3511,9 +3632,9 @@ pub fn decide_abilities(
             let ability = AbilityType::HeroicStrike;
             let def = ability.definition();
             
-            // Only use if we have enough rage for both Heroic Strike AND Rend+Pummel reserve
-            // Reserve: 10 (Rend) + 10 (Pummel) = 20 rage minimum
-            const RAGE_RESERVE: f32 = 20.0;
+            // Only use if we have enough rage for both Heroic Strike AND Rend+Pummel+MortalStrike reserve
+            // Reserve: 10 (Rend) + 10 (Pummel) + 30 (Mortal Strike) = 50 rage minimum
+            const RAGE_RESERVE: f32 = 50.0;
             let can_afford_heroic_strike = combatant.current_mana >= (def.mana_cost + RAGE_RESERVE);
             
             if can_afford_heroic_strike && ability.can_cast(&combatant, target_pos, my_pos) {
@@ -4065,7 +4186,7 @@ pub fn process_casting(
     time: Res<Time>,
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
-    mut combatants: Query<(Entity, &Transform, &mut Combatant, Option<&mut CastingState>)>,
+    mut combatants: Query<(Entity, &Transform, &mut Combatant, Option<&mut CastingState>, Option<&ActiveAuras>)>,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
     // Don't complete casts during victory celebration
@@ -4079,7 +4200,7 @@ pub fn process_casting(
     let mut completed_casts = Vec::new();
     
     // First pass: update cast timers and collect completed casts
-    for (caster_entity, caster_transform, mut caster, casting_state) in combatants.iter_mut() {
+    for (caster_entity, caster_transform, mut caster, casting_state, _auras) in combatants.iter_mut() {
         let Some(mut casting) = casting_state else {
             continue;
         };
@@ -4175,7 +4296,7 @@ pub fn process_casting(
         let is_self_target = target_entity == caster_entity;
         
         // Get target combatant
-        let Ok((_, target_transform, mut target, _)) = combatants.get_mut(target_entity) else {
+        let Ok((_, target_transform, mut target, _, target_auras)) = combatants.get_mut(target_entity) else {
             continue;
         };
         
@@ -4274,7 +4395,17 @@ pub fn process_casting(
         // Handle healing spells
         else if def.is_heal() {
             // Use pre-calculated healing (already includes stat scaling)
-            let healing = ability_healing;
+            let mut healing = ability_healing;
+            
+            // Check for healing reduction auras
+            if let Some(auras) = target_auras {
+                for aura in &auras.auras {
+                    if aura.effect_type == AuraType::HealingReduction {
+                        // Magnitude is a multiplier (e.g., 0.65 = 35% reduction)
+                        healing *= aura.magnitude;
+                    }
+                }
+            }
             
             // Apply healing (don't overheal)
             let actual_healing = healing.min(target.max_health - target.current_health);
@@ -4371,21 +4502,21 @@ pub fn process_casting(
     
     // Apply collected caster damage updates
     for (caster_entity, damage) in caster_damage_updates {
-        if let Ok((_, _, mut caster, _)) = combatants.get_mut(caster_entity) {
+        if let Ok((_, _, mut caster, _, _)) = combatants.get_mut(caster_entity) {
             caster.damage_dealt += damage;
         }
     }
     
     // Apply collected healer healing updates
     for (healer_entity, healing) in caster_healing_updates {
-        if let Ok((_, _, mut healer, _)) = combatants.get_mut(healer_entity) {
+        if let Ok((_, _, mut healer, _, _)) = combatants.get_mut(healer_entity) {
             healer.healing_done += healing;
         }
     }
     
     // Break stealth for casters who used offensive abilities
     for caster_entity in break_stealth {
-        if let Ok((_, _, mut caster, _)) = combatants.get_mut(caster_entity) {
+        if let Ok((_, _, mut caster, _, _)) = combatants.get_mut(caster_entity) {
             if caster.stealthed {
                 caster.stealthed = false;
                 info!(
@@ -4524,6 +4655,7 @@ pub fn process_aura_breaks(
                         AuraType::MaxHealthIncrease => "Power Word: Fortitude", // Should never break on damage
                         AuraType::DamageOverTime => "Rend", // Should never break on damage (has 0.0 threshold)
                         AuraType::SpellSchoolLockout => "Lockout", // Should never break on damage (has 0.0 threshold)
+                        AuraType::HealingReduction => "Mortal Strike", // Should never break on damage (has 0.0 threshold)
                     };
                     
                     let message = format!(
