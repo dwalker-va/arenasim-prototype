@@ -57,6 +57,8 @@ impl Plugin for StatesPlugin {
                 Update,
                 (
                     play_match::handle_time_controls,
+                    play_match::handle_camera_input,
+                    play_match::update_camera_position,
                     play_match::update_countdown,
                     play_match::update_play_match,
                     play_match::regenerate_resources,
@@ -103,6 +105,7 @@ impl Plugin for StatesPlugin {
                     play_match::update_spell_impact_effects,
                     play_match::cleanup_expired_spell_impacts,
                     play_match::render_time_controls,
+                    play_match::render_camera_controls,
                     play_match::render_countdown,
                     play_match::render_victory_celebration,
                     play_match::render_health_bars,

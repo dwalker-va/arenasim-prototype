@@ -71,6 +71,43 @@ impl SimulationSpeed {
     }
 }
 
+/// Camera control modes
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CameraMode {
+    /// Follow the center of all combatants
+    FollowCenter,
+    /// Follow a specific combatant
+    FollowCombatant(Entity),
+    /// Manual camera control
+    Manual,
+}
+
+/// Camera controller state
+#[derive(Resource)]
+pub struct CameraController {
+    pub mode: CameraMode,
+    pub zoom_distance: f32,      // Distance from target
+    pub pitch: f32,              // Rotation around X-axis (up/down)
+    pub yaw: f32,                // Rotation around Y-axis (left/right)
+    pub manual_target: Vec3,     // Look-at point for manual mode
+    pub is_dragging: bool,       // Mouse drag state
+    pub last_mouse_pos: Option<Vec2>,
+}
+
+impl Default for CameraController {
+    fn default() -> Self {
+        Self {
+            mode: CameraMode::FollowCenter,
+            zoom_distance: 60.0,
+            pitch: 38.7f32.to_radians(), // ~40 degrees
+            yaw: 0.0,
+            manual_target: Vec3::ZERO,
+            is_dragging: false,
+            last_mouse_pos: None,
+        }
+    }
+}
+
 // ============================================================================
 // Components
 // ============================================================================
@@ -79,6 +116,10 @@ impl SimulationSpeed {
 /// Used for cleanup when exiting the scene.
 #[derive(Component)]
 pub struct PlayMatchEntity;
+
+/// Marker component for the arena camera
+#[derive(Component)]
+pub struct ArenaCamera;
 
 /// Resource type for combatants (Mana, Energy, Rage).
 /// Different classes use different resources with different mechanics.
@@ -839,6 +880,7 @@ pub fn setup_play_match(
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(0.0, 40.0, 50.0).looking_at(Vec3::ZERO, Vec3::Y),
+        ArenaCamera,
         PlayMatchEntity,
     ));
 
@@ -861,6 +903,9 @@ pub fn setup_play_match(
     
     // Initialize simulation speed control
     commands.insert_resource(SimulationSpeed { multiplier: 1.0 });
+    
+    // Initialize camera controller
+    commands.insert_resource(CameraController::default());
     
     // Initialize match countdown (10 seconds before gates open)
     commands.insert_resource(MatchCountdown::default());
@@ -969,6 +1014,237 @@ fn spawn_combatant(
         Combatant::new(team, class),
         PlayMatchEntity,
     ));
+}
+
+/// Handle camera input for mode switching, zoom, rotation, and drag
+pub fn handle_camera_input(
+    mut camera_controller: ResMut<CameraController>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mouse_button: Res<ButtonInput<MouseButton>>,
+    mut mouse_wheel: EventReader<bevy::input::mouse::MouseWheel>,
+    mut cursor_moved: EventReader<bevy::window::CursorMoved>,
+    combatants: Query<Entity, With<Combatant>>,
+) {
+    // Cycle camera modes with TAB
+    if keyboard.just_pressed(KeyCode::Tab) {
+        camera_controller.mode = match camera_controller.mode {
+            CameraMode::FollowCenter => {
+                // Find first alive combatant to follow
+                if let Some(entity) = combatants.iter().next() {
+                    CameraMode::FollowCombatant(entity)
+                } else {
+                    CameraMode::FollowCenter
+                }
+            }
+            CameraMode::FollowCombatant(current_entity) => {
+                // Cycle to next combatant
+                let mut found_current = false;
+                let mut next_entity = None;
+                
+                for entity in combatants.iter() {
+                    if found_current {
+                        next_entity = Some(entity);
+                        break;
+                    }
+                    if entity == current_entity {
+                        found_current = true;
+                    }
+                }
+                
+                // If we found a next entity, use it. Otherwise, go to manual or back to center
+                if let Some(entity) = next_entity {
+                    CameraMode::FollowCombatant(entity)
+                } else {
+                    CameraMode::Manual
+                }
+            }
+            CameraMode::Manual => CameraMode::FollowCenter,
+        };
+    }
+    
+    // Reset camera to center with 'C' key
+    if keyboard.just_pressed(KeyCode::KeyC) {
+        camera_controller.mode = CameraMode::FollowCenter;
+        camera_controller.zoom_distance = 60.0;
+        camera_controller.pitch = 38.7f32.to_radians();
+        camera_controller.yaw = 0.0;
+    }
+    
+    // Handle mouse wheel for zoom
+    for event in mouse_wheel.read() {
+        let zoom_delta = event.y * 3.0; // Zoom speed
+        camera_controller.zoom_distance = (camera_controller.zoom_distance - zoom_delta).clamp(20.0, 150.0);
+    }
+    
+    // Handle mouse drag for rotation (middle mouse button)
+    if mouse_button.just_pressed(MouseButton::Middle) {
+        camera_controller.is_dragging = true;
+        
+        // When starting manual mode, we need to preserve the current target
+        // We'll update manual_target in the update_camera_position system
+    }
+    
+    if mouse_button.just_released(MouseButton::Middle) {
+        camera_controller.is_dragging = false;
+        camera_controller.last_mouse_pos = None;
+    }
+    
+    if camera_controller.is_dragging {
+        for event in cursor_moved.read() {
+            if let Some(last_pos) = camera_controller.last_mouse_pos {
+                let delta = event.position - last_pos;
+                
+                // Update yaw and pitch based on drag
+                camera_controller.yaw -= delta.x * 0.005; // Horizontal rotation
+                camera_controller.pitch = (camera_controller.pitch - delta.y * 0.005).clamp(0.1, 1.5); // Vertical rotation, clamped
+            }
+            camera_controller.last_mouse_pos = Some(event.position);
+        }
+    } else {
+        // Update last mouse pos even when not dragging, so first drag frame isn't a huge jump
+        for event in cursor_moved.read() {
+            camera_controller.last_mouse_pos = Some(event.position);
+        }
+    }
+}
+
+/// Update camera position and rotation based on controller state
+pub fn update_camera_position(
+    mut camera_controller: ResMut<CameraController>,
+    mut camera_query: Query<&mut Transform, With<ArenaCamera>>,
+    combatants: Query<(Entity, &Transform, &Combatant), Without<ArenaCamera>>,
+) {
+    let Ok(mut camera_transform) = camera_query.get_single_mut() else {
+        return;
+    };
+    
+    // If user just started dragging, switch to manual mode and preserve current target
+    if camera_controller.is_dragging && camera_controller.mode != CameraMode::Manual {
+        // Calculate current target before switching to manual
+        let current_target = match camera_controller.mode {
+            CameraMode::FollowCenter => {
+                let alive_combatants: Vec<Vec3> = combatants
+                    .iter()
+                    .filter(|(_, _, c)| c.is_alive())
+                    .map(|(_, t, _)| t.translation)
+                    .collect();
+                if alive_combatants.is_empty() {
+                    Vec3::ZERO
+                } else {
+                    let sum: Vec3 = alive_combatants.iter().sum();
+                    sum / alive_combatants.len() as f32
+                }
+            }
+            CameraMode::FollowCombatant(target_entity) => {
+                combatants
+                    .iter()
+                    .find(|(e, _, _)| *e == target_entity)
+                    .map(|(_, t, _)| t.translation)
+                    .unwrap_or(Vec3::ZERO)
+            }
+            CameraMode::Manual => camera_controller.manual_target,
+        };
+        
+        camera_controller.manual_target = current_target;
+        camera_controller.mode = CameraMode::Manual;
+    }
+    
+    // Determine the target look-at point based on camera mode
+    let target_point = match camera_controller.mode {
+        CameraMode::FollowCenter => {
+            // Calculate center of all alive combatants
+            let alive_combatants: Vec<Vec3> = combatants
+                .iter()
+                .filter(|(_, _, c)| c.is_alive())
+                .map(|(_, t, _)| t.translation)
+                .collect();
+            
+            if alive_combatants.is_empty() {
+                Vec3::ZERO
+            } else {
+                let sum: Vec3 = alive_combatants.iter().sum();
+                sum / alive_combatants.len() as f32
+            }
+        }
+        CameraMode::FollowCombatant(target_entity) => {
+            // Follow specific combatant
+            combatants
+                .iter()
+                .find(|(e, _, _)| *e == target_entity)
+                .map(|(_, t, _)| t.translation)
+                .unwrap_or(Vec3::ZERO)
+        }
+        CameraMode::Manual => {
+            // Use manual target (preserved when entering manual mode)
+            camera_controller.manual_target
+        }
+    };
+    
+    // Calculate camera position based on spherical coordinates
+    let x = target_point.x + camera_controller.zoom_distance * camera_controller.pitch.sin() * camera_controller.yaw.sin();
+    let y = target_point.y + camera_controller.zoom_distance * camera_controller.pitch.cos();
+    let z = target_point.z + camera_controller.zoom_distance * camera_controller.pitch.sin() * camera_controller.yaw.cos();
+    
+    camera_transform.translation = Vec3::new(x, y, z);
+    camera_transform.look_at(target_point, Vec3::Y);
+}
+
+/// Render camera controls help overlay
+pub fn render_camera_controls(
+    mut contexts: EguiContexts,
+    camera_controller: Res<CameraController>,
+) {
+    let ctx = contexts.ctx_mut();
+    
+    // Position in bottom-left corner
+    egui::Window::new("Camera Controls")
+        .fixed_pos(egui::pos2(10.0, ctx.screen_rect().height() - 160.0))
+        .resizable(false)
+        .collapsible(false)
+        .title_bar(false)
+        .frame(egui::Frame::window(&ctx.style())
+            .fill(egui::Color32::from_black_alpha(150))) // Semi-transparent
+        .show(ctx, |ui| {
+            ui.set_width(250.0);
+            
+            // Current mode
+            let mode_text = match camera_controller.mode {
+                CameraMode::FollowCenter => "Center",
+                CameraMode::FollowCombatant(_) => "Follow Combatant",
+                CameraMode::Manual => "Manual",
+            };
+            
+            ui.label(
+                egui::RichText::new(format!("Mode: {}", mode_text))
+                    .size(12.0)
+                    .color(egui::Color32::from_rgb(100, 200, 255))
+                    .strong()
+            );
+            
+            ui.add_space(5.0);
+            
+            // Controls
+            ui.label(
+                egui::RichText::new("TAB - Cycle camera mode")
+                    .size(11.0)
+                    .color(egui::Color32::from_rgb(200, 200, 200))
+            );
+            ui.label(
+                egui::RichText::new("C - Reset to center")
+                    .size(11.0)
+                    .color(egui::Color32::from_rgb(200, 200, 200))
+            );
+            ui.label(
+                egui::RichText::new("Mouse Wheel - Zoom")
+                    .size(11.0)
+                    .color(egui::Color32::from_rgb(200, 200, 200))
+            );
+            ui.label(
+                egui::RichText::new("Middle Mouse - Rotate")
+                    .size(11.0)
+                    .color(egui::Color32::from_rgb(200, 200, 200))
+            );
+        });
 }
 
 /// Cleanup system: Despawns all Play Match entities when exiting the state.
