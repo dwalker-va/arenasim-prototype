@@ -2,4 +2,68 @@
     window_mode: Windowed,
     resolution: HD720,
     vsync: true,
+    keybindings: (
+        bindings: {
+            PausePlay: (
+                primary: "Space",
+                secondary: None,
+            ),
+            SpeedNormal: (
+                primary: "Digit2",
+                secondary: None,
+            ),
+            CycleCameraMode: (
+                primary: "Tab",
+                secondary: None,
+            ),
+            CameraMoveRight: (
+                primary: "KeyD",
+                secondary: None,
+            ),
+            SpeedSlow: (
+                primary: "Digit1",
+                secondary: None,
+            ),
+            Confirm: (
+                primary: "Enter",
+                secondary: None,
+            ),
+            SpeedFast: (
+                primary: "Digit3",
+                secondary: None,
+            ),
+            ResetCamera: (
+                primary: "KeyC",
+                secondary: None,
+            ),
+            CameraZoomIn: (
+                primary: "Equal",
+                secondary: Some("NumpadAdd"),
+            ),
+            CameraMoveLeft: (
+                primary: "KeyA",
+                secondary: None,
+            ),
+            CameraMoveBackward: (
+                primary: "KeyS",
+                secondary: None,
+            ),
+            Back: (
+                primary: "Escape",
+                secondary: None,
+            ),
+            CameraMoveForward: (
+                primary: "KeyW",
+                secondary: None,
+            ),
+            CameraZoomOut: (
+                primary: "Minus",
+                secondary: Some("NumpadSubtract"),
+            ),
+            SpeedVeryFast: (
+                primary: "Digit4",
+                secondary: None,
+            ),
+        },
+    ),
 )

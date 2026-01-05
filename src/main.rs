@@ -9,12 +9,14 @@ use bevy_egui::{egui, EguiContexts, EguiPlugin};
 
 mod camera;
 mod combat;
+mod keybindings;
 mod settings;
 mod states;
 mod ui;
 
 use camera::CameraPlugin;
 use combat::CombatPlugin;
+use keybindings::Keybindings;
 use settings::{GameSettings, SettingsPlugin};
 use states::{GameState, StatesPlugin};
 use ui::UiPlugin;

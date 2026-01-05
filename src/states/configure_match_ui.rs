@@ -47,8 +47,11 @@ pub fn configure_match_ui(
     mut next_state: ResMut<NextState<GameState>>,
     mut picker_state: Option<ResMut<CharacterPickerState>>,
     mut commands: Commands,
+    keybindings: Res<crate::keybindings::Keybindings>,
     keyboard: Res<ButtonInput<KeyCode>>,
 ) {
+    use crate::keybindings::GameAction;
+    
     // Initialize picker state if it doesn't exist
     if picker_state.is_none() {
         commands.insert_resource(CharacterPickerState::default());
@@ -62,8 +65,8 @@ pub fn configure_match_ui(
     style.visuals.panel_fill = egui::Color32::from_rgb(20, 20, 30);
     ctx.set_style(style);
 
-    // Handle ESC key - close modal if open, otherwise return to main menu
-    if keyboard.just_pressed(KeyCode::Escape) {
+    // Handle Back key - close modal if open, otherwise return to main menu
+    if keybindings.action_just_pressed(GameAction::Back, &keyboard) {
         if let Some(ref mut picker) = picker_state {
             if picker.active {
                 picker.active = false;

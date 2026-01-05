@@ -37,21 +37,27 @@ impl Plugin for CameraPlugin {
 #[derive(Component)]
 pub struct MainCamera;
 
-/// Handle ESC key to return to previous state/menu.
+/// Handle Back key to return to previous state/menu.
 /// 
-/// Note: ConfigureMatch has its own ESC handler to close modals first.
+/// Note: ConfigureMatch has its own Back handler to close modals first.
 fn handle_escape_key(
+    keybindings: Res<crate::keybindings::Keybindings>,
     keyboard: Res<ButtonInput<KeyCode>>,
     current_state: Res<State<GameState>>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
-    if keyboard.just_pressed(KeyCode::Escape) {
+    use crate::keybindings::GameAction;
+    
+    if keybindings.action_just_pressed(GameAction::Back, &keyboard) {
         match current_state.get() {
             GameState::MainMenu => {
                 // ESC in main menu does nothing (or could open quit confirmation)
             }
             GameState::Options => {
                 next_state.set(GameState::MainMenu);
+            }
+            GameState::Keybindings => {
+                next_state.set(GameState::Options);
             }
             GameState::ConfigureMatch => {
                 // ConfigureMatch has its own ESC handler - skip here
@@ -71,41 +77,43 @@ fn handle_escape_key(
 /// Camera controls for the 3D arena view during PlayMatch.
 /// 
 /// **Controls:**
-/// - `+` / `Numpad +`: Zoom in
-/// - `-` / `Numpad -`: Zoom out
-/// - `WASD`: Pan camera (move viewpoint)
+/// - Zoom in/out: Via keybindings (default: +/- or numpad +/-)
+/// - Pan camera: Via keybindings (default: WASD)
 fn camera_controls(
     mut camera_query: Query<&mut Transform, With<MainCamera>>,
+    keybindings: Res<crate::keybindings::Keybindings>,
     keyboard: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
 ) {
+    use crate::keybindings::GameAction;
+    
     let Ok(mut camera_transform) = camera_query.get_single_mut() else {
         return;
     };
 
     // Zoom controls (move camera forward/backward along view direction)
     let zoom_speed = 10.0 * time.delta_secs();
-    if keyboard.pressed(KeyCode::Equal) || keyboard.pressed(KeyCode::NumpadAdd) {
+    if keybindings.action_pressed(GameAction::CameraZoomIn, &keyboard) {
         let direction = camera_transform.forward();
         camera_transform.translation += direction * zoom_speed;
     }
-    if keyboard.pressed(KeyCode::Minus) || keyboard.pressed(KeyCode::NumpadSubtract) {
+    if keybindings.action_pressed(GameAction::CameraZoomOut, &keyboard) {
         let direction = camera_transform.forward();
         camera_transform.translation -= direction * zoom_speed;
     }
 
     // Pan controls (move camera in world space)
     let move_speed = 15.0 * time.delta_secs();
-    if keyboard.pressed(KeyCode::KeyW) {
+    if keybindings.action_pressed(GameAction::CameraMoveForward, &keyboard) {
         camera_transform.translation.z -= move_speed;
     }
-    if keyboard.pressed(KeyCode::KeyS) {
+    if keybindings.action_pressed(GameAction::CameraMoveBackward, &keyboard) {
         camera_transform.translation.z += move_speed;
     }
-    if keyboard.pressed(KeyCode::KeyA) {
+    if keybindings.action_pressed(GameAction::CameraMoveLeft, &keyboard) {
         camera_transform.translation.x -= move_speed;
     }
-    if keyboard.pressed(KeyCode::KeyD) {
+    if keybindings.action_pressed(GameAction::CameraMoveRight, &keyboard) {
         camera_transform.translation.x += move_speed;
     }
 }

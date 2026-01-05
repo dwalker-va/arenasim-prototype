@@ -7,6 +7,7 @@ use bevy::window::{MonitorSelection, PresentMode, PrimaryWindow, WindowMode};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use crate::keybindings::Keybindings;
 
 /// User-configurable game settings
 #[derive(Resource, Clone, Debug, Serialize, Deserialize)]
@@ -14,6 +15,7 @@ pub struct GameSettings {
     pub window_mode: WindowModeOption,
     pub resolution: ResolutionOption,
     pub vsync: bool,
+    pub keybindings: Keybindings,
 }
 
 /// Tracks whether settings have changed and require application restart
@@ -54,6 +56,7 @@ impl Default for GameSettings {
             window_mode: WindowModeOption::Windowed,
             resolution: ResolutionOption::HD720,
             vsync: true,
+            keybindings: Keybindings::default(),
         }
     }
 }
@@ -171,12 +174,16 @@ impl Plugin for SettingsPlugin {
         // Load settings from file
         let settings = GameSettings::load();
         
+        // Also insert keybindings as a separate resource for easy access
+        let keybindings = settings.keybindings.clone();
+        
         app.insert_resource(settings.clone())
+            .insert_resource(keybindings)
             .insert_resource(PendingSettingsRestart {
                 restart_required: false,
                 previous_settings: settings,
             })
-            .add_systems(Update, (save_settings_on_change, apply_runtime_settings));
+            .add_systems(Update, (save_settings_on_change, apply_runtime_settings, sync_keybindings));
     }
 }
 
@@ -226,6 +233,17 @@ fn apply_runtime_settings(
             
             info!("Applied VSync: {}", settings.vsync);
         }
+    }
+}
+
+/// System to keep Keybindings resource in sync with GameSettings
+fn sync_keybindings(
+    settings: Res<GameSettings>,
+    mut keybindings: ResMut<Keybindings>,
+) {
+    if settings.is_changed() && !settings.is_added() {
+        *keybindings = settings.keybindings.clone();
+        info!("Synced keybindings from settings");
     }
 }
 

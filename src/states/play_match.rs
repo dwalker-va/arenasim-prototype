@@ -92,6 +92,7 @@ pub struct CameraController {
     pub manual_target: Vec3,     // Look-at point for manual mode
     pub is_dragging: bool,       // Mouse drag state
     pub last_mouse_pos: Option<Vec2>,
+    pub keyboard_movement: Vec3, // WASD movement delta this frame
 }
 
 impl Default for CameraController {
@@ -104,6 +105,7 @@ impl Default for CameraController {
             manual_target: Vec3::ZERO,
             is_dragging: false,
             last_mouse_pos: None,
+            keyboard_movement: Vec3::ZERO,
         }
     }
 }
@@ -1019,14 +1021,47 @@ fn spawn_combatant(
 /// Handle camera input for mode switching, zoom, rotation, and drag
 pub fn handle_camera_input(
     mut camera_controller: ResMut<CameraController>,
+    keybindings: Res<crate::keybindings::Keybindings>,
     keyboard: Res<ButtonInput<KeyCode>>,
     mouse_button: Res<ButtonInput<MouseButton>>,
     mut mouse_wheel: EventReader<bevy::input::mouse::MouseWheel>,
     mut cursor_moved: EventReader<bevy::window::CursorMoved>,
+    time: Res<Time>,
     combatants: Query<Entity, With<Combatant>>,
 ) {
-    // Cycle camera modes with TAB
-    if keyboard.just_pressed(KeyCode::Tab) {
+    use crate::keybindings::GameAction;
+    
+    let dt = time.delta_secs();
+    
+    // Keyboard zoom controls
+    if keybindings.action_pressed(GameAction::CameraZoomIn, &keyboard) {
+        let zoom_speed = 30.0 * dt;
+        camera_controller.zoom_distance = (camera_controller.zoom_distance - zoom_speed).clamp(20.0, 150.0);
+    }
+    if keybindings.action_pressed(GameAction::CameraZoomOut, &keyboard) {
+        let zoom_speed = 30.0 * dt;
+        camera_controller.zoom_distance = (camera_controller.zoom_distance + zoom_speed).clamp(20.0, 150.0);
+    }
+    
+    // WASD camera panning - moves the target point
+    camera_controller.keyboard_movement = Vec3::ZERO;
+    let move_speed = 15.0 * dt;
+    
+    if keybindings.action_pressed(GameAction::CameraMoveForward, &keyboard) {
+        camera_controller.keyboard_movement.z -= move_speed;
+    }
+    if keybindings.action_pressed(GameAction::CameraMoveBackward, &keyboard) {
+        camera_controller.keyboard_movement.z += move_speed;
+    }
+    if keybindings.action_pressed(GameAction::CameraMoveLeft, &keyboard) {
+        camera_controller.keyboard_movement.x -= move_speed;
+    }
+    if keybindings.action_pressed(GameAction::CameraMoveRight, &keyboard) {
+        camera_controller.keyboard_movement.x += move_speed;
+    }
+    
+    // Cycle camera modes
+    if keybindings.action_just_pressed(GameAction::CycleCameraMode, &keyboard) {
         camera_controller.mode = match camera_controller.mode {
             CameraMode::FollowCenter => {
                 // Find first alive combatant to follow
@@ -1062,8 +1097,8 @@ pub fn handle_camera_input(
         };
     }
     
-    // Reset camera to center with 'C' key
-    if keyboard.just_pressed(KeyCode::KeyC) {
+    // Reset camera
+    if keybindings.action_just_pressed(GameAction::ResetCamera, &keyboard) {
         camera_controller.mode = CameraMode::FollowCenter;
         camera_controller.zoom_distance = 60.0;
         camera_controller.pitch = 38.7f32.to_radians();
@@ -1118,8 +1153,11 @@ pub fn update_camera_position(
         return;
     };
     
-    // If user just started dragging, switch to manual mode and preserve current target
-    if camera_controller.is_dragging && camera_controller.mode != CameraMode::Manual {
+    // If user just started dragging OR using keyboard movement, switch to manual mode and preserve current target
+    let needs_manual_switch = (camera_controller.is_dragging || camera_controller.keyboard_movement != Vec3::ZERO) 
+        && camera_controller.mode != CameraMode::Manual;
+    
+    if needs_manual_switch {
         // Calculate current target before switching to manual
         let current_target = match camera_controller.mode {
             CameraMode::FollowCenter => {
@@ -1147,6 +1185,12 @@ pub fn update_camera_position(
         
         camera_controller.manual_target = current_target;
         camera_controller.mode = CameraMode::Manual;
+    }
+    
+    // Apply keyboard movement to manual target
+    let keyboard_movement = camera_controller.keyboard_movement;
+    if keyboard_movement != Vec3::ZERO {
+        camera_controller.manual_target += keyboard_movement;
     }
     
     // Determine the target look-at point based on camera mode
@@ -1193,7 +1237,10 @@ pub fn update_camera_position(
 pub fn render_camera_controls(
     mut contexts: EguiContexts,
     camera_controller: Res<CameraController>,
+    keybindings: Res<crate::keybindings::Keybindings>,
 ) {
+    use crate::keybindings::GameAction;
+    
     let ctx = contexts.ctx_mut();
     
     // Position in bottom-left corner
@@ -1203,7 +1250,8 @@ pub fn render_camera_controls(
         .collapsible(false)
         .title_bar(false)
         .frame(egui::Frame::window(&ctx.style())
-            .fill(egui::Color32::from_black_alpha(150))) // Semi-transparent
+            .fill(egui::Color32::from_black_alpha(150)) // Semi-transparent
+            .stroke(egui::Stroke::NONE)) // Remove border
         .show(ctx, |ui| {
             ui.set_width(250.0);
             
@@ -1223,16 +1271,22 @@ pub fn render_camera_controls(
             
             ui.add_space(5.0);
             
-            // Controls
+            // Controls - dynamically show actual keybindings
             ui.label(
-                egui::RichText::new("TAB - Cycle camera mode")
-                    .size(11.0)
-                    .color(egui::Color32::from_rgb(200, 200, 200))
+                egui::RichText::new(format!(
+                    "{} - Cycle camera mode",
+                    keybindings.binding_display(GameAction::CycleCameraMode)
+                ))
+                .size(11.0)
+                .color(egui::Color32::from_rgb(200, 200, 200))
             );
             ui.label(
-                egui::RichText::new("C - Reset to center")
-                    .size(11.0)
-                    .color(egui::Color32::from_rgb(200, 200, 200))
+                egui::RichText::new(format!(
+                    "{} - Reset to center",
+                    keybindings.binding_display(GameAction::ResetCamera)
+                ))
+                .size(11.0)
+                .color(egui::Color32::from_rgb(200, 200, 200))
             );
             ui.label(
                 egui::RichText::new("Mouse Wheel - Zoom")
@@ -1317,15 +1371,18 @@ pub fn update_countdown(
 /// - `3`: 2x speed
 /// - `4`: 3x speed
 pub fn handle_time_controls(
+    keybindings: Res<crate::keybindings::Keybindings>,
     keyboard: Res<ButtonInput<KeyCode>>,
     mut sim_speed: ResMut<SimulationSpeed>,
     mut time: ResMut<Time<Virtual>>,
 ) {
+    use crate::keybindings::GameAction;
+    
     let mut speed_changed = false;
     let old_multiplier = sim_speed.multiplier;
     
-    // Space toggles pause
-    if keyboard.just_pressed(KeyCode::Space) {
+    // Pause/Play toggle
+    if keybindings.action_just_pressed(GameAction::PausePlay, &keyboard) {
         if sim_speed.is_paused() {
             sim_speed.multiplier = 1.0; // Resume at normal speed
         } else {
@@ -1334,20 +1391,20 @@ pub fn handle_time_controls(
         speed_changed = true;
     }
     
-    // Number keys set specific speeds
-    if keyboard.just_pressed(KeyCode::Digit1) {
+    // Speed presets
+    if keybindings.action_just_pressed(GameAction::SpeedSlow, &keyboard) {
         sim_speed.multiplier = 0.5;
         speed_changed = true;
     }
-    if keyboard.just_pressed(KeyCode::Digit2) {
+    if keybindings.action_just_pressed(GameAction::SpeedNormal, &keyboard) {
         sim_speed.multiplier = 1.0;
         speed_changed = true;
     }
-    if keyboard.just_pressed(KeyCode::Digit3) {
+    if keybindings.action_just_pressed(GameAction::SpeedFast, &keyboard) {
         sim_speed.multiplier = 2.0;
         speed_changed = true;
     }
-    if keyboard.just_pressed(KeyCode::Digit4) {
+    if keybindings.action_just_pressed(GameAction::SpeedVeryFast, &keyboard) {
         sim_speed.multiplier = 3.0;
         speed_changed = true;
     }
@@ -1386,7 +1443,8 @@ pub fn render_time_controls(
         .collapsible(false)
         .title_bar(false)
         .frame(egui::Frame::window(&ctx.style())
-            .fill(egui::Color32::from_black_alpha(200))) // Semi-transparent
+            .fill(egui::Color32::from_black_alpha(200)) // Semi-transparent
+            .stroke(egui::Stroke::NONE)) // Remove border
         .show(ctx, |ui| {
             ui.set_width(panel_width);
             
@@ -1475,10 +1533,13 @@ pub fn render_time_controls(
 /// Handle player input during the match.
 /// Currently only handles ESC key to return to main menu.
 pub fn update_play_match(
+    keybindings: Res<crate::keybindings::Keybindings>,
     keyboard: Res<ButtonInput<KeyCode>>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
-    if keyboard.just_pressed(KeyCode::Escape) {
+    use crate::keybindings::GameAction;
+    
+    if keybindings.action_just_pressed(GameAction::Back, &keyboard) {
         next_state.set(GameState::MainMenu);
     }
 }
@@ -1832,8 +1893,10 @@ pub fn render_combat_log(
         .max_width(400.0)
         .min_width(250.0)
         .resizable(true)
+        .show_separator_line(false) // Hide the black resize separator line
         .frame(egui::Frame::side_top_panel(&ctx.style())
-            .fill(egui::Color32::from_black_alpha(180))) // Semi-transparent background
+            .fill(egui::Color32::from_black_alpha(180)) // Semi-transparent background
+            .stroke(egui::Stroke::NONE)) // Remove border
         .show(ctx, |ui| {
             ui.heading(
                 egui::RichText::new("Combat Log")
