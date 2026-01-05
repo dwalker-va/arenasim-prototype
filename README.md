@@ -58,7 +58,17 @@ arenasim-prototype/
 │   ├── main.rs                    # Entry point, plugin registration
 │   ├── states/
 │   │   ├── mod.rs                 # Game state orchestration (menu, options, match, results)
-│   │   ├── play_match.rs          # Combat simulation (5400+ lines - abilities, AI, rendering)
+│   │   ├── play_match/            # Combat simulation (modular architecture, 5500+ lines)
+│   │   │   ├── mod.rs             # Module coordination & setup
+│   │   │   ├── abilities.rs       # Ability definitions & spell schools
+│   │   │   ├── components.rs      # Combat data structures (Combatant, Aura, etc.)
+│   │   │   ├── combat_ai.rs       # AI decision-making (target acquisition, priorities)
+│   │   │   ├── combat_core.rs     # Core mechanics (movement, auto-attack, casting)
+│   │   │   ├── auras.rs           # Status effect systems (Root, Stun, DoT)
+│   │   │   ├── projectiles.rs     # Spell projectile systems
+│   │   │   ├── rendering.rs       # UI rendering (cast bars, FCT, combat log)
+│   │   │   ├── camera.rs          # Camera control systems
+│   │   │   └── match_flow.rs      # Match countdown, victory, time controls
 │   │   ├── configure_match_ui.rs  # Match setup UI
 │   │   ├── results_ui.rs          # Post-match statistics
 │   │   └── match_config.rs        # Team configuration data
