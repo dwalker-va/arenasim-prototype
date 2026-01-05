@@ -857,6 +857,29 @@ impl AbilityDefinition {
     }
 }
 
+/// Helper function to check if a spell school is currently locked out for a combatant
+fn is_spell_school_locked(spell_school: SpellSchool, auras: Option<&ActiveAuras>) -> bool {
+    if let Some(auras) = auras {
+        auras.auras.iter().any(|aura| {
+            if aura.effect_type == AuraType::SpellSchoolLockout {
+                // Convert magnitude back to spell school
+                let locked_school = match aura.magnitude as u8 {
+                    0 => SpellSchool::Physical,
+                    1 => SpellSchool::Frost,
+                    2 => SpellSchool::Holy,
+                    3 => SpellSchool::Shadow,
+                    _ => SpellSchool::None,
+                };
+                locked_school == spell_school
+            } else {
+                false
+            }
+        })
+    } else {
+        false
+    }
+}
+
 // ============================================================================
 // Setup & Cleanup Systems
 // ============================================================================
@@ -2998,7 +3021,10 @@ pub fn decide_abilities(
             let nova_def = frost_nova.definition();
             let nova_on_cooldown = combatant.ability_cooldowns.contains_key(&frost_nova);
             
-            if !nova_on_cooldown && combatant.current_mana >= nova_def.mana_cost {
+            // Check if Frost school is locked out
+            let frost_locked_out = is_spell_school_locked(nova_def.spell_school, auras);
+            
+            if !nova_on_cooldown && !frost_locked_out && combatant.current_mana >= nova_def.mana_cost {
                 // Check if any enemies are within Frost Nova range (melee range for threat detection)
                 let enemies_in_melee_range = positions.iter().any(|(enemy_entity, &enemy_pos)| {
                     if let Some(&(enemy_team, _, _, _)) = combatant_info.get(enemy_entity) {
@@ -3102,27 +3128,7 @@ pub fn decide_abilities(
             let def = ability.definition();
             
             // Check if spell school is locked out
-            let is_locked_out = if let Some(auras) = auras {
-                auras.auras.iter().any(|aura| {
-                    if aura.effect_type == AuraType::SpellSchoolLockout {
-                        // Convert magnitude back to spell school
-                        let locked_school = match aura.magnitude as u8 {
-                            0 => SpellSchool::Physical,
-                            1 => SpellSchool::Frost,
-                            2 => SpellSchool::Holy,
-                            3 => SpellSchool::Shadow,
-                            _ => SpellSchool::None,
-                        };
-                        locked_school == def.spell_school
-                    } else {
-                        false
-                    }
-                })
-            } else {
-                false
-            };
-            
-            if is_locked_out {
+            if is_spell_school_locked(def.spell_school, auras) {
                 continue; // Can't cast - spell school is locked
             }
             
@@ -3191,7 +3197,10 @@ pub fn decide_abilities(
             // Cast Fortitude on unbuffed ally
             if let Some((buff_target, target_pos)) = unbuffed_ally {
                 let ability = AbilityType::PowerWordFortitude;
-                if ability.can_cast(&combatant, target_pos, my_pos) {
+                let def = ability.definition();
+                
+                // Check if spell school is locked out
+                if !is_spell_school_locked(def.spell_school, auras) && ability.can_cast(&combatant, target_pos, my_pos) {
                     let def = ability.definition();
                     
                     // Consume mana
@@ -3260,7 +3269,10 @@ pub fn decide_abilities(
             // Priority 1: Cast heal on lowest HP ally if found
             if let Some((heal_target, _, target_pos)) = lowest_hp_ally {
                 let ability = AbilityType::FlashHeal;
-                if ability.can_cast(&combatant, target_pos, my_pos) {
+                let def = ability.definition();
+                
+                // Check if spell school is locked out
+                if !is_spell_school_locked(def.spell_school, auras) && ability.can_cast(&combatant, target_pos, my_pos) {
                     let def = ability.definition();
                     
                     // Trigger global cooldown (1.5s standard WoW GCD)
@@ -3299,8 +3311,10 @@ pub fn decide_abilities(
             // Check if Mind Blast is off cooldown
             let ability = AbilityType::MindBlast;
             let on_cooldown = combatant.ability_cooldowns.contains_key(&ability);
+            let def = ability.definition();
             
-            if !on_cooldown && ability.can_cast(&combatant, target_pos, my_pos) {
+            // Check if spell school is locked out
+            if !on_cooldown && !is_spell_school_locked(def.spell_school, auras) && ability.can_cast(&combatant, target_pos, my_pos) {
                 let def = ability.definition();
                 
                 // Put on cooldown
