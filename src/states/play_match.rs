@@ -1648,52 +1648,118 @@ pub fn render_health_bars(
                     if combatant.stealthed {
                         let stealth_text = "STEALTH";
                         let stealth_font = egui::FontId::monospace(9.0);
+                        
+                        // Create galley for measuring size
                         let stealth_galley = ui.fonts(|f| f.layout_no_wrap(
                             stealth_text.to_string(),
-                            stealth_font,
-                            egui::Color32::from_rgb(150, 100, 200), // Purple tint
+                            stealth_font.clone(),
+                            egui::Color32::from_rgb(180, 120, 230), // Brighter purple
                         ));
-                        let stealth_pos = egui::pos2(
+                        let stealth_center_pos = egui::pos2(
                             bar_pos.x + (bar_width - stealth_galley.size().x) / 2.0,
                             bar_pos.y + status_offset,
                         );
-                        ui.painter().galley(stealth_pos, stealth_galley, egui::Color32::from_rgb(150, 100, 200));
+                        
+                        // Draw black outline/stroke for visibility
+                        for dx in [-1.0, 0.0, 1.0] {
+                            for dy in [-1.0, 0.0, 1.0] {
+                                if dx != 0.0 || dy != 0.0 {
+                                    let outline_galley = ui.fonts(|f| f.layout_no_wrap(
+                                        stealth_text.to_string(),
+                                        stealth_font.clone(),
+                                        egui::Color32::BLACK,
+                                    ));
+                                    let outline_pos = egui::pos2(
+                                        stealth_center_pos.x + dx,
+                                        stealth_center_pos.y + dy,
+                                    );
+                                    ui.painter().galley(outline_pos, outline_galley, egui::Color32::BLACK);
+                                }
+                            }
+                        }
+                        
+                        // Draw main text on top
+                        ui.painter().galley(stealth_center_pos, stealth_galley, egui::Color32::from_rgb(180, 120, 230));
                         status_offset -= 10.0; // Move next label up
                     }
                     
                     // Status effect indicators (if has auras)
                     if let Some(auras) = active_auras {
-                        // STUNNED indicator (if has Stun aura)
-                        if auras.auras.iter().any(|a| a.effect_type == AuraType::Stun) {
-                            let stun_text = "STUNNED";
+                        // STUN indicator with duration countdown
+                        if let Some(stun_aura) = auras.auras.iter().find(|a| a.effect_type == AuraType::Stun) {
+                            let stun_text = format!("STUN {:.1}s", stun_aura.duration);
                             let stun_font = egui::FontId::monospace(9.0);
+                            
+                            // Create galley for measuring size
                             let stun_galley = ui.fonts(|f| f.layout_no_wrap(
-                                stun_text.to_string(),
-                                stun_font,
-                                egui::Color32::from_rgb(255, 100, 100), // Red
+                                stun_text.clone(),
+                                stun_font.clone(),
+                                egui::Color32::from_rgb(255, 100, 100),
                             ));
-                            let stun_pos = egui::pos2(
+                            let stun_center_pos = egui::pos2(
                                 bar_pos.x + (bar_width - stun_galley.size().x) / 2.0,
                                 bar_pos.y + status_offset,
                             );
-                            ui.painter().galley(stun_pos, stun_galley, egui::Color32::from_rgb(255, 100, 100));
+                            
+                            // Draw black outline/stroke for visibility
+                            for dx in [-1.0, 0.0, 1.0] {
+                                for dy in [-1.0, 0.0, 1.0] {
+                                    if dx != 0.0 || dy != 0.0 {
+                                        let outline_galley = ui.fonts(|f| f.layout_no_wrap(
+                                            stun_text.clone(),
+                                            stun_font.clone(),
+                                            egui::Color32::BLACK,
+                                        ));
+                                        let outline_pos = egui::pos2(
+                                            stun_center_pos.x + dx,
+                                            stun_center_pos.y + dy,
+                                        );
+                                        ui.painter().galley(outline_pos, outline_galley, egui::Color32::BLACK);
+                                    }
+                                }
+                            }
+                            
+                            // Draw main text on top
+                            ui.painter().galley(stun_center_pos, stun_galley, egui::Color32::from_rgb(255, 100, 100));
                             status_offset -= 10.0; // Move next label up
                         }
                         
-                        // ROOTED indicator (if has Root aura)
-                        if auras.auras.iter().any(|a| a.effect_type == AuraType::Root) {
-                            let root_text = "ROOTED";
+                        // ROOT indicator with duration countdown
+                        if let Some(root_aura) = auras.auras.iter().find(|a| a.effect_type == AuraType::Root) {
+                            let root_text = format!("ROOT {:.1}s", root_aura.duration);
                             let root_font = egui::FontId::monospace(9.0);
+                            
+                            // Create galley for measuring size
                             let root_galley = ui.fonts(|f| f.layout_no_wrap(
-                                root_text.to_string(),
-                                root_font,
-                                egui::Color32::from_rgb(100, 180, 255), // Ice blue
+                                root_text.clone(),
+                                root_font.clone(),
+                                egui::Color32::from_rgb(100, 200, 255), // Brighter ice blue
                             ));
-                            let root_pos = egui::pos2(
+                            let root_center_pos = egui::pos2(
                                 bar_pos.x + (bar_width - root_galley.size().x) / 2.0,
                                 bar_pos.y + status_offset,
                             );
-                            ui.painter().galley(root_pos, root_galley, egui::Color32::from_rgb(100, 180, 255));
+                            
+                            // Draw black outline/stroke for visibility
+                            for dx in [-1.0, 0.0, 1.0] {
+                                for dy in [-1.0, 0.0, 1.0] {
+                                    if dx != 0.0 || dy != 0.0 {
+                                        let outline_galley = ui.fonts(|f| f.layout_no_wrap(
+                                            root_text.clone(),
+                                            root_font.clone(),
+                                            egui::Color32::BLACK,
+                                        ));
+                                        let outline_pos = egui::pos2(
+                                            root_center_pos.x + dx,
+                                            root_center_pos.y + dy,
+                                        );
+                                        ui.painter().galley(outline_pos, outline_galley, egui::Color32::BLACK);
+                                    }
+                                }
+                            }
+                            
+                            // Draw main text on top
+                            ui.painter().galley(root_center_pos, root_galley, egui::Color32::from_rgb(100, 200, 255));
                         }
                     }
 
