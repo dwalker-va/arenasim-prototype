@@ -2708,7 +2708,12 @@ pub fn combat_auto_attack(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
     mut combatants: Query<(Entity, &Transform, &mut Combatant, Option<&CastingState>, Option<&ActiveAuras>)>,
+    celebration: Option<Res<VictoryCelebration>>,
 ) {
+    // Don't deal damage during victory celebration
+    if celebration.is_some() {
+        return;
+    }
     let dt = time.delta_secs();
     
     // Update match time in combat log (countdown doesn't count against match time)
@@ -2990,7 +2995,12 @@ pub fn decide_abilities(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
     mut combatants: Query<(Entity, &mut Combatant, &Transform, Option<&ActiveAuras>), Without<CastingState>>,
+    celebration: Option<Res<VictoryCelebration>>,
 ) {
+    // Don't cast abilities during victory celebration
+    if celebration.is_some() {
+        return;
+    }
     // Build position and info maps from all combatants
     let positions: std::collections::HashMap<Entity, Vec3> = combatants
         .iter()
@@ -3845,7 +3855,13 @@ pub fn check_interrupts(
     mut combatants: Query<(Entity, &mut Combatant, &Transform), Without<CastingState>>,
     casting_targets: Query<&CastingState>,
     positions: Query<&Transform>,
+    celebration: Option<Res<VictoryCelebration>>,
 ) {
+    // Don't interrupt during victory celebration
+    if celebration.is_some() {
+        return;
+    }
+    
     for (entity, mut combatant, transform) in combatants.iter_mut() {
         if !combatant.is_alive() {
             continue;
@@ -3946,7 +3962,13 @@ pub fn process_interrupts(
     interrupts: Query<(Entity, &InterruptPending)>,
     mut targets: Query<(&mut CastingState, &Combatant)>,
     combatants: Query<&Combatant>,
+    celebration: Option<Res<VictoryCelebration>>,
 ) {
+    // Don't process interrupts during victory celebration
+    if celebration.is_some() {
+        return;
+    }
+    
     for (interrupt_entity, interrupt) in interrupts.iter() {
         // Check if target is still casting
         if let Ok((mut cast_state, target_combatant)) = targets.get_mut(interrupt.target) {
@@ -4044,7 +4066,13 @@ pub fn process_casting(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
     mut combatants: Query<(Entity, &Transform, &mut Combatant, Option<&mut CastingState>)>,
+    celebration: Option<Res<VictoryCelebration>>,
 ) {
+    // Don't complete casts during victory celebration
+    if celebration.is_some() {
+        return;
+    }
+    
     let dt = time.delta_secs();
     
     // Track completed casts
@@ -4534,6 +4562,8 @@ pub fn check_match_end(
     config: Res<MatchConfig>,
     combat_log: Res<CombatLog>,
     celebration: Option<Res<VictoryCelebration>>,
+    projectiles: Query<Entity, With<Projectile>>,
+    spell_effects: Query<Entity, With<SpellImpactEffect>>,
     mut commands: Commands,
 ) {
     // If celebration is already active, don't check for match end again
@@ -4603,6 +4633,19 @@ pub fn check_match_end(
                 let bounce_offset = (team1_stats.len() + team2_stats.len()) as f32 * 0.2;
                 commands.entity(entity).insert(Celebrating { bounce_offset });
             }
+            
+            // Cancel any active casts to avoid frozen cast bars during celebration
+            commands.entity(entity).remove::<CastingState>();
+        }
+        
+        // Despawn all active projectiles to avoid frozen projectiles during celebration
+        for projectile_entity in projectiles.iter() {
+            commands.entity(projectile_entity).despawn_recursive();
+        }
+        
+        // Despawn all active spell impact effects (e.g., Mind Blast shadow spheres)
+        for effect_entity in spell_effects.iter() {
+            commands.entity(effect_entity).despawn_recursive();
         }
         
         // Save combat log to file for debugging
@@ -4818,7 +4861,13 @@ pub fn process_projectile_hits(
     mut combat_log: ResMut<CombatLog>,
     projectiles: Query<(Entity, &Projectile, &Transform)>,
     mut combatants: Query<(&Transform, &mut Combatant)>,
+    celebration: Option<Res<VictoryCelebration>>,
 ) {
+    // Don't apply projectile damage during victory celebration
+    if celebration.is_some() {
+        return;
+    }
+    
     const HIT_DISTANCE: f32 = 0.5; // Projectile hits when within 0.5 units of target
     
     // Collect hits to process (to avoid borrow checker issues)
@@ -5001,7 +5050,12 @@ pub fn process_dot_ticks(
     mut combat_log: ResMut<CombatLog>,
     mut combatants_with_auras: Query<(Entity, &mut Combatant, &Transform, &mut ActiveAuras)>,
     combatants_without_auras: Query<(Entity, &Combatant), Without<ActiveAuras>>,
+    celebration: Option<Res<VictoryCelebration>>,
 ) {
+    // Don't tick DoTs during victory celebration (prevents killing winners)
+    if celebration.is_some() {
+        return;
+    }
     let dt = time.delta_secs();
     
     // Build a map of entity -> (team, class) for quick lookups
