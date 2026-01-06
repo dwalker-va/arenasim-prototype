@@ -139,40 +139,64 @@ pub fn render_countdown(
     
     let ctx = contexts.ctx_mut();
     
-    // Display countdown in center of screen
-    egui::Area::new(egui::Id::new("match_countdown"))
-        .anchor(egui::Align2::CENTER_CENTER, [0.0, -50.0])
-        .show(ctx, |ui| {
-            ui.vertical_centered(|ui| {
-                // Large countdown number
-                let seconds_remaining = countdown.time_remaining.ceil() as i32;
-                ui.label(
-                    egui::RichText::new(format!("{}", seconds_remaining))
-                        .size(120.0)
-                        .color(egui::Color32::from_rgb(255, 215, 0)) // Gold color
-                        .strong()
-                );
-                
-                ui.add_space(10.0);
-                
-                // "Prepare for battle!" message
-                ui.label(
-                    egui::RichText::new("Prepare for battle!")
-                        .size(32.0)
-                        .color(egui::Color32::from_rgb(230, 230, 230))
-                );
-                
-                ui.add_space(5.0);
-                
-                // Hint about buffing
-                ui.label(
-                    egui::RichText::new("Apply buffs to your team!")
-                        .size(18.0)
-                        .color(egui::Color32::from_rgb(180, 180, 180))
-                        .italics()
-                );
-            });
-        });
+    let screen_rect = ctx.screen_rect();
+    let center = screen_rect.center();
+    
+    // Helper function to draw text with outline
+    let draw_text_with_outline = |painter: &egui::Painter, pos: egui::Pos2, text: &str, font_id: egui::FontId, color: egui::Color32| {
+        // Draw black outline (8 directions)
+        for (dx, dy) in [
+            (-2.0, 0.0), (2.0, 0.0), (0.0, -2.0), (0.0, 2.0),  // Cardinal
+            (-1.5, -1.5), (1.5, -1.5), (-1.5, 1.5), (1.5, 1.5), // Diagonal
+        ] {
+            painter.text(
+                egui::pos2(pos.x + dx, pos.y + dy),
+                egui::Align2::CENTER_CENTER,
+                text,
+                font_id.clone(),
+                egui::Color32::BLACK,
+            );
+        }
+        
+        // Draw main text
+        painter.text(pos, egui::Align2::CENTER_CENTER, text, font_id, color);
+    };
+    
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Foreground,
+        egui::Id::new("countdown_overlay"),
+    ));
+    
+    // Large countdown number
+    let seconds_remaining = countdown.time_remaining.ceil() as i32;
+    let countdown_pos = egui::pos2(center.x, center.y - 50.0);
+    draw_text_with_outline(
+        &painter,
+        countdown_pos,
+        &format!("{}", seconds_remaining),
+        egui::FontId::proportional(120.0),
+        egui::Color32::from_rgb(255, 215, 0), // Gold color
+    );
+    
+    // "Prepare for battle!" message
+    let message_pos = egui::pos2(center.x, center.y + 30.0);
+    draw_text_with_outline(
+        &painter,
+        message_pos,
+        "Prepare for battle!",
+        egui::FontId::proportional(32.0),
+        egui::Color32::from_rgb(230, 230, 230),
+    );
+    
+    // Hint about buffing
+    let hint_pos = egui::pos2(center.x, center.y + 65.0);
+    draw_text_with_outline(
+        &painter,
+        hint_pos,
+        "Apply buffs to your team!",
+        egui::FontId::proportional(18.0),
+        egui::Color32::from_rgb(180, 180, 180),
+    );
 }
 
 /// Render 2D health, resource, and cast bars above each living combatant's 3D position.
@@ -606,49 +630,74 @@ pub fn render_victory_celebration(
     };
     
     let ctx = contexts.ctx_mut();
+    let screen_rect = ctx.screen_rect();
+    let center = screen_rect.center();
     
-    // Display victory message in center of screen
-    egui::Area::new(egui::Id::new("victory_celebration"))
-        .anchor(egui::Align2::CENTER_CENTER, [0.0, -80.0])
-        .show(ctx, |ui| {
-            ui.vertical_centered(|ui| {
-                // Victory text based on winner
-                let (victory_text, victory_color) = match celebration.winner {
-                    Some(1) => ("TEAM 1 WINS!", egui::Color32::from_rgb(100, 150, 255)), // Blue
-                    Some(2) => ("TEAM 2 WINS!", egui::Color32::from_rgb(255, 100, 100)), // Red
-                    None => ("DRAW!", egui::Color32::from_rgb(200, 200, 100)),           // Yellow
-                    _ => ("MATCH OVER", egui::Color32::from_rgb(200, 200, 200)),        // Gray
-                };
-                
-                // Large victory text
-                ui.label(
-                    egui::RichText::new(victory_text)
-                        .size(96.0)
-                        .color(victory_color)
-                        .strong()
-                );
-                
-                ui.add_space(15.0);
-                
-                // Celebration message (only show "Victory!" if not a draw)
-                if celebration.winner.is_some() {
-                    ui.label(
-                        egui::RichText::new("Victory!")
-                            .size(42.0)
-                            .color(egui::Color32::from_rgb(255, 215, 0)) // Gold
-                    );
-                    ui.add_space(10.0);
-                }
-                
-                // Countdown to results
-                let seconds_remaining = celebration.time_remaining.ceil() as i32;
-                ui.label(
-                    egui::RichText::new(format!("Results in {}...", seconds_remaining))
-                        .size(20.0)
-                        .color(egui::Color32::from_rgb(180, 180, 180))
-                );
-            });
-        });
+    // Helper function to draw text with outline
+    let draw_text_with_outline = |painter: &egui::Painter, pos: egui::Pos2, text: &str, font_id: egui::FontId, color: egui::Color32| {
+        // Draw black outline (8 directions)
+        for (dx, dy) in [
+            (-3.0, 0.0), (3.0, 0.0), (0.0, -3.0), (0.0, 3.0),  // Cardinal (thicker for victory text)
+            (-2.0, -2.0), (2.0, -2.0), (-2.0, 2.0), (2.0, 2.0), // Diagonal
+        ] {
+            painter.text(
+                egui::pos2(pos.x + dx, pos.y + dy),
+                egui::Align2::CENTER_CENTER,
+                text,
+                font_id.clone(),
+                egui::Color32::BLACK,
+            );
+        }
+        
+        // Draw main text
+        painter.text(pos, egui::Align2::CENTER_CENTER, text, font_id, color);
+    };
+    
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Foreground,
+        egui::Id::new("victory_overlay"),
+    ));
+    
+    // Victory text based on winner
+    let (victory_text, victory_color) = match celebration.winner {
+        Some(1) => ("TEAM 1 WINS!", egui::Color32::from_rgb(100, 150, 255)), // Blue
+        Some(2) => ("TEAM 2 WINS!", egui::Color32::from_rgb(255, 100, 100)), // Red
+        None => ("DRAW!", egui::Color32::from_rgb(200, 200, 100)),           // Yellow
+        _ => ("MATCH OVER", egui::Color32::from_rgb(200, 200, 200)),        // Gray
+    };
+    
+    // Large victory text
+    let victory_pos = egui::pos2(center.x, center.y - 80.0);
+    draw_text_with_outline(
+        &painter,
+        victory_pos,
+        victory_text,
+        egui::FontId::proportional(96.0),
+        victory_color,
+    );
+    
+    // Celebration message (only show "Victory!" if not a draw)
+    if celebration.winner.is_some() {
+        let celebration_pos = egui::pos2(center.x, center.y + 5.0);
+        draw_text_with_outline(
+            &painter,
+            celebration_pos,
+            "Victory!",
+            egui::FontId::proportional(42.0),
+            egui::Color32::from_rgb(255, 215, 0), // Gold
+        );
+    }
+    
+    // Countdown to results
+    let seconds_remaining = celebration.time_remaining.ceil() as i32;
+    let countdown_pos = egui::pos2(center.x, center.y + 50.0);
+    draw_text_with_outline(
+        &painter,
+        countdown_pos,
+        &format!("Results in {}...", seconds_remaining),
+        egui::FontId::proportional(20.0),
+        egui::Color32::from_rgb(180, 180, 180),
+    );
 }
 
 // ==============================================================================
