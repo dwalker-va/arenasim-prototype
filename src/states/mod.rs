@@ -66,6 +66,7 @@ impl Plugin for StatesPlugin {
                     play_match::handle_camera_input,
                     play_match::update_camera_position,
                     play_match::update_countdown,
+                    play_match::animate_gate_bars,
                     play_match::update_play_match,
                     play_match::regenerate_resources,
                     play_match::update_auras,

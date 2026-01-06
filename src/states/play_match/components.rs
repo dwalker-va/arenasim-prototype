@@ -150,6 +150,15 @@ pub struct FloatingTextState {
     pub next_pattern_index: u8,
 }
 
+/// Component for gate bars that lower when countdown ends
+#[derive(Component)]
+pub struct GateBar {
+    /// Which team this gate belongs to (1 or 2)
+    pub team: u8,
+    /// Initial height of the gate bar
+    pub initial_height: f32,
+}
+
 // ============================================================================
 // Enums
 // ============================================================================

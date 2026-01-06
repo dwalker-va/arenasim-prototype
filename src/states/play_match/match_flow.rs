@@ -48,6 +48,41 @@ pub fn update_countdown(
     }
 }
 
+/// Animate gate bars lowering during the last 2 seconds of countdown
+pub fn animate_gate_bars(
+    countdown: Res<MatchCountdown>,
+    mut gate_bars: Query<(&GateBar, &mut Transform, &mut Visibility)>,
+) {
+    // Gates lower during the last 2 seconds
+    const GATE_OPEN_DURATION: f32 = 2.0;
+    
+    if countdown.gates_opened {
+        // Gates fully open - hide all bars completely
+        for (_gate_bar, mut transform, mut visibility) in gate_bars.iter_mut() {
+            *visibility = Visibility::Hidden;
+            transform.translation.y = -10.0; // Move far below ground to avoid any flicker
+            transform.scale.y = 0.0;
+        }
+        return;
+    }
+    
+    // Calculate how much the gates should be lowered
+    if countdown.time_remaining <= GATE_OPEN_DURATION {
+        let progress = 1.0 - (countdown.time_remaining / GATE_OPEN_DURATION); // 0.0 to 1.0
+        
+        for (gate_bar, mut transform, mut visibility) in gate_bars.iter_mut() {
+            // Keep visible during lowering
+            *visibility = Visibility::Visible;
+            
+            // Scale down the height
+            let current_height = gate_bar.initial_height * (1.0 - progress);
+            transform.scale.y = 1.0 - progress;
+            // Adjust Y position so bars sink into the ground
+            transform.translation.y = current_height / 2.0;
+        }
+    }
+}
+
 /// Handle time control keyboard shortcuts and apply time multiplier to simulation.
 /// 
 /// **Keyboard Shortcuts:**

@@ -377,6 +377,62 @@ pub fn setup_play_match(
             );
         }
     }
+    
+    // Spawn starting gate bars for both teams
+    spawn_gate_bars(&mut commands, &mut meshes, &mut materials, team1_spawn_x, team2_spawn_x);
+}
+
+/// Spawn visual gate bars that lower when countdown ends
+fn spawn_gate_bars(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    team1_x: f32,
+    team2_x: f32,
+) {
+    let gate_height = 6.0;
+    let bar_width = 0.5;
+    let bar_depth = 0.5;
+    let num_bars = 7; // Number of vertical bars per gate
+    let spacing = 2.5; // Space between bars
+    
+    // Dark metal material for the bars
+    let bar_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.2, 0.2, 0.2), // Dark gray/metal
+        metallic: 0.8,
+        perceptual_roughness: 0.3,
+        ..default()
+    });
+    
+    // Team 1 gate (left side)
+    for i in 0..num_bars {
+        let z_offset = (i as f32 - (num_bars as f32 / 2.0)) * spacing;
+        commands.spawn((
+            Mesh3d(meshes.add(Cuboid::new(bar_width, gate_height, bar_depth))),
+            MeshMaterial3d(bar_material.clone()),
+            Transform::from_xyz(team1_x + 3.0, gate_height / 2.0, z_offset),
+            GateBar {
+                team: 1,
+                initial_height: gate_height,
+            },
+            PlayMatchEntity,
+        ));
+    }
+    
+    // Team 2 gate (right side)
+    for i in 0..num_bars {
+        let z_offset = (i as f32 - (num_bars as f32 / 2.0)) * spacing;
+        commands.spawn((
+            Mesh3d(meshes.add(Cuboid::new(bar_width, gate_height, bar_depth))),
+            MeshMaterial3d(bar_material.clone()),
+            Transform::from_xyz(team2_x - 3.0, gate_height / 2.0, z_offset),
+            GateBar {
+                team: 2,
+                initial_height: gate_height,
+            },
+            PlayMatchEntity,
+        ));
+    }
 }
 
 /// Helper function to spawn a single combatant entity.
