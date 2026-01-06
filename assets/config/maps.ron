@@ -7,11 +7,11 @@
         (
             id: "basic_arena",
             name: "Basic Arena",
-            description: "A simple rectangular arena for testing",
-            // Arena dimensions in units
+            description: "A classic colosseum-style arena with warm stone walls and sandy battleground",
+            // Arena dimensions in units (stadium/oval shape)
             size: (
-                width: 40.0,
-                depth: 30.0,
+                width: 50.0,  // Long axis (80 total with walls)
+                depth: 50.0,  // Short axis (50 total with walls)
             ),
             // Team spawn points
             team_spawns: [
@@ -33,18 +33,18 @@
                 (x: -18.0, z: 0.0, facing: 0.0),
                 (x: 18.0, z: 0.0, facing: 180.0),
             ],
-            // Colors for the arena floor and walls
+            // Colors for the arena floor and walls - warm stone theme
             colors: (
-                floor: "#4a4a4a",
-                walls: "#2a2a2a",
-                team_1_gate: "#2244aa",
-                team_2_gate: "#aa2222",
+                floor: "#c9a876",       // Warm sandy tan - the battleground dirt/sand
+                walls: "#8b7355",       // Weathered stone brown - the arena walls
+                team_1_gate: "#d4691e", // Burnt orange - classic banner color
+                team_2_gate: "#c95d2a", // Deep orange-red - warm accent color
             ),
             // Grid settings for low-poly aesthetic
             grid: (
                 tile_size: 2.0,
                 show_grid_lines: true,
-                grid_line_color: "#555555",
+                grid_line_color: "#a58a65", // Subtle darker sand color for grid lines
             ),
         ),
         (

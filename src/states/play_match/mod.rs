@@ -93,6 +93,61 @@ const FCT_HEIGHT: f32 = 4.0;
 // Helper Functions
 // ============================================================================
 
+/// Creates an octagonal floor mesh matching the arena wall layout
+fn create_octagon_mesh(length: f32, width: f32, corner_cut: f32) -> Mesh {
+    let half_length = length / 2.0;
+    let half_width = width / 2.0;
+    
+    // Define the 8 vertices of the octagon (going counter-clockwise from top-right)
+    // Y is up in 3D space, but for a floor plane we want XZ coordinates
+    let vertices = vec![
+        // Starting from north-east, going counter-clockwise
+        [half_length - corner_cut, 0.0, half_width],           // 0: NE corner (right side of north edge)
+        [-half_length + corner_cut, 0.0, half_width],          // 1: NW corner (left side of north edge)
+        [-half_length, 0.0, half_width - corner_cut],          // 2: NW corner (top of west edge)
+        [-half_length, 0.0, -half_width + corner_cut],         // 3: SW corner (bottom of west edge)
+        [-half_length + corner_cut, 0.0, -half_width],         // 4: SW corner (left side of south edge)
+        [half_length - corner_cut, 0.0, -half_width],          // 5: SE corner (right side of south edge)
+        [half_length, 0.0, -half_width + corner_cut],          // 6: SE corner (bottom of east edge)
+        [half_length, 0.0, half_width - corner_cut],           // 7: NE corner (top of east edge)
+    ];
+    
+    // Create triangles by fanning from center point
+    // Add center vertex
+    let center = [0.0, 0.0, 0.0];
+    let mut all_vertices = vertices.clone();
+    all_vertices.push(center); // Index 8 is the center
+    
+    // Create triangle indices (center to each edge, going counter-clockwise)
+    let indices = vec![
+        8, 0, 1,  // North edge
+        8, 1, 2,  // NW corner
+        8, 2, 3,  // West edge
+        8, 3, 4,  // SW corner
+        8, 4, 5,  // South edge
+        8, 5, 6,  // SE corner
+        8, 6, 7,  // East edge
+        8, 7, 0,  // NE corner
+    ];
+    
+    // Create normals (all pointing up for a flat floor)
+    let normals = vec![[0.0, 1.0, 0.0]; all_vertices.len()];
+    
+    // Create UVs (simple mapping)
+    let uvs: Vec<[f32; 2]> = all_vertices.iter().map(|v| {
+        [(v[0] / length) + 0.5, (v[2] / width) + 0.5]
+    }).collect();
+    
+    Mesh::new(
+        bevy::render::render_resource::PrimitiveTopology::TriangleList,
+        bevy::render::render_asset::RenderAssetUsages::default(),
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, all_vertices)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+    .with_inserted_indices(bevy::render::mesh::Indices::U32(indices))
+}
+
 /// Helper function to get next floating combat text offset and update pattern state
 /// Returns (x_offset, y_offset) based on deterministic alternating pattern
 fn get_next_fct_offset(state: &mut FloatingTextState) -> (f32, f32) {
@@ -138,10 +193,11 @@ pub fn setup_play_match(
         PlayMatchEntity,
     ));
 
-    // Add directional light (sun-like)
+    // Add directional light (sun-like) - warm golden sunlight
     commands.spawn((
         DirectionalLight {
-            illuminance: 20000.0,
+            illuminance: 25000.0,
+            color: Color::srgb(1.0, 0.95, 0.85), // Warm golden sunlight
             shadows_enabled: false,
             ..default()
         },
@@ -149,10 +205,10 @@ pub fn setup_play_match(
         PlayMatchEntity,
     ));
 
-    // Add ambient light for overall scene brightness
+    // Add ambient light for overall scene brightness - warm atmospheric glow
     commands.insert_resource(AmbientLight {
-        color: Color::srgb(0.3, 0.3, 0.4),
-        brightness: 300.0,
+        color: Color::srgb(0.9, 0.85, 0.7), // Warm peachy ambient light
+        brightness: 400.0,
     });
     
     // Initialize simulation speed control
@@ -164,15 +220,117 @@ pub fn setup_play_match(
     // Initialize match countdown (10 seconds before gates open)
     commands.insert_resource(MatchCountdown::default());
 
-    // Spawn arena floor - 80x80 unit plane (includes starting areas)
-    let floor_size = 80.0;
+    // Spawn arena floor - octagonal shape matching the wall boundary
+    // Warm sandy/dirt battleground
+    let arena_length = 76.0;
+    let arena_width = 46.0;
+    let corner_cut = 10.0;
+    
+    // Create custom octagonal mesh
+    let octagon_mesh = create_octagon_mesh(arena_length, arena_width, corner_cut);
+    
     commands.spawn((
-        Mesh3d(meshes.add(Plane3d::default().mesh().size(floor_size, floor_size))),
+        Mesh3d(meshes.add(octagon_mesh)),
         MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(0.2, 0.25, 0.3),
-            perceptual_roughness: 0.9,
+            base_color: Color::srgb(0.79, 0.66, 0.46), // Warm sandy tan (#c9a876)
+            perceptual_roughness: 0.95, // Matte dirt/sand texture
+            cull_mode: None, // Render both sides
             ..default()
         })),
+        PlayMatchEntity,
+    ));
+
+    // Spawn rectangular arena walls with chamfered corners (simplified stadium shape)
+    let wall_height = 4.0;
+    let wall_thickness = 1.0;
+    
+    // Warm weathered stone material for walls
+    let wall_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.54, 0.45, 0.33), // Weathered stone brown (#8b7355)
+        perceptual_roughness: 0.9,
+        ..default()
+    });
+    
+    // Arena dimensions: elongated octagon
+    let corner_cut = 10.0; // How much to cut off each corner
+    let half_length = arena_length / 2.0; // 38.0
+    let half_width = arena_width / 2.0;   // 23.0
+    
+    // Calculate wall dimensions
+    let long_wall_length = arena_length - corner_cut * 2.0; // North/South walls
+    let short_wall_length = arena_width - corner_cut * 2.0; // East/West walls
+    let corner_wall_length = corner_cut * 1.414; // Diagonal length (45° angle)
+    
+    // North wall (positive Z) - main long side
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(long_wall_length, wall_height, wall_thickness))),
+        MeshMaterial3d(wall_material.clone()),
+        Transform::from_xyz(0.0, wall_height / 2.0, half_width),
+        PlayMatchEntity,
+    ));
+    
+    // South wall (negative Z) - main long side
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(long_wall_length, wall_height, wall_thickness))),
+        MeshMaterial3d(wall_material.clone()),
+        Transform::from_xyz(0.0, wall_height / 2.0, -half_width),
+        PlayMatchEntity,
+    ));
+    
+    // East wall (positive X) - short side
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(wall_thickness, wall_height, short_wall_length))),
+        MeshMaterial3d(wall_material.clone()),
+        Transform::from_xyz(half_length, wall_height / 2.0, 0.0),
+        PlayMatchEntity,
+    ));
+    
+    // West wall (negative X) - short side
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(wall_thickness, wall_height, short_wall_length))),
+        MeshMaterial3d(wall_material.clone()),
+        Transform::from_xyz(-half_length, wall_height / 2.0, 0.0),
+        PlayMatchEntity,
+    ));
+    
+    // Add angled corner pieces to connect the walls (45-degree angles)
+    // Each corner wall connects the end of one straight wall to the end of another
+    let corner_offset_x = half_length - corner_cut / 2.0;
+    let corner_offset_z = half_width - corner_cut / 2.0;
+    
+    // Northeast corner (connects North wall to East wall)
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(corner_wall_length, wall_height, wall_thickness))),
+        MeshMaterial3d(wall_material.clone()),
+        Transform::from_xyz(corner_offset_x, wall_height / 2.0, corner_offset_z)
+            .with_rotation(Quat::from_rotation_y(std::f32::consts::PI / 4.0)),
+        PlayMatchEntity,
+    ));
+    
+    // Southeast corner (connects South wall to East wall)
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(corner_wall_length, wall_height, wall_thickness))),
+        MeshMaterial3d(wall_material.clone()),
+        Transform::from_xyz(corner_offset_x, wall_height / 2.0, -corner_offset_z)
+            .with_rotation(Quat::from_rotation_y(-std::f32::consts::PI / 4.0)),
+        PlayMatchEntity,
+    ));
+    
+    // Northwest corner (connects North wall to West wall)
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(corner_wall_length, wall_height, wall_thickness))),
+        MeshMaterial3d(wall_material.clone()),
+        Transform::from_xyz(-corner_offset_x, wall_height / 2.0, corner_offset_z)
+            .with_rotation(Quat::from_rotation_y(-std::f32::consts::PI / 4.0)),
+        PlayMatchEntity,
+    ));
+    
+    // Southwest corner (connects South wall to West wall)
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(corner_wall_length, wall_height, wall_thickness))),
+        MeshMaterial3d(wall_material.clone()),
+        Transform::from_xyz(-corner_offset_x, wall_height / 2.0, -corner_offset_z)
+            .with_rotation(Quat::from_rotation_y(std::f32::consts::PI / 4.0)),
         PlayMatchEntity,
     ));
 
