@@ -107,6 +107,7 @@ impl Plugin for StatesPlugin {
                     play_match::check_match_end,
                     play_match::update_victory_celebration,
                     play_match::update_floating_combat_text,
+                    play_match::update_speech_bubbles,
                     play_match::cleanup_expired_floating_text,
                     play_match::spawn_spell_impact_visuals,
                     play_match::update_spell_impact_effects,
@@ -117,6 +118,7 @@ impl Plugin for StatesPlugin {
                     play_match::render_victory_celebration,
                     play_match::render_health_bars,
                     play_match::render_floating_combat_text,
+                    play_match::render_speech_bubbles,
                     play_match::render_combat_log,
                 )
                     .run_if(in_state(GameState::PlayMatch)),

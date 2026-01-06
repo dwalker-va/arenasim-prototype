@@ -13,6 +13,22 @@ use super::components::*;
 use super::abilities::{AbilityType, SpellSchool};
 use super::{MELEE_RANGE, is_spell_school_locked, get_next_fct_offset};
 
+/// Helper function to spawn a speech bubble when a combatant uses an ability
+fn spawn_speech_bubble(
+    commands: &mut Commands,
+    owner: Entity,
+    ability_name: &str,
+) {
+    commands.spawn((
+        SpeechBubble {
+            owner,
+            text: format!("{}!", ability_name),
+            lifetime: 2.0, // 2 seconds
+        },
+        PlayMatchEntity,
+    ));
+}
+
 pub fn acquire_targets(
     countdown: Res<MatchCountdown>,
     config: Res<match_config::MatchConfig>,
@@ -183,6 +199,9 @@ pub fn decide_abilities(
                 });
                 
                 if enemies_in_melee_range {
+                    // Spawn speech bubble for Frost Nova
+                    spawn_speech_bubble(&mut commands, entity, "Frost Nova");
+                    
                     // Consume mana
                     combatant.current_mana -= nova_def.mana_cost;
                     
@@ -771,6 +790,9 @@ pub fn decide_abilities(
             if !ks_on_cooldown && kidney_shot.can_cast(&combatant, target_pos, my_pos) {
                 let def = kidney_shot.definition();
                 
+                // Spawn speech bubble
+                spawn_speech_bubble(&mut commands, entity, "Kidney Shot");
+                
                 // Consume energy
                 combatant.current_mana -= def.mana_cost;
                 
@@ -1098,6 +1120,9 @@ pub fn check_interrupts(
             distance,
             cast_state.time_remaining
         );
+        
+        // Spawn speech bubble for interrupt
+        spawn_speech_bubble(&mut commands, entity, ability_def.name);
         
         // Consume resources
         combatant.current_mana -= ability_def.mana_cost;

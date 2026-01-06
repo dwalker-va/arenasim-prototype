@@ -159,6 +159,17 @@ pub struct GateBar {
     pub initial_height: f32,
 }
 
+/// Component for speech bubbles that appear when abilities are used
+#[derive(Component)]
+pub struct SpeechBubble {
+    /// Entity this speech bubble is attached to
+    pub owner: Entity,
+    /// Text to display
+    pub text: String,
+    /// Time until this bubble disappears (in seconds)
+    pub lifetime: f32,
+}
+
 // ============================================================================
 // Enums
 // ============================================================================

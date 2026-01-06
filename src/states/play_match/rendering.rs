@@ -5,6 +5,7 @@
 //! - UI overlays (time controls, combat log, health bars, countdown, victory celebration)
 //! - Floating combat text
 //! - Spell impact visual effects
+//! - Speech bubbles for ability callouts
 
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
@@ -716,17 +717,21 @@ pub fn render_floating_combat_text(
                         alpha,
                     );
                     
-                    // Draw the damage number with outline for visibility
+                    // Draw the damage number with thick outline for visibility
                     let font_id = egui::FontId::proportional(24.0);
                     
-                    // Draw black outline (offset in 4 directions for better visibility)
-                    for (dx, dy) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+                    // Draw thick black outline (8 directions for smooth outline)
+                    let outline_color = egui::Color32::from_rgba_unmultiplied(0, 0, 0, alpha);
+                    for (dx, dy) in [
+                        (-2.0, 0.0), (2.0, 0.0), (0.0, -2.0), (0.0, 2.0),  // Cardinal
+                        (-1.5, -1.5), (1.5, -1.5), (-1.5, 1.5), (1.5, 1.5), // Diagonal
+                    ] {
                         ui.painter().text(
                             egui::pos2(screen_pos.x + dx, screen_pos.y + dy),
                             egui::Align2::CENTER_CENTER,
                             &fct.text,
                             font_id.clone(),
-                            egui::Color32::from_rgba_unmultiplied(0, 0, 0, alpha),
+                            outline_color,
                         );
                     }
                     
@@ -827,6 +832,99 @@ pub fn cleanup_expired_spell_impacts(
 ) {
     for (entity, effect) in effects.iter() {
         if effect.lifetime <= 0.0 {
+            commands.entity(entity).despawn_recursive();
+        }
+    }
+}
+
+// ==============================================================================
+// Speech Bubble Systems
+// ==============================================================================
+
+/// Render speech bubbles above combatants' heads
+pub fn render_speech_bubbles(
+    mut contexts: EguiContexts,
+    speech_bubbles: Query<&SpeechBubble>,
+    combatants: Query<&Transform, With<Combatant>>,
+    camera_query: Query<(&Camera, &GlobalTransform)>,
+) {
+    let Ok((camera, camera_transform)) = camera_query.get_single() else {
+        return;
+    };
+    
+    let ctx = contexts.ctx_mut();
+    
+    for bubble in speech_bubbles.iter() {
+        // Get owner's position
+        let Ok(owner_transform) = combatants.get(bubble.owner) else {
+            continue;
+        };
+        
+        // Position above the combatant's head
+        let bubble_world_pos = owner_transform.translation + Vec3::new(0.0, 4.0, 0.0);
+        
+        // Project to screen space
+        let Ok(screen_pos) = camera.world_to_viewport(camera_transform, bubble_world_pos) else {
+            continue;
+        };
+        
+        // Measure text to make bubble fit snugly
+        let font_id = egui::FontId::proportional(14.0);
+        let galley = ctx.fonts(|f| f.layout_no_wrap(bubble.text.clone(), font_id.clone(), egui::Color32::BLACK));
+        
+        // Tight padding around text
+        let padding = egui::vec2(12.0, 6.0);
+        let bubble_size = galley.size() + padding * 2.0;
+        let bubble_pos = egui::pos2(
+            screen_pos.x - bubble_size.x / 2.0,
+            screen_pos.y - bubble_size.y / 2.0,
+        );
+        
+        let rect = egui::Rect::from_min_size(bubble_pos, bubble_size);
+        
+        // Paint speech bubble background
+        let painter = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::new(format!("speech_bubble_{:?}", bubble.owner)),
+        ));
+        
+        // White rounded rectangle background
+        painter.rect_filled(
+            rect,
+            egui::Rounding::same(6.0),
+            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 240),
+        );
+        
+        // Black border
+        painter.rect_stroke(
+            rect,
+            egui::Rounding::same(6.0),
+            egui::Stroke::new(2.0, egui::Color32::BLACK),
+        );
+        
+        // Draw text
+        painter.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            &bubble.text,
+            egui::FontId::proportional(14.0),
+            egui::Color32::BLACK,
+        );
+    }
+}
+
+/// Update speech bubble lifetimes and remove expired ones
+pub fn update_speech_bubbles(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut bubbles: Query<(Entity, &mut SpeechBubble)>,
+) {
+    let dt = time.delta_secs();
+    
+    for (entity, mut bubble) in bubbles.iter_mut() {
+        bubble.lifetime -= dt;
+        
+        if bubble.lifetime <= 0.0 {
             commands.entity(entity).despawn_recursive();
         }
     }
