@@ -3,6 +3,7 @@
 //! Handles camera modes, input, and positioning for the match view.
 
 use bevy::prelude::*;
+use bevy::time::Real;
 use bevy_egui::{egui, EguiContexts};
 use super::components::{CameraController, CameraMode, ArenaCamera, Combatant};
 
@@ -14,13 +15,21 @@ pub fn handle_camera_input(
     mouse_button: Res<ButtonInput<MouseButton>>,
     mut mouse_wheel: EventReader<bevy::input::mouse::MouseWheel>,
     mut cursor_moved: EventReader<bevy::window::CursorMoved>,
-    time: Res<Time>,
+    time: Res<Time<Real>>,
     combatants: Query<Entity, With<Combatant>>,
+    mut contexts: EguiContexts,
 ) {
     use crate::keybindings::GameAction;
-    
+
+    // Use real (wall-clock) time so camera works even when simulation is paused
     let dt = time.delta_secs();
-    
+
+    // Check if egui wants pointer input (hovering over UI)
+    // Use try_ctx_mut to gracefully handle window close
+    let egui_wants_pointer = contexts.try_ctx_mut()
+        .map(|ctx| ctx.wants_pointer_input())
+        .unwrap_or(false);
+
     // Keyboard zoom controls
     if keybindings.action_pressed(GameAction::CameraZoomIn, &keyboard) {
         let zoom_speed = 30.0 * dt;
@@ -30,11 +39,11 @@ pub fn handle_camera_input(
         let zoom_speed = 30.0 * dt;
         camera_controller.zoom_distance = (camera_controller.zoom_distance + zoom_speed).clamp(20.0, 150.0);
     }
-    
+
     // WASD camera panning - moves the target point
     camera_controller.keyboard_movement = Vec3::ZERO;
     let move_speed = 15.0 * dt;
-    
+
     if keybindings.action_pressed(GameAction::CameraMoveForward, &keyboard) {
         camera_controller.keyboard_movement.z -= move_speed;
     }
@@ -47,7 +56,7 @@ pub fn handle_camera_input(
     if keybindings.action_pressed(GameAction::CameraMoveRight, &keyboard) {
         camera_controller.keyboard_movement.x += move_speed;
     }
-    
+
     // Cycle camera modes
     if keybindings.action_just_pressed(GameAction::CycleCameraMode, &keyboard) {
         camera_controller.mode = match camera_controller.mode {
@@ -63,7 +72,7 @@ pub fn handle_camera_input(
                 // Cycle to next combatant
                 let mut found_current = false;
                 let mut next_entity = None;
-                
+
                 for entity in combatants.iter() {
                     if found_current {
                         next_entity = Some(entity);
@@ -73,7 +82,7 @@ pub fn handle_camera_input(
                         found_current = true;
                     }
                 }
-                
+
                 // If we found a next entity, use it. Otherwise, go to manual or back to center
                 if let Some(entity) = next_entity {
                     CameraMode::FollowCombatant(entity)
@@ -84,7 +93,7 @@ pub fn handle_camera_input(
             CameraMode::Manual => CameraMode::FollowCenter,
         };
     }
-    
+
     // Reset camera
     if keybindings.action_just_pressed(GameAction::ResetCamera, &keyboard) {
         camera_controller.mode = CameraMode::FollowCenter;
@@ -92,31 +101,36 @@ pub fn handle_camera_input(
         camera_controller.pitch = 38.7f32.to_radians();
         camera_controller.yaw = 0.0;
     }
-    
-    // Handle mouse wheel for zoom
-    for event in mouse_wheel.read() {
-        let zoom_delta = event.y * 3.0; // Zoom speed
-        camera_controller.zoom_distance = (camera_controller.zoom_distance - zoom_delta).clamp(20.0, 150.0);
+
+    // Handle mouse wheel for zoom (only if not over UI)
+    if !egui_wants_pointer {
+        for event in mouse_wheel.read() {
+            let zoom_delta = event.y * 3.0; // Zoom speed
+            camera_controller.zoom_distance = (camera_controller.zoom_distance - zoom_delta).clamp(20.0, 150.0);
+        }
+    } else {
+        // Drain events if egui wants pointer
+        mouse_wheel.clear();
     }
-    
-    // Handle mouse drag for rotation (middle mouse button)
-    if mouse_button.just_pressed(MouseButton::Middle) {
+
+    // Handle mouse drag for rotation (left mouse button, only if not over UI)
+    if mouse_button.just_pressed(MouseButton::Left) && !egui_wants_pointer {
         camera_controller.is_dragging = true;
-        
+
         // When starting manual mode, we need to preserve the current target
         // We'll update manual_target in the update_camera_position system
     }
-    
-    if mouse_button.just_released(MouseButton::Middle) {
+
+    if mouse_button.just_released(MouseButton::Left) {
         camera_controller.is_dragging = false;
         camera_controller.last_mouse_pos = None;
     }
-    
+
     if camera_controller.is_dragging {
         for event in cursor_moved.read() {
             if let Some(last_pos) = camera_controller.last_mouse_pos {
                 let delta = event.position - last_pos;
-                
+
                 // Update yaw and pitch based on drag
                 camera_controller.yaw -= delta.x * 0.005; // Horizontal rotation
                 camera_controller.pitch = (camera_controller.pitch - delta.y * 0.005).clamp(0.1, 1.5); // Vertical rotation, clamped
@@ -228,9 +242,10 @@ pub fn render_camera_controls(
     keybindings: Res<crate::keybindings::Keybindings>,
 ) {
     use crate::keybindings::GameAction;
-    
-    let ctx = contexts.ctx_mut();
-    
+
+    // Use try_ctx_mut to gracefully handle window close
+    let Some(ctx) = contexts.try_ctx_mut() else { return; };
+
     // Position in bottom-left corner
     egui::Window::new("Camera Controls")
         .fixed_pos(egui::pos2(10.0, ctx.screen_rect().height() - 160.0))
@@ -282,7 +297,7 @@ pub fn render_camera_controls(
                     .color(egui::Color32::from_rgb(200, 200, 200))
             );
             ui.label(
-                egui::RichText::new("Middle Mouse - Rotate")
+                egui::RichText::new("Left Click Drag - Rotate/Pitch")
                     .size(11.0)
                     .color(egui::Color32::from_rgb(200, 200, 200))
             );

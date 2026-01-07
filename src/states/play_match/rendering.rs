@@ -25,7 +25,8 @@ pub fn render_time_controls(
     mut sim_speed: ResMut<SimulationSpeed>,
     mut time: ResMut<Time<Virtual>>,
 ) {
-    let ctx = contexts.ctx_mut();
+    // Use try_ctx_mut to gracefully handle window close
+    let Some(ctx) = contexts.try_ctx_mut() else { return; };
     
     // Position in top-right corner
     let screen_width = ctx.screen_rect().width();
@@ -136,8 +137,9 @@ pub fn render_countdown(
     if countdown.gates_opened {
         return;
     }
-    
-    let ctx = contexts.ctx_mut();
+
+    // Use try_ctx_mut to gracefully handle window close
+    let Some(ctx) = contexts.try_ctx_mut() else { return; };
     
     let screen_rect = ctx.screen_rect();
     let center = screen_rect.center();
@@ -214,8 +216,9 @@ pub fn render_health_bars(
     combatants: Query<(&Combatant, &Transform, Option<&CastingState>, Option<&ActiveAuras>)>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
 ) {
-    let ctx = contexts.ctx_mut();
-    
+    // Use try_ctx_mut to gracefully handle window close
+    let Some(ctx) = contexts.try_ctx_mut() else { return; };
+
     let Ok((camera, camera_transform)) = camera_query.get_single() else {
         return;
     };
@@ -554,8 +557,9 @@ pub fn render_combat_log(
     mut contexts: EguiContexts,
     combat_log: Res<CombatLog>,
 ) {
-    let ctx = contexts.ctx_mut();
-    
+    // Use try_ctx_mut to gracefully handle window close
+    let Some(ctx) = contexts.try_ctx_mut() else { return; };
+
     // Combat log panel on the left side - semi-transparent to reduce obstruction
     egui::SidePanel::left("combat_log_panel")
         .default_width(320.0)
@@ -628,8 +632,9 @@ pub fn render_victory_celebration(
     let Some(celebration) = celebration else {
         return;
     };
-    
-    let ctx = contexts.ctx_mut();
+
+    // Use try_ctx_mut to gracefully handle window close
+    let Some(ctx) = contexts.try_ctx_mut() else { return; };
     let screen_rect = ctx.screen_rect();
     let center = screen_rect.center();
     
@@ -733,8 +738,9 @@ pub fn render_floating_combat_text(
     floating_texts: Query<&FloatingCombatText>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
 ) {
-    let ctx = contexts.ctx_mut();
-    
+    // Use try_ctx_mut to gracefully handle window close
+    let Some(ctx) = contexts.try_ctx_mut() else { return; };
+
     let Ok((camera, camera_transform)) = camera_query.get_single() else {
         return;
     };
@@ -900,8 +906,9 @@ pub fn render_speech_bubbles(
     let Ok((camera, camera_transform)) = camera_query.get_single() else {
         return;
     };
-    
-    let ctx = contexts.ctx_mut();
+
+    // Use try_ctx_mut to gracefully handle window close
+    let Some(ctx) = contexts.try_ctx_mut() else { return; };
     
     for bubble in speech_bubbles.iter() {
         // Get owner's position
