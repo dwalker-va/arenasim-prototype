@@ -1,8 +1,23 @@
 //! Combat logging
 //!
 //! Records all combat events for display and post-match analysis.
+//!
+//! The CombatLog is the **definitive source of truth** for match statistics.
+//! The Results scene uses this data to build WoW Details-style breakdowns.
+//!
+//! ## Structured Data
+//! Each log entry contains optional structured data for machine-readable queries:
+//! - `DamageEvent`: source, target, ability, amount, was_killing_blow
+//! - `HealingEvent`: source, target, ability, amount
+//! - `CrowdControlEvent`: source, target, cc_type, duration
+//! - `DeathEvent`: victim, killer (optional)
 
 use bevy::prelude::*;
+use std::collections::HashMap;
+
+/// Unique identifier for a combatant in the combat log
+/// Format: "Team {team} {class}" e.g. "Team 1 Warrior"
+pub type CombatantId = String;
 
 /// A single entry in the combat log
 #[derive(Debug, Clone)]
@@ -15,6 +30,40 @@ pub struct CombatLogEntry {
     pub message: String,
     /// Optional position data for debugging (where the event occurred)
     pub position_data: Option<PositionData>,
+    /// Optional structured data for machine-readable queries
+    pub structured_data: Option<StructuredEventData>,
+}
+
+/// Structured event data for machine-readable queries and aggregation
+#[derive(Debug, Clone)]
+pub enum StructuredEventData {
+    /// Damage dealt from one combatant to another
+    Damage {
+        source: CombatantId,
+        target: CombatantId,
+        ability: String,
+        amount: f32,
+        is_killing_blow: bool,
+    },
+    /// Healing done from one combatant to another (or self)
+    Healing {
+        source: CombatantId,
+        target: CombatantId,
+        ability: String,
+        amount: f32,
+    },
+    /// Crowd control applied
+    CrowdControl {
+        source: CombatantId,
+        target: CombatantId,
+        cc_type: String,
+        duration_secs: f32,
+    },
+    /// Combatant death
+    Death {
+        victim: CombatantId,
+        killer: Option<CombatantId>,
+    },
 }
 
 /// Position data for debugging combat events
@@ -67,16 +116,17 @@ impl CombatLog {
         self.match_time = 0.0;
     }
 
-    /// Add a new entry to the log
+    /// Add a new entry to the log (without structured data - for simple events)
     pub fn log(&mut self, event_type: CombatLogEventType, message: String) {
         self.entries.push(CombatLogEntry {
             timestamp: self.match_time,
             event_type,
             message,
             position_data: None,
+            structured_data: None,
         });
     }
-    
+
     /// Add a new entry with position data for debugging
     pub fn log_with_position(
         &mut self,
@@ -89,8 +139,100 @@ impl CombatLog {
             event_type,
             message,
             position_data: Some(position_data),
+            structured_data: None,
         });
     }
+
+    /// Add a structured damage event
+    pub fn log_damage(
+        &mut self,
+        source: CombatantId,
+        target: CombatantId,
+        ability: String,
+        amount: f32,
+        is_killing_blow: bool,
+        message: String,
+    ) {
+        self.entries.push(CombatLogEntry {
+            timestamp: self.match_time,
+            event_type: CombatLogEventType::Damage,
+            message,
+            position_data: None,
+            structured_data: Some(StructuredEventData::Damage {
+                source,
+                target,
+                ability,
+                amount,
+                is_killing_blow,
+            }),
+        });
+    }
+
+    /// Add a structured healing event
+    pub fn log_healing(
+        &mut self,
+        source: CombatantId,
+        target: CombatantId,
+        ability: String,
+        amount: f32,
+        message: String,
+    ) {
+        self.entries.push(CombatLogEntry {
+            timestamp: self.match_time,
+            event_type: CombatLogEventType::Healing,
+            message,
+            position_data: None,
+            structured_data: Some(StructuredEventData::Healing {
+                source,
+                target,
+                ability,
+                amount,
+            }),
+        });
+    }
+
+    /// Add a structured crowd control event
+    pub fn log_crowd_control(
+        &mut self,
+        source: CombatantId,
+        target: CombatantId,
+        cc_type: String,
+        duration_secs: f32,
+        message: String,
+    ) {
+        self.entries.push(CombatLogEntry {
+            timestamp: self.match_time,
+            event_type: CombatLogEventType::CrowdControl,
+            message,
+            position_data: None,
+            structured_data: Some(StructuredEventData::CrowdControl {
+                source,
+                target,
+                cc_type,
+                duration_secs,
+            }),
+        });
+    }
+
+    /// Add a structured death event
+    pub fn log_death(
+        &mut self,
+        victim: CombatantId,
+        killer: Option<CombatantId>,
+        message: String,
+    ) {
+        self.entries.push(CombatLogEntry {
+            timestamp: self.match_time,
+            event_type: CombatLogEventType::Death,
+            message,
+            position_data: None,
+            structured_data: Some(StructuredEventData::Death { victim, killer }),
+        });
+    }
+
+    // =========================================================================
+    // Query Methods
+    // =========================================================================
 
     /// Get entries filtered by event type
     pub fn filter_by_type(&self, event_type: CombatLogEventType) -> Vec<&CombatLogEntry> {
@@ -116,6 +258,155 @@ impl CombatLog {
     /// Get the last N entries
     pub fn recent(&self, count: usize) -> Vec<&CombatLogEntry> {
         self.entries.iter().rev().take(count).rev().collect()
+    }
+
+    // =========================================================================
+    // Aggregation Methods for Results Scene
+    // =========================================================================
+
+    /// Get total damage dealt by a combatant, broken down by ability
+    /// Returns HashMap<AbilityName, TotalDamage>
+    pub fn damage_by_ability(&self, combatant_id: &str) -> HashMap<String, f32> {
+        let mut result: HashMap<String, f32> = HashMap::new();
+
+        for entry in &self.entries {
+            if let Some(StructuredEventData::Damage { source, ability, amount, .. }) = &entry.structured_data {
+                if source == combatant_id {
+                    *result.entry(ability.clone()).or_insert(0.0) += amount;
+                }
+            }
+        }
+
+        result
+    }
+
+    /// Get total healing done by a combatant, broken down by ability
+    /// Returns HashMap<AbilityName, TotalHealing>
+    pub fn healing_by_ability(&self, combatant_id: &str) -> HashMap<String, f32> {
+        let mut result: HashMap<String, f32> = HashMap::new();
+
+        for entry in &self.entries {
+            if let Some(StructuredEventData::Healing { source, ability, amount, .. }) = &entry.structured_data {
+                if source == combatant_id {
+                    *result.entry(ability.clone()).or_insert(0.0) += amount;
+                }
+            }
+        }
+
+        result
+    }
+
+    /// Get total damage dealt by a combatant (sum of all abilities)
+    pub fn total_damage_dealt(&self, combatant_id: &str) -> f32 {
+        self.damage_by_ability(combatant_id).values().sum()
+    }
+
+    /// Get total healing done by a combatant (sum of all abilities)
+    pub fn total_healing_done(&self, combatant_id: &str) -> f32 {
+        self.healing_by_ability(combatant_id).values().sum()
+    }
+
+    /// Get total damage taken by a combatant
+    pub fn total_damage_taken(&self, combatant_id: &str) -> f32 {
+        let mut total = 0.0;
+
+        for entry in &self.entries {
+            if let Some(StructuredEventData::Damage { target, amount, .. }) = &entry.structured_data {
+                if target == combatant_id {
+                    total += amount;
+                }
+            }
+        }
+
+        total
+    }
+
+    /// Get number of killing blows by a combatant
+    pub fn killing_blows(&self, combatant_id: &str) -> u32 {
+        let mut count = 0;
+
+        for entry in &self.entries {
+            if let Some(StructuredEventData::Damage { source, is_killing_blow: true, .. }) = &entry.structured_data {
+                if source == combatant_id {
+                    count += 1;
+                }
+            }
+        }
+
+        count
+    }
+
+    /// Get total CC time done by a combatant (in seconds)
+    pub fn cc_done_seconds(&self, combatant_id: &str) -> f32 {
+        let mut total = 0.0;
+
+        for entry in &self.entries {
+            if let Some(StructuredEventData::CrowdControl { source, duration_secs, .. }) = &entry.structured_data {
+                if source == combatant_id {
+                    total += duration_secs;
+                }
+            }
+        }
+
+        total
+    }
+
+    /// Get total CC time received by a combatant (in seconds)
+    pub fn cc_received_seconds(&self, combatant_id: &str) -> f32 {
+        let mut total = 0.0;
+
+        for entry in &self.entries {
+            if let Some(StructuredEventData::CrowdControl { target, duration_secs, .. }) = &entry.structured_data {
+                if target == combatant_id {
+                    total += duration_secs;
+                }
+            }
+        }
+
+        total
+    }
+
+    /// Get all unique combatant IDs that appear in the log
+    pub fn all_combatants(&self) -> Vec<String> {
+        let mut combatants: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        for entry in &self.entries {
+            match &entry.structured_data {
+                Some(StructuredEventData::Damage { source, target, .. }) => {
+                    combatants.insert(source.clone());
+                    combatants.insert(target.clone());
+                }
+                Some(StructuredEventData::Healing { source, target, .. }) => {
+                    combatants.insert(source.clone());
+                    combatants.insert(target.clone());
+                }
+                Some(StructuredEventData::CrowdControl { source, target, .. }) => {
+                    combatants.insert(source.clone());
+                    combatants.insert(target.clone());
+                }
+                Some(StructuredEventData::Death { victim, killer }) => {
+                    combatants.insert(victim.clone());
+                    if let Some(k) = killer {
+                        combatants.insert(k.clone());
+                    }
+                }
+                None => {}
+            }
+        }
+
+        combatants.into_iter().collect()
+    }
+
+    /// Check if a combatant survived (no death event recorded for them)
+    pub fn combatant_survived(&self, combatant_id: &str) -> bool {
+        for entry in &self.entries {
+            if let Some(StructuredEventData::Death { victim, .. }) = &entry.structured_data {
+                if victim == combatant_id {
+                    return false;
+                }
+            }
+        }
+        true
     }
     
     /// Save the combat log to a file with match metadata

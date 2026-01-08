@@ -7,11 +7,12 @@
 
 use bevy::prelude::*;
 use bevy_egui::egui;
-use crate::combat::log::{CombatLog, CombatLogEventType, PositionData};
+use crate::combat::log::{CombatLog, CombatLogEventType};
 use super::match_config;
 use super::components::*;
-use super::abilities::{AbilityType, SpellSchool};
+use super::abilities::AbilityType;
 use super::{MELEE_RANGE, is_spell_school_locked, get_next_fct_offset};
+use super::combat_core::combatant_id;
 
 /// Helper function to spawn a speech bubble when a combatant uses an ability
 fn spawn_speech_bubble(
@@ -825,21 +826,32 @@ pub fn decide_abilities(
                     combatant.class.name(),
                     def.name
                 );
-                
-                // Log to combat log
-                let message = format!(
-                    "Team {} {} uses {} on Team {} {}",
-                    combatant.team,
-                    combatant.class.name(),
-                    def.name,
-                    combatant_info.get(&target_entity).map(|(t, _, _, _)| *t).unwrap_or(0),
-                    combatant_info.get(&target_entity).map(|(_, c, _, _)| c.name()).unwrap_or("Unknown")
-                );
-                combat_log.log(CombatLogEventType::CrowdControl, message);
-                
+
+                // Log to combat log with structured CC data
+                if let Some((target_team, target_class, _, _)) = combatant_info.get(&target_entity) {
+                    if let Some((aura_type, duration, _, _)) = def.applies_aura {
+                        let cc_type = format!("{:?}", aura_type);
+                        let message = format!(
+                            "Team {} {} uses {} on Team {} {}",
+                            combatant.team,
+                            combatant.class.name(),
+                            def.name,
+                            target_team,
+                            target_class.name()
+                        );
+                        combat_log.log_crowd_control(
+                            combatant_id(combatant.team, combatant.class),
+                            combatant_id(*target_team, *target_class),
+                            cc_type,
+                            duration,
+                            message,
+                        );
+                    }
+                }
+
                 continue; // Done this frame
             }
-            
+
             // Priority 2: Use Sinister Strike if we have enough energy and target is in melee range
             let ability = AbilityType::SinisterStrike;
             if ability.can_cast(&combatant, target_pos, my_pos) {
@@ -922,7 +934,8 @@ pub fn decide_abilities(
                     PlayMatchEntity,
                 ));
                 
-                // Log the instant attack with position data
+                // Log the instant attack with structured data
+                let is_killing_blow = !target.is_alive();
                 let message = format!(
                     "Team {} {}'s {} hits Team {} {} for {:.0} damage",
                     attacker_team,
@@ -932,27 +945,27 @@ pub fn decide_abilities(
                     target_class.name(),
                     actual_damage
                 );
-                
-                if let (Some(&attacker_pos), Some(&target_pos)) = 
-                    (positions.get(&attacker_entity), positions.get(&target_entity)) {
-                    let distance = attacker_pos.distance(target_pos);
-                    combat_log.log_with_position(
-                        CombatLogEventType::Damage,
-                        message,
-                        PositionData {
-                            entities: vec![
-                                format!("Team {} {} (attacker)", attacker_team, attacker_class.name()),
-                                format!("Team {} {} (target)", target_team, target_class.name()),
-                            ],
-                            positions: vec![
-                                (attacker_pos.x, attacker_pos.y, attacker_pos.z),
-                                (target_pos.x, target_pos.y, target_pos.z),
-                            ],
-                            distance: Some(distance),
-                        },
+                combat_log.log_damage(
+                    combatant_id(attacker_team, attacker_class),
+                    combatant_id(target_team, target_class),
+                    ability_name.to_string(),
+                    actual_damage,
+                    is_killing_blow,
+                    message,
+                );
+
+                // Log death with killer tracking
+                if is_killing_blow {
+                    let death_message = format!(
+                        "Team {} {} has been eliminated",
+                        target_team,
+                        target_class.name()
                     );
-                } else {
-                    combat_log.log(CombatLogEventType::Damage, message);
+                    combat_log.log_death(
+                        combatant_id(target_team, target_class),
+                        Some(combatant_id(attacker_team, attacker_class)),
+                        death_message,
+                    );
                 }
             }
         }
@@ -1007,7 +1020,8 @@ pub fn decide_abilities(
                     PlayMatchEntity,
                 ));
                 
-                // Log the Frost Nova damage with position data
+                // Log the Frost Nova damage with structured data
+                let is_killing_blow = !target.is_alive();
                 let message = format!(
                     "Team {} {}'s Frost Nova hits Team {} {} for {:.0} damage",
                     caster_team,
@@ -1016,26 +1030,27 @@ pub fn decide_abilities(
                     target_class.name(),
                     actual_damage
                 );
-                
-                if let Some(&caster_pos) = positions.get(&caster_entity) {
-                    let distance = caster_pos.distance(target_pos);
-                    combat_log.log_with_position(
-                        CombatLogEventType::Damage,
-                        message,
-                        PositionData {
-                            entities: vec![
-                                format!("Team {} {} (caster)", caster_team, caster_class.name()),
-                                format!("Team {} {} (target)", target_team, target_class.name()),
-                            ],
-                            positions: vec![
-                                (caster_pos.x, caster_pos.y, caster_pos.z),
-                                (target_pos.x, target_pos.y, target_pos.z),
-                            ],
-                            distance: Some(distance),
-                        },
+                combat_log.log_damage(
+                    combatant_id(caster_team, caster_class),
+                    combatant_id(target_team, target_class),
+                    "Frost Nova".to_string(),
+                    actual_damage,
+                    is_killing_blow,
+                    message,
+                );
+
+                // Log death with killer tracking
+                if is_killing_blow {
+                    let death_message = format!(
+                        "Team {} {} has been eliminated",
+                        target_team,
+                        target_class.name()
                     );
-                } else {
-                    combat_log.log(CombatLogEventType::Damage, message);
+                    combat_log.log_death(
+                        combatant_id(target_team, target_class),
+                        Some(combatant_id(caster_team, caster_class)),
+                        death_message,
+                    );
                 }
             }
         }

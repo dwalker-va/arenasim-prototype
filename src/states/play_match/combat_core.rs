@@ -10,11 +10,17 @@
 
 use bevy::prelude::*;
 use bevy_egui::egui;
-use crate::combat::log::{CombatLog, CombatLogEventType, PositionData};
+use crate::combat::log::{CombatLog, CombatLogEventType, CombatantId};
 use super::match_config;
 use super::components::*;
 use super::abilities::{AbilityType, SpellSchool};
 use super::{MELEE_RANGE, WAND_RANGE, STOP_DISTANCE, ARENA_HALF_SIZE, get_next_fct_offset};
+
+/// Helper to generate a consistent combatant ID for the combat log
+/// Format: "Team {team} {class}" e.g., "Team 1 Warrior"
+pub fn combatant_id(team: u8, class: match_config::CharacterClass) -> CombatantId {
+    format!("Team {} {}", team, class.name())
+}
 
 fn find_best_kiting_direction(
     current_pos: Vec3,
@@ -524,8 +530,8 @@ pub fn combat_auto_attack(
                 // Collect attacker damage for later update
                 damage_dealt_updates.push((attacker_entity, actual_damage));
                 
-                // Log the attack with position data
-                if let (Some(&(attacker_team, attacker_class)), Some(&(target_team, target_class))) = 
+                // Log the attack with structured data
+                if let (Some(&(attacker_team, attacker_class)), Some(&(target_team, target_class))) =
                     (combatant_info.get(&attacker_entity), combatant_info.get(&target_entity)) {
                     let attack_name = if has_bonus {
                         "Heroic Strike" // Enhanced auto-attack
@@ -545,40 +551,29 @@ pub fn combat_auto_attack(
                         target_class.name(),
                         actual_damage
                     );
-                    
-                    // Get positions for logging
-                    if let (Some(&attacker_pos), Some(&target_pos)) = 
-                        (positions.get(&attacker_entity), positions.get(&target_entity)) {
-                        let distance = attacker_pos.distance(target_pos);
-                        combat_log.log_with_position(
-                            CombatLogEventType::Damage,
-                            message,
-                            PositionData {
-                                entities: vec![
-                                    format!("Team {} {} (attacker)", attacker_team, attacker_class.name()),
-                                    format!("Team {} {} (target)", target_team, target_class.name()),
-                                ],
-                                positions: vec![
-                                    (attacker_pos.x, attacker_pos.y, attacker_pos.z),
-                                    (target_pos.x, target_pos.y, target_pos.z),
-                                ],
-                                distance: Some(distance),
-                            },
-                        );
-                    } else {
-                        combat_log.log(CombatLogEventType::Damage, message);
-                    }
-                }
-                
-                if !target.is_alive() {
-                    // Log death
-                    if let Some(&(target_team, target_class)) = combatant_info.get(&target_entity) {
-                        let message = format!(
+
+                    let is_killing_blow = !target.is_alive();
+                    combat_log.log_damage(
+                        combatant_id(attacker_team, attacker_class),
+                        combatant_id(target_team, target_class),
+                        attack_name.to_string(),
+                        actual_damage,
+                        is_killing_blow,
+                        message,
+                    );
+
+                    // Log death with killer tracking
+                    if is_killing_blow {
+                        let death_message = format!(
                             "Team {} {} has been eliminated",
                             target_team,
                             target_class.name()
                         );
-                        combat_log.log(CombatLogEventType::Death, message);
+                        combat_log.log_death(
+                            combatant_id(target_team, target_class),
+                            Some(combatant_id(attacker_team, attacker_class)),
+                            death_message,
+                        );
                     }
                 }
             }
@@ -973,7 +968,8 @@ pub fn process_casting(
                 ));
             }
             
-            // Log the damage
+            // Log the damage with structured data
+            let is_killing_blow = !target.is_alive();
             let message = format!(
                 "Team {} {}'s {} hits Team {} {} for {:.0} damage",
                 caster_team,
@@ -983,20 +979,13 @@ pub fn process_casting(
                 target.class.name(),
                 actual_damage
             );
-            combat_log.log_with_position(
-                CombatLogEventType::Damage,
+            combat_log.log_damage(
+                combatant_id(caster_team, caster_class),
+                combatant_id(target.team, target.class),
+                def.name.to_string(),
+                actual_damage,
+                is_killing_blow,
                 message,
-                PositionData {
-                    entities: vec![
-                        format!("Team {} {} (caster)", caster_team, caster_class.name()),
-                        format!("Team {} {} (target)", target.team, target.class.name()),
-                    ],
-                    positions: vec![
-                        (caster_pos.x, caster_pos.y, caster_pos.z),
-                        (target_pos.x, target_pos.y, target_pos.z),
-                    ],
-                    distance: Some(distance),
-                },
             );
         }
         // Handle healing spells
@@ -1045,7 +1034,7 @@ pub fn process_casting(
                 PlayMatchEntity,
             ));
             
-            // Log the healing
+            // Log the healing with structured data
             let message = format!(
                 "Team {} {}'s {} heals Team {} {} for {:.0}",
                 caster_team,
@@ -1055,20 +1044,12 @@ pub fn process_casting(
                 target.class.name(),
                 actual_healing
             );
-            combat_log.log_with_position(
-                CombatLogEventType::Healing,
+            combat_log.log_healing(
+                combatant_id(caster_team, caster_class),
+                combatant_id(target.team, target.class),
+                def.name.to_string(),
+                actual_healing,
                 message,
-                PositionData {
-                    entities: vec![
-                        format!("Team {} {} (caster)", caster_team, caster_class.name()),
-                        format!("Team {} {} (target)", target.team, target.class.name()),
-                    ],
-                    positions: vec![
-                        (caster_pos.x, caster_pos.y, caster_pos.z),
-                        (target_pos.x, target_pos.y, target_pos.z),
-                    ],
-                    distance: Some(distance),
-                },
             );
         }
         
@@ -1102,14 +1083,19 @@ pub fn process_casting(
             );
         }
         
-        // Check for death
-        if !target.is_alive() {
+        // Check for death (log if killed by non-damage abilities/auras)
+        // Note: damage abilities already log death via is_killing_blow above
+        if !target.is_alive() && !def.is_damage() {
             let message = format!(
                 "Team {} {} has been eliminated",
                 target.team,
                 target.class.name()
             );
-            combat_log.log(CombatLogEventType::Death, message);
+            combat_log.log_death(
+                combatant_id(target.team, target.class),
+                Some(combatant_id(caster_team, caster_class)),
+                message,
+            );
         }
     }
     

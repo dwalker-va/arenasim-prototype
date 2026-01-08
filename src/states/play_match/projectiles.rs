@@ -4,11 +4,12 @@
 
 use bevy::prelude::*;
 use bevy_egui::egui;
-use crate::combat::log::{CombatLog, CombatLogEventType, PositionData};
+use crate::combat::log::CombatLog;
 use super::match_config;
 use super::components::*;
 use super::abilities::AbilityType;
 use super::get_next_fct_offset;
+use super::combat_core::combatant_id;
 
 /// Spawn visual meshes for newly created projectiles.
 /// Creates a glowing sphere that travels through the air.
@@ -168,28 +169,29 @@ pub fn process_projectile_hits(
             let damage = ability_damage;
             
             // Get target info and apply damage
-            let (actual_damage, target_team, target_class_name, _is_warrior_target) = {
+            let (actual_damage, target_team, target_class, is_killing_blow) = {
                 let Ok((_, mut target)) = combatants.get_mut(target_entity) else {
                     commands.entity(projectile_entity).despawn_recursive();
                     continue;
                 };
-                
+
                 let actual_damage = damage.min(target.current_health);
                 target.current_health = (target.current_health - damage).max(0.0);
                 target.damage_taken += actual_damage;
-                
+
                 // Warriors generate Rage from taking damage
                 if target.resource_type == ResourceType::Rage {
                     let rage_gain = actual_damage * 0.15;
                     target.current_mana = (target.current_mana + rage_gain).min(target.max_mana);
                 }
-                
+
                 // Track damage for aura breaking
                 commands.entity(target_entity).insert(DamageTakenThisFrame {
                     amount: actual_damage,
                 });
-                
-                (actual_damage, target.team, target.class.name().to_string(), target.resource_type == ResourceType::Rage)
+
+                let is_killing_blow = !target.is_alive();
+                (actual_damage, target.team, target.class, is_killing_blow)
             }; // target borrow dropped here
             
             // Update caster damage dealt
@@ -219,31 +221,38 @@ pub fn process_projectile_hits(
                 PlayMatchEntity,
             ));
             
-            // Log the damage
+            // Log the damage with structured data
             let message = format!(
                 "Team {} {}'s {} hits Team {} {} for {:.0} damage",
                 caster_team,
                 caster_class.name(),
                 def.name,
                 target_team,
-                target_class_name,
+                target_class.name(),
                 actual_damage
             );
-            combat_log.log_with_position(
-                CombatLogEventType::Damage,
+            combat_log.log_damage(
+                combatant_id(caster_team, caster_class),
+                combatant_id(target_team, target_class),
+                def.name.to_string(),
+                actual_damage,
+                is_killing_blow,
                 message,
-                PositionData {
-                    entities: vec![
-                        format!("Team {} {} (caster)", caster_team, caster_class.name()),
-                        format!("Team {} {} (target)", target_team, target_class_name),
-                    ],
-                    positions: vec![
-                        (caster_pos.x, caster_pos.y, caster_pos.z),
-                        (target_pos.x, target_pos.y, target_pos.z),
-                    ],
-                    distance: Some(ability_range),
-                },
             );
+
+            // Log death with killer tracking
+            if is_killing_blow {
+                let death_message = format!(
+                    "Team {} {} has been eliminated",
+                    target_team,
+                    target_class.name()
+                );
+                combat_log.log_death(
+                    combatant_id(target_team, target_class),
+                    Some(combatant_id(caster_team, caster_class)),
+                    death_message,
+                );
+            }
             
             // Apply aura if ability has one
             if let Some((aura_type, duration, magnitude, break_threshold)) = def.applies_aura {

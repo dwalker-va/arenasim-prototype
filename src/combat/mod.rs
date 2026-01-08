@@ -7,7 +7,7 @@ use bevy::prelude::*;
 
 pub mod log;
 
-pub use log::{CombatLog, CombatLogEntry, CombatLogEventType, MatchMetadata, CombatantMetadata, PositionData};
+pub use log::{CombatLog, CombatLogEntry, CombatLogEventType, MatchMetadata, CombatantMetadata, PositionData, StructuredEventData, CombatantId};
 
 /// Plugin for the combat system.
 /// 

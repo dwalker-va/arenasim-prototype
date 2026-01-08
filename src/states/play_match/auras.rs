@@ -13,6 +13,7 @@ use crate::combat::log::{CombatLog, CombatLogEventType};
 use super::match_config;
 use super::components::*;
 use super::get_next_fct_offset;
+use super::combat_core::combatant_id;
 
 /// Update all active auras - tick down durations and remove expired ones.
 /// 
@@ -305,18 +306,38 @@ pub fn process_dot_ticks(
             PlayMatchEntity,
         ));
         
-        // Log to combat log
-        combat_log.log(
-            CombatLogEventType::Damage,
-            format!(
-                "Team {} {}'s Rend ticks for {:.0} damage on Team {} {}",
-                caster_team,
-                caster_class.name(),
-                actual_damage,
+        // Log to combat log with structured data
+        let is_killing_blow = !target.is_alive();
+        let message = format!(
+            "Team {} {}'s Rend ticks for {:.0} damage on Team {} {}",
+            caster_team,
+            caster_class.name(),
+            actual_damage,
+            target_team,
+            target_class.name()
+        );
+        combat_log.log_damage(
+            combatant_id(caster_team, caster_class),
+            combatant_id(target_team, target_class),
+            "Rend".to_string(),
+            actual_damage,
+            is_killing_blow,
+            message,
+        );
+
+        // Log death with killer tracking
+        if is_killing_blow {
+            let death_message = format!(
+                "Team {} {} has been eliminated",
                 target_team,
                 target_class.name()
-            ),
-        );
+            );
+            combat_log.log_death(
+                combatant_id(target_team, target_class),
+                Some(combatant_id(caster_team, caster_class)),
+                death_message,
+            );
+        }
     }
     
     // Third pass: update caster damage_dealt stats
