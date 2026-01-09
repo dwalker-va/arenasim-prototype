@@ -409,10 +409,10 @@ pub fn decide_abilities(
             
             for (ally_entity, &(ally_team, _ally_class, ally_hp, ally_max_hp)) in combatant_info.iter() {
                 // Must be same team and alive
-                if ally_team != combatant.team {
+                if ally_team != combatant.team || ally_hp <= 0.0 {
                     continue;
                 }
-                
+
                 // Only heal if damaged (below 90% health)
                 let hp_percent = ally_hp / ally_max_hp;
                 if hp_percent >= 0.9 {
