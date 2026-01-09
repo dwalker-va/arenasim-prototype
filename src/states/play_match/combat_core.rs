@@ -14,7 +14,7 @@ use crate::combat::log::{CombatLog, CombatLogEventType, CombatantId};
 use super::match_config;
 use super::components::*;
 use super::abilities::{AbilityType, SpellSchool};
-use super::{MELEE_RANGE, WAND_RANGE, STOP_DISTANCE, ARENA_HALF_SIZE, get_next_fct_offset};
+use super::{MELEE_RANGE, ARENA_HALF_SIZE, get_next_fct_offset};
 
 /// Helper to generate a consistent combatant ID for the combat log
 /// Format: "Team {team} {class}" e.g., "Team 1 Warrior"
@@ -121,9 +121,9 @@ pub fn move_to_target(
             continue;
         }
         
-        // Check if rooted or stunned - if so, cannot move
+        // Check if rooted, stunned, or feared - if so, cannot move intentionally
         let is_cc_locked = if let Some(auras) = auras {
-            auras.auras.iter().any(|a| matches!(a.effect_type, AuraType::Root | AuraType::Stun))
+            auras.auras.iter().any(|a| matches!(a.effect_type, AuraType::Root | AuraType::Stun | AuraType::Fear))
         } else {
             false
         };
@@ -289,18 +289,11 @@ pub fn move_to_target(
         };
         
         let distance = my_pos.distance(target_pos);
-        
-        // Determine stop distance based on attack range (melee or wand)
-        // Stop slightly before attack range to avoid jitter
-        let stop_distance = match combatant.class {
-            match_config::CharacterClass::Mage | match_config::CharacterClass::Priest => {
-                WAND_RANGE - 1.0 // Stop 1 unit before wand range
-            }
-            match_config::CharacterClass::Warrior | match_config::CharacterClass::Rogue => {
-                STOP_DISTANCE // Use standard melee stop distance
-            }
-        };
-        
+
+        // Use class-specific preferred range - the optimal distance where they
+        // can use all their important abilities without unnecessary repositioning
+        let stop_distance = combatant.class.preferred_range();
+
         // If out of range, move towards target
         if distance > stop_distance {
             // Calculate direction to target (only in XZ plane, keep Y constant)
@@ -441,13 +434,13 @@ pub fn combat_auto_attack(
             continue;
         }
         
-        // WoW Mechanic: Cannot auto-attack while stunned
-        let is_stunned = if let Some(auras) = auras {
-            auras.auras.iter().any(|a| a.effect_type == AuraType::Stun)
+        // WoW Mechanic: Cannot auto-attack while stunned or feared
+        let is_incapacitated = if let Some(auras) = auras {
+            auras.auras.iter().any(|a| matches!(a.effect_type, AuraType::Stun | AuraType::Fear))
         } else {
             false
         };
-        if is_stunned {
+        if is_incapacitated {
             continue;
         }
         
@@ -731,6 +724,7 @@ pub fn process_interrupts(
                     tick_interval: 0.0,
                     time_until_next_tick: 0.0,
                     caster: Some(interrupt.caster),
+                    ability_name: interrupt.ability.definition().name.to_string(),
                 },
             });
             
@@ -859,6 +853,8 @@ pub fn process_casting(
     let mut caster_damage_updates: Vec<(Entity, f32)> = Vec::new();
     // Track healing_done updates for healers (to apply after processing all casts)
     let mut caster_healing_updates: Vec<(Entity, f32)> = Vec::new();
+    // Track ability cooldowns to apply (caster_entity, ability, cooldown_duration)
+    let mut cooldown_updates: Vec<(Entity, AbilityType, f32)> = Vec::new();
     // Track casters who should have stealth broken (offensive abilities)
     let mut break_stealth: Vec<Entity> = Vec::new();
     
@@ -1068,6 +1064,7 @@ pub fn process_casting(
                         tick_interval: 0.0,
                         time_until_next_tick: 0.0,
                         caster: Some(caster_entity),
+                        ability_name: def.name.to_string(),
                     },
                 },
                 PlayMatchEntity,
@@ -1082,7 +1079,12 @@ pub fn process_casting(
                 duration
             );
         }
-        
+
+        // Track cooldown if ability has one
+        if def.cooldown > 0.0 {
+            cooldown_updates.push((caster_entity, ability, def.cooldown));
+        }
+
         // Check for death (log if killed by non-damage abilities/auras)
         // Note: damage abilities already log death via is_killing_blow above
         if !target.is_alive() && !def.is_damage() {
@@ -1112,7 +1114,14 @@ pub fn process_casting(
             healer.healing_done += healing;
         }
     }
-    
+
+    // Apply collected ability cooldowns
+    for (caster_entity, ability, cooldown) in cooldown_updates {
+        if let Ok((_, _, mut caster, _, _)) = combatants.get_mut(caster_entity) {
+            caster.ability_cooldowns.insert(ability, cooldown);
+        }
+    }
+
     // Break stealth for casters who used offensive abilities
     for caster_entity in break_stealth {
         if let Ok((_, _, mut caster, _, _)) = combatants.get_mut(caster_entity) {

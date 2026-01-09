@@ -366,6 +366,45 @@ pub fn render_health_bars(
                             
                             // Draw main text on top
                             ui.painter().galley(root_center_pos, root_galley, egui::Color32::from_rgb(100, 200, 255));
+                            status_offset -= 10.0; // Move next label up
+                        }
+
+                        // FEAR indicator with duration countdown
+                        if let Some(fear_aura) = auras.auras.iter().find(|a| a.effect_type == AuraType::Fear) {
+                            let fear_text = format!("FEAR {:.1}s", fear_aura.duration);
+                            let fear_font = egui::FontId::monospace(9.0);
+
+                            // Create galley for measuring size
+                            let fear_galley = ui.fonts(|f| f.layout_no_wrap(
+                                fear_text.clone(),
+                                fear_font.clone(),
+                                egui::Color32::from_rgb(148, 103, 189), // Purple for fear
+                            ));
+                            let fear_center_pos = egui::pos2(
+                                bar_pos.x + (bar_width - fear_galley.size().x) / 2.0,
+                                bar_pos.y + status_offset,
+                            );
+
+                            // Draw black outline/stroke for visibility
+                            for dx in [-1.0, 0.0, 1.0] {
+                                for dy in [-1.0, 0.0, 1.0] {
+                                    if dx != 0.0 || dy != 0.0 {
+                                        let outline_galley = ui.fonts(|f| f.layout_no_wrap(
+                                            fear_text.clone(),
+                                            fear_font.clone(),
+                                            egui::Color32::BLACK,
+                                        ));
+                                        let outline_pos = egui::pos2(
+                                            fear_center_pos.x + dx,
+                                            fear_center_pos.y + dy,
+                                        );
+                                        ui.painter().galley(outline_pos, outline_galley, egui::Color32::BLACK);
+                                    }
+                                }
+                            }
+
+                            // Draw main text on top
+                            ui.painter().galley(fear_center_pos, fear_galley, egui::Color32::from_rgb(148, 103, 189));
                         }
                     }
 

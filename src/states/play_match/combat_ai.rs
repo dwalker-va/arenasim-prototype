@@ -160,13 +160,13 @@ pub fn decide_abilities(
             continue;
         }
         
-        // WoW Mechanic: Cannot use abilities while stunned
-        let is_stunned = if let Some(auras) = auras {
-            auras.auras.iter().any(|a| a.effect_type == AuraType::Stun)
+        // WoW Mechanic: Cannot use abilities while stunned or feared
+        let is_incapacitated = if let Some(auras) = auras {
+            auras.auras.iter().any(|a| matches!(a.effect_type, AuraType::Stun | AuraType::Fear))
         } else {
             false
         };
-        if is_stunned {
+        if is_incapacitated {
             continue;
         }
         
@@ -246,6 +246,7 @@ pub fn decide_abilities(
                                     tick_interval: 0.0,
                                     time_until_next_tick: 0.0,
                                     caster: Some(entity),
+                                    ability_name: nova_def.name.to_string(),
                                 },
                             });
                         }
@@ -388,10 +389,11 @@ pub fn decide_abilities(
                                 tick_interval: 0.0,
                                 time_until_next_tick: 0.0,
                                 caster: Some(entity),
+                                ability_name: def.name.to_string(),
                             },
                         });
                     }
-                    
+
                     info!(
                         "Team {} {} casts Power Word: Fortitude on ally",
                         combatant.team,
@@ -604,10 +606,11 @@ pub fn decide_abilities(
                                 tick_interval: 3.0, // Tick every 3 seconds
                                 time_until_next_tick: 3.0, // First tick after 3 seconds
                                 caster: Some(entity),
+                                ability_name: rend_def.name.to_string(),
                             },
                         });
                     }
-                    
+
                     // Log Rend application to combat log
                     combat_log.log(
                         CombatLogEventType::Buff,
@@ -670,6 +673,7 @@ pub fn decide_abilities(
                             tick_interval: 0.0,
                             time_until_next_tick: 0.0,
                             caster: Some(entity),
+                            ability_name: ms_def.name.to_string(),
                         },
                     });
                 }
@@ -816,6 +820,7 @@ pub fn decide_abilities(
                             tick_interval: 0.0,
                             time_until_next_tick: 0.0,
                             caster: Some(entity),
+                            ability_name: def.name.to_string(),
                         },
                     });
                 }
@@ -877,8 +882,157 @@ pub fn decide_abilities(
                 );
             }
         }
+
+        // Warlocks use Corruption (instant DoT) and Shadowbolt (cast time projectile)
+        if combatant.class == match_config::CharacterClass::Warlock {
+            // Check if we have an enemy target
+            let Some(target_entity) = combatant.target else {
+                continue;
+            };
+
+            let Some(&target_pos) = positions.get(&target_entity) else {
+                continue;
+            };
+
+            // Check if global cooldown is active
+            if combatant.global_cooldown > 0.0 {
+                continue; // Can't use abilities during GCD
+            }
+
+            // Priority 1: Apply Corruption if target doesn't have it (instant DoT)
+            let target_has_corruption = if let Some(auras) = active_auras_map.get(&target_entity) {
+                // Check for any DoT - in the future we could track specific DoT sources
+                auras.iter().any(|a| a.effect_type == AuraType::DamageOverTime)
+            } else {
+                false
+            };
+
+            if !target_has_corruption {
+                let corruption = AbilityType::Corruption;
+                let corruption_def = corruption.definition();
+
+                // Check if Shadow school is locked out
+                if !is_spell_school_locked(corruption_def.spell_school, auras) {
+                    if corruption.can_cast(&combatant, target_pos, my_pos) {
+                        // Consume mana
+                        combatant.current_mana -= corruption_def.mana_cost;
+
+                        // Trigger global cooldown
+                        combatant.global_cooldown = 1.5;
+
+                        // Apply the DoT aura
+                        if let Some((aura_type, duration, magnitude, break_threshold)) = corruption_def.applies_aura {
+                            commands.spawn(AuraPending {
+                                target: target_entity,
+                                aura: Aura {
+                                    effect_type: aura_type,
+                                    duration,
+                                    magnitude,
+                                    break_on_damage_threshold: break_threshold,
+                                    accumulated_damage: 0.0,
+                                    tick_interval: 3.0, // Tick every 3 seconds
+                                    time_until_next_tick: 3.0, // First tick after 3 seconds
+                                    caster: Some(entity),
+                                    ability_name: corruption_def.name.to_string(),
+                                },
+                            });
+                        }
+
+                        // Log Corruption application
+                        combat_log.log(
+                            CombatLogEventType::Buff,
+                            format!(
+                                "Team {} {} applies Corruption to enemy (10 damage per 3s for 18s)",
+                                combatant.team,
+                                combatant.class.name()
+                            )
+                        );
+
+                        info!(
+                            "Team {} {} applies Corruption to enemy (10 damage per 3s for 18s)",
+                            combatant.team,
+                            combatant.class.name()
+                        );
+
+                        continue; // Done this frame
+                    }
+                }
+            }
+
+            // Priority 2: Cast Fear if target is not CC'd and Fear is off cooldown
+            let fear = AbilityType::Fear;
+            let fear_def = fear.definition();
+            let fear_cooldown = combatant.ability_cooldowns.get(&fear).copied().unwrap_or(0.0);
+
+            // Check if target is already CC'd (don't waste Fear on CC'd targets)
+            let target_is_ccd = if let Some(auras) = active_auras_map.get(&target_entity) {
+                auras.iter().any(|a| matches!(a.effect_type, AuraType::Stun | AuraType::Fear | AuraType::Root))
+            } else {
+                false
+            };
+
+            if fear_cooldown <= 0.0 && !target_is_ccd {
+                // Check if Shadow school is locked out
+                if !is_spell_school_locked(fear_def.spell_school, auras) {
+                    if fear.can_cast(&combatant, target_pos, my_pos) {
+                        // Trigger global cooldown (starts when cast begins)
+                        combatant.global_cooldown = 1.5;
+
+                        // Start casting Fear
+                        commands.entity(entity).insert(CastingState {
+                            ability: fear,
+                            time_remaining: fear_def.cast_time,
+                            target: Some(target_entity),
+                            interrupted: false,
+                            interrupted_display_time: 0.0,
+                        });
+
+                        // Spawn speech bubble
+                        spawn_speech_bubble(&mut commands, entity, "Fear");
+
+                        info!(
+                            "Team {} {} starts casting Fear on enemy",
+                            combatant.team,
+                            combatant.class.name()
+                        );
+
+                        continue; // Done this frame
+                    }
+                }
+            }
+
+            // Priority 3: Cast Shadowbolt (main damage spell with cast time)
+            let shadowbolt = AbilityType::Shadowbolt;
+            let shadowbolt_def = shadowbolt.definition();
+
+            // Check if Shadow school is locked out
+            if is_spell_school_locked(shadowbolt_def.spell_school, auras) {
+                continue; // Can't cast - spell school is locked
+            }
+
+            if shadowbolt.can_cast(&combatant, target_pos, my_pos) {
+                // Trigger global cooldown (starts when cast begins)
+                combatant.global_cooldown = 1.5;
+
+                // Start casting
+                commands.entity(entity).insert(CastingState {
+                    ability: shadowbolt,
+                    time_remaining: shadowbolt_def.cast_time,
+                    target: Some(target_entity),
+                    interrupted: false,
+                    interrupted_display_time: 0.0,
+                });
+
+                info!(
+                    "Team {} {} starts casting {} on enemy",
+                    combatant.team,
+                    combatant.class.name(),
+                    shadowbolt_def.name
+                );
+            }
+        }
     }
-    
+
     // Process queued instant attacks (Ambush, Sinister Strike)
     for (attacker_entity, target_entity, damage, attacker_team, attacker_class, ability) in instant_attacks {
         let ability_name = ability.definition().name;

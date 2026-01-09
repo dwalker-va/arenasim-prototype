@@ -204,6 +204,8 @@ pub enum AuraType {
     SpellSchoolLockout,
     /// Reduces healing received by a percentage (magnitude = multiplier, e.g., 0.65 = 35% reduction)
     HealingReduction,
+    /// Fear - target runs around randomly, unable to act. Breaks on damage.
+    Fear,
     // Future: Silence, Healing-over-time, Attack Power buffs, etc.
 }
 
@@ -277,6 +279,8 @@ impl Combatant {
             match_config::CharacterClass::Rogue => (ResourceType::Energy, 175.0, 100.0, 20.0, 100.0, 10.0, 1.3, 35.0, 0.0, 6.0),
             // Priests: Medium HP, healing & wand damage, scales with Spell Power
             match_config::CharacterClass::Priest => (ResourceType::Mana, 150.0, 150.0, 8.0, 150.0, 6.0, 0.8, 0.0, 40.0, 5.0),
+            // Warlocks: Medium HP, shadow damage (wand), scales with Spell Power, DoT focused
+            match_config::CharacterClass::Warlock => (ResourceType::Mana, 160.0, 180.0, 9.0, 180.0, 8.0, 0.7, 0.0, 45.0, 4.5),
         };
         
         // Rogues start stealthed
@@ -316,11 +320,11 @@ impl Combatant {
     }
     
     /// Check if this combatant is in range to attack the target position.
-    /// Mages and Priests use wands (ranged), Warriors and Rogues use melee weapons.
+    /// Mages, Priests, and Warlocks use wands (ranged), Warriors and Rogues use melee weapons.
     pub fn in_attack_range(&self, my_position: Vec3, target_position: Vec3) -> bool {
         let distance = my_position.distance(target_position);
         match self.class {
-            match_config::CharacterClass::Mage | match_config::CharacterClass::Priest => {
+            match_config::CharacterClass::Mage | match_config::CharacterClass::Priest | match_config::CharacterClass::Warlock => {
                 distance <= WAND_RANGE
             }
             match_config::CharacterClass::Warrior | match_config::CharacterClass::Rogue => {
@@ -405,6 +409,8 @@ pub struct Aura {
     pub time_until_next_tick: f32,
     /// For DoT effects: who applied this aura (for damage attribution)
     pub caster: Option<Entity>,
+    /// Name of the ability that created this aura (for logging)
+    pub ability_name: String,
 }
 
 /// Temporary component for pending auras to be applied.

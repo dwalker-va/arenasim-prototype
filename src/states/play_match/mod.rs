@@ -454,6 +454,7 @@ fn spawn_combatant(
         match_config::CharacterClass::Mage => Color::srgb(0.3, 0.6, 1.0),    // Bright blue
         match_config::CharacterClass::Rogue => Color::srgb(1.0, 0.9, 0.2),   // Bright yellow
         match_config::CharacterClass::Priest => Color::srgb(0.95, 0.95, 0.95), // White
+        match_config::CharacterClass::Warlock => Color::srgb(0.58, 0.41, 0.93), // Purple
     };
     
     // Apply darkening for duplicate classes (0.65 multiplier per duplicate)

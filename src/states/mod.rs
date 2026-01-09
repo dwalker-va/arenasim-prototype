@@ -69,6 +69,7 @@ impl Plugin for StatesPlugin {
                     play_match::animate_gate_bars,
                     play_match::update_play_match,
                     play_match::regenerate_resources,
+                    play_match::process_dot_ticks,  // Process DoT ticks BEFORE updating auras (so final tick fires on expiration)
                     play_match::update_auras,
                     play_match::apply_pending_auras,
                 )
@@ -84,7 +85,6 @@ impl Plugin for StatesPlugin {
                 Update,
                 (
                     play_match::process_aura_breaks,
-                    play_match::process_dot_ticks,
                     play_match::acquire_targets,
                     play_match::decide_abilities,
                     apply_deferred,  // Flush commands so CastingState is visible

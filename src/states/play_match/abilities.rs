@@ -52,7 +52,11 @@ pub enum AbilityType {
     MortalStrike, // Warrior damage + healing reduction
     Pummel,    // Warrior interrupt
     Kick,      // Rogue interrupt
-    // Future: Fireball, Backstab, etc.
+    // Warlock abilities
+    Corruption, // Shadow DoT
+    Shadowbolt, // Shadow projectile
+    Fear,       // Shadow CC - target flees, breaks on damage
+    // Future: Fireball, Backstab, Drain Life, etc.
 }
 
 /// Ability definition with all parameters.
@@ -370,6 +374,66 @@ impl AbilityType {
                 spell_school: SpellSchool::Physical,
                 is_interrupt: true,
                 lockout_duration: 4.0, // 4 second lockout
+            },
+            // Warlock abilities
+            AbilityType::Corruption => AbilityDefinition {
+                name: "Corruption",
+                cast_time: 0.0, // Instant cast (WoW classic style)
+                range: 30.0, // Ranged spell
+                mana_cost: 25.0,
+                cooldown: 0.0, // No cooldown, but can only have one on target
+                damage_base_min: 0.0, // No direct damage
+                damage_base_max: 0.0,
+                damage_coefficient: 0.0,
+                damage_scales_with: ScalingStat::None,
+                healing_base_min: 0.0,
+                healing_base_max: 0.0,
+                healing_coefficient: 0.0,
+                // Shadow DoT: 18 second duration, 10 damage per tick (ticks every 3 seconds = 6 ticks, 60 total)
+                applies_aura: Some((AuraType::DamageOverTime, 18.0, 10.0, 0.0)),
+                projectile_speed: None, // Instant application
+                spell_school: SpellSchool::Shadow,
+                is_interrupt: false,
+                lockout_duration: 0.0,
+            },
+            AbilityType::Shadowbolt => AbilityDefinition {
+                name: "Shadowbolt",
+                cast_time: 2.0, // Slightly longer than Frostbolt
+                range: 30.0, // Ranged spell
+                mana_cost: 25.0,
+                cooldown: 0.0, // No cooldown, spam spell
+                damage_base_min: 12.0, // Good base damage
+                damage_base_max: 18.0,
+                damage_coefficient: 0.85, // 85% of Spell Power - slightly higher than Frostbolt
+                damage_scales_with: ScalingStat::SpellPower,
+                healing_base_min: 0.0,
+                healing_base_max: 0.0,
+                healing_coefficient: 0.0,
+                applies_aura: None, // Pure damage, no debuff (unlike Frostbolt's slow)
+                projectile_speed: Some(18.0), // Slightly slower than Frostbolt (20.0)
+                spell_school: SpellSchool::Shadow,
+                is_interrupt: false,
+                lockout_duration: 0.0,
+            },
+            AbilityType::Fear => AbilityDefinition {
+                name: "Fear",
+                cast_time: 1.5, // Classic WoW Fear cast time
+                range: 30.0, // Classic WoW Fear range
+                mana_cost: 30.0,
+                cooldown: 30.0, // 30 second cooldown
+                damage_base_min: 0.0,
+                damage_base_max: 0.0,
+                damage_coefficient: 0.0,
+                damage_scales_with: ScalingStat::None,
+                healing_base_min: 0.0,
+                healing_base_max: 0.0,
+                healing_coefficient: 0.0,
+                // Fear: 8 second duration, breaks after 30 damage
+                applies_aura: Some((AuraType::Fear, 8.0, 0.0, 30.0)),
+                projectile_speed: None, // Instant application on cast complete
+                spell_school: SpellSchool::Shadow,
+                is_interrupt: false,
+                lockout_duration: 0.0,
             },
         }
     }

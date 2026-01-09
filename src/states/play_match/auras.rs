@@ -16,7 +16,10 @@ use super::get_next_fct_offset;
 use super::combat_core::combatant_id;
 
 /// Update all active auras - tick down durations and remove expired ones.
-/// 
+///
+/// IMPORTANT: This system must run AFTER process_dot_ticks so that DoTs can
+/// apply their final tick before being removed (WoW-style behavior).
+///
 /// This system runs every frame to decrement aura durations. When an aura expires,
 /// it is removed from the combatant's active aura list.
 pub fn update_auras(
@@ -136,6 +139,7 @@ pub fn process_aura_breaks(
                         AuraType::Root => "Root",
                         AuraType::MovementSpeedSlow => "Movement Speed Slow",
                         AuraType::Stun => "Stun",
+                        AuraType::Fear => "Fear",
                         AuraType::MaxHealthIncrease => "Power Word: Fortitude", // Should never break on damage
                         AuraType::DamageOverTime => "Rend", // Should never break on damage (has 0.0 threshold)
                         AuraType::SpellSchoolLockout => "Lockout", // Should never break on damage (has 0.0 threshold)
@@ -166,7 +170,11 @@ pub fn process_aura_breaks(
 }
 
 /// Process damage-over-time ticks.
-/// 
+///
+/// IMPORTANT: This system must run BEFORE update_auras so that the final tick
+/// fires exactly when the aura expires (WoW-style DoT behavior). For example,
+/// an 18s DoT with 3s ticks will tick at t=3,6,9,12,15,18 (6 total ticks).
+///
 /// For each combatant with DoT auras:
 /// 1. Tick down time_until_next_tick
 /// 2. When it reaches 0, apply damage
@@ -208,8 +216,8 @@ pub fn process_dot_ticks(
         .collect();
     
     // Track DoT damage to apply (to avoid borrow issues)
-    // Format: (target_entity, caster_entity, damage, target_pos, caster_team, caster_class)
-    let mut dot_damage_to_apply: Vec<(Entity, Entity, f32, Vec3, u8, match_config::CharacterClass)> = Vec::new();
+    // Format: (target_entity, caster_entity, damage, target_pos, caster_team, caster_class, ability_name)
+    let mut dot_damage_to_apply: Vec<(Entity, Entity, f32, Vec3, u8, match_config::CharacterClass, String)> = Vec::new();
     
     // First pass: tick down DoT timers and queue damage
     for (entity, combatant, _transform, mut active_auras) in combatants_with_auras.iter_mut() {
@@ -225,13 +233,19 @@ pub fn process_dot_ticks(
             }
             
             // Tick down time until next damage application
-            // (Duration is already handled by update_auras system)
             aura.time_until_next_tick -= dt;
-            
-            if aura.time_until_next_tick <= 0.0 {
+
+            // Check if we should apply damage:
+            // 1. Normal tick: time_until_next_tick <= 0
+            // 2. Final tick: aura is expiring this frame (duration - dt <= 0) but tick timer hasn't fired
+            //    This ensures WoW-style behavior where the final tick happens exactly at expiration
+            let normal_tick = aura.time_until_next_tick <= 0.0;
+            let final_tick = !normal_tick && (aura.duration - dt) <= 0.0;
+
+            if normal_tick || final_tick {
                 // Time to apply DoT damage!
                 let damage = aura.magnitude;
-                
+
                 // Get caster info (if still exists)
                 if let Some(caster_entity) = aura.caster {
                     if let Some(&(caster_team, caster_class)) = combatant_info.get(&caster_entity) {
@@ -242,12 +256,15 @@ pub fn process_dot_ticks(
                             target_pos,
                             caster_team,
                             caster_class,
+                            aura.ability_name.clone(),
                         ));
                     }
                 }
-                
-                // Reset tick timer
-                aura.time_until_next_tick = aura.tick_interval;
+
+                // Reset tick timer (only for normal ticks, final tick doesn't need reset)
+                if normal_tick {
+                    aura.time_until_next_tick = aura.tick_interval;
+                }
             }
         }
     }
@@ -256,7 +273,7 @@ pub fn process_dot_ticks(
     let mut caster_damage_updates: Vec<(Entity, f32)> = Vec::new();
     
     // Second pass: apply queued DoT damage to targets
-    for (target_entity, caster_entity, damage, target_pos, caster_team, caster_class) in dot_damage_to_apply {
+    for (target_entity, caster_entity, damage, target_pos, caster_team, caster_class, ability_name) in dot_damage_to_apply {
         // Get target combatant
         let Ok((_, mut target, _, _)) = combatants_with_auras.get_mut(target_entity) else {
             continue;
@@ -309,9 +326,10 @@ pub fn process_dot_ticks(
         // Log to combat log with structured data
         let is_killing_blow = !target.is_alive();
         let message = format!(
-            "Team {} {}'s Rend ticks for {:.0} damage on Team {} {}",
+            "Team {} {}'s {} ticks for {:.0} damage on Team {} {}",
             caster_team,
             caster_class.name(),
+            ability_name,
             actual_damage,
             target_team,
             target_class.name()
@@ -319,7 +337,7 @@ pub fn process_dot_ticks(
         combat_log.log_damage(
             combatant_id(caster_team, caster_class),
             combatant_id(target_team, target_class),
-            "Rend".to_string(),
+            ability_name.clone(),
             actual_damage,
             is_killing_blow,
             message,

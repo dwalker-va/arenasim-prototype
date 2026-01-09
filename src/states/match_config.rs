@@ -12,6 +12,7 @@ pub enum CharacterClass {
     Mage,
     Rogue,
     Priest,
+    Warlock,
 }
 
 impl CharacterClass {
@@ -22,6 +23,7 @@ impl CharacterClass {
             CharacterClass::Mage,
             CharacterClass::Rogue,
             CharacterClass::Priest,
+            CharacterClass::Warlock,
         ]
     }
 
@@ -32,6 +34,7 @@ impl CharacterClass {
             CharacterClass::Mage => "Mage",
             CharacterClass::Rogue => "Rogue",
             CharacterClass::Priest => "Priest",
+            CharacterClass::Warlock => "Warlock",
         }
     }
 
@@ -42,6 +45,7 @@ impl CharacterClass {
             CharacterClass::Mage => "Powerful spellcaster",
             CharacterClass::Rogue => "Swift shadow striker",
             CharacterClass::Priest => "Healer and support",
+            CharacterClass::Warlock => "Shadow magic and curses",
         }
     }
 
@@ -52,6 +56,27 @@ impl CharacterClass {
             CharacterClass::Mage => Color::srgb(0.41, 0.80, 0.94),    // Light blue
             CharacterClass::Rogue => Color::srgb(1.0, 0.96, 0.41),    // Yellow
             CharacterClass::Priest => Color::srgb(1.0, 1.0, 1.0),     // White
+            CharacterClass::Warlock => Color::srgb(0.58, 0.51, 0.79), // Purple
+        }
+    }
+
+    /// Get the preferred combat range for this class.
+    /// This is the optimal distance to maintain - close enough for all important
+    /// abilities without putting themselves in unnecessary danger.
+    pub fn preferred_range(&self) -> f32 {
+        match self {
+            // Melee classes want to be in melee range
+            CharacterClass::Warrior => 2.0,
+            CharacterClass::Rogue => 2.0,
+            // Mage stays at max range (squishy, relies on kiting)
+            // Frostbolt: 40, but stay slightly back for safety
+            CharacterClass::Mage => 38.0,
+            // Priest and Warlock position for their shortest-range abilities
+            // Priest: Wand 30, so stay at ~28 to use everything
+            CharacterClass::Priest => 28.0,
+            // Warlock: Fear 30, Shadowbolt 40, Corruption 40, Wand 30
+            // Stay at ~28 to cast Fear without repositioning
+            CharacterClass::Warlock => 28.0,
         }
     }
 }

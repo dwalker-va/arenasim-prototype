@@ -267,6 +267,7 @@ pub fn process_projectile_hits(
                         tick_interval: if aura_type == AuraType::DamageOverTime { 3.0 } else { 0.0 },
                         time_until_next_tick: if aura_type == AuraType::DamageOverTime { 3.0 } else { 0.0 },
                         caster: Some(caster_entity),
+                        ability_name: def.name.to_string(),
                     },
                 });
             }
