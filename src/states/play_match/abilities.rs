@@ -117,7 +117,7 @@ impl AbilityType {
                 healing_base_max: 0.0,
                 healing_coefficient: 0.0,
                 applies_aura: Some((AuraType::MovementSpeedSlow, 5.0, 0.7, 0.0)), // 30% slow for 5s, doesn't break on damage
-                projectile_speed: Some(20.0), // Travels at 20 units/second
+                projectile_speed: Some(35.0), // Fast projectile
                 spell_school: SpellSchool::Frost,
                 is_interrupt: false,
                 lockout_duration: 0.0,
@@ -410,7 +410,7 @@ impl AbilityType {
                 healing_base_max: 0.0,
                 healing_coefficient: 0.0,
                 applies_aura: None, // Pure damage, no debuff (unlike Frostbolt's slow)
-                projectile_speed: Some(18.0), // Slightly slower than Frostbolt (20.0)
+                projectile_speed: Some(35.0), // Fast projectile
                 spell_school: SpellSchool::Shadow,
                 is_interrupt: false,
                 lockout_duration: 0.0,

@@ -27,14 +27,29 @@ pub fn spawn_projectile_visuals(
         };
         
         let caster_pos = caster_transform.translation;
-        
+
         // Create a small sphere mesh for the projectile
         let mesh = meshes.add(Sphere::new(0.3));
-        
-        // Ice blue color with emissive glow
+
+        // Color based on spell school/ability type
+        let (base_color, emissive) = match projectile.ability {
+            AbilityType::Shadowbolt => (
+                Color::srgb(0.6, 0.3, 0.8),           // Purple
+                LinearRgba::rgb(0.8, 0.4, 1.2),       // Purple glow
+            ),
+            AbilityType::Frostbolt => (
+                Color::srgb(0.4, 0.7, 1.0),           // Ice blue
+                LinearRgba::rgb(0.6, 0.9, 1.5),       // Ice glow
+            ),
+            _ => (
+                Color::srgb(1.0, 0.8, 0.3),           // Default: golden/arcane
+                LinearRgba::rgb(1.2, 1.0, 0.5),       // Golden glow
+            ),
+        };
+
         let material = materials.add(StandardMaterial {
-            base_color: Color::srgb(0.4, 0.7, 1.0), // Ice blue
-            emissive: LinearRgba::rgb(0.6, 0.9, 1.5), // Bright ice glow
+            base_color,
+            emissive,
             ..default()
         });
         

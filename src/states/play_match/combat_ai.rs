@@ -15,7 +15,7 @@ use super::{MELEE_RANGE, is_spell_school_locked, get_next_fct_offset};
 use super::combat_core::combatant_id;
 
 /// Helper function to spawn a speech bubble when a combatant uses an ability
-fn spawn_speech_bubble(
+pub fn spawn_speech_bubble(
     commands: &mut Commands,
     owner: Entity,
     ability_name: &str,
@@ -987,8 +987,7 @@ pub fn decide_abilities(
                             interrupted_display_time: 0.0,
                         });
 
-                        // Spawn speech bubble
-                        spawn_speech_bubble(&mut commands, entity, "Fear");
+                        // Note: Speech bubble spawned in process_casting when Fear lands
 
                         info!(
                             "Team {} {} starts casting Fear on enemy",

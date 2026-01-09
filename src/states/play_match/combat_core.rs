@@ -14,6 +14,7 @@ use crate::combat::log::{CombatLog, CombatLogEventType, CombatantId};
 use super::match_config;
 use super::components::*;
 use super::abilities::{AbilityType, SpellSchool};
+use super::combat_ai::spawn_speech_bubble;
 use super::{MELEE_RANGE, ARENA_HALF_SIZE, get_next_fct_offset};
 
 /// Helper to generate a consistent combatant ID for the combat log
@@ -1078,6 +1079,11 @@ pub fn process_casting(
                 magnitude,
                 duration
             );
+
+            // Spawn speech bubble for Fear (only when successfully applied, not when cast starts)
+            if aura_type == AuraType::Fear {
+                spawn_speech_bubble(&mut commands, caster_entity, "Fear");
+            }
         }
 
         // Track cooldown if ability has one
