@@ -38,6 +38,9 @@ impl Plugin for StatesPlugin {
         app
             // Initialize match config resource
             .init_resource::<MatchConfig>()
+            // Initialize class icon resources
+            .init_resource::<configure_match_ui::ClassIcons>()
+            .init_resource::<configure_match_ui::ClassIconHandles>()
             // Main menu systems (now using egui)
             .add_systems(
                 Update,
@@ -55,7 +58,12 @@ impl Plugin for StatesPlugin {
             // Configure match systems (defined in configure_match_ui module)
             .add_systems(
                 Update,
-                configure_match_ui::configure_match_ui.run_if(in_state(GameState::ConfigureMatch)),
+                (
+                    configure_match_ui::load_class_icons,
+                    configure_match_ui::configure_match_ui,
+                )
+                    .chain()
+                    .run_if(in_state(GameState::ConfigureMatch)),
             )
             // Play match systems (defined in play_match module)
             .add_systems(OnEnter(GameState::PlayMatch), play_match::setup_play_match)

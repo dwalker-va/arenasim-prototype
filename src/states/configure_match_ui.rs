@@ -20,7 +20,74 @@
 
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
+use std::collections::HashMap;
 use super::{GameState, match_config::{self, MatchConfig}};
+
+/// Resource storing loaded class icon textures for egui rendering.
+/// Maps CharacterClass to egui TextureId for efficient icon display.
+#[derive(Resource, Default)]
+pub struct ClassIcons {
+    /// Map of class to egui texture ID
+    pub textures: HashMap<match_config::CharacterClass, egui::TextureId>,
+    /// Whether icons have been loaded
+    pub loaded: bool,
+}
+
+/// Resource storing the Bevy image handles for class icons.
+/// These are kept alive to prevent the assets from being unloaded.
+#[derive(Resource, Default)]
+pub struct ClassIconHandles {
+    pub handles: Vec<Handle<Image>>,
+}
+
+/// System to load class icons and register them with egui.
+/// This runs during ConfigureMatch state update and only loads once.
+pub fn load_class_icons(
+    mut contexts: EguiContexts,
+    asset_server: Res<AssetServer>,
+    mut class_icons: ResMut<ClassIcons>,
+    mut icon_handles: ResMut<ClassIconHandles>,
+    images: Res<Assets<Image>>,
+) {
+    // Only load once
+    if class_icons.loaded {
+        return;
+    }
+
+    // Check if all images are loaded
+    let class_paths = [
+        (match_config::CharacterClass::Warrior, "icons/classes/warrior.png"),
+        (match_config::CharacterClass::Mage, "icons/classes/mage.png"),
+        (match_config::CharacterClass::Rogue, "icons/classes/rogue.png"),
+        (match_config::CharacterClass::Priest, "icons/classes/priest.png"),
+        (match_config::CharacterClass::Warlock, "icons/classes/warlock.png"),
+    ];
+
+    // Load handles if not already loaded
+    if icon_handles.handles.is_empty() {
+        for (_, path) in &class_paths {
+            let handle: Handle<Image> = asset_server.load(*path);
+            icon_handles.handles.push(handle);
+        }
+        return; // Wait for next frame to check if loaded
+    }
+
+    // Check if all images are loaded
+    let all_loaded = icon_handles.handles.iter().all(|h| images.contains(h));
+    if !all_loaded {
+        return; // Wait for images to load
+    }
+
+    // Register textures with egui
+    for (i, (class, _)) in class_paths.iter().enumerate() {
+        let handle = icon_handles.handles[i].clone();
+        let texture_id = contexts.add_image(handle);
+        class_icons.textures.insert(*class, texture_id);
+    }
+
+    class_icons.loaded = true;
+    info!("Class icons loaded and registered with egui");
+}
 
 /// State for the character picker modal.
 /// Tracks which slot is being edited when the modal is open.
@@ -49,9 +116,10 @@ pub fn configure_match_ui(
     mut commands: Commands,
     keybindings: Res<crate::keybindings::Keybindings>,
     keyboard: Res<ButtonInput<KeyCode>>,
+    class_icons: Res<ClassIcons>,
 ) {
     use crate::keybindings::GameAction;
-    
+
     // Initialize picker state if it doesn't exist
     if picker_state.is_none() {
         commands.insert_resource(CharacterPickerState::default());
@@ -129,21 +197,21 @@ pub fn configure_match_ui(
                 ui.vertical(|ui| {
                     ui.set_width(col_width);
                     ui.add_space(5.0);
-                    render_team_panel(ui, &mut config, 1, &mut picker_state, panel_width);
+                    render_team_panel(ui, &mut config, 1, &mut picker_state, panel_width, &class_icons);
                 });
-                
+
                 // Map column
                 ui.vertical(|ui| {
                     ui.set_width(col_width);
                     ui.add_space(5.0);
                     render_map_panel(ui, &mut config, panel_width);
                 });
-                
+
                 // Team 2 column
                 ui.vertical(|ui| {
                     ui.set_width(col_width);
                     ui.add_space(5.0);
-                    render_team_panel(ui, &mut config, 2, &mut picker_state, panel_width);
+                    render_team_panel(ui, &mut config, 2, &mut picker_state, panel_width, &class_icons);
                 });
             });
 
@@ -181,13 +249,13 @@ pub fn configure_match_ui(
     // Character picker modal - shown when active
     if let Some(ref mut picker) = picker_state {
         if picker.active {
-            render_character_picker_modal(ctx, &mut config, picker);
+            render_character_picker_modal(ctx, &mut config, picker, &class_icons);
         }
     }
 }
 
 /// Render the character picker modal window.
-/// 
+///
 /// Displays all available character classes with:
 /// - Class icon and name
 /// - Class description
@@ -197,6 +265,7 @@ fn render_character_picker_modal(
     ctx: &egui::Context,
     config: &mut MatchConfig,
     picker: &mut CharacterPickerState,
+    class_icons: &ClassIcons,
 ) {
     egui::Window::new(format!("Select Character - Team {} Slot {}", picker.team, picker.slot + 1))
         .collapsible(false)
@@ -245,8 +314,22 @@ fn render_character_picker_modal(
                     egui::pos2(content_pos.x, content_pos.y - icon_size / 2.0),
                     egui::vec2(icon_size, icon_size),
                 );
-                ui.painter().rect_filled(icon_rect, 6.0, color32.gamma_multiply(0.3));
-                ui.painter().rect_stroke(icon_rect, 6.0, egui::Stroke::new(2.0, color32));
+
+                // Draw the actual class icon if loaded, otherwise fall back to colored rectangle
+                if let Some(&texture_id) = class_icons.textures.get(class) {
+                    ui.painter().image(
+                        texture_id,
+                        icon_rect,
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        egui::Color32::WHITE,
+                    );
+                    // Add border around the icon
+                    ui.painter().rect_stroke(icon_rect, 6.0, egui::Stroke::new(2.0, color32));
+                } else {
+                    // Fallback: colored rectangle placeholder
+                    ui.painter().rect_filled(icon_rect, 6.0, color32.gamma_multiply(0.3));
+                    ui.painter().rect_stroke(icon_rect, 6.0, egui::Stroke::new(2.0, color32));
+                }
 
                 // Class text
                 let text_pos = egui::pos2(content_pos.x + icon_size + 15.0, content_pos.y - 20.0);
@@ -291,7 +374,7 @@ fn render_character_picker_modal(
 }
 
 /// Render a team panel (Team 1 or Team 2).
-/// 
+///
 /// Shows:
 /// - Team header with size controls (+/-)
 /// - Three character slots (active/inactive based on team size)
@@ -301,6 +384,7 @@ fn render_team_panel(
     team: u8,
     picker_state: &mut Option<ResMut<CharacterPickerState>>,
     max_width: f32,
+    class_icons: &ClassIcons,
 ) {
     let team_color = if team == 1 {
         egui::Color32::from_rgb(51, 102, 204)
@@ -355,8 +439,8 @@ fn render_team_panel(
         let character = team_slots.get(slot).and_then(|c| *c);
         let is_active = slot < team_size;
 
-        render_character_slot(ui, team, slot, character, is_active, team_color, picker_state, max_width);
-        
+        render_character_slot(ui, team, slot, character, is_active, team_color, picker_state, max_width, class_icons);
+
         if slot < 2 {
             ui.add_space(12.0);
         }
@@ -438,7 +522,7 @@ fn render_team_panel(
 }
 
 /// Render a single character slot.
-/// 
+///
 /// Display varies based on state:
 /// - **Active + Filled**: Shows class icon and name
 /// - **Active + Empty**: Shows "Click to select" prompt
@@ -452,6 +536,7 @@ fn render_character_slot(
     team_color: egui::Color32,
     picker_state: &mut Option<ResMut<CharacterPickerState>>,
     max_width: f32,
+    class_icons: &ClassIcons,
 ) {
     let bg_color = if is_active {
         if character.is_some() {
@@ -508,12 +593,26 @@ fn render_character_slot(
             egui::pos2(content_pos.x, content_pos.y - icon_size / 2.0),
             egui::vec2(icon_size, icon_size),
         );
-        ui.painter().rect_filled(icon_rect, 6.0, color32.gamma_multiply(0.3));
-        ui.painter().rect_stroke(icon_rect, 6.0, egui::Stroke::new(2.0, color32));
+
+        // Draw the actual class icon if loaded, otherwise fall back to colored rectangle
+        if let Some(&texture_id) = class_icons.textures.get(&class) {
+            ui.painter().image(
+                texture_id,
+                icon_rect,
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+            // Add border around the icon
+            ui.painter().rect_stroke(icon_rect, 6.0, egui::Stroke::new(2.0, color32));
+        } else {
+            // Fallback: colored rectangle placeholder
+            ui.painter().rect_filled(icon_rect, 6.0, color32.gamma_multiply(0.3));
+            ui.painter().rect_stroke(icon_rect, 6.0, egui::Stroke::new(2.0, color32));
+        }
 
         // Class text
         let text_pos = egui::pos2(content_pos.x + icon_size + 15.0, content_pos.y - 20.0);
-        
+
         ui.painter().text(
             text_pos,
             egui::Align2::LEFT_TOP,
@@ -521,7 +620,7 @@ fn render_character_slot(
             egui::FontId::proportional(20.0),
             color32,
         );
-        
+
         ui.painter().text(
             egui::pos2(text_pos.x, text_pos.y + 24.0),
             egui::Align2::LEFT_TOP,
