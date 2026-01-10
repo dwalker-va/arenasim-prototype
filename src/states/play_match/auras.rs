@@ -28,16 +28,31 @@ pub fn update_auras(
     mut combatants: Query<(Entity, &mut ActiveAuras)>,
 ) {
     let dt = time.delta_secs();
-    
+
     for (entity, mut auras) in combatants.iter_mut() {
-        // Tick down all aura durations
+        // Tick down all aura durations and update fear timers
         for aura in auras.auras.iter_mut() {
             aura.duration -= dt;
+
+            // For Fear auras, tick down direction timer and pick new random direction
+            if aura.effect_type == AuraType::Fear {
+                aura.fear_direction_timer -= dt;
+
+                // Time to pick a new random direction
+                if aura.fear_direction_timer <= 0.0 {
+                    // Generate random angle (0 to 2*PI)
+                    let angle = rand::random::<f32>() * std::f32::consts::TAU;
+                    aura.fear_direction = (angle.cos(), angle.sin());
+
+                    // Reset timer: change direction every 1-2 seconds (WoW-style)
+                    aura.fear_direction_timer = 1.0 + rand::random::<f32>();
+                }
+            }
         }
-        
+
         // Remove expired auras
         auras.auras.retain(|aura| aura.duration > 0.0);
-        
+
         // Remove component if no auras remain
         if auras.auras.is_empty() {
             commands.entity(entity).remove::<ActiveAuras>();

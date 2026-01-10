@@ -121,19 +121,47 @@ pub fn move_to_target(
         if casting_state.is_some() {
             continue;
         }
-        
-        // Check if rooted, stunned, or feared - if so, cannot move intentionally
-        let is_cc_locked = if let Some(auras) = auras {
-            auras.auras.iter().any(|a| matches!(a.effect_type, AuraType::Root | AuraType::Stun | AuraType::Fear))
+
+        // Check for movement-preventing CC
+        let (is_rooted_or_stunned, fear_direction) = if let Some(auras) = auras {
+            let rooted_or_stunned = auras.auras.iter().any(|a| matches!(a.effect_type, AuraType::Root | AuraType::Stun));
+            let fear_dir = auras.auras.iter()
+                .find(|a| a.effect_type == AuraType::Fear)
+                .map(|a| a.fear_direction);
+            (rooted_or_stunned, fear_dir)
         } else {
-            false
+            (false, None)
         };
-        
-        if is_cc_locked {
+
+        // Cannot move at all if rooted or stunned
+        if is_rooted_or_stunned {
             continue;
         }
-        
+
         let my_pos = transform.translation;
+
+        // FEARED BEHAVIOR: If feared, run in random direction (ignoring normal movement)
+        if let Some((dir_x, dir_z)) = fear_direction {
+            let direction = Vec3::new(dir_x, 0.0, dir_z).normalize_or_zero();
+
+            if direction != Vec3::ZERO {
+                // Feared targets run at normal movement speed (no slows applied during fear)
+                let move_distance = combatant.base_movement_speed * dt;
+
+                // Move in fear direction
+                transform.translation += direction * move_distance;
+
+                // Clamp to arena bounds
+                transform.translation.x = transform.translation.x.clamp(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
+                transform.translation.z = transform.translation.z.clamp(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
+
+                // Rotate to face direction of travel
+                let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
+                transform.rotation = target_rotation;
+            }
+
+            continue; // Skip normal movement logic while feared
+        }
         
         // CHARGING BEHAVIOR: If charging, move at high speed toward target ignoring slows
         if let Some(charge_state) = charging_state {
@@ -726,6 +754,8 @@ pub fn process_interrupts(
                     time_until_next_tick: 0.0,
                     caster: Some(interrupt.caster),
                     ability_name: interrupt.ability.definition().name.to_string(),
+                    fear_direction: (0.0, 0.0),
+                    fear_direction_timer: 0.0,
                 },
             });
             
@@ -1066,6 +1096,8 @@ pub fn process_casting(
                         time_until_next_tick: 0.0,
                         caster: Some(caster_entity),
                         ability_name: def.name.to_string(),
+                        fear_direction: (0.0, 0.0),
+                        fear_direction_timer: 0.0,
                     },
                 },
                 PlayMatchEntity,

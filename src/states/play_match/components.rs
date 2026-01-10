@@ -411,6 +411,10 @@ pub struct Aura {
     pub caster: Option<Entity>,
     /// Name of the ability that created this aura (for logging)
     pub ability_name: String,
+    /// For Fear: current run direction (x, z normalized)
+    pub fear_direction: (f32, f32),
+    /// For Fear: time until direction change
+    pub fear_direction_timer: f32,
 }
 
 /// Temporary component for pending auras to be applied.

@@ -247,6 +247,8 @@ pub fn decide_abilities(
                                     time_until_next_tick: 0.0,
                                     caster: Some(entity),
                                     ability_name: nova_def.name.to_string(),
+                                    fear_direction: (0.0, 0.0),
+                                    fear_direction_timer: 0.0,
                                 },
                             });
                         }
@@ -390,6 +392,8 @@ pub fn decide_abilities(
                                 time_until_next_tick: 0.0,
                                 caster: Some(entity),
                                 ability_name: def.name.to_string(),
+                                fear_direction: (0.0, 0.0),
+                                fear_direction_timer: 0.0,
                             },
                         });
                     }
@@ -607,6 +611,8 @@ pub fn decide_abilities(
                                 time_until_next_tick: 3.0, // First tick after 3 seconds
                                 caster: Some(entity),
                                 ability_name: rend_def.name.to_string(),
+                                fear_direction: (0.0, 0.0),
+                                fear_direction_timer: 0.0,
                             },
                         });
                     }
@@ -674,10 +680,12 @@ pub fn decide_abilities(
                             time_until_next_tick: 0.0,
                             caster: Some(entity),
                             ability_name: ms_def.name.to_string(),
+                            fear_direction: (0.0, 0.0),
+                            fear_direction_timer: 0.0,
                         },
                     });
                 }
-                
+
                 // Note: Combat log and FCT are handled in the instant_attacks processing loop
                 // to avoid duplicate entries
                 
@@ -821,6 +829,8 @@ pub fn decide_abilities(
                             time_until_next_tick: 0.0,
                             caster: Some(entity),
                             ability_name: def.name.to_string(),
+                            fear_direction: (0.0, 0.0),
+                            fear_direction_timer: 0.0,
                         },
                     });
                 }
@@ -934,6 +944,8 @@ pub fn decide_abilities(
                                     time_until_next_tick: 3.0, // First tick after 3 seconds
                                     caster: Some(entity),
                                     ability_name: corruption_def.name.to_string(),
+                                    fear_direction: (0.0, 0.0),
+                                    fear_direction_timer: 0.0,
                                 },
                             });
                         }
