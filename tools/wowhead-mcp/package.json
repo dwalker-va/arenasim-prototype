@@ -1,0 +1,23 @@
+{
+  "name": "wowhead-classic-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for looking up WoW Classic spell data from Wowhead",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "wowhead-classic-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc && node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.6.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.3.0"
+  }
+}
