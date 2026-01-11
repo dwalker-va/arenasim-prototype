@@ -127,7 +127,8 @@ impl Plugin for StatesPlugin {
                     play_match::render_health_bars,
                     play_match::render_floating_combat_text,
                     play_match::render_speech_bubbles,
-                    play_match::render_combat_log,
+                    play_match::render_combat_panel,
+                    play_match::load_spell_icons,
                 )
                     .run_if(in_state(GameState::PlayMatch)),
             )

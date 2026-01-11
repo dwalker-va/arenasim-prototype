@@ -724,7 +724,11 @@ pub fn process_interrupts(
             // Mark cast as interrupted
             cast_state.interrupted = true;
             cast_state.interrupted_display_time = 0.5; // Show "INTERRUPTED" for 0.5 seconds
-            
+
+            // Mark the ability cast as interrupted in the combat log (for timeline visualization)
+            let interrupted_caster_id = format!("Team {} {}", target_combatant.team, target_combatant.class.name());
+            combat_log.mark_cast_interrupted(&interrupted_caster_id, interrupted_spell_name);
+
             // Get caster info for logging
             let caster_info = if let Ok(caster) = combatants.get(interrupt.caster) {
                 (caster.team, caster.class)

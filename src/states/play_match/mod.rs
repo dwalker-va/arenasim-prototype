@@ -180,10 +180,17 @@ pub fn setup_play_match(
     config: Res<MatchConfig>,
 ) {
     info!("Setting up Play Match scene with config: {:?}", *config);
-    
+
     // Clear combat log for new match
     combat_log.clear();
     combat_log.log(CombatLogEventType::MatchEvent, "Match started!".to_string());
+
+    // Initialize combat panel view (for tabbed Combat Log / Timeline UI)
+    commands.insert_resource(CombatPanelView::default());
+
+    // Initialize spell icons resources (for ability timeline)
+    commands.insert_resource(SpellIcons::default());
+    commands.insert_resource(SpellIconHandles::default());
 
     // Spawn 3D camera with isometric-ish view
     commands.spawn((

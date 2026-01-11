@@ -246,9 +246,10 @@ pub fn render_camera_controls(
     // Use try_ctx_mut to gracefully handle window close
     let Some(ctx) = contexts.try_ctx_mut() else { return; };
 
-    // Position in bottom-left corner
+    // Position in bottom-right corner (to avoid overlapping with timeline panel on left)
+    let panel_width = 260.0;
     egui::Window::new("Camera Controls")
-        .fixed_pos(egui::pos2(10.0, ctx.screen_rect().height() - 160.0))
+        .fixed_pos(egui::pos2(ctx.screen_rect().width() - panel_width - 10.0, ctx.screen_rect().height() - 160.0))
         .resizable(false)
         .collapsible(false)
         .title_bar(false)

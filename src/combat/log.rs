@@ -64,6 +64,14 @@ pub enum StructuredEventData {
         victim: CombatantId,
         killer: Option<CombatantId>,
     },
+    /// Ability cast initiated (for timeline visualization)
+    AbilityCast {
+        caster: CombatantId,
+        ability: String,
+        target: Option<CombatantId>,
+        /// Whether this cast was interrupted before completing
+        interrupted: bool,
+    },
 }
 
 /// Position data for debugging combat events
@@ -230,6 +238,41 @@ impl CombatLog {
         });
     }
 
+    /// Add a structured ability cast event (for timeline visualization)
+    pub fn log_ability_cast(
+        &mut self,
+        caster: CombatantId,
+        ability: String,
+        target: Option<CombatantId>,
+        message: String,
+    ) {
+        self.entries.push(CombatLogEntry {
+            timestamp: self.match_time,
+            event_type: CombatLogEventType::AbilityUsed,
+            message,
+            position_data: None,
+            structured_data: Some(StructuredEventData::AbilityCast {
+                caster,
+                ability,
+                target,
+                interrupted: false,
+            }),
+        });
+    }
+
+    /// Mark the most recent ability cast by a combatant as interrupted
+    pub fn mark_cast_interrupted(&mut self, caster_id: &str, ability_name: &str) {
+        // Find the most recent matching ability cast and mark it interrupted
+        for entry in self.entries.iter_mut().rev() {
+            if let Some(StructuredEventData::AbilityCast { caster, ability, interrupted, .. }) = &mut entry.structured_data {
+                if caster == caster_id && ability == ability_name {
+                    *interrupted = true;
+                    return;
+                }
+            }
+        }
+    }
+
     // =========================================================================
     // Query Methods
     // =========================================================================
@@ -258,6 +301,25 @@ impl CombatLog {
     /// Get the last N entries
     pub fn recent(&self, count: usize) -> Vec<&CombatLogEntry> {
         self.entries.iter().rev().take(count).rev().collect()
+    }
+
+    /// Get all ability casts for a specific combatant (for timeline visualization)
+    /// Returns Vec<(timestamp, ability_name, was_interrupted)> sorted by timestamp
+    pub fn ability_casts_for(&self, combatant_id: &str) -> Vec<(f32, &str, bool)> {
+        self.entries
+            .iter()
+            .filter_map(|e| {
+                if let Some(StructuredEventData::AbilityCast { caster, ability, interrupted, .. }) = &e.structured_data {
+                    if caster == combatant_id {
+                        Some((e.timestamp, ability.as_str(), *interrupted))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     // =========================================================================
@@ -388,6 +450,12 @@ impl CombatLog {
                     combatants.insert(victim.clone());
                     if let Some(k) = killer {
                         combatants.insert(k.clone());
+                    }
+                }
+                Some(StructuredEventData::AbilityCast { caster, target, .. }) => {
+                    combatants.insert(caster.clone());
+                    if let Some(t) = target {
+                        combatants.insert(t.clone());
                     }
                 }
                 None => {}

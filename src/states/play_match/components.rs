@@ -33,6 +33,31 @@ impl SimulationSpeed {
     }
 }
 
+/// Which panel view is currently active in the combat log area
+#[derive(Resource, Default, Clone, Copy, PartialEq, Eq)]
+pub enum CombatPanelView {
+    #[default]
+    CombatLog,
+    Timeline,
+}
+
+/// Resource storing loaded spell icon textures for egui rendering in the timeline.
+/// Maps ability name to egui TextureId for efficient icon display.
+#[derive(Resource, Default)]
+pub struct SpellIcons {
+    /// Map of ability name to egui texture ID
+    pub textures: std::collections::HashMap<String, egui::TextureId>,
+    /// Whether icons have been loaded
+    pub loaded: bool,
+}
+
+/// Resource storing the Bevy image handles for spell icons.
+/// These are kept alive to prevent the assets from being unloaded.
+#[derive(Resource, Default)]
+pub struct SpellIconHandles {
+    pub handles: Vec<(String, Handle<Image>)>,
+}
+
 /// Camera control modes
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CameraMode {

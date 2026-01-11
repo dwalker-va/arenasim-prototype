@@ -202,16 +202,25 @@ pub fn decide_abilities(
                 if enemies_in_melee_range {
                     // Spawn speech bubble for Frost Nova
                     spawn_speech_bubble(&mut commands, entity, "Frost Nova");
-                    
+
                     // Consume mana
                     combatant.current_mana -= nova_def.mana_cost;
-                    
+
                     // Put ability on cooldown
                     combatant.ability_cooldowns.insert(frost_nova, nova_def.cooldown);
-                    
+
                     // Trigger global cooldown (1.5s standard WoW GCD)
                     combatant.global_cooldown = 1.5;
-                    
+
+                    // Log ability cast for timeline (AOE ability, no specific target)
+                    let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
+                    combat_log.log_ability_cast(
+                        caster_id,
+                        "Frost Nova".to_string(),
+                        None,
+                        format!("Team {} {} casts Frost Nova", combatant.team, combatant.class.name()),
+                    );
+
                     // Collect enemies in range for damage and root
                     let mut frost_nova_targets: Vec<(Entity, Vec3, u8, match_config::CharacterClass)> = Vec::new();
                     for (enemy_entity, &enemy_pos) in positions.iter() {
@@ -316,7 +325,19 @@ pub fn decide_abilities(
                     interrupted: false,
                     interrupted_display_time: 0.0,
                 });
-                
+
+                // Log ability cast for timeline
+                let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
+                let target_id = combatant_info.get(&target_entity).map(|(team, class, _, _)| {
+                    format!("Team {} {}", team, class.name())
+                });
+                combat_log.log_ability_cast(
+                    caster_id,
+                    def.name.to_string(),
+                    target_id,
+                    format!("Team {} {} begins casting {}", combatant.team, combatant.class.name(), def.name),
+                );
+
                 info!(
                     "Team {} {} starts casting {} on enemy",
                     combatant.team,
@@ -371,13 +392,25 @@ pub fn decide_abilities(
                 // Check if spell school is locked out
                 if !is_spell_school_locked(def.spell_school, auras) && ability.can_cast(&combatant, target_pos, my_pos) {
                     let def = ability.definition();
-                    
+
                     // Consume mana
                     combatant.current_mana -= def.mana_cost;
-                    
+
                     // Trigger global cooldown
                     combatant.global_cooldown = 1.5;
-                    
+
+                    // Log ability cast for timeline
+                    let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
+                    let target_id = combatant_info.get(&buff_target).map(|(team, class, _, _)| {
+                        format!("Team {} {}", team, class.name())
+                    });
+                    combat_log.log_ability_cast(
+                        caster_id,
+                        "Power Word: Fortitude".to_string(),
+                        target_id,
+                        format!("Team {} {} casts Power Word: Fortitude", combatant.team, combatant.class.name()),
+                    );
+
                     // Apply the buff aura immediately (instant cast)
                     if let Some((aura_type, duration, magnitude, break_threshold)) = def.applies_aura {
                         commands.spawn(AuraPending {
@@ -403,7 +436,7 @@ pub fn decide_abilities(
                         combatant.team,
                         combatant.class.name()
                     );
-                    
+
                     continue; // Done this frame
                 }
             }
@@ -446,11 +479,11 @@ pub fn decide_abilities(
                 // Check if spell school is locked out
                 if !is_spell_school_locked(def.spell_school, auras) && ability.can_cast(&combatant, target_pos, my_pos) {
                     let def = ability.definition();
-                    
+
                     // Trigger global cooldown (1.5s standard WoW GCD)
                     // GCD starts when cast BEGINS, not when it completes
                     combatant.global_cooldown = 1.5;
-                    
+
                     // Start casting
                     commands.entity(entity).insert(CastingState {
                         ability,
@@ -459,18 +492,30 @@ pub fn decide_abilities(
                         interrupted: false,
                         interrupted_display_time: 0.0,
                     });
-                    
+
+                    // Log ability cast for timeline
+                    let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
+                    let target_id = combatant_info.get(&heal_target).map(|(team, class, _, _)| {
+                        format!("Team {} {}", team, class.name())
+                    });
+                    combat_log.log_ability_cast(
+                        caster_id,
+                        def.name.to_string(),
+                        target_id,
+                        format!("Team {} {} begins casting {}", combatant.team, combatant.class.name(), def.name),
+                    );
+
                     info!(
                         "Team {} {} starts casting {} on ally",
                         combatant.team,
                         combatant.class.name(),
                         def.name
                     );
-                    
+
                     continue; // Done this frame
                 }
             }
-            
+
             // Priority 2: Cast Mind Blast on enemy if no healing needed
             let Some(target_entity) = combatant.target else {
                 continue;
@@ -488,14 +533,14 @@ pub fn decide_abilities(
             // Check if spell school is locked out
             if !on_cooldown && !is_spell_school_locked(def.spell_school, auras) && ability.can_cast(&combatant, target_pos, my_pos) {
                 let def = ability.definition();
-                
+
                 // Put on cooldown
                 combatant.ability_cooldowns.insert(ability, def.cooldown);
-                
+
                 // Trigger global cooldown (1.5s standard WoW GCD)
                 // GCD starts when cast BEGINS, not when it completes
                 combatant.global_cooldown = 1.5;
-                
+
                 // Start casting
                 commands.entity(entity).insert(CastingState {
                     ability,
@@ -504,7 +549,19 @@ pub fn decide_abilities(
                     interrupted: false,
                     interrupted_display_time: 0.0,
                 });
-                
+
+                // Log ability cast for timeline
+                let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
+                let target_id = combatant_info.get(&target_entity).map(|(team, class, _, _)| {
+                    format!("Team {} {}", team, class.name())
+                });
+                combat_log.log_ability_cast(
+                    caster_id,
+                    def.name.to_string(),
+                    target_id,
+                    format!("Team {} {} begins casting {}", combatant.team, combatant.class.name(), def.name),
+                );
+
                 info!(
                     "Team {} {} starts casting {} on enemy",
                     combatant.team,
@@ -513,7 +570,7 @@ pub fn decide_abilities(
                 );
             }
         }
-        
+
         // Warriors use Charge (gap closer), Mortal Strike, Rend, and Heroic Strike
         if combatant.class == match_config::CharacterClass::Warrior {
             // Check if we have an enemy target
@@ -553,20 +610,32 @@ pub fn decide_abilities(
                 false
             };
             
-            if !charge_on_cooldown 
+            if !charge_on_cooldown
                 && !is_rooted
-                && distance_to_target >= CHARGE_MIN_RANGE 
+                && distance_to_target >= CHARGE_MIN_RANGE
                 && distance_to_target <= charge_def.range {
-                
+
                 // Use Charge!
                 combatant.ability_cooldowns.insert(charge, charge_def.cooldown);
                 combatant.global_cooldown = 1.5;
-                
+
                 // Add ChargingState component to enable high-speed movement
                 commands.entity(entity).insert(ChargingState {
                     target: target_entity,
                 });
-                
+
+                // Log ability cast for timeline
+                let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
+                let target_id = combatant_info.get(&target_entity).map(|(team, class, _, _)| {
+                    format!("Team {} {}", team, class.name())
+                });
+                combat_log.log_ability_cast(
+                    caster_id,
+                    "Charge".to_string(),
+                    target_id,
+                    format!("Team {} {} uses Charge", combatant.team, combatant.class.name()),
+                );
+
                 info!(
                     "Team {} {} uses {} on enemy (distance: {:.1} units)",
                     combatant.team,
@@ -574,7 +643,7 @@ pub fn decide_abilities(
                     charge_def.name,
                     distance_to_target
                 );
-                
+
                 continue; // Done this frame
             }
             
@@ -593,10 +662,22 @@ pub fn decide_abilities(
                 if can_cast_rend {
                     // Consume rage
                     combatant.current_mana -= rend_def.mana_cost;
-                    
+
                     // Trigger global cooldown
                     combatant.global_cooldown = 1.5;
-                    
+
+                    // Log ability cast for timeline
+                    let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
+                    let target_id = combatant_info.get(&target_entity).map(|(team, class, _, _)| {
+                        format!("Team {} {}", team, class.name())
+                    });
+                    combat_log.log_ability_cast(
+                        caster_id,
+                        "Rend".to_string(),
+                        target_id,
+                        format!("Team {} {} uses Rend", combatant.team, combatant.class.name()),
+                    );
+
                     // Apply the DoT aura
                     if let Some((aura_type, duration, magnitude, break_threshold)) = rend_def.applies_aura {
                         commands.spawn(AuraPending {
@@ -650,16 +731,25 @@ pub fn decide_abilities(
                 } else {
                     continue;
                 };
-                
+
                 // Consume rage
                 combatant.current_mana -= ms_def.mana_cost;
-                
+
                 // Put on cooldown
                 combatant.ability_cooldowns.insert(mortal_strike, ms_def.cooldown);
-                
+
                 // Trigger global cooldown
                 combatant.global_cooldown = 1.5;
-                
+
+                // Log ability cast for timeline
+                let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
+                combat_log.log_ability_cast(
+                    caster_id,
+                    "Mortal Strike".to_string(),
+                    Some(format!("Team {} {}", target_team, target_class.name())),
+                    format!("Team {} {} uses Mortal Strike", combatant.team, combatant.class.name()),
+                );
+
                 // Calculate damage
                 let damage = combatant.calculate_ability_damage(&ms_def);
                 
@@ -752,22 +842,34 @@ pub fn decide_abilities(
             let ability = AbilityType::Ambush;
             if ability.can_cast(&combatant, target_pos, my_pos) {
                 let def = ability.definition();
-                
+
                 // Consume energy
                 combatant.current_mana -= def.mana_cost;
-                
+
                 // Break stealth immediately
                 combatant.stealthed = false;
-                
+
                 // Calculate damage (with stat scaling)
                 let damage = combatant.calculate_ability_damage(&def);
-                
+
                 // Queue the Ambush attack to be applied after the loop
                 instant_attacks.push((entity, target_entity, damage, combatant.team, combatant.class, ability));
-                
+
                 // Trigger global cooldown (1.5s standard WoW GCD)
                 combatant.global_cooldown = 1.5;
-                
+
+                // Log ability cast for timeline
+                let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
+                let target_id = combatant_info.get(&target_entity).map(|(team, class, _, _)| {
+                    format!("Team {} {}", team, class.name())
+                });
+                combat_log.log_ability_cast(
+                    caster_id,
+                    "Ambush".to_string(),
+                    target_id,
+                    format!("Team {} {} uses Ambush from stealth", combatant.team, combatant.class.name()),
+                );
+
                 info!(
                     "Team {} {} uses {} from stealth!",
                     combatant.team,
@@ -802,19 +904,31 @@ pub fn decide_abilities(
             
             if !ks_on_cooldown && kidney_shot.can_cast(&combatant, target_pos, my_pos) {
                 let def = kidney_shot.definition();
-                
+
                 // Spawn speech bubble
                 spawn_speech_bubble(&mut commands, entity, "Kidney Shot");
-                
+
                 // Consume energy
                 combatant.current_mana -= def.mana_cost;
-                
+
                 // Put on cooldown
                 combatant.ability_cooldowns.insert(kidney_shot, def.cooldown);
-                
+
                 // Trigger global cooldown
                 combatant.global_cooldown = 1.5;
-                
+
+                // Log ability cast for timeline
+                let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
+                let target_id = combatant_info.get(&target_entity).map(|(team, class, _, _)| {
+                    format!("Team {} {}", team, class.name())
+                });
+                combat_log.log_ability_cast(
+                    caster_id,
+                    "Kidney Shot".to_string(),
+                    target_id,
+                    format!("Team {} {} uses Kidney Shot", combatant.team, combatant.class.name()),
+                );
+
                 // Spawn pending aura (stun effect)
                 if let Some((aura_type, duration, magnitude, break_threshold)) = def.applies_aura {
                     commands.spawn(AuraPending {
@@ -871,19 +985,31 @@ pub fn decide_abilities(
             let ability = AbilityType::SinisterStrike;
             if ability.can_cast(&combatant, target_pos, my_pos) {
                 let def = ability.definition();
-                
+
                 // Consume energy
                 combatant.current_mana -= def.mana_cost;
-                
+
                 // Calculate damage (with stat scaling)
                 let damage = combatant.calculate_ability_damage(&def);
-                
+
                 // Queue the Sinister Strike attack to be applied after the loop
                 instant_attacks.push((entity, target_entity, damage, combatant.team, combatant.class, ability));
-                
+
                 // Trigger global cooldown (1.5s standard WoW GCD)
                 combatant.global_cooldown = 1.5;
-                
+
+                // Log ability cast for timeline
+                let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
+                let target_id = combatant_info.get(&target_entity).map(|(team, class, _, _)| {
+                    format!("Team {} {}", team, class.name())
+                });
+                combat_log.log_ability_cast(
+                    caster_id,
+                    "Sinister Strike".to_string(),
+                    target_id,
+                    format!("Team {} {} uses Sinister Strike", combatant.team, combatant.class.name()),
+                );
+
                 info!(
                     "Team {} {} uses {}!",
                     combatant.team,
@@ -929,6 +1055,18 @@ pub fn decide_abilities(
 
                         // Trigger global cooldown
                         combatant.global_cooldown = 1.5;
+
+                        // Log ability cast for timeline
+                        let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
+                        let target_id = combatant_info.get(&target_entity).map(|(team, class, _, _)| {
+                            format!("Team {} {}", team, class.name())
+                        });
+                        combat_log.log_ability_cast(
+                            caster_id,
+                            "Corruption".to_string(),
+                            target_id,
+                            format!("Team {} {} casts Corruption", combatant.team, combatant.class.name()),
+                        );
 
                         // Apply the DoT aura
                         if let Some((aura_type, duration, magnitude, break_threshold)) = corruption_def.applies_aura {
@@ -999,7 +1137,17 @@ pub fn decide_abilities(
                             interrupted_display_time: 0.0,
                         });
 
-                        // Note: Speech bubble spawned in process_casting when Fear lands
+                        // Log ability cast for timeline
+                        let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
+                        let target_id = combatant_info.get(&target_entity).map(|(team, class, _, _)| {
+                            format!("Team {} {}", team, class.name())
+                        });
+                        combat_log.log_ability_cast(
+                            caster_id,
+                            "Fear".to_string(),
+                            target_id,
+                            format!("Team {} {} begins casting Fear", combatant.team, combatant.class.name()),
+                        );
 
                         info!(
                             "Team {} {} starts casting Fear on enemy",
@@ -1033,6 +1181,18 @@ pub fn decide_abilities(
                     interrupted: false,
                     interrupted_display_time: 0.0,
                 });
+
+                // Log ability cast for timeline
+                let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
+                let target_id = combatant_info.get(&target_entity).map(|(team, class, _, _)| {
+                    format!("Team {} {}", team, class.name())
+                });
+                combat_log.log_ability_cast(
+                    caster_id,
+                    "Shadowbolt".to_string(),
+                    target_id,
+                    format!("Team {} {} begins casting Shadowbolt", combatant.team, combatant.class.name()),
+                );
 
                 info!(
                     "Team {} {} starts casting {} on enemy",
@@ -1303,15 +1463,24 @@ pub fn check_interrupts(
         
         // Spawn speech bubble for interrupt
         spawn_speech_bubble(&mut commands, entity, ability_def.name);
-        
+
         // Consume resources
         combatant.current_mana -= ability_def.mana_cost;
-        
+
         // Put on cooldown
         combatant.ability_cooldowns.insert(interrupt_ability, ability_def.cooldown);
-        
+
         // Interrupts do NOT trigger GCD in WoW!
-        
+
+        // Log ability cast for timeline
+        let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
+        combat_log.log_ability_cast(
+            caster_id,
+            ability_def.name.to_string(),
+            None, // Interrupts don't have a "target" in the same way
+            format!("Team {} {} uses {}", combatant.team, combatant.class.name(), ability_def.name),
+        );
+
         // Queue the interrupt for processing
         commands.spawn(InterruptPending {
             caster: entity,
@@ -1319,7 +1488,7 @@ pub fn check_interrupts(
             ability: interrupt_ability,
             lockout_duration: ability_def.lockout_duration,
         });
-        
+
         // Log to combat log
         combat_log.log(
             CombatLogEventType::AbilityUsed,
