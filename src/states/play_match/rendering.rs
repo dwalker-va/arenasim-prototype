@@ -665,15 +665,14 @@ pub fn render_health_bars(
 // Timeline Constants
 // ==============================================================================
 
-const TIMELINE_PIXELS_PER_SECOND: f32 = 15.0;
-const TIMELINE_TIME_COLUMN_WIDTH: f32 = 40.0;
-const TIMELINE_COMBATANT_COLUMN_WIDTH: f32 = 55.0;
-const TIMELINE_ICON_SIZE: f32 = 20.0;
+const TIMELINE_PIXELS_PER_SECOND: f32 = 30.0;
+const TIMELINE_TIME_COLUMN_WIDTH: f32 = 35.0;
+const TIMELINE_ICON_SIZE: f32 = 28.0;
 const TIMELINE_TIME_TICK_INTERVAL: f32 = 5.0;
 /// Top padding so icons at t=0 aren't cut off
-const TIMELINE_TOP_PADDING: f32 = 12.0;
+const TIMELINE_TOP_PADDING: f32 = 18.0;
 /// Minimum vertical spacing between icons to avoid overlap
-const TIMELINE_MIN_ICON_SPACING: f32 = 22.0;
+const TIMELINE_MIN_ICON_SPACING: f32 = 32.0;
 
 /// Render the combat panel with tabbed view (Combat Log or Timeline).
 ///
@@ -793,17 +792,13 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, spell_icon
         team_a.cmp(&team_b).then(a.cmp(b))
     });
 
-    // Filter to combatants that have ability casts
-    let combatants_with_casts: Vec<&String> = combatants
-        .iter()
-        .filter(|c| !combat_log.ability_casts_for(c).is_empty())
-        .collect();
-
-    if combatants_with_casts.is_empty() {
+    // Show all combatants from the start (not just those with casts)
+    // This prevents layout shifts as abilities are used
+    if combatants.is_empty() {
         ui.vertical_centered(|ui| {
             ui.add_space(20.0);
             ui.label(
-                egui::RichText::new("No abilities cast yet...")
+                egui::RichText::new("Waiting for match to start...")
                     .size(14.0)
                     .color(egui::Color32::from_rgb(120, 120, 120))
                     .italics()
@@ -812,19 +807,30 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, spell_icon
         return;
     }
 
-    let num_combatants = combatants_with_casts.len();
-    let total_width = TIMELINE_TIME_COLUMN_WIDTH + (num_combatants as f32 * TIMELINE_COMBATANT_COLUMN_WIDTH);
+    let num_combatants = combatants.len();
     let current_time = combat_log.match_time;
     // Add top padding so icons at t=0 are visible
     let timeline_height = TIMELINE_TOP_PADDING + (current_time * TIMELINE_PIXELS_PER_SECOND).max(200.0);
 
+    // Calculate dynamic column width to fill available space
+    let available_width = ui.available_width() - 15.0; // Reserve space for scrollbar
+    let combatant_column_width = if num_combatants > 0 {
+        ((available_width - TIMELINE_TIME_COLUMN_WIDTH) / num_combatants as f32).max(60.0)
+    } else {
+        60.0
+    };
+    let total_width = TIMELINE_TIME_COLUMN_WIDTH + (num_combatants as f32 * combatant_column_width);
+
     // Fixed header row with combatant names
     ui.horizontal(|ui| {
+        // Remove default spacing so headers align with painted columns
+        ui.spacing_mut().item_spacing.x = 0.0;
+
         // Time column header (empty)
-        ui.allocate_space(egui::vec2(TIMELINE_TIME_COLUMN_WIDTH, 20.0));
+        ui.allocate_space(egui::vec2(TIMELINE_TIME_COLUMN_WIDTH, 24.0));
 
         // Combatant column headers
-        for combatant_id in &combatants_with_casts {
+        for combatant_id in &combatants {
             let short_name = shorten_combatant_name(combatant_id);
             let team_color = if combatant_id.starts_with("Team 1") {
                 egui::Color32::from_rgb(100, 150, 255) // Blue
@@ -833,13 +839,14 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, spell_icon
             };
 
             ui.allocate_ui_with_layout(
-                egui::vec2(TIMELINE_COMBATANT_COLUMN_WIDTH, 20.0),
+                egui::vec2(combatant_column_width, 24.0),
                 egui::Layout::centered_and_justified(egui::Direction::TopDown),
                 |ui| {
                     ui.label(
                         egui::RichText::new(short_name)
-                            .size(10.0)
+                            .size(12.0)
                             .color(team_color)
+                            .strong()
                     );
                 }
             );
@@ -850,10 +857,12 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, spell_icon
     ui.separator();
     ui.add_space(2.0);
 
-    // Scrollable timeline content
+    // Scrollable timeline content with always-visible scrollbar
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .stick_to_bottom(true)
+        .animated(false) // Disable scroll animation
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
         .show(ui, |ui| {
             // Allocate the full timeline space
             let (rect, response) = ui.allocate_exact_size(
@@ -865,7 +874,7 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, spell_icon
 
             // Draw vertical column separator lines
             for i in 0..=num_combatants {
-                let x = rect.min.x + TIMELINE_TIME_COLUMN_WIDTH + (i as f32 * TIMELINE_COMBATANT_COLUMN_WIDTH);
+                let x = rect.min.x + TIMELINE_TIME_COLUMN_WIDTH + (i as f32 * combatant_column_width);
                 painter.line_segment(
                     [egui::pos2(x, rect.min.y), egui::pos2(x, rect.max.y)],
                     egui::Stroke::new(1.0, egui::Color32::from_white_alpha(30))
@@ -898,11 +907,11 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, spell_icon
             // Draw ability icons for each combatant
             let mut hovered_ability: Option<(String, f32, bool)> = None; // (ability_name, timestamp, interrupted)
 
-            for (col_idx, combatant_id) in combatants_with_casts.iter().enumerate() {
+            for (col_idx, combatant_id) in combatants.iter().enumerate() {
                 let casts = combat_log.ability_casts_for(combatant_id);
                 let col_center_x = rect.min.x + TIMELINE_TIME_COLUMN_WIDTH
-                    + (col_idx as f32 * TIMELINE_COMBATANT_COLUMN_WIDTH)
-                    + (TIMELINE_COMBATANT_COLUMN_WIDTH / 2.0);
+                    + (col_idx as f32 * combatant_column_width)
+                    + (combatant_column_width / 2.0);
 
                 // First pass: calculate base y positions and detect overlaps
                 // We'll push overlapping icons down to avoid collision
@@ -987,11 +996,14 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, spell_icon
             // Show tooltip for hovered ability using foreground layer (so it can overflow panel bounds)
             if let Some((ability_name, timestamp, interrupted)) = hovered_ability {
                 if let Some(hover_pos) = ui.input(|i| i.pointer.hover_pos()) {
-                    let tooltip_text = if interrupted {
-                        format!("{} at {:.1}s (Interrupted)", ability_name, timestamp)
+                    // Format: "{time}s {ability}" with time in yellow
+                    let time_text = format!("{:.1}s", timestamp);
+                    let ability_text = if interrupted {
+                        format!(" {} (Interrupted)", ability_name)
                     } else {
-                        format!("{} at {:.1}s", ability_name, timestamp)
+                        format!(" {}", ability_name)
                     };
+                    let full_text = format!("{}{}", time_text, ability_text);
                     let tooltip_pos = egui::pos2(hover_pos.x + 15.0, hover_pos.y - 10.0);
 
                     // Use foreground layer painter so tooltip can overflow panel bounds
@@ -999,23 +1011,38 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, spell_icon
                         egui::LayerId::new(egui::Order::Foreground, egui::Id::new("timeline_tooltip"))
                     );
 
-                    // Draw tooltip background
-                    let text_galley = foreground_painter.layout_no_wrap(
-                        tooltip_text.clone(),
-                        egui::FontId::proportional(12.0),
+                    let font = egui::FontId::proportional(12.0);
+                    let time_color = egui::Color32::from_rgb(255, 215, 0); // Gold
+                    let ability_color = egui::Color32::WHITE;
+
+                    // Calculate total size for background
+                    let full_galley = foreground_painter.layout_no_wrap(
+                        full_text,
+                        font.clone(),
                         egui::Color32::WHITE
                     );
                     let bg_rect = egui::Rect::from_min_size(
                         tooltip_pos,
-                        text_galley.size() + egui::vec2(8.0, 4.0)
+                        full_galley.size() + egui::vec2(8.0, 4.0)
                     );
                     foreground_painter.rect_filled(bg_rect, 3.0, egui::Color32::from_black_alpha(220));
+
+                    // Draw time in yellow
+                    let time_galley = foreground_painter.layout_no_wrap(
+                        time_text,
+                        font.clone(),
+                        time_color
+                    );
+                    let time_width = time_galley.size().x;
+                    foreground_painter.galley(tooltip_pos + egui::vec2(4.0, 2.0), time_galley, time_color);
+
+                    // Draw ability name in white (after time)
                     foreground_painter.text(
-                        tooltip_pos + egui::vec2(4.0, 2.0),
+                        tooltip_pos + egui::vec2(4.0 + time_width, 2.0),
                         egui::Align2::LEFT_TOP,
-                        tooltip_text,
-                        egui::FontId::proportional(12.0),
-                        egui::Color32::WHITE
+                        ability_text,
+                        font,
+                        ability_color
                     );
                 }
             }

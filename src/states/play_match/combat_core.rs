@@ -428,10 +428,8 @@ pub fn combat_auto_attack(
     }
     let dt = time.delta_secs();
     
-    // Update match time in combat log (countdown doesn't count against match time)
-    if countdown.gates_opened {
-        combat_log.match_time += dt;
-    }
+    // Update match time in combat log (starts from beginning, including prep phase)
+    combat_log.match_time += dt;
     
     // Don't allow auto-attacks until gates open
     if !countdown.gates_opened {
