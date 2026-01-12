@@ -64,11 +64,16 @@ pub fn update_auras(
 ///
 /// This system runs after casting completes and applies any queued auras
 /// to their targets. It handles both new auras and stacking existing auras.
+///
+/// CC immunity: Combatants who are charging are immune to crowd control effects.
+/// When a CC would be applied to a charging target, "Immune" floating text is shown.
 pub fn apply_pending_auras(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
     pending_auras: Query<(Entity, &AuraPending)>,
-    mut combatants: Query<(&mut Combatant, Option<&mut ActiveAuras>)>,
+    mut combatants: Query<(&mut Combatant, Option<&mut ActiveAuras>, &Transform)>,
+    charging_query: Query<&ChargingState>,
+    mut fct_states: Query<&mut FloatingTextState>,
 ) {
     use std::collections::{HashSet, HashMap};
 
@@ -82,10 +87,64 @@ pub fn apply_pending_auras(
 
     for (pending_entity, pending) in pending_auras.iter() {
         // Get target combatant
-        let Ok((mut target_combatant, active_auras)) = combatants.get_mut(pending.target) else {
+        let Ok((mut target_combatant, active_auras, target_transform)) = combatants.get_mut(pending.target) else {
             commands.entity(pending_entity).despawn();
             continue;
         };
+
+        // Check for CC immunity: Charging combatants are immune to crowd control
+        let is_cc_aura = matches!(
+            pending.aura.effect_type,
+            AuraType::Fear | AuraType::Stun | AuraType::Root
+        );
+        let is_charging = charging_query.get(pending.target).is_ok();
+
+        if is_cc_aura && is_charging {
+            // Target is immune - show floating text and log
+            let text_position = target_transform.translation + Vec3::new(0.0, 2.5, 0.0);
+            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(pending.target) {
+                get_next_fct_offset(&mut fct_state)
+            } else {
+                (0.0, 0.0)
+            };
+
+            commands.spawn((
+                FloatingCombatText {
+                    world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
+                    text: "Immune".to_string(),
+                    color: egui::Color32::YELLOW,
+                    lifetime: 1.5,
+                    vertical_offset: offset_y,
+                },
+                PlayMatchEntity,
+            ));
+
+            // Log to combat log
+            let cc_name = match pending.aura.effect_type {
+                AuraType::Fear => "Fear",
+                AuraType::Stun => "Stun",
+                AuraType::Root => "Root",
+                _ => "CC",
+            };
+            combat_log.log(
+                CombatLogEventType::MatchEvent,
+                format!(
+                    "Team {} {}'s {} is immune (charging)",
+                    target_combatant.team,
+                    target_combatant.class.name(),
+                    cc_name
+                )
+            );
+            info!(
+                "Team {} {} is immune to {} (charging)",
+                target_combatant.team,
+                target_combatant.class.name(),
+                cc_name
+            );
+
+            commands.entity(pending_entity).despawn();
+            continue;
+        }
 
         // Check if target already has this buff type (prevent stacking for buff auras)
         let is_buff_aura = matches!(
