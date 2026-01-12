@@ -36,8 +36,8 @@ impl SimulationSpeed {
 /// Which panel view is currently active in the combat log area
 #[derive(Resource, Default, Clone, Copy, PartialEq, Eq)]
 pub enum CombatPanelView {
-    #[default]
     CombatLog,
+    #[default]
     Timeline,
 }
 
