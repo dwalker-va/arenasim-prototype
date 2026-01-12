@@ -8,9 +8,23 @@
 //! - Speech bubbles for ability callouts
 
 use bevy::prelude::*;
+use bevy::time::Real;
 use bevy_egui::{egui, EguiContexts};
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use super::components::*;
+
+// ==============================================================================
+// Low HP Highlighting Constants
+// ==============================================================================
+
+/// HP percentage threshold below which combatants get highlighted
+const LOW_HP_THRESHOLD: f32 = 0.35;
+/// Base glow intensity for low HP highlight (0.0-1.0)
+const LOW_HP_GLOW_BASE: f32 = 0.3;
+/// Pulse amplitude for low HP highlight
+const LOW_HP_GLOW_PULSE: f32 = 0.7;
+/// Pulse speed (cycles per second)
+const LOW_HP_PULSE_SPEED: f32 = 2.0;
 
 // ==============================================================================
 // Spell Icon Loading
@@ -291,6 +305,7 @@ pub fn render_health_bars(
     mut contexts: EguiContexts,
     combatants: Query<(&Combatant, &Transform, Option<&CastingState>, Option<&ActiveAuras>)>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
+    time: Res<Time<Real>>,
 ) {
     // Use try_ctx_mut to gracefully handle window close
     let Some(ctx) = contexts.try_ctx_mut() else { return; };
@@ -298,6 +313,10 @@ pub fn render_health_bars(
     let Ok((camera, camera_transform)) = camera_query.get_single() else {
         return;
     };
+
+    // Calculate pulse intensity for low HP highlighting (uses real time so it works when paused)
+    let pulse_phase = time.elapsed_secs() * LOW_HP_PULSE_SPEED * std::f32::consts::TAU;
+    let pulse_intensity = LOW_HP_GLOW_BASE + LOW_HP_GLOW_PULSE * (0.5 + 0.5 * pulse_phase.sin());
 
     egui::Area::new(egui::Id::new("health_bars"))
         .fixed_pos(egui::pos2(0.0, 0.0))
@@ -509,13 +528,37 @@ pub fn render_health_bars(
                         health_color,
                     );
 
-                    // Health bar border
+                    // Health bar border (pulsing red if low HP)
+                    let is_low_hp = health_percent < LOW_HP_THRESHOLD;
+                    let border_color = if is_low_hp {
+                        // Pulsing red border for low HP
+                        let red_intensity = (200.0 + 55.0 * pulse_intensity) as u8;
+                        egui::Color32::from_rgb(red_intensity, 50, 50)
+                    } else {
+                        egui::Color32::from_rgb(200, 200, 200)
+                    };
+                    let border_width = if is_low_hp { 2.0 } else { 1.0 };
+
                     ui.painter().rect_stroke(
                         egui::Rect::from_min_size(bar_pos, egui::vec2(bar_width, bar_height)),
                         2.0,
-                        egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 200, 200)),
+                        egui::Stroke::new(border_width, border_color),
                     );
-                    
+
+                    // Low HP outer glow effect (pulsing red halo)
+                    if is_low_hp {
+                        let glow_alpha = (80.0 * pulse_intensity) as u8;
+                        let glow_expand = 3.0 + 2.0 * pulse_intensity;
+                        ui.painter().rect_stroke(
+                            egui::Rect::from_min_size(
+                                bar_pos - egui::vec2(glow_expand, glow_expand),
+                                egui::vec2(bar_width + glow_expand * 2.0, bar_height + glow_expand * 2.0),
+                            ),
+                            4.0,
+                            egui::Stroke::new(2.0, egui::Color32::from_rgba_unmultiplied(255, 50, 50, glow_alpha)),
+                        );
+                    }
+
                     // Resource bar (mana/energy/rage)
                     let mut next_bar_y_offset = bar_height + bar_spacing;
                     if combatant.max_mana > 0.0 {
