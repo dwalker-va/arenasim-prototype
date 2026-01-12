@@ -20,6 +20,8 @@ pub enum SpellSchool {
     Holy,
     /// Shadow magic (Mind Blast)
     Shadow,
+    /// Arcane magic (Arcane Intellect, Polymorph)
+    Arcane,
     /// No spell school (can't be locked out)
     None,
 }
@@ -56,7 +58,9 @@ pub enum AbilityType {
     Corruption, // Shadow DoT
     Shadowbolt, // Shadow projectile
     Fear,       // Shadow CC - target flees, breaks on damage
-    // Future: Fireball, Backstab, Drain Life, etc.
+    // Buff abilities
+    ArcaneIntellect, // Mage buff - increases max mana
+    BattleShout,     // Warrior buff - increases attack power
 }
 
 /// Ability definition with all parameters.
@@ -432,6 +436,50 @@ impl AbilityType {
                 applies_aura: Some((AuraType::Fear, 8.0, 0.0, 30.0)),
                 projectile_speed: None, // Instant application on cast complete
                 spell_school: SpellSchool::Shadow,
+                is_interrupt: false,
+                lockout_duration: 0.0,
+            },
+
+            // ==================== BUFF ABILITIES ====================
+
+            AbilityType::ArcaneIntellect => AbilityDefinition {
+                name: "Arcane Intellect",
+                cast_time: 0.0, // Instant cast
+                range: 40.0, // Same range as other buffs
+                mana_cost: 40.0, // Moderate mana cost
+                cooldown: 0.0, // No cooldown - can buff entire team quickly
+                damage_base_min: 0.0,
+                damage_base_max: 0.0,
+                damage_coefficient: 0.0,
+                damage_scales_with: ScalingStat::None,
+                healing_base_min: 0.0,
+                healing_base_max: 0.0,
+                healing_coefficient: 0.0,
+                // Increase max mana by 40 for 600 seconds (10 minutes, effectively permanent)
+                applies_aura: Some((AuraType::MaxManaIncrease, 600.0, 40.0, 0.0)),
+                projectile_speed: None, // Instant buff
+                spell_school: SpellSchool::Arcane,
+                is_interrupt: false,
+                lockout_duration: 0.0,
+            },
+
+            AbilityType::BattleShout => AbilityDefinition {
+                name: "Battle Shout",
+                cast_time: 0.0, // Instant cast
+                range: 0.0, // Self-cast AOE, affects nearby allies
+                mana_cost: 0.0, // Free in pre-combat (Warriors start with 0 rage)
+                cooldown: 0.0, // No cooldown
+                damage_base_min: 0.0,
+                damage_base_max: 0.0,
+                damage_coefficient: 0.0,
+                damage_scales_with: ScalingStat::None,
+                healing_base_min: 0.0,
+                healing_base_max: 0.0,
+                healing_coefficient: 0.0,
+                // Increase attack power by 20 for 120 seconds (2 minutes)
+                applies_aura: Some((AuraType::AttackPowerIncrease, 120.0, 20.0, 0.0)),
+                projectile_speed: None, // Instant buff
+                spell_school: SpellSchool::None, // Physical/shout, can't be locked out
                 is_interrupt: false,
                 lockout_duration: 0.0,
             },

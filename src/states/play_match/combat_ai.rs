@@ -178,7 +178,104 @@ pub fn decide_abilities(
             if combatant.global_cooldown > 0.0 {
                 continue; // Can't use abilities during GCD
             }
-            
+
+            // Priority 0: Cast Arcane Intellect on allies with mana who don't have it
+            // (Pre-combat buffing phase)
+            let mut unbuffed_mana_ally: Option<(Entity, Vec3)> = None;
+
+            for (ally_entity, &(ally_team, ally_class, ally_hp, _ally_max_hp)) in combatant_info.iter() {
+                // Must be same team, alive, and use mana
+                if ally_team != combatant.team || ally_hp <= 0.0 {
+                    continue;
+                }
+
+                // Only buff mana users (Mage, Priest, Warlock)
+                let uses_mana = matches!(
+                    ally_class,
+                    match_config::CharacterClass::Mage
+                        | match_config::CharacterClass::Priest
+                        | match_config::CharacterClass::Warlock
+                );
+                if !uses_mana {
+                    continue;
+                }
+
+                // Check if ally already has MaxManaIncrease buff
+                let has_arcane_intellect = if let Some(auras) = active_auras_map.get(ally_entity) {
+                    auras.iter().any(|a| a.effect_type == AuraType::MaxManaIncrease)
+                } else {
+                    false
+                };
+
+                if has_arcane_intellect {
+                    continue; // Already buffed
+                }
+
+                // Get position
+                let Some(&ally_pos) = positions.get(ally_entity) else {
+                    continue;
+                };
+
+                // Found an unbuffed mana ally
+                unbuffed_mana_ally = Some((*ally_entity, ally_pos));
+                break; // Buff one ally at a time
+            }
+
+            // Cast Arcane Intellect on unbuffed mana ally
+            if let Some((buff_target, target_pos)) = unbuffed_mana_ally {
+                let ability = AbilityType::ArcaneIntellect;
+                let def = ability.definition();
+
+                // Check if spell school is locked out
+                if !is_spell_school_locked(def.spell_school, auras) && ability.can_cast(&combatant, target_pos, my_pos) {
+                    // Consume mana
+                    combatant.current_mana -= def.mana_cost;
+
+                    // Trigger global cooldown
+                    combatant.global_cooldown = 1.5;
+
+                    // Log ability cast for timeline
+                    let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
+                    let target_id = combatant_info.get(&buff_target).map(|(team, class, _, _)| {
+                        format!("Team {} {}", team, class.name())
+                    });
+                    combat_log.log_ability_cast(
+                        caster_id,
+                        "Arcane Intellect".to_string(),
+                        target_id,
+                        format!("Team {} {} casts Arcane Intellect", combatant.team, combatant.class.name()),
+                    );
+
+                    // Apply the buff aura immediately (instant cast)
+                    if let Some((aura_type, duration, magnitude, break_threshold)) = def.applies_aura {
+                        commands.spawn(AuraPending {
+                            target: buff_target,
+                            aura: Aura {
+                                effect_type: aura_type,
+                                duration,
+                                magnitude,
+                                break_on_damage_threshold: break_threshold,
+                                accumulated_damage: 0.0,
+                                tick_interval: 0.0,
+                                time_until_next_tick: 0.0,
+                                caster: Some(entity),
+                                ability_name: def.name.to_string(),
+                                fear_direction: (0.0, 0.0),
+                                fear_direction_timer: 0.0,
+                            },
+                        });
+                    }
+
+                    info!(
+                        "Team {} {} casts Arcane Intellect on ally",
+                        combatant.team,
+                        combatant.class.name()
+                    );
+
+                    continue; // Done this frame
+                }
+            }
+
             // First priority: Use Frost Nova if enemies are in melee range (defensive ability)
             let frost_nova = AbilityType::FrostNova;
             let nova_def = frost_nova.definition();
@@ -573,24 +670,116 @@ pub fn decide_abilities(
 
         // Warriors use Charge (gap closer), Mortal Strike, Rend, and Heroic Strike
         if combatant.class == match_config::CharacterClass::Warrior {
-            // Check if we have an enemy target
-            let Some(target_entity) = combatant.target else {
-                continue;
-            };
-            
-            let Some(&target_pos) = positions.get(&target_entity) else {
-                continue;
-            };
-            
-            let distance_to_target = my_pos.distance(target_pos);
-            
-            // NOTE: Interrupt checking (Pummel) is now handled in the dedicated check_interrupts system
-            // which runs after apply_deferred so it can see CastingState components from this frame
-            
             // Check if global cooldown is active for other abilities
             if combatant.global_cooldown > 0.0 {
                 continue; // Can't use other abilities during GCD
             }
+
+            // Priority 0: Cast Battle Shout on nearby allies who don't have it
+            // (Pre-combat buffing phase - self-cast AOE)
+            const BATTLE_SHOUT_RANGE: f32 = 30.0; // Affects all allies within 30 units
+
+            // Check if any nearby ally (including self) needs the buff
+            let mut needs_battle_shout = false;
+            let mut allies_to_buff: Vec<Entity> = Vec::new();
+
+            for (ally_entity, &(ally_team, _ally_class, ally_hp, _ally_max_hp)) in combatant_info.iter() {
+                // Must be same team and alive
+                if ally_team != combatant.team || ally_hp <= 0.0 {
+                    continue;
+                }
+
+                // Get ally position to check range
+                let Some(&ally_pos) = positions.get(ally_entity) else {
+                    continue;
+                };
+
+                let distance_to_ally = my_pos.distance(ally_pos);
+                if distance_to_ally > BATTLE_SHOUT_RANGE {
+                    continue; // Too far away
+                }
+
+                // Check if ally already has AttackPowerIncrease buff
+                let has_battle_shout = if let Some(auras) = active_auras_map.get(ally_entity) {
+                    auras.iter().any(|a| a.effect_type == AuraType::AttackPowerIncrease)
+                } else {
+                    false
+                };
+
+                if !has_battle_shout {
+                    needs_battle_shout = true;
+                    allies_to_buff.push(*ally_entity);
+                }
+            }
+
+            // Cast Battle Shout if any nearby ally needs it
+            if needs_battle_shout {
+                let ability = AbilityType::BattleShout;
+                let def = ability.definition();
+
+                // Battle Shout costs rage, check if we have enough (or it's free pre-combat)
+                // Note: Warriors start with 0 rage, so we'll make it free (cost 0) or check resource
+                if combatant.current_mana >= def.mana_cost || def.mana_cost == 0.0 {
+                    // Consume resource (rage)
+                    combatant.current_mana -= def.mana_cost;
+
+                    // Trigger global cooldown
+                    combatant.global_cooldown = 1.5;
+
+                    // Log ability cast for timeline (self-cast AOE)
+                    let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
+                    combat_log.log_ability_cast(
+                        caster_id,
+                        "Battle Shout".to_string(),
+                        None, // AOE, no specific target
+                        format!("Team {} {} uses Battle Shout", combatant.team, combatant.class.name()),
+                    );
+
+                    // Apply the buff aura to all nearby allies
+                    if let Some((aura_type, duration, magnitude, break_threshold)) = def.applies_aura {
+                        for ally_entity in allies_to_buff {
+                            commands.spawn(AuraPending {
+                                target: ally_entity,
+                                aura: Aura {
+                                    effect_type: aura_type,
+                                    duration,
+                                    magnitude,
+                                    break_on_damage_threshold: break_threshold,
+                                    accumulated_damage: 0.0,
+                                    tick_interval: 0.0,
+                                    time_until_next_tick: 0.0,
+                                    caster: Some(entity),
+                                    ability_name: def.name.to_string(),
+                                    fear_direction: (0.0, 0.0),
+                                    fear_direction_timer: 0.0,
+                                },
+                            });
+                        }
+                    }
+
+                    info!(
+                        "Team {} {} uses Battle Shout",
+                        combatant.team,
+                        combatant.class.name()
+                    );
+
+                    continue; // Done this frame
+                }
+            }
+
+            // Check if we have an enemy target for combat abilities
+            let Some(target_entity) = combatant.target else {
+                continue;
+            };
+
+            let Some(&target_pos) = positions.get(&target_entity) else {
+                continue;
+            };
+
+            let distance_to_target = my_pos.distance(target_pos);
+
+            // NOTE: Interrupt checking (Pummel) is now handled in the dedicated check_interrupts system
+            // which runs after apply_deferred so it can see CastingState components from this frame
             
             // Priority 1: Use Charge to close distance if target is at medium range
             // Charge requirements:

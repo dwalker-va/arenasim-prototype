@@ -231,7 +231,10 @@ pub enum AuraType {
     HealingReduction,
     /// Fear - target runs around randomly, unable to act. Breaks on damage.
     Fear,
-    // Future: Silence, Healing-over-time, Attack Power buffs, etc.
+    /// Increases maximum mana by a flat amount (magnitude = mana bonus)
+    MaxManaIncrease,
+    /// Increases attack power by a flat amount (magnitude = AP bonus)
+    AttackPowerIncrease,
 }
 
 // ============================================================================

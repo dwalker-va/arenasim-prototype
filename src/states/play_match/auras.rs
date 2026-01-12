@@ -61,7 +61,7 @@ pub fn update_auras(
 }
 
 /// Apply pending auras to targets.
-/// 
+///
 /// This system runs after casting completes and applies any queued auras
 /// to their targets. It handles both new auras and stacking existing auras.
 pub fn apply_pending_auras(
@@ -70,13 +70,67 @@ pub fn apply_pending_auras(
     pending_auras: Query<(Entity, &AuraPending)>,
     mut combatants: Query<(&mut Combatant, Option<&mut ActiveAuras>)>,
 ) {
+    use std::collections::{HashSet, HashMap};
+
+    // Track which buff auras we've applied this frame to prevent stacking
+    // Key: (target_entity, aura_type as u8)
+    let mut applied_buffs: HashSet<(Entity, u8)> = HashSet::new();
+
+    // Track auras to add for entities that don't have ActiveAuras component yet
+    // This prevents multiple insert() calls from overwriting each other
+    let mut new_auras_map: HashMap<Entity, Vec<Aura>> = HashMap::new();
+
     for (pending_entity, pending) in pending_auras.iter() {
         // Get target combatant
         let Ok((mut target_combatant, active_auras)) = combatants.get_mut(pending.target) else {
             commands.entity(pending_entity).despawn();
             continue;
         };
-        
+
+        // Check if target already has this buff type (prevent stacking for buff auras)
+        let is_buff_aura = matches!(
+            pending.aura.effect_type,
+            AuraType::MaxHealthIncrease | AuraType::MaxManaIncrease | AuraType::AttackPowerIncrease
+        );
+        if is_buff_aura {
+            // Convert aura type to a simple u8 for the HashSet key
+            let aura_type_key = match pending.aura.effect_type {
+                AuraType::MaxHealthIncrease => 0,
+                AuraType::MaxManaIncrease => 1,
+                AuraType::AttackPowerIncrease => 2,
+                _ => 255, // Won't happen for buff auras
+            };
+
+            // Check if we already applied this buff type to this target THIS FRAME
+            if applied_buffs.contains(&(pending.target, aura_type_key)) {
+                commands.entity(pending_entity).despawn();
+                continue;
+            }
+
+            // Check if target already has this buff type from a PREVIOUS frame
+            let already_has_buff_existing = if let Some(ref auras) = active_auras {
+                auras.auras.iter().any(|a| a.effect_type == pending.aura.effect_type)
+            } else {
+                false
+            };
+
+            // Also check auras we're accumulating this frame for entities without ActiveAuras
+            let already_has_buff_new = if let Some(new_auras) = new_auras_map.get(&pending.target) {
+                new_auras.iter().any(|a| a.effect_type == pending.aura.effect_type)
+            } else {
+                false
+            };
+
+            if already_has_buff_existing || already_has_buff_new {
+                // Skip - target already has this buff
+                commands.entity(pending_entity).despawn();
+                continue;
+            }
+
+            // Mark this buff as applied for this frame
+            applied_buffs.insert((pending.target, aura_type_key));
+        }
+
         // Handle MaxHealthIncrease aura - apply HP buff immediately
         if pending.aura.effect_type == AuraType::MaxHealthIncrease {
             let hp_bonus = pending.aura.magnitude;
@@ -103,19 +157,79 @@ pub fn apply_pending_auras(
                 )
             );
         }
-        // Try to get existing auras on target
+
+        // Handle MaxManaIncrease aura (Arcane Intellect) - apply mana buff immediately
+        if pending.aura.effect_type == AuraType::MaxManaIncrease {
+            let mana_bonus = pending.aura.magnitude;
+            target_combatant.max_mana += mana_bonus;
+            target_combatant.current_mana += mana_bonus; // Give them the extra mana
+
+            info!(
+                "Team {} {} receives Arcane Intellect (+{:.0} max mana, now {:.0}/{:.0})",
+                target_combatant.team,
+                target_combatant.class.name(),
+                mana_bonus,
+                target_combatant.current_mana,
+                target_combatant.max_mana
+            );
+
+            // Log to combat log
+            combat_log.log(
+                CombatLogEventType::Buff,
+                format!(
+                    "Team {} {} gains Arcane Intellect (+{:.0} max mana)",
+                    target_combatant.team,
+                    target_combatant.class.name(),
+                    mana_bonus
+                )
+            );
+        }
+
+        // Handle AttackPowerIncrease aura (Battle Shout) - apply AP buff immediately
+        if pending.aura.effect_type == AuraType::AttackPowerIncrease {
+            let ap_bonus = pending.aura.magnitude;
+            target_combatant.attack_power += ap_bonus;
+
+            info!(
+                "Team {} {} receives Battle Shout (+{:.0} attack power, now {:.0})",
+                target_combatant.team,
+                target_combatant.class.name(),
+                ap_bonus,
+                target_combatant.attack_power
+            );
+
+            // Log to combat log
+            combat_log.log(
+                CombatLogEventType::Buff,
+                format!(
+                    "Team {} {} gains Battle Shout (+{:.0} attack power)",
+                    target_combatant.team,
+                    target_combatant.class.name(),
+                    ap_bonus
+                )
+            );
+        }
+
+        // Add aura to target
         if let Some(mut active_auras) = active_auras {
-            // Add to existing auras
+            // Add to existing ActiveAuras component
             active_auras.auras.push(pending.aura.clone());
         } else {
-            // No existing auras, insert new component
-            commands.entity(pending.target).insert(ActiveAuras {
-                auras: vec![pending.aura.clone()],
-            });
+            // Entity doesn't have ActiveAuras yet - accumulate in our map
+            // This prevents multiple insert() calls from overwriting each other
+            new_auras_map
+                .entry(pending.target)
+                .or_insert_with(Vec::new)
+                .push(pending.aura.clone());
         }
-        
+
         // Remove the pending aura entity
         commands.entity(pending_entity).despawn();
+    }
+
+    // Now insert ActiveAuras components for entities that didn't have them
+    for (entity, auras) in new_auras_map {
+        commands.entity(entity).insert(ActiveAuras { auras });
     }
 }
 
@@ -156,6 +270,8 @@ pub fn process_aura_breaks(
                         AuraType::Stun => "Stun",
                         AuraType::Fear => "Fear",
                         AuraType::MaxHealthIncrease => "Power Word: Fortitude", // Should never break on damage
+                        AuraType::MaxManaIncrease => "Arcane Intellect", // Should never break on damage
+                        AuraType::AttackPowerIncrease => "Battle Shout", // Should never break on damage
                         AuraType::DamageOverTime => "Rend", // Should never break on damage (has 0.0 threshold)
                         AuraType::SpellSchoolLockout => "Lockout", // Should never break on damage (has 0.0 threshold)
                         AuraType::HealingReduction => "Mortal Strike", // Should never break on damage (has 0.0 threshold)
