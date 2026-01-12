@@ -236,7 +236,11 @@ pub fn render_countdown(
     let Some(ctx) = contexts.try_ctx_mut() else { return; };
 
     let screen_rect = ctx.screen_rect();
-    let center = screen_rect.center();
+    let screen_center = screen_rect.center();
+
+    // Shift the entire overlay upward to visually center it
+    // (content extends further below center than above)
+    let center = egui::pos2(screen_center.x, screen_center.y - 60.0);
 
     // Helper function to draw text with outline
     let draw_text_with_outline = |painter: &egui::Painter, pos: egui::Pos2, text: &str, font_id: egui::FontId, color: egui::Color32, align: egui::Align2| {
