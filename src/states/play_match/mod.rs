@@ -353,7 +353,10 @@ pub fn setup_play_match(
         if let Some(character) = character_opt {
             let count = *team1_class_counts.get(character).unwrap_or(&0);
             *team1_class_counts.entry(*character).or_insert(0) += 1;
-            
+
+            // Register combatant with combat log for timeline display
+            combat_log.register_combatant(combatant_id(1, *character));
+
             spawn_combatant(
                 &mut commands,
                 &mut meshes,
@@ -372,7 +375,10 @@ pub fn setup_play_match(
         if let Some(character) = character_opt {
             let count = *team2_class_counts.get(character).unwrap_or(&0);
             *team2_class_counts.entry(*character).or_insert(0) += 1;
-            
+
+            // Register combatant with combat log for timeline display
+            combat_log.register_combatant(combatant_id(2, *character));
+
             spawn_combatant(
                 &mut commands,
                 &mut meshes,

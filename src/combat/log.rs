@@ -115,6 +115,8 @@ pub struct CombatLog {
     pub entries: Vec<CombatLogEntry>,
     /// Current match time
     pub match_time: f32,
+    /// All combatants registered at match start (for timeline display)
+    pub registered_combatants: Vec<CombatantId>,
 }
 
 impl CombatLog {
@@ -122,6 +124,14 @@ impl CombatLog {
     pub fn clear(&mut self) {
         self.entries.clear();
         self.match_time = 0.0;
+        self.registered_combatants.clear();
+    }
+
+    /// Register a combatant at match start (for timeline display)
+    pub fn register_combatant(&mut self, combatant_id: CombatantId) {
+        if !self.registered_combatants.contains(&combatant_id) {
+            self.registered_combatants.push(combatant_id);
+        }
     }
 
     /// Add a new entry to the log (without structured data - for simple events)
@@ -428,8 +438,14 @@ impl CombatLog {
         total
     }
 
-    /// Get all unique combatant IDs that appear in the log
+    /// Get all unique combatant IDs (from registered list, or extracted from log entries)
     pub fn all_combatants(&self) -> Vec<String> {
+        // Use registered combatants if available (preferred - ensures all columns show from start)
+        if !self.registered_combatants.is_empty() {
+            return self.registered_combatants.clone();
+        }
+
+        // Fallback: extract from log entries
         let mut combatants: std::collections::HashSet<String> = std::collections::HashSet::new();
 
         for entry in &self.entries {
