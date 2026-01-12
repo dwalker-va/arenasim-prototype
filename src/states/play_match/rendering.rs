@@ -50,6 +50,8 @@ fn get_ability_icon_path(ability: &str) -> Option<&'static str> {
         "Fear" => Some("icons/abilities/spell_shadow_possession.jpg"),
         "Pummel" => Some("icons/abilities/inv_gauntlets_04.jpg"),
         "Kick" => Some("icons/abilities/ability_kick.jpg"),
+        "Arcane Intellect" => Some("icons/abilities/spell_holy_magicalsentry.jpg"),
+        "Battle Shout" => Some("icons/abilities/ability_warrior_battleshout.jpg"),
         _ => None,
     }
 }
@@ -59,7 +61,7 @@ const SPELL_ICON_ABILITIES: &[&str] = &[
     "Frostbolt", "Frost Nova", "Flash Heal", "Mind Blast", "Power Word: Fortitude",
     "Charge", "Rend", "Mortal Strike", "Heroic Strike", "Ambush",
     "Sinister Strike", "Kidney Shot", "Corruption", "Shadowbolt", "Fear",
-    "Pummel", "Kick",
+    "Pummel", "Kick", "Arcane Intellect", "Battle Shout",
 ];
 
 /// System to load spell icons and register them with egui.
