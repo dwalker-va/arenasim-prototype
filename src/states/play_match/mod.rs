@@ -72,10 +72,11 @@ const WAND_RANGE: f32 = 30.0;
 /// Distance threshold for stopping movement (slightly less than melee range to avoid jitter)
 const STOP_DISTANCE: f32 = 2.0;
 
-/// Arena half-sizes matching the visual arena walls
-/// The arena is 76x46 units (elongated octagon) with walls at these boundaries
-const ARENA_HALF_X: f32 = 38.0;  // X axis (length): walls at ±38
-const ARENA_HALF_Z: f32 = 23.0;  // Z axis (width): walls at ±23
+/// Arena half-sizes for movement clamping (inside the visual walls)
+/// The arena is 76x46 with wall centers at ±38/±23 and wall thickness 1.0.
+/// We subtract 1.5 to account for wall thickness (0.5) + combatant buffer (1.0)
+const ARENA_HALF_X: f32 = 36.5;  // X axis: wall center 38 - 1.5 buffer
+const ARENA_HALF_Z: f32 = 21.5;  // Z axis: wall center 23 - 1.5 buffer
 
 /// Floating combat text horizontal spread (multiplied by -0.5 to +0.5 range)
 /// Adjust this to control how far left/right numbers can appear from their spawn point
