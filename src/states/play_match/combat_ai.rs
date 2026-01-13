@@ -1623,7 +1623,13 @@ pub fn check_interrupts(
         // Determine which interrupt ability to use based on class
         let interrupt_ability = match combatant.class {
             match_config::CharacterClass::Warrior => AbilityType::Pummel,
-            match_config::CharacterClass::Rogue => AbilityType::Kick,
+            match_config::CharacterClass::Rogue => {
+                // Rogues cannot use Kick while stealthed - must break stealth first
+                if combatant.stealthed {
+                    continue;
+                }
+                AbilityType::Kick
+            },
             _ => continue,
         };
         
