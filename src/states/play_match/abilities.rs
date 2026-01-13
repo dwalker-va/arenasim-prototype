@@ -110,7 +110,7 @@ impl AbilityType {
             AbilityType::Frostbolt => AbilityDefinition {
                 name: "Frostbolt",
                 cast_time: 1.5, // Reduced from 2.5s to see projectiles more often
-                range: 30.0,
+                range: 40.0,  // 40 yard range like WoW Classic
                 mana_cost: 20.0,
                 cooldown: 0.0,
                 damage_base_min: 10.0,

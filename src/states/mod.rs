@@ -30,6 +30,17 @@ pub enum GameState {
     Results,
 }
 
+/// System sets for PlayMatch state to ensure proper execution order.
+/// ResourcesAndAuras must run before CombatAndMovement so that timer
+/// decrements (like kiting_timer) are visible to movement systems.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+enum PlayMatchSystems {
+    /// First phase: resource regeneration, DoT ticks, aura updates
+    ResourcesAndAuras,
+    /// Second phase: targeting, abilities, casting, projectiles, movement
+    CombatAndMovement,
+}
+
 /// Plugin for managing game states and transitions
 pub struct StatesPlugin;
 
@@ -41,6 +52,13 @@ impl Plugin for StatesPlugin {
             // Initialize class icon resources
             .init_resource::<configure_match_ui::ClassIcons>()
             .init_resource::<configure_match_ui::ClassIconHandles>()
+            // Configure PlayMatch system sets ordering
+            // ResourcesAndAuras must run before CombatAndMovement so that
+            // kiting_timer decrements are visible to move_to_target
+            .configure_sets(
+                Update,
+                PlayMatchSystems::CombatAndMovement.after(PlayMatchSystems::ResourcesAndAuras),
+            )
             // Main menu systems (now using egui)
             .add_systems(
                 Update,
@@ -67,6 +85,7 @@ impl Plugin for StatesPlugin {
             )
             // Play match systems (defined in play_match module)
             .add_systems(OnEnter(GameState::PlayMatch), play_match::setup_play_match)
+            // Phase 1: Resources and Auras - includes kiting_timer decrement
             .add_systems(
                 Update,
                 (
@@ -82,13 +101,19 @@ impl Plugin for StatesPlugin {
                     play_match::apply_pending_auras,
                 )
                     .chain()
+                    .in_set(PlayMatchSystems::ResourcesAndAuras)
                     .run_if(in_state(GameState::PlayMatch)),
             )
             // Apply deferred commands (e.g., inserting ActiveAuras) before processing them
+            // This runs after ResourcesAndAuras, before CombatAndMovement
             .add_systems(
                 Update,
-                apply_deferred.run_if(in_state(GameState::PlayMatch)),
+                apply_deferred
+                    .after(PlayMatchSystems::ResourcesAndAuras)
+                    .before(PlayMatchSystems::CombatAndMovement)
+                    .run_if(in_state(GameState::PlayMatch)),
             )
+            // Phase 2: Combat and Movement - uses kiting_timer to decide movement
             .add_systems(
                 Update,
                 (
@@ -105,6 +130,7 @@ impl Plugin for StatesPlugin {
                     play_match::move_to_target,
                 )
                     .chain()
+                    .in_set(PlayMatchSystems::CombatAndMovement)
                     .run_if(in_state(GameState::PlayMatch)),
             )
             .add_systems(

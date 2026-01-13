@@ -15,7 +15,7 @@ use super::match_config;
 use super::components::*;
 use super::abilities::{AbilityType, SpellSchool};
 use super::combat_ai::spawn_speech_bubble;
-use super::{MELEE_RANGE, ARENA_HALF_SIZE, get_next_fct_offset};
+use super::{MELEE_RANGE, ARENA_HALF_X, ARENA_HALF_Z, get_next_fct_offset};
 
 /// Helper to generate a consistent combatant ID for the combat log
 /// Format: "Team {team} {class}" e.g., "Team 1 Warrior"
@@ -41,9 +41,9 @@ fn find_best_kiting_direction(
     
     // Check if ideal direction keeps us in bounds
     let ideal_next_pos = current_pos + ideal_direction * move_distance;
-    let ideal_in_bounds = 
-        ideal_next_pos.x >= -ARENA_HALF_SIZE && ideal_next_pos.x <= ARENA_HALF_SIZE &&
-        ideal_next_pos.z >= -ARENA_HALF_SIZE && ideal_next_pos.z <= ARENA_HALF_SIZE;
+    let ideal_in_bounds =
+        ideal_next_pos.x >= -ARENA_HALF_X && ideal_next_pos.x <= ARENA_HALF_X &&
+        ideal_next_pos.z >= -ARENA_HALF_Z && ideal_next_pos.z <= ARENA_HALF_Z;
     
     if ideal_in_bounds {
         return ideal_direction; // Ideal direction works, use it!
@@ -68,9 +68,9 @@ fn find_best_kiting_direction(
         let candidate_next_pos = current_pos + candidate_direction * move_distance;
         
         // Check if this keeps us in bounds
-        let in_bounds = 
-            candidate_next_pos.x >= -ARENA_HALF_SIZE && candidate_next_pos.x <= ARENA_HALF_SIZE &&
-            candidate_next_pos.z >= -ARENA_HALF_SIZE && candidate_next_pos.z <= ARENA_HALF_SIZE;
+        let in_bounds =
+            candidate_next_pos.x >= -ARENA_HALF_X && candidate_next_pos.x <= ARENA_HALF_X &&
+            candidate_next_pos.z >= -ARENA_HALF_Z && candidate_next_pos.z <= ARENA_HALF_Z;
         
         if !in_bounds {
             continue; // Skip directions that go out of bounds
@@ -152,8 +152,8 @@ pub fn move_to_target(
                 transform.translation += direction * move_distance;
 
                 // Clamp to arena bounds
-                transform.translation.x = transform.translation.x.clamp(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
-                transform.translation.z = transform.translation.z.clamp(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
+                transform.translation.x = transform.translation.x.clamp(-ARENA_HALF_X, ARENA_HALF_X);
+                transform.translation.z = transform.translation.z.clamp(-ARENA_HALF_Z, ARENA_HALF_Z);
 
                 // Rotate to face direction of travel
                 let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
@@ -162,7 +162,7 @@ pub fn move_to_target(
 
             continue; // Skip normal movement logic while feared
         }
-        
+
         // CHARGING BEHAVIOR: If charging, move at high speed toward target ignoring slows
         if let Some(charge_state) = charging_state {
             let Some(&(target_pos, _)) = positions.get(&charge_state.target) else {
@@ -170,41 +170,41 @@ pub fn move_to_target(
                 commands.entity(entity).remove::<ChargingState>();
                 continue;
             };
-            
+
             let distance = my_pos.distance(target_pos);
-            
+
             // If we've reached melee range, end the charge
             if distance <= MELEE_RANGE {
                 commands.entity(entity).remove::<ChargingState>();
-                
+
                 info!(
                     "Team {} {} completes charge!",
                     combatant.team,
                     combatant.class.name()
                 );
-                
+
                 continue; // Will use normal movement/combat next frame
             }
-            
+
             // Calculate direction to target
             let direction = Vec3::new(
                 target_pos.x - my_pos.x,
                 0.0,
                 target_pos.z - my_pos.z,
             ).normalize_or_zero();
-            
+
             if direction != Vec3::ZERO {
                 // Charge speed: 4x normal movement speed, ignores slows
                 const CHARGE_SPEED_MULTIPLIER: f32 = 4.0;
                 let charge_speed = combatant.base_movement_speed * CHARGE_SPEED_MULTIPLIER;
                 let move_distance = charge_speed * dt;
-                
+
                 // Move towards target
                 transform.translation += direction * move_distance;
-                
+
                 // Clamp position to arena bounds
-                transform.translation.x = transform.translation.x.clamp(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
-                transform.translation.z = transform.translation.z.clamp(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
+                transform.translation.x = transform.translation.x.clamp(-ARENA_HALF_X, ARENA_HALF_X);
+                transform.translation.z = transform.translation.z.clamp(-ARENA_HALF_Z, ARENA_HALF_Z);
                 
                 // Rotate to face target
                 let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
@@ -256,27 +256,27 @@ pub fn move_to_target(
                 if best_direction != Vec3::ZERO {
                     // Move in the best direction
                     transform.translation += best_direction * move_distance;
-                    
+
                     // Ensure we stay in bounds (in case of floating point errors)
-                    transform.translation.x = transform.translation.x.clamp(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
-                    transform.translation.z = transform.translation.z.clamp(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
-                    
+                    transform.translation.x = transform.translation.x.clamp(-ARENA_HALF_X, ARENA_HALF_X);
+                    transform.translation.z = transform.translation.z.clamp(-ARENA_HALF_Z, ARENA_HALF_Z);
+
                     // Rotate to face direction of travel
                     let target_rotation = Quat::from_rotation_y(best_direction.x.atan2(best_direction.z));
                     transform.rotation = target_rotation;
                 }
             }
-            
+
             continue; // Skip normal movement logic
         }
-        
+
         // NORMAL MOVEMENT: Get target position
         let Some(target_entity) = combatant.target else {
             // No target available (likely facing all-stealth team)
             // Move to defensive position in center of arena to anticipate stealth openers
             let defensive_pos = Vec3::ZERO; // Center of arena
             let distance_to_defensive = my_pos.distance(defensive_pos);
-            
+
             // Only move if we're far from the defensive position (> 5 units)
             if distance_to_defensive > 5.0 {
                 let direction = Vec3::new(
@@ -284,7 +284,7 @@ pub fn move_to_target(
                     0.0,
                     defensive_pos.z - my_pos.z,
                 ).normalize_or_zero();
-                
+
                 if direction != Vec3::ZERO {
                     // Calculate effective movement speed
                     let mut movement_speed = combatant.base_movement_speed;
@@ -295,14 +295,14 @@ pub fn move_to_target(
                             }
                         }
                     }
-                    
+
                     // Move towards defensive position
                     let move_distance = movement_speed * dt;
                     transform.translation += direction * move_distance;
-                    
+
                     // Clamp position to arena bounds
-                    transform.translation.x = transform.translation.x.clamp(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
-                    transform.translation.z = transform.translation.z.clamp(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
+                    transform.translation.x = transform.translation.x.clamp(-ARENA_HALF_X, ARENA_HALF_X);
+                    transform.translation.z = transform.translation.z.clamp(-ARENA_HALF_Z, ARENA_HALF_Z);
                     
                     // Rotate to face center
                     let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
@@ -346,11 +346,11 @@ pub fn move_to_target(
                 // Move towards target
                 let move_distance = movement_speed * dt;
                 transform.translation += direction * move_distance;
-                
+
                 // Clamp position to arena bounds
-                transform.translation.x = transform.translation.x.clamp(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
-                transform.translation.z = transform.translation.z.clamp(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
-                
+                transform.translation.x = transform.translation.x.clamp(-ARENA_HALF_X, ARENA_HALF_X);
+                transform.translation.z = transform.translation.z.clamp(-ARENA_HALF_Z, ARENA_HALF_Z);
+
                 // Rotate to face target
                 let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
                 transform.rotation = target_rotation;
