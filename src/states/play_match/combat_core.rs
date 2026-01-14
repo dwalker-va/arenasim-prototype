@@ -461,9 +461,9 @@ pub fn combat_auto_attack(
             continue;
         }
         
-        // WoW Mechanic: Cannot auto-attack while stunned or feared
+        // WoW Mechanic: Cannot auto-attack while stunned, feared, or polymorphed
         let is_incapacitated = if let Some(auras) = auras {
-            auras.auras.iter().any(|a| matches!(a.effect_type, AuraType::Stun | AuraType::Fear))
+            auras.auras.iter().any(|a| matches!(a.effect_type, AuraType::Stun | AuraType::Fear | AuraType::Polymorph))
         } else {
             false
         };

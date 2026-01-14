@@ -231,6 +231,8 @@ pub enum AuraType {
     HealingReduction,
     /// Fear - target runs around randomly, unable to act. Breaks on damage.
     Fear,
+    /// Polymorph - target is a sheep, unable to act, heals over time. Breaks on ANY damage.
+    Polymorph,
     /// Increases maximum mana by a flat amount (magnitude = mana bonus)
     MaxManaIncrease,
     /// Increases attack power by a flat amount (magnitude = AP bonus)

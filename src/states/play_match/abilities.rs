@@ -61,6 +61,8 @@ pub enum AbilityType {
     // Buff abilities
     ArcaneIntellect, // Mage buff - increases max mana
     BattleShout,     // Warrior buff - increases attack power
+    // Mage CC
+    Polymorph,       // Mage CC - target is a sheep, heals over time, breaks on any damage
 }
 
 /// Ability definition with all parameters.
@@ -480,6 +482,28 @@ impl AbilityType {
                 applies_aura: Some((AuraType::AttackPowerIncrease, 120.0, 20.0, 0.0)),
                 projectile_speed: None, // Instant buff
                 spell_school: SpellSchool::None, // Physical/shout, can't be locked out
+                is_interrupt: false,
+                lockout_duration: 0.0,
+            },
+
+            AbilityType::Polymorph => AbilityDefinition {
+                name: "Polymorph",
+                cast_time: 1.5, // 1.5 second cast
+                range: 30.0, // Same as Frostbolt
+                mana_cost: 40.0, // Moderate mana cost
+                cooldown: 0.0, // No cooldown, but smart AI won't spam
+                damage_base_min: 0.0,
+                damage_base_max: 0.0,
+                damage_coefficient: 0.0,
+                damage_scales_with: ScalingStat::None,
+                healing_base_min: 0.0,
+                healing_base_max: 0.0,
+                healing_coefficient: 0.0,
+                // Polymorph: 50s duration, breaks on ANY damage (threshold=1)
+                // Target heals while polymorphed (handled in auras.rs)
+                applies_aura: Some((AuraType::Polymorph, 50.0, 1.0, 1.0)),
+                projectile_speed: None, // Instant application on cast complete
+                spell_school: SpellSchool::Arcane,
                 is_interrupt: false,
                 lockout_duration: 0.0,
             },

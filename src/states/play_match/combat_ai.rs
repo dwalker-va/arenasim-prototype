@@ -30,6 +30,42 @@ pub fn spawn_speech_bubble(
     ));
 }
 
+/// Get the remaining duration of the longest active CC on a target from an aura slice.
+/// Returns Some((aura_type, remaining_duration)) or None if not CC'd.
+fn get_cc_remaining_from_slice(auras: &[Aura]) -> Option<(AuraType, f32)> {
+    auras.iter()
+        .filter(|a| matches!(a.effect_type,
+            AuraType::Stun | AuraType::Fear | AuraType::Polymorph | AuraType::Root))
+        .map(|a| (a.effect_type, a.duration))
+        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+}
+
+/// Check if a CC ability should be cast now for proper chain timing.
+/// For casted CC: start casting when CC remaining <= cast_time + buffer (0.3s).
+/// For instant CC: use when CC remaining < 0.5s or target not CC'd.
+fn should_cast_cc_now(cc_remaining: f32, cast_time: f32) -> bool {
+    if cast_time > 0.0 {
+        // Casted CC: start casting so it lands right as existing CC expires
+        cc_remaining <= cast_time + 0.3
+    } else {
+        // Instant CC: use when existing CC is almost expired
+        cc_remaining < 0.5
+    }
+}
+
+/// Get the CC target entity for a specific CC type based on team config.
+fn get_cc_target_slot(config: &match_config::MatchConfig, team: u8, cc_type: &str) -> Option<usize> {
+    match (team, cc_type) {
+        (1, "stun") => config.team1_stun_target,
+        (1, "sheep") => config.team1_sheep_target,
+        (1, "fear") => config.team1_fear_target,
+        (2, "stun") => config.team2_stun_target,
+        (2, "sheep") => config.team2_sheep_target,
+        (2, "fear") => config.team2_fear_target,
+        _ => None,
+    }
+}
+
 pub fn acquire_targets(
     countdown: Res<MatchCountdown>,
     config: Res<match_config::MatchConfig>,
@@ -118,6 +154,7 @@ pub fn acquire_targets(
 pub fn decide_abilities(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
+    config: Res<match_config::MatchConfig>,
     mut combatants: Query<(Entity, &mut Combatant, &Transform, Option<&ActiveAuras>), Without<CastingState>>,
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
@@ -154,15 +191,31 @@ pub fn decide_abilities(
     
     // Queue for Frost Nova damage (caster, target, damage, caster_team, caster_class, target_pos)
     let mut frost_nova_damage: Vec<(Entity, Entity, f32, u8, match_config::CharacterClass, Vec3)> = Vec::new();
-    
+
+    // Build lists of alive combatants per team, sorted by spawn order (entity index)
+    // This allows looking up CC targets by slot index from MatchConfig
+    let mut team1_by_slot: Vec<Entity> = combatants
+        .iter()
+        .filter(|(_, c, _, _)| c.team == 1 && c.is_alive())
+        .map(|(e, _, _, _)| e)
+        .collect();
+    team1_by_slot.sort_by_key(|e| e.index());
+
+    let mut team2_by_slot: Vec<Entity> = combatants
+        .iter()
+        .filter(|(_, c, _, _)| c.team == 2 && c.is_alive())
+        .map(|(e, _, _, _)| e)
+        .collect();
+    team2_by_slot.sort_by_key(|e| e.index());
+
     for (entity, mut combatant, transform, auras) in combatants.iter_mut() {
         if !combatant.is_alive() {
             continue;
         }
         
-        // WoW Mechanic: Cannot use abilities while stunned or feared
+        // WoW Mechanic: Cannot use abilities while stunned, feared, or polymorphed
         let is_incapacitated = if let Some(auras) = auras {
-            auras.auras.iter().any(|a| matches!(a.effect_type, AuraType::Stun | AuraType::Fear))
+            auras.auras.iter().any(|a| matches!(a.effect_type, AuraType::Stun | AuraType::Fear | AuraType::Polymorph))
         } else {
             false
         };
@@ -373,8 +426,75 @@ pub fn decide_abilities(
                     continue; // Don't cast Frostbolt this frame
                 }
             }
-            
-            // Second priority: Cast Frostbolt on target
+
+            // Second priority: Cast Polymorph on configured sheep target (with smart CC chain timing)
+            if let Some(sheep_slot) = get_cc_target_slot(&config, combatant.team, "sheep") {
+                // Get the enemy team's combatants by slot
+                let enemy_by_slot = if combatant.team == 1 { &team2_by_slot } else { &team1_by_slot };
+
+                if let Some(&sheep_target) = enemy_by_slot.get(sheep_slot) {
+                    // Get sheep target's current CC status
+                    let cc_remaining = active_auras_map
+                        .get(&sheep_target)
+                        .map(|auras| get_cc_remaining_from_slice(auras))
+                        .flatten();
+
+                    let poly_def = AbilityType::Polymorph.definition();
+                    let should_poly = match cc_remaining {
+                        Some((_, remaining)) => should_cast_cc_now(remaining, poly_def.cast_time),
+                        None => true, // No CC on target, poly immediately
+                    };
+
+                    if should_poly {
+                        // Check if we can cast Polymorph (Arcane school not locked, have mana, in range, etc.)
+                        if let Some(&sheep_pos) = positions.get(&sheep_target) {
+                            if !is_spell_school_locked(poly_def.spell_school, auras)
+                                && combatant.current_mana >= poly_def.mana_cost
+                                && combatant.global_cooldown <= 0.0
+                            {
+                                let ability = AbilityType::Polymorph;
+                                if ability.can_cast(&combatant, sheep_pos, my_pos) {
+                                    // Trigger global cooldown
+                                    combatant.global_cooldown = 1.5;
+
+                                    // Start casting Polymorph
+                                    commands.entity(entity).insert(CastingState {
+                                        ability,
+                                        time_remaining: poly_def.cast_time,
+                                        target: Some(sheep_target),
+                                        interrupted: false,
+                                        interrupted_display_time: 0.0,
+                                    });
+
+                                    // Log ability cast for timeline
+                                    let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
+                                    let target_id = combatant_info.get(&sheep_target).map(|(team, class, _, _)| {
+                                        format!("Team {} {}", team, class.name())
+                                    });
+                                    combat_log.log_ability_cast(
+                                        caster_id,
+                                        poly_def.name.to_string(),
+                                        target_id,
+                                        format!("Team {} {} begins casting {}", combatant.team, combatant.class.name(), poly_def.name),
+                                    );
+
+                                    info!(
+                                        "Team {} {} starts casting Polymorph on sheep target (slot {})",
+                                        combatant.team,
+                                        combatant.class.name(),
+                                        sheep_slot + 1
+                                    );
+
+                                    continue; // Don't cast Frostbolt this frame
+                                }
+                            }
+                        }
+                    }
+                    // If sheep target still has CC remaining, fall through to Frostbolt on kill target
+                }
+            }
+
+            // Third priority: Cast Frostbolt on target
             // While kiting, only cast if we're at a safe distance (beyond melee range + buffer)
             let Some(target_entity) = combatant.target else {
                 continue;
@@ -1087,87 +1207,114 @@ pub fn decide_abilities(
                 continue; // Can't use other abilities during GCD
             }
             
-            // Priority 1: Use Kidney Shot (stun) if available
+            // Priority 1: Use Kidney Shot (stun) on configured stun target with smart CC chain timing
             let kidney_shot = AbilityType::KidneyShot;
             let ks_on_cooldown = combatant.ability_cooldowns.contains_key(&kidney_shot);
-            
-            if !ks_on_cooldown && kidney_shot.can_cast(&combatant, target_pos, my_pos) {
-                let def = kidney_shot.definition();
 
-                // Spawn speech bubble
-                spawn_speech_bubble(&mut commands, entity, "Kidney Shot");
+            if !ks_on_cooldown {
+                // Determine Kidney Shot target: use configured stun target if set, otherwise current target
+                let stun_target_slot = get_cc_target_slot(&config, combatant.team, "stun");
+                let enemy_by_slot = if combatant.team == 1 { &team2_by_slot } else { &team1_by_slot };
 
-                // Consume energy
-                combatant.current_mana -= def.mana_cost;
+                let stun_target = stun_target_slot
+                    .and_then(|slot| enemy_by_slot.get(slot).copied())
+                    .unwrap_or(target_entity);
 
-                // Put on cooldown
-                combatant.ability_cooldowns.insert(kidney_shot, def.cooldown);
+                // Check if stun target has CC remaining (smart chain timing for instant CC)
+                let cc_remaining = active_auras_map
+                    .get(&stun_target)
+                    .map(|auras| get_cc_remaining_from_slice(auras))
+                    .flatten();
 
-                // Trigger global cooldown
-                combatant.global_cooldown = 1.5;
+                // For instant CC (Kidney Shot): use when CC remaining < 0.5s or no CC
+                let should_stun = match cc_remaining {
+                    Some((_, remaining)) => should_cast_cc_now(remaining, 0.0), // 0.0 = instant
+                    None => true, // No CC on target, stun immediately
+                };
 
-                // Log ability cast for timeline
-                let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-                let target_id = combatant_info.get(&target_entity).map(|(team, class, _, _)| {
-                    format!("Team {} {}", team, class.name())
-                });
-                combat_log.log_ability_cast(
-                    caster_id,
-                    "Kidney Shot".to_string(),
-                    target_id,
-                    format!("Team {} {} uses Kidney Shot", combatant.team, combatant.class.name()),
-                );
+                if should_stun {
+                    if let Some(&stun_pos) = positions.get(&stun_target) {
+                        if kidney_shot.can_cast(&combatant, stun_pos, my_pos) {
+                            let def = kidney_shot.definition();
 
-                // Spawn pending aura (stun effect)
-                if let Some((aura_type, duration, magnitude, break_threshold)) = def.applies_aura {
-                    commands.spawn(AuraPending {
-                        target: target_entity,
-                        aura: Aura {
-                            effect_type: aura_type,
-                            duration,
-                            magnitude,
-                            break_on_damage_threshold: break_threshold,
-                            accumulated_damage: 0.0,
-                            tick_interval: 0.0,
-                            time_until_next_tick: 0.0,
-                            caster: Some(entity),
-                            ability_name: def.name.to_string(),
-                            fear_direction: (0.0, 0.0),
-                            fear_direction_timer: 0.0,
-                        },
-                    });
-                }
-                
-                info!(
-                    "Team {} {} uses {} on enemy!",
-                    combatant.team,
-                    combatant.class.name(),
-                    def.name
-                );
+                            // Spawn speech bubble
+                            spawn_speech_bubble(&mut commands, entity, "Kidney Shot");
 
-                // Log to combat log with structured CC data
-                if let Some((target_team, target_class, _, _)) = combatant_info.get(&target_entity) {
-                    if let Some((aura_type, duration, _, _)) = def.applies_aura {
-                        let cc_type = format!("{:?}", aura_type);
-                        let message = format!(
-                            "Team {} {} uses {} on Team {} {}",
-                            combatant.team,
-                            combatant.class.name(),
-                            def.name,
-                            target_team,
-                            target_class.name()
-                        );
-                        combat_log.log_crowd_control(
-                            combatant_id(combatant.team, combatant.class),
-                            combatant_id(*target_team, *target_class),
-                            cc_type,
-                            duration,
-                            message,
-                        );
+                            // Consume energy
+                            combatant.current_mana -= def.mana_cost;
+
+                            // Put on cooldown
+                            combatant.ability_cooldowns.insert(kidney_shot, def.cooldown);
+
+                            // Trigger global cooldown
+                            combatant.global_cooldown = 1.5;
+
+                            // Log ability cast for timeline
+                            let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
+                            let target_id = combatant_info.get(&stun_target).map(|(team, class, _, _)| {
+                                format!("Team {} {}", team, class.name())
+                            });
+                            combat_log.log_ability_cast(
+                                caster_id,
+                                "Kidney Shot".to_string(),
+                                target_id,
+                                format!("Team {} {} uses Kidney Shot", combatant.team, combatant.class.name()),
+                            );
+
+                            // Spawn pending aura (stun effect)
+                            if let Some((aura_type, duration, magnitude, break_threshold)) = def.applies_aura {
+                                commands.spawn(AuraPending {
+                                    target: stun_target,
+                                    aura: Aura {
+                                        effect_type: aura_type,
+                                        duration,
+                                        magnitude,
+                                        break_on_damage_threshold: break_threshold,
+                                        accumulated_damage: 0.0,
+                                        tick_interval: 0.0,
+                                        time_until_next_tick: 0.0,
+                                        caster: Some(entity),
+                                        ability_name: def.name.to_string(),
+                                        fear_direction: (0.0, 0.0),
+                                        fear_direction_timer: 0.0,
+                                    },
+                                });
+                            }
+
+                            info!(
+                                "Team {} {} uses {} on enemy!",
+                                combatant.team,
+                                combatant.class.name(),
+                                def.name
+                            );
+
+                            // Log to combat log with structured CC data
+                            if let Some((target_team, target_class, _, _)) = combatant_info.get(&stun_target) {
+                                if let Some((aura_type, duration, _, _)) = def.applies_aura {
+                                    let cc_type = format!("{:?}", aura_type);
+                                    let message = format!(
+                                        "Team {} {} uses {} on Team {} {}",
+                                        combatant.team,
+                                        combatant.class.name(),
+                                        def.name,
+                                        target_team,
+                                        target_class.name()
+                                    );
+                                    combat_log.log_crowd_control(
+                                        combatant_id(combatant.team, combatant.class),
+                                        combatant_id(*target_team, *target_class),
+                                        cc_type,
+                                        duration,
+                                        message,
+                                    );
+                                }
+                            }
+
+                            continue; // Done this frame
+                        }
                     }
                 }
-
-                continue; // Done this frame
+                // If stun target still has CC, fall through to Sinister Strike on kill target
             }
 
             // Priority 2: Use Sinister Strike if we have enough energy and target is in melee range
@@ -1298,55 +1445,73 @@ pub fn decide_abilities(
                 }
             }
 
-            // Priority 2: Cast Fear if target is not CC'd and Fear is off cooldown
+            // Priority 2: Cast Fear on configured fear target with smart CC chain timing
             let fear = AbilityType::Fear;
             let fear_def = fear.definition();
             let fear_cooldown = combatant.ability_cooldowns.get(&fear).copied().unwrap_or(0.0);
 
-            // Check if target is already CC'd (don't waste Fear on CC'd targets)
-            let target_is_ccd = if let Some(auras) = active_auras_map.get(&target_entity) {
-                auras.iter().any(|a| matches!(a.effect_type, AuraType::Stun | AuraType::Fear | AuraType::Root))
-            } else {
-                false
-            };
+            if fear_cooldown <= 0.0 {
+                // Determine Fear target: use configured fear target if set, otherwise current target
+                let fear_target_slot = get_cc_target_slot(&config, combatant.team, "fear");
+                let enemy_by_slot = if combatant.team == 1 { &team2_by_slot } else { &team1_by_slot };
 
-            if fear_cooldown <= 0.0 && !target_is_ccd {
-                // Check if Shadow school is locked out
-                if !is_spell_school_locked(fear_def.spell_school, auras) {
-                    if fear.can_cast(&combatant, target_pos, my_pos) {
-                        // Trigger global cooldown (starts when cast begins)
-                        combatant.global_cooldown = 1.5;
+                let fear_target = fear_target_slot
+                    .and_then(|slot| enemy_by_slot.get(slot).copied())
+                    .unwrap_or(target_entity);
 
-                        // Start casting Fear
-                        commands.entity(entity).insert(CastingState {
-                            ability: fear,
-                            time_remaining: fear_def.cast_time,
-                            target: Some(target_entity),
-                            interrupted: false,
-                            interrupted_display_time: 0.0,
-                        });
+                // Check fear target's current CC status for chain timing
+                let cc_remaining = active_auras_map
+                    .get(&fear_target)
+                    .map(|auras| get_cc_remaining_from_slice(auras))
+                    .flatten();
 
-                        // Log ability cast for timeline
-                        let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-                        let target_id = combatant_info.get(&target_entity).map(|(team, class, _, _)| {
-                            format!("Team {} {}", team, class.name())
-                        });
-                        combat_log.log_ability_cast(
-                            caster_id,
-                            "Fear".to_string(),
-                            target_id,
-                            format!("Team {} {} begins casting Fear", combatant.team, combatant.class.name()),
-                        );
+                // For casted CC (Fear 1.5s): start casting when CC remaining <= cast_time + 0.3s
+                let should_fear = match cc_remaining {
+                    Some((_, remaining)) => should_cast_cc_now(remaining, fear_def.cast_time),
+                    None => true, // No CC on target, fear immediately
+                };
 
-                        info!(
-                            "Team {} {} starts casting Fear on enemy",
-                            combatant.team,
-                            combatant.class.name()
-                        );
+                if should_fear {
+                    if let Some(&fear_pos) = positions.get(&fear_target) {
+                        // Check if Shadow school is locked out
+                        if !is_spell_school_locked(fear_def.spell_school, auras) {
+                            if fear.can_cast(&combatant, fear_pos, my_pos) {
+                                // Trigger global cooldown (starts when cast begins)
+                                combatant.global_cooldown = 1.5;
 
-                        continue; // Done this frame
+                                // Start casting Fear
+                                commands.entity(entity).insert(CastingState {
+                                    ability: fear,
+                                    time_remaining: fear_def.cast_time,
+                                    target: Some(fear_target),
+                                    interrupted: false,
+                                    interrupted_display_time: 0.0,
+                                });
+
+                                // Log ability cast for timeline
+                                let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
+                                let target_id = combatant_info.get(&fear_target).map(|(team, class, _, _)| {
+                                    format!("Team {} {}", team, class.name())
+                                });
+                                combat_log.log_ability_cast(
+                                    caster_id,
+                                    "Fear".to_string(),
+                                    target_id,
+                                    format!("Team {} {} begins casting Fear", combatant.team, combatant.class.name()),
+                                );
+
+                                info!(
+                                    "Team {} {} starts casting Fear on fear target",
+                                    combatant.team,
+                                    combatant.class.name()
+                                );
+
+                                continue; // Done this frame
+                            }
+                        }
                     }
                 }
+                // If fear target still has CC, fall through to Shadowbolt on kill target
             }
 
             // Priority 3: Cast Shadowbolt (main damage spell with cast time)

@@ -519,6 +519,70 @@ fn render_team_panel(
             );
         }
     });
+
+    ui.add_space(20.0);
+
+    // CC Priority Section
+    ui.vertical(|ui| {
+        ui.label(egui::RichText::new("CC Priority").size(16.0).color(team_color));
+        ui.add_space(8.0);
+
+        // Get enemy team info
+        let (enemy_team_size, enemy_slots) = if team == 1 {
+            (config.team2_size, config.team2.clone())
+        } else {
+            (config.team1_size, config.team1.clone())
+        };
+
+        // CC type colors
+        let stun_color = egui::Color32::from_rgb(204, 51, 51);   // Red
+        let sheep_color = egui::Color32::from_rgb(255, 153, 204); // Pink
+        let fear_color = egui::Color32::from_rgb(148, 130, 201);  // Purple
+
+        // Get current CC targets
+        let (current_stun, current_sheep, current_fear) = if team == 1 {
+            (config.team1_stun_target, config.team1_sheep_target, config.team1_fear_target)
+        } else {
+            (config.team2_stun_target, config.team2_sheep_target, config.team2_fear_target)
+        };
+
+        // Stun target row
+        render_cc_row(ui, "Stun", stun_color, current_stun, enemy_team_size, &enemy_slots, |slot| {
+            if team == 1 {
+                if config.team1_stun_target == slot { config.team1_stun_target = None; }
+                else { config.team1_stun_target = slot; }
+            } else {
+                if config.team2_stun_target == slot { config.team2_stun_target = None; }
+                else { config.team2_stun_target = slot; }
+            }
+        });
+
+        ui.add_space(4.0);
+
+        // Sheep target row
+        render_cc_row(ui, "Sheep", sheep_color, current_sheep, enemy_team_size, &enemy_slots, |slot| {
+            if team == 1 {
+                if config.team1_sheep_target == slot { config.team1_sheep_target = None; }
+                else { config.team1_sheep_target = slot; }
+            } else {
+                if config.team2_sheep_target == slot { config.team2_sheep_target = None; }
+                else { config.team2_sheep_target = slot; }
+            }
+        });
+
+        ui.add_space(4.0);
+
+        // Fear target row
+        render_cc_row(ui, "Fear", fear_color, current_fear, enemy_team_size, &enemy_slots, |slot| {
+            if team == 1 {
+                if config.team1_fear_target == slot { config.team1_fear_target = None; }
+                else { config.team1_fear_target = slot; }
+            } else {
+                if config.team2_fear_target == slot { config.team2_fear_target = None; }
+                else { config.team2_fear_target = slot; }
+            }
+        });
+    });
 }
 
 /// Render a single character slot.
@@ -756,6 +820,88 @@ fn render_map_panel(ui: &mut egui::Ui, config: &mut MatchConfig, max_width: f32)
                 .size(36.0)
                 .color(egui::Color32::from_rgb(128, 115, 102)),
         );
+    });
+}
+
+/// Render a CC target selection row.
+///
+/// Shows a row with CC type label and buttons for each enemy slot.
+/// Format: "Stun: [1] [2] [3]" where selected slot is highlighted.
+fn render_cc_row<F>(
+    ui: &mut egui::Ui,
+    cc_name: &str,
+    cc_color: egui::Color32,
+    current_target: Option<usize>,
+    enemy_team_size: usize,
+    enemy_slots: &[Option<match_config::CharacterClass>],
+    mut on_click: F,
+) where
+    F: FnMut(Option<usize>),
+{
+    ui.horizontal(|ui| {
+        // CC type label
+        ui.label(
+            egui::RichText::new(format!("{}:", cc_name))
+                .size(12.0)
+                .color(cc_color),
+        );
+
+        ui.add_space(4.0);
+
+        // None button
+        let none_selected = current_target.is_none();
+        let none_color = if none_selected {
+            cc_color
+        } else {
+            egui::Color32::from_rgb(77, 77, 77)
+        };
+
+        let none_button = egui::Button::new(
+            egui::RichText::new("None")
+                .size(11.0)
+                .color(none_color)
+        )
+        .min_size(egui::vec2(36.0, 20.0));
+
+        if ui.add(none_button).clicked() && !none_selected {
+            on_click(None);
+        }
+
+        // Slot buttons
+        for slot in 0..enemy_team_size {
+            if let Some(Some(enemy_class)) = enemy_slots.get(slot) {
+                let is_selected = current_target == Some(slot);
+
+                // Get class color for the button
+                let class_color = enemy_class.color();
+                let class_color32 = egui::Color32::from_rgb(
+                    (class_color.to_srgba().red * 255.0) as u8,
+                    (class_color.to_srgba().green * 255.0) as u8,
+                    (class_color.to_srgba().blue * 255.0) as u8,
+                );
+
+                let button_color = if is_selected {
+                    cc_color
+                } else {
+                    class_color32.gamma_multiply(0.6)
+                };
+
+                // Show slot number with class initial
+                let class_initial = enemy_class.name().chars().next().unwrap_or('?');
+                let button_text = format!("{}{}", slot + 1, class_initial);
+
+                let button = egui::Button::new(
+                    egui::RichText::new(button_text)
+                        .size(11.0)
+                        .color(button_color)
+                )
+                .min_size(egui::vec2(28.0, 20.0));
+
+                if ui.add(button).clicked() {
+                    on_click(Some(slot));
+                }
+            }
+        }
     });
 }
 

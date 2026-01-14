@@ -129,6 +129,18 @@ pub struct MatchConfig {
     pub team1_kill_target: Option<usize>,
     /// Team 2's kill target priority (index into enemy team, None = no priority)
     pub team2_kill_target: Option<usize>,
+    /// Team 1's stun target (Kidney Shot, etc.) - index into enemy team
+    pub team1_stun_target: Option<usize>,
+    /// Team 1's polymorph/sheep target - index into enemy team
+    pub team1_sheep_target: Option<usize>,
+    /// Team 1's fear target - index into enemy team
+    pub team1_fear_target: Option<usize>,
+    /// Team 2's stun target (Kidney Shot, etc.) - index into enemy team
+    pub team2_stun_target: Option<usize>,
+    /// Team 2's polymorph/sheep target - index into enemy team
+    pub team2_sheep_target: Option<usize>,
+    /// Team 2's fear target - index into enemy team
+    pub team2_fear_target: Option<usize>,
 }
 
 impl Default for MatchConfig {
@@ -139,8 +151,14 @@ impl Default for MatchConfig {
             team1: vec![None],
             team2: vec![None],
             map: ArenaMap::BasicArena,
-            team1_kill_target: None, // No priority by default
-            team2_kill_target: None, // No priority by default
+            team1_kill_target: None,
+            team2_kill_target: None,
+            team1_stun_target: None,
+            team1_sheep_target: None,
+            team1_fear_target: None,
+            team2_stun_target: None,
+            team2_sheep_target: None,
+            team2_fear_target: None,
         }
     }
 }

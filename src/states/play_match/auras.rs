@@ -25,11 +25,11 @@ use super::combat_core::combatant_id;
 pub fn update_auras(
     time: Res<Time>,
     mut commands: Commands,
-    mut combatants: Query<(Entity, &mut ActiveAuras)>,
+    mut combatants: Query<(Entity, &mut Combatant, &mut ActiveAuras)>,
 ) {
     let dt = time.delta_secs();
 
-    for (entity, mut auras) in combatants.iter_mut() {
+    for (entity, mut combatant, mut auras) in combatants.iter_mut() {
         // Tick down all aura durations and update fear timers
         for aura in auras.auras.iter_mut() {
             aura.duration -= dt;
@@ -46,6 +46,17 @@ pub fn update_auras(
 
                     // Reset timer: change direction every 1-2 seconds (WoW-style)
                     aura.fear_direction_timer = 1.0 + rand::random::<f32>();
+                }
+            }
+
+            // Polymorph heals the target over time (5% max HP per second)
+            if aura.effect_type == AuraType::Polymorph && combatant.is_alive() {
+                let heal_per_second = combatant.max_health * 0.05;
+                let heal_amount = heal_per_second * dt;
+                let actual_heal = heal_amount.min(combatant.max_health - combatant.current_health);
+                if actual_heal > 0.0 {
+                    combatant.current_health += actual_heal;
+                    combatant.healing_done += actual_heal;
                 }
             }
         }
@@ -95,7 +106,7 @@ pub fn apply_pending_auras(
         // Check for CC immunity: Charging combatants are immune to crowd control
         let is_cc_aura = matches!(
             pending.aura.effect_type,
-            AuraType::Fear | AuraType::Stun | AuraType::Root
+            AuraType::Fear | AuraType::Stun | AuraType::Root | AuraType::Polymorph
         );
         let is_charging = charging_query.get(pending.target).is_ok();
 
@@ -124,6 +135,7 @@ pub fn apply_pending_auras(
                 AuraType::Fear => "Fear",
                 AuraType::Stun => "Stun",
                 AuraType::Root => "Root",
+                AuraType::Polymorph => "Polymorph",
                 _ => "CC",
             };
             combat_log.log(
@@ -328,6 +340,7 @@ pub fn process_aura_breaks(
                         AuraType::MovementSpeedSlow => "Movement Speed Slow",
                         AuraType::Stun => "Stun",
                         AuraType::Fear => "Fear",
+                        AuraType::Polymorph => "Polymorph",
                         AuraType::MaxHealthIncrease => "Power Word: Fortitude", // Should never break on damage
                         AuraType::MaxManaIncrease => "Arcane Intellect", // Should never break on damage
                         AuraType::AttackPowerIncrease => "Battle Shout", // Should never break on damage
