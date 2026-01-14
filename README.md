@@ -5,17 +5,18 @@ A World of Warcraft-inspired arena combat simulator built with Bevy (Rust). Conf
 ## ✨ Features
 
 ### Combat System
-- **4 Character Classes**: Warrior (melee tank), Mage (ranged caster), Rogue (stealth DPS), Priest (healer)
-- **15+ Unique Abilities**: Cast-time spells, instant attacks, healing, crowd control, interrupts
+- **5 Character Classes**: Warrior (melee tank), Mage (ranged caster), Rogue (stealth DPS), Priest (healer), Warlock (shadow DoTs/control)
+- **20+ Unique Abilities**: Cast-time spells, instant attacks, healing, crowd control, interrupts
 - **WoW-Style Mechanics**: Mana/Energy/Rage resources, cooldowns, global cooldown, spell schools
-- **Status Effects**: Roots, stuns, movement slows, healing reduction, damage over time
+- **Status Effects**: Roots, stuns, fears, movement slows, healing reduction, damage over time
 - **Advanced AI**: Targeting priority, ability rotation, interrupt timing, kiting behavior
-- **Visual Feedback**: Health/resource bars, cast bars, floating combat text, status effect labels
+- **Visual Feedback**: Health/resource bars, cast bars, floating combat text, death animations, status effect labels
 - **Real-time Combat Log**: Scrolling event stream with color-coded damage/healing/death messages
+- **Ability Timeline**: Visual timeline showing when each combatant casts abilities
 
 ### Match Configuration
 - **Team Sizes**: 1v1, 2v2, or 3v3 arena battles
-- **Character Selection**: Build team compositions from 4 classes
+- **Character Selection**: Build team compositions from 5 classes
 - **Kill Target Strategy**: Set focus targets for coordinated team play
 - **Multiple Arenas**: Choose from different battlefield layouts
 
@@ -157,7 +158,7 @@ This project is designed for **agentic development** (AI-assisted code generatio
 
 ### Mage (Ranged Caster/Control)
 - **Resource**: Mana
-- **Abilities**: Wand Shot (ranged), Frostbolt (slow), Frost Nova (AoE root)
+- **Abilities**: Wand Shot (ranged), Frostbolt (slow), Frost Nova (AoE root), Arcane Intellect (mana buff)
 - **Playstyle**: Kite melee, control positioning, burst damage from range
 
 ### Rogue (Stealth Melee DPS/Control)
@@ -169,6 +170,11 @@ This project is designed for **agentic development** (AI-assisted code generatio
 - **Resource**: Mana
 - **Abilities**: Wand Shot (ranged), Flash Heal, Mind Blast, Power Word: Fortitude (HP buff)
 - **Playstyle**: Keep allies alive, buff before combat, contribute damage when safe
+
+### Warlock (Shadow DoT/Control)
+- **Resource**: Mana
+- **Abilities**: Wand Shot (ranged), Shadowbolt, Corruption (DoT), Fear (CC)
+- **Playstyle**: Apply sustained pressure with DoTs, fear to disrupt healers, shadow damage from range
 
 ## Roadmap
 
