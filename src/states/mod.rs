@@ -133,12 +133,15 @@ impl Plugin for StatesPlugin {
                     .in_set(PlayMatchSystems::CombatAndMovement)
                     .run_if(in_state(GameState::PlayMatch)),
             )
+            // Combat resolution, death, and effects
             .add_systems(
                 Update,
                 (
                     play_match::update_stealth_visuals,
                     play_match::combat_auto_attack,
                     play_match::check_match_end,
+                    play_match::trigger_death_animation,
+                    play_match::animate_death,
                     play_match::update_victory_celebration,
                     play_match::update_floating_combat_text,
                     play_match::update_speech_bubbles,
@@ -146,6 +149,13 @@ impl Plugin for StatesPlugin {
                     play_match::spawn_spell_impact_visuals,
                     play_match::update_spell_impact_effects,
                     play_match::cleanup_expired_spell_impacts,
+                )
+                    .run_if(in_state(GameState::PlayMatch)),
+            )
+            // UI rendering systems
+            .add_systems(
+                Update,
+                (
                     play_match::render_time_controls,
                     play_match::render_camera_controls,
                     play_match::render_countdown,

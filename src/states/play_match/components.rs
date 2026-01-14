@@ -523,3 +523,29 @@ pub struct SpellImpactEffect {
     pub final_scale: f32,
 }
 
+/// Component for tracking death fall animation.
+/// When a combatant dies, this component is added to animate them falling over.
+#[derive(Component)]
+pub struct DeathAnimation {
+    /// Animation progress (0.0 = start, 1.0 = complete)
+    pub progress: f32,
+    /// Fall direction (normalized, in XZ plane)
+    pub fall_direction: Vec3,
+}
+
+impl DeathAnimation {
+    /// Duration of the death fall animation in seconds
+    pub const DURATION: f32 = 0.6;
+
+    pub fn new(fall_direction: Vec3) -> Self {
+        Self {
+            progress: 0.0,
+            fall_direction: fall_direction.normalize(),
+        }
+    }
+
+    pub fn is_complete(&self) -> bool {
+        self.progress >= 1.0
+    }
+}
+
