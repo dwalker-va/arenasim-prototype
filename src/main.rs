@@ -8,7 +8,9 @@ use bevy::window::PresentMode;
 use bevy_egui::{egui, EguiContexts, EguiPlugin};
 
 mod camera;
+mod cli;
 mod combat;
+mod headless;
 mod keybindings;
 mod settings;
 mod states;
@@ -22,6 +24,45 @@ use states::{GameState, StatesPlugin};
 use ui::UiPlugin;
 
 fn main() {
+    let args = cli::parse_args();
+
+    if let Some(config_path) = args.headless {
+        // Headless mode
+        run_headless_mode(config_path, args.output, args.max_duration);
+    } else {
+        // Normal graphical mode
+        run_graphical_mode();
+    }
+}
+
+fn run_headless_mode(
+    config_path: std::path::PathBuf,
+    output: Option<std::path::PathBuf>,
+    max_duration: f32,
+) {
+    println!("Running in headless mode with config: {:?}", config_path);
+
+    let mut config = match headless::HeadlessMatchConfig::load_from_file(&config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Error loading config: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    // Override from CLI args if provided
+    if let Some(path) = output {
+        config.output_path = Some(path.to_string_lossy().to_string());
+    }
+    config.max_duration_secs = max_duration;
+
+    if let Err(e) = headless::run_headless_match(config) {
+        eprintln!("Error running match: {}", e);
+        std::process::exit(1);
+    }
+}
+
+fn run_graphical_mode() {
     // Load settings first to apply them to window configuration
     let settings = GameSettings::load();
     let (width, height) = settings.resolution.dimensions();
