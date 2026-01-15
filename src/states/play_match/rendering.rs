@@ -1661,4 +1661,3 @@ pub fn update_speech_bubbles(
         }
     }
 }
-

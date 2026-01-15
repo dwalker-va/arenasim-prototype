@@ -334,6 +334,7 @@ pub fn process_aura_breaks(
                         AuraType::DamageOverTime => "Rend", // Should never break on damage (has 0.0 threshold)
                         AuraType::SpellSchoolLockout => "Lockout", // Should never break on damage (has 0.0 threshold)
                         AuraType::HealingReduction => "Mortal Strike", // Should never break on damage (has 0.0 threshold)
+                        AuraType::ShadowSight => "Shadow Sight", // Should never break on damage (has 0.0 threshold)
                     };
                     
                     let message = format!(

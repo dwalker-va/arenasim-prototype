@@ -96,6 +96,7 @@ impl Plugin for StatesPlugin {
                     play_match::animate_gate_bars,
                     play_match::update_play_match,
                     play_match::regenerate_resources,
+                    play_match::track_shadow_sight_timer,  // Track combat time and spawn Shadow Sight orbs
                     play_match::process_dot_ticks,  // Process DoT ticks BEFORE updating auras (so final tick fires on expiration)
                     play_match::update_auras,
                     play_match::apply_pending_auras,
@@ -119,6 +120,7 @@ impl Plugin for StatesPlugin {
                 (
                     play_match::process_aura_breaks,
                     play_match::acquire_targets,
+                    play_match::check_orb_pickups,  // Check for Shadow Sight orb pickups
                     play_match::decide_abilities,
                     apply_deferred,  // Flush commands so CastingState is visible
                     play_match::check_interrupts,  // Check for interrupts after CastingState is visible
@@ -149,6 +151,7 @@ impl Plugin for StatesPlugin {
                     play_match::spawn_spell_impact_visuals,
                     play_match::update_spell_impact_effects,
                     play_match::cleanup_expired_spell_impacts,
+                    play_match::animate_shadow_sight_orbs,  // Pulsing orb animation
                 )
                     .run_if(in_state(GameState::PlayMatch)),
             )

@@ -97,6 +97,7 @@ pub fn move_to_target(
     time: Res<Time>,
     mut commands: Commands,
     mut combatants: Query<(Entity, &mut Transform, &Combatant, Option<&ActiveAuras>, Option<&CastingState>, Option<&ChargingState>)>,
+    orbs: Query<&Transform, (With<ShadowSightOrb>, Without<Combatant>)>,
 ) {
     // Don't allow movement until gates open
     if !countdown.gates_opened {
@@ -273,16 +274,29 @@ pub fn move_to_target(
         // NORMAL MOVEMENT: Get target position
         let Some(target_entity) = combatant.target else {
             // No target available (likely facing all-stealth team)
-            // Move to defensive position in center of arena to anticipate stealth openers
-            let defensive_pos = Vec3::ZERO; // Center of arena
-            let distance_to_defensive = my_pos.distance(defensive_pos);
+            // When orbs are spawned, ALL combatants (even stealthed) should seek them
+            // to break the stalemate. This represents accepting the reveal to gain vision.
 
-            // Only move if we're far from the defensive position (> 5 units)
-            if distance_to_defensive > 5.0 {
+            // Find nearest Shadow Sight orb (if any exist)
+            let nearest_orb_pos = orbs.iter()
+                .map(|orb_transform| orb_transform.translation)
+                .min_by(|a, b| {
+                    let dist_a = my_pos.distance(*a);
+                    let dist_b = my_pos.distance(*b);
+                    dist_a.partial_cmp(&dist_b).unwrap()
+                });
+
+            // Determine destination: nearest orb if available, otherwise center
+            let destination = nearest_orb_pos.unwrap_or(Vec3::ZERO);
+            let distance_to_destination = my_pos.distance(destination);
+
+            // Only move if we're far from destination (> 2.5 units for orbs, > 5 units for center)
+            let stop_distance = if nearest_orb_pos.is_some() { 2.5 } else { 5.0 };
+            if distance_to_destination > stop_distance {
                 let direction = Vec3::new(
-                    defensive_pos.x - my_pos.x,
+                    destination.x - my_pos.x,
                     0.0,
-                    defensive_pos.z - my_pos.z,
+                    destination.z - my_pos.z,
                 ).normalize_or_zero();
 
                 if direction != Vec3::ZERO {
@@ -296,20 +310,20 @@ pub fn move_to_target(
                         }
                     }
 
-                    // Move towards defensive position
+                    // Move towards destination
                     let move_distance = movement_speed * dt;
                     transform.translation += direction * move_distance;
 
                     // Clamp position to arena bounds
                     transform.translation.x = transform.translation.x.clamp(-ARENA_HALF_X, ARENA_HALF_X);
                     transform.translation.z = transform.translation.z.clamp(-ARENA_HALF_Z, ARENA_HALF_Z);
-                    
-                    // Rotate to face center
+
+                    // Rotate to face destination
                     let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
                     transform.rotation = target_rotation;
                 }
             }
-            
+
             continue;
         };
         

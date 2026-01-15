@@ -115,6 +115,25 @@ impl Default for MatchCountdown {
     }
 }
 
+/// Resource tracking Shadow Sight orb spawn state.
+/// Shadow Sight orbs spawn after extended combat to break stealth stalemates.
+#[derive(Resource)]
+pub struct ShadowSightState {
+    /// Time elapsed since gates opened
+    pub combat_time: f32,
+    /// Whether orbs have been spawned
+    pub orbs_spawned: bool,
+}
+
+impl Default for ShadowSightState {
+    fn default() -> Self {
+        Self {
+            combat_time: 0.0,
+            orbs_spawned: false,
+        }
+    }
+}
+
 /// Victory celebration state - tracks post-match victory animation
 #[derive(Resource)]
 pub struct VictoryCelebration {
@@ -195,6 +214,14 @@ pub struct SpeechBubble {
     pub lifetime: f32,
 }
 
+/// Component marking a Shadow Sight orb entity.
+/// These orbs spawn after extended combat to break stealth stalemates.
+#[derive(Component)]
+pub struct ShadowSightOrb {
+    /// Which orb spawn point this is (0 or 1)
+    pub spawn_index: u8,
+}
+
 // ============================================================================
 // Enums
 // ============================================================================
@@ -235,6 +262,8 @@ pub enum AuraType {
     MaxManaIncrease,
     /// Increases attack power by a flat amount (magnitude = AP bonus)
     AttackPowerIncrease,
+    /// Shadow Sight - reveals stealthed enemies AND makes the holder visible to enemies
+    ShadowSight,
 }
 
 // ============================================================================
@@ -548,4 +577,3 @@ impl DeathAnimation {
         self.progress >= 1.0
     }
 }
-

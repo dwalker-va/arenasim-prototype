@@ -39,6 +39,7 @@ pub mod auras;
 pub mod match_flow;
 pub mod combat_ai;
 pub mod combat_core;
+pub mod shadow_sight;
 
 // Re-exports
 pub use abilities::*;
@@ -50,6 +51,7 @@ pub use auras::*;
 pub use match_flow::*;
 pub use combat_ai::*;
 pub use combat_core::*;
+pub use shadow_sight::*;
 
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
@@ -229,6 +231,9 @@ pub fn setup_play_match(
     
     // Initialize match countdown (10 seconds before gates open)
     commands.insert_resource(MatchCountdown::default());
+
+    // Initialize Shadow Sight state (for stealth stalemate breaking)
+    commands.insert_resource(ShadowSightState::default());
 
     // Spawn arena floor - octagonal shape matching the wall boundary
     // Warm sandy/dirt battleground
@@ -519,6 +524,7 @@ pub fn cleanup_play_match(
     commands.remove_resource::<AmbientLight>();
     commands.remove_resource::<SimulationSpeed>();
     commands.remove_resource::<MatchCountdown>();
+    commands.remove_resource::<ShadowSightState>();
     // Remove optional resources (may not exist if match didn't finish)
     commands.remove_resource::<VictoryCelebration>();
 }

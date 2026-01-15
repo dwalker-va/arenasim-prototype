@@ -9,10 +9,11 @@ use std::time::Duration;
 use crate::combat::log::{CombatLog, CombatLogEventType, CombatantMetadata, MatchMetadata};
 use crate::states::match_config::MatchConfig;
 use crate::states::play_match::{
-    acquire_targets, apply_pending_auras, check_interrupts, combat_auto_attack, combatant_id,
-    decide_abilities, move_projectiles, move_to_target, process_aura_breaks, process_casting,
-    process_dot_ticks, process_interrupts, process_projectile_hits, regenerate_resources,
-    update_auras, update_countdown, Combatant, FloatingTextState, MatchCountdown, SimulationSpeed,
+    acquire_targets, apply_pending_auras, check_interrupts, check_orb_pickups, combat_auto_attack,
+    combatant_id, decide_abilities, move_projectiles, move_to_target, process_aura_breaks,
+    process_casting, process_dot_ticks, process_interrupts, process_projectile_hits,
+    regenerate_resources, track_shadow_sight_timer, update_auras, update_countdown, Combatant,
+    FloatingTextState, MatchCountdown, ShadowSightState, SimulationSpeed,
 };
 
 use super::config::HeadlessMatchConfig;
@@ -51,34 +52,55 @@ impl Plugin for HeadlessPlugin {
             })
             .init_resource::<CombatLog>()
             .add_systems(Startup, headless_setup_match)
+            // Phase 1: Resources and Auras
             .add_systems(
                 Update,
                 (
-                    // Phase 1: Resources and Auras
                     update_countdown,
                     regenerate_resources,
+                    track_shadow_sight_timer,
                     process_dot_ticks,
                     update_auras,
                     apply_pending_auras,
-                    apply_deferred,
-                    // Phase 2: Combat and Movement
+                )
+                    .chain(),
+            )
+            // Phase 2: Combat and Movement (first half)
+            .add_systems(
+                Update,
+                (
                     process_aura_breaks,
                     acquire_targets,
+                    check_orb_pickups,
                     decide_abilities,
-                    apply_deferred,
                     check_interrupts,
                     process_interrupts,
                     process_casting,
+                )
+                    .chain()
+                    .after(apply_pending_auras),
+            )
+            // Phase 2: Combat and Movement (second half)
+            .add_systems(
+                Update,
+                (
                     move_projectiles,
                     process_projectile_hits,
                     move_to_target,
-                    // Phase 3: Combat resolution
+                )
+                    .chain()
+                    .after(process_casting),
+            )
+            // Phase 3: Combat resolution and Headless-specific systems
+            .add_systems(
+                Update,
+                (
                     combat_auto_attack,
-                    // Headless-specific systems
                     headless_check_match_end,
                     headless_track_time,
                 )
-                    .chain(),
+                    .chain()
+                    .after(move_to_target),
             )
             .add_systems(PostUpdate, headless_exit_on_complete);
     }
@@ -96,6 +118,7 @@ fn headless_setup_match(mut commands: Commands, config: Res<MatchConfig>, mut co
     // Initialize required resources
     commands.insert_resource(SimulationSpeed { multiplier: 1.0 });
     commands.insert_resource(MatchCountdown::default());
+    commands.insert_resource(ShadowSightState::default());
 
     // Spawn combatants for Team 1
     let team1_spawn_x = -35.0;

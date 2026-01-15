@@ -33,40 +33,59 @@ pub fn spawn_speech_bubble(
 pub fn acquire_targets(
     countdown: Res<MatchCountdown>,
     config: Res<match_config::MatchConfig>,
-    mut combatants: Query<(Entity, &mut Combatant, &Transform)>,
+    mut combatants: Query<(Entity, &mut Combatant, &Transform, Option<&ActiveAuras>)>,
 ) {
     // Don't acquire targets until gates open
     if !countdown.gates_opened {
         return;
     }
-    // Build list of all alive combatants with their info (excluding stealthed enemies)
-    // Also track spawn order for each team to respect kill target priorities
-    let mut team1_combatants: Vec<(Entity, Vec3, bool)> = Vec::new();
-    let mut team2_combatants: Vec<(Entity, Vec3, bool)> = Vec::new();
-    
-    for (entity, c, transform) in combatants.iter() {
+
+    // First pass: identify which entities have Shadow Sight
+    let shadow_sight_holders: std::collections::HashSet<Entity> = combatants
+        .iter()
+        .filter_map(|(entity, _, _, auras)| {
+            if let Some(active) = auras {
+                if active.auras.iter().any(|a| a.effect_type == AuraType::ShadowSight) {
+                    return Some(entity);
+                }
+            }
+            None
+        })
+        .collect();
+
+    // Build list of all alive combatants with their info
+    // Tuple: (entity, position, stealthed, has_shadow_sight)
+    let mut team1_combatants: Vec<(Entity, Vec3, bool, bool)> = Vec::new();
+    let mut team2_combatants: Vec<(Entity, Vec3, bool, bool)> = Vec::new();
+
+    for (entity, c, transform, _) in combatants.iter() {
         if !c.is_alive() {
             continue;
         }
-        
+
+        let has_shadow_sight = shadow_sight_holders.contains(&entity);
+
         if c.team == 1 {
-            team1_combatants.push((entity, transform.translation, c.stealthed));
+            team1_combatants.push((entity, transform.translation, c.stealthed, has_shadow_sight));
         } else {
-            team2_combatants.push((entity, transform.translation, c.stealthed));
+            team2_combatants.push((entity, transform.translation, c.stealthed, has_shadow_sight));
         }
     }
-    
+
     // Sort by entity ID to ensure deterministic ordering matching spawn order
     // Entity IDs are assigned sequentially at spawn time
-    team1_combatants.sort_by_key(|(entity, _, _)| entity.index());
-    team2_combatants.sort_by_key(|(entity, _, _)| entity.index());
+    team1_combatants.sort_by_key(|(entity, _, _, _)| entity.index());
+    team2_combatants.sort_by_key(|(entity, _, _, _)| entity.index());
 
     // For each combatant, ensure they have a valid target
-    for (_entity, mut combatant, transform) in combatants.iter_mut() {
+    for (entity, mut combatant, transform, _) in combatants.iter_mut() {
         if !combatant.is_alive() {
             combatant.target = None;
             continue;
         }
+
+        // Check if this combatant has Shadow Sight
+        let i_have_shadow_sight = shadow_sight_holders.contains(&entity);
 
         // Get enemy team combatants and kill target priority
         let (enemy_combatants, kill_target_index) = if combatant.team == 1 {
@@ -75,42 +94,50 @@ pub fn acquire_targets(
             (&team1_combatants, config.team2_kill_target)
         };
 
-        // Check if current target is still valid (alive, on enemy team, and not stealthed)
+        // Visibility check: can see enemy if:
+        // 1. Enemy is not stealthed, OR
+        // 2. I have Shadow Sight buff, OR
+        // 3. Enemy has Shadow Sight buff (they're revealed by picking it up)
+        let can_see = |stealthed: bool, enemy_has_shadow_sight: bool| -> bool {
+            !stealthed || i_have_shadow_sight || enemy_has_shadow_sight
+        };
+
+        // Check if current target is still valid (alive, on enemy team, and visible)
         let target_valid = combatant.target.and_then(|target_entity| {
             enemy_combatants
                 .iter()
-                .find(|(e, _, _)| *e == target_entity)
-                .filter(|(_, _, stealthed)| !stealthed)
+                .find(|(e, _, _, _)| *e == target_entity)
+                .filter(|(_, _, stealthed, enemy_ss)| can_see(*stealthed, *enemy_ss))
         }).is_some();
 
         // If no valid target, acquire a new one
         if !target_valid {
-            // Priority 1: Check if kill target is set and valid
+            // Priority 1: Check if kill target is set and visible
             let kill_target = if let Some(index) = kill_target_index {
                 enemy_combatants
                     .get(index)
-                    .filter(|(_, _, stealthed)| !stealthed)
-                    .map(|(entity, _, _)| *entity)
+                    .filter(|(_, _, stealthed, enemy_ss)| can_see(*stealthed, *enemy_ss))
+                    .map(|(entity, _, _, _)| *entity)
             } else {
                 None
             };
-            
+
             if let Some(priority_target) = kill_target {
                 // Use the kill target
                 combatant.target = Some(priority_target);
             } else {
-                // Priority 2: Fall back to nearest enemy (excluding stealthed)
+                // Priority 2: Fall back to nearest visible enemy
                 let my_pos = transform.translation;
                 let nearest_enemy = enemy_combatants
                     .iter()
-                    .filter(|(_, _, stealthed)| !stealthed)
-                    .min_by(|(_, pos_a, _), (_, pos_b, _)| {
+                    .filter(|(_, _, stealthed, enemy_ss)| can_see(*stealthed, *enemy_ss))
+                    .min_by(|(_, pos_a, _, _), (_, pos_b, _, _)| {
                         let dist_a = my_pos.distance(*pos_a);
                         let dist_b = my_pos.distance(*pos_b);
                         dist_a.partial_cmp(&dist_b).unwrap()
                     });
 
-                combatant.target = nearest_enemy.map(|(entity, _, _)| *entity);
+                combatant.target = nearest_enemy.map(|(entity, _, _, _)| *entity);
             }
         }
     }
