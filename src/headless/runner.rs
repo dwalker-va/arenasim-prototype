@@ -159,18 +159,20 @@ fn headless_setup_match(mut commands: Commands, config: Res<MatchConfig>, mut co
     );
 }
 
-/// Track elapsed time for the headless match
+/// Track elapsed combat time for the headless match (used for timeout detection).
+///
+/// Note: `combat_log.match_time` is updated by `combat_auto_attack` in combat_core.rs,
+/// which runs from the start of the match (including prep phase). We only track
+/// `elapsed_time` here for timeout purposes - it measures time since gates opened.
 fn headless_track_time(
     time: Res<Time>,
-    mut combat_log: ResMut<CombatLog>,
     mut headless_state: ResMut<HeadlessMatchState>,
     countdown: Res<MatchCountdown>,
 ) {
-    // Only track time after gates open
+    // Only track elapsed combat time after gates open (for timeout detection)
     if countdown.gates_opened {
         let dt = time.delta_secs();
         headless_state.elapsed_time += dt;
-        combat_log.match_time = headless_state.elapsed_time;
     }
 }
 

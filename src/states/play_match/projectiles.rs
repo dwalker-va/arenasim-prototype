@@ -13,21 +13,14 @@ use super::combat_core::combatant_id;
 
 /// Spawn visual meshes for newly created projectiles.
 /// Creates a glowing sphere that travels through the air.
+/// Note: Projectiles already have a Transform (added in process_casting for headless compatibility).
 pub fn spawn_projectile_visuals(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     new_projectiles: Query<(Entity, &Projectile), (Added<Projectile>, Without<Mesh3d>)>,
-    combatants: Query<&Transform, With<Combatant>>,
 ) {
     for (projectile_entity, projectile) in new_projectiles.iter() {
-        // Get caster position to spawn projectile at that location
-        let Ok(caster_transform) = combatants.get(projectile.caster) else {
-            continue;
-        };
-        
-        let caster_pos = caster_transform.translation;
-
         // Create a small sphere mesh for the projectile
         let mesh = meshes.add(Sphere::new(0.3));
 
@@ -52,12 +45,11 @@ pub fn spawn_projectile_visuals(
             emissive,
             ..default()
         });
-        
-        // Add visual mesh to the projectile entity
+
+        // Add visual mesh to the projectile entity (Transform already exists from process_casting)
         commands.entity(projectile_entity).insert((
             Mesh3d(mesh),
             MeshMaterial3d(material),
-            Transform::from_translation(caster_pos + Vec3::new(0.0, 1.5, 0.0)), // Start at chest height
         ));
     }
 }

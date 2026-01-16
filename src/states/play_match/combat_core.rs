@@ -1003,7 +1003,8 @@ pub fn process_casting(
         
         // If this ability uses a projectile, spawn it and skip immediate effect application
         if let Some(projectile_speed) = def.projectile_speed {
-            // Spawn projectile visual and logic entity
+            // Spawn projectile with Transform (required for move_projectiles to work in headless mode)
+            // Visual mesh/material is added by spawn_projectile_visuals in graphical mode
             commands.spawn((
                 Projectile {
                     caster: caster_entity,
@@ -1013,6 +1014,7 @@ pub fn process_casting(
                     caster_team,
                     caster_class,
                 },
+                Transform::from_translation(caster_pos + Vec3::new(0.0, 1.5, 0.0)), // Spawn at chest height
                 PlayMatchEntity,
             ));
             continue; // Skip immediate damage/healing - projectile will handle it on impact
