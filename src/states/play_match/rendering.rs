@@ -52,6 +52,8 @@ fn get_ability_icon_path(ability: &str) -> Option<&'static str> {
         "Kick" => Some("icons/abilities/ability_kick.jpg"),
         "Arcane Intellect" => Some("icons/abilities/spell_holy_magicalsentry.jpg"),
         "Battle Shout" => Some("icons/abilities/ability_warrior_battleshout.jpg"),
+        "Ice Barrier" => Some("icons/abilities/spell_ice_lament.jpg"),
+        "Power Word: Shield" => Some("icons/abilities/spell_holy_powerwordshield.jpg"),
         _ => None,
     }
 }
@@ -62,6 +64,7 @@ const SPELL_ICON_ABILITIES: &[&str] = &[
     "Charge", "Rend", "Mortal Strike", "Heroic Strike", "Ambush",
     "Sinister Strike", "Kidney Shot", "Corruption", "Shadowbolt", "Fear",
     "Pummel", "Kick", "Arcane Intellect", "Battle Shout",
+    "Ice Barrier", "Power Word: Shield",
 ];
 
 /// System to load spell icons and register them with egui.
@@ -668,7 +671,8 @@ pub fn render_health_bars(
                         health_color,
                     );
 
-                    // Absorb shield visualization (light blue extension after health)
+                    // Absorb shield visualization (translucent white overlay from right)
+                    // Drawn on top of health bar, from right to left, contained within border
                     if let Some(auras) = active_auras {
                         let absorb_amount: f32 = auras.auras.iter()
                             .filter(|a| a.effect_type == AuraType::Absorb)
@@ -676,17 +680,15 @@ pub fn render_health_bars(
                             .sum();
 
                         if absorb_amount > 0.0 {
-                            // Scale absorb relative to max_health for consistent visualization
-                            // Cap at 50% of bar width to prevent overflow
-                            let absorb_percent = (absorb_amount / combatant.max_health).min(0.5);
+                            // Scale absorb relative to max_health, cap at 100% of bar
+                            let absorb_percent = (absorb_amount / combatant.max_health).min(1.0);
                             let absorb_bar_width = bar_width * absorb_percent;
 
-                            // Start where health bar ends
-                            let health_bar_width = bar_width * health_percent;
-                            let absorb_start_x = bar_pos.x + health_bar_width;
+                            // Draw from right edge, going left
+                            let absorb_start_x = bar_pos.x + bar_width - absorb_bar_width;
 
-                            // Light blue color for shields
-                            let shield_color = egui::Color32::from_rgb(100, 180, 255);
+                            // Translucent white overlay
+                            let shield_color = egui::Color32::from_rgba_unmultiplied(255, 255, 255, 100);
 
                             ui.painter().rect_filled(
                                 egui::Rect::from_min_size(

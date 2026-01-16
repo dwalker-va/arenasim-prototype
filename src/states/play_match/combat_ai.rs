@@ -704,9 +704,6 @@ pub fn decide_abilities(
                 // Cast Power Word: Shield on target
                 if let Some((shield_entity, target_pos)) = shield_target {
                     if pw_shield.can_cast(&combatant, target_pos, my_pos) {
-                        // Spawn speech bubble
-                        spawn_speech_bubble(&mut commands, entity, "PW: Shield");
-
                         // Consume mana
                         combatant.current_mana -= pw_shield_def.mana_cost;
 
@@ -764,12 +761,6 @@ pub fn decide_abilities(
 
                         // Mark this target as shielded this frame (prevents other Priests from shielding same target)
                         shielded_this_frame.insert(shield_entity);
-
-                        info!(
-                            "Team {} {} casts Power Word: Shield",
-                            combatant.team,
-                            combatant.class.name()
-                        );
 
                         continue; // Done this frame
                     }
