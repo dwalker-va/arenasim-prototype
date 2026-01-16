@@ -1824,19 +1824,28 @@ pub fn update_shield_bubbles(
             ),
         };
 
-        let mesh = meshes.add(Sphere::new(1.2)); // Slightly larger than combatant capsule (0.5 radius)
+        // Use unit sphere stretched into egg shape to encompass combatant
+        let mesh = meshes.add(Sphere::new(1.0));
         let material = materials.add(StandardMaterial {
             base_color,
             emissive,
-            alpha_mode: AlphaMode::Blend,
-            cull_mode: None, // Render both sides for bubble effect
+            // Use additive blending to avoid depth sorting flicker
+            alpha_mode: AlphaMode::Add,
+            // Disable depth writes so bubble doesn't interfere with other objects
+            depth_bias: 0.0,
             ..default()
         });
+
+        // Stretch sphere into tall narrow ellipsoid like WoW's shield bubble
+        // Combatant transform is at capsule center (~y=1.0), so no Y offset needed
+        // Scale large enough to fully encompass the combatant capsule without intersection
+        let transform = Transform::from_translation(position)
+            .with_scale(Vec3::new(0.9, 1.4, 0.9));
 
         commands.spawn((
             Mesh3d(mesh),
             MeshMaterial3d(material),
-            Transform::from_translation(position + Vec3::new(0.0, 1.0, 0.0)), // Center on combatant
+            transform,
             ShieldBubble {
                 combatant: combatant_entity,
                 spell_school,
@@ -1860,8 +1869,8 @@ pub fn follow_shield_bubbles(
 ) {
     for (bubble, mut bubble_transform) in bubbles.iter_mut() {
         if let Ok(combatant_transform) = combatants.get(bubble.combatant) {
-            // Position bubble centered on combatant (slightly higher to center on body)
-            bubble_transform.translation = combatant_transform.translation + Vec3::new(0.0, 1.0, 0.0);
+            // Combatant transform is at capsule center, so use directly
+            bubble_transform.translation = combatant_transform.translation;
         }
     }
 }
