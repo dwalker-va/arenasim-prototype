@@ -222,6 +222,18 @@ pub struct ShadowSightOrb {
     pub spawn_index: u8,
 }
 
+/// Component marking a Shadow Sight orb that is being consumed.
+/// The orb will animate (shrink toward collector, fade) before despawning.
+#[derive(Component)]
+pub struct ShadowSightOrbConsuming {
+    /// Entity that picked up the orb (for movement toward them)
+    pub collector: Entity,
+    /// Time remaining before despawn (seconds)
+    pub lifetime: f32,
+    /// Initial lifetime for calculating animation progress
+    pub initial_lifetime: f32,
+}
+
 // ============================================================================
 // Enums
 // ============================================================================

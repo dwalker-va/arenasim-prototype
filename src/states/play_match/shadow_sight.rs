@@ -18,6 +18,9 @@ pub const SHADOW_SIGHT_DURATION: f32 = 15.0;
 /// Radius at which a combatant can pick up an orb
 const ORB_PICKUP_RADIUS: f32 = 2.5;
 
+/// Duration of the orb consumption animation (seconds)
+const ORB_CONSUMPTION_DURATION: f32 = 0.4;
+
 /// Spawn positions for Shadow Sight orbs (symmetric on Z-axis)
 /// Positioned near the center but offset north/south for accessibility
 const ORB_SPAWN_POSITIONS: [Vec3; 2] = [
@@ -85,6 +88,7 @@ pub fn track_shadow_sight_timer(
 }
 
 /// Spawn a single Shadow Sight orb entity with visual representation.
+/// Includes a core sphere and an outer glowing aura.
 fn spawn_shadow_sight_orb(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
@@ -92,21 +96,34 @@ fn spawn_shadow_sight_orb(
     position: Vec3,
     spawn_index: u8,
 ) {
-    // Create a glowing purple sphere for the orb
-    let mesh = meshes.add(Sphere::new(0.6));
-    let material = materials.add(StandardMaterial {
-        base_color: Color::srgba(0.8, 0.2, 1.0, 0.9), // Purple glow
-        emissive: LinearRgba::new(0.6, 0.1, 0.8, 1.0),
+    // Core orb - solid purple sphere
+    let core_mesh = meshes.add(Sphere::new(0.5));
+    let core_material = materials.add(StandardMaterial {
+        base_color: Color::srgba(0.7, 0.2, 1.0, 1.0), // Bright purple
+        emissive: LinearRgba::new(0.5, 0.1, 0.8, 1.0), // Purple glow
+        ..default()
+    });
+
+    // Outer aura - larger, transparent, strongly emissive
+    let aura_mesh = meshes.add(Sphere::new(1.0));
+    let aura_material = materials.add(StandardMaterial {
+        base_color: Color::srgba(0.6, 0.1, 0.9, 0.15), // Very transparent purple
+        emissive: LinearRgba::new(0.8, 0.2, 1.2, 1.0), // Strong purple/magenta glow
         alpha_mode: AlphaMode::Blend,
         ..default()
     });
 
+    // Spawn core orb with aura as child
     commands.spawn((
-        Mesh3d(mesh),
-        MeshMaterial3d(material),
+        Mesh3d(core_mesh),
+        MeshMaterial3d(core_material),
         Transform::from_translation(position),
         ShadowSightOrb { spawn_index },
         PlayMatchEntity,
+    )).with_child((
+        Mesh3d(aura_mesh),
+        MeshMaterial3d(aura_material),
+        Transform::default(), // Centered on parent
     ));
 }
 
@@ -118,7 +135,7 @@ pub fn check_orb_pickups(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
     combatants: Query<(Entity, &Combatant, &Transform)>,
-    orbs: Query<(Entity, &ShadowSightOrb, &Transform)>,
+    orbs: Query<(Entity, &ShadowSightOrb, &Transform), Without<ShadowSightOrbConsuming>>,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
     // Don't process pickups during victory celebration
@@ -140,8 +157,12 @@ pub fn check_orb_pickups(
             if distance <= ORB_PICKUP_RADIUS {
                 // Combatant picks up the orb!
 
-                // Despawn the orb
-                commands.entity(orb_entity).despawn_recursive();
+                // Mark orb as being consumed (will animate and despawn)
+                commands.entity(orb_entity).insert(ShadowSightOrbConsuming {
+                    collector: combatant_entity,
+                    lifetime: ORB_CONSUMPTION_DURATION,
+                    initial_lifetime: ORB_CONSUMPTION_DURATION,
+                });
 
                 // Apply Shadow Sight aura to the combatant
                 commands.spawn(AuraPending {
@@ -183,14 +204,64 @@ pub fn check_orb_pickups(
     }
 }
 
-/// Animate Shadow Sight orbs with a pulsing effect.
+/// Animate Shadow Sight orbs with bobbing, rotation, and pulsing.
 pub fn animate_shadow_sight_orbs(
     time: Res<Time>,
-    mut orbs: Query<&mut Transform, With<ShadowSightOrb>>,
+    mut orbs: Query<&mut Transform, (With<ShadowSightOrb>, Without<ShadowSightOrbConsuming>)>,
 ) {
-    let pulse = (time.elapsed_secs() * 3.0).sin() * 0.15 + 1.0;
+    let elapsed = time.elapsed_secs();
+
+    // Pulsing scale (breathe effect)
+    let pulse = (elapsed * 2.5).sin() * 0.12 + 1.0;
+
+    // Vertical bobbing (gentle float up/down)
+    let bob_offset = (elapsed * 1.5).sin() * 0.3;
+
+    // Continuous rotation
+    let rotation = Quat::from_rotation_y(elapsed * 1.2);
 
     for mut transform in orbs.iter_mut() {
+        // Apply pulsing scale
         transform.scale = Vec3::splat(pulse);
+
+        // Apply bobbing (adjust Y relative to base height of 1.0)
+        transform.translation.y = 1.0 + bob_offset;
+
+        // Apply rotation
+        transform.rotation = rotation;
+    }
+}
+
+/// Animate orbs being consumed - shrink and move toward the collector before despawning.
+pub fn animate_orb_consumption(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut consuming_orbs: Query<(Entity, &mut Transform, &mut ShadowSightOrbConsuming), Without<Combatant>>,
+    collectors: Query<&Transform, (With<Combatant>, Without<ShadowSightOrbConsuming>)>,
+) {
+    let delta = time.delta_secs();
+
+    for (entity, mut orb_transform, mut consuming) in consuming_orbs.iter_mut() {
+        consuming.lifetime -= delta;
+
+        // Calculate animation progress (0 = just picked up, 1 = about to despawn)
+        let progress = 1.0 - (consuming.lifetime / consuming.initial_lifetime).max(0.0);
+
+        // Shrink the orb as it's consumed (ease out for snappy feel)
+        let scale = (1.0 - progress).powi(2);
+        orb_transform.scale = Vec3::splat(scale.max(0.01));
+
+        // Move toward the collector if they still exist
+        if let Ok(collector_transform) = collectors.get(consuming.collector) {
+            let target = collector_transform.translation + Vec3::Y * 1.5; // Aim for chest height
+            let direction = (target - orb_transform.translation).normalize_or_zero();
+            let speed = 8.0 * progress + 2.0; // Accelerate as it gets closer
+            orb_transform.translation += direction * speed * delta;
+        }
+
+        // Despawn when animation completes
+        if consuming.lifetime <= 0.0 {
+            commands.entity(entity).despawn_recursive();
+        }
     }
 }

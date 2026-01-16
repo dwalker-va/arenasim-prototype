@@ -9,11 +9,12 @@ use std::time::Duration;
 use crate::combat::log::{CombatLog, CombatLogEventType, CombatantMetadata, MatchMetadata};
 use crate::states::match_config::MatchConfig;
 use crate::states::play_match::{
-    acquire_targets, apply_pending_auras, check_interrupts, check_orb_pickups, combat_auto_attack,
-    combatant_id, decide_abilities, move_projectiles, move_to_target, process_aura_breaks,
-    process_casting, process_dot_ticks, process_interrupts, process_projectile_hits,
-    regenerate_resources, track_shadow_sight_timer, update_auras, update_countdown, Combatant,
-    FloatingTextState, MatchCountdown, ShadowSightState, SimulationSpeed,
+    acquire_targets, animate_orb_consumption, apply_pending_auras, check_interrupts,
+    check_orb_pickups, combat_auto_attack, combatant_id, decide_abilities, move_projectiles,
+    move_to_target, process_aura_breaks, process_casting, process_dot_ticks, process_interrupts,
+    process_projectile_hits, regenerate_resources, track_shadow_sight_timer, update_auras,
+    update_countdown, Combatant, FloatingTextState, MatchCountdown, ShadowSightState,
+    SimulationSpeed,
 };
 
 use super::config::HeadlessMatchConfig;
@@ -72,6 +73,7 @@ impl Plugin for HeadlessPlugin {
                     process_aura_breaks,
                     acquire_targets,
                     check_orb_pickups,
+                    animate_orb_consumption,
                     decide_abilities,
                     check_interrupts,
                     process_interrupts,
