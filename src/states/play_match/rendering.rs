@@ -668,6 +668,37 @@ pub fn render_health_bars(
                         health_color,
                     );
 
+                    // Absorb shield visualization (light blue extension after health)
+                    if let Some(auras) = active_auras {
+                        let absorb_amount: f32 = auras.auras.iter()
+                            .filter(|a| a.effect_type == AuraType::Absorb)
+                            .map(|a| a.magnitude)
+                            .sum();
+
+                        if absorb_amount > 0.0 {
+                            // Scale absorb relative to max_health for consistent visualization
+                            // Cap at 50% of bar width to prevent overflow
+                            let absorb_percent = (absorb_amount / combatant.max_health).min(0.5);
+                            let absorb_bar_width = bar_width * absorb_percent;
+
+                            // Start where health bar ends
+                            let health_bar_width = bar_width * health_percent;
+                            let absorb_start_x = bar_pos.x + health_bar_width;
+
+                            // Light blue color for shields
+                            let shield_color = egui::Color32::from_rgb(100, 180, 255);
+
+                            ui.painter().rect_filled(
+                                egui::Rect::from_min_size(
+                                    egui::pos2(absorb_start_x, bar_pos.y),
+                                    egui::vec2(absorb_bar_width, bar_height),
+                                ),
+                                2.0,
+                                shield_color,
+                            );
+                        }
+                    }
+
                     // Health bar border (pulsing red if low HP)
                     let is_low_hp = health_percent < LOW_HP_THRESHOLD;
                     let border_color = if is_low_hp {

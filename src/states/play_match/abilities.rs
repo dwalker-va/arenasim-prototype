@@ -61,6 +61,9 @@ pub enum AbilityType {
     // Buff abilities
     ArcaneIntellect, // Mage buff - increases max mana
     BattleShout,     // Warrior buff - increases attack power
+    // Defensive abilities
+    IceBarrier,      // Mage self-shield
+    PowerWordShield, // Priest shield (self or ally)
 }
 
 /// Ability definition with all parameters.
@@ -480,6 +483,51 @@ impl AbilityType {
                 applies_aura: Some((AuraType::AttackPowerIncrease, 120.0, 20.0, 0.0)),
                 projectile_speed: None, // Instant buff
                 spell_school: SpellSchool::None, // Physical/shout, can't be locked out
+                is_interrupt: false,
+                lockout_duration: 0.0,
+            },
+
+            // ==================== DEFENSIVE ABILITIES ====================
+
+            AbilityType::IceBarrier => AbilityDefinition {
+                name: "Ice Barrier",
+                cast_time: 0.0, // Instant cast
+                range: 0.0, // Self only
+                mana_cost: 30.0,
+                cooldown: 30.0, // 30 second cooldown
+                damage_base_min: 0.0,
+                damage_base_max: 0.0,
+                damage_coefficient: 0.0,
+                damage_scales_with: ScalingStat::None,
+                healing_base_min: 0.0,
+                healing_base_max: 0.0,
+                healing_coefficient: 0.0,
+                // Absorb 60 damage, duration 60s (effectively until broken)
+                applies_aura: Some((AuraType::Absorb, 60.0, 60.0, 0.0)),
+                projectile_speed: None, // Instant buff
+                spell_school: SpellSchool::Frost,
+                is_interrupt: false,
+                lockout_duration: 0.0,
+            },
+
+            AbilityType::PowerWordShield => AbilityDefinition {
+                name: "Power Word: Shield",
+                cast_time: 0.0, // Instant cast
+                range: 40.0, // Can target allies
+                mana_cost: 25.0,
+                cooldown: 0.0, // No caster cooldown - limited by Weakened Soul on target
+                damage_base_min: 0.0,
+                damage_base_max: 0.0,
+                damage_coefficient: 0.0,
+                damage_scales_with: ScalingStat::None,
+                healing_base_min: 0.0,
+                healing_base_max: 0.0,
+                healing_coefficient: 0.0,
+                // Absorb 50 damage, duration 30s
+                // NOTE: Also applies Weakened Soul (15s) - handled in AI
+                applies_aura: Some((AuraType::Absorb, 30.0, 50.0, 0.0)),
+                projectile_speed: None, // Instant buff
+                spell_school: SpellSchool::Holy,
                 is_interrupt: false,
                 lockout_duration: 0.0,
             },

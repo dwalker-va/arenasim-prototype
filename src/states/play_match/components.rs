@@ -276,6 +276,11 @@ pub enum AuraType {
     AttackPowerIncrease,
     /// Shadow Sight - reveals stealthed enemies AND makes the holder visible to enemies
     ShadowSight,
+    /// Absorbs incoming damage (magnitude = remaining absorb amount)
+    /// When damage is absorbed, magnitude decreases. Aura removed when magnitude reaches 0.
+    Absorb,
+    /// Weakened Soul - prevents receiving Power Word: Shield (applied by PW:S)
+    WeakenedSoul,
 }
 
 // ============================================================================

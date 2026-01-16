@@ -145,7 +145,7 @@ pub fn acquire_targets(
 pub fn decide_abilities(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
-    mut combatants: Query<(Entity, &mut Combatant, &Transform, Option<&ActiveAuras>), Without<CastingState>>,
+    mut combatants: Query<(Entity, &mut Combatant, &Transform, Option<&mut ActiveAuras>), Without<CastingState>>,
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
@@ -178,6 +178,10 @@ pub fn decide_abilities(
     // Queue for instant ability attacks (Ambush, Sinister Strike, Mortal Strike)
     // Format: (attacker_entity, target_entity, damage, attacker_team, attacker_class, ability_type)
     let mut instant_attacks: Vec<(Entity, Entity, f32, u8, match_config::CharacterClass, AbilityType)> = Vec::new();
+
+    // Track targets that have been shielded THIS FRAME to prevent same-frame double-shielding
+    // This handles the case where multiple Priests try to shield the same target before AuraPending is processed
+    let mut shielded_this_frame: std::collections::HashSet<Entity> = std::collections::HashSet::new();
     
     // Queue for Frost Nova damage (caster, target, damage, caster_team, caster_class, target_pos)
     let mut frost_nova_damage: Vec<(Entity, Entity, f32, u8, match_config::CharacterClass, Vec3)> = Vec::new();
@@ -188,7 +192,7 @@ pub fn decide_abilities(
         }
         
         // WoW Mechanic: Cannot use abilities while stunned or feared
-        let is_incapacitated = if let Some(auras) = auras {
+        let is_incapacitated = if let Some(ref auras) = auras {
             auras.auras.iter().any(|a| matches!(a.effect_type, AuraType::Stun | AuraType::Fear))
         } else {
             false
@@ -204,6 +208,75 @@ pub fn decide_abilities(
             // Check if global cooldown is active
             if combatant.global_cooldown > 0.0 {
                 continue; // Can't use abilities during GCD
+            }
+
+            // Priority -1: Cast Ice Barrier on self if not shielded
+            // Pre-combat (full HP): Always cast
+            // In-combat: Only recast when HP < 80%
+            let has_absorb_shield = if let Some(auras) = active_auras_map.get(&entity) {
+                auras.iter().any(|a| a.effect_type == AuraType::Absorb)
+            } else {
+                false
+            };
+
+            let is_full_hp = combatant.current_health >= combatant.max_health;
+            let is_below_threshold = combatant.current_health < combatant.max_health * 0.8;
+            let should_shield = !has_absorb_shield && (is_full_hp || is_below_threshold);
+
+            if should_shield {
+                let ice_barrier = AbilityType::IceBarrier;
+                let barrier_def = ice_barrier.definition();
+                let barrier_on_cooldown = combatant.ability_cooldowns.contains_key(&ice_barrier);
+
+                if !barrier_on_cooldown && combatant.current_mana >= barrier_def.mana_cost {
+                    // Spawn speech bubble
+                    spawn_speech_bubble(&mut commands, entity, "Ice Barrier");
+
+                    // Consume mana
+                    combatant.current_mana -= barrier_def.mana_cost;
+
+                    // Put ability on cooldown
+                    combatant.ability_cooldowns.insert(ice_barrier, barrier_def.cooldown);
+
+                    // Trigger global cooldown
+                    combatant.global_cooldown = 1.5;
+
+                    // Log ability cast
+                    let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
+                    combat_log.log_ability_cast(
+                        caster_id,
+                        "Ice Barrier".to_string(),
+                        None,
+                        format!("Team {} {} casts Ice Barrier", combatant.team, combatant.class.name()),
+                    );
+
+                    // Apply the absorb shield aura
+                    let (aura_type, duration, magnitude, _) = barrier_def.applies_aura.unwrap();
+                    commands.spawn(AuraPending {
+                        target: entity,
+                        aura: Aura {
+                            effect_type: aura_type,
+                            duration,
+                            magnitude,
+                            break_on_damage_threshold: 0.0,
+                            accumulated_damage: 0.0,
+                            tick_interval: 0.0,
+                            time_until_next_tick: 0.0,
+                            caster: Some(entity),
+                            ability_name: "Ice Barrier".to_string(),
+                            fear_direction: (0.0, 0.0),
+                            fear_direction_timer: 0.0,
+                        },
+                    });
+
+                    info!(
+                        "Team {} {} casts Ice Barrier",
+                        combatant.team,
+                        combatant.class.name()
+                    );
+
+                    continue; // Done this frame
+                }
             }
 
             // Priority 0: Cast Arcane Intellect on allies with mana who don't have it
@@ -254,7 +327,7 @@ pub fn decide_abilities(
                 let def = ability.definition();
 
                 // Check if spell school is locked out
-                if !is_spell_school_locked(def.spell_school, auras) && ability.can_cast(&combatant, target_pos, my_pos) {
+                if !is_spell_school_locked(def.spell_school, auras.as_deref()) && ability.can_cast(&combatant, target_pos, my_pos) {
                     // Consume mana
                     combatant.current_mana -= def.mana_cost;
 
@@ -309,7 +382,7 @@ pub fn decide_abilities(
             let nova_on_cooldown = combatant.ability_cooldowns.contains_key(&frost_nova);
             
             // Check if Frost school is locked out
-            let frost_locked_out = is_spell_school_locked(nova_def.spell_school, auras);
+            let frost_locked_out = is_spell_school_locked(nova_def.spell_school, auras.as_deref());
             
             if !nova_on_cooldown && !frost_locked_out && combatant.current_mana >= nova_def.mana_cost {
                 // Check if any enemies are within Frost Nova range (melee range for threat detection)
@@ -430,7 +503,7 @@ pub fn decide_abilities(
             let def = ability.definition();
             
             // Check if spell school is locked out
-            if is_spell_school_locked(def.spell_school, auras) {
+            if is_spell_school_locked(def.spell_school, auras.as_deref()) {
                 continue; // Can't cast - spell school is locked
             }
             
@@ -514,7 +587,7 @@ pub fn decide_abilities(
                 let def = ability.definition();
                 
                 // Check if spell school is locked out
-                if !is_spell_school_locked(def.spell_school, auras) && ability.can_cast(&combatant, target_pos, my_pos) {
+                if !is_spell_school_locked(def.spell_school, auras.as_deref()) && ability.can_cast(&combatant, target_pos, my_pos) {
                     let def = ability.definition();
 
                     // Consume mana
@@ -564,7 +637,145 @@ pub fn decide_abilities(
                     continue; // Done this frame
                 }
             }
-            
+
+            // Priority 0.5: Cast Power Word: Shield on allies without Weakened Soul
+            // Pre-combat (full HP allies): Shield everyone
+            // In-combat: Shield allies below 70% HP
+            let pw_shield = AbilityType::PowerWordShield;
+            let pw_shield_def = pw_shield.definition();
+
+            if !is_spell_school_locked(pw_shield_def.spell_school, auras.as_deref())
+               && combatant.current_mana >= pw_shield_def.mana_cost
+            {
+                let mut shield_target: Option<(Entity, Vec3)> = None;
+
+                // Find ally to shield (prioritize lowest HP)
+                let mut best_candidate: Option<(Entity, Vec3, f32)> = None; // (entity, pos, hp_percent)
+
+                for (ally_entity, &(ally_team, _ally_class, ally_hp, ally_max_hp)) in combatant_info.iter() {
+                    // Must be same team and alive
+                    if ally_team != combatant.team || ally_hp <= 0.0 {
+                        continue;
+                    }
+
+                    // Check if ally has Weakened Soul or already has Absorb shield
+                    // Weakened Soul from ANY priest prevents PW:Shield (not just the caster's WS)
+                    let ally_auras = active_auras_map.get(ally_entity);
+                    let has_weakened_soul = ally_auras
+                        .map_or(false, |auras| auras.iter().any(|a| a.effect_type == AuraType::WeakenedSoul));
+                    let has_absorb = ally_auras
+                        .map_or(false, |auras| auras.iter().any(|a| a.effect_type == AuraType::Absorb));
+
+                    // Also check if target was shielded by another Priest THIS FRAME
+                    let shielded_this_frame_check = shielded_this_frame.contains(ally_entity);
+
+                    if has_weakened_soul || has_absorb || shielded_this_frame_check {
+                        continue; // Can't shield this target
+                    }
+
+                    // Get position
+                    let Some(&ally_pos) = positions.get(ally_entity) else {
+                        continue;
+                    };
+
+                    let hp_percent = ally_hp / ally_max_hp;
+
+                    // Pre-combat (full HP): Shield anyone
+                    // In-combat: Only shield if below 70% HP
+                    let is_full_hp = hp_percent >= 1.0;
+                    let is_below_threshold = hp_percent < 0.7;
+
+                    if is_full_hp || is_below_threshold {
+                        // Track lowest HP candidate
+                        match best_candidate {
+                            None => best_candidate = Some((*ally_entity, ally_pos, hp_percent)),
+                            Some((_, _, best_percent)) if hp_percent < best_percent => {
+                                best_candidate = Some((*ally_entity, ally_pos, hp_percent));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
+                if let Some((target, target_pos, _)) = best_candidate {
+                    shield_target = Some((target, target_pos));
+                }
+
+                // Cast Power Word: Shield on target
+                if let Some((shield_entity, target_pos)) = shield_target {
+                    if pw_shield.can_cast(&combatant, target_pos, my_pos) {
+                        // Spawn speech bubble
+                        spawn_speech_bubble(&mut commands, entity, "PW: Shield");
+
+                        // Consume mana
+                        combatant.current_mana -= pw_shield_def.mana_cost;
+
+                        // Trigger global cooldown
+                        combatant.global_cooldown = 1.5;
+
+                        // Log ability cast
+                        let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
+                        let target_id = combatant_info.get(&shield_entity).map(|(team, class, _, _)| {
+                            format!("Team {} {}", team, class.name())
+                        });
+                        combat_log.log_ability_cast(
+                            caster_id,
+                            "Power Word: Shield".to_string(),
+                            target_id,
+                            format!("Team {} {} casts Power Word: Shield", combatant.team, combatant.class.name()),
+                        );
+
+                        // Apply the absorb shield aura
+                        let (aura_type, duration, magnitude, _) = pw_shield_def.applies_aura.unwrap();
+                        commands.spawn(AuraPending {
+                            target: shield_entity,
+                            aura: Aura {
+                                effect_type: aura_type,
+                                duration,
+                                magnitude,
+                                break_on_damage_threshold: 0.0,
+                                accumulated_damage: 0.0,
+                                tick_interval: 0.0,
+                                time_until_next_tick: 0.0,
+                                caster: Some(entity),
+                                ability_name: "Power Word: Shield".to_string(),
+                                fear_direction: (0.0, 0.0),
+                                fear_direction_timer: 0.0,
+                            },
+                        });
+
+                        // Apply Weakened Soul debuff (15 seconds)
+                        commands.spawn(AuraPending {
+                            target: shield_entity,
+                            aura: Aura {
+                                effect_type: AuraType::WeakenedSoul,
+                                duration: 15.0,
+                                magnitude: 0.0, // Not used
+                                break_on_damage_threshold: 0.0,
+                                accumulated_damage: 0.0,
+                                tick_interval: 0.0,
+                                time_until_next_tick: 0.0,
+                                caster: Some(entity),
+                                ability_name: "Weakened Soul".to_string(),
+                                fear_direction: (0.0, 0.0),
+                                fear_direction_timer: 0.0,
+                            },
+                        });
+
+                        // Mark this target as shielded this frame (prevents other Priests from shielding same target)
+                        shielded_this_frame.insert(shield_entity);
+
+                        info!(
+                            "Team {} {} casts Power Word: Shield",
+                            combatant.team,
+                            combatant.class.name()
+                        );
+
+                        continue; // Done this frame
+                    }
+                }
+            }
+
             // Find the lowest HP ally (including self)
             let mut lowest_hp_ally: Option<(Entity, f32, Vec3)> = None;
             
@@ -601,7 +812,7 @@ pub fn decide_abilities(
                 let def = ability.definition();
                 
                 // Check if spell school is locked out
-                if !is_spell_school_locked(def.spell_school, auras) && ability.can_cast(&combatant, target_pos, my_pos) {
+                if !is_spell_school_locked(def.spell_school, auras.as_deref()) && ability.can_cast(&combatant, target_pos, my_pos) {
                     let def = ability.definition();
 
                     // Trigger global cooldown (1.5s standard WoW GCD)
@@ -655,7 +866,7 @@ pub fn decide_abilities(
             let def = ability.definition();
             
             // Check if spell school is locked out
-            if !on_cooldown && !is_spell_school_locked(def.spell_school, auras) && ability.can_cast(&combatant, target_pos, my_pos) {
+            if !on_cooldown && !is_spell_school_locked(def.spell_school, auras.as_deref()) && ability.can_cast(&combatant, target_pos, my_pos) {
                 let def = ability.definition();
 
                 // Put on cooldown
@@ -820,7 +1031,7 @@ pub fn decide_abilities(
             let charge_on_cooldown = combatant.ability_cooldowns.contains_key(&charge);
             
             // Check if rooted
-            let is_rooted = if let Some(auras) = auras {
+            let is_rooted = if let Some(ref auras) = auras {
                 auras.auras.iter().any(|aura| matches!(aura.effect_type, AuraType::Root))
             } else {
                 false
@@ -1264,7 +1475,7 @@ pub fn decide_abilities(
                 let corruption_def = corruption.definition();
 
                 // Check if Shadow school is locked out
-                if !is_spell_school_locked(corruption_def.spell_school, auras) {
+                if !is_spell_school_locked(corruption_def.spell_school, auras.as_deref()) {
                     if corruption.can_cast(&combatant, target_pos, my_pos) {
                         // Consume mana
                         combatant.current_mana -= corruption_def.mana_cost;
@@ -1339,7 +1550,7 @@ pub fn decide_abilities(
 
             if fear_cooldown <= 0.0 && !target_is_ccd {
                 // Check if Shadow school is locked out
-                if !is_spell_school_locked(fear_def.spell_school, auras) {
+                if !is_spell_school_locked(fear_def.spell_school, auras.as_deref()) {
                     if fear.can_cast(&combatant, target_pos, my_pos) {
                         // Trigger global cooldown (starts when cast begins)
                         combatant.global_cooldown = 1.5;
@@ -1381,7 +1592,7 @@ pub fn decide_abilities(
             let shadowbolt_def = shadowbolt.definition();
 
             // Check if Shadow school is locked out
-            if is_spell_school_locked(shadowbolt_def.spell_school, auras) {
+            if is_spell_school_locked(shadowbolt_def.spell_school, auras.as_deref()) {
                 continue; // Can't cast - spell school is locked
             }
 
@@ -1426,17 +1637,21 @@ pub fn decide_abilities(
         let mut actual_damage = 0.0;
         let mut target_team = 0;
         let mut target_class = match_config::CharacterClass::Warrior; // Default, will be overwritten
-        
-        if let Ok((_, mut target, target_transform, _)) = combatants.get_mut(target_entity) {
+
+        if let Ok((_, mut target, target_transform, mut target_auras)) = combatants.get_mut(target_entity) {
             if target.is_alive() {
-                actual_damage = damage.min(target.current_health);
-                target.current_health = (target.current_health - damage).max(0.0);
-                target.damage_taken += actual_damage;
+                // Apply damage with absorb shield consideration
+                let (dmg, _absorbed) = super::combat_core::apply_damage_with_absorb(
+                    damage,
+                    &mut target,
+                    target_auras.as_deref_mut(),
+                );
+                actual_damage = dmg;
                 target_team = target.team;
                 target_class = target.class;
-                
-                // Warriors generate Rage from taking damage
-                if target.resource_type == ResourceType::Rage {
+
+                // Warriors generate Rage from taking damage (only on actual health damage)
+                if actual_damage > 0.0 && target.resource_type == ResourceType::Rage {
                     let rage_gain = actual_damage * 0.15;
                     target.current_mana = (target.current_mana + rage_gain).min(target.max_mana);
                 }
@@ -1518,21 +1733,25 @@ pub fn decide_abilities(
     }
     
     // Process queued Frost Nova damage
-    for (caster_entity, target_entity, damage, caster_team, caster_class, target_pos) in frost_nova_damage {
+    for (caster_entity, target_entity, damage, caster_team, caster_class, _target_pos) in frost_nova_damage {
         let mut actual_damage = 0.0;
         let mut target_team = 0;
         let mut target_class = match_config::CharacterClass::Warrior;
-        
-        if let Ok((_, mut target, target_transform, _)) = combatants.get_mut(target_entity) {
+
+        if let Ok((_, mut target, target_transform, mut target_auras)) = combatants.get_mut(target_entity) {
             if target.is_alive() {
-                actual_damage = damage.min(target.current_health);
-                target.current_health = (target.current_health - damage).max(0.0);
-                target.damage_taken += actual_damage;
+                // Apply damage with absorb shield consideration
+                let (dmg, _absorbed) = super::combat_core::apply_damage_with_absorb(
+                    damage,
+                    &mut target,
+                    target_auras.as_deref_mut(),
+                );
+                actual_damage = dmg;
                 target_team = target.team;
                 target_class = target.class;
-                
-                // Warriors generate Rage from taking damage
-                if target.resource_type == ResourceType::Rage {
+
+                // Warriors generate Rage from taking damage (only on actual health damage)
+                if actual_damage > 0.0 && target.resource_type == ResourceType::Rage {
                     let rage_gain = actual_damage * 0.15;
                     target.current_mana = (target.current_mana + rage_gain).min(target.max_mana);
                 }

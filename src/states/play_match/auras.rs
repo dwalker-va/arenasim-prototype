@@ -147,9 +147,11 @@ pub fn apply_pending_auras(
         }
 
         // Check if target already has this buff type (prevent stacking for buff auras)
+        // Also includes Absorb shields and WeakenedSoul to prevent same-frame double-application
         let is_buff_aura = matches!(
             pending.aura.effect_type,
             AuraType::MaxHealthIncrease | AuraType::MaxManaIncrease | AuraType::AttackPowerIncrease
+            | AuraType::Absorb | AuraType::WeakenedSoul
         );
         if is_buff_aura {
             // Convert aura type to a simple u8 for the HashSet key
@@ -157,6 +159,8 @@ pub fn apply_pending_auras(
                 AuraType::MaxHealthIncrease => 0,
                 AuraType::MaxManaIncrease => 1,
                 AuraType::AttackPowerIncrease => 2,
+                AuraType::Absorb => 3,
+                AuraType::WeakenedSoul => 4,
                 _ => 255, // Won't happen for buff auras
             };
 
@@ -335,6 +339,8 @@ pub fn process_aura_breaks(
                         AuraType::SpellSchoolLockout => "Lockout", // Should never break on damage (has 0.0 threshold)
                         AuraType::HealingReduction => "Mortal Strike", // Should never break on damage (has 0.0 threshold)
                         AuraType::ShadowSight => "Shadow Sight", // Should never break on damage (has 0.0 threshold)
+                        AuraType::Absorb => "Shield", // Shields don't break on damage, they absorb it
+                        AuraType::WeakenedSoul => "Weakened Soul", // Debuff, doesn't break on damage
                     };
                     
                     let message = format!(
@@ -466,29 +472,31 @@ pub fn process_dot_ticks(
     // Second pass: apply queued DoT damage to targets
     for (target_entity, caster_entity, damage, target_pos, caster_team, caster_class, ability_name) in dot_damage_to_apply {
         // Get target combatant
-        let Ok((_, mut target, _, _)) = combatants_with_auras.get_mut(target_entity) else {
+        let Ok((_, mut target, _, mut target_auras)) = combatants_with_auras.get_mut(target_entity) else {
             continue;
         };
-        
+
         if !target.is_alive() {
             continue;
         }
-        
+
         let target_team = target.team;
         let target_class = target.class;
-        
-        // Apply damage
-        let actual_damage = damage.min(target.current_health);
-        target.current_health = (target.current_health - damage).max(0.0);
-        target.damage_taken += actual_damage;
-        
-        // Track damage for aura breaking
+
+        // Apply damage with absorb shield consideration
+        let (actual_damage, _absorbed) = super::combat_core::apply_damage_with_absorb(
+            damage,
+            &mut target,
+            Some(&mut target_auras),
+        );
+
+        // Track damage for aura breaking (only actual damage, not absorbed)
         commands.entity(target_entity).insert(DamageTakenThisFrame {
             amount: actual_damage,
         });
-        
-        // Warriors generate Rage from taking damage
-        if target.resource_type == ResourceType::Rage {
+
+        // Warriors generate Rage from taking damage (only on actual health damage)
+        if actual_damage > 0.0 && target.resource_type == ResourceType::Rage {
             let rage_gain = actual_damage * 0.15;
             target.current_mana = (target.current_mana + rage_gain).min(target.max_mana);
         }

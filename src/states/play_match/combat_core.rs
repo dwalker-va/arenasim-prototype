@@ -23,6 +23,51 @@ pub fn combatant_id(team: u8, class: match_config::CharacterClass) -> CombatantI
     format!("Team {} {}", team, class.name())
 }
 
+/// Apply damage to a combatant, accounting for absorb shields.
+/// Returns (actual_damage_to_health, damage_absorbed).
+///
+/// If the target has an Absorb aura, damage is first subtracted from the shield.
+/// Any remaining damage is applied to health. Depleted shields are removed.
+pub fn apply_damage_with_absorb(
+    damage: f32,
+    target: &mut Combatant,
+    active_auras: Option<&mut ActiveAuras>,
+) -> (f32, f32) {
+    let mut remaining_damage = damage;
+    let mut total_absorbed = 0.0;
+
+    // Check for absorb shields and consume them
+    if let Some(auras) = active_auras {
+        for aura in auras.auras.iter_mut() {
+            if aura.effect_type == AuraType::Absorb && remaining_damage > 0.0 {
+                let absorb_amount = aura.magnitude.min(remaining_damage);
+                aura.magnitude -= absorb_amount;
+                remaining_damage -= absorb_amount;
+                total_absorbed += absorb_amount;
+            }
+        }
+        // Remove depleted absorb shields
+        auras.auras.retain(|a| !(a.effect_type == AuraType::Absorb && a.magnitude <= 0.0));
+    }
+
+    // Apply remaining damage to health
+    let actual_damage = remaining_damage.min(target.current_health);
+    target.current_health = (target.current_health - remaining_damage).max(0.0);
+    target.damage_taken += actual_damage;
+
+    (actual_damage, total_absorbed)
+}
+
+/// Check if a combatant has an absorb shield active
+pub fn has_absorb_shield(auras: Option<&ActiveAuras>) -> bool {
+    auras.map_or(false, |a| a.auras.iter().any(|aura| aura.effect_type == AuraType::Absorb))
+}
+
+/// Check if a combatant has Weakened Soul (cannot receive Power Word: Shield)
+pub fn has_weakened_soul(auras: Option<&ActiveAuras>) -> bool {
+    auras.map_or(false, |a| a.auras.iter().any(|aura| aura.effect_type == AuraType::WeakenedSoul))
+}
+
 fn find_best_kiting_direction(
     current_pos: Vec3,
     enemy_pos: Vec3,
@@ -432,7 +477,7 @@ pub fn combat_auto_attack(
     time: Res<Time>,
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
-    mut combatants: Query<(Entity, &Transform, &mut Combatant, Option<&CastingState>, Option<&ActiveAuras>)>,
+    mut combatants: Query<(Entity, &Transform, &mut Combatant, Option<&CastingState>, Option<&mut ActiveAuras>)>,
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
@@ -541,21 +586,24 @@ pub fn combat_auto_attack(
 
     // Apply damage to targets and track damage dealt
     let mut damage_dealt_updates: Vec<(Entity, f32)> = Vec::new();
-    
+
     for (attacker_entity, target_entity, damage, has_bonus) in attacks {
-        if let Ok((_, _, mut target, _, _)) = combatants.get_mut(target_entity) {
+        if let Ok((_, _, mut target, _, mut target_auras)) = combatants.get_mut(target_entity) {
             if target.is_alive() {
-                let actual_damage = damage.min(target.current_health);
-                target.current_health = (target.current_health - damage).max(0.0);
-                target.damage_taken += actual_damage;
-                
-                // Warriors generate Rage from taking damage
-                if target.resource_type == ResourceType::Rage {
+                // Apply damage with absorb shield consideration
+                let (actual_damage, absorbed) = apply_damage_with_absorb(
+                    damage,
+                    &mut target,
+                    target_auras.as_deref_mut(),
+                );
+
+                // Warriors generate Rage from taking damage (only on actual health damage)
+                if actual_damage > 0.0 && target.resource_type == ResourceType::Rage {
                     let rage_gain = actual_damage * 0.15; // Gain 15% of damage taken as Rage
                     target.current_mana = (target.current_mana + rage_gain).min(target.max_mana);
                 }
-                
-                // Track damage for aura breaking
+
+                // Track damage for aura breaking (only actual damage, not absorbed)
                 *damage_per_aura_break.entry(target_entity).or_insert(0.0) += actual_damage;
                 
                 // Batch damage for floating combat text (sum all damage to same target)

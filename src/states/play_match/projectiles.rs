@@ -101,7 +101,7 @@ pub fn process_projectile_hits(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
     projectiles: Query<(Entity, &Projectile, &Transform)>,
-    mut combatants: Query<(&Transform, &mut Combatant)>,
+    mut combatants: Query<(&Transform, &mut Combatant, Option<&mut ActiveAuras>)>,
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
@@ -118,36 +118,36 @@ pub fn process_projectile_hits(
     
     for (projectile_entity, projectile, projectile_transform) in projectiles.iter() {
         // Get target position (immutable borrow)
-        let Ok((target_transform, target)) = combatants.get(projectile.target) else {
+        let Ok((target_transform, target, _)) = combatants.get(projectile.target) else {
             // Target no longer exists, despawn projectile
             commands.entity(projectile_entity).despawn_recursive();
             continue;
         };
-        
+
         if !target.is_alive() {
             // Target already dead, despawn projectile
             commands.entity(projectile_entity).despawn_recursive();
             continue;
         }
-        
+
         let target_pos = target_transform.translation + Vec3::new(0.0, 1.0, 0.0); // Center mass
         let projectile_pos = projectile_transform.translation;
         let distance = projectile_pos.distance(target_pos);
-        
+
         // Check if projectile has reached target
         if distance <= HIT_DISTANCE {
             // Get caster position (immutable borrow)
-            let Ok((caster_transform, _)) = combatants.get(projectile.caster) else {
+            let Ok((caster_transform, _, _)) = combatants.get(projectile.caster) else {
                 // Caster no longer exists, despawn projectile
                 commands.entity(projectile_entity).despawn_recursive();
                 continue;
             };
-            
+
             let caster_pos = caster_transform.translation;
             let target_world_pos = target_transform.translation;
-            
+
             // Get caster's combatant to calculate damage/healing with stats
-            let Ok((_, caster_combatant)) = combatants.get(projectile.caster) else {
+            let Ok((_, caster_combatant, _)) = combatants.get(projectile.caster) else {
                 commands.entity(projectile_entity).despawn_recursive();
                 continue;
             };
@@ -182,20 +182,23 @@ pub fn process_projectile_hits(
         if def.is_damage() {
             // Use pre-calculated damage (already includes stat scaling)
             let damage = ability_damage;
-            
+
             // Get target info and apply damage
             let (actual_damage, target_team, target_class, is_killing_blow) = {
-                let Ok((_, mut target)) = combatants.get_mut(target_entity) else {
+                let Ok((_, mut target, mut target_auras)) = combatants.get_mut(target_entity) else {
                     commands.entity(projectile_entity).despawn_recursive();
                     continue;
                 };
 
-                let actual_damage = damage.min(target.current_health);
-                target.current_health = (target.current_health - damage).max(0.0);
-                target.damage_taken += actual_damage;
+                // Apply damage with absorb shield consideration
+                let (actual_damage, _absorbed) = super::combat_core::apply_damage_with_absorb(
+                    damage,
+                    &mut target,
+                    target_auras.as_deref_mut(),
+                );
 
-                // Warriors generate Rage from taking damage
-                if target.resource_type == ResourceType::Rage {
+                // Warriors generate Rage from taking damage (only on actual health damage)
+                if actual_damage > 0.0 && target.resource_type == ResourceType::Rage {
                     let rage_gain = actual_damage * 0.15;
                     target.current_mana = (target.current_mana + rage_gain).min(target.max_mana);
                 }
@@ -208,10 +211,10 @@ pub fn process_projectile_hits(
                 let is_killing_blow = !target.is_alive();
                 (actual_damage, target.team, target.class, is_killing_blow)
             }; // target borrow dropped here
-            
+
             // Update caster damage dealt
             {
-                let Ok((_, mut caster)) = combatants.get_mut(caster_entity) else {
+                let Ok((_, mut caster, _)) = combatants.get_mut(caster_entity) else {
                     commands.entity(projectile_entity).despawn_recursive();
                     continue;
                 };
