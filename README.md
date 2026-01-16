@@ -6,7 +6,7 @@ A World of Warcraft-inspired arena combat simulator built with Bevy (Rust). Conf
 
 ### Combat System
 - **5 Character Classes**: Warrior (melee tank), Mage (ranged caster), Rogue (stealth DPS), Priest (healer), Warlock (shadow DoTs/control)
-- **20+ Unique Abilities**: Cast-time spells, instant attacks, healing, crowd control, interrupts
+- **22+ Unique Abilities**: Cast-time spells, instant attacks, healing, absorb shields, crowd control, interrupts
 - **WoW-Style Mechanics**: Mana/Energy/Rage resources, cooldowns, global cooldown, spell schools
 - **Status Effects**: Roots, stuns, fears, movement slows, healing reduction, damage over time
 - **Advanced AI**: Targeting priority, ability rotation, interrupt timing, kiting behavior
@@ -158,8 +158,8 @@ This project is designed for **agentic development** (AI-assisted code generatio
 
 ### Mage (Ranged Caster/Control)
 - **Resource**: Mana
-- **Abilities**: Wand Shot (ranged), Frostbolt (slow), Frost Nova (AoE root), Arcane Intellect (mana buff)
-- **Playstyle**: Kite melee, control positioning, burst damage from range
+- **Abilities**: Wand Shot (ranged), Frostbolt (slow), Frost Nova (AoE root), Ice Barrier (absorb shield), Arcane Intellect (mana buff)
+- **Playstyle**: Kite melee, control positioning, burst damage from range, defensive shields
 
 ### Rogue (Stealth Melee DPS/Control)
 - **Resource**: Energy
@@ -168,8 +168,8 @@ This project is designed for **agentic development** (AI-assisted code generatio
 
 ### Priest (Healer/Support)
 - **Resource**: Mana
-- **Abilities**: Wand Shot (ranged), Flash Heal, Mind Blast, Power Word: Fortitude (HP buff)
-- **Playstyle**: Keep allies alive, buff before combat, contribute damage when safe
+- **Abilities**: Wand Shot (ranged), Flash Heal, Mind Blast, Power Word: Shield (absorb shield), Power Word: Fortitude (HP buff)
+- **Playstyle**: Keep allies alive, shield allies proactively, buff before combat, contribute damage when safe
 
 ### Warlock (Shadow DoT/Control)
 - **Resource**: Mana
