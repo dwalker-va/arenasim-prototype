@@ -1626,18 +1626,20 @@ pub fn decide_abilities(
     for (attacker_entity, target_entity, damage, attacker_team, attacker_class, ability) in instant_attacks {
         let ability_name = ability.definition().name;
         let mut actual_damage = 0.0;
+        let mut absorbed = 0.0;
         let mut target_team = 0;
         let mut target_class = match_config::CharacterClass::Warrior; // Default, will be overwritten
 
         if let Ok((_, mut target, target_transform, mut target_auras)) = combatants.get_mut(target_entity) {
             if target.is_alive() {
                 // Apply damage with absorb shield consideration
-                let (dmg, _absorbed) = super::combat_core::apply_damage_with_absorb(
+                let (dmg, abs) = super::combat_core::apply_damage_with_absorb(
                     damage,
                     &mut target,
                     target_auras.as_deref_mut(),
                 );
                 actual_damage = dmg;
+                absorbed = abs;
                 target_team = target.team;
                 target_class = target.class;
 
@@ -1646,12 +1648,12 @@ pub fn decide_abilities(
                     let rage_gain = actual_damage * 0.15;
                     target.current_mana = (target.current_mana + rage_gain).min(target.max_mana);
                 }
-                
+
                 // Track damage for aura breaking
                 commands.entity(target_entity).insert(DamageTakenThisFrame {
                     amount: actual_damage,
                 });
-                
+
                 info!(
                     "Team {} {}'s {} hits Team {} {} for {:.0} damage!",
                     attacker_team,
@@ -1661,7 +1663,7 @@ pub fn decide_abilities(
                     target_class.name(),
                     actual_damage
                 );
-                
+
                 // Spawn floating combat text (yellow for abilities)
                 let text_position = target_transform.translation + Vec3::new(0.0, super::FCT_HEIGHT, 0.0);
                 // Get deterministic offset based on pattern state
@@ -1680,18 +1682,50 @@ pub fn decide_abilities(
                     },
                     PlayMatchEntity,
                 ));
-                
+
+                // Spawn light blue floating combat text for absorbed damage
+                if absorbed > 0.0 {
+                    let (absorb_offset_x, absorb_offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
+                        get_next_fct_offset(&mut fct_state)
+                    } else {
+                        (0.0, 0.0)
+                    };
+                    commands.spawn((
+                        FloatingCombatText {
+                            world_position: text_position + Vec3::new(absorb_offset_x, absorb_offset_y, 0.0),
+                            text: format!("{:.0} absorbed", absorbed),
+                            color: egui::Color32::from_rgb(100, 180, 255), // Light blue
+                            lifetime: 1.5,
+                            vertical_offset: absorb_offset_y,
+                        },
+                        PlayMatchEntity,
+                    ));
+                }
+
                 // Log the instant attack with structured data
                 let is_killing_blow = !target.is_alive();
-                let message = format!(
-                    "Team {} {}'s {} hits Team {} {} for {:.0} damage",
-                    attacker_team,
-                    attacker_class.name(),
-                    ability_name,
-                    target_team,
-                    target_class.name(),
-                    actual_damage
-                );
+                let message = if absorbed > 0.0 {
+                    format!(
+                        "Team {} {}'s {} hits Team {} {} for {:.0} damage ({:.0} absorbed)",
+                        attacker_team,
+                        attacker_class.name(),
+                        ability_name,
+                        target_team,
+                        target_class.name(),
+                        actual_damage,
+                        absorbed
+                    )
+                } else {
+                    format!(
+                        "Team {} {}'s {} hits Team {} {} for {:.0} damage",
+                        attacker_team,
+                        attacker_class.name(),
+                        ability_name,
+                        target_team,
+                        target_class.name(),
+                        actual_damage
+                    )
+                };
                 combat_log.log_damage(
                     combatant_id(attacker_team, attacker_class),
                     combatant_id(target_team, target_class),
@@ -1726,18 +1760,20 @@ pub fn decide_abilities(
     // Process queued Frost Nova damage
     for (caster_entity, target_entity, damage, caster_team, caster_class, _target_pos) in frost_nova_damage {
         let mut actual_damage = 0.0;
+        let mut absorbed = 0.0;
         let mut target_team = 0;
         let mut target_class = match_config::CharacterClass::Warrior;
 
         if let Ok((_, mut target, target_transform, mut target_auras)) = combatants.get_mut(target_entity) {
             if target.is_alive() {
                 // Apply damage with absorb shield consideration
-                let (dmg, _absorbed) = super::combat_core::apply_damage_with_absorb(
+                let (dmg, abs) = super::combat_core::apply_damage_with_absorb(
                     damage,
                     &mut target,
                     target_auras.as_deref_mut(),
                 );
                 actual_damage = dmg;
+                absorbed = abs;
                 target_team = target.team;
                 target_class = target.class;
 
@@ -1746,12 +1782,12 @@ pub fn decide_abilities(
                     let rage_gain = actual_damage * 0.15;
                     target.current_mana = (target.current_mana + rage_gain).min(target.max_mana);
                 }
-                
+
                 // Track damage for aura breaking
                 commands.entity(target_entity).insert(DamageTakenThisFrame {
                     amount: actual_damage,
                 });
-                
+
                 // Spawn floating combat text (yellow for abilities)
                 let text_position = target_transform.translation + Vec3::new(0.0, super::FCT_HEIGHT, 0.0);
                 // Get deterministic offset based on pattern state
@@ -1770,17 +1806,48 @@ pub fn decide_abilities(
                     },
                     PlayMatchEntity,
                 ));
-                
+
+                // Spawn light blue floating combat text for absorbed damage
+                if absorbed > 0.0 {
+                    let (absorb_offset_x, absorb_offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
+                        get_next_fct_offset(&mut fct_state)
+                    } else {
+                        (0.0, 0.0)
+                    };
+                    commands.spawn((
+                        FloatingCombatText {
+                            world_position: text_position + Vec3::new(absorb_offset_x, absorb_offset_y, 0.0),
+                            text: format!("{:.0} absorbed", absorbed),
+                            color: egui::Color32::from_rgb(100, 180, 255), // Light blue
+                            lifetime: 1.5,
+                            vertical_offset: absorb_offset_y,
+                        },
+                        PlayMatchEntity,
+                    ));
+                }
+
                 // Log the Frost Nova damage with structured data
                 let is_killing_blow = !target.is_alive();
-                let message = format!(
-                    "Team {} {}'s Frost Nova hits Team {} {} for {:.0} damage",
-                    caster_team,
-                    caster_class.name(),
-                    target_team,
-                    target_class.name(),
-                    actual_damage
-                );
+                let message = if absorbed > 0.0 {
+                    format!(
+                        "Team {} {}'s Frost Nova hits Team {} {} for {:.0} damage ({:.0} absorbed)",
+                        caster_team,
+                        caster_class.name(),
+                        target_team,
+                        target_class.name(),
+                        actual_damage,
+                        absorbed
+                    )
+                } else {
+                    format!(
+                        "Team {} {}'s Frost Nova hits Team {} {} for {:.0} damage",
+                        caster_team,
+                        caster_class.name(),
+                        target_team,
+                        target_class.name(),
+                        actual_damage
+                    )
+                };
                 combat_log.log_damage(
                     combatant_id(caster_team, caster_class),
                     combatant_id(target_team, target_class),

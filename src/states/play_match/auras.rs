@@ -484,7 +484,7 @@ pub fn process_dot_ticks(
         let target_class = target.class;
 
         // Apply damage with absorb shield consideration
-        let (actual_damage, _absorbed) = super::combat_core::apply_damage_with_absorb(
+        let (actual_damage, absorbed) = super::combat_core::apply_damage_with_absorb(
             damage,
             &mut target,
             Some(&mut target_auras),
@@ -500,10 +500,10 @@ pub fn process_dot_ticks(
             let rage_gain = actual_damage * 0.15;
             target.current_mana = (target.current_mana + rage_gain).min(target.max_mana);
         }
-        
+
         // Queue caster damage_dealt update
         caster_damage_updates.push((caster_entity, actual_damage));
-        
+
         // Spawn floating combat text (yellow for DoT ticks, like ability damage)
         // Get deterministic offset based on pattern state
         let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
@@ -521,18 +521,50 @@ pub fn process_dot_ticks(
             },
             PlayMatchEntity,
         ));
-        
+
+        // Spawn light blue floating combat text for absorbed damage
+        if absorbed > 0.0 {
+            let (absorb_offset_x, absorb_offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
+                get_next_fct_offset(&mut fct_state)
+            } else {
+                (0.0, 0.0)
+            };
+            commands.spawn((
+                FloatingCombatText {
+                    world_position: target_pos + Vec3::new(absorb_offset_x, super::FCT_HEIGHT + absorb_offset_y, 0.0),
+                    text: format!("{:.0} absorbed", absorbed),
+                    color: egui::Color32::from_rgb(100, 180, 255), // Light blue
+                    lifetime: 1.5,
+                    vertical_offset: absorb_offset_y,
+                },
+                PlayMatchEntity,
+            ));
+        }
+
         // Log to combat log with structured data
         let is_killing_blow = !target.is_alive();
-        let message = format!(
-            "Team {} {}'s {} ticks for {:.0} damage on Team {} {}",
-            caster_team,
-            caster_class.name(),
-            ability_name,
-            actual_damage,
-            target_team,
-            target_class.name()
-        );
+        let message = if absorbed > 0.0 {
+            format!(
+                "Team {} {}'s {} ticks for {:.0} damage on Team {} {} ({:.0} absorbed)",
+                caster_team,
+                caster_class.name(),
+                ability_name,
+                actual_damage,
+                target_team,
+                target_class.name(),
+                absorbed
+            )
+        } else {
+            format!(
+                "Team {} {}'s {} ticks for {:.0} damage on Team {} {}",
+                caster_team,
+                caster_class.name(),
+                ability_name,
+                actual_damage,
+                target_team,
+                target_class.name()
+            )
+        };
         combat_log.log_damage(
             combatant_id(caster_team, caster_class),
             combatant_id(target_team, target_class),

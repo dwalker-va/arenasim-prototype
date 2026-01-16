@@ -8,6 +8,7 @@
 //! - Speech bubbles for ability callouts
 
 use bevy::prelude::*;
+use bevy::color::LinearRgba;
 use bevy::time::Real;
 use bevy_egui::{egui, EguiContexts};
 use crate::combat::log::{CombatLog, CombatLogEventType};
@@ -1469,7 +1470,7 @@ pub fn render_floating_combat_text(
                     } else {
                         255
                     };
-                    
+
                     // Apply alpha to color
                     let color_with_alpha = egui::Color32::from_rgba_unmultiplied(
                         fct.color.r(),
@@ -1477,33 +1478,91 @@ pub fn render_floating_combat_text(
                         fct.color.b(),
                         alpha,
                     );
-                    
-                    // Draw the damage number with thick outline for visibility
-                    let font_id = egui::FontId::proportional(24.0);
-                    
-                    // Draw thick black outline (8 directions for smooth outline)
                     let outline_color = egui::Color32::from_rgba_unmultiplied(0, 0, 0, alpha);
-                    for (dx, dy) in [
-                        (-2.0, 0.0), (2.0, 0.0), (0.0, -2.0), (0.0, 2.0),  // Cardinal
-                        (-1.5, -1.5), (1.5, -1.5), (-1.5, 1.5), (1.5, 1.5), // Diagonal
-                    ] {
+
+                    // Check if this is absorbed text - render number and label separately
+                    if let Some(number_str) = fct.text.strip_suffix(" absorbed") {
+                        // Render number at 24pt
+                        let number_font = egui::FontId::proportional(24.0);
+                        let label_font = egui::FontId::proportional(14.0);
+
+                        // Calculate positions - number centered, label to the right
+                        let number_galley = ui.painter().layout_no_wrap(number_str.to_string(), number_font.clone(), color_with_alpha);
+                        let label_galley = ui.painter().layout_no_wrap("absorbed".to_string(), label_font.clone(), color_with_alpha);
+                        let total_width = number_galley.size().x + 4.0 + label_galley.size().x;
+                        let number_x = screen_pos.x - total_width / 2.0 + number_galley.size().x / 2.0;
+                        let label_x = number_x + number_galley.size().x / 2.0 + 4.0 + label_galley.size().x / 2.0;
+
+                        // Draw number outline
+                        for (dx, dy) in [
+                            (-2.0, 0.0), (2.0, 0.0), (0.0, -2.0), (0.0, 2.0),
+                            (-1.5, -1.5), (1.5, -1.5), (-1.5, 1.5), (1.5, 1.5),
+                        ] {
+                            ui.painter().text(
+                                egui::pos2(number_x + dx, screen_pos.y + dy),
+                                egui::Align2::CENTER_CENTER,
+                                number_str,
+                                number_font.clone(),
+                                outline_color,
+                            );
+                        }
+                        // Draw number
                         ui.painter().text(
-                            egui::pos2(screen_pos.x + dx, screen_pos.y + dy),
+                            egui::pos2(number_x, screen_pos.y),
+                            egui::Align2::CENTER_CENTER,
+                            number_str,
+                            number_font,
+                            color_with_alpha,
+                        );
+
+                        // Draw label outline (smaller offset for smaller text)
+                        for (dx, dy) in [
+                            (-1.5, 0.0), (1.5, 0.0), (0.0, -1.5), (0.0, 1.5),
+                            (-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0),
+                        ] {
+                            ui.painter().text(
+                                egui::pos2(label_x + dx, screen_pos.y + 2.0 + dy),
+                                egui::Align2::CENTER_CENTER,
+                                "absorbed",
+                                label_font.clone(),
+                                outline_color,
+                            );
+                        }
+                        // Draw label (slightly lower to align with number baseline)
+                        ui.painter().text(
+                            egui::pos2(label_x, screen_pos.y + 2.0),
+                            egui::Align2::CENTER_CENTER,
+                            "absorbed",
+                            label_font,
+                            color_with_alpha,
+                        );
+                    } else {
+                        // Regular text - render normally at 24pt
+                        let font_id = egui::FontId::proportional(24.0);
+
+                        // Draw thick black outline (8 directions for smooth outline)
+                        for (dx, dy) in [
+                            (-2.0, 0.0), (2.0, 0.0), (0.0, -2.0), (0.0, 2.0),
+                            (-1.5, -1.5), (1.5, -1.5), (-1.5, 1.5), (1.5, 1.5),
+                        ] {
+                            ui.painter().text(
+                                egui::pos2(screen_pos.x + dx, screen_pos.y + dy),
+                                egui::Align2::CENTER_CENTER,
+                                &fct.text,
+                                font_id.clone(),
+                                outline_color,
+                            );
+                        }
+
+                        // Draw main text
+                        ui.painter().text(
+                            egui::pos2(screen_pos.x, screen_pos.y),
                             egui::Align2::CENTER_CENTER,
                             &fct.text,
-                            font_id.clone(),
-                            outline_color,
+                            font_id,
+                            color_with_alpha,
                         );
                     }
-                    
-                    // Draw main text
-                    ui.painter().text(
-                        egui::pos2(screen_pos.x, screen_pos.y),
-                        egui::Align2::CENTER_CENTER,
-                        &fct.text,
-                        font_id,
-                        color_with_alpha,
-                    );
                 }
             }
         });
@@ -1685,12 +1744,124 @@ pub fn update_speech_bubbles(
     mut bubbles: Query<(Entity, &mut SpeechBubble)>,
 ) {
     let dt = time.delta_secs();
-    
+
     for (entity, mut bubble) in bubbles.iter_mut() {
         bubble.lifetime -= dt;
-        
+
         if bubble.lifetime <= 0.0 {
             commands.entity(entity).despawn_recursive();
+        }
+    }
+}
+
+// ==============================================================================
+// Shield Bubble Visual Effects
+// ==============================================================================
+
+use super::abilities::SpellSchool;
+
+/// System to spawn and despawn shield bubble visual effects based on Absorb auras.
+/// Creates a translucent sphere around combatants with active absorb shields.
+pub fn update_shield_bubbles(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    combatants: Query<(Entity, &Transform, Option<&ActiveAuras>), With<Combatant>>,
+    existing_bubbles: Query<(Entity, &ShieldBubble)>,
+) {
+    use std::collections::HashSet;
+
+    // Track which combatants currently have shield bubbles
+    let mut combatants_with_bubbles: HashSet<Entity> = HashSet::new();
+    for (_, bubble) in existing_bubbles.iter() {
+        combatants_with_bubbles.insert(bubble.combatant);
+    }
+
+    // Track which combatants need bubbles
+    let mut combatants_needing_bubbles: Vec<(Entity, Vec3, SpellSchool)> = Vec::new();
+    let mut combatants_with_absorb: HashSet<Entity> = HashSet::new();
+
+    for (entity, transform, auras) in combatants.iter() {
+        if let Some(auras) = auras {
+            // Check for Absorb auras
+            for aura in &auras.auras {
+                if aura.effect_type == AuraType::Absorb && aura.magnitude > 0.0 {
+                    combatants_with_absorb.insert(entity);
+
+                    // Determine spell school based on ability name
+                    let spell_school = if aura.ability_name.contains("Ice Barrier") {
+                        SpellSchool::Frost
+                    } else {
+                        SpellSchool::Holy // Power Word: Shield
+                    };
+
+                    // If combatant doesn't have a bubble yet, spawn one
+                    if !combatants_with_bubbles.contains(&entity) {
+                        combatants_needing_bubbles.push((entity, transform.translation, spell_school));
+                    }
+                    break; // Only need one absorb aura to spawn bubble
+                }
+            }
+        }
+    }
+
+    // Spawn bubbles for combatants that need them
+    for (combatant_entity, position, spell_school) in combatants_needing_bubbles {
+        // Color based on spell school
+        // Emissive uses LinearRgba with pre-scaled values (2x for glow effect)
+        let (base_color, emissive) = match spell_school {
+            SpellSchool::Frost => (
+                Color::srgba(0.4, 0.7, 1.0, 0.25), // Light blue, translucent
+                LinearRgba::new(0.4, 1.0, 2.0, 1.0), // Blue glow (2x scaled)
+            ),
+            SpellSchool::Holy => (
+                Color::srgba(1.0, 0.95, 0.7, 0.25), // Golden/white, translucent
+                LinearRgba::new(2.0, 1.8, 1.0, 1.0), // Golden glow (2x scaled)
+            ),
+            _ => (
+                Color::srgba(0.8, 0.8, 0.8, 0.25), // Default grey
+                LinearRgba::new(1.0, 1.0, 1.0, 1.0),
+            ),
+        };
+
+        let mesh = meshes.add(Sphere::new(1.2)); // Slightly larger than combatant capsule (0.5 radius)
+        let material = materials.add(StandardMaterial {
+            base_color,
+            emissive,
+            alpha_mode: AlphaMode::Blend,
+            cull_mode: None, // Render both sides for bubble effect
+            ..default()
+        });
+
+        commands.spawn((
+            Mesh3d(mesh),
+            MeshMaterial3d(material),
+            Transform::from_translation(position + Vec3::new(0.0, 1.0, 0.0)), // Center on combatant
+            ShieldBubble {
+                combatant: combatant_entity,
+                spell_school,
+            },
+            PlayMatchEntity,
+        ));
+    }
+
+    // Despawn bubbles for combatants without absorb auras
+    for (bubble_entity, bubble) in existing_bubbles.iter() {
+        if !combatants_with_absorb.contains(&bubble.combatant) {
+            commands.entity(bubble_entity).despawn_recursive();
+        }
+    }
+}
+
+/// System to update shield bubble positions to follow their combatants.
+pub fn follow_shield_bubbles(
+    combatants: Query<&Transform, With<Combatant>>,
+    mut bubbles: Query<(&ShieldBubble, &mut Transform), Without<Combatant>>,
+) {
+    for (bubble, mut bubble_transform) in bubbles.iter_mut() {
+        if let Ok(combatant_transform) = combatants.get(bubble.combatant) {
+            // Position bubble centered on combatant (slightly higher to center on body)
+            bubble_transform.translation = combatant_transform.translation + Vec3::new(0.0, 1.0, 0.0);
         }
     }
 }

@@ -8,6 +8,7 @@
 //! - Interrupt processing (applying lockouts)
 //! - Stealth visuals
 
+use std::collections::HashMap;
 use bevy::prelude::*;
 use bevy_egui::egui;
 use crate::combat::log::{CombatLog, CombatLogEventType, CombatantId};
@@ -586,6 +587,7 @@ pub fn combat_auto_attack(
 
     // Apply damage to targets and track damage dealt
     let mut damage_dealt_updates: Vec<(Entity, f32)> = Vec::new();
+    let mut absorbed_per_target: HashMap<Entity, f32> = HashMap::new();
 
     for (attacker_entity, target_entity, damage, has_bonus) in attacks {
         if let Ok((_, _, mut target, _, mut target_auras)) = combatants.get_mut(target_entity) {
@@ -605,13 +607,14 @@ pub fn combat_auto_attack(
 
                 // Track damage for aura breaking (only actual damage, not absorbed)
                 *damage_per_aura_break.entry(target_entity).or_insert(0.0) += actual_damage;
-                
+
                 // Batch damage for floating combat text (sum all damage to same target)
                 *damage_per_target.entry(target_entity).or_insert(0.0) += actual_damage;
-                
+                *absorbed_per_target.entry(target_entity).or_insert(0.0) += absorbed;
+
                 // Collect attacker damage for later update
                 damage_dealt_updates.push((attacker_entity, actual_damage));
-                
+
                 // Log the attack with structured data
                 if let (Some(&(attacker_team, attacker_class)), Some(&(target_team, target_class))) =
                     (combatant_info.get(&attacker_entity), combatant_info.get(&target_entity)) {
@@ -624,15 +627,28 @@ pub fn combat_auto_attack(
                             _ => "Auto Attack",
                         }
                     };
-                    let message = format!(
-                        "Team {} {}'s {} hits Team {} {} for {:.0} damage",
-                        attacker_team,
-                        attacker_class.name(),
-                        attack_name,
-                        target_team,
-                        target_class.name(),
-                        actual_damage
-                    );
+                    let message = if absorbed > 0.0 {
+                        format!(
+                            "Team {} {}'s {} hits Team {} {} for {:.0} damage ({:.0} absorbed)",
+                            attacker_team,
+                            attacker_class.name(),
+                            attack_name,
+                            target_team,
+                            target_class.name(),
+                            actual_damage,
+                            absorbed
+                        )
+                    } else {
+                        format!(
+                            "Team {} {}'s {} hits Team {} {} for {:.0} damage",
+                            attacker_team,
+                            attacker_class.name(),
+                            attack_name,
+                            target_team,
+                            target_class.name(),
+                            actual_damage
+                        )
+                    };
 
                     let is_killing_blow = !target.is_alive();
                     combat_log.log_damage(
@@ -667,7 +683,7 @@ pub fn combat_auto_attack(
         if let Some(&target_pos) = positions.get(&target_entity) {
             // Spawn floating text slightly above the combatant
             let text_position = target_pos + Vec3::new(0.0, super::FCT_HEIGHT, 0.0);
-            
+
             // Get deterministic offset based on pattern state
             let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
                 get_next_fct_offset(&mut fct_state)
@@ -675,7 +691,7 @@ pub fn combat_auto_attack(
                 // Fallback to center if state not found
                 (0.0, 0.0)
             };
-            
+
             commands.spawn((
                 FloatingCombatText {
                     world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
@@ -686,6 +702,27 @@ pub fn combat_auto_attack(
                 },
                 PlayMatchEntity,
             ));
+
+            // Spawn light blue floating combat text for absorbed damage
+            if let Some(&total_absorbed) = absorbed_per_target.get(&target_entity) {
+                if total_absorbed > 0.0 {
+                    let (absorb_offset_x, absorb_offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
+                        get_next_fct_offset(&mut fct_state)
+                    } else {
+                        (0.0, 0.0)
+                    };
+                    commands.spawn((
+                        FloatingCombatText {
+                            world_position: text_position + Vec3::new(absorb_offset_x, absorb_offset_y, 0.0),
+                            text: format!("{:.0} absorbed", total_absorbed),
+                            color: egui::Color32::from_rgb(100, 180, 255), // Light blue
+                            lifetime: 1.5,
+                            vertical_offset: absorb_offset_y,
+                        },
+                        PlayMatchEntity,
+                    ));
+                }
+            }
         }
     }
     

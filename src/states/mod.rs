@@ -153,6 +153,8 @@ impl Plugin for StatesPlugin {
                     play_match::cleanup_expired_spell_impacts,
                     play_match::animate_shadow_sight_orbs,  // Pulsing orb animation
                     play_match::animate_orb_consumption,    // Orb pickup animation
+                    play_match::update_shield_bubbles,      // Spawn/despawn shield bubbles
+                    play_match::follow_shield_bubbles,      // Update bubble positions
                 )
                     .run_if(in_state(GameState::PlayMatch)),
             )

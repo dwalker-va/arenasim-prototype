@@ -184,14 +184,14 @@ pub fn process_projectile_hits(
             let damage = ability_damage;
 
             // Get target info and apply damage
-            let (actual_damage, target_team, target_class, is_killing_blow) = {
+            let (actual_damage, absorbed, target_team, target_class, is_killing_blow) = {
                 let Ok((_, mut target, mut target_auras)) = combatants.get_mut(target_entity) else {
                     commands.entity(projectile_entity).despawn_recursive();
                     continue;
                 };
 
                 // Apply damage with absorb shield consideration
-                let (actual_damage, _absorbed) = super::combat_core::apply_damage_with_absorb(
+                let (actual_damage, absorbed) = super::combat_core::apply_damage_with_absorb(
                     damage,
                     &mut target,
                     target_auras.as_deref_mut(),
@@ -209,7 +209,7 @@ pub fn process_projectile_hits(
                 });
 
                 let is_killing_blow = !target.is_alive();
-                (actual_damage, target.team, target.class, is_killing_blow)
+                (actual_damage, absorbed, target.team, target.class, is_killing_blow)
             }; // target borrow dropped here
 
             // Update caster damage dealt
@@ -238,17 +238,49 @@ pub fn process_projectile_hits(
                 },
                 PlayMatchEntity,
             ));
-            
+
+            // Spawn light blue floating combat text for absorbed damage
+            if absorbed > 0.0 {
+                let (absorb_offset_x, absorb_offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
+                    get_next_fct_offset(&mut fct_state)
+                } else {
+                    (0.0, 0.0)
+                };
+                commands.spawn((
+                    FloatingCombatText {
+                        world_position: text_position + Vec3::new(absorb_offset_x, absorb_offset_y, 0.0),
+                        text: format!("{:.0} absorbed", absorbed),
+                        color: egui::Color32::from_rgb(100, 180, 255), // Light blue
+                        lifetime: 1.5,
+                        vertical_offset: absorb_offset_y,
+                    },
+                    PlayMatchEntity,
+                ));
+            }
+
             // Log the damage with structured data
-            let message = format!(
-                "Team {} {}'s {} hits Team {} {} for {:.0} damage",
-                caster_team,
-                caster_class.name(),
-                def.name,
-                target_team,
-                target_class.name(),
-                actual_damage
-            );
+            let message = if absorbed > 0.0 {
+                format!(
+                    "Team {} {}'s {} hits Team {} {} for {:.0} damage ({:.0} absorbed)",
+                    caster_team,
+                    caster_class.name(),
+                    def.name,
+                    target_team,
+                    target_class.name(),
+                    actual_damage,
+                    absorbed
+                )
+            } else {
+                format!(
+                    "Team {} {}'s {} hits Team {} {} for {:.0} damage",
+                    caster_team,
+                    caster_class.name(),
+                    def.name,
+                    target_team,
+                    target_class.name(),
+                    actual_damage
+                )
+            };
             combat_log.log_damage(
                 combatant_id(caster_team, caster_class),
                 combatant_id(target_team, target_class),

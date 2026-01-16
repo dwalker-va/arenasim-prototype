@@ -594,3 +594,13 @@ impl DeathAnimation {
         self.progress >= 1.0
     }
 }
+
+/// Component for shield bubble visual effects.
+/// Attached to a sphere entity that visually represents an absorb shield around a combatant.
+#[derive(Component)]
+pub struct ShieldBubble {
+    /// The combatant entity this bubble belongs to
+    pub combatant: Entity,
+    /// The spell school of the shield (affects color: Frost = blue, Holy = gold)
+    pub spell_school: super::abilities::SpellSchool,
+}
