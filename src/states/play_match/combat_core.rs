@@ -15,6 +15,7 @@ use crate::combat::log::{CombatLog, CombatLogEventType};
 use super::match_config;
 use super::components::*;
 use super::abilities::{AbilityType, SpellSchool};
+use super::ability_config::AbilityDefinitions;
 use super::utils::{spawn_speech_bubble, get_next_fct_offset};
 use super::{MELEE_RANGE, ARENA_HALF_X, ARENA_HALF_Z};
 
@@ -821,6 +822,7 @@ pub fn regenerate_resources(
 pub fn process_interrupts(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
+    abilities: Res<AbilityDefinitions>,
     interrupts: Query<(Entity, &InterruptPending)>,
     mut targets: Query<(&mut CastingState, &Combatant)>,
     combatants: Query<&Combatant>,
@@ -841,9 +843,9 @@ pub fn process_interrupts(
             }
             
             // Get the spell school of the interrupted spell
-            let interrupted_ability_def = cast_state.ability.definition();
+            let interrupted_ability_def = abilities.get_unchecked(&cast_state.ability);
             let interrupted_school = interrupted_ability_def.spell_school;
-            let interrupted_spell_name = interrupted_ability_def.name;
+            let interrupted_spell_name = &interrupted_ability_def.name;
             
             // Mark cast as interrupted
             cast_state.interrupted = true;
@@ -882,7 +884,7 @@ pub fn process_interrupts(
                     tick_interval: 0.0,
                     time_until_next_tick: 0.0,
                     caster: Some(interrupt.caster),
-                    ability_name: interrupt.ability.definition().name.to_string(),
+                    ability_name: abilities.get_unchecked(&interrupt.ability).name.clone(),
                     fear_direction: (0.0, 0.0),
                     fear_direction_timer: 0.0,
                 },
@@ -936,6 +938,7 @@ pub fn process_casting(
     time: Res<Time>,
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
+    abilities: Res<AbilityDefinitions>,
     mut game_rng: ResMut<GameRng>,
     mut combatants: Query<(Entity, &Transform, &mut Combatant, Option<&mut CastingState>, Option<&mut ActiveAuras>)>,
     mut fct_states: Query<&mut FloatingTextState>,
@@ -983,15 +986,15 @@ pub fn process_casting(
         // Check if cast completed
         if casting.time_remaining <= 0.0 {
             let ability = casting.ability;
-            let def = ability.definition();
+            let def = abilities.get_unchecked(&ability);
             let target_entity = casting.target;
-            
+
             // Consume mana
             caster.current_mana -= def.mana_cost;
-            
+
             // Pre-calculate damage/healing (using caster's stats)
-            let ability_damage = caster.calculate_ability_damage(&def, &mut game_rng);
-            let ability_healing = caster.calculate_ability_healing(&def, &mut game_rng);
+            let ability_damage = caster.calculate_ability_damage_config(def, &mut game_rng);
+            let ability_healing = caster.calculate_ability_healing_config(def, &mut game_rng);
             
             // Store cast info for processing
             completed_casts.push((
@@ -1022,7 +1025,7 @@ pub fn process_casting(
     
     // Process completed casts
     for (caster_entity, caster_team, caster_class, caster_pos, ability_damage, ability_healing, ability, target_entity) in completed_casts {
-        let def = ability.definition();
+        let def = abilities.get_unchecked(&ability);
         
         // Get target
         let Some(target_entity) = target_entity else {
@@ -1250,21 +1253,21 @@ pub fn process_casting(
         }
         
         // Apply aura if applicable (store for later application)
-        if let Some((aura_type, duration, magnitude, break_threshold)) = def.applies_aura {
+        if let Some(aura) = def.applies_aura.as_ref() {
             // We'll apply auras in a separate pass to avoid borrow issues
             commands.spawn((
                 AuraPending {
                     target: target_entity,
                     aura: Aura {
-                        effect_type: aura_type,
-                        duration,
-                        magnitude,
-                        break_on_damage_threshold: break_threshold,
+                        effect_type: aura.aura_type,
+                        duration: aura.duration,
+                        magnitude: aura.magnitude,
+                        break_on_damage_threshold: aura.break_on_damage,
                         accumulated_damage: 0.0,
-                        tick_interval: 0.0,
-                        time_until_next_tick: 0.0,
+                        tick_interval: aura.tick_interval,
+                        time_until_next_tick: aura.tick_interval,
                         caster: Some(caster_entity),
-                        ability_name: def.name.to_string(),
+                        ability_name: def.name.clone(),
                         fear_direction: (0.0, 0.0),
                         fear_direction_timer: 0.0,
                     },
@@ -1274,15 +1277,15 @@ pub fn process_casting(
             
             info!(
                 "Queued {:?} aura for Team {} {} (magnitude: {}, duration: {}s)",
-                aura_type,
+                aura.aura_type,
                 target.team,
                 target.class.name(),
-                magnitude,
-                duration
+                aura.magnitude,
+                aura.duration
             );
 
             // Spawn speech bubble for Fear (only when successfully applied, not when cast starts)
-            if aura_type == AuraType::Fear {
+            if aura.aura_type == AuraType::Fear {
                 spawn_speech_bubble(&mut commands, caster_entity, "Fear");
             }
         }

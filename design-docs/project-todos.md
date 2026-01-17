@@ -2,7 +2,7 @@
 
 This document tracks the development progress of the ArenaSim prototype. Reference this document at the start of each agentic session to maintain continuity.
 
-**Last Updated:** January 16, 2026 (Session 13 - Headless Mode Fixes & Absorb Shield Refinements)
+**Last Updated:** January 17, 2026 (Session 14 - Data-Driven Ability Definitions)
 
 ---
 
@@ -526,6 +526,68 @@ For every implementation, verify:
 ---
 
 ## Session Notes
+
+### Session 14 (January 17, 2026 - Data-Driven Ability Definitions)
+
+**Major Refactoring: Data-Driven Abilities (Plan Item 3.3)**
+
+Migrated all 21 ability definitions from hardcoded Rust to RON configuration file, enabling runtime modification without recompilation.
+
+**New Architecture:**
+- [x] Created `ability_config.rs` with new config structs:
+  - `AuraEffect` - named fields for aura effects (replaces tuple)
+  - `ProjectileVisuals` - color configuration for spell projectiles
+  - `AbilityConfig` - full ability definition with all parameters
+  - `AbilityDefinitions` - Bevy Resource loaded at startup
+- [x] Created `assets/config/abilities.ron` with all 21 abilities in RON format
+- [x] Added `AbilityConfigPlugin` for loading and validation at startup
+- [x] Validation ensures all `AbilityType` variants have definitions
+
+**Migration Completed:**
+- [x] Added serde derives to `SpellSchool`, `ScalingStat`, `AbilityType`, `AuraType` enums
+- [x] Migrated `mage.rs` - all 5 mage abilities use config system
+- [x] Migrated `priest.rs` - all 5 priest abilities use config system
+- [x] Migrated `warrior.rs` - all 5 warrior abilities use config system
+- [x] Migrated `rogue.rs` - all 3 rogue abilities use config system
+- [x] Migrated `warlock.rs` - all 3 warlock abilities use config system
+- [x] Migrated `projectiles.rs` - projectile hit processing uses config
+- [x] Updated `combat_ai.rs` - passes `AbilityDefinitions` to all class AI
+
+**Key Changes:**
+- `ability.definition()` → `abilities.get_unchecked(&ability)`
+- `calculate_ability_damage(&def)` → `calculate_ability_damage_config(def)`
+- Aura tuple `(aura_type, duration, magnitude, break_threshold)` → Named fields `aura.aura_type`, `aura.duration`, etc.
+- Tick interval now stored in config instead of hardcoded
+
+**Files Created:**
+- `src/states/play_match/ability_config.rs` - Config structs and loading plugin
+
+**Files Modified:**
+- `assets/config/abilities.ron` - Complete rewrite with new schema
+- `src/states/play_match/abilities.rs` - Added serde derives
+- `src/states/play_match/components/mod.rs` - Added serde derives to AuraType, dual damage calculation methods
+- `src/states/play_match/class_ai/*.rs` - All 5 class AI modules updated
+- `src/states/play_match/combat_ai.rs` - Pass abilities to all class AI
+- `src/states/play_match/projectiles.rs` - Use config for hit processing
+- `src/main.rs` - Register AbilityConfigPlugin
+- `src/headless/runner.rs` - Register AbilityConfigPlugin
+
+**Commits:**
+- `afadf65` - feat: add data-driven ability config system (partial migration)
+- `fdbaf02` - feat: complete migration of class AI to data-driven abilities
+
+**Benefits:**
+- Balance changes via config file without recompilation
+- Cleaner ability definitions with named fields
+- Foundation for modding support
+- Easier testing of ability variations
+- All 82 unit tests pass, all 18 regression tests pass
+
+**Legacy Code Retained:**
+- `AbilityType::definition()` method still exists for backward compatibility
+- Can be removed in future cleanup pass once all callers migrated
+
+**Next:** Consider removing legacy `definition()` method, or proceed with other refactoring items from the plan.
 
 ### Session 13 (January 16, 2026 - Headless Mode Fixes & Absorb Shield Refinements)
 

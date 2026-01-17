@@ -550,6 +550,7 @@ pub fn decide_abilities(
 pub fn check_interrupts(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
+    abilities: Res<AbilityDefinitions>,
     mut combatants: Query<(Entity, &mut Combatant, &Transform), Without<CastingState>>,
     casting_targets: Query<&CastingState>,
     positions: Query<&Transform>,
@@ -605,7 +606,7 @@ pub fn check_interrupts(
             _ => continue,
         };
         
-        let ability_def = interrupt_ability.definition();
+        let ability_def = abilities.get_unchecked(&interrupt_ability);
         
         // Check if interrupt is on cooldown
         if combatant.ability_cooldowns.contains_key(&interrupt_ability) {
@@ -623,13 +624,13 @@ pub fn check_interrupts(
             combatant.team,
             combatant.class.name(),
             ability_def.name,
-            cast_state.ability.definition().name,
+            abilities.get_unchecked(&cast_state.ability).name,
             distance,
             cast_state.time_remaining
         );
         
         // Spawn speech bubble for interrupt
-        spawn_speech_bubble(&mut commands, entity, ability_def.name);
+        spawn_speech_bubble(&mut commands, entity, &ability_def.name);
 
         // Consume resources
         combatant.current_mana -= ability_def.mana_cost;

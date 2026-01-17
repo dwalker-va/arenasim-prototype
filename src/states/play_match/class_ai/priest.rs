@@ -78,6 +78,7 @@ pub fn decide_priest_action(
     if try_power_word_shield(
         commands,
         combat_log,
+        abilities,
         entity,
         combatant,
         my_pos,
@@ -94,6 +95,7 @@ pub fn decide_priest_action(
     if try_flash_heal(
         commands,
         combat_log,
+        abilities,
         entity,
         combatant,
         my_pos,
@@ -108,6 +110,7 @@ pub fn decide_priest_action(
     if try_mind_blast(
         commands,
         combat_log,
+        abilities,
         entity,
         combatant,
         my_pos,
@@ -237,6 +240,7 @@ fn try_fortitude(
 fn try_power_word_shield(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -247,7 +251,7 @@ fn try_power_word_shield(
     shielded_this_frame: &mut HashSet<Entity>,
 ) -> bool {
     let pw_shield = AbilityType::PowerWordShield;
-    let pw_shield_def = pw_shield.definition();
+    let pw_shield_def = abilities.get_unchecked(&pw_shield);
 
     if is_spell_school_locked(pw_shield_def.spell_school, auras) {
         return false;
@@ -335,23 +339,24 @@ fn try_power_word_shield(
     );
 
     // Apply absorb shield aura
-    let (aura_type, duration, magnitude, _) = pw_shield_def.applies_aura.unwrap();
-    commands.spawn(AuraPending {
-        target: shield_entity,
-        aura: Aura {
-            effect_type: aura_type,
-            duration,
-            magnitude,
-            break_on_damage_threshold: 0.0,
-            accumulated_damage: 0.0,
-            tick_interval: 0.0,
-            time_until_next_tick: 0.0,
-            caster: Some(entity),
-            ability_name: "Power Word: Shield".to_string(),
-            fear_direction: (0.0, 0.0),
-            fear_direction_timer: 0.0,
-        },
-    });
+    if let Some(aura) = pw_shield_def.applies_aura.as_ref() {
+        commands.spawn(AuraPending {
+            target: shield_entity,
+            aura: Aura {
+                effect_type: aura.aura_type,
+                duration: aura.duration,
+                magnitude: aura.magnitude,
+                break_on_damage_threshold: aura.break_on_damage,
+                accumulated_damage: 0.0,
+                tick_interval: aura.tick_interval,
+                time_until_next_tick: aura.tick_interval,
+                caster: Some(entity),
+                ability_name: pw_shield_def.name.to_string(),
+                fear_direction: (0.0, 0.0),
+                fear_direction_timer: 0.0,
+            },
+        });
+    }
 
     // Apply Weakened Soul debuff
     commands.spawn(AuraPending {
@@ -383,6 +388,7 @@ fn try_power_word_shield(
 fn try_flash_heal(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -424,7 +430,7 @@ fn try_flash_heal(
     };
 
     let ability = AbilityType::FlashHeal;
-    let def = ability.definition();
+    let def = abilities.get_unchecked(&ability);
 
     // Check if spell school is locked out
     if is_spell_school_locked(def.spell_school, auras) {
@@ -479,6 +485,7 @@ fn try_flash_heal(
 fn try_mind_blast(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -496,7 +503,7 @@ fn try_mind_blast(
 
     let ability = AbilityType::MindBlast;
     let on_cooldown = combatant.ability_cooldowns.contains_key(&ability);
-    let def = ability.definition();
+    let def = abilities.get_unchecked(&ability);
 
     if on_cooldown {
         return false;

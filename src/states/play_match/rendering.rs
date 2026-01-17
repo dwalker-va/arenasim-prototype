@@ -12,6 +12,7 @@ use bevy::color::LinearRgba;
 use bevy::time::Real;
 use bevy_egui::{egui, EguiContexts};
 use crate::combat::log::{CombatLog, CombatLogEventType};
+use super::ability_config::AbilityDefinitions;
 use super::components::*;
 
 // ==============================================================================
@@ -447,6 +448,7 @@ pub fn render_countdown(
 /// - **Cast bar** (when casting): Orange bar with spell name showing cast progress
 pub fn render_health_bars(
     mut contexts: EguiContexts,
+    abilities: Res<AbilityDefinitions>,
     combatants: Query<(&Combatant, &Transform, Option<&CastingState>, Option<&ActiveAuras>)>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
     time: Res<Time<Real>>,
@@ -788,7 +790,7 @@ pub fn render_health_bars(
                     
                     // Cast bar (only when actively casting)
                     if let Some(casting) = casting_state {
-                        let ability_def = casting.ability.definition();
+                        let ability_def = abilities.get_unchecked(&casting.ability);
                         
                         let cast_bar_pos = egui::pos2(
                             bar_pos.x,
@@ -867,7 +869,7 @@ pub fn render_health_bars(
                             ui.painter().text(
                                 text_pos,
                                 egui::Align2::CENTER_CENTER,
-                                ability_def.name,
+                                &ability_def.name,
                                 egui::FontId::proportional(10.0),
                                 egui::Color32::WHITE,
                             );
