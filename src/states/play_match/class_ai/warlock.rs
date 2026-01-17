@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
+use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
 use crate::states::play_match::constants::GCD;
 use crate::states::play_match::is_spell_school_locked;
@@ -40,6 +41,7 @@ impl ClassAI for WarlockAI {
 pub fn decide_warlock_action(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -66,6 +68,7 @@ pub fn decide_warlock_action(
     if try_corruption(
         commands,
         combat_log,
+        abilities,
         entity,
         combatant,
         my_pos,
@@ -82,6 +85,7 @@ pub fn decide_warlock_action(
     if try_fear(
         commands,
         combat_log,
+        abilities,
         entity,
         combatant,
         my_pos,
@@ -98,6 +102,7 @@ pub fn decide_warlock_action(
     try_shadowbolt(
         commands,
         combat_log,
+        abilities,
         entity,
         combatant,
         my_pos,
@@ -114,6 +119,7 @@ pub fn decide_warlock_action(
 fn try_corruption(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -134,7 +140,7 @@ fn try_corruption(
     }
 
     let corruption = AbilityType::Corruption;
-    let corruption_def = corruption.definition();
+    let corruption_def = abilities.get_unchecked(&corruption);
 
     // Check if Shadow school is locked out
     if is_spell_school_locked(corruption_def.spell_school, auras) {
@@ -166,17 +172,17 @@ fn try_corruption(
     );
 
     // Apply DoT aura
-    if let Some((aura_type, duration, magnitude, break_threshold)) = corruption_def.applies_aura {
+    if let Some(aura) = corruption_def.applies_aura.as_ref() {
         commands.spawn(AuraPending {
             target: target_entity,
             aura: Aura {
-                effect_type: aura_type,
-                duration,
-                magnitude,
-                break_on_damage_threshold: break_threshold,
+                effect_type: aura.aura_type,
+                duration: aura.duration,
+                magnitude: aura.magnitude,
+                break_on_damage_threshold: aura.break_on_damage,
                 accumulated_damage: 0.0,
-                tick_interval: 3.0,
-                time_until_next_tick: 3.0,
+                tick_interval: aura.tick_interval,
+                time_until_next_tick: aura.tick_interval,
                 caster: Some(entity),
                 ability_name: corruption_def.name.to_string(),
                 fear_direction: (0.0, 0.0),
@@ -209,6 +215,7 @@ fn try_corruption(
 fn try_fear(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -219,7 +226,7 @@ fn try_fear(
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
 ) -> bool {
     let fear = AbilityType::Fear;
-    let fear_def = fear.definition();
+    let fear_def = abilities.get_unchecked(&fear);
     let fear_cooldown = combatant.ability_cooldowns.get(&fear).copied().unwrap_or(0.0);
 
     if fear_cooldown > 0.0 {
@@ -291,6 +298,7 @@ fn try_fear(
 fn try_shadowbolt(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -300,7 +308,7 @@ fn try_shadowbolt(
     combatant_info: &HashMap<Entity, (u8, CharacterClass, f32, f32)>,
 ) -> bool {
     let shadowbolt = AbilityType::Shadowbolt;
-    let shadowbolt_def = shadowbolt.definition();
+    let shadowbolt_def = abilities.get_unchecked(&shadowbolt);
 
     // Check if Shadow school is locked out
     if is_spell_school_locked(shadowbolt_def.spell_school, auras) {

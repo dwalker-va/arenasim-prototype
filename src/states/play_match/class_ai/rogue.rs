@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use crate::combat::log::CombatLog;
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
+use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
 use crate::states::play_match::constants::GCD;
 use crate::states::play_match::utils::{combatant_id, spawn_speech_bubble};
@@ -43,6 +44,7 @@ pub fn decide_rogue_action(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     game_rng: &mut GameRng,
+    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -64,6 +66,7 @@ pub fn decide_rogue_action(
         return try_ambush(
             combat_log,
             game_rng,
+            abilities,
             entity,
             combatant,
             my_pos,
@@ -83,6 +86,7 @@ pub fn decide_rogue_action(
     if try_kidney_shot(
         commands,
         combat_log,
+        abilities,
         entity,
         combatant,
         my_pos,
@@ -97,6 +101,7 @@ pub fn decide_rogue_action(
     try_sinister_strike(
         combat_log,
         game_rng,
+        abilities,
         entity,
         combatant,
         my_pos,
@@ -113,6 +118,7 @@ pub fn decide_rogue_action(
 fn try_ambush(
     combat_log: &mut CombatLog,
     game_rng: &mut GameRng,
+    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -127,7 +133,7 @@ fn try_ambush(
         return false;
     }
 
-    let def = ability.definition();
+    let def = abilities.get_unchecked(&ability);
 
     // Execute Ambush
     combatant.current_mana -= def.mana_cost;
@@ -135,7 +141,7 @@ fn try_ambush(
     combatant.global_cooldown = GCD;
 
     // Calculate and queue damage
-    let damage = combatant.calculate_ability_damage(&def, game_rng);
+    let damage = combatant.calculate_ability_damage_config(def, game_rng);
     instant_attacks.push((
         entity,
         target_entity,
@@ -177,6 +183,7 @@ fn try_ambush(
 fn try_kidney_shot(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -195,7 +202,7 @@ fn try_kidney_shot(
         return false;
     }
 
-    let def = kidney_shot.definition();
+    let def = abilities.get_unchecked(&kidney_shot);
 
     // Execute Kidney Shot
     spawn_speech_bubble(commands, entity, "Kidney Shot");
@@ -220,14 +227,14 @@ fn try_kidney_shot(
     );
 
     // Apply stun aura
-    if let Some((aura_type, duration, magnitude, break_threshold)) = def.applies_aura {
+    if let Some(aura) = def.applies_aura.as_ref() {
         commands.spawn(AuraPending {
             target: target_entity,
             aura: Aura {
-                effect_type: aura_type,
-                duration,
-                magnitude,
-                break_on_damage_threshold: break_threshold,
+                effect_type: aura.aura_type,
+                duration: aura.duration,
+                magnitude: aura.magnitude,
+                break_on_damage_threshold: aura.break_on_damage,
                 accumulated_damage: 0.0,
                 tick_interval: 0.0,
                 time_until_next_tick: 0.0,
@@ -240,7 +247,7 @@ fn try_kidney_shot(
 
         // Log CC
         if let Some((target_team, target_class, _, _)) = combatant_info.get(&target_entity) {
-            let cc_type = format!("{:?}", aura_type);
+            let cc_type = format!("{:?}", aura.aura_type);
             let message = format!(
                 "Team {} {} uses {} on Team {} {}",
                 combatant.team,
@@ -253,7 +260,7 @@ fn try_kidney_shot(
                 combatant_id(combatant.team, combatant.class),
                 combatant_id(*target_team, *target_class),
                 cc_type,
-                duration,
+                aura.duration,
                 message,
             );
         }
@@ -275,6 +282,7 @@ fn try_kidney_shot(
 fn try_sinister_strike(
     combat_log: &mut CombatLog,
     game_rng: &mut GameRng,
+    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -289,14 +297,14 @@ fn try_sinister_strike(
         return false;
     }
 
-    let def = ability.definition();
+    let def = abilities.get_unchecked(&ability);
 
     // Execute Sinister Strike
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
 
     // Calculate and queue damage
-    let damage = combatant.calculate_ability_damage(&def, game_rng);
+    let damage = combatant.calculate_ability_damage_config(def, game_rng);
     instant_attacks.push((
         entity,
         target_entity,

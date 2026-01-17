@@ -239,6 +239,7 @@ pub fn decide_abilities(
                 &mut commands,
                 &mut combat_log,
                 &mut game_rng,
+                &abilities,
                 entity,
                 &mut combatant,
                 my_pos,
@@ -258,6 +259,7 @@ pub fn decide_abilities(
                 &mut commands,
                 &mut combat_log,
                 &mut game_rng,
+                &abilities,
                 entity,
                 &mut combatant,
                 my_pos,
@@ -274,6 +276,7 @@ pub fn decide_abilities(
             if class_ai::warlock::decide_warlock_action(
                 &mut commands,
                 &mut combat_log,
+                &abilities,
                 entity,
                 &mut combatant,
                 my_pos,
@@ -289,7 +292,7 @@ pub fn decide_abilities(
 
     // Process queued instant attacks (Ambush, Sinister Strike)
     for (attacker_entity, target_entity, damage, attacker_team, attacker_class, ability) in instant_attacks {
-        let ability_name = ability.definition().name;
+        let ability_name = abilities.get_unchecked(&ability).name.clone();
         let mut actual_damage = 0.0;
         let mut absorbed = 0.0;
         let mut target_team = 0;

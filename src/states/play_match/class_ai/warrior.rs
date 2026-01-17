@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
+use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
 use crate::states::play_match::constants::{CHARGE_MIN_RANGE, GCD};
 
@@ -48,6 +49,7 @@ pub fn decide_warrior_action(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     game_rng: &mut GameRng,
+    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -66,6 +68,7 @@ pub fn decide_warrior_action(
     if try_battle_shout(
         commands,
         combat_log,
+        abilities,
         entity,
         combatant,
         my_pos,
@@ -89,6 +92,7 @@ pub fn decide_warrior_action(
     if try_charge(
         commands,
         combat_log,
+        abilities,
         entity,
         combatant,
         my_pos,
@@ -104,6 +108,7 @@ pub fn decide_warrior_action(
     if try_rend(
         commands,
         combat_log,
+        abilities,
         entity,
         combatant,
         my_pos,
@@ -120,6 +125,7 @@ pub fn decide_warrior_action(
         commands,
         combat_log,
         game_rng,
+        abilities,
         entity,
         combatant,
         my_pos,
@@ -132,7 +138,7 @@ pub fn decide_warrior_action(
     }
 
     // Priority 5: Heroic Strike (rage dump)
-    try_heroic_strike(combatant, target_pos, my_pos);
+    try_heroic_strike(abilities, combatant, target_pos, my_pos);
 
     false
 }
@@ -143,6 +149,7 @@ pub fn decide_warrior_action(
 fn try_battle_shout(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -185,7 +192,7 @@ fn try_battle_shout(
     }
 
     let ability = AbilityType::BattleShout;
-    let def = ability.definition();
+    let def = abilities.get_unchecked(&ability);
 
     if combatant.current_mana < def.mana_cost && def.mana_cost > 0.0 {
         return false;
@@ -209,15 +216,15 @@ fn try_battle_shout(
     );
 
     // Apply buff to all nearby allies
-    if let Some((aura_type, duration, magnitude, break_threshold)) = def.applies_aura {
+    if let Some(aura) = def.applies_aura.as_ref() {
         for ally_entity in allies_to_buff {
             commands.spawn(AuraPending {
                 target: ally_entity,
                 aura: Aura {
-                    effect_type: aura_type,
-                    duration,
-                    magnitude,
-                    break_on_damage_threshold: break_threshold,
+                    effect_type: aura.aura_type,
+                    duration: aura.duration,
+                    magnitude: aura.magnitude,
+                    break_on_damage_threshold: aura.break_on_damage,
                     accumulated_damage: 0.0,
                     tick_interval: 0.0,
                     time_until_next_tick: 0.0,
@@ -245,6 +252,7 @@ fn try_battle_shout(
 fn try_charge(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -254,7 +262,7 @@ fn try_charge(
     combatant_info: &HashMap<Entity, (u8, CharacterClass, f32, f32)>,
 ) -> bool {
     let charge = AbilityType::Charge;
-    let charge_def = charge.definition();
+    let charge_def = abilities.get_unchecked(&charge);
     let charge_on_cooldown = combatant.ability_cooldowns.contains_key(&charge);
 
     if charge_on_cooldown {
@@ -317,6 +325,7 @@ fn try_charge(
 fn try_rend(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -336,7 +345,7 @@ fn try_rend(
     }
 
     let rend = AbilityType::Rend;
-    let rend_def = rend.definition();
+    let rend_def = abilities.get_unchecked(&rend);
 
     if !rend.can_cast(combatant, target_pos, my_pos) {
         return false;
@@ -363,17 +372,17 @@ fn try_rend(
     );
 
     // Apply DoT aura
-    if let Some((aura_type, duration, magnitude, break_threshold)) = rend_def.applies_aura {
+    if let Some(aura) = rend_def.applies_aura.as_ref() {
         commands.spawn(AuraPending {
             target: target_entity,
             aura: Aura {
-                effect_type: aura_type,
-                duration,
-                magnitude,
-                break_on_damage_threshold: break_threshold,
+                effect_type: aura.aura_type,
+                duration: aura.duration,
+                magnitude: aura.magnitude,
+                break_on_damage_threshold: aura.break_on_damage,
                 accumulated_damage: 0.0,
-                tick_interval: 3.0,
-                time_until_next_tick: 3.0,
+                tick_interval: aura.tick_interval,
+                time_until_next_tick: aura.tick_interval,
                 caster: Some(entity),
                 ability_name: rend_def.name.to_string(),
                 fear_direction: (0.0, 0.0),
@@ -407,6 +416,7 @@ fn try_mortal_strike(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     game_rng: &mut GameRng,
+    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -416,7 +426,7 @@ fn try_mortal_strike(
     instant_attacks: &mut Vec<(Entity, Entity, f32, u8, CharacterClass, AbilityType)>,
 ) -> bool {
     let mortal_strike = AbilityType::MortalStrike;
-    let ms_def = mortal_strike.definition();
+    let ms_def = abilities.get_unchecked(&mortal_strike);
     let ms_on_cooldown = combatant.ability_cooldowns.contains_key(&mortal_strike);
 
     if ms_on_cooldown {
@@ -456,7 +466,7 @@ fn try_mortal_strike(
     );
 
     // Calculate and queue damage
-    let damage = combatant.calculate_ability_damage(&ms_def, game_rng);
+    let damage = combatant.calculate_ability_damage_config(ms_def, game_rng);
     instant_attacks.push((
         entity,
         target_entity,
@@ -467,14 +477,14 @@ fn try_mortal_strike(
     ));
 
     // Apply healing reduction aura
-    if let Some((aura_type, duration, magnitude, break_threshold)) = ms_def.applies_aura {
+    if let Some(aura) = ms_def.applies_aura.as_ref() {
         commands.spawn(AuraPending {
             target: target_entity,
             aura: Aura {
-                effect_type: aura_type,
-                duration,
-                magnitude,
-                break_on_damage_threshold: break_threshold,
+                effect_type: aura.aura_type,
+                duration: aura.duration,
+                magnitude: aura.magnitude,
+                break_on_damage_threshold: aura.break_on_damage,
                 accumulated_damage: 0.0,
                 tick_interval: 0.0,
                 time_until_next_tick: 0.0,
@@ -498,14 +508,14 @@ fn try_mortal_strike(
 
 /// Try to queue Heroic Strike for next auto-attack.
 /// This doesn't consume a GCD, just queues bonus damage.
-fn try_heroic_strike(combatant: &mut Combatant, target_pos: Vec3, my_pos: Vec3) {
+fn try_heroic_strike(abilities: &AbilityDefinitions, combatant: &mut Combatant, target_pos: Vec3, my_pos: Vec3) {
     // Don't queue if one is already pending
     if combatant.next_attack_bonus_damage > 0.0 {
         return;
     }
 
     let ability = AbilityType::HeroicStrike;
-    let def = ability.definition();
+    let def = abilities.get_unchecked(&ability);
 
     // Only use if we have enough rage for Heroic Strike AND reserve
     let can_afford = combatant.current_mana >= (def.mana_cost + RAGE_RESERVE);
