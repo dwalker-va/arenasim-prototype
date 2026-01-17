@@ -12,6 +12,7 @@ use super::match_config;
 use super::components::*;
 use super::abilities::AbilityType;
 use super::utils::{combatant_id, get_next_fct_offset};
+use super::constants::{GCD, SAFE_KITING_DISTANCE, CHARGE_MIN_RANGE, DEFENSIVE_HP_THRESHOLD};
 use super::{MELEE_RANGE, is_spell_school_locked};
 
 // Re-export spawn_speech_bubble for backward compatibility (used by other modules)
@@ -208,7 +209,7 @@ pub fn decide_abilities(
             };
 
             let is_full_hp = combatant.current_health >= combatant.max_health;
-            let is_below_threshold = combatant.current_health < combatant.max_health * 0.8;
+            let is_below_threshold = combatant.current_health < combatant.max_health * DEFENSIVE_HP_THRESHOLD;
             let should_shield = !has_absorb_shield && (is_full_hp || is_below_threshold);
 
             if should_shield {
@@ -227,7 +228,7 @@ pub fn decide_abilities(
                     combatant.ability_cooldowns.insert(ice_barrier, barrier_def.cooldown);
 
                     // Trigger global cooldown
-                    combatant.global_cooldown = 1.5;
+                    combatant.global_cooldown = GCD;
 
                     // Log ability cast
                     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
@@ -320,7 +321,7 @@ pub fn decide_abilities(
                     combatant.current_mana -= def.mana_cost;
 
                     // Trigger global cooldown
-                    combatant.global_cooldown = 1.5;
+                    combatant.global_cooldown = GCD;
 
                     // Log ability cast for timeline
                     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
@@ -395,7 +396,7 @@ pub fn decide_abilities(
                     combatant.ability_cooldowns.insert(frost_nova, nova_def.cooldown);
 
                     // Trigger global cooldown (1.5s standard WoW GCD)
-                    combatant.global_cooldown = 1.5;
+                    combatant.global_cooldown = GCD;
 
                     // Log ability cast for timeline (AOE ability, no specific target)
                     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
@@ -475,8 +476,7 @@ pub fn decide_abilities(
             let distance_to_target = my_pos.distance(target_pos);
             
             // While kiting, only cast if we're at a safe distance
-            // Safe distance = beyond melee range + buffer (8 units gives good tactical spacing)
-            const SAFE_KITING_DISTANCE: f32 = 8.0;
+            // Safe distance = beyond melee range + buffer (defined in constants.rs)
             if combatant.kiting_timer > 0.0 && distance_to_target < SAFE_KITING_DISTANCE {
                 continue; // Too close while kiting, focus on movement
             }
@@ -500,7 +500,7 @@ pub fn decide_abilities(
                 
                 // Trigger global cooldown (1.5s standard WoW GCD)
                 // GCD starts when cast BEGINS, not when it completes
-                combatant.global_cooldown = 1.5;
+                combatant.global_cooldown = GCD;
                 
                 // Start casting
                 commands.entity(entity).insert(CastingState {
@@ -582,7 +582,7 @@ pub fn decide_abilities(
                     combatant.current_mana -= def.mana_cost;
 
                     // Trigger global cooldown
-                    combatant.global_cooldown = 1.5;
+                    combatant.global_cooldown = GCD;
 
                     // Log ability cast for timeline
                     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
@@ -699,7 +699,7 @@ pub fn decide_abilities(
                         combatant.current_mana -= pw_shield_def.mana_cost;
 
                         // Trigger global cooldown
-                        combatant.global_cooldown = 1.5;
+                        combatant.global_cooldown = GCD;
 
                         // Log ability cast
                         let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
@@ -799,7 +799,7 @@ pub fn decide_abilities(
 
                     // Trigger global cooldown (1.5s standard WoW GCD)
                     // GCD starts when cast BEGINS, not when it completes
-                    combatant.global_cooldown = 1.5;
+                    combatant.global_cooldown = GCD;
 
                     // Start casting
                     commands.entity(entity).insert(CastingState {
@@ -856,7 +856,7 @@ pub fn decide_abilities(
 
                 // Trigger global cooldown (1.5s standard WoW GCD)
                 // GCD starts when cast BEGINS, not when it completes
-                combatant.global_cooldown = 1.5;
+                combatant.global_cooldown = GCD;
 
                 // Start casting
                 commands.entity(entity).insert(CastingState {
@@ -944,7 +944,7 @@ pub fn decide_abilities(
                     combatant.current_mana -= def.mana_cost;
 
                     // Trigger global cooldown
-                    combatant.global_cooldown = 1.5;
+                    combatant.global_cooldown = GCD;
 
                     // Log ability cast for timeline (self-cast AOE)
                     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
@@ -1006,8 +1006,7 @@ pub fn decide_abilities(
             // - Minimum 8 units (can't waste at melee range)
             // - Maximum 25 units (ability range)
             // - Not rooted (can't charge while rooted)
-            // - Off cooldown
-            const CHARGE_MIN_RANGE: f32 = 8.0;
+            // - Off cooldown (CHARGE_MIN_RANGE defined in constants.rs)
             let charge = AbilityType::Charge;
             let charge_def = charge.definition();
             let charge_on_cooldown = combatant.ability_cooldowns.contains_key(&charge);
@@ -1026,7 +1025,7 @@ pub fn decide_abilities(
 
                 // Use Charge!
                 combatant.ability_cooldowns.insert(charge, charge_def.cooldown);
-                combatant.global_cooldown = 1.5;
+                combatant.global_cooldown = GCD;
 
                 // Add ChargingState component to enable high-speed movement
                 commands.entity(entity).insert(ChargingState {
@@ -1073,7 +1072,7 @@ pub fn decide_abilities(
                     combatant.current_mana -= rend_def.mana_cost;
 
                     // Trigger global cooldown
-                    combatant.global_cooldown = 1.5;
+                    combatant.global_cooldown = GCD;
 
                     // Log ability cast for timeline
                     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
@@ -1148,7 +1147,7 @@ pub fn decide_abilities(
                 combatant.ability_cooldowns.insert(mortal_strike, ms_def.cooldown);
 
                 // Trigger global cooldown
-                combatant.global_cooldown = 1.5;
+                combatant.global_cooldown = GCD;
 
                 // Log ability cast for timeline
                 let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
@@ -1224,7 +1223,7 @@ pub fn decide_abilities(
                 combatant.next_attack_bonus_damage = bonus_damage;
                 
                 // Trigger global cooldown (1.5s standard WoW GCD)
-                combatant.global_cooldown = 1.5;
+                combatant.global_cooldown = GCD;
                 
                 info!(
                     "Team {} {} uses {} (next attack +{:.0} damage)",
@@ -1265,7 +1264,7 @@ pub fn decide_abilities(
                 instant_attacks.push((entity, target_entity, damage, combatant.team, combatant.class, ability));
 
                 // Trigger global cooldown (1.5s standard WoW GCD)
-                combatant.global_cooldown = 1.5;
+                combatant.global_cooldown = GCD;
 
                 // Log ability cast for timeline
                 let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
@@ -1324,7 +1323,7 @@ pub fn decide_abilities(
                 combatant.ability_cooldowns.insert(kidney_shot, def.cooldown);
 
                 // Trigger global cooldown
-                combatant.global_cooldown = 1.5;
+                combatant.global_cooldown = GCD;
 
                 // Log ability cast for timeline
                 let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
@@ -1405,7 +1404,7 @@ pub fn decide_abilities(
                 instant_attacks.push((entity, target_entity, damage, combatant.team, combatant.class, ability));
 
                 // Trigger global cooldown (1.5s standard WoW GCD)
-                combatant.global_cooldown = 1.5;
+                combatant.global_cooldown = GCD;
 
                 // Log ability cast for timeline
                 let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
@@ -1463,7 +1462,7 @@ pub fn decide_abilities(
                         combatant.current_mana -= corruption_def.mana_cost;
 
                         // Trigger global cooldown
-                        combatant.global_cooldown = 1.5;
+                        combatant.global_cooldown = GCD;
 
                         // Log ability cast for timeline
                         let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
@@ -1535,7 +1534,7 @@ pub fn decide_abilities(
                 if !is_spell_school_locked(fear_def.spell_school, auras.as_deref()) {
                     if fear.can_cast(&combatant, target_pos, my_pos) {
                         // Trigger global cooldown (starts when cast begins)
-                        combatant.global_cooldown = 1.5;
+                        combatant.global_cooldown = GCD;
 
                         // Start casting Fear
                         commands.entity(entity).insert(CastingState {
@@ -1580,7 +1579,7 @@ pub fn decide_abilities(
 
             if shadowbolt.can_cast(&combatant, target_pos, my_pos) {
                 // Trigger global cooldown (starts when cast begins)
-                combatant.global_cooldown = 1.5;
+                combatant.global_cooldown = GCD;
 
                 // Start casting
                 commands.entity(entity).insert(CastingState {

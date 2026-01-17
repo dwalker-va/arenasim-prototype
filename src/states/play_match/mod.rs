@@ -43,6 +43,7 @@ pub mod shadow_sight;
 pub mod systems;
 pub mod utils;
 pub mod class_ai;
+pub mod constants;
 
 // Re-exports
 pub use abilities::*;
@@ -56,39 +57,13 @@ pub use combat_ai::*;
 pub use combat_core::*;
 pub use shadow_sight::*;
 pub use utils::*;
+pub use constants::*;
 
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use super::match_config::{self, MatchConfig};
 use super::GameState;
 use crate::combat::log::{CombatLog, CombatLogEventType, PositionData, MatchMetadata, CombatantMetadata};
-
-// ============================================================================
-// Constants
-// ============================================================================
-
-/// Melee attack range in units. Combatants must be within this distance to auto-attack.
-/// Similar to WoW's melee range of ~5 yards.
-const MELEE_RANGE: f32 = 2.5;
-
-/// Ranged wand attack range for caster classes (Mage, Priest).
-/// Similar to WoW's wand range of ~30 yards.
-const WAND_RANGE: f32 = 30.0;
-
-/// Distance threshold for stopping movement (slightly less than melee range to avoid jitter)
-const STOP_DISTANCE: f32 = 2.0;
-
-/// Arena half-sizes for movement clamping (inside the visual walls)
-/// The arena is 76x46 with wall centers at ±38/±23 and wall thickness 1.0.
-/// We subtract 1.5 to account for wall thickness (0.5) + combatant buffer (1.0)
-const ARENA_HALF_X: f32 = 36.5;  // X axis: wall center 38 - 1.5 buffer
-const ARENA_HALF_Z: f32 = 21.5;  // Z axis: wall center 23 - 1.5 buffer
-
-/// Floating combat text base height above combatants (in world space Y units)
-/// Adjust this to control how high damage/healing numbers appear above characters
-/// Should be high enough to avoid overlapping with status effect labels
-const FCT_HEIGHT: f32 = 4.0;
-
 
 // ============================================================================
 // Helper Functions
