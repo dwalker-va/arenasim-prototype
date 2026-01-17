@@ -658,18 +658,21 @@ pub fn decide_abilities(
                         continue;
                     }
 
-                    // Check if ally has Weakened Soul or already has Absorb shield
+                    // Check if ally has Weakened Soul or already has Power Word: Shield
                     // Weakened Soul from ANY priest prevents PW:Shield (not just the caster's WS)
+                    // Note: Other absorb shields (Ice Barrier) do NOT prevent PW:Shield - they can coexist
                     let ally_auras = active_auras_map.get(ally_entity);
                     let has_weakened_soul = ally_auras
                         .map_or(false, |auras| auras.iter().any(|a| a.effect_type == AuraType::WeakenedSoul));
-                    let has_absorb = ally_auras
-                        .map_or(false, |auras| auras.iter().any(|a| a.effect_type == AuraType::Absorb));
+                    let has_pw_shield = ally_auras
+                        .map_or(false, |auras| auras.iter().any(|a|
+                            a.effect_type == AuraType::Absorb && a.ability_name == "Power Word: Shield"
+                        ));
 
                     // Also check if target was shielded by another Priest THIS FRAME
                     let shielded_this_frame_check = shielded_this_frame.contains(ally_entity);
 
-                    if has_weakened_soul || has_absorb || shielded_this_frame_check {
+                    if has_weakened_soul || has_pw_shield || shielded_this_frame_check {
                         continue; // Can't shield this target
                     }
 

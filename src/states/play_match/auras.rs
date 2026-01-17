@@ -78,8 +78,9 @@ pub fn apply_pending_auras(
     use std::collections::{HashSet, HashMap};
 
     // Track which buff auras we've applied this frame to prevent stacking
-    // Key: (target_entity, aura_type as u8)
-    let mut applied_buffs: HashSet<(Entity, u8)> = HashSet::new();
+    // Key: (target_entity, buff_key) where buff_key identifies the specific buff
+    // For absorbs: "absorb:{ability_name}", for others: "type:{AuraType}"
+    let mut applied_buffs: HashSet<(Entity, String)> = HashSet::new();
 
     // Track auras to add for entities that don't have ActiveAuras component yet
     // This prevents multiple insert() calls from overwriting each other
@@ -148,38 +149,51 @@ pub fn apply_pending_auras(
 
         // Check if target already has this buff type (prevent stacking for buff auras)
         // Also includes Absorb shields and WeakenedSoul to prevent same-frame double-application
+        // Note: Different Absorb abilities (Ice Barrier vs PW:S) CAN coexist - only same ability is blocked
         let is_buff_aura = matches!(
             pending.aura.effect_type,
             AuraType::MaxHealthIncrease | AuraType::MaxManaIncrease | AuraType::AttackPowerIncrease
             | AuraType::Absorb | AuraType::WeakenedSoul
         );
         if is_buff_aura {
-            // Convert aura type to a simple u8 for the HashSet key
-            let aura_type_key = match pending.aura.effect_type {
-                AuraType::MaxHealthIncrease => 0,
-                AuraType::MaxManaIncrease => 1,
-                AuraType::AttackPowerIncrease => 2,
-                AuraType::Absorb => 3,
-                AuraType::WeakenedSoul => 4,
-                _ => 255, // Won't happen for buff auras
+            // For Absorb shields, use ability_name as the key to allow different absorbs to coexist
+            // For other buffs, use the aura type
+            let buff_key: String = if pending.aura.effect_type == AuraType::Absorb {
+                format!("absorb:{}", pending.aura.ability_name)
+            } else {
+                format!("type:{:?}", pending.aura.effect_type)
             };
 
-            // Check if we already applied this buff type to this target THIS FRAME
-            if applied_buffs.contains(&(pending.target, aura_type_key)) {
+            // Check if we already applied this specific buff to this target THIS FRAME
+            if applied_buffs.contains(&(pending.target, buff_key.clone())) {
                 commands.entity(pending_entity).despawn();
                 continue;
             }
 
-            // Check if target already has this buff type from a PREVIOUS frame
+            // Check if target already has this specific buff from a PREVIOUS frame
             let already_has_buff_existing = if let Some(ref auras) = active_auras {
-                auras.auras.iter().any(|a| a.effect_type == pending.aura.effect_type)
+                if pending.aura.effect_type == AuraType::Absorb {
+                    // For absorbs, check same ability name
+                    auras.auras.iter().any(|a|
+                        a.effect_type == AuraType::Absorb && a.ability_name == pending.aura.ability_name
+                    )
+                } else {
+                    // For other buffs, check same effect type
+                    auras.auras.iter().any(|a| a.effect_type == pending.aura.effect_type)
+                }
             } else {
                 false
             };
 
             // Also check auras we're accumulating this frame for entities without ActiveAuras
             let already_has_buff_new = if let Some(new_auras) = new_auras_map.get(&pending.target) {
-                new_auras.iter().any(|a| a.effect_type == pending.aura.effect_type)
+                if pending.aura.effect_type == AuraType::Absorb {
+                    new_auras.iter().any(|a|
+                        a.effect_type == AuraType::Absorb && a.ability_name == pending.aura.ability_name
+                    )
+                } else {
+                    new_auras.iter().any(|a| a.effect_type == pending.aura.effect_type)
+                }
             } else {
                 false
             };
@@ -191,7 +205,7 @@ pub fn apply_pending_auras(
             }
 
             // Mark this buff as applied for this frame
-            applied_buffs.insert((pending.target, aura_type_key));
+            applied_buffs.insert((pending.target, buff_key));
         }
 
         // Handle MaxHealthIncrease aura - apply HP buff immediately
