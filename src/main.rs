@@ -31,7 +31,7 @@ fn main() {
 fn run_headless_mode(
     config_path: std::path::PathBuf,
     output: Option<std::path::PathBuf>,
-    max_duration: f32,
+    max_duration: Option<f32>,
 ) {
     println!("Running in headless mode with config: {:?}", config_path);
 
@@ -47,7 +47,9 @@ fn run_headless_mode(
     if let Some(path) = output {
         config.output_path = Some(path.to_string_lossy().to_string());
     }
-    config.max_duration_secs = max_duration;
+    if let Some(duration) = max_duration {
+        config.max_duration_secs = duration;
+    }
 
     if let Err(e) = headless::run_headless_match(config) {
         eprintln!("Error running match: {}", e);

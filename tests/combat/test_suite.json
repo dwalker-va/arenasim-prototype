@@ -1,0 +1,177 @@
+{
+  "description": "Combat system regression test suite",
+  "version": "1.0",
+  "default_settings": {
+    "max_duration_secs": 120,
+    "random_seed": 42
+  },
+  "test_cases": [
+    {
+      "name": "warrior_vs_mage",
+      "description": "Melee vs ranged kiting matchup",
+      "team1": ["Warrior"],
+      "team2": ["Mage"],
+      "expect": {
+        "completes": true,
+        "max_duration": 60
+      }
+    },
+    {
+      "name": "warrior_vs_priest",
+      "description": "Melee damage vs healer sustain",
+      "team1": ["Warrior"],
+      "team2": ["Priest"],
+      "expect": {
+        "completes": true
+      }
+    },
+    {
+      "name": "warrior_vs_rogue",
+      "description": "Melee vs melee burst",
+      "team1": ["Warrior"],
+      "team2": ["Rogue"],
+      "expect": {
+        "completes": true,
+        "max_duration": 45
+      }
+    },
+    {
+      "name": "warrior_vs_warlock",
+      "description": "Melee vs DoT caster with fear",
+      "team1": ["Warrior"],
+      "team2": ["Warlock"],
+      "expect": {
+        "completes": true
+      }
+    },
+    {
+      "name": "mage_vs_priest",
+      "description": "Ranged damage vs healer",
+      "team1": ["Mage"],
+      "team2": ["Priest"],
+      "expect": {
+        "completes": true
+      }
+    },
+    {
+      "name": "mage_vs_rogue",
+      "description": "Ranged with CC vs melee burst",
+      "team1": ["Mage"],
+      "team2": ["Rogue"],
+      "expect": {
+        "completes": true
+      }
+    },
+    {
+      "name": "mage_vs_warlock",
+      "description": "Frost caster vs shadow caster",
+      "team1": ["Mage"],
+      "team2": ["Warlock"],
+      "expect": {
+        "completes": true
+      }
+    },
+    {
+      "name": "priest_vs_rogue",
+      "description": "Healer vs burst damage",
+      "team1": ["Priest"],
+      "team2": ["Rogue"],
+      "expect": {
+        "completes": true
+      }
+    },
+    {
+      "name": "priest_vs_warlock",
+      "description": "Healer vs DoT pressure",
+      "team1": ["Priest"],
+      "team2": ["Warlock"],
+      "expect": {
+        "completes": true
+      }
+    },
+    {
+      "name": "rogue_vs_warlock",
+      "description": "Melee burst vs caster with fear",
+      "team1": ["Rogue"],
+      "team2": ["Warlock"],
+      "expect": {
+        "completes": true
+      }
+    },
+    {
+      "name": "mirror_warrior",
+      "description": "Warrior mirror match",
+      "team1": ["Warrior"],
+      "team2": ["Warrior"],
+      "expect": {
+        "completes": true,
+        "max_duration": 60
+      }
+    },
+    {
+      "name": "mirror_mage",
+      "description": "Mage mirror match",
+      "team1": ["Mage"],
+      "team2": ["Mage"],
+      "expect": {
+        "completes": true
+      }
+    },
+    {
+      "name": "double_dps_vs_healer_dps",
+      "description": "2v2: Double DPS burst vs sustained healing",
+      "team1": ["Warrior", "Rogue"],
+      "team2": ["Priest", "Mage"],
+      "expect": {
+        "completes": true
+      }
+    },
+    {
+      "name": "warrior_healer_vs_warrior_healer",
+      "description": "2v2: Classic arena comp mirror (may draw)",
+      "team1": ["Warrior", "Priest"],
+      "team2": ["Warrior", "Priest"],
+      "max_duration_secs": 90,
+      "expect": {
+        "completes": true
+      }
+    },
+    {
+      "name": "caster_cleave_vs_melee_cleave",
+      "description": "2v2: Ranged vs melee team",
+      "team1": ["Mage", "Warlock"],
+      "team2": ["Warrior", "Rogue"],
+      "expect": {
+        "completes": true
+      }
+    },
+    {
+      "name": "triple_dps",
+      "description": "3v3: All DPS no healing",
+      "team1": ["Warrior", "Rogue", "Mage"],
+      "team2": ["Warlock", "Mage", "Rogue"],
+      "expect": {
+        "completes": true,
+        "max_duration": 60
+      }
+    },
+    {
+      "name": "full_team_with_healer",
+      "description": "3v3: Standard arena teams",
+      "team1": ["Warrior", "Mage", "Priest"],
+      "team2": ["Rogue", "Warlock", "Priest"],
+      "expect": {
+        "completes": true
+      }
+    },
+    {
+      "name": "double_healer_vs_triple_dps",
+      "description": "3v3: Sustain vs burst",
+      "team1": ["Priest", "Priest", "Warrior"],
+      "team2": ["Mage", "Warlock", "Rogue"],
+      "expect": {
+        "completes": true
+      }
+    }
+  ]
+}

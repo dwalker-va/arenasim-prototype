@@ -19,9 +19,9 @@ pub struct Args {
     #[arg(long, value_name = "OUTPUT_PATH")]
     pub output: Option<PathBuf>,
 
-    /// Maximum match duration in seconds (headless mode only)
-    #[arg(long, default_value = "300")]
-    pub max_duration: f32,
+    /// Maximum match duration in seconds (headless mode only, overrides config file)
+    #[arg(long)]
+    pub max_duration: Option<f32>,
 }
 
 pub fn parse_args() -> Args {

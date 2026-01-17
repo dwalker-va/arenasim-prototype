@@ -251,7 +251,7 @@ pub fn check_match_end(
             team2: team2_metadata,
         };
         
-        match combat_log.save_to_file(&match_metadata) {
+        match combat_log.save_to_file(&match_metadata, None) {
             Ok(filename) => {
                 info!("Combat log saved to: {}", filename);
             }

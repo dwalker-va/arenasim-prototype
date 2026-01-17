@@ -494,20 +494,32 @@ impl CombatLog {
     }
     
     /// Save the combat log to a file with match metadata
-    pub fn save_to_file(&self, match_metadata: &MatchMetadata) -> std::io::Result<String> {
+    /// If `output_path` is provided, saves to that exact path.
+    /// Otherwise, generates a timestamped filename in match_logs/
+    pub fn save_to_file(&self, match_metadata: &MatchMetadata, output_path: Option<&str>) -> std::io::Result<String> {
         use std::fs::{self, File};
         use std::io::Write;
         use std::time::{SystemTime, UNIX_EPOCH};
-        
-        // Create logs directory if it doesn't exist
-        fs::create_dir_all("match_logs")?;
-        
-        // Generate filename with timestamp
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        let filename = format!("match_logs/match_{}.txt", timestamp);
+
+        let filename = if let Some(path) = output_path {
+            // Use custom path - ensure parent directory exists
+            if let Some(parent) = std::path::Path::new(path).parent() {
+                if !parent.as_os_str().is_empty() {
+                    fs::create_dir_all(parent)?;
+                }
+            }
+            path.to_string()
+        } else {
+            // Create logs directory if it doesn't exist
+            fs::create_dir_all("match_logs")?;
+
+            // Generate filename with timestamp
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            format!("match_logs/match_{}.txt", timestamp)
+        };
         
         let mut file = File::create(&filename)?;
         

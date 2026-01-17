@@ -320,8 +320,8 @@ fn save_headless_match_log(
         team2: team2_metadata,
     };
 
-    // Save to file
-    match combat_log.save_to_file(&match_metadata) {
+    // Save to file (use custom output path if provided)
+    match combat_log.save_to_file(&match_metadata, headless_state.output_path.as_deref()) {
         Ok(filename) => {
             println!("Match complete. Log saved to: {}", filename);
         }
