@@ -347,7 +347,7 @@ fn try_rend(
     let rend = AbilityType::Rend;
     let rend_def = abilities.get_unchecked(&rend);
 
-    if !rend.can_cast(combatant, target_pos, my_pos) {
+    if !rend.can_cast_config(combatant, target_pos, my_pos, rend_def) {
         return false;
     }
 
@@ -433,7 +433,7 @@ fn try_mortal_strike(
         return false;
     }
 
-    if !mortal_strike.can_cast(combatant, target_pos, my_pos) {
+    if !mortal_strike.can_cast_config(combatant, target_pos, my_pos, ms_def) {
         return false;
     }
 
@@ -524,7 +524,7 @@ fn try_heroic_strike(abilities: &AbilityDefinitions, combatant: &mut Combatant, 
         return;
     }
 
-    if !ability.can_cast(combatant, target_pos, my_pos) {
+    if !ability.can_cast_config(combatant, target_pos, my_pos, def) {
         return;
     }
 

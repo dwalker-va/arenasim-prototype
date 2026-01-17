@@ -128,12 +128,11 @@ fn try_ambush(
     instant_attacks: &mut Vec<(Entity, Entity, f32, u8, CharacterClass, AbilityType)>,
 ) -> bool {
     let ability = AbilityType::Ambush;
+    let def = abilities.get_unchecked(&ability);
 
-    if !ability.can_cast(combatant, target_pos, my_pos) {
+    if !ability.can_cast_config(combatant, target_pos, my_pos, def) {
         return false;
     }
-
-    let def = abilities.get_unchecked(&ability);
 
     // Execute Ambush
     combatant.current_mana -= def.mana_cost;
@@ -198,11 +197,11 @@ fn try_kidney_shot(
         return false;
     }
 
-    if !kidney_shot.can_cast(combatant, target_pos, my_pos) {
+    let def = abilities.get_unchecked(&kidney_shot);
+
+    if !kidney_shot.can_cast_config(combatant, target_pos, my_pos, def) {
         return false;
     }
-
-    let def = abilities.get_unchecked(&kidney_shot);
 
     // Execute Kidney Shot
     spawn_speech_bubble(commands, entity, "Kidney Shot");
@@ -292,12 +291,11 @@ fn try_sinister_strike(
     instant_attacks: &mut Vec<(Entity, Entity, f32, u8, CharacterClass, AbilityType)>,
 ) -> bool {
     let ability = AbilityType::SinisterStrike;
+    let def = abilities.get_unchecked(&ability);
 
-    if !ability.can_cast(combatant, target_pos, my_pos) {
+    if !ability.can_cast_config(combatant, target_pos, my_pos, def) {
         return false;
     }
-
-    let def = abilities.get_unchecked(&ability);
 
     // Execute Sinister Strike
     combatant.current_mana -= def.mana_cost;

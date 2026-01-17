@@ -314,7 +314,7 @@ fn try_power_word_shield(
         return false;
     };
 
-    if !pw_shield.can_cast(combatant, target_pos, my_pos) {
+    if !pw_shield.can_cast_config(combatant, target_pos, my_pos, pw_shield_def) {
         return false;
     }
 
@@ -437,7 +437,7 @@ fn try_flash_heal(
         return false;
     }
 
-    if !ability.can_cast(combatant, target_pos, my_pos) {
+    if !ability.can_cast_config(combatant, target_pos, my_pos, def) {
         return false;
     }
 
@@ -514,7 +514,7 @@ fn try_mind_blast(
         return false;
     }
 
-    if !ability.can_cast(combatant, target_pos, my_pos) {
+    if !ability.can_cast_config(combatant, target_pos, my_pos, def) {
         return false;
     }
 

@@ -147,7 +147,7 @@ fn try_corruption(
         return false;
     }
 
-    if !corruption.can_cast(combatant, target_pos, my_pos) {
+    if !corruption.can_cast_config(combatant, target_pos, my_pos, corruption_def) {
         return false;
     }
 
@@ -252,7 +252,7 @@ fn try_fear(
         return false;
     }
 
-    if !fear.can_cast(combatant, target_pos, my_pos) {
+    if !fear.can_cast_config(combatant, target_pos, my_pos, fear_def) {
         return false;
     }
 
@@ -315,7 +315,7 @@ fn try_shadowbolt(
         return false;
     }
 
-    if !shadowbolt.can_cast(combatant, target_pos, my_pos) {
+    if !shadowbolt.can_cast_config(combatant, target_pos, my_pos, shadowbolt_def) {
         return false;
     }
 

@@ -614,7 +614,7 @@ pub fn check_interrupts(
         }
         
         // Check if we can cast the interrupt (range, resources, etc.)
-        if !interrupt_ability.can_cast(&combatant, target_pos, my_pos) {
+        if !interrupt_ability.can_cast_config(&combatant, target_pos, my_pos, ability_def) {
             continue;
         }
         
