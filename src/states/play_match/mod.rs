@@ -40,6 +40,8 @@ pub mod match_flow;
 pub mod combat_ai;
 pub mod combat_core;
 pub mod shadow_sight;
+pub mod systems;
+pub mod utils;
 
 // Re-exports
 pub use abilities::*;
@@ -52,6 +54,7 @@ pub use match_flow::*;
 pub use combat_ai::*;
 pub use combat_core::*;
 pub use shadow_sight::*;
+pub use utils::*;
 
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
@@ -79,14 +82,6 @@ const STOP_DISTANCE: f32 = 2.0;
 /// We subtract 1.5 to account for wall thickness (0.5) + combatant buffer (1.0)
 const ARENA_HALF_X: f32 = 36.5;  // X axis: wall center 38 - 1.5 buffer
 const ARENA_HALF_Z: f32 = 21.5;  // Z axis: wall center 23 - 1.5 buffer
-
-/// Floating combat text horizontal spread (multiplied by -0.5 to +0.5 range)
-/// Adjust this to control how far left/right numbers can appear from their spawn point
-const FCT_HORIZONTAL_SPREAD: f32 = 1.2; // Default: 0.8 (range: -0.4 to +0.4)
-
-/// Floating combat text vertical spread (0.0 to this value)
-/// Adjust this to control the vertical stagger of numbers
-const FCT_VERTICAL_SPREAD: f32 = 0.8; // Default: 0.5 (range: 0.0 to 0.5)
 
 /// Floating combat text base height above combatants (in world space Y units)
 /// Adjust this to control how high damage/healing numbers appear above characters
@@ -151,22 +146,6 @@ fn create_octagon_mesh(length: f32, width: f32, corner_cut: f32) -> Mesh {
     .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
     .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
     .with_inserted_indices(bevy::render::mesh::Indices::U32(indices))
-}
-
-/// Helper function to get next floating combat text offset and update pattern state
-/// Returns (x_offset, y_offset) based on deterministic alternating pattern
-fn get_next_fct_offset(state: &mut FloatingTextState) -> (f32, f32) {
-    let (x_offset, y_offset) = match state.next_pattern_index {
-        0 => (0.0, 0.0),  // Center
-        1 => (FCT_HORIZONTAL_SPREAD * 0.4, FCT_VERTICAL_SPREAD * 0.3),  // Right side, slight up
-        2 => (FCT_HORIZONTAL_SPREAD * -0.4, FCT_VERTICAL_SPREAD * 0.6), // Left side, more up
-        _ => (0.0, 0.0),  // Fallback to center
-    };
-    
-    // Cycle to next pattern: 0 -> 1 -> 2 -> 0
-    state.next_pattern_index = (state.next_pattern_index + 1) % 3;
-    
-    (x_offset, y_offset)
 }
 
 // ============================================================================

@@ -11,18 +11,15 @@
 use std::collections::HashMap;
 use bevy::prelude::*;
 use bevy_egui::egui;
-use crate::combat::log::{CombatLog, CombatLogEventType, CombatantId};
+use crate::combat::log::{CombatLog, CombatLogEventType};
 use super::match_config;
 use super::components::*;
 use super::abilities::{AbilityType, SpellSchool};
-use super::combat_ai::spawn_speech_bubble;
-use super::{MELEE_RANGE, ARENA_HALF_X, ARENA_HALF_Z, get_next_fct_offset};
+use super::utils::{spawn_speech_bubble, get_next_fct_offset};
+use super::{MELEE_RANGE, ARENA_HALF_X, ARENA_HALF_Z};
 
-/// Helper to generate a consistent combatant ID for the combat log
-/// Format: "Team {team} {class}" e.g., "Team 1 Warrior"
-pub fn combatant_id(team: u8, class: match_config::CharacterClass) -> CombatantId {
-    format!("Team {} {}", team, class.name())
-}
+// Re-export combatant_id for backward compatibility (used by other modules)
+pub use super::utils::combatant_id;
 
 /// Apply damage to a combatant, accounting for absorb shields.
 /// Returns (actual_damage_to_health, damage_absorbed).

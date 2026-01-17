@@ -8,8 +8,7 @@ use crate::combat::log::CombatLog;
 use super::match_config;
 use super::components::*;
 use super::abilities::AbilityType;
-use super::get_next_fct_offset;
-use super::combat_core::combatant_id;
+use super::utils::{combatant_id, get_next_fct_offset};
 
 /// Spawn visual meshes for newly created projectiles.
 /// Creates a glowing sphere that travels through the air.

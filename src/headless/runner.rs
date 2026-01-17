@@ -8,12 +8,9 @@ use std::time::Duration;
 
 use crate::combat::log::{CombatLog, CombatLogEventType, CombatantMetadata, MatchMetadata};
 use crate::states::match_config::MatchConfig;
-use crate::states::play_match::{
-    acquire_targets, animate_orb_consumption, apply_pending_auras, check_interrupts,
-    check_orb_pickups, combat_auto_attack, combatant_id, decide_abilities, move_projectiles,
-    move_to_target, process_aura_breaks, process_casting, process_dot_ticks, process_interrupts,
-    process_projectile_hits, regenerate_resources, track_shadow_sight_timer, update_auras,
-    update_countdown, Combatant, FloatingTextState, GameRng, MatchCountdown, ShadowSightState,
+// Use the stable systems API instead of importing internal functions directly
+use crate::states::play_match::systems::{
+    self, combatant_id, Combatant, FloatingTextState, GameRng, MatchCountdown, ShadowSightState,
     SimulationSpeed,
 };
 
@@ -91,58 +88,21 @@ impl Plugin for HeadlessPlugin {
                 random_seed: self.config.random_seed,
                 result: None,
             })
-            .init_resource::<CombatLog>()
-            .add_systems(Startup, headless_setup_match)
-            // Phase 1: Resources and Auras
+            .init_resource::<CombatLog>();
+
+        // Configure combat system phase ordering
+        systems::configure_combat_system_ordering(app);
+
+        // Add core combat systems using the shared API (always run in headless mode)
+        systems::add_core_combat_systems(app, || true);
+
+        // Add headless-specific systems after combat resolution
+        app.add_systems(Startup, headless_setup_match)
             .add_systems(
                 Update,
-                (
-                    update_countdown,
-                    regenerate_resources,
-                    track_shadow_sight_timer,
-                    process_dot_ticks,
-                    update_auras,
-                    apply_pending_auras,
-                )
-                    .chain(),
-            )
-            // Phase 2: Combat and Movement (first half)
-            .add_systems(
-                Update,
-                (
-                    process_aura_breaks,
-                    acquire_targets,
-                    check_orb_pickups,
-                    animate_orb_consumption,
-                    decide_abilities,
-                    check_interrupts,
-                    process_interrupts,
-                    process_casting,
-                )
+                (headless_track_time, headless_check_match_end)
                     .chain()
-                    .after(apply_pending_auras),
-            )
-            // Phase 2: Combat and Movement (second half)
-            .add_systems(
-                Update,
-                (
-                    move_projectiles,
-                    process_projectile_hits,
-                    move_to_target,
-                )
-                    .chain()
-                    .after(process_casting),
-            )
-            // Phase 3: Combat resolution and Headless-specific systems
-            .add_systems(
-                Update,
-                (
-                    combat_auto_attack,
-                    headless_check_match_end,
-                    headless_track_time,
-                )
-                    .chain()
-                    .after(move_to_target),
+                    .after(systems::CombatSystemPhase::CombatResolution),
             )
             .add_systems(PostUpdate, headless_exit_on_complete);
     }

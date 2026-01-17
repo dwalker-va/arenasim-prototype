@@ -11,24 +11,11 @@ use crate::combat::log::{CombatLog, CombatLogEventType};
 use super::match_config;
 use super::components::*;
 use super::abilities::AbilityType;
-use super::{MELEE_RANGE, is_spell_school_locked, get_next_fct_offset};
-use super::combat_core::combatant_id;
+use super::utils::{combatant_id, get_next_fct_offset};
+use super::{MELEE_RANGE, is_spell_school_locked};
 
-/// Helper function to spawn a speech bubble when a combatant uses an ability
-pub fn spawn_speech_bubble(
-    commands: &mut Commands,
-    owner: Entity,
-    ability_name: &str,
-) {
-    commands.spawn((
-        SpeechBubble {
-            owner,
-            text: format!("{}!", ability_name),
-            lifetime: 2.0, // 2 seconds
-        },
-        PlayMatchEntity,
-    ));
-}
+// Re-export spawn_speech_bubble for backward compatibility (used by other modules)
+pub use super::utils::spawn_speech_bubble;
 
 pub fn acquire_targets(
     countdown: Res<MatchCountdown>,

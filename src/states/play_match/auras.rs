@@ -12,8 +12,7 @@ use bevy_egui::egui;
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use super::match_config;
 use super::components::*;
-use super::get_next_fct_offset;
-use super::combat_core::combatant_id;
+use super::utils::{combatant_id, get_next_fct_offset};
 
 /// Update all active auras - tick down durations and remove expired ones.
 ///
