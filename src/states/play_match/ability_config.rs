@@ -159,14 +159,6 @@ impl AbilityConfig {
     pub fn is_heal(&self) -> bool {
         self.healing_base_max > 0.0 || self.healing_coefficient > 0.0
     }
-
-    /// Convert the aura effect to the legacy tuple format for compatibility.
-    /// Returns None if no aura is configured.
-    pub fn applies_aura_tuple(&self) -> Option<(AuraType, f32, f32, f32)> {
-        self.applies_aura.as_ref().map(|aura| {
-            (aura.aura_type, aura.duration, aura.magnitude, aura.break_on_damage)
-        })
-    }
 }
 
 /// Root structure for the abilities.ron file
@@ -362,44 +354,5 @@ mod tests {
 
         assert!(!config.is_damage());
         assert!(config.is_heal());
-    }
-
-    #[test]
-    fn test_applies_aura_tuple() {
-        let config = AbilityConfig {
-            name: "Test".to_string(),
-            cast_time: 0.0,
-            range: 10.0,
-            mana_cost: 30.0,
-            cooldown: 25.0,
-            damage_base_min: 0.0,
-            damage_base_max: 0.0,
-            damage_coefficient: 0.0,
-            damage_scales_with: ScalingStat::None,
-            healing_base_min: 0.0,
-            healing_base_max: 0.0,
-            healing_coefficient: 0.0,
-            applies_aura: Some(AuraEffect {
-                aura_type: AuraType::Root,
-                duration: 6.0,
-                magnitude: 1.0,
-                break_on_damage: 35.0,
-                tick_interval: 0.0,
-            }),
-            projectile_speed: None,
-            projectile_visuals: None,
-            spell_school: SpellSchool::Frost,
-            is_interrupt: false,
-            lockout_duration: 0.0,
-            requires_stealth: false,
-            is_charge: false,
-            spawn_impact_effect: false,
-        };
-
-        let tuple = config.applies_aura_tuple().unwrap();
-        assert_eq!(tuple.0, AuraType::Root);
-        assert_eq!(tuple.1, 6.0);
-        assert_eq!(tuple.2, 1.0);
-        assert_eq!(tuple.3, 35.0);
     }
 }

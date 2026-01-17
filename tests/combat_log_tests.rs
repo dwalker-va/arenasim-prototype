@@ -6,9 +6,7 @@
 //! - Tracks CC duration
 //! - Identifies surviving combatants
 
-use arenasim::combat::log::{
-    CombatLog, CombatLogEventType, CombatantId, StructuredEventData,
-};
+use arenasim::combat::log::{CombatLog, CombatLogEventType};
 
 fn create_test_log() -> CombatLog {
     CombatLog::default()
