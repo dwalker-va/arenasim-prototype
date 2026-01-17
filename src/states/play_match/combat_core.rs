@@ -1064,7 +1064,6 @@ pub fn process_casting(
         }
         
         let target_pos = target_transform.translation;
-        let distance = caster_pos.distance(target_pos);
         let text_position = target_transform.translation + Vec3::new(0.0, super::FCT_HEIGHT, 0.0);
         
         // Handle damage spells

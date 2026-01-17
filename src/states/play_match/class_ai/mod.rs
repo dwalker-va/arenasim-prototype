@@ -25,7 +25,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::match_config::CharacterClass;
 use super::abilities::AbilityType;
-use super::components::{Aura, Combatant, AuraType, ActiveAuras};
+use super::components::{Aura, Combatant, AuraType};
 
 /// Information about a single combatant, used for AI decision making.
 #[derive(Clone, Debug)]

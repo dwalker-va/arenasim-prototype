@@ -13,8 +13,6 @@ use super::components::*;
 use super::abilities::AbilityType;
 use super::ability_config::AbilityDefinitions;
 use super::utils::{combatant_id, get_next_fct_offset};
-use super::constants::{GCD, CHARGE_MIN_RANGE};
-use super::is_spell_school_locked;
 use super::class_ai;
 
 // Re-export spawn_speech_bubble for backward compatibility (used by other modules)
@@ -294,22 +292,18 @@ pub fn decide_abilities(
     for (attacker_entity, target_entity, damage, attacker_team, attacker_class, ability) in instant_attacks {
         let ability_name = abilities.get_unchecked(&ability).name.clone();
         let mut actual_damage = 0.0;
-        let mut absorbed = 0.0;
-        let mut target_team = 0;
-        let mut target_class = match_config::CharacterClass::Warrior; // Default, will be overwritten
 
         if let Ok((_, mut target, target_transform, mut target_auras)) = combatants.get_mut(target_entity) {
             if target.is_alive() {
                 // Apply damage with absorb shield consideration
-                let (dmg, abs) = super::combat_core::apply_damage_with_absorb(
+                let (dmg, absorbed) = super::combat_core::apply_damage_with_absorb(
                     damage,
                     &mut target,
                     target_auras.as_deref_mut(),
                 );
                 actual_damage = dmg;
-                absorbed = abs;
-                target_team = target.team;
-                target_class = target.class;
+                let target_team = target.team;
+                let target_class = target.class;
 
                 // Warriors generate Rage from taking damage (only on actual health damage)
                 if actual_damage > 0.0 && target.resource_type == ResourceType::Rage {
@@ -428,22 +422,18 @@ pub fn decide_abilities(
     // Process queued Frost Nova damage
     for (caster_entity, target_entity, damage, caster_team, caster_class, _target_pos) in frost_nova_damage {
         let mut actual_damage = 0.0;
-        let mut absorbed = 0.0;
-        let mut target_team = 0;
-        let mut target_class = match_config::CharacterClass::Warrior;
 
         if let Ok((_, mut target, target_transform, mut target_auras)) = combatants.get_mut(target_entity) {
             if target.is_alive() {
                 // Apply damage with absorb shield consideration
-                let (dmg, abs) = super::combat_core::apply_damage_with_absorb(
+                let (dmg, absorbed) = super::combat_core::apply_damage_with_absorb(
                     damage,
                     &mut target,
                     target_auras.as_deref_mut(),
                 );
                 actual_damage = dmg;
-                absorbed = abs;
-                target_team = target.team;
-                target_class = target.class;
+                let target_team = target.team;
+                let target_class = target.class;
 
                 // Warriors generate Rage from taking damage (only on actual health damage)
                 if actual_damage > 0.0 && target.resource_type == ResourceType::Rage {

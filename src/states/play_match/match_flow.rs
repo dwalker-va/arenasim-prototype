@@ -287,7 +287,7 @@ pub fn check_match_end(
 /// - Transition to Results state
 pub fn update_victory_celebration(
     time: Res<Time>,
-    mut celebration: Option<ResMut<VictoryCelebration>>,
+    celebration: Option<ResMut<VictoryCelebration>>,
     mut commands: Commands,
     mut next_state: ResMut<NextState<GameState>>,
     mut celebrating_combatants: Query<(&mut Transform, &Celebrating)>,

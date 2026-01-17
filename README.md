@@ -59,12 +59,16 @@ arenasim-prototype/
 │   ├── main.rs                    # Entry point, plugin registration
 │   ├── states/
 │   │   ├── mod.rs                 # Game state orchestration (menu, options, match, results)
-│   │   ├── play_match/            # Combat simulation (modular architecture, 5500+ lines)
+│   │   ├── play_match/            # Combat simulation (modular architecture)
 │   │   │   ├── mod.rs             # Module coordination & setup
-│   │   │   ├── abilities.rs       # Ability definitions & spell schools
-│   │   │   ├── components.rs      # Combat data structures (Combatant, Aura, etc.)
-│   │   │   ├── combat_ai.rs       # AI decision-making (target acquisition, priorities)
-│   │   │   ├── combat_core.rs     # Core mechanics (movement, auto-attack, casting)
+│   │   │   ├── abilities.rs       # AbilityType enum, spell schools
+│   │   │   ├── ability_config.rs  # Data-driven ability loading from RON
+│   │   │   ├── components/        # ECS components (Combatant, Auras, Visual effects)
+│   │   │   ├── class_ai/          # Per-class AI logic (Warrior, Mage, Rogue, Priest, Warlock)
+│   │   │   ├── combat_ai.rs       # Target selection, interrupt timing
+│   │   │   ├── combat_core.rs     # Damage/healing, movement, casting
+│   │   │   ├── constants.rs       # Centralized game constants (GCD, ranges, etc.)
+│   │   │   ├── systems.rs         # Systems API layer for headless mode
 │   │   │   ├── auras.rs           # Status effect systems (Root, Stun, DoT)
 │   │   │   ├── projectiles.rs     # Spell projectile systems
 │   │   │   ├── rendering.rs       # UI rendering (cast bars, FCT, combat log)
@@ -86,7 +90,8 @@ arenasim-prototype/
 │   ├── fonts/
 │   │   ├── Rajdhani-Bold.ttf      # UI font (fantasy-themed)
 │   │   └── Rajdhani-Regular.ttf
-│   ├── config/                    # Game data (currently unused - data is code-defined)
+│   ├── config/
+│   │   └── abilities.ron          # Data-driven ability definitions (damage, cooldowns, auras)
 │   ├── models/                    # 3D models (procedurally generated meshes)
 │   └── audio/                     # Audio (not yet implemented)
 ├── match_logs/                    # Auto-saved combat logs for debugging
@@ -149,6 +154,33 @@ This project is designed for **agentic development** (AI-assisted code generatio
 - **Deterministic**: Procedural generation and simple assets make behavior predictable
 - **Debuggable**: Match logs saved automatically, extensive console logging
 
+## Data-Driven Abilities
+
+Abilities are defined in `assets/config/abilities.ron` using the RON format. This allows tweaking damage values, cooldowns, and effects without recompiling:
+
+```ron
+Frostbolt: (
+    name: "Frostbolt",
+    cast_time: 1.5,
+    range: 40.0,
+    mana_cost: 20.0,
+    cooldown: 0.0,
+    damage_base_min: 10.0,
+    damage_base_max: 15.0,
+    damage_coefficient: 0.8,
+    damage_scales_with: SpellPower,
+    applies_aura: Some((
+        aura_type: MovementSpeedSlow,
+        duration: 5.0,
+        magnitude: 0.7,
+    )),
+    projectile_speed: Some(35.0),
+    spell_school: Frost,
+)
+```
+
+See [CLAUDE.md](CLAUDE.md) for detailed instructions on adding new abilities.
+
 ## Character Classes & Abilities
 
 ### Warrior (Melee Tank/DPS)
@@ -194,7 +226,8 @@ This project is designed for **agentic development** (AI-assisted code generatio
 - [ ] AI opponent strategies (configurable team behaviors)
 - [ ] Tournament mode (bracket progression)
 - [ ] Steam Deck optimization
-- [ ] Modding support (expose ability/character configs)
+- [x] Modding support: Abilities are now data-driven via `assets/config/abilities.ron`
+- [ ] Modding support: Character stats and class configs
 
 ## Contributing
 

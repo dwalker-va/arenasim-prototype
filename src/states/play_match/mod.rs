@@ -62,10 +62,9 @@ pub use utils::*;
 pub use constants::*;
 
 use bevy::prelude::*;
-use bevy_egui::{egui, EguiContexts};
 use super::match_config::{self, MatchConfig};
 use super::GameState;
-use crate::combat::log::{CombatLog, CombatLogEventType, PositionData, MatchMetadata, CombatantMetadata};
+use crate::combat::log::{CombatLog, CombatLogEventType};
 
 // ============================================================================
 // Helper Functions
