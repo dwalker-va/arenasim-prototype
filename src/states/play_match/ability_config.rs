@@ -184,6 +184,15 @@ pub struct AbilityDefinitions {
     definitions: HashMap<AbilityType, AbilityConfig>,
 }
 
+impl Default for AbilityDefinitions {
+    /// Load ability definitions from the default config file.
+    /// Panics if the file cannot be loaded - use for tests only.
+    fn default() -> Self {
+        load_ability_definitions()
+            .expect("Failed to load ability definitions in Default impl")
+    }
+}
+
 impl AbilityDefinitions {
     /// Create from a loaded config
     pub fn new(config: AbilitiesConfig) -> Self {

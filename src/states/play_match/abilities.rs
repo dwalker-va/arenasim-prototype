@@ -536,25 +536,53 @@ impl AbilityType {
     }
     
     /// Check if a combatant can cast this ability (has mana, in range, not casting, etc.)
+    /// Uses the legacy `definition()` method for backward compatibility.
     pub fn can_cast(&self, caster: &Combatant, target_position: Vec3, caster_position: Vec3) -> bool {
         let def = self.definition();
-        
+
         // Check mana/resource
         if caster.current_mana < def.mana_cost {
             return false;
         }
-        
+
         // Check range
         let distance = caster_position.distance(target_position);
         if distance > def.range {
             return false;
         }
-        
+
         // Ambush requires stealth
         if matches!(self, AbilityType::Ambush) && !caster.stealthed {
             return false;
         }
-        
+
+        true
+    }
+
+    /// Check if a combatant can cast this ability using config-based definitions.
+    pub fn can_cast_config(
+        &self,
+        caster: &Combatant,
+        target_position: Vec3,
+        caster_position: Vec3,
+        ability_def: &super::ability_config::AbilityConfig,
+    ) -> bool {
+        // Check mana/resource
+        if caster.current_mana < ability_def.mana_cost {
+            return false;
+        }
+
+        // Check range
+        let distance = caster_position.distance(target_position);
+        if distance > ability_def.range {
+            return false;
+        }
+
+        // Ambush requires stealth
+        if matches!(self, AbilityType::Ambush) && !caster.stealthed {
+            return false;
+        }
+
         true
     }
 }

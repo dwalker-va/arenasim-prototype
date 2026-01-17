@@ -638,31 +638,31 @@ pub struct AuraPending {
 }
 
 impl AuraPending {
-    /// Create an AuraPending from an ability definition.
+    /// Create an AuraPending from an ability config.
     ///
-    /// This is a helper method that extracts the aura info from an AbilityDefinition
+    /// This is a helper method that extracts the aura info from an AbilityConfig
     /// and creates an AuraPending with appropriate defaults.
     ///
     /// Returns None if the ability doesn't apply an aura.
     pub fn from_ability(
         target: Entity,
         caster: Entity,
-        ability_def: &AbilityDefinition,
+        ability_def: &AbilityConfig,
     ) -> Option<Self> {
-        let (aura_type, duration, magnitude, break_threshold) = ability_def.applies_aura?;
+        let aura_effect = ability_def.applies_aura.as_ref()?;
 
         Some(Self {
             target,
             aura: Aura {
-                effect_type: aura_type,
-                duration,
-                magnitude,
-                break_on_damage_threshold: break_threshold,
+                effect_type: aura_effect.aura_type,
+                duration: aura_effect.duration,
+                magnitude: aura_effect.magnitude,
+                break_on_damage_threshold: aura_effect.break_on_damage,
                 accumulated_damage: 0.0,
-                tick_interval: 0.0,
-                time_until_next_tick: 0.0,
+                tick_interval: aura_effect.tick_interval,
+                time_until_next_tick: aura_effect.tick_interval,
                 caster: Some(caster),
-                ability_name: ability_def.name.to_string(),
+                ability_name: ability_def.name.clone(),
                 fear_direction: (0.0, 0.0),
                 fear_direction_timer: 0.0,
             },
@@ -675,23 +675,23 @@ impl AuraPending {
     pub fn from_ability_dot(
         target: Entity,
         caster: Entity,
-        ability_def: &AbilityDefinition,
+        ability_def: &AbilityConfig,
         tick_interval: f32,
     ) -> Option<Self> {
-        let (aura_type, duration, magnitude, break_threshold) = ability_def.applies_aura?;
+        let aura_effect = ability_def.applies_aura.as_ref()?;
 
         Some(Self {
             target,
             aura: Aura {
-                effect_type: aura_type,
-                duration,
-                magnitude,
-                break_on_damage_threshold: break_threshold,
+                effect_type: aura_effect.aura_type,
+                duration: aura_effect.duration,
+                magnitude: aura_effect.magnitude,
+                break_on_damage_threshold: aura_effect.break_on_damage,
                 accumulated_damage: 0.0,
                 tick_interval,
                 time_until_next_tick: tick_interval, // First tick after interval
                 caster: Some(caster),
-                ability_name: ability_def.name.to_string(),
+                ability_name: ability_def.name.clone(),
                 fear_direction: (0.0, 0.0),
                 fear_direction_timer: 0.0,
             },
@@ -704,21 +704,21 @@ impl AuraPending {
     pub fn from_ability_with_name(
         target: Entity,
         caster: Entity,
-        ability_def: &AbilityDefinition,
+        ability_def: &AbilityConfig,
         ability_name: String,
     ) -> Option<Self> {
-        let (aura_type, duration, magnitude, break_threshold) = ability_def.applies_aura?;
+        let aura_effect = ability_def.applies_aura.as_ref()?;
 
         Some(Self {
             target,
             aura: Aura {
-                effect_type: aura_type,
-                duration,
-                magnitude,
-                break_on_damage_threshold: break_threshold,
+                effect_type: aura_effect.aura_type,
+                duration: aura_effect.duration,
+                magnitude: aura_effect.magnitude,
+                break_on_damage_threshold: aura_effect.break_on_damage,
                 accumulated_damage: 0.0,
-                tick_interval: 0.0,
-                time_until_next_tick: 0.0,
+                tick_interval: aura_effect.tick_interval,
+                time_until_next_tick: aura_effect.tick_interval,
                 caster: Some(caster),
                 ability_name,
                 fear_direction: (0.0, 0.0),
@@ -898,13 +898,15 @@ mod tests {
     #[test]
     fn test_aura_pending_from_ability_with_aura() {
         use super::AbilityType;
+        use super::super::ability_config::AbilityDefinitions;
 
         // Ice Barrier has an absorb aura
-        let ability_def = AbilityType::IceBarrier.definition();
+        let abilities = AbilityDefinitions::default();
+        let ability_def = abilities.get_unchecked(&AbilityType::IceBarrier);
         let target = Entity::from_raw(1);
         let caster = Entity::from_raw(2);
 
-        let pending = AuraPending::from_ability(target, caster, &ability_def);
+        let pending = AuraPending::from_ability(target, caster, ability_def);
 
         assert!(pending.is_some(), "Ice Barrier should create an AuraPending");
         let pending = pending.unwrap();
@@ -917,13 +919,15 @@ mod tests {
     #[test]
     fn test_aura_pending_from_ability_without_aura() {
         use super::AbilityType;
+        use super::super::ability_config::AbilityDefinitions;
 
         // Shadowbolt doesn't have an aura
-        let ability_def = AbilityType::Shadowbolt.definition();
+        let abilities = AbilityDefinitions::default();
+        let ability_def = abilities.get_unchecked(&AbilityType::Shadowbolt);
         let target = Entity::from_raw(1);
         let caster = Entity::from_raw(2);
 
-        let pending = AuraPending::from_ability(target, caster, &ability_def);
+        let pending = AuraPending::from_ability(target, caster, ability_def);
 
         assert!(pending.is_none(), "Shadowbolt should not create an AuraPending");
     }
@@ -931,13 +935,15 @@ mod tests {
     #[test]
     fn test_aura_pending_dot_has_tick_interval() {
         use super::AbilityType;
+        use super::super::ability_config::AbilityDefinitions;
 
         // Corruption is a DoT
-        let ability_def = AbilityType::Corruption.definition();
+        let abilities = AbilityDefinitions::default();
+        let ability_def = abilities.get_unchecked(&AbilityType::Corruption);
         let target = Entity::from_raw(1);
         let caster = Entity::from_raw(2);
 
-        let pending = AuraPending::from_ability_dot(target, caster, &ability_def, 3.0);
+        let pending = AuraPending::from_ability_dot(target, caster, ability_def, 3.0);
 
         assert!(pending.is_some(), "Corruption should create an AuraPending");
         let pending = pending.unwrap();
@@ -949,15 +955,17 @@ mod tests {
     #[test]
     fn test_aura_pending_custom_name() {
         use super::AbilityType;
+        use super::super::ability_config::AbilityDefinitions;
 
-        let ability_def = AbilityType::IceBarrier.definition();
+        let abilities = AbilityDefinitions::default();
+        let ability_def = abilities.get_unchecked(&AbilityType::IceBarrier);
         let target = Entity::from_raw(1);
         let caster = Entity::from_raw(2);
 
         let pending = AuraPending::from_ability_with_name(
             target,
             caster,
-            &ability_def,
+            ability_def,
             "Custom Shield Name".to_string(),
         );
 
