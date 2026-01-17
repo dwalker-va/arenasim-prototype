@@ -204,13 +204,13 @@ pub fn process_projectile_hits(
                 (actual_damage, absorbed, target.team, target.class, is_killing_blow)
             }; // target borrow dropped here
 
-            // Update caster damage dealt
+            // Update caster damage dealt (include absorbed damage - caster dealt it)
             {
                 let Ok((_, mut caster, _)) = combatants.get_mut(caster_entity) else {
                     commands.entity(projectile_entity).despawn_recursive();
                     continue;
                 };
-                caster.damage_dealt += actual_damage;
+                caster.damage_dealt += actual_damage + absorbed;
             } // caster borrow dropped here
             
             // Spawn yellow floating combat text for ability damage
@@ -277,7 +277,7 @@ pub fn process_projectile_hits(
                 combatant_id(caster_team, caster_class),
                 combatant_id(target_team, target_class),
                 def.name.to_string(),
-                actual_damage,
+                actual_damage + absorbed, // Total damage dealt (including absorbed)
                 is_killing_blow,
                 message,
             );

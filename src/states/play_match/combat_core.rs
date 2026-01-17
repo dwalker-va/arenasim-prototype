@@ -612,8 +612,8 @@ pub fn combat_auto_attack(
                 *damage_per_target.entry(target_entity).or_insert(0.0) += actual_damage;
                 *absorbed_per_target.entry(target_entity).or_insert(0.0) += absorbed;
 
-                // Collect attacker damage for later update
-                damage_dealt_updates.push((attacker_entity, actual_damage));
+                // Collect attacker damage for later update (include absorbed damage - attacker dealt it)
+                damage_dealt_updates.push((attacker_entity, actual_damage + absorbed));
 
                 // Log the attack with structured data
                 if let (Some(&(attacker_team, attacker_class)), Some(&(target_team, target_class))) =
@@ -655,7 +655,7 @@ pub fn combat_auto_attack(
                         combatant_id(attacker_team, attacker_class),
                         combatant_id(target_team, target_class),
                         attack_name.to_string(),
-                        actual_damage,
+                        actual_damage + absorbed, // Total damage dealt (including absorbed)
                         is_killing_blow,
                         message,
                     );
@@ -909,7 +909,7 @@ pub fn process_casting(
     time: Res<Time>,
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
-    mut combatants: Query<(Entity, &Transform, &mut Combatant, Option<&mut CastingState>, Option<&ActiveAuras>)>,
+    mut combatants: Query<(Entity, &Transform, &mut Combatant, Option<&mut CastingState>, Option<&mut ActiveAuras>)>,
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
@@ -1024,7 +1024,7 @@ pub fn process_casting(
         let is_self_target = target_entity == caster_entity;
         
         // Get target combatant
-        let Ok((_, target_transform, mut target, _, target_auras)) = combatants.get_mut(target_entity) else {
+        let Ok((_, target_transform, mut target, _, mut target_auras)) = combatants.get_mut(target_entity) else {
             continue;
         };
         
@@ -1040,34 +1040,38 @@ pub fn process_casting(
         if def.is_damage() {
             // Use pre-calculated damage (already includes stat scaling)
             let damage = ability_damage;
-            
-            let actual_damage = damage.min(target.current_health);
-            target.current_health = (target.current_health - damage).max(0.0);
-            target.damage_taken += actual_damage;
-            
-            // Warriors generate Rage from taking damage
-            if target.resource_type == ResourceType::Rage {
+
+            // Apply damage with absorb shield consideration
+            let (actual_damage, absorbed) = apply_damage_with_absorb(
+                damage,
+                &mut target,
+                target_auras.as_deref_mut(),
+            );
+
+            // Warriors generate Rage from taking damage (only on actual health damage)
+            if actual_damage > 0.0 && target.resource_type == ResourceType::Rage {
                 let rage_gain = actual_damage * 0.15; // Gain 15% of damage taken as Rage
                 target.current_mana = (target.current_mana + rage_gain).min(target.max_mana);
             }
-            
+
             // Track damage for aura breaking
             commands.entity(target_entity).insert(DamageTakenThisFrame {
                 amount: actual_damage,
             });
-            
+
             // Break stealth on offensive ability use
             break_stealth.push(caster_entity);
-            
-            // Track damage dealt for caster (update later to avoid double borrow)
+
+            // Track damage dealt for caster (include absorbed - caster dealt it)
+            let total_damage_dealt = actual_damage + absorbed;
             if is_self_target {
                 // Self-damage: target IS caster, so update now
-                target.damage_dealt += actual_damage;
+                target.damage_dealt += total_damage_dealt;
             } else {
                 // Different target: collect for later update
-                caster_damage_updates.push((caster_entity, actual_damage));
+                caster_damage_updates.push((caster_entity, total_damage_dealt));
             }
-            
+
             // Spawn floating combat text (yellow for damage abilities)
             // Get deterministic offset based on pattern state
             let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
@@ -1085,7 +1089,26 @@ pub fn process_casting(
                 },
                 PlayMatchEntity,
             ));
-            
+
+            // Spawn light blue floating combat text for absorbed damage
+            if absorbed > 0.0 {
+                let (absorb_offset_x, absorb_offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
+                    get_next_fct_offset(&mut fct_state)
+                } else {
+                    (0.0, 0.0)
+                };
+                commands.spawn((
+                    FloatingCombatText {
+                        world_position: text_position + Vec3::new(absorb_offset_x, absorb_offset_y, 0.0),
+                        text: format!("{:.0} absorbed", absorbed),
+                        color: egui::Color32::from_rgb(100, 180, 255), // Light blue
+                        lifetime: 1.5,
+                        vertical_offset: absorb_offset_y,
+                    },
+                    PlayMatchEntity,
+                ));
+            }
+
             // Spawn visual effect for Mind Blast (shadow impact)
             if ability == AbilityType::MindBlast {
                 commands.spawn((
@@ -1099,23 +1122,36 @@ pub fn process_casting(
                     PlayMatchEntity,
                 ));
             }
-            
+
             // Log the damage with structured data
             let is_killing_blow = !target.is_alive();
-            let message = format!(
-                "Team {} {}'s {} hits Team {} {} for {:.0} damage",
-                caster_team,
-                caster_class.name(),
-                def.name,
-                target.team,
-                target.class.name(),
-                actual_damage
-            );
+            let message = if absorbed > 0.0 {
+                format!(
+                    "Team {} {}'s {} hits Team {} {} for {:.0} damage ({:.0} absorbed)",
+                    caster_team,
+                    caster_class.name(),
+                    def.name,
+                    target.team,
+                    target.class.name(),
+                    actual_damage,
+                    absorbed
+                )
+            } else {
+                format!(
+                    "Team {} {}'s {} hits Team {} {} for {:.0} damage",
+                    caster_team,
+                    caster_class.name(),
+                    def.name,
+                    target.team,
+                    target.class.name(),
+                    actual_damage
+                )
+            };
             combat_log.log_damage(
                 combatant_id(caster_team, caster_class),
                 combatant_id(target.team, target.class),
                 def.name.to_string(),
-                actual_damage,
+                total_damage_dealt, // Total damage including absorbed
                 is_killing_blow,
                 message,
             );
