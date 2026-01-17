@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "if echo \"$CLAUDE_TOOL_INPUT\" | grep -q 'git commit'; then echo '📝 Reminder: Update design-docs/project-todos.md with this commit (session notes, files modified, key learnings)'; fi"
+            "command": "jq -e '.tool_input.command | contains(\"git commit\")' > /dev/null 2>&1 && echo '📝 Reminder: Update design-docs/project-todos.md with this commit (session notes, files modified, key learnings)' || true"
           }
         ]
       }
