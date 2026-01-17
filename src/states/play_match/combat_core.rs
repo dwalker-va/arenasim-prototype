@@ -29,11 +29,28 @@ pub fn combatant_id(team: u8, class: match_config::CharacterClass) -> CombatantI
 ///
 /// If the target has an Absorb aura, damage is first subtracted from the shield.
 /// Any remaining damage is applied to health. Depleted shields are removed.
+///
+/// # Panics (debug only)
+/// Panics if damage is negative (damage should always be >= 0).
 pub fn apply_damage_with_absorb(
     damage: f32,
     target: &mut Combatant,
     active_auras: Option<&mut ActiveAuras>,
 ) -> (f32, f32) {
+    // Invariant: damage should never be negative
+    debug_assert!(
+        damage >= 0.0,
+        "apply_damage_with_absorb: damage cannot be negative, got {}",
+        damage
+    );
+
+    // Invariant: target health should be valid before we modify it
+    debug_assert!(
+        target.current_health >= 0.0,
+        "apply_damage_with_absorb: target health already negative ({})",
+        target.current_health
+    );
+
     let mut remaining_damage = damage;
     let mut total_absorbed = 0.0;
 
@@ -41,6 +58,13 @@ pub fn apply_damage_with_absorb(
     if let Some(auras) = active_auras {
         for aura in auras.auras.iter_mut() {
             if aura.effect_type == AuraType::Absorb && remaining_damage > 0.0 {
+                // Invariant: absorb shield magnitude should be positive
+                debug_assert!(
+                    aura.magnitude >= 0.0,
+                    "apply_damage_with_absorb: absorb shield has negative magnitude ({})",
+                    aura.magnitude
+                );
+
                 let absorb_amount = aura.magnitude.min(remaining_damage);
                 aura.magnitude -= absorb_amount;
                 remaining_damage -= absorb_amount;
@@ -55,6 +79,12 @@ pub fn apply_damage_with_absorb(
     let actual_damage = remaining_damage.min(target.current_health);
     target.current_health = (target.current_health - remaining_damage).max(0.0);
     target.damage_taken += actual_damage;
+
+    // Post-condition: health should still be valid
+    debug_assert!(
+        target.current_health >= 0.0,
+        "apply_damage_with_absorb: health went negative after damage"
+    );
 
     (actual_damage, total_absorbed)
 }
@@ -909,6 +939,7 @@ pub fn process_casting(
     time: Res<Time>,
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
+    mut game_rng: ResMut<GameRng>,
     mut combatants: Query<(Entity, &Transform, &mut Combatant, Option<&mut CastingState>, Option<&mut ActiveAuras>)>,
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
@@ -962,8 +993,8 @@ pub fn process_casting(
             caster.current_mana -= def.mana_cost;
             
             // Pre-calculate damage/healing (using caster's stats)
-            let ability_damage = caster.calculate_ability_damage(&def);
-            let ability_healing = caster.calculate_ability_healing(&def);
+            let ability_damage = caster.calculate_ability_damage(&def, &mut game_rng);
+            let ability_healing = caster.calculate_ability_healing(&def, &mut game_rng);
             
             // Store cast info for processing
             completed_casts.push((
@@ -1413,5 +1444,248 @@ pub fn animate_death(
 /// Returns 0.0 at t=0.0 and 1.0 at t=1.0, with decreasing rate of change.
 fn ease_out_quad(t: f32) -> f32 {
     1.0 - (1.0 - t).powi(2)
+}
+
+// =============================================================================
+// Unit Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper to create a test combatant
+    fn create_test_combatant(health: f32) -> Combatant {
+        let mut combatant = Combatant::new(1, match_config::CharacterClass::Warrior);
+        combatant.max_health = health;
+        combatant.current_health = health;
+        combatant.damage_taken = 0.0;
+        combatant
+    }
+
+    /// Helper to create an absorb aura
+    fn create_absorb_aura(amount: f32, ability_name: &str) -> Aura {
+        Aura {
+            effect_type: AuraType::Absorb,
+            duration: 30.0,
+            magnitude: amount,
+            break_on_damage_threshold: 0.0,
+            accumulated_damage: 0.0,
+            tick_interval: 0.0,
+            time_until_next_tick: 0.0,
+            caster: None,
+            ability_name: ability_name.to_string(),
+            fear_direction: (0.0, 0.0),
+            fear_direction_timer: 0.0,
+        }
+    }
+
+    // =========================================================================
+    // apply_damage_with_absorb Tests
+    // =========================================================================
+
+    #[test]
+    fn test_damage_with_no_shields() {
+        let mut target = create_test_combatant(100.0);
+
+        let (actual_damage, absorbed) = apply_damage_with_absorb(30.0, &mut target, None);
+
+        assert_eq!(actual_damage, 30.0, "All damage should hit health");
+        assert_eq!(absorbed, 0.0, "No damage should be absorbed");
+        assert_eq!(target.current_health, 70.0, "Health should decrease by damage");
+        assert_eq!(target.damage_taken, 30.0, "Damage taken should be tracked");
+    }
+
+    #[test]
+    fn test_damage_fully_absorbed_by_shield() {
+        let mut target = create_test_combatant(100.0);
+        let mut auras = ActiveAuras {
+            auras: vec![create_absorb_aura(50.0, "Power Word: Shield")],
+        };
+
+        let (actual_damage, absorbed) = apply_damage_with_absorb(30.0, &mut target, Some(&mut auras));
+
+        assert_eq!(actual_damage, 0.0, "No damage should hit health");
+        assert_eq!(absorbed, 30.0, "All damage should be absorbed");
+        assert_eq!(target.current_health, 100.0, "Health should remain full");
+        assert_eq!(auras.auras[0].magnitude, 20.0, "Shield should have 20 remaining");
+    }
+
+    #[test]
+    fn test_damage_partially_absorbed() {
+        let mut target = create_test_combatant(100.0);
+        let mut auras = ActiveAuras {
+            auras: vec![create_absorb_aura(20.0, "Power Word: Shield")],
+        };
+
+        let (actual_damage, absorbed) = apply_damage_with_absorb(50.0, &mut target, Some(&mut auras));
+
+        assert_eq!(absorbed, 20.0, "Shield should absorb its full amount");
+        assert_eq!(actual_damage, 30.0, "Remaining damage should hit health");
+        assert_eq!(target.current_health, 70.0, "Health should decrease by remaining damage");
+        assert!(auras.auras.is_empty(), "Depleted shield should be removed");
+    }
+
+    #[test]
+    fn test_multiple_shields_stack() {
+        let mut target = create_test_combatant(100.0);
+        let mut auras = ActiveAuras {
+            auras: vec![
+                create_absorb_aura(30.0, "Power Word: Shield"),
+                create_absorb_aura(40.0, "Ice Barrier"),
+            ],
+        };
+
+        let (actual_damage, absorbed) = apply_damage_with_absorb(50.0, &mut target, Some(&mut auras));
+
+        assert_eq!(absorbed, 50.0, "All damage should be absorbed by combined shields");
+        assert_eq!(actual_damage, 0.0, "No damage should hit health");
+        assert_eq!(target.current_health, 100.0, "Health should remain full");
+
+        // First shield should be consumed, second should have remaining
+        assert_eq!(auras.auras.len(), 1, "One shield should remain");
+        assert_eq!(auras.auras[0].magnitude, 20.0, "Ice Barrier should have 20 remaining");
+    }
+
+    #[test]
+    fn test_damage_exceeds_health() {
+        let mut target = create_test_combatant(50.0);
+
+        let (actual_damage, absorbed) = apply_damage_with_absorb(100.0, &mut target, None);
+
+        assert_eq!(actual_damage, 50.0, "Actual damage should be limited by remaining health");
+        assert_eq!(absorbed, 0.0, "No damage absorbed");
+        assert_eq!(target.current_health, 0.0, "Target should be dead");
+    }
+
+    #[test]
+    fn test_zero_damage() {
+        let mut target = create_test_combatant(100.0);
+
+        let (actual_damage, absorbed) = apply_damage_with_absorb(0.0, &mut target, None);
+
+        assert_eq!(actual_damage, 0.0, "No damage dealt");
+        assert_eq!(absorbed, 0.0, "No damage absorbed");
+        assert_eq!(target.current_health, 100.0, "Health unchanged");
+    }
+
+    #[test]
+    fn test_depleted_shield_removed() {
+        let mut target = create_test_combatant(100.0);
+        let mut auras = ActiveAuras {
+            auras: vec![create_absorb_aura(25.0, "Power Word: Shield")],
+        };
+
+        let (actual_damage, absorbed) = apply_damage_with_absorb(25.0, &mut target, Some(&mut auras));
+
+        assert_eq!(absorbed, 25.0);
+        assert_eq!(actual_damage, 0.0);
+        assert!(auras.auras.is_empty(), "Exactly-depleted shield should be removed");
+    }
+
+    // =========================================================================
+    // has_absorb_shield Tests
+    // =========================================================================
+
+    #[test]
+    fn test_has_absorb_shield_with_no_auras() {
+        assert!(!has_absorb_shield(None));
+    }
+
+    #[test]
+    fn test_has_absorb_shield_with_empty_auras() {
+        let auras = ActiveAuras { auras: vec![] };
+        assert!(!has_absorb_shield(Some(&auras)));
+    }
+
+    #[test]
+    fn test_has_absorb_shield_with_absorb() {
+        let auras = ActiveAuras {
+            auras: vec![create_absorb_aura(50.0, "Power Word: Shield")],
+        };
+        assert!(has_absorb_shield(Some(&auras)));
+    }
+
+    #[test]
+    fn test_has_absorb_shield_with_other_auras() {
+        let auras = ActiveAuras {
+            auras: vec![Aura {
+                effect_type: AuraType::MovementSpeedSlow,
+                duration: 5.0,
+                magnitude: 0.7,
+                break_on_damage_threshold: 0.0,
+                accumulated_damage: 0.0,
+                tick_interval: 0.0,
+                time_until_next_tick: 0.0,
+                caster: None,
+                ability_name: "Frostbolt".to_string(),
+                fear_direction: (0.0, 0.0),
+                fear_direction_timer: 0.0,
+            }],
+        };
+        assert!(!has_absorb_shield(Some(&auras)));
+    }
+
+    // =========================================================================
+    // has_weakened_soul Tests
+    // =========================================================================
+
+    #[test]
+    fn test_has_weakened_soul_with_no_auras() {
+        assert!(!has_weakened_soul(None));
+    }
+
+    #[test]
+    fn test_has_weakened_soul_with_weakened_soul() {
+        let auras = ActiveAuras {
+            auras: vec![Aura {
+                effect_type: AuraType::WeakenedSoul,
+                duration: 15.0,
+                magnitude: 0.0,
+                break_on_damage_threshold: 0.0,
+                accumulated_damage: 0.0,
+                tick_interval: 0.0,
+                time_until_next_tick: 0.0,
+                caster: None,
+                ability_name: "Weakened Soul".to_string(),
+                fear_direction: (0.0, 0.0),
+                fear_direction_timer: 0.0,
+            }],
+        };
+        assert!(has_weakened_soul(Some(&auras)));
+    }
+
+    // =========================================================================
+    // combatant_id Tests
+    // =========================================================================
+
+    #[test]
+    fn test_combatant_id_format() {
+        let id = combatant_id(1, match_config::CharacterClass::Warrior);
+        assert_eq!(id, "Team 1 Warrior");
+    }
+
+    #[test]
+    fn test_combatant_id_team2() {
+        let id = combatant_id(2, match_config::CharacterClass::Mage);
+        assert_eq!(id, "Team 2 Mage");
+    }
+
+    // =========================================================================
+    // ease_out_quad Tests
+    // =========================================================================
+
+    #[test]
+    fn test_ease_out_quad_boundaries() {
+        assert_eq!(ease_out_quad(0.0), 0.0, "Should return 0 at t=0");
+        assert_eq!(ease_out_quad(1.0), 1.0, "Should return 1 at t=1");
+    }
+
+    #[test]
+    fn test_ease_out_quad_midpoint() {
+        let mid = ease_out_quad(0.5);
+        assert!(mid > 0.5, "Ease-out should be > 0.5 at t=0.5, got {}", mid);
+        assert!(mid < 1.0, "Ease-out should be < 1.0 at t=0.5, got {}", mid);
+    }
 }
 

@@ -2,9 +2,25 @@
 //!
 //! This module contains all ECS components, resources, and data structures
 //! used during the match simulation.
+//!
+//! ## Module Structure
+//!
+//! Components are organized into logical groups (with documentation submodules):
+//! - `auras`: Buff/debuff system (AuraType, Aura, ActiveAuras, AuraPending)
+//! - `visual`: Visual effects (FloatingCombatText, ShieldBubble, DeathAnimation)
+//!
+//! All types are defined here and re-exported for backward compatibility.
+//! The submodules exist primarily for documentation organization.
+
+// Documentation submodules - these provide focused documentation
+// but types are still defined in this file for simplicity
+pub mod auras;
+pub mod visual;
 
 use bevy::prelude::*;
 use bevy_egui::egui;
+use rand::prelude::*;
+use rand::rngs::StdRng;
 use super::match_config;
 use super::abilities::{AbilityDefinition, AbilityType, ScalingStat};
 
@@ -14,6 +30,51 @@ use super::{MELEE_RANGE, WAND_RANGE};
 // ============================================================================
 // Resources & Camera
 // ============================================================================
+
+/// Seeded random number generator for deterministic match simulation.
+///
+/// When a seed is provided (e.g., via headless config), the same seed will
+/// always produce the same match outcome. Without a seed, uses system entropy.
+#[derive(Resource)]
+pub struct GameRng {
+    rng: StdRng,
+    /// The seed used to initialize this RNG (if deterministic)
+    pub seed: Option<u64>,
+}
+
+impl GameRng {
+    /// Create a new GameRng with a specific seed for deterministic behavior
+    pub fn from_seed(seed: u64) -> Self {
+        Self {
+            rng: StdRng::seed_from_u64(seed),
+            seed: Some(seed),
+        }
+    }
+
+    /// Create a new GameRng with random entropy (non-deterministic)
+    pub fn from_entropy() -> Self {
+        Self {
+            rng: StdRng::from_entropy(),
+            seed: None,
+        }
+    }
+
+    /// Generate a random f32 in the range [0.0, 1.0)
+    pub fn random_f32(&mut self) -> f32 {
+        self.rng.gen()
+    }
+
+    /// Generate a random f32 in the given range
+    pub fn random_range(&mut self, min: f32, max: f32) -> f32 {
+        min + self.random_f32() * (max - min)
+    }
+}
+
+impl Default for GameRng {
+    fn default() -> Self {
+        Self::from_entropy()
+    }
+}
 
 /// Controls the speed of combat simulation
 #[derive(Resource)]
@@ -392,6 +453,43 @@ impl Combatant {
     pub fn is_alive(&self) -> bool {
         self.current_health > 0.0
     }
+
+    /// Validate that all combatant invariants hold.
+    ///
+    /// This is useful for debugging - call this after modifying combatant state
+    /// to ensure no invariants have been violated.
+    ///
+    /// In debug builds, this panics on invariant violations.
+    /// In release builds, this is a no-op.
+    #[inline]
+    pub fn debug_validate(&self) {
+        debug_assert!(
+            self.current_health >= 0.0,
+            "Combatant health cannot be negative: {}",
+            self.current_health
+        );
+        debug_assert!(
+            self.current_health <= self.max_health,
+            "Combatant health ({}) cannot exceed max_health ({})",
+            self.current_health,
+            self.max_health
+        );
+        debug_assert!(
+            self.current_mana >= 0.0,
+            "Combatant mana cannot be negative: {}",
+            self.current_mana
+        );
+        debug_assert!(
+            self.max_health > 0.0,
+            "Combatant max_health must be positive: {}",
+            self.max_health
+        );
+        debug_assert!(
+            self.team == 1 || self.team == 2,
+            "Combatant team must be 1 or 2, got {}",
+            self.team
+        );
+    }
     
     /// Check if this combatant is in range to attack the target position.
     /// Mages, Priests, and Warlocks use wands (ranged), Warriors and Rogues use melee weapons.
@@ -409,28 +507,32 @@ impl Combatant {
     
     /// Calculate damage for an ability based on character stats.
     /// Formula: Base Damage + (Scaling Stat × Coefficient)
-    pub fn calculate_ability_damage(&self, ability_def: &AbilityDefinition) -> f32 {
+    ///
+    /// Uses the provided GameRng for deterministic results when seeded.
+    pub fn calculate_ability_damage(&self, ability_def: &AbilityDefinition, rng: &mut GameRng) -> f32 {
         // Calculate base damage (random between min and max)
         let damage_range = ability_def.damage_base_max - ability_def.damage_base_min;
-        let base_damage = ability_def.damage_base_min + (rand::random::<f32>() * damage_range);
-        
+        let base_damage = ability_def.damage_base_min + (rng.random_f32() * damage_range);
+
         // Add stat scaling
         let stat_value = match ability_def.damage_scales_with {
             ScalingStat::AttackPower => self.attack_power,
             ScalingStat::SpellPower => self.spell_power,
             ScalingStat::None => 0.0,
         };
-        
+
         base_damage + (stat_value * ability_def.damage_coefficient)
     }
-    
+
     /// Calculate healing for an ability based on character stats.
     /// Formula: Base Healing + (Spell Power × Coefficient)
-    pub fn calculate_ability_healing(&self, ability_def: &AbilityDefinition) -> f32 {
+    ///
+    /// Uses the provided GameRng for deterministic results when seeded.
+    pub fn calculate_ability_healing(&self, ability_def: &AbilityDefinition, rng: &mut GameRng) -> f32 {
         // Calculate base healing (random between min and max)
         let healing_range = ability_def.healing_base_max - ability_def.healing_base_min;
-        let base_healing = ability_def.healing_base_min + (rand::random::<f32>() * healing_range);
-        
+        let base_healing = ability_def.healing_base_min + (rng.random_f32() * healing_range);
+
         // Add spell power scaling (healing always scales with spell power in WoW)
         base_healing + (self.spell_power * ability_def.healing_coefficient)
     }
@@ -497,6 +599,97 @@ pub struct Aura {
 pub struct AuraPending {
     pub target: Entity,
     pub aura: Aura,
+}
+
+impl AuraPending {
+    /// Create an AuraPending from an ability definition.
+    ///
+    /// This is a helper method that extracts the aura info from an AbilityDefinition
+    /// and creates an AuraPending with appropriate defaults.
+    ///
+    /// Returns None if the ability doesn't apply an aura.
+    pub fn from_ability(
+        target: Entity,
+        caster: Entity,
+        ability_def: &AbilityDefinition,
+    ) -> Option<Self> {
+        let (aura_type, duration, magnitude, break_threshold) = ability_def.applies_aura?;
+
+        Some(Self {
+            target,
+            aura: Aura {
+                effect_type: aura_type,
+                duration,
+                magnitude,
+                break_on_damage_threshold: break_threshold,
+                accumulated_damage: 0.0,
+                tick_interval: 0.0,
+                time_until_next_tick: 0.0,
+                caster: Some(caster),
+                ability_name: ability_def.name.to_string(),
+                fear_direction: (0.0, 0.0),
+                fear_direction_timer: 0.0,
+            },
+        })
+    }
+
+    /// Create an AuraPending for a DoT (Damage over Time) effect.
+    ///
+    /// DoTs have tick intervals and need special handling for damage attribution.
+    pub fn from_ability_dot(
+        target: Entity,
+        caster: Entity,
+        ability_def: &AbilityDefinition,
+        tick_interval: f32,
+    ) -> Option<Self> {
+        let (aura_type, duration, magnitude, break_threshold) = ability_def.applies_aura?;
+
+        Some(Self {
+            target,
+            aura: Aura {
+                effect_type: aura_type,
+                duration,
+                magnitude,
+                break_on_damage_threshold: break_threshold,
+                accumulated_damage: 0.0,
+                tick_interval,
+                time_until_next_tick: tick_interval, // First tick after interval
+                caster: Some(caster),
+                ability_name: ability_def.name.to_string(),
+                fear_direction: (0.0, 0.0),
+                fear_direction_timer: 0.0,
+            },
+        })
+    }
+
+    /// Create an AuraPending with a custom ability name override.
+    ///
+    /// Useful when the display name should differ from the ability definition.
+    pub fn from_ability_with_name(
+        target: Entity,
+        caster: Entity,
+        ability_def: &AbilityDefinition,
+        ability_name: String,
+    ) -> Option<Self> {
+        let (aura_type, duration, magnitude, break_threshold) = ability_def.applies_aura?;
+
+        Some(Self {
+            target,
+            aura: Aura {
+                effect_type: aura_type,
+                duration,
+                magnitude,
+                break_on_damage_threshold: break_threshold,
+                accumulated_damage: 0.0,
+                tick_interval: 0.0,
+                time_until_next_tick: 0.0,
+                caster: Some(caster),
+                ability_name,
+                fear_direction: (0.0, 0.0),
+                fear_direction_timer: 0.0,
+            },
+        })
+    }
 }
 
 /// Component for pending interrupt attempts.
@@ -603,4 +796,137 @@ pub struct ShieldBubble {
     pub combatant: Entity,
     /// The spell school of the shield (affects color: Frost = blue, Holy = gold)
     pub spell_school: super::abilities::SpellSchool,
+}
+
+// =============================================================================
+// Unit Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // =========================================================================
+    // GameRng Tests
+    // =========================================================================
+
+    #[test]
+    fn test_seeded_rng_is_deterministic() {
+        let seed = 42;
+        let mut rng1 = GameRng::from_seed(seed);
+        let mut rng2 = GameRng::from_seed(seed);
+
+        // Both RNGs should produce identical sequences
+        for _ in 0..100 {
+            assert_eq!(rng1.random_f32(), rng2.random_f32());
+        }
+    }
+
+    #[test]
+    fn test_different_seeds_produce_different_results() {
+        let mut rng1 = GameRng::from_seed(1);
+        let mut rng2 = GameRng::from_seed(2);
+
+        // Different seeds should produce different first values
+        assert_ne!(rng1.random_f32(), rng2.random_f32());
+    }
+
+    #[test]
+    fn test_random_range() {
+        let mut rng = GameRng::from_seed(123);
+
+        for _ in 0..100 {
+            let value = rng.random_range(10.0, 20.0);
+            assert!(value >= 10.0, "Value {} should be >= 10.0", value);
+            assert!(value < 20.0, "Value {} should be < 20.0", value);
+        }
+    }
+
+    #[test]
+    fn test_seeded_rng_stores_seed() {
+        let seed = 12345;
+        let rng = GameRng::from_seed(seed);
+        assert_eq!(rng.seed, Some(seed));
+    }
+
+    #[test]
+    fn test_entropy_rng_has_no_seed() {
+        let rng = GameRng::from_entropy();
+        assert!(rng.seed.is_none());
+    }
+
+    // =========================================================================
+    // AuraPending Helper Tests
+    // =========================================================================
+
+    #[test]
+    fn test_aura_pending_from_ability_with_aura() {
+        use super::AbilityType;
+
+        // Ice Barrier has an absorb aura
+        let ability_def = AbilityType::IceBarrier.definition();
+        let target = Entity::from_raw(1);
+        let caster = Entity::from_raw(2);
+
+        let pending = AuraPending::from_ability(target, caster, &ability_def);
+
+        assert!(pending.is_some(), "Ice Barrier should create an AuraPending");
+        let pending = pending.unwrap();
+        assert_eq!(pending.target, target);
+        assert_eq!(pending.aura.caster, Some(caster));
+        assert_eq!(pending.aura.effect_type, AuraType::Absorb);
+        assert_eq!(pending.aura.ability_name, "Ice Barrier");
+    }
+
+    #[test]
+    fn test_aura_pending_from_ability_without_aura() {
+        use super::AbilityType;
+
+        // Shadowbolt doesn't have an aura
+        let ability_def = AbilityType::Shadowbolt.definition();
+        let target = Entity::from_raw(1);
+        let caster = Entity::from_raw(2);
+
+        let pending = AuraPending::from_ability(target, caster, &ability_def);
+
+        assert!(pending.is_none(), "Shadowbolt should not create an AuraPending");
+    }
+
+    #[test]
+    fn test_aura_pending_dot_has_tick_interval() {
+        use super::AbilityType;
+
+        // Corruption is a DoT
+        let ability_def = AbilityType::Corruption.definition();
+        let target = Entity::from_raw(1);
+        let caster = Entity::from_raw(2);
+
+        let pending = AuraPending::from_ability_dot(target, caster, &ability_def, 3.0);
+
+        assert!(pending.is_some(), "Corruption should create an AuraPending");
+        let pending = pending.unwrap();
+        assert_eq!(pending.aura.tick_interval, 3.0);
+        assert_eq!(pending.aura.time_until_next_tick, 3.0);
+        assert_eq!(pending.aura.effect_type, AuraType::DamageOverTime);
+    }
+
+    #[test]
+    fn test_aura_pending_custom_name() {
+        use super::AbilityType;
+
+        let ability_def = AbilityType::IceBarrier.definition();
+        let target = Entity::from_raw(1);
+        let caster = Entity::from_raw(2);
+
+        let pending = AuraPending::from_ability_with_name(
+            target,
+            caster,
+            &ability_def,
+            "Custom Shield Name".to_string(),
+        );
+
+        assert!(pending.is_some());
+        let pending = pending.unwrap();
+        assert_eq!(pending.aura.ability_name, "Custom Shield Name");
+    }
 }

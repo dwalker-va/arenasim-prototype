@@ -235,6 +235,9 @@ pub fn setup_play_match(
     // Initialize Shadow Sight state (for stealth stalemate breaking)
     commands.insert_resource(ShadowSightState::default());
 
+    // Initialize random number generator (non-deterministic for graphical mode)
+    commands.insert_resource(GameRng::default());
+
     // Spawn arena floor - octagonal shape matching the wall boundary
     // Warm sandy/dirt battleground
     let arena_length = 76.0;

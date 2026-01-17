@@ -7,21 +7,14 @@ use bevy::prelude::*;
 use bevy::window::PresentMode;
 use bevy_egui::{egui, EguiContexts, EguiPlugin};
 
-mod camera;
-mod cli;
-mod combat;
-mod headless;
-mod keybindings;
-mod settings;
-mod states;
-mod ui;
-
-use camera::CameraPlugin;
-use combat::CombatPlugin;
-use keybindings::Keybindings;
-use settings::{GameSettings, SettingsPlugin};
-use states::{GameState, StatesPlugin};
-use ui::UiPlugin;
+use arenasim::camera::CameraPlugin;
+use arenasim::cli;
+use arenasim::combat::CombatPlugin;
+use arenasim::headless;
+use arenasim::keybindings::Keybindings;
+use arenasim::settings::{GameSettings, SettingsPlugin};
+use arenasim::states::{GameState, StatesPlugin};
+use arenasim::ui::UiPlugin;
 
 fn main() {
     let args = cli::parse_args();

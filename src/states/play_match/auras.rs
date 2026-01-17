@@ -25,6 +25,7 @@ use super::combat_core::combatant_id;
 pub fn update_auras(
     time: Res<Time>,
     mut commands: Commands,
+    mut game_rng: ResMut<GameRng>,
     mut combatants: Query<(Entity, &mut ActiveAuras)>,
 ) {
     let dt = time.delta_secs();
@@ -40,12 +41,12 @@ pub fn update_auras(
 
                 // Time to pick a new random direction
                 if aura.fear_direction_timer <= 0.0 {
-                    // Generate random angle (0 to 2*PI)
-                    let angle = rand::random::<f32>() * std::f32::consts::TAU;
+                    // Generate random angle (0 to 2*PI) using seeded RNG
+                    let angle = game_rng.random_f32() * std::f32::consts::TAU;
                     aura.fear_direction = (angle.cos(), angle.sin());
 
                     // Reset timer: change direction every 1-2 seconds (WoW-style)
-                    aura.fear_direction_timer = 1.0 + rand::random::<f32>();
+                    aura.fear_direction_timer = 1.0 + game_rng.random_f32();
                 }
             }
         }
@@ -87,6 +88,22 @@ pub fn apply_pending_auras(
     let mut new_auras_map: HashMap<Entity, Vec<Aura>> = HashMap::new();
 
     for (pending_entity, pending) in pending_auras.iter() {
+        // Invariant: aura duration should be positive
+        debug_assert!(
+            pending.aura.duration > 0.0,
+            "apply_pending_auras: aura '{}' has non-positive duration ({})",
+            pending.aura.ability_name,
+            pending.aura.duration
+        );
+
+        // Invariant: tick interval should be non-negative (0 means no ticking)
+        debug_assert!(
+            pending.aura.tick_interval >= 0.0,
+            "apply_pending_auras: aura '{}' has negative tick_interval ({})",
+            pending.aura.ability_name,
+            pending.aura.tick_interval
+        );
+
         // Get target combatant
         let Ok((mut target_combatant, active_auras, target_transform)) = combatants.get_mut(pending.target) else {
             commands.entity(pending_entity).despawn();

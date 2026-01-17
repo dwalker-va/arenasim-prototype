@@ -8,7 +8,7 @@
 
 use bevy::prelude::*;
 use crate::combat::log::{CombatLog, CombatLogEventType, MatchMetadata, CombatantMetadata};
-use crate::GameState;
+use crate::states::GameState;
 use super::match_config::MatchConfig;
 use super::components::*;
 

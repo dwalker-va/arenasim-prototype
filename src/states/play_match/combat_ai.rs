@@ -145,6 +145,7 @@ pub fn acquire_targets(
 pub fn decide_abilities(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
+    mut game_rng: ResMut<GameRng>,
     mut combatants: Query<(Entity, &mut Combatant, &Transform, Option<&mut ActiveAuras>), Without<CastingState>>,
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
@@ -434,7 +435,7 @@ pub fn decide_abilities(
                     // Queue damage and apply root to all targets
                     for (target_entity, target_pos, target_team, target_class) in &frost_nova_targets {
                         // Calculate damage (with stat scaling)
-                        let damage = combatant.calculate_ability_damage(&nova_def);
+                        let damage = combatant.calculate_ability_damage(&nova_def, &mut game_rng);
                         
                         // Queue damage for later application
                         frost_nova_damage.push((entity, *target_entity, damage, combatant.team, combatant.class, *target_pos));
@@ -1172,8 +1173,8 @@ pub fn decide_abilities(
                 );
 
                 // Calculate damage
-                let damage = combatant.calculate_ability_damage(&ms_def);
-                
+                let damage = combatant.calculate_ability_damage(&ms_def, &mut game_rng);
+
                 // Queue damage to apply (collect for later to avoid borrow issues)
                 instant_attacks.push((entity, target_entity, damage, combatant.team, combatant.class, mortal_strike));
                 
@@ -1271,7 +1272,7 @@ pub fn decide_abilities(
                 combatant.stealthed = false;
 
                 // Calculate damage (with stat scaling)
-                let damage = combatant.calculate_ability_damage(&def);
+                let damage = combatant.calculate_ability_damage(&def, &mut game_rng);
 
                 // Queue the Ambush attack to be applied after the loop
                 instant_attacks.push((entity, target_entity, damage, combatant.team, combatant.class, ability));
@@ -1411,7 +1412,7 @@ pub fn decide_abilities(
                 combatant.current_mana -= def.mana_cost;
 
                 // Calculate damage (with stat scaling)
-                let damage = combatant.calculate_ability_damage(&def);
+                let damage = combatant.calculate_ability_damage(&def, &mut game_rng);
 
                 // Queue the Sinister Strike attack to be applied after the loop
                 instant_attacks.push((entity, target_entity, damage, combatant.team, combatant.class, ability));

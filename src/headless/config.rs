@@ -29,6 +29,10 @@ pub struct HeadlessMatchConfig {
     /// Maximum match duration in seconds (default: 300)
     #[serde(default = "default_max_duration")]
     pub max_duration_secs: f32,
+    /// Random seed for deterministic match reproduction
+    /// If provided, the match will use a seeded RNG for reproducible results
+    #[serde(default)]
+    pub random_seed: Option<u64>,
 }
 
 fn default_map() -> String {

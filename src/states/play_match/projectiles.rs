@@ -92,6 +92,7 @@ pub fn move_projectiles(
 pub fn process_projectile_hits(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
+    mut game_rng: ResMut<GameRng>,
     projectiles: Query<(Entity, &Projectile, &Transform)>,
     mut combatants: Query<(&Transform, &mut Combatant, Option<&mut ActiveAuras>)>,
     mut fct_states: Query<&mut FloatingTextState>,
@@ -145,8 +146,8 @@ pub fn process_projectile_hits(
             };
             
             let def = projectile.ability.definition();
-            let ability_damage = caster_combatant.calculate_ability_damage(&def);
-            let ability_healing = caster_combatant.calculate_ability_healing(&def);
+            let ability_damage = caster_combatant.calculate_ability_damage(&def, &mut game_rng);
+            let ability_healing = caster_combatant.calculate_ability_healing(&def, &mut game_rng);
             
             // Queue this hit for processing
             hits_to_process.push((

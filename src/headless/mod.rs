@@ -25,4 +25,4 @@ pub mod config;
 pub mod runner;
 
 pub use config::HeadlessMatchConfig;
-pub use runner::run_headless_match;
+pub use runner::{run_headless_match, CombatantResult, HeadlessMatchState, MatchResult};

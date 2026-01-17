@@ -13,11 +13,45 @@ use crate::states::play_match::{
     check_orb_pickups, combat_auto_attack, combatant_id, decide_abilities, move_projectiles,
     move_to_target, process_aura_breaks, process_casting, process_dot_ticks, process_interrupts,
     process_projectile_hits, regenerate_resources, track_shadow_sight_timer, update_auras,
-    update_countdown, Combatant, FloatingTextState, MatchCountdown, ShadowSightState,
+    update_countdown, Combatant, FloatingTextState, GameRng, MatchCountdown, ShadowSightState,
     SimulationSpeed,
 };
 
 use super::config::HeadlessMatchConfig;
+
+/// Result of a completed headless match
+///
+/// This struct provides programmatic access to match results for testing and analysis.
+#[derive(Debug, Clone)]
+pub struct MatchResult {
+    /// The winning team (1 or 2), or None for a draw
+    pub winner: Option<u8>,
+    /// Total match duration in seconds (from gates opening to match end)
+    pub match_time: f32,
+    /// Combatant statistics from the match
+    pub team1_combatants: Vec<CombatantResult>,
+    /// Combatant statistics from the match
+    pub team2_combatants: Vec<CombatantResult>,
+    /// Random seed used (if deterministic mode)
+    pub random_seed: Option<u64>,
+}
+
+/// Statistics for a single combatant after the match
+#[derive(Debug, Clone)]
+pub struct CombatantResult {
+    /// Class name (e.g., "Warrior", "Mage")
+    pub class_name: String,
+    /// Maximum health
+    pub max_health: f32,
+    /// Health remaining at match end (0 if dead)
+    pub final_health: f32,
+    /// Whether this combatant survived
+    pub survived: bool,
+    /// Total damage dealt during the match
+    pub damage_dealt: f32,
+    /// Total damage taken during the match
+    pub damage_taken: f32,
+}
 
 /// Resource to track headless match state
 #[derive(Resource)]
@@ -30,6 +64,10 @@ pub struct HeadlessMatchState {
     pub output_path: Option<String>,
     /// Whether the match has completed
     pub match_complete: bool,
+    /// Random seed for deterministic simulation (if provided)
+    pub random_seed: Option<u64>,
+    /// Match result (populated when match completes)
+    pub result: Option<MatchResult>,
 }
 
 /// Plugin for headless match execution
@@ -50,6 +88,8 @@ impl Plugin for HeadlessPlugin {
                 elapsed_time: 0.0,
                 output_path: self.config.output_path.clone(),
                 match_complete: false,
+                random_seed: self.config.random_seed,
+                result: None,
             })
             .init_resource::<CombatLog>()
             .add_systems(Startup, headless_setup_match)
@@ -109,7 +149,12 @@ impl Plugin for HeadlessPlugin {
 }
 
 /// Setup system for headless match
-fn headless_setup_match(mut commands: Commands, config: Res<MatchConfig>, mut combat_log: ResMut<CombatLog>) {
+fn headless_setup_match(
+    mut commands: Commands,
+    config: Res<MatchConfig>,
+    headless_state: Res<HeadlessMatchState>,
+    mut combat_log: ResMut<CombatLog>,
+) {
     // Clear and initialize combat log
     combat_log.clear();
     combat_log.log(
@@ -121,6 +166,19 @@ fn headless_setup_match(mut commands: Commands, config: Res<MatchConfig>, mut co
     commands.insert_resource(SimulationSpeed { multiplier: 1.0 });
     commands.insert_resource(MatchCountdown::default());
     commands.insert_resource(ShadowSightState::default());
+
+    // Initialize GameRng with seed if provided (deterministic mode)
+    let game_rng = match headless_state.random_seed {
+        Some(seed) => {
+            info!("Using deterministic RNG with seed: {}", seed);
+            GameRng::from_seed(seed)
+        }
+        None => {
+            info!("Using non-deterministic RNG (no seed provided)");
+            GameRng::from_entropy()
+        }
+    };
+    commands.insert_resource(game_rng);
 
     // Spawn combatants for Team 1
     let team1_spawn_x = -35.0;
@@ -194,7 +252,9 @@ fn headless_check_match_end(
             "Match timed out after {:.1}s - declaring DRAW",
             headless_state.elapsed_time
         );
+        let result = build_match_result(&combatants, None, &headless_state);
         save_headless_match_log(&combatants, &config, &combat_log, None, &headless_state);
+        headless_state.result = Some(result);
         headless_state.match_complete = true;
         return;
     }
@@ -215,8 +275,45 @@ fn headless_check_match_end(
             Some(2)
         };
 
+        let result = build_match_result(&combatants, winner, &headless_state);
         save_headless_match_log(&combatants, &config, &combat_log, winner, &headless_state);
+        headless_state.result = Some(result);
         headless_state.match_complete = true;
+    }
+}
+
+/// Build the MatchResult from current combatant state
+fn build_match_result(
+    combatants: &Query<(&Combatant, &Transform)>,
+    winner: Option<u8>,
+    headless_state: &HeadlessMatchState,
+) -> MatchResult {
+    let mut team1_combatants = Vec::new();
+    let mut team2_combatants = Vec::new();
+
+    for (combatant, _transform) in combatants.iter() {
+        let result = CombatantResult {
+            class_name: combatant.class.name().to_string(),
+            max_health: combatant.max_health,
+            final_health: combatant.current_health,
+            survived: combatant.is_alive(),
+            damage_dealt: combatant.damage_dealt,
+            damage_taken: combatant.damage_taken,
+        };
+
+        if combatant.team == 1 {
+            team1_combatants.push(result);
+        } else {
+            team2_combatants.push(result);
+        }
+    }
+
+    MatchResult {
+        winner,
+        match_time: headless_state.elapsed_time,
+        team1_combatants,
+        team2_combatants,
+        random_seed: headless_state.random_seed,
     }
 }
 
