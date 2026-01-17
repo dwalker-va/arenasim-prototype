@@ -1,0 +1,213 @@
+//! Class-Specific AI Modules
+//!
+//! This module contains the AI decision logic for each character class.
+//! Each class has its own module that implements the `ClassAI` trait.
+//!
+//! ## Architecture
+//!
+//! The combat AI works in two phases:
+//! 1. **Context Building**: `CombatContext` collects all game state needed for decisions
+//! 2. **Decision Making**: Each class's `decide_action()` returns an `AbilityDecision`
+//!
+//! This separation allows:
+//! - Each class AI to be tested in isolation
+//! - New classes to be added without modifying other files
+//! - Clear boundaries between shared state and class-specific logic
+
+pub mod mage;
+pub mod priest;
+pub mod warrior;
+pub mod rogue;
+pub mod warlock;
+
+use bevy::prelude::*;
+use std::collections::{HashMap, HashSet};
+
+use super::match_config::CharacterClass;
+use super::abilities::AbilityType;
+use super::components::{Aura, Combatant, AuraType, ActiveAuras};
+
+/// Information about a single combatant, used for AI decision making.
+#[derive(Clone, Debug)]
+pub struct CombatantInfo {
+    pub entity: Entity,
+    pub team: u8,
+    pub class: CharacterClass,
+    pub current_health: f32,
+    pub max_health: f32,
+    pub current_mana: f32,
+    pub max_mana: f32,
+    pub position: Vec3,
+    pub is_alive: bool,
+    pub stealthed: bool,
+    pub has_target: bool,
+    pub target: Option<Entity>,
+}
+
+impl CombatantInfo {
+    /// Health as a percentage (0.0 to 1.0)
+    pub fn health_pct(&self) -> f32 {
+        if self.max_health > 0.0 {
+            self.current_health / self.max_health
+        } else {
+            0.0
+        }
+    }
+
+    /// Mana as a percentage (0.0 to 1.0)
+    pub fn mana_pct(&self) -> f32 {
+        if self.max_mana > 0.0 {
+            self.current_mana / self.max_mana
+        } else {
+            0.0
+        }
+    }
+
+    /// Distance to another position
+    pub fn distance_to(&self, other_pos: Vec3) -> f32 {
+        self.position.distance(other_pos)
+    }
+}
+
+/// Shared context for AI decision making.
+///
+/// This struct provides a read-only view of the game state that AI modules
+/// can use to make decisions without directly accessing ECS queries.
+pub struct CombatContext<'a> {
+    /// Map of entity to combatant info
+    pub combatants: &'a HashMap<Entity, CombatantInfo>,
+    /// Map of entity to their active auras
+    pub active_auras: &'a HashMap<Entity, Vec<Aura>>,
+    /// Entities that have been shielded this frame (to prevent double-shielding)
+    pub shielded_this_frame: &'a HashSet<Entity>,
+    /// The combatant making the decision
+    pub self_entity: Entity,
+    /// Whether gates have opened (combat has started)
+    pub gates_opened: bool,
+}
+
+impl<'a> CombatContext<'a> {
+    /// Get info about self
+    pub fn self_info(&self) -> Option<&CombatantInfo> {
+        self.combatants.get(&self.self_entity)
+    }
+
+    /// Get info about target (if any)
+    pub fn target_info(&self) -> Option<&CombatantInfo> {
+        self.self_info()
+            .and_then(|info| info.target)
+            .and_then(|target| self.combatants.get(&target))
+    }
+
+    /// Get auras on self
+    pub fn self_auras(&self) -> Option<&Vec<Aura>> {
+        self.active_auras.get(&self.self_entity)
+    }
+
+    /// Get auras on target
+    pub fn target_auras(&self) -> Option<&Vec<Aura>> {
+        self.target_info()
+            .and_then(|info| self.active_auras.get(&info.entity))
+    }
+
+    /// Check if self has a specific aura type
+    pub fn has_aura(&self, aura_type: AuraType) -> bool {
+        self.self_auras()
+            .map(|auras| auras.iter().any(|a| a.effect_type == aura_type))
+            .unwrap_or(false)
+    }
+
+    /// Check if target has a specific aura type
+    pub fn target_has_aura(&self, aura_type: AuraType) -> bool {
+        self.target_auras()
+            .map(|auras| auras.iter().any(|a| a.effect_type == aura_type))
+            .unwrap_or(false)
+    }
+
+    /// Check if self is incapacitated (stunned or feared)
+    pub fn is_incapacitated(&self) -> bool {
+        self.has_aura(AuraType::Stun) || self.has_aura(AuraType::Fear)
+    }
+
+    /// Get all alive enemies
+    pub fn alive_enemies(&self) -> Vec<&CombatantInfo> {
+        let my_team = self.self_info().map(|i| i.team).unwrap_or(0);
+        self.combatants
+            .values()
+            .filter(|c| c.team != my_team && c.is_alive)
+            .collect()
+    }
+
+    /// Get all alive allies (including self)
+    pub fn alive_allies(&self) -> Vec<&CombatantInfo> {
+        let my_team = self.self_info().map(|i| i.team).unwrap_or(0);
+        self.combatants
+            .values()
+            .filter(|c| c.team == my_team && c.is_alive)
+            .collect()
+    }
+
+    /// Get lowest health ally
+    pub fn lowest_health_ally(&self) -> Option<&CombatantInfo> {
+        self.alive_allies()
+            .into_iter()
+            .min_by(|a, b| a.health_pct().partial_cmp(&b.health_pct()).unwrap())
+    }
+
+    /// Check if the target entity has been shielded this frame
+    pub fn was_shielded_this_frame(&self, entity: Entity) -> bool {
+        self.shielded_this_frame.contains(&entity)
+    }
+}
+
+/// The result of an AI decision.
+#[derive(Debug, Clone)]
+pub enum AbilityDecision {
+    /// Do nothing this frame
+    None,
+    /// Use an instant ability on a target
+    InstantAbility {
+        ability: AbilityType,
+        target: Entity,
+    },
+    /// Start casting a spell on a target
+    StartCast {
+        ability: AbilityType,
+        target: Entity,
+    },
+    /// Apply a buff to self
+    SelfBuff {
+        ability: AbilityType,
+    },
+    /// Apply a buff to an ally
+    AllyBuff {
+        ability: AbilityType,
+        target: Entity,
+    },
+    /// Use an AoE ability centered on self
+    AoeAbility {
+        ability: AbilityType,
+    },
+}
+
+/// Trait for class-specific AI logic.
+///
+/// Each class implements this trait to provide its decision-making logic.
+/// The trait takes a read-only context and returns a decision.
+pub trait ClassAI {
+    /// Decide what ability (if any) to use this frame.
+    ///
+    /// Returns `AbilityDecision::None` if no ability should be used.
+    fn decide_action(&self, ctx: &CombatContext, combatant: &Combatant) -> AbilityDecision;
+}
+
+/// Get the AI implementation for a given class.
+pub fn get_class_ai(class: CharacterClass) -> Box<dyn ClassAI> {
+    match class {
+        CharacterClass::Mage => Box::new(mage::MageAI),
+        CharacterClass::Priest => Box::new(priest::PriestAI),
+        CharacterClass::Warrior => Box::new(warrior::WarriorAI),
+        CharacterClass::Rogue => Box::new(rogue::RogueAI),
+        CharacterClass::Warlock => Box::new(warlock::WarlockAI),
+    }
+}

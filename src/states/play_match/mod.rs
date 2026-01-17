@@ -42,6 +42,7 @@ pub mod combat_core;
 pub mod shadow_sight;
 pub mod systems;
 pub mod utils;
+pub mod class_ai;
 
 // Re-exports
 pub use abilities::*;
