@@ -8,6 +8,7 @@ use crate::combat::log::CombatLog;
 use super::match_config;
 use super::components::*;
 use super::abilities::AbilityType;
+use super::ability_config::AbilityDefinitions;
 use super::utils::{combatant_id, get_next_fct_offset};
 
 /// Spawn visual meshes for newly created projectiles.
@@ -92,6 +93,7 @@ pub fn process_projectile_hits(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
     mut game_rng: ResMut<GameRng>,
+    abilities: Res<AbilityDefinitions>,
     projectiles: Query<(Entity, &Projectile, &Transform)>,
     mut combatants: Query<(&Transform, &mut Combatant, Option<&mut ActiveAuras>)>,
     mut fct_states: Query<&mut FloatingTextState>,
@@ -144,9 +146,9 @@ pub fn process_projectile_hits(
                 continue;
             };
             
-            let def = projectile.ability.definition();
-            let ability_damage = caster_combatant.calculate_ability_damage(&def, &mut game_rng);
-            let ability_healing = caster_combatant.calculate_ability_healing(&def, &mut game_rng);
+            let def = abilities.get_unchecked(&projectile.ability);
+            let ability_damage = caster_combatant.calculate_ability_damage_config(def, &mut game_rng);
+            let ability_healing = caster_combatant.calculate_ability_healing_config(def, &mut game_rng);
             
             // Queue this hit for processing
             hits_to_process.push((
@@ -166,9 +168,9 @@ pub fn process_projectile_hits(
     
     // Process all queued hits
     for (projectile_entity, caster_entity, target_entity, ability, caster_team, caster_class, caster_pos, target_pos, ability_damage, _ability_healing) in hits_to_process {
-        let def = ability.definition();
+        let def = abilities.get_unchecked(&ability);
         let text_position = target_pos + Vec3::new(0.0, super::FCT_HEIGHT, 0.0);
-        let ability_range = caster_pos.distance(target_pos);
+        let _ability_range = caster_pos.distance(target_pos);
         
         // Apply damage
         if def.is_damage() {
@@ -297,17 +299,17 @@ pub fn process_projectile_hits(
             }
             
             // Apply aura if ability has one
-            if let Some((aura_type, duration, magnitude, break_threshold)) = def.applies_aura {
+            if let Some(aura) = def.applies_aura.as_ref() {
                 commands.spawn(AuraPending {
                     target: target_entity,
                     aura: Aura {
-                        effect_type: aura_type,
-                        duration,
-                        magnitude,
-                        break_on_damage_threshold: break_threshold,
+                        effect_type: aura.aura_type,
+                        duration: aura.duration,
+                        magnitude: aura.magnitude,
+                        break_on_damage_threshold: aura.break_on_damage,
                         accumulated_damage: 0.0,
-                        tick_interval: if aura_type == AuraType::DamageOverTime { 3.0 } else { 0.0 },
-                        time_until_next_tick: if aura_type == AuraType::DamageOverTime { 3.0 } else { 0.0 },
+                        tick_interval: if aura.aura_type == AuraType::DamageOverTime { aura.tick_interval } else { 0.0 },
+                        time_until_next_tick: if aura.aura_type == AuraType::DamageOverTime { aura.tick_interval } else { 0.0 },
                         caster: Some(caster_entity),
                         ability_name: def.name.to_string(),
                         fear_direction: (0.0, 0.0),

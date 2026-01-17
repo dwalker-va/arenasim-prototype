@@ -11,6 +11,7 @@ use crate::combat::log::{CombatLog, CombatLogEventType};
 use super::match_config;
 use super::components::*;
 use super::abilities::AbilityType;
+use super::ability_config::AbilityDefinitions;
 use super::utils::{combatant_id, get_next_fct_offset};
 use super::constants::{GCD, CHARGE_MIN_RANGE};
 use super::is_spell_school_locked;
@@ -135,6 +136,7 @@ pub fn decide_abilities(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
     mut game_rng: ResMut<GameRng>,
+    abilities: Res<AbilityDefinitions>,
     mut combatants: Query<(Entity, &mut Combatant, &Transform, Option<&mut ActiveAuras>), Without<CastingState>>,
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
@@ -199,6 +201,7 @@ pub fn decide_abilities(
                 &mut commands,
                 &mut combat_log,
                 &mut game_rng,
+                &abilities,
                 entity,
                 &mut combatant,
                 my_pos,
@@ -216,6 +219,7 @@ pub fn decide_abilities(
             if class_ai::priest::decide_priest_action(
                 &mut commands,
                 &mut combat_log,
+                &abilities,
                 entity,
                 &mut combatant,
                 my_pos,
@@ -247,7 +251,7 @@ pub fn decide_abilities(
                 continue;
             }
         }
-        
+
         // Rogues use Ambush from stealth, Kick, Kidney Shot and Sinister Strike
         if combatant.class == match_config::CharacterClass::Rogue {
             if class_ai::rogue::decide_rogue_action(

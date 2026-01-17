@@ -11,8 +11,8 @@ use arenasim::camera::CameraPlugin;
 use arenasim::cli;
 use arenasim::combat::CombatPlugin;
 use arenasim::headless;
-use arenasim::keybindings::Keybindings;
 use arenasim::settings::{GameSettings, SettingsPlugin};
+use arenasim::states::play_match::AbilityConfigPlugin;
 use arenasim::states::{GameState, StatesPlugin};
 use arenasim::ui::UiPlugin;
 
@@ -85,6 +85,7 @@ fn run_graphical_mode() {
         .add_plugins((
             EguiPlugin,
             SettingsPlugin,
+            AbilityConfigPlugin,
             StatesPlugin,
             CameraPlugin,
             CombatPlugin,

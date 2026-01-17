@@ -1,213 +1,341 @@
-// Ability definitions for ArenaSim
-// RON format - Rusty Object Notation
-// This file defines all abilities and their effects
+// Ability Definitions for ArenaSim
+//
+// This file contains all ability data for the game.
+// Changes here take effect on restart without recompiling.
+//
+// Note: MELEE_RANGE (2.5) is used for melee abilities.
 
 (
-    abilities: [
-        // Warrior abilities
-        (
-            id: "heroic_strike",
-            name: "Heroic Strike",
-            description: "A powerful melee attack",
-            resource_cost: 15.0,
-            cooldown: 0.0,
-            cast_time: 0.0,
-            range: 5.0,
-            effects: [
-                Damage(
-                    base_amount: 80.0,
-                    scaling: AttackPower(0.5),
-                    damage_type: Physical,
-                ),
-            ],
-        ),
-        (
-            id: "shield_slam",
-            name: "Shield Slam",
-            description: "Slam the target with your shield, dealing damage and stunning them",
-            resource_cost: 20.0,
-            cooldown: 6.0,
-            cast_time: 0.0,
-            range: 5.0,
-            effects: [
-                Damage(
-                    base_amount: 60.0,
-                    scaling: AttackPower(0.3),
-                    damage_type: Physical,
-                ),
-                ApplyCC(
-                    cc_type: Stun,
-                    duration: 2.0,
-                ),
-            ],
-        ),
-        (
-            id: "charge",
-            name: "Charge",
-            description: "Charge at an enemy, stunning them briefly",
-            resource_cost: 0.0,
-            cooldown: 15.0,
-            cast_time: 0.0,
-            range: 25.0,
-            min_range: 8.0,
-            effects: [
-                Movement(ChargeToTarget),
-                ApplyCC(
-                    cc_type: Stun,
-                    duration: 1.0,
-                ),
-            ],
-        ),
-        
-        // Mage abilities
-        (
-            id: "fireball",
-            name: "Fireball",
-            description: "Hurls a fiery ball at the target",
-            resource_cost: 40.0,
-            cooldown: 0.0,
-            cast_time: 2.5,
-            range: 35.0,
-            effects: [
-                Damage(
-                    base_amount: 120.0,
-                    scaling: SpellPower(0.8),
-                    damage_type: Fire,
-                ),
-            ],
-        ),
-        (
-            id: "frost_nova",
-            name: "Frost Nova",
-            description: "Freezes all enemies within 10 yards",
-            resource_cost: 30.0,
-            cooldown: 25.0,
-            cast_time: 0.0,
-            range: 0.0, // Self-centered AoE
-            radius: 10.0,
-            effects: [
-                Damage(
-                    base_amount: 30.0,
-                    scaling: SpellPower(0.2),
-                    damage_type: Frost,
-                ),
-                ApplyCC(
-                    cc_type: Freeze,
-                    duration: 4.0,
-                ),
-            ],
-        ),
-        (
-            id: "blink",
-            name: "Blink",
-            description: "Teleport forward a short distance",
-            resource_cost: 20.0,
-            cooldown: 15.0,
-            cast_time: 0.0,
-            range: 0.0,
-            effects: [
-                Movement(BlinkForward(20.0)),
-            ],
-        ),
-        
-        // Rogue abilities
-        (
-            id: "backstab",
-            name: "Backstab",
-            description: "A vicious stab from behind",
-            resource_cost: 60.0,
-            cooldown: 0.0,
-            cast_time: 0.0,
-            range: 5.0,
-            requires_behind: true,
-            effects: [
-                Damage(
-                    base_amount: 100.0,
-                    scaling: AttackPower(0.7),
-                    damage_type: Physical,
-                ),
-            ],
-        ),
-        (
-            id: "eviscerate",
-            name: "Eviscerate",
-            description: "Finishing move that causes damage",
-            resource_cost: 35.0,
-            cooldown: 0.0,
-            cast_time: 0.0,
-            range: 5.0,
-            effects: [
-                Damage(
-                    base_amount: 150.0,
-                    scaling: AttackPower(0.9),
-                    damage_type: Physical,
-                ),
-            ],
-        ),
-        (
-            id: "stealth",
-            name: "Stealth",
-            description: "Enter stealth mode, becoming invisible",
-            resource_cost: 0.0,
-            cooldown: 10.0,
-            cast_time: 0.0,
-            range: 0.0,
-            effects: [
-                ApplyBuff(
-                    aura_id: "stealth",
-                    duration: None, // Until broken
-                ),
-            ],
-        ),
-        
-        // Priest abilities
-        (
-            id: "greater_heal",
-            name: "Greater Heal",
-            description: "A powerful healing spell",
-            resource_cost: 50.0,
-            cooldown: 0.0,
-            cast_time: 3.0,
-            range: 40.0,
-            target_type: Friendly,
-            effects: [
-                Heal(
-                    base_amount: 200.0,
-                    scaling: SpellPower(1.0),
-                ),
-            ],
-        ),
-        (
-            id: "flash_heal",
-            name: "Flash Heal",
-            description: "A fast but inefficient heal",
-            resource_cost: 40.0,
-            cooldown: 0.0,
+    abilities: {
+        // ============================================================================
+        // MAGE ABILITIES
+        // ============================================================================
+
+        Frostbolt: (
+            name: "Frostbolt",
             cast_time: 1.5,
             range: 40.0,
-            target_type: Friendly,
-            effects: [
-                Heal(
-                    base_amount: 80.0,
-                    scaling: SpellPower(0.5),
-                ),
-            ],
-        ),
-        (
-            id: "shadow_word_pain",
-            name: "Shadow Word: Pain",
-            description: "A word of shadow that causes pain over time",
-            resource_cost: 25.0,
+            mana_cost: 20.0,
             cooldown: 0.0,
+            damage_base_min: 10.0,
+            damage_base_max: 15.0,
+            damage_coefficient: 0.8,
+            damage_scales_with: SpellPower,
+            applies_aura: Some((
+                aura_type: MovementSpeedSlow,
+                duration: 5.0,
+                magnitude: 0.7,
+                break_on_damage: 0.0,
+            )),
+            projectile_speed: Some(35.0),
+            projectile_visuals: Some((
+                color: (0.4, 0.7, 1.0),
+                emissive: (0.6, 0.9, 1.5),
+            )),
+            spell_school: Frost,
+        ),
+
+        FrostNova: (
+            name: "Frost Nova",
+            cast_time: 0.0,
+            range: 10.0,
+            mana_cost: 30.0,
+            cooldown: 25.0,
+            damage_base_min: 5.0,
+            damage_base_max: 10.0,
+            damage_coefficient: 0.2,
+            damage_scales_with: SpellPower,
+            applies_aura: Some((
+                aura_type: Root,
+                duration: 6.0,
+                magnitude: 1.0,
+                break_on_damage: 35.0,
+            )),
+            spell_school: Frost,
+        ),
+
+        ArcaneIntellect: (
+            name: "Arcane Intellect",
+            cast_time: 0.0,
+            range: 40.0,
+            mana_cost: 40.0,
+            cooldown: 0.0,
+            applies_aura: Some((
+                aura_type: MaxManaIncrease,
+                duration: 600.0,
+                magnitude: 40.0,
+                break_on_damage: 0.0,
+            )),
+            spell_school: Arcane,
+        ),
+
+        IceBarrier: (
+            name: "Ice Barrier",
+            cast_time: 0.0,
+            range: 0.0,
+            mana_cost: 30.0,
+            cooldown: 30.0,
+            applies_aura: Some((
+                aura_type: Absorb,
+                duration: 60.0,
+                magnitude: 60.0,
+                break_on_damage: 0.0,
+            )),
+            spell_school: Frost,
+        ),
+
+        // ============================================================================
+        // PRIEST ABILITIES
+        // ============================================================================
+
+        FlashHeal: (
+            name: "Flash Heal",
+            cast_time: 1.5,
+            range: 40.0,
+            mana_cost: 25.0,
+            cooldown: 0.0,
+            healing_base_min: 15.0,
+            healing_base_max: 20.0,
+            healing_coefficient: 0.75,
+            spell_school: Holy,
+        ),
+
+        MindBlast: (
+            name: "Mind Blast",
+            cast_time: 1.5,
+            range: 30.0,
+            mana_cost: 25.0,
+            cooldown: 8.0,
+            damage_base_min: 15.0,
+            damage_base_max: 20.0,
+            damage_coefficient: 0.6,
+            damage_scales_with: SpellPower,
+            spell_school: Shadow,
+            spawn_impact_effect: true,
+        ),
+
+        PowerWordFortitude: (
+            name: "Power Word: Fortitude",
+            cast_time: 0.0,
+            range: 40.0,
+            mana_cost: 30.0,
+            cooldown: 0.0,
+            applies_aura: Some((
+                aura_type: MaxHealthIncrease,
+                duration: 600.0,
+                magnitude: 30.0,
+                break_on_damage: 0.0,
+            )),
+            spell_school: Holy,
+        ),
+
+        PowerWordShield: (
+            name: "Power Word: Shield",
+            cast_time: 0.0,
+            range: 40.0,
+            mana_cost: 25.0,
+            cooldown: 0.0,
+            applies_aura: Some((
+                aura_type: Absorb,
+                duration: 30.0,
+                magnitude: 50.0,
+                break_on_damage: 0.0,
+            )),
+            spell_school: Holy,
+        ),
+
+        // ============================================================================
+        // WARRIOR ABILITIES
+        // ============================================================================
+
+        HeroicStrike: (
+            name: "Heroic Strike",
+            cast_time: 0.0,
+            range: 2.5,
+            mana_cost: 15.0,
+            cooldown: 0.0,
+            spell_school: Physical,
+        ),
+
+        Charge: (
+            name: "Charge",
+            cast_time: 0.0,
+            range: 25.0,
+            mana_cost: 0.0,
+            cooldown: 15.0,
+            spell_school: Physical,
+            is_charge: true,
+        ),
+
+        Rend: (
+            name: "Rend",
+            cast_time: 0.0,
+            range: 2.5,
+            mana_cost: 10.0,
+            cooldown: 0.0,
+            applies_aura: Some((
+                aura_type: DamageOverTime,
+                duration: 15.0,
+                magnitude: 8.0,
+                break_on_damage: 0.0,
+                tick_interval: 3.0,
+            )),
+            spell_school: Physical,
+        ),
+
+        MortalStrike: (
+            name: "Mortal Strike",
+            cast_time: 0.0,
+            range: 2.5,
+            mana_cost: 30.0,
+            cooldown: 6.0,
+            damage_base_min: 15.0,
+            damage_base_max: 25.0,
+            damage_coefficient: 1.0,
+            damage_scales_with: AttackPower,
+            applies_aura: Some((
+                aura_type: HealingReduction,
+                duration: 10.0,
+                magnitude: 0.65,
+                break_on_damage: 0.0,
+            )),
+            spell_school: Physical,
+        ),
+
+        Pummel: (
+            name: "Pummel",
+            cast_time: 0.0,
+            range: 2.5,
+            mana_cost: 10.0,
+            cooldown: 12.0,
+            spell_school: Physical,
+            is_interrupt: true,
+            lockout_duration: 4.0,
+        ),
+
+        BattleShout: (
+            name: "Battle Shout",
+            cast_time: 0.0,
+            range: 0.0,
+            mana_cost: 0.0,
+            cooldown: 0.0,
+            applies_aura: Some((
+                aura_type: AttackPowerIncrease,
+                duration: 120.0,
+                magnitude: 20.0,
+                break_on_damage: 0.0,
+            )),
+            spell_school: None,
+        ),
+
+        // ============================================================================
+        // ROGUE ABILITIES
+        // ============================================================================
+
+        Ambush: (
+            name: "Ambush",
+            cast_time: 0.0,
+            range: 2.5,
+            mana_cost: 60.0,
+            cooldown: 0.0,
+            damage_base_min: 10.0,
+            damage_base_max: 15.0,
+            damage_coefficient: 1.2,
+            damage_scales_with: AttackPower,
+            spell_school: Physical,
+            requires_stealth: true,
+        ),
+
+        SinisterStrike: (
+            name: "Sinister Strike",
+            cast_time: 0.0,
+            range: 2.5,
+            mana_cost: 40.0,
+            cooldown: 0.0,
+            damage_base_min: 5.0,
+            damage_base_max: 10.0,
+            damage_coefficient: 0.5,
+            damage_scales_with: AttackPower,
+            spell_school: Physical,
+        ),
+
+        KidneyShot: (
+            name: "Kidney Shot",
+            cast_time: 0.0,
+            range: 2.5,
+            mana_cost: 60.0,
+            cooldown: 30.0,
+            applies_aura: Some((
+                aura_type: Stun,
+                duration: 6.0,
+                magnitude: 1.0,
+                break_on_damage: 0.0,
+            )),
+            spell_school: Physical,
+        ),
+
+        Kick: (
+            name: "Kick",
+            cast_time: 0.0,
+            range: 2.5,
+            mana_cost: 25.0,
+            cooldown: 12.0,
+            spell_school: Physical,
+            is_interrupt: true,
+            lockout_duration: 4.0,
+        ),
+
+        // ============================================================================
+        // WARLOCK ABILITIES
+        // ============================================================================
+
+        Corruption: (
+            name: "Corruption",
             cast_time: 0.0,
             range: 30.0,
-            effects: [
-                ApplyDebuff(
-                    aura_id: "shadow_word_pain_dot",
-                    duration: Some(18.0),
-                ),
-            ],
+            mana_cost: 25.0,
+            cooldown: 0.0,
+            applies_aura: Some((
+                aura_type: DamageOverTime,
+                duration: 18.0,
+                magnitude: 10.0,
+                break_on_damage: 0.0,
+                tick_interval: 3.0,
+            )),
+            spell_school: Shadow,
         ),
-    ],
-)
 
+        Shadowbolt: (
+            name: "Shadowbolt",
+            cast_time: 2.0,
+            range: 30.0,
+            mana_cost: 25.0,
+            cooldown: 0.0,
+            damage_base_min: 12.0,
+            damage_base_max: 18.0,
+            damage_coefficient: 0.85,
+            damage_scales_with: SpellPower,
+            projectile_speed: Some(35.0),
+            projectile_visuals: Some((
+                color: (0.6, 0.3, 0.8),
+                emissive: (0.8, 0.4, 1.2),
+            )),
+            spell_school: Shadow,
+        ),
+
+        Fear: (
+            name: "Fear",
+            cast_time: 1.5,
+            range: 30.0,
+            mana_cost: 30.0,
+            cooldown: 30.0,
+            applies_aura: Some((
+                aura_type: Fear,
+                duration: 8.0,
+                magnitude: 0.0,
+                break_on_damage: 30.0,
+            )),
+            spell_school: Shadow,
+        ),
+    }
+)

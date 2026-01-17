@@ -21,8 +21,10 @@ use bevy::prelude::*;
 use bevy_egui::egui;
 use rand::prelude::*;
 use rand::rngs::StdRng;
+use serde::{Deserialize, Serialize};
 use super::match_config;
 use super::abilities::{AbilityDefinition, AbilityType, ScalingStat};
+use super::ability_config::AbilityConfig;
 
 // Re-export constants from parent module
 use super::{MELEE_RANGE, WAND_RANGE};
@@ -312,7 +314,7 @@ pub enum ResourceType {
 }
 
 /// Types of aura effects.
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
 pub enum AuraType {
     /// Reduces movement speed by a percentage (magnitude = multiplier, e.g., 0.7 = 30% slow)
     MovementSpeedSlow,
@@ -509,6 +511,7 @@ impl Combatant {
     /// Formula: Base Damage + (Scaling Stat × Coefficient)
     ///
     /// Uses the provided GameRng for deterministic results when seeded.
+    /// This version uses the legacy AbilityDefinition for backward compatibility.
     pub fn calculate_ability_damage(&self, ability_def: &AbilityDefinition, rng: &mut GameRng) -> f32 {
         // Calculate base damage (random between min and max)
         let damage_range = ability_def.damage_base_max - ability_def.damage_base_min;
@@ -528,6 +531,7 @@ impl Combatant {
     /// Formula: Base Healing + (Spell Power × Coefficient)
     ///
     /// Uses the provided GameRng for deterministic results when seeded.
+    /// This version uses the legacy AbilityDefinition for backward compatibility.
     pub fn calculate_ability_healing(&self, ability_def: &AbilityDefinition, rng: &mut GameRng) -> f32 {
         // Calculate base healing (random between min and max)
         let healing_range = ability_def.healing_base_max - ability_def.healing_base_min;
@@ -535,6 +539,38 @@ impl Combatant {
 
         // Add spell power scaling (healing always scales with spell power in WoW)
         base_healing + (self.spell_power * ability_def.healing_coefficient)
+    }
+
+    /// Calculate damage for an ability using the new data-driven AbilityConfig.
+    /// Formula: Base Damage + (Scaling Stat × Coefficient)
+    ///
+    /// Uses the provided GameRng for deterministic results when seeded.
+    pub fn calculate_ability_damage_config(&self, ability_config: &AbilityConfig, rng: &mut GameRng) -> f32 {
+        // Calculate base damage (random between min and max)
+        let damage_range = ability_config.damage_base_max - ability_config.damage_base_min;
+        let base_damage = ability_config.damage_base_min + (rng.random_f32() * damage_range);
+
+        // Add stat scaling
+        let stat_value = match ability_config.damage_scales_with {
+            ScalingStat::AttackPower => self.attack_power,
+            ScalingStat::SpellPower => self.spell_power,
+            ScalingStat::None => 0.0,
+        };
+
+        base_damage + (stat_value * ability_config.damage_coefficient)
+    }
+
+    /// Calculate healing for an ability using the new data-driven AbilityConfig.
+    /// Formula: Base Healing + (Spell Power × Coefficient)
+    ///
+    /// Uses the provided GameRng for deterministic results when seeded.
+    pub fn calculate_ability_healing_config(&self, ability_config: &AbilityConfig, rng: &mut GameRng) -> f32 {
+        // Calculate base healing (random between min and max)
+        let healing_range = ability_config.healing_base_max - ability_config.healing_base_min;
+        let base_healing = ability_config.healing_base_min + (rng.random_f32() * healing_range);
+
+        // Add spell power scaling (healing always scales with spell power in WoW)
+        base_healing + (self.spell_power * ability_config.healing_coefficient)
     }
 }
 

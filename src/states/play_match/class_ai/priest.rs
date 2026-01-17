@@ -14,6 +14,7 @@ use std::collections::{HashMap, HashSet};
 use crate::combat::log::CombatLog;
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
+use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
 use crate::states::play_match::constants::GCD;
 use crate::states::play_match::is_spell_school_locked;
@@ -42,6 +43,7 @@ impl ClassAI for PriestAI {
 pub fn decide_priest_action(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -60,6 +62,7 @@ pub fn decide_priest_action(
     if try_fortitude(
         commands,
         combat_log,
+        abilities,
         entity,
         combatant,
         my_pos,
@@ -124,6 +127,7 @@ pub fn decide_priest_action(
 fn try_fortitude(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -165,14 +169,16 @@ fn try_fortitude(
     };
 
     let ability = AbilityType::PowerWordFortitude;
-    let def = ability.definition();
+    let def = abilities.get_unchecked(&ability);
 
     // Check if spell school is locked out
     if is_spell_school_locked(def.spell_school, auras) {
         return false;
     }
 
-    if !ability.can_cast(combatant, target_pos, my_pos) {
+    // Check range and mana
+    let distance = my_pos.distance(target_pos);
+    if distance > def.range || combatant.current_mana < def.mana_cost {
         return false;
     }
 
@@ -197,14 +203,14 @@ fn try_fortitude(
     );
 
     // Apply buff aura
-    if let Some((aura_type, duration, magnitude, break_threshold)) = def.applies_aura {
+    if let Some(aura) = def.applies_aura.as_ref() {
         commands.spawn(AuraPending {
             target: buff_target,
             aura: Aura {
-                effect_type: aura_type,
-                duration,
-                magnitude,
-                break_on_damage_threshold: break_threshold,
+                effect_type: aura.aura_type,
+                duration: aura.duration,
+                magnitude: aura.magnitude,
+                break_on_damage_threshold: aura.break_on_damage,
                 accumulated_damage: 0.0,
                 tick_interval: 0.0,
                 time_until_next_tick: 0.0,

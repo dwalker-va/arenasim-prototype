@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use crate::combat::log::{CombatLog, CombatLogEventType, CombatantMetadata, MatchMetadata};
 use crate::states::match_config::MatchConfig;
+use crate::states::play_match::AbilityConfigPlugin;
 // Use the stable systems API instead of importing internal functions directly
 use crate::states::play_match::systems::{
     self, combatant_id, Combatant, FloatingTextState, GameRng, MatchCountdown, ShadowSightState,
@@ -365,6 +366,8 @@ pub fn run_headless_match(config: HeadlessMatchConfig) -> Result<(), String> {
         // Transform and hierarchy plugins needed for entity positions
         .add_plugins(TransformPlugin)
         .add_plugins(HierarchyPlugin)
+        // Load ability definitions from config
+        .add_plugins(AbilityConfigPlugin)
         // Our headless match plugin
         .add_plugins(HeadlessPlugin { config })
         .run();

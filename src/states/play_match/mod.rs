@@ -31,6 +31,7 @@
 
 // Submodules
 pub mod abilities;
+pub mod ability_config;
 pub mod components;
 pub mod camera;
 pub mod projectiles;
@@ -47,6 +48,7 @@ pub mod constants;
 
 // Re-exports
 pub use abilities::*;
+pub use ability_config::*;
 pub use components::*;
 pub use camera::*;
 pub use projectiles::*;

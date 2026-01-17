@@ -4,13 +4,14 @@
 //! Abilities are the core combat actions that combatants can perform.
 
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 use super::components::{ActiveAuras, AuraType, Combatant};
 
 // Re-export constants from parent module
 use super::{MELEE_RANGE};
 
 /// Spell schools - determines which spells share lockouts when interrupted.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub enum SpellSchool {
     /// Physical abilities (melee attacks, weapon strikes)
     Physical,
@@ -27,7 +28,7 @@ pub enum SpellSchool {
 }
 
 /// What stat an ability scales with for damage/healing
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
 pub enum ScalingStat {
     /// Scales with Attack Power (physical abilities and auto-attacks)
     AttackPower,
@@ -38,7 +39,7 @@ pub enum ScalingStat {
 }
 
 /// Enum representing available abilities.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub enum AbilityType {
     Frostbolt,
     FlashHeal,

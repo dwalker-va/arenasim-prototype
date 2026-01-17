@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use crate::combat::log::CombatLog;
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
+use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
 use crate::states::play_match::constants::{
     DEFENSIVE_HP_THRESHOLD, GCD, MELEE_RANGE, SAFE_KITING_DISTANCE,
@@ -45,6 +46,7 @@ pub fn decide_mage_action(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     game_rng: &mut GameRng,
+    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -60,7 +62,7 @@ pub fn decide_mage_action(
     }
 
     // Priority 1: Ice Barrier (self-shield)
-    if try_ice_barrier(commands, combat_log, entity, combatant, active_auras_map) {
+    if try_ice_barrier(commands, combat_log, abilities, entity, combatant, active_auras_map) {
         return true;
     }
 
@@ -68,6 +70,7 @@ pub fn decide_mage_action(
     if try_arcane_intellect(
         commands,
         combat_log,
+        abilities,
         entity,
         combatant,
         my_pos,
@@ -84,6 +87,7 @@ pub fn decide_mage_action(
         commands,
         combat_log,
         game_rng,
+        abilities,
         entity,
         combatant,
         my_pos,
@@ -99,6 +103,7 @@ pub fn decide_mage_action(
     if try_frostbolt(
         commands,
         combat_log,
+        abilities,
         entity,
         combatant,
         my_pos,
@@ -117,6 +122,7 @@ pub fn decide_mage_action(
 fn try_ice_barrier(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
@@ -139,7 +145,7 @@ fn try_ice_barrier(
     }
 
     let ice_barrier = AbilityType::IceBarrier;
-    let barrier_def = ice_barrier.definition();
+    let barrier_def = abilities.get_unchecked(&ice_barrier);
     let barrier_on_cooldown = combatant.ability_cooldowns.contains_key(&ice_barrier);
 
     if barrier_on_cooldown || combatant.current_mana < barrier_def.mana_cost {
@@ -166,13 +172,13 @@ fn try_ice_barrier(
     );
 
     // Apply absorb shield aura
-    let (aura_type, duration, magnitude, _) = barrier_def.applies_aura.unwrap();
+    let aura = barrier_def.applies_aura.as_ref().unwrap();
     commands.spawn(AuraPending {
         target: entity,
         aura: Aura {
-            effect_type: aura_type,
-            duration,
-            magnitude,
+            effect_type: aura.aura_type,
+            duration: aura.duration,
+            magnitude: aura.magnitude,
             break_on_damage_threshold: 0.0,
             accumulated_damage: 0.0,
             tick_interval: 0.0,
@@ -199,6 +205,7 @@ fn try_ice_barrier(
 fn try_arcane_intellect(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -249,14 +256,16 @@ fn try_arcane_intellect(
     };
 
     let ability = AbilityType::ArcaneIntellect;
-    let def = ability.definition();
+    let def = abilities.get_unchecked(&ability);
 
     // Check if spell school is locked out
     if is_spell_school_locked(def.spell_school, auras) {
         return false;
     }
 
-    if !ability.can_cast(combatant, target_pos, my_pos) {
+    // Check range and mana
+    let distance = my_pos.distance(target_pos);
+    if distance > def.range || combatant.current_mana < def.mana_cost {
         return false;
     }
 
@@ -281,14 +290,14 @@ fn try_arcane_intellect(
     );
 
     // Apply buff aura
-    if let Some((aura_type, duration, magnitude, break_threshold)) = def.applies_aura {
+    if let Some(aura) = def.applies_aura.as_ref() {
         commands.spawn(AuraPending {
             target: buff_target,
             aura: Aura {
-                effect_type: aura_type,
-                duration,
-                magnitude,
-                break_on_damage_threshold: break_threshold,
+                effect_type: aura.aura_type,
+                duration: aura.duration,
+                magnitude: aura.magnitude,
+                break_on_damage_threshold: aura.break_on_damage,
                 accumulated_damage: 0.0,
                 tick_interval: 0.0,
                 time_until_next_tick: 0.0,
@@ -316,6 +325,7 @@ fn try_frost_nova(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     game_rng: &mut GameRng,
+    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -325,7 +335,7 @@ fn try_frost_nova(
     frost_nova_damage: &mut Vec<(Entity, Entity, f32, u8, CharacterClass, Vec3)>,
 ) -> bool {
     let frost_nova = AbilityType::FrostNova;
-    let nova_def = frost_nova.definition();
+    let nova_def = abilities.get_unchecked(&frost_nova);
     let nova_on_cooldown = combatant.ability_cooldowns.contains_key(&frost_nova);
 
     if nova_on_cooldown {
@@ -389,7 +399,7 @@ fn try_frost_nova(
 
     // Queue damage and apply root to all targets
     for (target_entity, target_pos, _target_team, _target_class) in &frost_nova_targets {
-        let damage = combatant.calculate_ability_damage(&nova_def, game_rng);
+        let damage = combatant.calculate_ability_damage_config(nova_def, game_rng);
         frost_nova_damage.push((
             entity,
             *target_entity,
@@ -400,14 +410,14 @@ fn try_frost_nova(
         ));
 
         // Apply root aura
-        if let Some((aura_type, duration, magnitude, break_threshold)) = nova_def.applies_aura {
+        if let Some(aura) = nova_def.applies_aura.as_ref() {
             commands.spawn(AuraPending {
                 target: *target_entity,
                 aura: Aura {
-                    effect_type: aura_type,
-                    duration,
-                    magnitude,
-                    break_on_damage_threshold: break_threshold,
+                    effect_type: aura.aura_type,
+                    duration: aura.duration,
+                    magnitude: aura.magnitude,
+                    break_on_damage_threshold: aura.break_on_damage,
                     accumulated_damage: 0.0,
                     tick_interval: 0.0,
                     time_until_next_tick: 0.0,
@@ -421,7 +431,7 @@ fn try_frost_nova(
     }
 
     // Set kiting timer
-    combatant.kiting_timer = nova_def.applies_aura.unwrap().1;
+    combatant.kiting_timer = nova_def.applies_aura.as_ref().unwrap().duration;
 
     info!(
         "Team {} {} casts Frost Nova! (AOE root) - {} enemies affected",
@@ -439,6 +449,7 @@ fn try_frost_nova(
 fn try_frostbolt(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -467,14 +478,15 @@ fn try_frostbolt(
     }
 
     let ability = AbilityType::Frostbolt;
-    let def = ability.definition();
+    let def = abilities.get_unchecked(&ability);
 
     // Check if spell school is locked out
     if is_spell_school_locked(def.spell_school, auras) {
         return false;
     }
 
-    if !ability.can_cast(combatant, target_pos, my_pos) {
+    // Check range and mana
+    if distance_to_target > def.range || combatant.current_mana < def.mana_cost {
         return false;
     }
 
