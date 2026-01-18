@@ -2,7 +2,7 @@
 
 This document tracks the development progress of the ArenaSim prototype. Reference this document at the start of each agentic session to maintain continuity.
 
-**Last Updated:** January 17, 2026 (Session 14 - Data-Driven Ability Definitions)
+**Last Updated:** January 18, 2026 (Session 16 - Polymorph)
 
 ---
 
@@ -391,6 +391,8 @@ All core gameplay loop features have been implemented. The game loop of "Configu
 - [x] Kiting behavior (Mages)
 - [x] Interrupt logic (Warriors)
 - [x] Defensive cooldown usage
+- [x] Strategic CC targeting (separate from kill target)
+- [x] CC target heuristics (healer priority, context-aware inversion)
 
 ### Simulation Speed Controls ✅
 - [x] Pause/Play toggle (Space)
@@ -413,10 +415,13 @@ All core gameplay loop features have been implemented. The game loop of "Configu
 ### Crowd Control System ✅ (Partial)
 - [x] Root (Frost Nova) - prevents movement
 - [x] Stun (Kidney Shot, Charge) - prevents all actions
-- [x] Fear (Warlock) - target runs randomly, breaks on damage
+- [x] Fear (Warlock) - target runs randomly, breaks on damage (100 threshold)
+- [x] Polymorph (Mage) - target wanders slowly, breaks on ANY damage
 - [x] CC indicators on combatants
-- [x] CC breaks (Fear breaks on damage threshold)
-- [ ] **TODO**: Polymorph
+- [x] CC breaks (Fear breaks on damage threshold, Polymorph on any damage)
+- [x] Strategic CC targeting (separate cc_target from kill_target)
+- [x] Heuristic CC target selection (healer priority, inverted when killing healer)
+- [ ] **TODO**: Diminishing returns
 
 ### Pre-Match Countdown ✅
 - [x] 10-second countdown with visual display
@@ -454,7 +459,7 @@ All core gameplay loop features have been implemented. The game loop of "Configu
 
 - [ ] **Additional CC Types**
   - [x] Fear (run in random direction) - Warlock class added
-  - [ ] Polymorph (transform, breaks on damage)
+  - [x] Polymorph (transform, breaks on any damage) - Mage class
   - [ ] Silence (prevent casting)
 
 ---
@@ -526,6 +531,133 @@ For every implementation, verify:
 ---
 
 ## Session Notes
+
+### Session 15 (January 18, 2026 - Strategic CC Targeting)
+
+**Strategic CC Targeting System:**
+
+Implemented a complete CC targeting system that enables AI to use crowd control on non-kill targets, creating outnumbering situations (2v1, 3v2) in arena combat.
+
+**New Configuration Options:**
+- [x] Added `team1_cc_target` and `team2_cc_target` to MatchConfig
+- [x] Added same fields to HeadlessMatchConfig with serde support
+- [x] Validation ensures cc_target index is within enemy team bounds
+
+**Combatant CC Target Field:**
+- [x] Added `cc_target: Option<Entity>` to Combatant struct
+- [x] Separate from kill target - enables strategic CC on healers while killing DPS
+
+**Heuristic CC Target Selection:**
+- [x] Implemented `select_cc_target_heuristic()` function with scoring system:
+  - Healer (Priest): +100 points when killing DPS
+  - DPS: +100 points when killing healer (inverted priority)
+  - Non-kill-target: +50 points (enables outnumbering)
+  - Higher HP: +20 points (don't waste CC on dying targets)
+  - Skip already-CC'd targets (prevent CC overlap)
+
+**Class AI Updates:**
+- [x] Warlock Fear now uses `cc_target.or(target)` for strategic CC
+- [x] Rogue Kidney Shot uses cc_target with melee range fallback
+  - Added `select_melee_cc_target()` helper that falls back to kill target if CC target out of range
+
+**Fear Balance Adjustments:**
+- [x] Increased Fear `break_on_damage` threshold from 30 to 100
+- [x] Fear now survives DoT ticks and requires ~2 Frostbolts to break
+
+**Bug Fixes:**
+- [x] Fixed entity despawn panic in `spawn_spell_impact_visuals`
+  - Changed `insert()` to `try_insert()` to handle despawned entities gracefully
+
+**Helper Functions:**
+- [x] Added `is_ccd()` method to CombatContext for CC overlap prevention
+- [x] Added `is_entity_ccd()` helper in combat_ai.rs
+
+**Files Modified:**
+- `src/states/match_config.rs` - cc_target config fields
+- `src/headless/config.rs` - HeadlessMatchConfig cc_target support
+- `src/states/play_match/components/mod.rs` - Combatant.cc_target field
+- `src/states/play_match/combat_ai.rs` - CC target acquisition and heuristics
+- `src/states/play_match/class_ai/mod.rs` - is_ccd() helper
+- `src/states/play_match/class_ai/warlock.rs` - Fear uses cc_target
+- `src/states/play_match/class_ai/rogue.rs` - Kidney Shot with melee fallback
+- `src/states/play_match/rendering/effects.rs` - try_insert fix
+- `assets/config/abilities.ron` - Fear break threshold
+- `tests/headless_tests.rs` - cc_target test fields
+
+**Commits:**
+- `45e970c` - feat: add strategic CC targeting system
+
+**Testing Results:**
+- Fear break threshold: Verified Fear breaks at 144/100 damage (working)
+- Inverted heuristic: Warlock correctly Fears Warrior (DPS) when killing Priest (healer)
+- Melee fallback: Rogue uses Kidney Shot on kill target when CC target out of range
+
+**Key Learnings:**
+- CC targeting separate from damage targeting enables realistic arena tactics
+- Heuristic inversion (CC DPS when killing healer) prevents wasted CC
+- Melee abilities need range-aware target selection with fallback logic
+
+**Next:** Consider adding Blind (Rogue), Silence, or diminishing returns system.
+
+### Session 16 (January 18, 2026 - Polymorph)
+
+**New Mage Ability: Polymorph**
+
+Implemented Polymorph as a CC spell for Mages that transforms the target into a sheep:
+
+**Ability Definition:**
+- [x] 1.5s cast time, 30 yard range, 60 mana cost
+- [x] Arcane spell school
+- [x] 10 second duration (same as Fear)
+- [x] Breaks on ANY damage (threshold 0)
+- [x] Target wanders at 50% speed (like Fear behavior)
+
+**New AuraType:**
+- [x] Added `AuraType::Polymorph` - separate from Stun for future diminishing returns
+- [x] Polymorph is an "incapacitate" category, distinct from stuns/fears
+
+**AI Behavior:**
+- [x] Mage uses Polymorph on `cc_target` (not kill target)
+- [x] Skips if cc_target == kill_target (any damage breaks it)
+- [x] Checks if target already CC'd to prevent overlap
+- [x] Checks Arcane spell school lockout
+- [x] Priority: Ice Barrier → Frost Nova → Polymorph → Frostbolt
+
+**Visual Feedback:**
+- [x] "SHEEPED X.Xs" status label in hot pink above polymorphed targets
+- [x] Downloaded `spell_nature_polymorph.jpg` icon from Wowhead
+- [x] Icon appears in ability timeline
+
+**Break-on-Damage Fix:**
+- [x] Fixed semantics: 0.0 threshold now correctly means "break on any damage"
+- [x] Changed default `break_on_damage` from 0.0 to -1.0
+- [x] -1.0 means "never break on damage" (used by buffs)
+- [x] Fixed WeakenedSoul in priest.rs which was incorrectly using 0.0
+
+**Files Modified:**
+- `assets/icons/abilities/spell_nature_polymorph.jpg` - New spell icon
+- `src/states/play_match/components/mod.rs` - AuraType::Polymorph
+- `src/states/play_match/abilities.rs` - AbilityType::Polymorph
+- `assets/config/abilities.ron` - Polymorph definition
+- `src/states/play_match/ability_config.rs` - Default break_on_damage changed to -1.0
+- `src/states/play_match/combat_core.rs` - Polymorph wandering (50% speed)
+- `src/states/play_match/auras.rs` - Break-on-damage logic fix, Polymorph CC checks
+- `src/states/play_match/rendering/hud.rs` - SHEEPED status label
+- `src/states/play_match/rendering/mod.rs` - Polymorph icon registration
+- `src/states/play_match/class_ai/mage.rs` - try_polymorph() and AI priority
+- `src/states/play_match/class_ai/mod.rs` - is_ccd() and is_incapacitated() include Polymorph
+- `src/states/play_match/class_ai/priest.rs` - WeakenedSoul fix
+- `src/states/play_match/combat_ai.rs` - is_entity_ccd() includes Polymorph
+
+**Commits:**
+- `4fe6133` - feat: add Polymorph ability for Mage class
+
+**Key Learnings:**
+- Break-on-damage threshold semantics matter: 0.0 = any damage, -1.0 = never
+- Separate AuraType for each CC category enables future diminishing returns
+- CC targeting on non-kill targets prevents wasted CC on damage focus
+
+**Next:** Consider adding Blind (Rogue), Silence, or diminishing returns system.
 
 ### Session 14 (January 17, 2026 - Data-Driven Ability Definitions)
 
