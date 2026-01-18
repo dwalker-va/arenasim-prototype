@@ -87,6 +87,17 @@ assets/
     abilities.ron         # Data-driven ability definitions
 ```
 
+## Documentation Index
+
+For deeper context, see these focused references:
+
+- **[Session Notes](design-docs/session-notes.md)** - Full development history (16 sessions)
+- **[WoW Mechanics](design-docs/wow-mechanics.md)** - Implemented game mechanics (CC, resources, combat)
+- **[Bevy Patterns](design-docs/bevy-patterns.md)** - Rust/Bevy learnings and common pitfalls
+- **[Roadmap](design-docs/roadmap.md)** - Long-term TODOs and milestones
+- **[Stat Scaling](design-docs/stat-scaling-system.md)** - Damage/healing formulas and coefficients
+- **[Game Design](design-docs/game-design-doc.md)** - High-level game vision
+
 ## Key Concepts
 
 ### Combat Flow
