@@ -4,7 +4,7 @@
 
 - **Core gameplay loop**: COMPLETE
 - **Classes**: Warrior, Mage, Rogue, Priest, Warlock (5)
-- **Abilities**: 21+ across all classes
+- **Abilities**: 22 across all classes
 - **Headless testing**: COMPLETE
 - **Results screen**: Enhanced with WoW Details-style breakdown
 
@@ -13,7 +13,6 @@
 ### High Priority
 
 - [ ] Combat log filter (HP changes only)
-- [ ] Aura duration display on status labels (show remaining time)
 
 ### Medium Priority
 
@@ -56,15 +55,8 @@
 ### Aura System Architecture
 Currently auras are separate entities. May need to reconsider as child entities or components on the combatant for better performance and simpler queries.
 
-### Killer Tracking
-Death events don't properly track who dealt the killing blow. Need to add last-damage-source tracking to Combatant component.
-
 ### Combat Log Performance
 If matches get long, may need to limit log size or virtualize the display to prevent memory growth and UI slowdown.
-
-### Legacy Code Cleanup
-- `AbilityType::definition()` method still exists for backward compatibility
-- Can be removed once all callers migrated to `AbilityDefinitions` resource
 
 ---
 
@@ -91,11 +83,12 @@ If matches get long, may need to limit log size or virtualize the display to pre
 - [x] Win/lose detection with victory celebration
 - [x] Pre-match countdown (10s) with gates
 - [x] Mana restoration during countdown (pre-buffing phase)
-- [x] 21+ abilities across 5 classes
+- [x] 22 abilities across 5 classes
 - [x] Ability cooldowns
 - [x] Cast time handling (interruptible)
 - [x] Resource cost/generation (Mana, Rage, Energy)
 - [x] Spell school lockouts on interrupt
+- [x] Killing blow tracking
 
 ### AI System
 
@@ -118,7 +111,7 @@ If matches get long, may need to limit log size or virtualize the display to pre
 
 - [x] Aura system (Root, Stun, Slow, DoTs, buffs)
 - [x] Duration tracking
-- [x] Visual labels (ROOTED, STUNNED, STEALTH, FEARED, SHEEPED)
+- [x] Visual labels with duration countdown (ROOT 5.2s, STUN 3.1s, etc.)
 - [x] Pre-match buff phase (Fortitude)
 - [x] Absorb shields (Ice Barrier, Power Word: Shield)
 
@@ -135,6 +128,6 @@ If matches get long, may need to limit log size or virtualize the display to pre
 
 ### Data-Driven Configuration
 
-- [x] abilities.ron - All 21 ability definitions
+- [x] abilities.ron - All 22 ability definitions
 - [x] AbilityDefinitions Bevy resource
 - [x] Runtime balance changes without recompilation
