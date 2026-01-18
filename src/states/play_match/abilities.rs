@@ -21,6 +21,8 @@ pub enum SpellSchool {
     Shadow,
     /// Arcane magic (Arcane Intellect, Polymorph)
     Arcane,
+    /// Fire magic (Immolate)
+    Fire,
     /// No spell school (can't be locked out)
     None,
 }
@@ -57,6 +59,7 @@ pub enum AbilityType {
     Corruption, // Shadow DoT
     Shadowbolt, // Shadow projectile
     Fear,       // Shadow CC - target flees, breaks on damage
+    Immolate,   // Fire direct damage + DoT
     // Buff abilities
     ArcaneIntellect, // Mage buff - increases max mana
     BattleShout,     // Warrior buff - increases attack power
@@ -107,6 +110,8 @@ pub fn is_spell_school_locked(spell_school: SpellSchool, auras: Option<&ActiveAu
                     1 => SpellSchool::Frost,
                     2 => SpellSchool::Holy,
                     3 => SpellSchool::Shadow,
+                    4 => SpellSchool::Arcane,
+                    5 => SpellSchool::Fire,
                     _ => SpellSchool::None,
                 };
                 locked_school == spell_school

@@ -118,7 +118,10 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
    }
    ```
 
-2. **Add definition to `abilities.ron`**:
+2. **Add to validation list** in `ability_config.rs`:
+   - Add `AbilityType::NewAbility` to the `expected_abilities` array in `validate()`
+
+3. **Add definition to `abilities.ron`**:
    ```ron
    NewAbility: (
        name: "New Ability",
@@ -143,14 +146,21 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
    )
    ```
 
-3. **Add AI logic** in the appropriate `class_ai/<class>.rs` file:
+4. **Add AI logic** in the appropriate `class_ai/<class>.rs` file:
    - Implement when to use the ability in the class's `decide_action()` method
    - Use `CombatContext` helpers like `ctx.target_info()`, `ctx.has_aura()`, etc.
 
-4. **Add special handling** in `combat_core.rs` if the ability has unique mechanics
+5. **Add spell icon** for the ability timeline UI:
+   - Download icon: `mcp__wowhead-classic__get_spell_icon("New Ability")` to get the URL
+   - Save to `assets/icons/abilities/<icon_name>.jpg`
+   - Add mapping in `rendering/mod.rs`:
+     - Add entry to `get_ability_icon_path()` match
+     - Add ability name to `SPELL_ICON_ABILITIES` array
+
+6. **Add special handling** in `combat_core.rs` if the ability has unique mechanics
    (most abilities work automatically via the config)
 
-5. **Test with headless simulation**:
+7. **Test with headless simulation**:
    ```bash
    cargo run --release -- --headless /tmp/test.json
    ```

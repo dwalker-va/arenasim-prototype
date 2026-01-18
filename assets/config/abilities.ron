@@ -345,5 +345,24 @@
             )),
             spell_school: Shadow,
         ),
+
+        Immolate: (
+            name: "Immolate",
+            cast_time: 2.0,
+            range: 30.0,
+            mana_cost: 25.0,
+            cooldown: 0.0,
+            damage_base_min: 10.0,
+            damage_base_max: 12.0,
+            damage_coefficient: 0.2,
+            damage_scales_with: SpellPower,
+            applies_aura: Some((
+                aura_type: DamageOverTime,
+                duration: 15.0,
+                magnitude: 4.0,
+                tick_interval: 3.0,
+            )),
+            spell_school: Fire,
+        ),
     }
 )

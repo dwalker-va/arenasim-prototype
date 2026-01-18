@@ -233,10 +233,12 @@ impl AbilityDefinitions {
             AbilityType::Corruption,
             AbilityType::Shadowbolt,
             AbilityType::Fear,
+            AbilityType::Immolate,
             AbilityType::ArcaneIntellect,
             AbilityType::BattleShout,
             AbilityType::IceBarrier,
             AbilityType::PowerWordShield,
+            AbilityType::Polymorph,
         ];
 
         let missing: Vec<AbilityType> = expected_abilities

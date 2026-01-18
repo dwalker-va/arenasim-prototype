@@ -896,7 +896,8 @@ pub fn process_interrupts(
                 SpellSchool::Holy => 2.0,
                 SpellSchool::Shadow => 3.0,
                 SpellSchool::Arcane => 4.0,
-                SpellSchool::None => 5.0,
+                SpellSchool::Fire => 5.0,
+                SpellSchool::None => 6.0,
             };
             
             commands.spawn(AuraPending {
@@ -923,6 +924,7 @@ pub fn process_interrupts(
                 SpellSchool::Holy => "Holy",
                 SpellSchool::Shadow => "Shadow",
                 SpellSchool::Arcane => "Arcane",
+                SpellSchool::Fire => "Fire",
                 SpellSchool::None => "None",
             };
             

@@ -3,9 +3,10 @@
 //! Handles AI decision-making for the Warlock class.
 //!
 //! ## Priority Order
-//! 1. Corruption (DoT on enemies without it)
-//! 2. Fear (CC on non-CC'd target)
-//! 3. Shadow Bolt (main damage spell)
+//! 1. Corruption (instant Shadow DoT)
+//! 2. Immolate (2s cast Fire DoT)
+//! 3. Fear (CC on non-CC'd target)
+//! 4. Shadow Bolt (main damage spell)
 
 use bevy::prelude::*;
 use std::collections::HashMap;
@@ -64,7 +65,7 @@ pub fn decide_warlock_action(
         return false;
     }
 
-    // Priority 1: Corruption (instant DoT)
+    // Priority 1: Corruption (instant Shadow DoT)
     if try_corruption(
         commands,
         combat_log,
@@ -81,7 +82,24 @@ pub fn decide_warlock_action(
         return true;
     }
 
-    // Priority 2: Fear (uses CC target if available, otherwise kill target)
+    // Priority 2: Immolate (2s cast Fire DoT)
+    if try_immolate(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        target_entity,
+        target_pos,
+        combatant_info,
+        active_auras_map,
+    ) {
+        return true;
+    }
+
+    // Priority 3: Fear (uses CC target if available, otherwise kill target)
     // CC target is separate from kill target to enable strategic CC on healers
     // while focusing damage on a different target
     let fear_target = combatant.cc_target.or(combatant.target);
@@ -105,7 +123,7 @@ pub fn decide_warlock_action(
         }
     }
 
-    // Priority 3: Shadow Bolt
+    // Priority 4: Shadow Bolt
     try_shadowbolt(
         commands,
         combat_log,
@@ -136,10 +154,12 @@ fn try_corruption(
     combatant_info: &HashMap<Entity, (u8, CharacterClass, f32, f32)>,
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
 ) -> bool {
-    // Check if target already has Corruption (any DoT for now)
+    // Check if target already has Corruption (check by ability name to allow stacking with Immolate)
     let target_has_corruption = active_auras_map
         .get(&target_entity)
-        .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::DamageOverTime))
+        .map(|auras| auras.iter().any(|a|
+            a.effect_type == AuraType::DamageOverTime && a.ability_name == "Corruption"
+        ))
         .unwrap_or(false);
 
     if target_has_corruption {
@@ -209,6 +229,82 @@ fn try_corruption(
 
     info!(
         "Team {} {} applies Corruption to enemy (10 damage per 3s for 18s)",
+        combatant.team,
+        combatant.class.name()
+    );
+
+    true
+}
+
+/// Try to cast Immolate on target.
+/// Returns true if Immolate cast was started.
+#[allow(clippy::too_many_arguments)]
+fn try_immolate(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    target_entity: Entity,
+    target_pos: Vec3,
+    combatant_info: &HashMap<Entity, (u8, CharacterClass, f32, f32)>,
+    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+) -> bool {
+    // Check if target already has Immolate (check by ability name to allow stacking with Corruption)
+    let target_has_immolate = active_auras_map
+        .get(&target_entity)
+        .map(|auras| auras.iter().any(|a|
+            a.effect_type == AuraType::DamageOverTime && a.ability_name == "Immolate"
+        ))
+        .unwrap_or(false);
+
+    if target_has_immolate {
+        return false;
+    }
+
+    let immolate = AbilityType::Immolate;
+    let immolate_def = abilities.get_unchecked(&immolate);
+
+    // Check if Fire school is locked out
+    if is_spell_school_locked(immolate_def.spell_school, auras) {
+        return false;
+    }
+
+    if !immolate.can_cast_config(combatant, target_pos, my_pos, immolate_def) {
+        return false;
+    }
+
+    // Execute Immolate (start casting - 2s cast time)
+    combatant.global_cooldown = GCD;
+
+    commands.entity(entity).insert(CastingState {
+        ability: immolate,
+        time_remaining: immolate_def.cast_time,
+        target: Some(target_entity),
+        interrupted: false,
+        interrupted_display_time: 0.0,
+    });
+
+    // Log
+    let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
+    let target_id = combatant_info
+        .get(&target_entity)
+        .map(|(team, class, _, _)| format!("Team {} {}", team, class.name()));
+    combat_log.log_ability_cast(
+        caster_id,
+        "Immolate".to_string(),
+        target_id,
+        format!(
+            "Team {} {} begins casting Immolate",
+            combatant.team,
+            combatant.class.name()
+        ),
+    );
+
+    info!(
+        "Team {} {} starts casting Immolate on enemy",
         combatant.team,
         combatant.class.name()
     );
