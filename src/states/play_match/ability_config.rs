@@ -23,6 +23,11 @@ use std::collections::HashMap;
 use super::abilities::{AbilityType, ScalingStat, SpellSchool};
 use super::components::AuraType;
 
+/// Default value for break_on_damage: -1.0 means the aura doesn't break on damage.
+fn default_break_on_damage() -> f32 {
+    -1.0
+}
+
 /// Aura effect configuration with named fields.
 ///
 /// Replaces the old tuple format `(AuraType, duration, magnitude, break_threshold)`
@@ -39,8 +44,11 @@ pub struct AuraEffect {
     /// - DamageOverTime: damage per tick
     /// - HealingReduction: multiplier (0.65 = 35% reduction)
     pub magnitude: f32,
-    /// Damage threshold that breaks the aura (0.0 = doesn't break on damage)
-    #[serde(default)]
+    /// Damage threshold that breaks the aura.
+    /// - Negative (default -1.0) = doesn't break on damage
+    /// - 0.0 = breaks on ANY damage (e.g., Polymorph)
+    /// - Positive = breaks when accumulated damage exceeds threshold
+    #[serde(default = "default_break_on_damage")]
     pub break_on_damage: f32,
     /// Tick interval for DoT effects in seconds (0.0 = no ticks)
     #[serde(default)]

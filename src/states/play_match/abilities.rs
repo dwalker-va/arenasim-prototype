@@ -63,6 +63,8 @@ pub enum AbilityType {
     // Defensive abilities
     IceBarrier,      // Mage self-shield
     PowerWordShield, // Priest shield (self or ally)
+    // Crowd Control abilities
+    Polymorph, // Mage CC - transforms target into sheep, breaks on any damage
 }
 
 impl AbilityType {

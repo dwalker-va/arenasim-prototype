@@ -246,7 +246,7 @@ fn select_cc_target_heuristic(
     scored_targets.first().map(|(entity, _)| *entity)
 }
 
-/// Check if an entity is currently CC'd (Stun, Fear, or Root).
+/// Check if an entity is currently CC'd (Stun, Fear, Root, or Polymorph).
 fn is_entity_ccd(entity: Entity, active_auras_map: &std::collections::HashMap<Entity, Vec<Aura>>) -> bool {
     active_auras_map
         .get(&entity)
@@ -254,7 +254,7 @@ fn is_entity_ccd(entity: Entity, active_auras_map: &std::collections::HashMap<En
             auras.iter().any(|a| {
                 matches!(
                     a.effect_type,
-                    AuraType::Stun | AuraType::Fear | AuraType::Root
+                    AuraType::Stun | AuraType::Fear | AuraType::Root | AuraType::Polymorph
                 )
             })
         })
@@ -311,9 +311,9 @@ pub fn decide_abilities(
             continue;
         }
         
-        // WoW Mechanic: Cannot use abilities while stunned or feared
+        // WoW Mechanic: Cannot use abilities while stunned, feared, or polymorphed
         let is_incapacitated = if let Some(ref auras) = auras {
-            auras.auras.iter().any(|a| matches!(a.effect_type, AuraType::Stun | AuraType::Fear))
+            auras.auras.iter().any(|a| matches!(a.effect_type, AuraType::Stun | AuraType::Fear | AuraType::Polymorph))
         } else {
             false
         };

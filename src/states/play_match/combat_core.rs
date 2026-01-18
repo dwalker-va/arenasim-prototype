@@ -197,15 +197,18 @@ pub fn move_to_target(
             continue;
         }
 
-        // Check for movement-preventing CC
-        let (is_rooted_or_stunned, fear_direction) = if let Some(auras) = auras {
+        // Check for movement-preventing CC and wandering CC
+        let (is_rooted_or_stunned, fear_direction, polymorph_direction) = if let Some(auras) = auras {
             let rooted_or_stunned = auras.auras.iter().any(|a| matches!(a.effect_type, AuraType::Root | AuraType::Stun));
             let fear_dir = auras.auras.iter()
                 .find(|a| a.effect_type == AuraType::Fear)
                 .map(|a| a.fear_direction);
-            (rooted_or_stunned, fear_dir)
+            let poly_dir = auras.auras.iter()
+                .find(|a| a.effect_type == AuraType::Polymorph)
+                .map(|a| a.fear_direction); // Polymorph reuses fear_direction for wandering
+            (rooted_or_stunned, fear_dir, poly_dir)
         } else {
-            (false, None)
+            (false, None, None)
         };
 
         // Cannot move at all if rooted or stunned
@@ -236,6 +239,29 @@ pub fn move_to_target(
             }
 
             continue; // Skip normal movement logic while feared
+        }
+
+        // POLYMORPH BEHAVIOR: If polymorphed, wander slowly (like Fear but at 50% speed)
+        if let Some((dir_x, dir_z)) = polymorph_direction {
+            let direction = Vec3::new(dir_x, 0.0, dir_z).normalize_or_zero();
+
+            if direction != Vec3::ZERO {
+                // Polymorphed targets wander at 50% of normal movement speed (sheep move slowly!)
+                let move_distance = combatant.base_movement_speed * 0.5 * dt;
+
+                // Move in polymorph direction
+                transform.translation += direction * move_distance;
+
+                // Clamp to arena bounds
+                transform.translation.x = transform.translation.x.clamp(-ARENA_HALF_X, ARENA_HALF_X);
+                transform.translation.z = transform.translation.z.clamp(-ARENA_HALF_Z, ARENA_HALF_Z);
+
+                // Rotate to face direction of travel
+                let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
+                transform.rotation = target_rotation;
+            }
+
+            continue; // Skip normal movement logic while polymorphed
         }
 
         // CHARGING BEHAVIOR: If charging, move at high speed toward target ignoring slows
@@ -549,9 +575,9 @@ pub fn combat_auto_attack(
             continue;
         }
         
-        // WoW Mechanic: Cannot auto-attack while stunned or feared
+        // WoW Mechanic: Cannot auto-attack while stunned, feared, or polymorphed
         let is_incapacitated = if let Some(auras) = auras {
-            auras.auras.iter().any(|a| matches!(a.effect_type, AuraType::Stun | AuraType::Fear))
+            auras.auras.iter().any(|a| matches!(a.effect_type, AuraType::Stun | AuraType::Fear | AuraType::Polymorph))
         } else {
             false
         };

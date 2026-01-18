@@ -216,6 +216,12 @@ pub fn render_health_bars(
                             let fear_text = format!("FEAR {:.1}s", fear_aura.duration);
                             render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &fear_text, egui::Color32::from_rgb(148, 103, 189));
                         }
+
+                        // SHEEPED indicator with duration countdown (Polymorph)
+                        if let Some(poly_aura) = auras.auras.iter().find(|a| a.effect_type == AuraType::Polymorph) {
+                            let poly_text = format!("SHEEPED {:.1}s", poly_aura.duration);
+                            render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &poly_text, egui::Color32::from_rgb(255, 105, 180)); // Hot pink
+                        }
                     }
 
                     // Health bar background (dark gray)

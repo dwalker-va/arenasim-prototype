@@ -6,7 +6,8 @@
 //! 1. Ice Barrier (self-shield when no shield or HP < 80%)
 //! 2. Arcane Intellect (buff mana-using allies pre-combat)
 //! 3. Frost Nova (defensive AoE when enemies in melee)
-//! 4. Frostbolt (main damage spell with kiting behavior)
+//! 4. Polymorph (CC non-kill target to create outnumbering situation)
+//! 5. Frostbolt (main damage spell with kiting behavior)
 
 use bevy::prelude::*;
 use std::collections::HashMap;
@@ -99,7 +100,23 @@ pub fn decide_mage_action(
         return true;
     }
 
-    // Priority 4: Frostbolt (main damage spell)
+    // Priority 4: Polymorph (CC non-kill target)
+    if try_polymorph(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        positions,
+        combatant_info,
+        active_auras_map,
+    ) {
+        return true;
+    }
+
+    // Priority 5: Frostbolt (main damage spell)
     if try_frostbolt(
         commands,
         combat_log,
@@ -438,6 +455,113 @@ fn try_frost_nova(
         combatant.team,
         combatant.class.name(),
         frost_nova_targets.len()
+    );
+
+    true
+}
+
+/// Try to cast Polymorph on the CC target (non-kill target).
+///
+/// Polymorph is a long-duration CC that breaks on ANY damage, so it should only
+/// be used on targets that won't take damage (the cc_target, not kill_target).
+///
+/// Returns true if casting was started.
+#[allow(clippy::too_many_arguments)]
+fn try_polymorph(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    positions: &HashMap<Entity, Vec3>,
+    combatant_info: &HashMap<Entity, (u8, CharacterClass, f32, f32)>,
+    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+) -> bool {
+    // Polymorph targets the cc_target, NOT the kill target
+    let Some(cc_target) = combatant.cc_target else {
+        return false;
+    };
+
+    // Don't polymorph the kill target - any damage will break it immediately
+    if combatant.target == Some(cc_target) {
+        return false;
+    }
+
+    let Some(&target_pos) = positions.get(&cc_target) else {
+        return false;
+    };
+
+    // Check if target is already CC'd (don't waste Polymorph on already CC'd targets)
+    let target_already_ccd = active_auras_map
+        .get(&cc_target)
+        .map(|auras| {
+            auras.iter().any(|a| {
+                matches!(
+                    a.effect_type,
+                    AuraType::Stun | AuraType::Fear | AuraType::Root | AuraType::Polymorph
+                )
+            })
+        })
+        .unwrap_or(false);
+
+    if target_already_ccd {
+        return false;
+    }
+
+    // Check GCD
+    if combatant.global_cooldown > 0.0 {
+        return false;
+    }
+
+    let ability = AbilityType::Polymorph;
+    let def = abilities.get_unchecked(&ability);
+
+    // Check if Arcane spell school is locked out
+    if is_spell_school_locked(def.spell_school, auras) {
+        return false;
+    }
+
+    // Check range and mana
+    let distance_to_target = my_pos.distance(target_pos);
+    if distance_to_target > def.range || combatant.current_mana < def.mana_cost {
+        return false;
+    }
+
+    // Start casting Polymorph
+    combatant.global_cooldown = GCD;
+
+    commands.entity(entity).insert(CastingState {
+        ability,
+        time_remaining: def.cast_time,
+        target: Some(cc_target),
+        interrupted: false,
+        interrupted_display_time: 0.0,
+    });
+
+    // Log
+    let caster_id = combatant_id(combatant.team, combatant.class);
+    let target_id = combatant_info
+        .get(&cc_target)
+        .map(|(team, class, _, _)| format!("Team {} {}", team, class.name()));
+    combat_log.log_ability_cast(
+        caster_id,
+        def.name.to_string(),
+        target_id,
+        format!(
+            "Team {} {} begins casting {}",
+            combatant.team,
+            combatant.class.name(),
+            def.name
+        ),
+    );
+
+    info!(
+        "Team {} {} starts casting {} on cc_target",
+        combatant.team,
+        combatant.class.name(),
+        def.name
     );
 
     true

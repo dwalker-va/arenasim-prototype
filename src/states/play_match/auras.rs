@@ -34,8 +34,8 @@ pub fn update_auras(
         for aura in auras.auras.iter_mut() {
             aura.duration -= dt;
 
-            // For Fear auras, tick down direction timer and pick new random direction
-            if aura.effect_type == AuraType::Fear {
+            // For Fear and Polymorph auras, tick down direction timer and pick new random direction
+            if matches!(aura.effect_type, AuraType::Fear | AuraType::Polymorph) {
                 aura.fear_direction_timer -= dt;
 
                 // Time to pick a new random direction
@@ -45,7 +45,9 @@ pub fn update_auras(
                     aura.fear_direction = (angle.cos(), angle.sin());
 
                     // Reset timer: change direction every 1-2 seconds (WoW-style)
-                    aura.fear_direction_timer = 1.0 + game_rng.random_f32();
+                    // Polymorph changes direction slightly less frequently (sheep wander lazily)
+                    let base_timer = if aura.effect_type == AuraType::Polymorph { 1.5 } else { 1.0 };
+                    aura.fear_direction_timer = base_timer + game_rng.random_f32();
                 }
             }
         }
@@ -112,7 +114,7 @@ pub fn apply_pending_auras(
         // Check for CC immunity: Charging combatants are immune to crowd control
         let is_cc_aura = matches!(
             pending.aura.effect_type,
-            AuraType::Fear | AuraType::Stun | AuraType::Root
+            AuraType::Fear | AuraType::Stun | AuraType::Root | AuraType::Polymorph
         );
         let is_charging = charging_query.get(pending.target).is_ok();
 
@@ -141,6 +143,7 @@ pub fn apply_pending_auras(
                 AuraType::Fear => "Fear",
                 AuraType::Stun => "Stun",
                 AuraType::Root => "Root",
+                AuraType::Polymorph => "Polymorph",
                 _ => "CC",
             };
             combat_log.log(
@@ -348,12 +351,14 @@ pub fn process_aura_breaks(
         let mut auras_to_remove = Vec::new();
         
         // Accumulate damage on breakable auras
+        // Note: threshold of 0.0 means "break on ANY damage" (e.g., Polymorph)
+        // threshold of -1.0 or negative means "never break on damage"
         for (index, aura) in active_auras.auras.iter_mut().enumerate() {
-            if aura.break_on_damage_threshold > 0.0 {
+            if aura.break_on_damage_threshold >= 0.0 {
                 aura.accumulated_damage += damage_taken.amount;
-                
-                // Check if aura should break
-                if aura.accumulated_damage >= aura.break_on_damage_threshold {
+
+                // Check if aura should break (threshold 0 = break on any damage)
+                if aura.accumulated_damage > aura.break_on_damage_threshold {
                     auras_to_remove.push(index);
                     
                     // Log the break
@@ -362,6 +367,7 @@ pub fn process_aura_breaks(
                         AuraType::MovementSpeedSlow => "Movement Speed Slow",
                         AuraType::Stun => "Stun",
                         AuraType::Fear => "Fear",
+                        AuraType::Polymorph => "Polymorph",
                         AuraType::MaxHealthIncrease => "Power Word: Fortitude", // Should never break on damage
                         AuraType::MaxManaIncrease => "Arcane Intellect", // Should never break on damage
                         AuraType::AttackPowerIncrease => "Battle Shout", // Should never break on damage

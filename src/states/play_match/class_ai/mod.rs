@@ -124,12 +124,12 @@ impl<'a> CombatContext<'a> {
             .unwrap_or(false)
     }
 
-    /// Check if self is incapacitated (stunned or feared)
+    /// Check if self is incapacitated (stunned, feared, or polymorphed)
     pub fn is_incapacitated(&self) -> bool {
-        self.has_aura(AuraType::Stun) || self.has_aura(AuraType::Fear)
+        self.has_aura(AuraType::Stun) || self.has_aura(AuraType::Fear) || self.has_aura(AuraType::Polymorph)
     }
 
-    /// Check if an entity is currently CC'd (Stun, Fear, or Root).
+    /// Check if an entity is currently CC'd (Stun, Fear, Root, or Polymorph).
     /// Useful for preventing CC overlap on targets.
     pub fn is_ccd(&self, entity: Entity) -> bool {
         self.active_auras
@@ -138,7 +138,7 @@ impl<'a> CombatContext<'a> {
                 auras.iter().any(|a| {
                     matches!(
                         a.effect_type,
-                        AuraType::Stun | AuraType::Fear | AuraType::Root
+                        AuraType::Stun | AuraType::Fear | AuraType::Root | AuraType::Polymorph
                     )
                 })
             })

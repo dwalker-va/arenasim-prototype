@@ -358,14 +358,14 @@ fn try_power_word_shield(
         });
     }
 
-    // Apply Weakened Soul debuff
+    // Apply Weakened Soul debuff (doesn't break on damage)
     commands.spawn(AuraPending {
         target: shield_entity,
         aura: Aura {
             effect_type: AuraType::WeakenedSoul,
             duration: 15.0,
             magnitude: 0.0,
-            break_on_damage_threshold: 0.0,
+            break_on_damage_threshold: -1.0, // Never breaks on damage
             accumulated_damage: 0.0,
             tick_interval: 0.0,
             time_until_next_tick: 0.0,

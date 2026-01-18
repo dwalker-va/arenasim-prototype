@@ -344,6 +344,9 @@ pub enum AuraType {
     Absorb,
     /// Weakened Soul - prevents receiving Power Word: Shield (applied by PW:S)
     WeakenedSoul,
+    /// Polymorph - target wanders slowly, can't attack/cast, breaks on ANY damage.
+    /// Separate from Stun for diminishing returns categories (incapacitates vs stuns).
+    Polymorph,
 }
 
 // ============================================================================
