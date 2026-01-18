@@ -23,6 +23,12 @@ pub struct HeadlessMatchConfig {
     /// Team 2's kill target priority (0-based index into enemy team)
     #[serde(default)]
     pub team2_kill_target: Option<usize>,
+    /// Team 1's CC target priority (0-based index into enemy team, None = use heuristics)
+    #[serde(default)]
+    pub team1_cc_target: Option<usize>,
+    /// Team 2's CC target priority (0-based index into enemy team, None = use heuristics)
+    #[serde(default)]
+    pub team2_cc_target: Option<usize>,
     /// Custom output path for match log (optional)
     #[serde(default)]
     pub output_path: Option<String>,
@@ -94,6 +100,26 @@ impl HeadlessMatchConfig {
             }
         }
 
+        // Validate CC targets
+        if let Some(target) = self.team1_cc_target {
+            if target >= self.team2.len() {
+                return Err(format!(
+                    "team1_cc_target {} is out of range (team2 has {} members)",
+                    target,
+                    self.team2.len()
+                ));
+            }
+        }
+        if let Some(target) = self.team2_cc_target {
+            if target >= self.team1.len() {
+                return Err(format!(
+                    "team2_cc_target {} is out of range (team1 has {} members)",
+                    target,
+                    self.team1.len()
+                ));
+            }
+        }
+
         // Validate max duration
         if self.max_duration_secs <= 0.0 {
             return Err("max_duration_secs must be positive".to_string());
@@ -153,6 +179,8 @@ impl HeadlessMatchConfig {
             map,
             team1_kill_target: self.team1_kill_target,
             team2_kill_target: self.team2_kill_target,
+            team1_cc_target: self.team1_cc_target,
+            team2_cc_target: self.team2_cc_target,
         })
     }
 }

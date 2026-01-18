@@ -15,6 +15,8 @@ fn create_config(team1: Vec<&str>, team2: Vec<&str>, seed: Option<u64>) -> Headl
         map: "BasicArena".to_string(),
         team1_kill_target: None,
         team2_kill_target: None,
+        team1_cc_target: None,
+        team2_cc_target: None,
         output_path: None,
         max_duration_secs: 60.0, // Short duration for tests
         random_seed: seed,

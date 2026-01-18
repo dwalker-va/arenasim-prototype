@@ -381,8 +381,10 @@ pub struct Combatant {
     pub spell_power: f32,
     /// Base movement speed in units per second (modified by auras/debuffs)
     pub base_movement_speed: f32,
-    /// Current target entity (None if no valid target)
+    /// Current target entity for damage (None if no valid target)
     pub target: Option<Entity>,
+    /// CC target entity (separate from damage target, None = use heuristics)
+    pub cc_target: Option<Entity>,
     /// Total damage this combatant has dealt
     pub damage_dealt: f32,
     /// Total damage this combatant has taken
@@ -439,6 +441,7 @@ impl Combatant {
             spell_power,
             base_movement_speed: movement_speed,
             target: None,
+            cc_target: None,
             damage_dealt: 0.0,
             damage_taken: 0.0,
             healing_done: 0.0,

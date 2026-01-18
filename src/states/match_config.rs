@@ -129,6 +129,10 @@ pub struct MatchConfig {
     pub team1_kill_target: Option<usize>,
     /// Team 2's kill target priority (index into enemy team, None = no priority)
     pub team2_kill_target: Option<usize>,
+    /// Team 1's CC target priority (index into enemy team, None = use heuristics)
+    pub team1_cc_target: Option<usize>,
+    /// Team 2's CC target priority (index into enemy team, None = use heuristics)
+    pub team2_cc_target: Option<usize>,
 }
 
 impl Default for MatchConfig {
@@ -141,6 +145,8 @@ impl Default for MatchConfig {
             map: ArenaMap::BasicArena,
             team1_kill_target: None, // No priority by default
             team2_kill_target: None, // No priority by default
+            team1_cc_target: None,   // Use heuristics by default
+            team2_cc_target: None,   // Use heuristics by default
         }
     }
 }

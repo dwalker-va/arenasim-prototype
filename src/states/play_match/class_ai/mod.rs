@@ -129,6 +129,22 @@ impl<'a> CombatContext<'a> {
         self.has_aura(AuraType::Stun) || self.has_aura(AuraType::Fear)
     }
 
+    /// Check if an entity is currently CC'd (Stun, Fear, or Root).
+    /// Useful for preventing CC overlap on targets.
+    pub fn is_ccd(&self, entity: Entity) -> bool {
+        self.active_auras
+            .get(&entity)
+            .map(|auras| {
+                auras.iter().any(|a| {
+                    matches!(
+                        a.effect_type,
+                        AuraType::Stun | AuraType::Fear | AuraType::Root
+                    )
+                })
+            })
+            .unwrap_or(false)
+    }
+
     /// Get all alive enemies
     pub fn alive_enemies(&self) -> Vec<&CombatantInfo> {
         let my_team = self.self_info().map(|i| i.team).unwrap_or(0);

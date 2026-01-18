@@ -81,21 +81,28 @@ pub fn decide_warlock_action(
         return true;
     }
 
-    // Priority 2: Fear
-    if try_fear(
-        commands,
-        combat_log,
-        abilities,
-        entity,
-        combatant,
-        my_pos,
-        auras,
-        target_entity,
-        target_pos,
-        combatant_info,
-        active_auras_map,
-    ) {
-        return true;
+    // Priority 2: Fear (uses CC target if available, otherwise kill target)
+    // CC target is separate from kill target to enable strategic CC on healers
+    // while focusing damage on a different target
+    let fear_target = combatant.cc_target.or(combatant.target);
+    if let Some(fear_target_entity) = fear_target {
+        if let Some(&fear_target_pos) = positions.get(&fear_target_entity) {
+            if try_fear(
+                commands,
+                combat_log,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                auras,
+                fear_target_entity,
+                fear_target_pos,
+                combatant_info,
+                active_auras_map,
+            ) {
+                return true;
+            }
+        }
     }
 
     // Priority 3: Shadow Bolt

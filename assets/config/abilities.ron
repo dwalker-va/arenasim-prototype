@@ -333,7 +333,9 @@
                 aura_type: Fear,
                 duration: 8.0,
                 magnitude: 0.0,
-                break_on_damage: 30.0,
+                // More realistic threshold - breaks after ~100 damage (2 Frostbolts)
+                // rather than instantly on any DoT tick
+                break_on_damage: 100.0,
             )),
             spell_school: Shadow,
         ),

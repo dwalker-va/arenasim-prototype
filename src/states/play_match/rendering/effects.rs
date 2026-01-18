@@ -202,14 +202,13 @@ pub fn spawn_spell_impact_visuals(
         });
 
         // Add visual mesh to the effect entity at the target's position
-        // Use get_entity to safely handle cases where the entity was despawned
-        if let Some(mut entity_commands) = commands.get_entity(effect_entity) {
-            entity_commands.insert((
-                Mesh3d(mesh),
-                MeshMaterial3d(material),
-                Transform::from_translation(effect.position + Vec3::new(0.0, 1.0, 0.0)), // Centered at chest height
-            ));
-        }
+        // Use try_insert to safely handle cases where the entity was despawned
+        // between when the query ran and when commands are applied
+        commands.entity(effect_entity).try_insert((
+            Mesh3d(mesh),
+            MeshMaterial3d(material),
+            Transform::from_translation(effect.position + Vec3::new(0.0, 1.0, 0.0)), // Centered at chest height
+        ));
     }
 }
 

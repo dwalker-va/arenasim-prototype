@@ -17,7 +17,7 @@ use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
-use crate::states::play_match::constants::GCD;
+use crate::states::play_match::constants::{GCD, MELEE_RANGE};
 use crate::states::play_match::utils::{combatant_id, spawn_speech_bubble};
 
 use super::{AbilityDecision, ClassAI, CombatContext};
@@ -82,19 +82,31 @@ pub fn decide_rogue_action(
         return false;
     }
 
-    // Priority 1: Kidney Shot
-    if try_kidney_shot(
-        commands,
-        combat_log,
-        abilities,
-        entity,
-        combatant,
+    // Priority 1: Kidney Shot (melee-range CC)
+    // For melee CC, we need range-aware targeting:
+    // - If CC target is in melee range, use it (strategic CC on healer)
+    // - If CC target is out of range but kill target is in range, use kill target
+    // - A stun on kill target is still valuable (helps secure kill)
+    let kidney_shot_target = select_melee_cc_target(
+        combatant.cc_target,
+        combatant.target,
         my_pos,
-        target_entity,
-        target_pos,
-        combatant_info,
-    ) {
-        return true;
+        positions,
+    );
+    if let Some((ks_target_entity, ks_target_pos)) = kidney_shot_target {
+        if try_kidney_shot(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            ks_target_entity,
+            ks_target_pos,
+            combatant_info,
+        ) {
+            return true;
+        }
     }
 
     // Priority 2: Sinister Strike
@@ -336,4 +348,40 @@ fn try_sinister_strike(
     );
 
     true
+}
+
+/// Select the best target for melee-range CC abilities.
+///
+/// For melee CC like Kidney Shot, we need range-aware targeting:
+/// 1. If CC target is in melee range, use it (strategic CC on healer)
+/// 2. If CC target is out of range but kill target is in range, fall back to kill target
+/// 3. If neither is in range, return None
+///
+/// A stun on the kill target is still valuable even if not the ideal CC target.
+fn select_melee_cc_target(
+    cc_target: Option<Entity>,
+    kill_target: Option<Entity>,
+    my_pos: Vec3,
+    positions: &HashMap<Entity, Vec3>,
+) -> Option<(Entity, Vec3)> {
+    // First, check if CC target is in melee range
+    if let Some(cc_entity) = cc_target {
+        if let Some(&cc_pos) = positions.get(&cc_entity) {
+            if my_pos.distance(cc_pos) <= MELEE_RANGE {
+                return Some((cc_entity, cc_pos));
+            }
+        }
+    }
+
+    // CC target not in range - fall back to kill target if in melee range
+    if let Some(kill_entity) = kill_target {
+        if let Some(&kill_pos) = positions.get(&kill_entity) {
+            if my_pos.distance(kill_pos) <= MELEE_RANGE {
+                return Some((kill_entity, kill_pos));
+            }
+        }
+    }
+
+    // Neither target in melee range
+    None
 }
