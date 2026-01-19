@@ -7,6 +7,7 @@ use bevy::time::Real;
 use bevy_egui::{egui, EguiContexts};
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
+use super::{get_aura_icon_key, is_buff_aura, AURA_ICON_SIZE, AURA_ICON_SPACING};
 
 // ==============================================================================
 // Low HP Highlighting Constants
@@ -153,6 +154,7 @@ pub fn render_health_bars(
     combatants: Query<(&Combatant, &Transform, Option<&CastingState>, Option<&ActiveAuras>)>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
     time: Res<Time<Real>>,
+    spell_icons: Res<SpellIcons>,
 ) {
     // Use try_ctx_mut to gracefully handle window close
     let Some(ctx) = contexts.try_ctx_mut() else { return; };
@@ -448,6 +450,22 @@ pub fn render_health_bars(
                                 egui::Color32::WHITE,
                             );
                         }
+
+                        next_bar_y_offset += cast_bar_height + bar_spacing;
+                    }
+
+                    // Aura icons (below cast bar or resource bar)
+                    if let Some(auras) = active_auras {
+                        if !auras.auras.is_empty() {
+                            render_aura_icons(
+                                ui.painter(),
+                                bar_pos,
+                                bar_width,
+                                next_bar_y_offset,
+                                auras,
+                                &spell_icons,
+                            );
+                        }
                     }
                 }
             }
@@ -497,4 +515,148 @@ fn render_status_label(
     // Draw main text on top
     ui.painter().galley(center_pos, galley, color);
     *status_offset -= 10.0; // Move next label up
+}
+
+// ==============================================================================
+// Aura Icons
+// ==============================================================================
+
+/// Render aura icons with countdown timers below the health/cast bars.
+/// Icons are centered below the health bar, with buffs using gold borders
+/// and debuffs using red borders. Countdown timers use OmniCC-style coloring.
+fn render_aura_icons(
+    painter: &egui::Painter,
+    bar_pos: egui::Pos2,
+    bar_width: f32,
+    y_offset: f32,
+    auras: &ActiveAuras,
+    spell_icons: &SpellIcons,
+) {
+    let num_auras = auras.auras.len();
+    if num_auras == 0 {
+        return;
+    }
+
+    // Calculate total width of icon row
+    let total_width = (num_auras as f32 * AURA_ICON_SIZE)
+        + ((num_auras - 1) as f32 * AURA_ICON_SPACING);
+
+    // Center the icons below the health bar
+    let start_x = bar_pos.x + (bar_width - total_width) / 2.0;
+    let icons_y = bar_pos.y + y_offset + 2.0; // Small gap below bars
+
+    for (i, aura) in auras.auras.iter().enumerate() {
+        let icon_x = start_x + (i as f32 * (AURA_ICON_SIZE + AURA_ICON_SPACING));
+        let icon_rect = egui::Rect::from_min_size(
+            egui::pos2(icon_x, icons_y),
+            egui::vec2(AURA_ICON_SIZE, AURA_ICON_SIZE),
+        );
+
+        // Border color: gold for buffs, red for debuffs
+        let is_buff = is_buff_aura(&aura.effect_type);
+        let border_color = if is_buff {
+            egui::Color32::from_rgb(255, 215, 0)  // Gold
+        } else {
+            egui::Color32::from_rgb(200, 50, 50)  // Red
+        };
+
+        // Draw icon background
+        painter.rect_filled(
+            icon_rect,
+            2.0,
+            egui::Color32::from_rgb(20, 20, 20),
+        );
+
+        // Try to draw the icon texture
+        let icon_key = get_aura_icon_key(aura);
+        if let Some(texture_id) = spell_icons.textures.get(&icon_key) {
+            // Draw the icon texture
+            painter.image(
+                *texture_id,
+                icon_rect.shrink(2.0), // Shrink slightly for border
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+        } else {
+            // Fallback: draw colored rectangle based on aura type
+            let fallback_color = get_aura_fallback_color(&aura.effect_type);
+            painter.rect_filled(
+                icon_rect.shrink(2.0),
+                1.0,
+                fallback_color,
+            );
+        }
+
+        // Draw border
+        painter.rect_stroke(
+            icon_rect,
+            2.0,
+            egui::Stroke::new(2.0, border_color),
+        );
+
+        // Draw countdown timer (OmniCC style)
+        let seconds_remaining = aura.duration.ceil() as i32;
+        if seconds_remaining > 0 {
+            let countdown_text = format!("{}", seconds_remaining);
+
+            // Color based on time remaining: white (>3s), orange (1-3s), red (<1s)
+            let text_color = if aura.duration > 3.0 {
+                egui::Color32::WHITE
+            } else if aura.duration > 1.0 {
+                egui::Color32::from_rgb(255, 165, 0) // Orange
+            } else {
+                egui::Color32::from_rgb(255, 50, 50) // Red
+            };
+
+            let font = egui::FontId::proportional(14.0);
+            let text_pos = egui::pos2(
+                icon_rect.center().x,
+                icon_rect.center().y,
+            );
+
+            // Draw black outline for visibility
+            let outline_offsets = [
+                (-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0),
+                (-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0),
+            ];
+            for (dx, dy) in outline_offsets {
+                painter.text(
+                    egui::pos2(text_pos.x + dx, text_pos.y + dy),
+                    egui::Align2::CENTER_CENTER,
+                    &countdown_text,
+                    font.clone(),
+                    egui::Color32::BLACK,
+                );
+            }
+
+            // Draw main text
+            painter.text(
+                text_pos,
+                egui::Align2::CENTER_CENTER,
+                &countdown_text,
+                font,
+                text_color,
+            );
+        }
+    }
+}
+
+/// Get a fallback color for an aura type when no icon is available.
+fn get_aura_fallback_color(aura_type: &AuraType) -> egui::Color32 {
+    match aura_type {
+        AuraType::MovementSpeedSlow => egui::Color32::from_rgb(100, 149, 237), // Cornflower blue
+        AuraType::Root => egui::Color32::from_rgb(139, 90, 43),  // Brown
+        AuraType::Stun => egui::Color32::from_rgb(255, 215, 0),  // Gold
+        AuraType::Fear => egui::Color32::from_rgb(148, 0, 211),  // Purple
+        AuraType::DamageOverTime => egui::Color32::from_rgb(138, 43, 226), // Blue violet
+        AuraType::Absorb => egui::Color32::from_rgb(255, 255, 255), // White
+        AuraType::HealingReduction => egui::Color32::from_rgb(178, 34, 34), // Firebrick
+        AuraType::MaxHealthIncrease => egui::Color32::from_rgb(34, 139, 34), // Forest green
+        AuraType::MaxManaIncrease => egui::Color32::from_rgb(65, 105, 225), // Royal blue
+        AuraType::AttackPowerIncrease => egui::Color32::from_rgb(255, 69, 0), // Orange red
+        AuraType::SpellSchoolLockout => egui::Color32::from_rgb(128, 0, 0), // Maroon
+        AuraType::WeakenedSoul => egui::Color32::from_rgb(169, 169, 169), // Dark gray
+        AuraType::Polymorph => egui::Color32::from_rgb(255, 182, 193), // Light pink
+        AuraType::ShadowSight => egui::Color32::from_rgb(75, 0, 130), // Indigo
+    }
 }

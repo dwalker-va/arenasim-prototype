@@ -20,7 +20,7 @@ pub use overlays::*;
 
 use bevy::prelude::*;
 use bevy_egui::egui;
-use super::components::{SpellIcons, SpellIconHandles};
+use super::components::{SpellIcons, SpellIconHandles, Aura, AuraType};
 
 // ==============================================================================
 // Spell Icon Loading (shared by multiple modules)
@@ -65,8 +65,71 @@ pub const SPELL_ICON_ABILITIES: &[&str] = &[
     "Ice Barrier", "Power Word: Shield", "Polymorph",
 ];
 
+// ==============================================================================
+// Aura Icon Constants and Helpers
+// ==============================================================================
+
+/// Size of aura icons in pixels
+pub const AURA_ICON_SIZE: f32 = 24.0;
+/// Spacing between aura icons in pixels
+pub const AURA_ICON_SPACING: f32 = 2.0;
+
+/// Generic aura icon keys (used when ability doesn't have a specific icon)
+pub const GENERIC_AURA_ICONS: &[(&str, &str)] = &[
+    ("aura_slow", "icons/auras/slow.jpg"),
+    ("aura_root", "icons/auras/root.jpg"),
+    ("aura_stun", "icons/auras/stun.jpg"),
+    ("aura_fear", "icons/auras/fear.jpg"),
+    ("aura_dot", "icons/auras/dot.jpg"),
+    ("aura_absorb", "icons/auras/absorb.jpg"),
+    ("aura_healing_reduction", "icons/auras/healing_reduction.jpg"),
+    ("aura_max_health", "icons/auras/max_health_buff.jpg"),
+    ("aura_lockout", "icons/auras/lockout.jpg"),
+    ("aura_weakened_soul", "icons/auras/weakened_soul.jpg"),
+];
+
+/// Get the icon key for an aura.
+/// Returns the ability name if it has a specific icon, otherwise returns a generic key.
+pub fn get_aura_icon_key(aura: &Aura) -> String {
+    // Check if the ability that created this aura has a specific icon
+    if get_ability_icon_path(&aura.ability_name).is_some() {
+        return aura.ability_name.clone();
+    }
+
+    // Fall back to generic aura type icon
+    match aura.effect_type {
+        AuraType::MovementSpeedSlow => "aura_slow".to_string(),
+        AuraType::Root => "aura_root".to_string(),
+        AuraType::Stun => "aura_stun".to_string(),
+        AuraType::Fear => "aura_fear".to_string(),
+        AuraType::DamageOverTime => "aura_dot".to_string(),
+        AuraType::Absorb => "aura_absorb".to_string(),
+        AuraType::HealingReduction => "aura_healing_reduction".to_string(),
+        AuraType::MaxHealthIncrease => "aura_max_health".to_string(),
+        AuraType::MaxManaIncrease => "aura_max_health".to_string(), // Reuse health icon
+        AuraType::AttackPowerIncrease => "aura_max_health".to_string(), // Reuse buff icon
+        AuraType::SpellSchoolLockout => "aura_lockout".to_string(),
+        AuraType::WeakenedSoul => "aura_weakened_soul".to_string(),
+        AuraType::Polymorph => "aura_stun".to_string(), // Reuse stun icon as fallback
+        AuraType::ShadowSight => "aura_dot".to_string(), // Reuse DoT icon as fallback
+    }
+}
+
+/// Determine if an aura type is a buff (beneficial) or debuff (harmful).
+/// Used for border color: gold for buffs, red for debuffs.
+pub fn is_buff_aura(aura_type: &AuraType) -> bool {
+    matches!(aura_type,
+        AuraType::Absorb |
+        AuraType::MaxHealthIncrease |
+        AuraType::MaxManaIncrease |
+        AuraType::AttackPowerIncrease |
+        AuraType::ShadowSight
+    )
+}
+
 /// System to load spell icons and register them with egui.
 /// This runs during PlayMatch state update and only loads once.
+/// Loads both ability-specific icons and generic aura fallback icons.
 pub fn load_spell_icons(
     mut contexts: bevy_egui::EguiContexts,
     asset_server: Res<AssetServer>,
@@ -81,11 +144,17 @@ pub fn load_spell_icons(
 
     // Load handles if not already loaded
     if icon_handles.handles.is_empty() {
+        // Load ability icons
         for ability in SPELL_ICON_ABILITIES {
             if let Some(path) = get_ability_icon_path(ability) {
                 let handle: Handle<Image> = asset_server.load(path);
                 icon_handles.handles.push((ability.to_string(), handle));
             }
+        }
+        // Load generic aura icons
+        for (key, path) in GENERIC_AURA_ICONS {
+            let handle: Handle<Image> = asset_server.load(*path);
+            icon_handles.handles.push((key.to_string(), handle));
         }
         return; // Wait for next frame to check if loaded
     }
