@@ -595,8 +595,9 @@ fn render_aura_icons(
         );
 
         // Draw countdown timer (OmniCC style)
+        // Skip timer for long-duration buffs (>60s) - they won't expire naturally
         let seconds_remaining = aura.duration.ceil() as i32;
-        if seconds_remaining > 0 {
+        if seconds_remaining > 0 && aura.duration <= 60.0 {
             let countdown_text = format!("{}", seconds_remaining);
 
             // Color based on time remaining: white (>3s), orange (1-3s), red (<1s)
