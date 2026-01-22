@@ -10,6 +10,17 @@ use crate::states::play_match::components::*;
 use super::{get_aura_icon_key, is_buff_aura, AURA_ICON_SIZE, AURA_ICON_SPACING};
 
 // ==============================================================================
+// Zoom Scaling Constants
+// ==============================================================================
+
+/// Reference zoom distance where UI looks best (used as baseline for scaling)
+const BASE_ZOOM_DISTANCE: f32 = 40.0;
+/// Minimum scale factor (prevents UI from getting too small when zoomed out)
+const MIN_UI_SCALE: f32 = 0.5;
+/// Maximum scale factor (prevents UI from getting too large when zoomed in)
+const MAX_UI_SCALE: f32 = 1.5;
+
+// ==============================================================================
 // Low HP Highlighting Constants
 // ==============================================================================
 
@@ -155,6 +166,7 @@ pub fn render_health_bars(
     camera_query: Query<(&Camera, &GlobalTransform)>,
     time: Res<Time<Real>>,
     spell_icons: Res<SpellIcons>,
+    camera_controller: Res<CameraController>,
 ) {
     // Use try_ctx_mut to gracefully handle window close
     let Some(ctx) = contexts.try_ctx_mut() else { return; };
@@ -162,6 +174,10 @@ pub fn render_health_bars(
     let Ok((camera, camera_transform)) = camera_query.get_single() else {
         return;
     };
+
+    // Calculate UI scale based on camera zoom distance
+    // When zoomed out (larger distance), UI elements get smaller
+    let ui_scale = (BASE_ZOOM_DISTANCE / camera_controller.zoom_distance).clamp(MIN_UI_SCALE, MAX_UI_SCALE);
 
     // Calculate pulse intensity for low HP highlighting (uses real time so it works when paused)
     let pulse_phase = time.elapsed_secs() * LOW_HP_PULSE_SPEED * std::f32::consts::TAU;
@@ -176,27 +192,28 @@ pub fn render_health_bars(
                 }
 
                 // Project 3D position to 2D screen space
-                let health_bar_offset = Vec3::new(0.0, 2.5, 0.0); // Above head
+                // Offset high enough to clear aura icons below the bars
+                let health_bar_offset = Vec3::new(0.0, 3.5, 0.0); // Above head
                 let world_pos = transform.translation + health_bar_offset;
 
                 if let Ok(screen_pos) = camera.world_to_viewport(camera_transform, world_pos) {
                     let health_percent = combatant.current_health / combatant.max_health;
 
-                    // Health bar dimensions
-                    let bar_width = 50.0;
-                    let bar_height = 6.0;
-                    let bar_spacing = 2.0; // Space between bars
+                    // Health bar dimensions (scaled by zoom)
+                    let bar_width = 50.0 * ui_scale;
+                    let bar_height = 6.0 * ui_scale;
+                    let bar_spacing = 2.0 * ui_scale;
                     let bar_pos = egui::pos2(
                         screen_pos.x - bar_width / 2.0,
                         screen_pos.y - bar_height / 2.0,
                     );
 
                     // Status indicators above health bar
-                    let mut status_offset = -12.0; // Starting position above health bar
+                    let mut status_offset = -12.0 * ui_scale; // Starting position above health bar
 
                     // STEALTH indicator (if stealthed)
                     if combatant.stealthed {
-                        render_status_label(ui, &bar_pos, bar_width, &mut status_offset, "STEALTH", egui::Color32::from_rgb(180, 120, 230));
+                        render_status_label(ui, &bar_pos, bar_width, &mut status_offset, "STEALTH", egui::Color32::from_rgb(180, 120, 230), ui_scale);
                     }
 
                     // Status effect indicators (if has auras)
@@ -204,32 +221,35 @@ pub fn render_health_bars(
                         // STUN indicator with duration countdown
                         if let Some(stun_aura) = auras.auras.iter().find(|a| a.effect_type == AuraType::Stun) {
                             let stun_text = format!("STUN {:.1}s", stun_aura.duration);
-                            render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &stun_text, egui::Color32::from_rgb(255, 100, 100));
+                            render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &stun_text, egui::Color32::from_rgb(255, 100, 100), ui_scale);
                         }
 
                         // ROOT indicator with duration countdown
                         if let Some(root_aura) = auras.auras.iter().find(|a| a.effect_type == AuraType::Root) {
                             let root_text = format!("ROOT {:.1}s", root_aura.duration);
-                            render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &root_text, egui::Color32::from_rgb(100, 200, 255));
+                            render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &root_text, egui::Color32::from_rgb(100, 200, 255), ui_scale);
                         }
 
                         // FEAR indicator with duration countdown
                         if let Some(fear_aura) = auras.auras.iter().find(|a| a.effect_type == AuraType::Fear) {
                             let fear_text = format!("FEAR {:.1}s", fear_aura.duration);
-                            render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &fear_text, egui::Color32::from_rgb(148, 103, 189));
+                            render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &fear_text, egui::Color32::from_rgb(148, 103, 189), ui_scale);
                         }
 
                         // SHEEPED indicator with duration countdown (Polymorph)
                         if let Some(poly_aura) = auras.auras.iter().find(|a| a.effect_type == AuraType::Polymorph) {
                             let poly_text = format!("SHEEPED {:.1}s", poly_aura.duration);
-                            render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &poly_text, egui::Color32::from_rgb(255, 105, 180)); // Hot pink
+                            render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &poly_text, egui::Color32::from_rgb(255, 105, 180), ui_scale); // Hot pink
                         }
                     }
+
+                    // Scaled corner radius
+                    let corner_radius = 2.0 * ui_scale;
 
                     // Health bar background (dark gray)
                     ui.painter().rect_filled(
                         egui::Rect::from_min_size(bar_pos, egui::vec2(bar_width, bar_height)),
-                        2.0,
+                        corner_radius,
                         egui::Color32::from_rgb(30, 30, 30),
                     );
 
@@ -247,7 +267,7 @@ pub fn render_health_bars(
                             bar_pos,
                             egui::vec2(bar_width * health_percent, bar_height),
                         ),
-                        2.0,
+                        corner_radius,
                         health_color,
                     );
 
@@ -274,7 +294,7 @@ pub fn render_health_bars(
                                     egui::pos2(absorb_start_x, bar_pos.y),
                                     egui::vec2(absorb_bar_width, bar_height),
                                 ),
-                                2.0,
+                                corner_radius,
                                 shield_color,
                             );
                         }
@@ -289,25 +309,25 @@ pub fn render_health_bars(
                     } else {
                         egui::Color32::from_rgb(200, 200, 200)
                     };
-                    let border_width = if is_low_hp { 2.0 } else { 1.0 };
+                    let border_width = if is_low_hp { 2.0 * ui_scale } else { 1.0 * ui_scale };
 
                     ui.painter().rect_stroke(
                         egui::Rect::from_min_size(bar_pos, egui::vec2(bar_width, bar_height)),
-                        2.0,
+                        corner_radius,
                         egui::Stroke::new(border_width, border_color),
                     );
 
                     // Low HP outer glow effect (pulsing red halo)
                     if is_low_hp {
                         let glow_alpha = (80.0 * pulse_intensity) as u8;
-                        let glow_expand = 3.0 + 2.0 * pulse_intensity;
+                        let glow_expand = (3.0 + 2.0 * pulse_intensity) * ui_scale;
                         ui.painter().rect_stroke(
                             egui::Rect::from_min_size(
                                 bar_pos - egui::vec2(glow_expand, glow_expand),
                                 egui::vec2(bar_width + glow_expand * 2.0, bar_height + glow_expand * 2.0),
                             ),
-                            4.0,
-                            egui::Stroke::new(2.0, egui::Color32::from_rgba_unmultiplied(255, 50, 50, glow_alpha)),
+                            4.0 * ui_scale,
+                            egui::Stroke::new(2.0 * ui_scale, egui::Color32::from_rgba_unmultiplied(255, 50, 50, glow_alpha)),
                         );
                     }
 
@@ -319,10 +339,10 @@ pub fn render_health_bars(
                             bar_pos.x,
                             bar_pos.y + next_bar_y_offset,
                         );
-                        let resource_bar_height = 4.0; // Slightly smaller than health bar
+                        let resource_bar_height = 4.0 * ui_scale; // Slightly smaller than health bar
 
                         // Determine resource color based on type
-                        let (resource_color, border_color) = match combatant.resource_type {
+                        let (resource_color, res_border_color) = match combatant.resource_type {
                             ResourceType::Mana => (
                                 egui::Color32::from_rgb(80, 150, 255),  // Blue
                                 egui::Color32::from_rgb(150, 150, 200),
@@ -340,7 +360,7 @@ pub fn render_health_bars(
                         // Resource bar background
                         ui.painter().rect_filled(
                             egui::Rect::from_min_size(resource_bar_pos, egui::vec2(bar_width, resource_bar_height)),
-                            2.0,
+                            corner_radius,
                             egui::Color32::from_rgb(20, 20, 30),
                         );
 
@@ -350,15 +370,15 @@ pub fn render_health_bars(
                                 resource_bar_pos,
                                 egui::vec2(bar_width * resource_percent, resource_bar_height),
                             ),
-                            2.0,
+                            corner_radius,
                             resource_color,
                         );
 
                         // Resource bar border
                         ui.painter().rect_stroke(
                             egui::Rect::from_min_size(resource_bar_pos, egui::vec2(bar_width, resource_bar_height)),
-                            2.0,
-                            egui::Stroke::new(1.0, border_color),
+                            corner_radius,
+                            egui::Stroke::new(1.0 * ui_scale, res_border_color),
                         );
 
                         next_bar_y_offset += resource_bar_height + bar_spacing;
@@ -372,29 +392,31 @@ pub fn render_health_bars(
                             bar_pos.x,
                             bar_pos.y + next_bar_y_offset,
                         );
-                        let cast_bar_height = 8.0; // Slightly larger than other bars
-                        let cast_bar_width = bar_width + 10.0; // Wider for better visibility
+                        let cast_bar_height = 8.0 * ui_scale; // Slightly larger than other bars
+                        let cast_bar_width = bar_width + 10.0 * ui_scale; // Wider for better visibility
 
                         // Adjust x position to keep it centered
                         let cast_bar_pos = egui::pos2(
-                            cast_bar_pos.x - 5.0,
+                            cast_bar_pos.x - 5.0 * ui_scale,
                             cast_bar_pos.y,
                         );
+
+                        let cast_font_size = 10.0 * ui_scale;
 
                         // Interrupted casts show in RED
                         if casting.interrupted {
                             // Red background for interrupted
                             ui.painter().rect_filled(
                                 egui::Rect::from_min_size(cast_bar_pos, egui::vec2(cast_bar_width, cast_bar_height)),
-                                2.0,
+                                corner_radius,
                                 egui::Color32::from_rgb(150, 20, 20), // Dark red
                             );
 
                             // Red border
                             ui.painter().rect_stroke(
                                 egui::Rect::from_min_size(cast_bar_pos, egui::vec2(cast_bar_width, cast_bar_height)),
-                                2.0,
-                                egui::Stroke::new(1.5, egui::Color32::from_rgb(220, 50, 50)),
+                                corner_radius,
+                                egui::Stroke::new(1.5 * ui_scale, egui::Color32::from_rgb(220, 50, 50)),
                             );
 
                             // "INTERRUPTED" text in white
@@ -406,7 +428,7 @@ pub fn render_health_bars(
                                 text_pos,
                                 egui::Align2::CENTER_CENTER,
                                 "INTERRUPTED",
-                                egui::FontId::proportional(10.0),
+                                egui::FontId::proportional(cast_font_size),
                                 egui::Color32::WHITE,
                             );
                         } else {
@@ -416,7 +438,7 @@ pub fn render_health_bars(
                             // Cast bar background (darker)
                             ui.painter().rect_filled(
                                 egui::Rect::from_min_size(cast_bar_pos, egui::vec2(cast_bar_width, cast_bar_height)),
-                                2.0,
+                                corner_radius,
                                 egui::Color32::from_rgb(15, 15, 20),
                             );
 
@@ -426,15 +448,15 @@ pub fn render_health_bars(
                                     cast_bar_pos,
                                     egui::vec2(cast_bar_width * cast_progress, cast_bar_height),
                                 ),
-                                2.0,
+                                corner_radius,
                                 egui::Color32::from_rgb(255, 180, 50), // Orange
                             );
 
                             // Cast bar border
                             ui.painter().rect_stroke(
                                 egui::Rect::from_min_size(cast_bar_pos, egui::vec2(cast_bar_width, cast_bar_height)),
-                                2.0,
-                                egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 200, 100)),
+                                corner_radius,
+                                egui::Stroke::new(1.5 * ui_scale, egui::Color32::from_rgb(255, 200, 100)),
                             );
 
                             // Spell name text (centered on cast bar)
@@ -446,7 +468,7 @@ pub fn render_health_bars(
                                 text_pos,
                                 egui::Align2::CENTER_CENTER,
                                 &ability_def.name,
-                                egui::FontId::proportional(10.0),
+                                egui::FontId::proportional(cast_font_size),
                                 egui::Color32::WHITE,
                             );
                         }
@@ -464,6 +486,8 @@ pub fn render_health_bars(
                                 next_bar_y_offset,
                                 auras,
                                 &spell_icons,
+                                ui_scale,
+                                pulse_intensity,
                             );
                         }
                     }
@@ -480,8 +504,9 @@ fn render_status_label(
     status_offset: &mut f32,
     text: &str,
     color: egui::Color32,
+    ui_scale: f32,
 ) {
-    let font = egui::FontId::monospace(9.0);
+    let font = egui::FontId::monospace(9.0 * ui_scale);
 
     // Create galley for measuring size
     let galley = ui.fonts(|f| f.layout_no_wrap(
@@ -495,8 +520,9 @@ fn render_status_label(
     );
 
     // Draw black outline/stroke for visibility
-    for dx in [-1.0, 0.0, 1.0] {
-        for dy in [-1.0, 0.0, 1.0] {
+    let outline_offset = 1.0 * ui_scale;
+    for dx in [-outline_offset, 0.0, outline_offset] {
+        for dy in [-outline_offset, 0.0, outline_offset] {
             if dx != 0.0 || dy != 0.0 {
                 let outline_galley = ui.fonts(|f| f.layout_no_wrap(
                     text.to_string(),
@@ -514,16 +540,27 @@ fn render_status_label(
 
     // Draw main text on top
     ui.painter().galley(center_pos, galley, color);
-    *status_offset -= 10.0; // Move next label up
+    *status_offset -= 10.0 * ui_scale; // Move next label up
 }
 
 // ==============================================================================
 // Aura Icons
 // ==============================================================================
 
+/// Check if an aura type is a hard CC that should be highlighted
+fn is_hard_cc_aura(aura_type: &AuraType) -> bool {
+    matches!(aura_type,
+        AuraType::Stun |
+        AuraType::Fear |
+        AuraType::Polymorph |
+        AuraType::Root
+    )
+}
+
 /// Render aura icons with countdown timers below the health/cast bars.
 /// Icons are centered below the health bar, with buffs using gold borders
 /// and debuffs using red borders. Countdown timers use OmniCC-style coloring.
+/// Hard CC effects (stun, fear, polymorph, root) get a pulsing glow.
 fn render_aura_icons(
     painter: &egui::Painter,
     bar_pos: egui::Pos2,
@@ -531,30 +568,44 @@ fn render_aura_icons(
     y_offset: f32,
     auras: &ActiveAuras,
     spell_icons: &SpellIcons,
+    ui_scale: f32,
+    pulse_intensity: f32,
 ) {
     let num_auras = auras.auras.len();
     if num_auras == 0 {
         return;
     }
 
+    // Scale icon size and spacing
+    let icon_size = AURA_ICON_SIZE * ui_scale;
+    let icon_spacing = AURA_ICON_SPACING * ui_scale;
+    let corner_radius = 2.0 * ui_scale;
+
     // Calculate total width of icon row
-    let total_width = (num_auras as f32 * AURA_ICON_SIZE)
-        + ((num_auras - 1) as f32 * AURA_ICON_SPACING);
+    let total_width = (num_auras as f32 * icon_size)
+        + ((num_auras - 1) as f32 * icon_spacing);
 
     // Center the icons below the health bar
     let start_x = bar_pos.x + (bar_width - total_width) / 2.0;
-    let icons_y = bar_pos.y + y_offset + 2.0; // Small gap below bars
+    let icons_y = bar_pos.y + y_offset + 2.0 * ui_scale; // Small gap below bars
 
     for (i, aura) in auras.auras.iter().enumerate() {
-        let icon_x = start_x + (i as f32 * (AURA_ICON_SIZE + AURA_ICON_SPACING));
+        let icon_x = start_x + (i as f32 * (icon_size + icon_spacing));
         let icon_rect = egui::Rect::from_min_size(
             egui::pos2(icon_x, icons_y),
-            egui::vec2(AURA_ICON_SIZE, AURA_ICON_SIZE),
+            egui::vec2(icon_size, icon_size),
         );
 
-        // Border color: gold for buffs, red for debuffs
+        // Check if this is a hard CC that needs highlighting
+        let is_hard_cc = is_hard_cc_aura(&aura.effect_type);
+
+        // Border color: gold for buffs, red for debuffs, bright for hard CC
         let is_buff = is_buff_aura(&aura.effect_type);
-        let border_color = if is_buff {
+        let border_color = if is_hard_cc {
+            // Pulsing bright color for hard CC
+            let intensity = (200.0 + 55.0 * pulse_intensity) as u8;
+            egui::Color32::from_rgb(intensity, 50, 50)  // Pulsing red
+        } else if is_buff {
             egui::Color32::from_rgb(255, 215, 0)  // Gold
         } else {
             egui::Color32::from_rgb(200, 50, 50)  // Red
@@ -563,7 +614,7 @@ fn render_aura_icons(
         // Draw icon background
         painter.rect_filled(
             icon_rect,
-            2.0,
+            corner_radius,
             egui::Color32::from_rgb(20, 20, 20),
         );
 
@@ -573,7 +624,7 @@ fn render_aura_icons(
             // Draw the icon texture
             painter.image(
                 *texture_id,
-                icon_rect.shrink(2.0), // Shrink slightly for border
+                icon_rect.shrink(2.0 * ui_scale), // Shrink slightly for border
                 egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                 egui::Color32::WHITE,
             );
@@ -581,18 +632,30 @@ fn render_aura_icons(
             // Fallback: draw colored rectangle based on aura type
             let fallback_color = get_aura_fallback_color(&aura.effect_type);
             painter.rect_filled(
-                icon_rect.shrink(2.0),
-                1.0,
+                icon_rect.shrink(2.0 * ui_scale),
+                1.0 * ui_scale,
                 fallback_color,
             );
         }
 
-        // Draw border
+        // Draw border (thicker for hard CC)
+        let border_width = if is_hard_cc { 3.0 * ui_scale } else { 2.0 * ui_scale };
         painter.rect_stroke(
             icon_rect,
-            2.0,
-            egui::Stroke::new(2.0, border_color),
+            corner_radius,
+            egui::Stroke::new(border_width, border_color),
         );
+
+        // Draw pulsing outer glow for hard CC effects
+        if is_hard_cc {
+            let glow_alpha = (150.0 + 100.0 * pulse_intensity) as u8;
+            let glow_expand = (3.0 + 4.0 * pulse_intensity) * ui_scale;
+            painter.rect_stroke(
+                icon_rect.expand(glow_expand),
+                corner_radius + glow_expand,
+                egui::Stroke::new(3.0 * ui_scale, egui::Color32::from_rgba_unmultiplied(255, 80, 80, glow_alpha)),
+            );
+        }
 
         // Draw countdown timer (OmniCC style)
         // Skip timer for long-duration buffs (>60s) - they won't expire naturally
@@ -609,16 +672,17 @@ fn render_aura_icons(
                 egui::Color32::from_rgb(255, 50, 50) // Red
             };
 
-            let font = egui::FontId::proportional(14.0);
+            let font = egui::FontId::proportional(14.0 * ui_scale);
             let text_pos = egui::pos2(
                 icon_rect.center().x,
                 icon_rect.center().y,
             );
 
             // Draw black outline for visibility
+            let outline_offset = 1.0 * ui_scale;
             let outline_offsets = [
-                (-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0),
-                (-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0),
+                (-outline_offset, 0.0), (outline_offset, 0.0), (0.0, -outline_offset), (0.0, outline_offset),
+                (-outline_offset, -outline_offset), (outline_offset, -outline_offset), (-outline_offset, outline_offset), (outline_offset, outline_offset),
             ];
             for (dx, dy) in outline_offsets {
                 painter.text(
