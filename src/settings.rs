@@ -16,6 +16,13 @@ pub struct GameSettings {
     pub resolution: ResolutionOption,
     pub vsync: bool,
     pub keybindings: Keybindings,
+    /// Whether to show aura icons below combatant health bars (default: true)
+    #[serde(default = "default_show_aura_icons")]
+    pub show_aura_icons: bool,
+}
+
+fn default_show_aura_icons() -> bool {
+    true
 }
 
 /// Tracks whether settings have changed and require application restart
@@ -57,6 +64,7 @@ impl Default for GameSettings {
             resolution: ResolutionOption::HD720,
             vsync: true,
             keybindings: Keybindings::default(),
+            show_aura_icons: true,
         }
     }
 }
@@ -74,8 +82,10 @@ impl GameSettings {
         let path = Self::settings_path();
         if path.exists() {
             match fs::read_to_string(&path) {
-                Ok(contents) => match ron::from_str(&contents) {
-                    Ok(settings) => {
+                Ok(contents) => match ron::from_str::<GameSettings>(&contents) {
+                    Ok(mut settings) => {
+                        // Fill in any missing keybindings (for newly added actions)
+                        settings.keybindings.fill_missing_defaults();
                         info!("Loaded settings from {:?}", path);
                         settings
                     }

@@ -139,6 +139,7 @@ pub fn setup_play_match(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut combat_log: ResMut<CombatLog>,
     config: Res<MatchConfig>,
+    game_settings: Res<crate::settings::GameSettings>,
 ) {
     info!("Setting up Play Match scene with config: {:?}", *config);
 
@@ -193,6 +194,11 @@ pub fn setup_play_match(
 
     // Initialize random number generator (non-deterministic for graphical mode)
     commands.insert_resource(GameRng::default());
+
+    // Initialize display settings from game settings
+    commands.insert_resource(DisplaySettings {
+        show_aura_icons: game_settings.show_aura_icons,
+    });
 
     // Spawn arena floor - octagonal shape matching the wall boundary
     // Warm sandy/dirt battleground
@@ -485,6 +491,7 @@ pub fn cleanup_play_match(
     commands.remove_resource::<SimulationSpeed>();
     commands.remove_resource::<MatchCountdown>();
     commands.remove_resource::<ShadowSightState>();
+    commands.remove_resource::<DisplaySettings>();
     // Remove optional resources (may not exist if match didn't finish)
     commands.remove_resource::<VictoryCelebration>();
 }

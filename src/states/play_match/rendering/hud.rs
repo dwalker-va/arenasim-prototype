@@ -44,7 +44,18 @@ pub fn render_time_controls(
     mut contexts: EguiContexts,
     mut sim_speed: ResMut<SimulationSpeed>,
     mut time: ResMut<Time<Virtual>>,
+    mut display_settings: ResMut<DisplaySettings>,
+    keybindings: Res<crate::keybindings::Keybindings>,
+    keyboard: Res<ButtonInput<KeyCode>>,
 ) {
+    use crate::keybindings::GameAction;
+
+    // Handle V key toggle for aura icons
+    if keybindings.action_just_pressed(GameAction::ToggleAuraIcons, &keyboard) {
+        display_settings.show_aura_icons = !display_settings.show_aura_icons;
+        info!("Aura icons toggled to: {}", display_settings.show_aura_icons);
+    }
+
     // Use try_ctx_mut to gracefully handle window close
     let Some(ctx) = contexts.try_ctx_mut() else { return; };
 
@@ -142,6 +153,24 @@ pub fn render_time_controls(
                     .size(10.0)
                     .color(egui::Color32::from_rgb(120, 120, 120))
             );
+
+            ui.add_space(5.0);
+            ui.separator();
+            ui.add_space(3.0);
+
+            // Aura icons toggle
+            ui.horizontal(|ui| {
+                let mut show_auras = display_settings.show_aura_icons;
+                if ui.checkbox(&mut show_auras, "").changed() {
+                    display_settings.show_aura_icons = show_auras;
+                    info!("Aura icons toggled to: {}", display_settings.show_aura_icons);
+                }
+                ui.label(
+                    egui::RichText::new("Auras [V]")
+                        .size(12.0)
+                        .color(egui::Color32::from_rgb(200, 200, 200))
+                );
+            });
         });
 }
 
@@ -167,6 +196,7 @@ pub fn render_health_bars(
     time: Res<Time<Real>>,
     spell_icons: Res<SpellIcons>,
     camera_controller: Res<CameraController>,
+    display_settings: Res<DisplaySettings>,
 ) {
     // Use try_ctx_mut to gracefully handle window close
     let Some(ctx) = contexts.try_ctx_mut() else { return; };
@@ -476,19 +506,21 @@ pub fn render_health_bars(
                         next_bar_y_offset += cast_bar_height + bar_spacing;
                     }
 
-                    // Aura icons (below cast bar or resource bar)
-                    if let Some(auras) = active_auras {
-                        if !auras.auras.is_empty() {
-                            render_aura_icons(
-                                ui.painter(),
-                                bar_pos,
-                                bar_width,
-                                next_bar_y_offset,
-                                auras,
-                                &spell_icons,
-                                ui_scale,
-                                pulse_intensity,
-                            );
+                    // Aura icons (below cast bar or resource bar) - only if enabled
+                    if display_settings.show_aura_icons {
+                        if let Some(auras) = active_auras {
+                            if !auras.auras.is_empty() {
+                                render_aura_icons(
+                                    ui.painter(),
+                                    bar_pos,
+                                    bar_width,
+                                    next_bar_y_offset,
+                                    auras,
+                                    &spell_icons,
+                                    ui_scale,
+                                    pulse_intensity,
+                                );
+                            }
                         }
                     }
                 }

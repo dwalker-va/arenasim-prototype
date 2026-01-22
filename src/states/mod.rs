@@ -495,21 +495,61 @@ fn options_ui(
                         });
                         
                         ui.add_space(20.0);
-                        
+
+                        // Aura Icons Setting
+                        ui.group(|ui| {
+                            ui.set_min_width(580.0);
+                            ui.add_space(10.0);
+
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new("Show Aura Icons")
+                                        .size(24.0)
+                                        .color(egui::Color32::from_rgb(230, 204, 153)),
+                                );
+
+                                ui.add_space(20.0);
+
+                                // Toggle switch
+                                let aura_label = if settings.show_aura_icons { "On" } else { "Off" };
+                                if ui.add(
+                                    egui::widgets::Checkbox::new(
+                                        &mut settings.show_aura_icons,
+                                        egui::RichText::new(aura_label)
+                                            .size(18.0)
+                                    )
+                                ).changed() {
+                                    info!("Show Aura Icons toggled to: {}", settings.show_aura_icons);
+                                }
+                            });
+
+                            ui.add_space(5.0);
+
+                            ui.label(
+                                egui::RichText::new("Shows buff/debuff icons below health bars • Toggle in-match with V")
+                                    .size(14.0)
+                                    .color(egui::Color32::from_rgb(150, 150, 150)),
+                            );
+
+                            ui.add_space(10.0);
+                        });
+
+                        ui.add_space(20.0);
+
                         // Controls / Keybindings button
                         ui.group(|ui| {
                             ui.set_min_width(580.0);
                             ui.add_space(10.0);
-                            
+
                             ui.horizontal(|ui| {
                                 ui.label(
                                     egui::RichText::new("Controls")
                                         .size(24.0)
                                         .color(egui::Color32::from_rgb(230, 204, 153)),
                                 );
-                                
+
                                 ui.add_space(20.0);
-                                
+
                                 if ui.add(
                                     egui::Button::new(
                                         egui::RichText::new("Configure Keybindings")
@@ -520,15 +560,15 @@ fn options_ui(
                                     next_state.set(GameState::Keybindings);
                                 }
                             });
-                            
+
                             ui.add_space(5.0);
-                            
+
                             ui.label(
                                 egui::RichText::new("Customize keyboard controls")
                                     .size(14.0)
                                     .color(egui::Color32::from_rgb(150, 150, 150)),
                             );
-                            
+
                             ui.add_space(10.0);
                         });
 
@@ -679,7 +719,7 @@ fn keybindings_ui(
                         }
                         
                         // Render each category
-                        let categories = vec!["Navigation", "Camera", "Simulation"];
+                        let categories = vec!["Navigation", "Camera", "Simulation", "Display"];
                         for category in categories {
                             if let Some(actions) = actions_by_category.get(category) {
                                 ui.group(|ui| {

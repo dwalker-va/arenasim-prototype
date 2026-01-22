@@ -84,6 +84,13 @@ pub struct SimulationSpeed {
     pub multiplier: f32,
 }
 
+/// Display settings for the match UI (can be toggled during match)
+#[derive(Resource)]
+pub struct DisplaySettings {
+    /// Whether to show aura icons below combatant health bars
+    pub show_aura_icons: bool,
+}
+
 impl Default for SimulationSpeed {
     fn default() -> Self {
         Self { multiplier: 1.0 }

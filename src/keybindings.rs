@@ -12,7 +12,7 @@ pub enum GameAction {
     // Navigation
     Back,
     Confirm,
-    
+
     // Camera
     CycleCameraMode,
     ResetCamera,
@@ -22,13 +22,16 @@ pub enum GameAction {
     CameraMoveRight,
     CameraZoomIn,
     CameraZoomOut,
-    
+
     // Simulation
     PausePlay,
     SpeedSlow,
     SpeedNormal,
     SpeedFast,
     SpeedVeryFast,
+
+    // Display
+    ToggleAuraIcons,
 }
 
 impl GameAction {
@@ -49,19 +52,21 @@ impl GameAction {
             GameAction::SpeedNormal => "Speed: 1x",
             GameAction::SpeedFast => "Speed: 2x",
             GameAction::SpeedVeryFast => "Speed: 3x",
+            GameAction::ToggleAuraIcons => "Toggle Aura Icons",
         }
     }
     
     pub fn category(&self) -> &'static str {
         match self {
             GameAction::Back | GameAction::Confirm => "Navigation",
-            GameAction::CycleCameraMode | GameAction::ResetCamera 
+            GameAction::CycleCameraMode | GameAction::ResetCamera
             | GameAction::CameraMoveForward | GameAction::CameraMoveBackward
             | GameAction::CameraMoveLeft | GameAction::CameraMoveRight
             | GameAction::CameraZoomIn | GameAction::CameraZoomOut => "Camera",
-            GameAction::PausePlay | GameAction::SpeedSlow 
-            | GameAction::SpeedNormal | GameAction::SpeedFast 
+            GameAction::PausePlay | GameAction::SpeedSlow
+            | GameAction::SpeedNormal | GameAction::SpeedFast
             | GameAction::SpeedVeryFast => "Simulation",
+            GameAction::ToggleAuraIcons => "Display",
         }
     }
     
@@ -82,6 +87,7 @@ impl GameAction {
             GameAction::SpeedNormal,
             GameAction::SpeedFast,
             GameAction::SpeedVeryFast,
+            GameAction::ToggleAuraIcons,
         ]
     }
 }
@@ -262,11 +268,11 @@ impl Keybindings {
     /// Create default keybindings
     pub fn create_defaults() -> Self {
         let mut bindings = HashMap::new();
-        
+
         // Navigation
         bindings.insert(GameAction::Back, KeyBinding::new(KeyCode::Escape));
         bindings.insert(GameAction::Confirm, KeyBinding::new(KeyCode::Enter));
-        
+
         // Camera
         bindings.insert(GameAction::CycleCameraMode, KeyBinding::new(KeyCode::Tab));
         bindings.insert(GameAction::ResetCamera, KeyBinding::new(KeyCode::KeyC));
@@ -282,15 +288,32 @@ impl Keybindings {
             KeyCode::Minus,
             KeyCode::NumpadSubtract
         ));
-        
+
         // Simulation
         bindings.insert(GameAction::PausePlay, KeyBinding::new(KeyCode::Space));
         bindings.insert(GameAction::SpeedSlow, KeyBinding::new(KeyCode::Digit1));
         bindings.insert(GameAction::SpeedNormal, KeyBinding::new(KeyCode::Digit2));
         bindings.insert(GameAction::SpeedFast, KeyBinding::new(KeyCode::Digit3));
         bindings.insert(GameAction::SpeedVeryFast, KeyBinding::new(KeyCode::Digit4));
-        
+
+        // Display
+        bindings.insert(GameAction::ToggleAuraIcons, KeyBinding::new(KeyCode::KeyV));
+
         Self { bindings }
+    }
+
+    /// Fill in any missing actions with their default bindings.
+    /// Call this after deserializing to ensure new actions added in updates
+    /// get their default bindings.
+    pub fn fill_missing_defaults(&mut self) {
+        let defaults = Self::create_defaults();
+        for action in GameAction::all() {
+            if !self.bindings.contains_key(&action) {
+                if let Some(binding) = defaults.bindings.get(&action) {
+                    self.bindings.insert(action, binding.clone());
+                }
+            }
+        }
     }
     
     /// Get the binding for an action
