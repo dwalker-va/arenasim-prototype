@@ -806,6 +806,16 @@ pub struct ShieldBubble {
     pub spell_school: super::abilities::SpellSchool,
 }
 
+/// Component that stores the original mesh handle for a combatant.
+/// Used to restore the mesh when polymorph ends.
+#[derive(Component)]
+pub struct OriginalMesh(pub Handle<Mesh>);
+
+/// Marker component indicating the combatant is currently polymorphed.
+/// Used to track mesh swapping state.
+#[derive(Component)]
+pub struct PolymorphedVisual;
+
 // =============================================================================
 // Unit Tests
 // =============================================================================

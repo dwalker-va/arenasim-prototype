@@ -155,6 +155,7 @@ impl Plugin for StatesPlugin {
                     play_match::animate_orb_consumption,    // Orb pickup animation
                     play_match::update_shield_bubbles,      // Spawn/despawn shield bubbles
                     play_match::follow_shield_bubbles,      // Update bubble positions
+                    play_match::update_polymorph_visuals,   // Cuboid mesh when polymorphed
                 )
                     .run_if(in_state(GameState::PlayMatch)),
             )

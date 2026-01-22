@@ -446,7 +446,7 @@ fn spawn_combatant(
     );
 
     // Create combatant mesh (capsule represents the body)
-    let mesh = meshes.add(Capsule3d::new(0.5, 1.5));
+    let mesh_handle = meshes.add(Capsule3d::new(0.5, 1.5));
     let material = materials.add(StandardMaterial {
         base_color: combatant_color,
         perceptual_roughness: 0.5, // More reflective for better color visibility
@@ -457,13 +457,14 @@ fn spawn_combatant(
     });
 
     commands.spawn((
-        Mesh3d(mesh),
+        Mesh3d(mesh_handle.clone()),
         MeshMaterial3d(material),
         Transform::from_translation(position),
         Combatant::new(team, class),
         FloatingTextState {
             next_pattern_index: 0,
         },
+        OriginalMesh(mesh_handle),
         PlayMatchEntity,
     ));
 }

@@ -467,3 +467,37 @@ pub fn follow_shield_bubbles(
         }
     }
 }
+
+// ==============================================================================
+// Polymorph Visual Effect System
+// ==============================================================================
+
+/// System that swaps combatant meshes when polymorphed.
+/// Polymorphed combatants are rendered as a cuboid to show the "transfiguration" effect.
+pub fn update_polymorph_visuals(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut combatants: Query<(
+        Entity,
+        &ActiveAuras,
+        &OriginalMesh,
+        &mut Mesh3d,
+        Option<&PolymorphedVisual>,
+    ), With<Combatant>>,
+) {
+    for (entity, auras, original_mesh, mut mesh3d, polymorphed_marker) in combatants.iter_mut() {
+        let is_polymorphed = auras.auras.iter().any(|a| a.effect_type == AuraType::Polymorph);
+
+        if is_polymorphed && polymorphed_marker.is_none() {
+            // Combatant just got polymorphed - swap to cuboid (sheep/pig box shape)
+            // Using a squat cuboid to represent the transformed creature
+            let poly_mesh = meshes.add(Cuboid::new(0.8, 0.6, 1.0));
+            *mesh3d = Mesh3d(poly_mesh);
+            commands.entity(entity).insert(PolymorphedVisual);
+        } else if !is_polymorphed && polymorphed_marker.is_some() {
+            // Polymorph ended - restore original capsule mesh
+            *mesh3d = Mesh3d(original_mesh.0.clone());
+            commands.entity(entity).remove::<PolymorphedVisual>();
+        }
+    }
+}

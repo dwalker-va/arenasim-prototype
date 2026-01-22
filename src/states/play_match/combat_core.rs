@@ -246,8 +246,8 @@ pub fn move_to_target(
             let direction = Vec3::new(dir_x, 0.0, dir_z).normalize_or_zero();
 
             if direction != Vec3::ZERO {
-                // Polymorphed targets wander at 50% of normal movement speed (sheep move slowly!)
-                let move_distance = combatant.base_movement_speed * 0.5 * dt;
+                // Polymorphed targets wander at 20% of normal movement speed (sheep waddle slowly!)
+                let move_distance = combatant.base_movement_speed * 0.2 * dt;
 
                 // Move in polymorph direction
                 transform.translation += direction * move_distance;
