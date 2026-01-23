@@ -189,10 +189,22 @@ pub fn update_camera_position(
         camera_controller.mode = CameraMode::Manual;
     }
     
-    // Apply keyboard movement to manual target
+    // Apply keyboard movement to manual target, rotated by camera yaw
+    // so that WASD moves relative to camera orientation
     let keyboard_movement = camera_controller.keyboard_movement;
     if keyboard_movement != Vec3::ZERO {
-        camera_controller.manual_target += keyboard_movement;
+        let yaw = camera_controller.yaw;
+
+        // Calculate camera-relative directions (projected to XZ plane)
+        // Forward is toward the target (negative of camera offset direction)
+        let forward = Vec3::new(-yaw.sin(), 0.0, -yaw.cos());
+        let right = Vec3::new(yaw.cos(), 0.0, -yaw.sin());
+
+        // keyboard_movement.z is forward/back input, keyboard_movement.x is left/right input
+        // Negative Z = forward (W key), positive X = right (D key)
+        let rotated_movement = forward * (-keyboard_movement.z) + right * keyboard_movement.x;
+
+        camera_controller.manual_target += rotated_movement;
     }
     
     // Determine the target look-at point based on camera mode
