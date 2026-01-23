@@ -823,6 +823,18 @@ pub struct OriginalMesh(pub Handle<Mesh>);
 #[derive(Component)]
 pub struct PolymorphedVisual;
 
+/// A rising flame particle for fire spell effects (e.g., Immolate).
+/// Spawned at target location, rises upward while shrinking and fading.
+#[derive(Component)]
+pub struct FlameParticle {
+    /// Velocity vector (primarily upward with slight horizontal drift)
+    pub velocity: Vec3,
+    /// Time remaining before despawn (seconds)
+    pub lifetime: f32,
+    /// Initial lifetime for fade/shrink calculation
+    pub initial_lifetime: f32,
+}
+
 // =============================================================================
 // Unit Tests
 // =============================================================================

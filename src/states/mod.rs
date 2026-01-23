@@ -156,6 +156,8 @@ impl Plugin for StatesPlugin {
                     play_match::update_shield_bubbles,      // Spawn/despawn shield bubbles
                     play_match::follow_shield_bubbles,      // Update bubble positions
                     play_match::update_polymorph_visuals,   // Cuboid mesh when polymorphed
+                    play_match::spawn_flame_visuals,        // Visual meshes for flame particles
+                    play_match::update_flame_particles,     // Move/fade flame particles
                 )
                     .run_if(in_state(GameState::PlayMatch)),
             )

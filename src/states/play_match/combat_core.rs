@@ -1181,6 +1181,35 @@ pub fn process_casting(
                 ));
             }
 
+            // Spawn flame particles for Immolate (fire rising effect)
+            if ability == AbilityType::Immolate {
+                // Spawn 8-12 flame particles around target
+                let particle_count = 8 + (game_rng.random_f32() * 5.0) as i32;
+                for _ in 0..particle_count {
+                    // Randomize position slightly around target
+                    let offset = Vec3::new(
+                        (game_rng.random_f32() - 0.5) * 1.0,  // -0.5 to 0.5
+                        game_rng.random_f32() * 0.5,          // 0 to 0.5 (start near ground)
+                        (game_rng.random_f32() - 0.5) * 1.0,
+                    );
+                    let velocity = Vec3::new(
+                        (game_rng.random_f32() - 0.5) * 0.5,  // Slight horizontal drift
+                        2.0 + game_rng.random_f32() * 1.5,    // Upward: 2.0-3.5 units/sec
+                        (game_rng.random_f32() - 0.5) * 0.5,
+                    );
+                    let lifetime = 0.6 + game_rng.random_f32() * 0.4;  // 0.6-1.0 sec
+                    commands.spawn((
+                        FlameParticle {
+                            velocity,
+                            lifetime,
+                            initial_lifetime: lifetime,
+                        },
+                        Transform::from_translation(target_pos + offset),
+                        PlayMatchEntity,
+                    ));
+                }
+            }
+
             // Log the damage with structured data
             let is_killing_blow = !target.is_alive();
             let message = if absorbed > 0.0 {
