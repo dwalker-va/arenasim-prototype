@@ -857,6 +857,29 @@ pub struct FlameParticle {
     pub initial_lifetime: f32,
 }
 
+/// Drain Life beam effect connecting caster to target.
+/// Created when a Drain Life channel starts, despawned when it ends.
+#[derive(Component)]
+pub struct DrainLifeBeam {
+    /// The caster entity channeling Drain Life
+    pub caster: Entity,
+    /// The target entity being drained
+    pub target: Entity,
+    /// Timer for spawning particles along the beam
+    pub particle_spawn_timer: f32,
+}
+
+/// A particle flowing along the Drain Life beam from target to caster.
+#[derive(Component)]
+pub struct DrainParticle {
+    /// Progress along beam: 0.0 = at target, 1.0 = at caster
+    pub progress: f32,
+    /// Movement speed (progress units per second)
+    pub speed: f32,
+    /// Reference to the beam this particle belongs to
+    pub beam: Entity,
+}
+
 // =============================================================================
 // Unit Tests
 // =============================================================================

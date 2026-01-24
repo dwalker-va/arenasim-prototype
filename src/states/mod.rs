@@ -162,6 +162,18 @@ impl Plugin for StatesPlugin {
                 )
                     .run_if(in_state(GameState::PlayMatch)),
             )
+            // Drain Life beam visual effects (separate group to avoid tuple size limits)
+            .add_systems(
+                Update,
+                (
+                    play_match::spawn_drain_life_beams,     // Spawn beam when Drain Life starts
+                    play_match::update_drain_life_beams,    // Update beam position/rotation
+                    play_match::spawn_drain_particles,      // Spawn particles along beam
+                    play_match::update_drain_particles,     // Move particles toward caster
+                    play_match::cleanup_drain_life_beams,   // Remove beam when channel ends
+                )
+                    .run_if(in_state(GameState::PlayMatch)),
+            )
             // UI rendering systems
             .add_systems(
                 Update,
