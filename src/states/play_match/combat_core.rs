@@ -981,7 +981,7 @@ fn apply_interrupt_lockout(
             effect_type: AuraType::SpellSchoolLockout,
             duration: interrupt.lockout_duration,
             magnitude: locked_school_value,
-            break_on_damage_threshold: 0.0,
+            break_on_damage_threshold: -1.0, // Never breaks on damage
             accumulated_damage: 0.0,
             tick_interval: 0.0,
             time_until_next_tick: 0.0,
