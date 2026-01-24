@@ -22,6 +22,7 @@ use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use std::collections::HashMap;
 use super::{GameState, match_config::{self, MatchConfig}};
+use super::view_combatant_ui::ViewCombatantState;
 
 /// Resource storing loaded class icon textures for egui rendering.
 /// Maps CharacterClass to egui TextureId for efficient icon display.
@@ -125,7 +126,10 @@ pub fn configure_match_ui(
         commands.insert_resource(CharacterPickerState::default());
     }
 
-    let ctx = contexts.ctx_mut();
+    // Use try_ctx_mut to avoid panic when context isn't ready during state transitions
+    let Some(ctx) = contexts.try_ctx_mut() else {
+        return;
+    };
 
     // Configure dark theme
     let mut style = (*ctx.style()).clone();
@@ -192,12 +196,12 @@ pub fn configure_match_ui(
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 20.0;
                 let panel_width = col_width - 10.0; // Account for borders/padding
-                
+
                 // Team 1 column
                 ui.vertical(|ui| {
                     ui.set_width(col_width);
                     ui.add_space(5.0);
-                    render_team_panel(ui, &mut config, 1, &mut picker_state, panel_width, &class_icons);
+                    render_team_panel(ui, &mut config, 1, &mut picker_state, panel_width, &class_icons, &mut commands, &mut next_state);
                 });
 
                 // Map column
@@ -211,7 +215,7 @@ pub fn configure_match_ui(
                 ui.vertical(|ui| {
                     ui.set_width(col_width);
                     ui.add_space(5.0);
-                    render_team_panel(ui, &mut config, 2, &mut picker_state, panel_width, &class_icons);
+                    render_team_panel(ui, &mut config, 2, &mut picker_state, panel_width, &class_icons, &mut commands, &mut next_state);
                 });
             });
 
@@ -385,6 +389,8 @@ fn render_team_panel(
     picker_state: &mut Option<ResMut<CharacterPickerState>>,
     max_width: f32,
     class_icons: &ClassIcons,
+    commands: &mut Commands,
+    next_state: &mut ResMut<NextState<GameState>>,
 ) {
     let team_color = if team == 1 {
         egui::Color32::from_rgb(51, 102, 204)
@@ -439,7 +445,7 @@ fn render_team_panel(
         let character = team_slots.get(slot).and_then(|c| *c);
         let is_active = slot < team_size;
 
-        render_character_slot(ui, team, slot, character, is_active, team_color, picker_state, max_width, class_icons);
+        render_character_slot(ui, team, slot, character, is_active, team_color, picker_state, max_width, class_icons, commands, next_state);
 
         if slot < 2 {
             ui.add_space(12.0);
@@ -524,8 +530,8 @@ fn render_team_panel(
 /// Render a single character slot.
 ///
 /// Display varies based on state:
-/// - **Active + Filled**: Shows class icon and name
-/// - **Active + Empty**: Shows "Click to select" prompt
+/// - **Active + Filled**: Shows class icon and name (click to view details)
+/// - **Active + Empty**: Shows "Click to select" prompt (click to open picker)
 /// - **Inactive**: Shows grayed-out dash
 fn render_character_slot(
     ui: &mut egui::Ui,
@@ -537,6 +543,8 @@ fn render_character_slot(
     picker_state: &mut Option<ResMut<CharacterPickerState>>,
     max_width: f32,
     class_icons: &ClassIcons,
+    commands: &mut Commands,
+    next_state: &mut ResMut<NextState<GameState>>,
 ) {
     let bg_color = if is_active {
         if character.is_some() {
@@ -628,6 +636,52 @@ fn render_character_slot(
             egui::FontId::proportional(14.0),
             egui::Color32::from_rgb(153, 153, 153),
         );
+
+        // Add X button in top-right corner to change selection
+        let btn_size = 20.0;
+        let btn_margin = 8.0;
+        let btn_rect = egui::Rect::from_min_size(
+            egui::pos2(rect.right() - btn_size - btn_margin, rect.top() + btn_margin),
+            egui::vec2(btn_size, btn_size),
+        );
+
+        // Check if mouse is over the X button
+        let btn_hovered = ui.rect_contains_pointer(btn_rect);
+        let btn_color = if btn_hovered {
+            egui::Color32::from_rgb(200, 80, 80)
+        } else {
+            egui::Color32::from_rgb(120, 120, 120)
+        };
+
+        // Draw X button background
+        ui.painter().rect_filled(
+            btn_rect,
+            4.0,
+            if btn_hovered {
+                egui::Color32::from_rgb(60, 40, 40)
+            } else {
+                egui::Color32::from_rgb(45, 45, 55)
+            },
+        );
+
+        // Draw X
+        ui.painter().text(
+            btn_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "X",
+            egui::FontId::proportional(12.0),
+            btn_color,
+        );
+
+        // Handle X button click - open picker to change selection
+        if btn_hovered && response.clicked() {
+            if let Some(ref mut picker) = picker_state {
+                picker.active = true;
+                picker.team = team;
+                picker.slot = slot;
+            }
+            return; // Don't navigate to View Combatant
+        }
     } else if is_active {
         // Empty active slot - show prompt
         ui.painter().text(
@@ -648,9 +702,14 @@ fn render_character_slot(
         );
     }
 
-    // Handle click on active slots - open picker modal
+    // Handle click on active slots
     if is_active && response.clicked() {
-        if let Some(ref mut picker) = picker_state {
+        if let Some(class) = character {
+            // Filled slot - navigate to view combatant screen
+            commands.insert_resource(ViewCombatantState { class, team, slot });
+            next_state.set(GameState::ViewCombatant);
+        } else if let Some(ref mut picker) = picker_state {
+            // Empty slot - open picker modal
             picker.active = true;
             picker.team = team;
             picker.slot = slot;

@@ -9,6 +9,7 @@ pub mod match_config;
 pub mod configure_match_ui;
 pub mod play_match;
 pub mod results_ui;
+pub mod view_combatant_ui;
 
 pub use match_config::MatchConfig;
 
@@ -24,6 +25,8 @@ pub enum GameState {
     Keybindings,
     /// Match configuration - team setup, map selection
     ConfigureMatch,
+    /// View combatant details - stats, abilities, gear, talents
+    ViewCombatant,
     /// Active match - the autobattle simulation
     PlayMatch,
     /// Post-match results - statistics and breakdown
@@ -52,6 +55,9 @@ impl Plugin for StatesPlugin {
             // Initialize class icon resources
             .init_resource::<configure_match_ui::ClassIcons>()
             .init_resource::<configure_match_ui::ClassIconHandles>()
+            // Initialize ability icon resources for view combatant screen
+            .init_resource::<view_combatant_ui::AbilityIcons>()
+            .init_resource::<view_combatant_ui::AbilityIconHandles>()
             // Configure PlayMatch system sets ordering
             // ResourcesAndAuras must run before CombatAndMovement so that
             // kiting_timer decrements are visible to move_to_target
@@ -82,6 +88,16 @@ impl Plugin for StatesPlugin {
                 )
                     .chain()
                     .run_if(in_state(GameState::ConfigureMatch)),
+            )
+            // View combatant systems (defined in view_combatant_ui module)
+            .add_systems(
+                Update,
+                (
+                    view_combatant_ui::load_ability_icons,
+                    view_combatant_ui::view_combatant_ui,
+                )
+                    .chain()
+                    .run_if(in_state(GameState::ViewCombatant)),
             )
             // Play match systems (defined in play_match module)
             .add_systems(OnEnter(GameState::PlayMatch), play_match::setup_play_match)

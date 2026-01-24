@@ -62,6 +62,9 @@ fn handle_escape_key(
             GameState::ConfigureMatch => {
                 // ConfigureMatch has its own ESC handler - skip here
             }
+            GameState::ViewCombatant => {
+                // ViewCombatant has its own ESC handler - skip here
+            }
             GameState::PlayMatch => {
                 // During a match, ESC returns to main menu
                 // Future: Could show pause menu instead
