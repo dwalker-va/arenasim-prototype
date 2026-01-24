@@ -60,6 +60,7 @@ pub enum AbilityType {
     Shadowbolt, // Shadow projectile
     Fear,       // Shadow CC - target flees, breaks on damage
     Immolate,   // Fire direct damage + DoT
+    DrainLife,  // Shadow channel - damages target, heals caster
     // Buff abilities
     ArcaneIntellect, // Mage buff - increases max mana
     BattleShout,     // Warrior buff - increases attack power

@@ -364,5 +364,22 @@
             )),
             spell_school: Fire,
         ),
+
+        DrainLife: (
+            name: "Drain Life",
+            cast_time: 0.0,
+            range: 20.0,
+            mana_cost: 55.0,
+            cooldown: 0.0,
+            damage_base_min: 10.0,
+            damage_base_max: 10.0,
+            damage_coefficient: 0.0,
+            damage_scales_with: None,
+            spell_school: Shadow,
+            // Channeling fields
+            channel_duration: Some(5.0),
+            channel_tick_interval: 1.0,
+            channel_healing_per_tick: 10.0,
+        ),
     }
 )

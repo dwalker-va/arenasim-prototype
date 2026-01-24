@@ -188,10 +188,11 @@ pub fn render_time_controls(
 ///   - Energy (yellow): Rogues - regenerates rapidly, starts full
 ///   - Rage (red): Warriors - starts at 0, builds from attacks and taking damage
 /// - **Cast bar** (when casting): Orange bar with spell name showing cast progress
+/// - **Channel bar** (when channeling): Green bar that drains down as channel progresses
 pub fn render_health_bars(
     mut contexts: EguiContexts,
     abilities: Res<AbilityDefinitions>,
-    combatants: Query<(&Combatant, &Transform, Option<&CastingState>, Option<&ActiveAuras>)>,
+    combatants: Query<(&Combatant, &Transform, Option<&CastingState>, Option<&ChannelingState>, Option<&ActiveAuras>)>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
     time: Res<Time<Real>>,
     spell_icons: Res<SpellIcons>,
@@ -216,7 +217,7 @@ pub fn render_health_bars(
     egui::Area::new(egui::Id::new("health_bars"))
         .fixed_pos(egui::pos2(0.0, 0.0))
         .show(ctx, |ui| {
-            for (combatant, transform, casting_state, active_auras) in combatants.iter() {
+            for (combatant, transform, casting_state, channeling_state, active_auras) in combatants.iter() {
                 if !combatant.is_alive() {
                     continue;
                 }
@@ -504,6 +505,100 @@ pub fn render_health_bars(
                         }
 
                         next_bar_y_offset += cast_bar_height + bar_spacing;
+                    }
+
+                    // Channel bar (only when actively channeling)
+                    // Unlike cast bars which fill up, channel bars start full and drain down
+                    if let Some(channeling) = channeling_state {
+                        let ability_def = abilities.get_unchecked(&channeling.ability);
+                        let channel_duration = ability_def.channel_duration.unwrap_or(5.0);
+
+                        let channel_bar_pos = egui::pos2(
+                            bar_pos.x,
+                            bar_pos.y + next_bar_y_offset,
+                        );
+                        let channel_bar_height = 8.0 * ui_scale;
+                        let channel_bar_width = bar_width + 10.0 * ui_scale;
+
+                        // Adjust x position to keep it centered
+                        let channel_bar_pos = egui::pos2(
+                            channel_bar_pos.x - 5.0 * ui_scale,
+                            channel_bar_pos.y,
+                        );
+
+                        let channel_font_size = 10.0 * ui_scale;
+
+                        // Interrupted channels show in RED
+                        if channeling.interrupted {
+                            // Red background for interrupted
+                            ui.painter().rect_filled(
+                                egui::Rect::from_min_size(channel_bar_pos, egui::vec2(channel_bar_width, channel_bar_height)),
+                                corner_radius,
+                                egui::Color32::from_rgb(150, 20, 20),
+                            );
+
+                            // Red border
+                            ui.painter().rect_stroke(
+                                egui::Rect::from_min_size(channel_bar_pos, egui::vec2(channel_bar_width, channel_bar_height)),
+                                corner_radius,
+                                egui::Stroke::new(1.5 * ui_scale, egui::Color32::from_rgb(220, 50, 50)),
+                            );
+
+                            // "INTERRUPTED" text
+                            let text_pos = egui::pos2(
+                                channel_bar_pos.x + channel_bar_width / 2.0,
+                                channel_bar_pos.y + channel_bar_height / 2.0,
+                            );
+                            ui.painter().text(
+                                text_pos,
+                                egui::Align2::CENTER_CENTER,
+                                "INTERRUPTED",
+                                egui::FontId::proportional(channel_font_size),
+                                egui::Color32::WHITE,
+                            );
+                        } else {
+                            // Channel bar drains from full to empty (opposite of cast bar)
+                            let channel_progress = channeling.duration_remaining / channel_duration;
+
+                            // Channel bar background (darker)
+                            ui.painter().rect_filled(
+                                egui::Rect::from_min_size(channel_bar_pos, egui::vec2(channel_bar_width, channel_bar_height)),
+                                corner_radius,
+                                egui::Color32::from_rgb(15, 15, 20),
+                            );
+
+                            // Channel bar fill (green/teal, distinct from orange cast bar)
+                            ui.painter().rect_filled(
+                                egui::Rect::from_min_size(
+                                    channel_bar_pos,
+                                    egui::vec2(channel_bar_width * channel_progress, channel_bar_height),
+                                ),
+                                corner_radius,
+                                egui::Color32::from_rgb(50, 200, 150), // Teal/green
+                            );
+
+                            // Channel bar border
+                            ui.painter().rect_stroke(
+                                egui::Rect::from_min_size(channel_bar_pos, egui::vec2(channel_bar_width, channel_bar_height)),
+                                corner_radius,
+                                egui::Stroke::new(1.5 * ui_scale, egui::Color32::from_rgb(100, 220, 180)),
+                            );
+
+                            // Spell name text (centered on channel bar)
+                            let text_pos = egui::pos2(
+                                channel_bar_pos.x + channel_bar_width / 2.0,
+                                channel_bar_pos.y + channel_bar_height / 2.0,
+                            );
+                            ui.painter().text(
+                                text_pos,
+                                egui::Align2::CENTER_CENTER,
+                                &ability_def.name,
+                                egui::FontId::proportional(channel_font_size),
+                                egui::Color32::WHITE,
+                            );
+                        }
+
+                        next_bar_y_offset += channel_bar_height + bar_spacing;
                     }
 
                     // Aura icons (below cast bar or resource bar) - only if enabled

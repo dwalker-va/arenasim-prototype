@@ -126,6 +126,7 @@ impl Plugin for StatesPlugin {
                     play_match::check_interrupts,  // Check for interrupts after CastingState is visible
                     play_match::process_interrupts,
                     play_match::process_casting,
+                    play_match::process_channeling,  // Process channeled spell ticks
                     play_match::spawn_projectile_visuals,
                     play_match::move_projectiles,
                     play_match::process_projectile_hits,

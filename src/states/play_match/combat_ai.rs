@@ -265,7 +265,9 @@ pub fn decide_abilities(
     mut combat_log: ResMut<CombatLog>,
     mut game_rng: ResMut<GameRng>,
     abilities: Res<AbilityDefinitions>,
-    mut combatants: Query<(Entity, &mut Combatant, &Transform, Option<&mut ActiveAuras>), Without<CastingState>>,
+    mut combatants: Query<(Entity, &mut Combatant, &Transform, Option<&mut ActiveAuras>), (Without<CastingState>, Without<ChannelingState>)>,
+    casting_auras: Query<(Entity, &ActiveAuras), With<CastingState>>,
+    channeling_auras: Query<(Entity, &ActiveAuras), (With<ChannelingState>, Without<CastingState>)>,
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
@@ -273,26 +275,42 @@ pub fn decide_abilities(
     if celebration.is_some() {
         return;
     }
-    // Build position and info maps from all combatants
+
+    // First pass: collect position and info from ALL combatants we can decide for
+    // (this query excludes casting/channeling combatants)
     let positions: std::collections::HashMap<Entity, Vec3> = combatants
         .iter()
         .map(|(entity, _, transform, _)| (entity, transform.translation))
         .collect();
-    
+
     let combatant_info: std::collections::HashMap<Entity, (u8, match_config::CharacterClass, f32, f32)> = combatants
         .iter()
         .map(|(entity, combatant, _, _)| {
             (entity, (combatant.team, combatant.class, combatant.current_health, combatant.max_health))
         })
         .collect();
-    
+
     // Map of entities to their active auras (for checking buffs/debuffs)
-    let active_auras_map: std::collections::HashMap<Entity, Vec<Aura>> = combatants
+    // We need auras from:
+    // 1. Non-casting/non-channeling entities (from main query)
+    // 2. Casting entities (separate query to avoid conflicts)
+    // 3. Channeling entities (separate query to avoid conflicts)
+    let mut active_auras_map: std::collections::HashMap<Entity, Vec<Aura>> = combatants
         .iter()
         .filter_map(|(entity, _, _, auras_opt)| {
             auras_opt.map(|auras| (entity, auras.auras.clone()))
         })
         .collect();
+
+    // Add auras from casting entities
+    for (entity, auras) in casting_auras.iter() {
+        active_auras_map.insert(entity, auras.auras.clone());
+    }
+
+    // Add auras from channeling entities
+    for (entity, auras) in channeling_auras.iter() {
+        active_auras_map.insert(entity, auras.auras.clone());
+    }
     
     // Queue for Ambush attacks (attacker, target, damage, team, class)
     // Queue for instant ability attacks (Ambush, Sinister Strike, Mortal Strike)
@@ -673,6 +691,7 @@ pub fn check_interrupts(
     abilities: Res<AbilityDefinitions>,
     mut combatants: Query<(Entity, &mut Combatant, &Transform), Without<CastingState>>,
     casting_targets: Query<&CastingState>,
+    channeling_targets: Query<&ChannelingState>,
     positions: Query<&Transform>,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
@@ -680,39 +699,54 @@ pub fn check_interrupts(
     if celebration.is_some() {
         return;
     }
-    
+
     for (entity, mut combatant, transform) in combatants.iter_mut() {
         if !combatant.is_alive() {
             continue;
         }
-        
+
         // Only Warriors and Rogues have interrupts
-        if combatant.class != match_config::CharacterClass::Warrior 
+        if combatant.class != match_config::CharacterClass::Warrior
             && combatant.class != match_config::CharacterClass::Rogue {
             continue;
         }
-        
+
         let Some(target_entity) = combatant.target else {
             continue;
         };
-        
+
         let Ok(target_transform) = positions.get(target_entity) else {
             continue;
         };
-        
+
         let my_pos = transform.translation;
         let target_pos = target_transform.translation;
         let distance = my_pos.distance(target_pos);
-        
-        // Check if target is casting
-        let Ok(cast_state) = casting_targets.get(target_entity) else {
-            continue; // Target not casting
-        };
-        
-        if cast_state.interrupted {
-            continue; // Already interrupted
+
+        // Check if target is casting or channeling
+        let target_ability_name: String;
+        let is_interruptable: bool;
+
+        if let Ok(cast_state) = casting_targets.get(target_entity) {
+            if cast_state.interrupted {
+                continue; // Already interrupted
+            }
+            target_ability_name = abilities.get_unchecked(&cast_state.ability).name.clone();
+            is_interruptable = true;
+        } else if let Ok(channel_state) = channeling_targets.get(target_entity) {
+            if channel_state.interrupted {
+                continue; // Already interrupted
+            }
+            target_ability_name = abilities.get_unchecked(&channel_state.ability).name.clone();
+            is_interruptable = true;
+        } else {
+            continue; // Target not casting or channeling
         }
-        
+
+        if !is_interruptable {
+            continue;
+        }
+
         // Determine which interrupt ability to use based on class
         let interrupt_ability = match combatant.class {
             match_config::CharacterClass::Warrior => AbilityType::Pummel,
@@ -725,30 +759,30 @@ pub fn check_interrupts(
             },
             _ => continue,
         };
-        
+
         let ability_def = abilities.get_unchecked(&interrupt_ability);
-        
+
         // Check if interrupt is on cooldown
         if combatant.ability_cooldowns.contains_key(&interrupt_ability) {
             continue;
         }
-        
+
         // Check if we can cast the interrupt (range, resources, etc.)
         if !interrupt_ability.can_cast_config(&combatant, target_pos, my_pos, ability_def) {
             continue;
         }
-        
+
         // Use the interrupt!
         info!(
-            "[INTERRUPT] Team {} {} uses {} to interrupt {}'s cast (distance: {:.1}, time_remaining: {:.2}s)",
+            "[INTERRUPT] Team {} {} uses {} to interrupt {}'s {} (distance: {:.1})",
             combatant.team,
             combatant.class.name(),
             ability_def.name,
-            abilities.get_unchecked(&cast_state.ability).name,
+            target_ability_name,
             distance,
-            cast_state.time_remaining
+            distance
         );
-        
+
         // Spawn speech bubble for interrupt
         spawn_speech_bubble(&mut commands, entity, &ability_def.name);
 

@@ -568,6 +568,28 @@ pub struct CastingState {
     pub interrupted_display_time: f32,
 }
 
+/// Component tracking an active channel in progress.
+/// Channeled spells deal their effects over time while the caster remains stationary.
+#[derive(Component)]
+pub struct ChannelingState {
+    /// The ability being channeled
+    pub ability: AbilityType,
+    /// Total duration remaining for the channel (in seconds)
+    pub duration_remaining: f32,
+    /// Time until next tick applies (in seconds)
+    pub time_until_next_tick: f32,
+    /// How often ticks occur (in seconds)
+    pub tick_interval: f32,
+    /// Target entity receiving the channel effects
+    pub target: Entity,
+    /// Whether this channel was interrupted (for visual feedback)
+    pub interrupted: bool,
+    /// Time remaining to show interrupted state (before removing ChannelingState)
+    pub interrupted_display_time: f32,
+    /// Number of ticks that have been applied
+    pub ticks_applied: u32,
+}
+
 /// Component tracking an active Charge (Warrior gap closer).
 #[derive(Component)]
 pub struct ChargingState {

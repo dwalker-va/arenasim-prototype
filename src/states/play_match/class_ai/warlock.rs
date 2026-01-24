@@ -6,7 +6,8 @@
 //! 1. Corruption (instant Shadow DoT)
 //! 2. Immolate (2s cast Fire DoT)
 //! 3. Fear (CC on non-CC'd target)
-//! 4. Shadow Bolt (main damage spell)
+//! 4. Drain Life (when HP < 80% and target has DoTs)
+//! 5. Shadow Bolt (main damage spell)
 
 use bevy::prelude::*;
 use std::collections::HashMap;
@@ -15,7 +16,9 @@ use crate::combat::log::{CombatLog, CombatLogEventType};
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
-use crate::states::play_match::components::*;
+use crate::states::play_match::components::{
+    ActiveAuras, Aura, AuraPending, AuraType, CastingState, ChannelingState, Combatant,
+};
 use crate::states::play_match::constants::GCD;
 use crate::states::play_match::is_spell_school_locked;
 
@@ -123,7 +126,24 @@ pub fn decide_warlock_action(
         }
     }
 
-    // Priority 4: Shadow Bolt
+    // Priority 4: Drain Life (when HP < 80% and target has DoTs)
+    if try_drain_life(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        target_entity,
+        target_pos,
+        combatant_info,
+        active_auras_map,
+    ) {
+        return true;
+    }
+
+    // Priority 5: Shadow Bolt
     try_shadowbolt(
         commands,
         combat_log,
@@ -454,6 +474,96 @@ fn try_shadowbolt(
         combatant.team,
         combatant.class.name(),
         shadowbolt_def.name
+    );
+
+    true
+}
+
+/// Try to channel Drain Life on target.
+/// Only used when HP < 80% and target has at least one DoT ticking.
+/// Returns true if Drain Life was started.
+#[allow(clippy::too_many_arguments)]
+fn try_drain_life(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    target_entity: Entity,
+    target_pos: Vec3,
+    combatant_info: &HashMap<Entity, (u8, CharacterClass, f32, f32)>,
+    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+) -> bool {
+    // Only use Drain Life when we need healing (HP < 80%)
+    let hp_percent = combatant.current_health / combatant.max_health;
+    if hp_percent >= 0.8 {
+        return false;
+    }
+
+    // Only use when target has at least one DoT ticking (maintain pressure)
+    let target_has_dot = active_auras_map
+        .get(&target_entity)
+        .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::DamageOverTime))
+        .unwrap_or(false);
+
+    if !target_has_dot {
+        return false;
+    }
+
+    let drain_life = AbilityType::DrainLife;
+    let drain_life_def = abilities.get_unchecked(&drain_life);
+
+    // Check if Shadow school is locked out
+    if is_spell_school_locked(drain_life_def.spell_school, auras) {
+        return false;
+    }
+
+    if !drain_life.can_cast_config(combatant, target_pos, my_pos, drain_life_def) {
+        return false;
+    }
+
+    // Execute Drain Life (start channeling)
+    combatant.current_mana -= drain_life_def.mana_cost;
+    combatant.global_cooldown = GCD;
+
+    // Get channel parameters
+    let channel_duration = drain_life_def.channel_duration.unwrap_or(5.0);
+    let tick_interval = drain_life_def.channel_tick_interval;
+
+    commands.entity(entity).insert(ChannelingState {
+        ability: drain_life,
+        duration_remaining: channel_duration,
+        time_until_next_tick: tick_interval,
+        tick_interval,
+        target: target_entity,
+        interrupted: false,
+        interrupted_display_time: 0.0,
+        ticks_applied: 0,
+    });
+
+    // Log
+    let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
+    let target_id = combatant_info
+        .get(&target_entity)
+        .map(|(team, class, _, _)| format!("Team {} {}", team, class.name()));
+    combat_log.log_ability_cast(
+        caster_id,
+        "Drain Life".to_string(),
+        target_id,
+        format!(
+            "Team {} {} begins channeling Drain Life",
+            combatant.team,
+            combatant.class.name()
+        ),
+    );
+
+    info!(
+        "Team {} {} starts channeling Drain Life on enemy (HP: {:.0}%)",
+        combatant.team,
+        combatant.class.name(),
+        hp_percent * 100.0
     );
 
     true

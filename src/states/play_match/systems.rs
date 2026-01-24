@@ -44,6 +44,7 @@ pub use super::combat_ai::decide_abilities;
 pub use super::combat_ai::check_interrupts;
 pub use super::combat_core::process_interrupts;
 pub use super::combat_core::process_casting;
+pub use super::combat_core::process_channeling;
 pub use super::projectiles::move_projectiles;
 pub use super::projectiles::process_projectile_hits;
 pub use super::combat_core::move_to_target;
@@ -56,7 +57,7 @@ pub use super::utils::combatant_id;
 
 // === Components and Resources ===
 pub use super::components::{
-    Combatant, CastingState, ActiveAuras, Aura, AuraPending, AuraType,
+    Combatant, CastingState, ChannelingState, ActiveAuras, Aura, AuraPending, AuraType,
     FloatingTextState, GameRng, MatchCountdown, SimulationSpeed, ShadowSightState,
 };
 
@@ -148,6 +149,7 @@ where
             check_interrupts,
             process_interrupts,
             process_casting,
+            process_channeling,
             move_projectiles,
             process_projectile_hits,
             move_to_target,

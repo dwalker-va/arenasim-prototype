@@ -17,6 +17,7 @@ use super::components::*;
 use super::abilities::{AbilityType, SpellSchool};
 use super::ability_config::AbilityDefinitions;
 use super::utils::{spawn_speech_bubble, get_next_fct_offset};
+use super::components::ChannelingState;
 use super::{MELEE_RANGE, ARENA_HALF_X, ARENA_HALF_Z};
 
 // Re-export combatant_id for backward compatibility (used by other modules)
@@ -170,7 +171,7 @@ pub fn move_to_target(
     countdown: Res<MatchCountdown>,
     time: Res<Time>,
     mut commands: Commands,
-    mut combatants: Query<(Entity, &mut Transform, &Combatant, Option<&ActiveAuras>, Option<&CastingState>, Option<&ChargingState>)>,
+    mut combatants: Query<(Entity, &mut Transform, &Combatant, Option<&ActiveAuras>, Option<&CastingState>, Option<&ChargingState>, Option<&ChannelingState>)>,
     orbs: Query<&Transform, (With<ShadowSightOrb>, Without<Combatant>)>,
 ) {
     // Don't allow movement until gates open
@@ -183,17 +184,22 @@ pub fn move_to_target(
     // Build a snapshot of all combatant positions and team info for lookups
     let positions: std::collections::HashMap<Entity, (Vec3, u8)> = combatants
         .iter()
-        .map(|(entity, transform, combatant, _, _, _)| (entity, (transform.translation, combatant.team)))
+        .map(|(entity, transform, combatant, _, _, _, _)| (entity, (transform.translation, combatant.team)))
         .collect();
-    
+
     // Move each combatant towards their target if needed
-    for (entity, mut transform, combatant, auras, casting_state, charging_state) in combatants.iter_mut() {
+    for (entity, mut transform, combatant, auras, casting_state, charging_state, channeling_state) in combatants.iter_mut() {
         if !combatant.is_alive() {
             continue;
         }
         
         // Cannot move while casting (WoW mechanic)
         if casting_state.is_some() {
+            continue;
+        }
+
+        // Cannot move while channeling (WoW mechanic)
+        if channeling_state.is_some() {
             continue;
         }
 
@@ -532,7 +538,7 @@ pub fn combat_auto_attack(
     time: Res<Time>,
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
-    mut combatants: Query<(Entity, &Transform, &mut Combatant, Option<&CastingState>, Option<&mut ActiveAuras>)>,
+    mut combatants: Query<(Entity, &Transform, &mut Combatant, Option<&CastingState>, Option<&ChannelingState>, Option<&mut ActiveAuras>)>,
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
@@ -553,13 +559,13 @@ pub fn combat_auto_attack(
     // Build a snapshot of positions for range checks
     let positions: std::collections::HashMap<Entity, Vec3> = combatants
         .iter()
-        .map(|(entity, transform, _, _, _)| (entity, transform.translation))
+        .map(|(entity, transform, _, _, _, _)| (entity, transform.translation))
         .collect();
-    
+
     // Build a snapshot of combatant info for logging
     let combatant_info: std::collections::HashMap<Entity, (u8, match_config::CharacterClass)> = combatants
         .iter()
-        .map(|(entity, _, combatant, _, _)| (entity, (combatant.team, combatant.class)))
+        .map(|(entity, _, combatant, _, _, _)| (entity, (combatant.team, combatant.class)))
         .collect();
     
     // Collect attacks that will happen this frame (attacker, target, damage)
@@ -570,11 +576,11 @@ pub fn combat_auto_attack(
     // Track damage per target for aura breaking
     let mut damage_per_aura_break: std::collections::HashMap<Entity, f32> = std::collections::HashMap::new();
     
-    for (attacker_entity, transform, mut combatant, casting_state, auras) in combatants.iter_mut() {
+    for (attacker_entity, transform, mut combatant, casting_state, channeling_state, auras) in combatants.iter_mut() {
         if !combatant.is_alive() {
             continue;
         }
-        
+
         // WoW Mechanic: Cannot auto-attack while stunned, feared, or polymorphed
         let is_incapacitated = if let Some(auras) = auras {
             auras.auras.iter().any(|a| matches!(a.effect_type, AuraType::Stun | AuraType::Fear | AuraType::Polymorph))
@@ -584,9 +590,14 @@ pub fn combat_auto_attack(
         if is_incapacitated {
             continue;
         }
-        
+
         // WoW Mechanic: Cannot auto-attack while casting
         if casting_state.is_some() {
+            continue;
+        }
+
+        // WoW Mechanic: Cannot auto-attack while channeling
+        if channeling_state.is_some() {
             continue;
         }
         
@@ -644,7 +655,7 @@ pub fn combat_auto_attack(
     let mut absorbed_per_target: HashMap<Entity, f32> = HashMap::new();
 
     for (attacker_entity, target_entity, damage, has_bonus) in attacks {
-        if let Ok((_, _, mut target, _, mut target_auras)) = combatants.get_mut(target_entity) {
+        if let Ok((_, _, mut target, _, _, mut target_auras)) = combatants.get_mut(target_entity) {
             if target.is_alive() {
                 // Apply damage with absorb shield consideration
                 let (actual_damage, absorbed) = apply_damage_with_absorb(
@@ -782,7 +793,7 @@ pub fn combat_auto_attack(
     
     // Update attacker damage dealt stats
     for (attacker_entity, damage) in damage_dealt_updates {
-        if let Ok((_, _, mut attacker, _, _)) = combatants.get_mut(attacker_entity) {
+        if let Ok((_, _, mut attacker, _, _, _)) = combatants.get_mut(attacker_entity) {
             attacker.damage_dealt += damage;
         }
     }
@@ -844,13 +855,14 @@ pub fn regenerate_resources(
     }
 }
 
-/// Process interrupt attempts: interrupt target's cast and apply spell school lockout.
+/// Process interrupt attempts: interrupt target's cast or channel and apply spell school lockout.
 pub fn process_interrupts(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
     abilities: Res<AbilityDefinitions>,
     interrupts: Query<(Entity, &InterruptPending)>,
-    mut targets: Query<(&mut CastingState, &Combatant)>,
+    mut casting_targets: Query<(&mut CastingState, &Combatant), Without<ChannelingState>>,
+    mut channeling_targets: Query<(&mut ChannelingState, &Combatant), Without<CastingState>>,
     combatants: Query<&Combatant>,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
@@ -858,100 +870,158 @@ pub fn process_interrupts(
     if celebration.is_some() {
         return;
     }
-    
+
     for (interrupt_entity, interrupt) in interrupts.iter() {
-        // Check if target is still casting
-        if let Ok((mut cast_state, target_combatant)) = targets.get_mut(interrupt.target) {
+        let mut interrupted = false;
+
+        // Check if target is casting
+        if let Ok((mut cast_state, target_combatant)) = casting_targets.get_mut(interrupt.target) {
             // Don't interrupt if already interrupted
-            if cast_state.interrupted {
-                commands.entity(interrupt_entity).despawn();
-                continue;
+            if !cast_state.interrupted {
+                // Get the spell school of the interrupted spell
+                let interrupted_ability_def = abilities.get_unchecked(&cast_state.ability);
+                let interrupted_school = interrupted_ability_def.spell_school;
+                let interrupted_spell_name = &interrupted_ability_def.name;
+
+                // Mark cast as interrupted
+                cast_state.interrupted = true;
+                cast_state.interrupted_display_time = 0.5; // Show "INTERRUPTED" for 0.5 seconds
+
+                // Mark the ability cast as interrupted in the combat log (for timeline visualization)
+                let interrupted_caster_id = format!("Team {} {}", target_combatant.team, target_combatant.class.name());
+                combat_log.mark_cast_interrupted(&interrupted_caster_id, interrupted_spell_name);
+
+                // Apply lockout and log
+                apply_interrupt_lockout(
+                    &mut commands,
+                    &mut combat_log,
+                    &abilities,
+                    interrupt,
+                    &combatants,
+                    target_combatant,
+                    interrupted_school,
+                    interrupted_spell_name,
+                );
+
+                interrupted = true;
             }
-            
-            // Get the spell school of the interrupted spell
-            let interrupted_ability_def = abilities.get_unchecked(&cast_state.ability);
-            let interrupted_school = interrupted_ability_def.spell_school;
-            let interrupted_spell_name = &interrupted_ability_def.name;
-            
-            // Mark cast as interrupted
-            cast_state.interrupted = true;
-            cast_state.interrupted_display_time = 0.5; // Show "INTERRUPTED" for 0.5 seconds
-
-            // Mark the ability cast as interrupted in the combat log (for timeline visualization)
-            let interrupted_caster_id = format!("Team {} {}", target_combatant.team, target_combatant.class.name());
-            combat_log.mark_cast_interrupted(&interrupted_caster_id, interrupted_spell_name);
-
-            // Get caster info for logging
-            let caster_info = if let Ok(caster) = combatants.get(interrupt.caster) {
-                (caster.team, caster.class)
-            } else {
-                (0, match_config::CharacterClass::Warrior) // Fallback
-            };
-            
-            // Apply spell school lockout aura
-            // Store the locked school as the magnitude (cast to f32)
-            let locked_school_value = match interrupted_school {
-                SpellSchool::Physical => 0.0,
-                SpellSchool::Frost => 1.0,
-                SpellSchool::Holy => 2.0,
-                SpellSchool::Shadow => 3.0,
-                SpellSchool::Arcane => 4.0,
-                SpellSchool::Fire => 5.0,
-                SpellSchool::None => 6.0,
-            };
-            
-            commands.spawn(AuraPending {
-                target: interrupt.target,
-                aura: Aura {
-                    effect_type: AuraType::SpellSchoolLockout,
-                    duration: interrupt.lockout_duration,
-                    magnitude: locked_school_value,
-                    break_on_damage_threshold: 0.0,
-                    accumulated_damage: 0.0,
-                    tick_interval: 0.0,
-                    time_until_next_tick: 0.0,
-                    caster: Some(interrupt.caster),
-                    ability_name: abilities.get_unchecked(&interrupt.ability).name.clone(),
-                    fear_direction: (0.0, 0.0),
-                    fear_direction_timer: 0.0,
-                },
-            });
-            
-            // Log the interrupt
-            let school_name = match interrupted_school {
-                SpellSchool::Physical => "Physical",
-                SpellSchool::Frost => "Frost",
-                SpellSchool::Holy => "Holy",
-                SpellSchool::Shadow => "Shadow",
-                SpellSchool::Arcane => "Arcane",
-                SpellSchool::Fire => "Fire",
-                SpellSchool::None => "None",
-            };
-            
-            let message = format!(
-                "Team {} {} interrupts Team {} {}'s {} - {} school locked for {:.1}s",
-                caster_info.0,
-                caster_info.1.name(),
-                target_combatant.team,
-                target_combatant.class.name(),
-                interrupted_spell_name,
-                school_name,
-                interrupt.lockout_duration
-            );
-            combat_log.log(CombatLogEventType::AbilityUsed, message);
-            
-            info!(
-                "Team {} {} interrupted! {} school locked for {:.1}s",
-                target_combatant.team,
-                target_combatant.class.name(),
-                school_name,
-                interrupt.lockout_duration
-            );
         }
-        
+
+        // Check if target is channeling (if not already interrupted a cast)
+        if !interrupted {
+            if let Ok((mut channel_state, target_combatant)) = channeling_targets.get_mut(interrupt.target) {
+                // Don't interrupt if already interrupted
+                if !channel_state.interrupted {
+                    // Get the spell school of the interrupted channel
+                    let interrupted_ability_def = abilities.get_unchecked(&channel_state.ability);
+                    let interrupted_school = interrupted_ability_def.spell_school;
+                    let interrupted_spell_name = &interrupted_ability_def.name;
+
+                    // Mark channel as interrupted
+                    channel_state.interrupted = true;
+                    channel_state.interrupted_display_time = 0.5; // Show "INTERRUPTED" for 0.5 seconds
+
+                    // Mark the ability as interrupted in the combat log (for timeline visualization)
+                    let interrupted_caster_id = format!("Team {} {}", target_combatant.team, target_combatant.class.name());
+                    combat_log.mark_cast_interrupted(&interrupted_caster_id, interrupted_spell_name);
+
+                    // Apply lockout and log
+                    apply_interrupt_lockout(
+                        &mut commands,
+                        &mut combat_log,
+                        &abilities,
+                        interrupt,
+                        &combatants,
+                        target_combatant,
+                        interrupted_school,
+                        interrupted_spell_name,
+                    );
+                }
+            }
+        }
+
         // Despawn the interrupt entity
         commands.entity(interrupt_entity).despawn();
     }
+}
+
+/// Helper function to apply spell school lockout and log the interrupt.
+fn apply_interrupt_lockout(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    interrupt: &InterruptPending,
+    combatants: &Query<&Combatant>,
+    target_combatant: &Combatant,
+    interrupted_school: SpellSchool,
+    interrupted_spell_name: &str,
+) {
+    // Get caster info for logging
+    let caster_info = if let Ok(caster) = combatants.get(interrupt.caster) {
+        (caster.team, caster.class)
+    } else {
+        (0, match_config::CharacterClass::Warrior) // Fallback
+    };
+
+    // Apply spell school lockout aura
+    // Store the locked school as the magnitude (cast to f32)
+    let locked_school_value = match interrupted_school {
+        SpellSchool::Physical => 0.0,
+        SpellSchool::Frost => 1.0,
+        SpellSchool::Holy => 2.0,
+        SpellSchool::Shadow => 3.0,
+        SpellSchool::Arcane => 4.0,
+        SpellSchool::Fire => 5.0,
+        SpellSchool::None => 6.0,
+    };
+
+    commands.spawn(AuraPending {
+        target: interrupt.target,
+        aura: Aura {
+            effect_type: AuraType::SpellSchoolLockout,
+            duration: interrupt.lockout_duration,
+            magnitude: locked_school_value,
+            break_on_damage_threshold: 0.0,
+            accumulated_damage: 0.0,
+            tick_interval: 0.0,
+            time_until_next_tick: 0.0,
+            caster: Some(interrupt.caster),
+            ability_name: abilities.get_unchecked(&interrupt.ability).name.clone(),
+            fear_direction: (0.0, 0.0),
+            fear_direction_timer: 0.0,
+        },
+    });
+
+    // Log the interrupt
+    let school_name = match interrupted_school {
+        SpellSchool::Physical => "Physical",
+        SpellSchool::Frost => "Frost",
+        SpellSchool::Holy => "Holy",
+        SpellSchool::Shadow => "Shadow",
+        SpellSchool::Arcane => "Arcane",
+        SpellSchool::Fire => "Fire",
+        SpellSchool::None => "None",
+    };
+
+    let message = format!(
+        "Team {} {} interrupts Team {} {}'s {} - {} school locked for {:.1}s",
+        caster_info.0,
+        caster_info.1.name(),
+        target_combatant.team,
+        target_combatant.class.name(),
+        interrupted_spell_name,
+        school_name,
+        interrupt.lockout_duration
+    );
+    combat_log.log(CombatLogEventType::AbilityUsed, message);
+
+    info!(
+        "Team {} {} interrupted! {} school locked for {:.1}s",
+        target_combatant.team,
+        target_combatant.class.name(),
+        school_name,
+        interrupt.lockout_duration
+    );
 }
 
 /// Process casting: update cast timers and apply effects when casts complete.
@@ -1400,6 +1470,285 @@ pub fn process_casting(
                 );
             }
         }
+    }
+}
+
+/// Process channeling: update channel timers and apply tick effects.
+///
+/// When a channel tick occurs:
+/// 1. Deal damage to target (with absorb shield handling)
+/// 2. Heal caster (reduced by healing reduction auras)
+/// 3. Spawn floating combat text (yellow for damage, green for heal)
+/// 4. Log to combat log
+///
+/// Channel ends when duration expires or either caster/target dies.
+pub fn process_channeling(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut combat_log: ResMut<CombatLog>,
+    abilities: Res<AbilityDefinitions>,
+    mut combatants: Query<(Entity, &Transform, &mut Combatant, Option<&mut ChannelingState>, Option<&mut ActiveAuras>)>,
+    mut fct_states: Query<&mut FloatingTextState>,
+    celebration: Option<Res<VictoryCelebration>>,
+) {
+    // Don't process channels during victory celebration
+    if celebration.is_some() {
+        return;
+    }
+
+    let dt = time.delta_secs();
+
+    // Track updates to apply after the loop
+    let mut remove_channel: Vec<Entity> = Vec::new();
+    let mut caster_healing_updates: Vec<(Entity, f32)> = Vec::new();
+    // (caster_entity, target_entity, damage, caster_team, caster_class)
+    let mut damage_to_apply: Vec<(Entity, Entity, f32, u8, match_config::CharacterClass)> = Vec::new();
+
+    // Build a snapshot of positions and health for lookups
+    let positions: std::collections::HashMap<Entity, Vec3> = combatants
+        .iter()
+        .map(|(entity, transform, _, _, _)| (entity, transform.translation))
+        .collect();
+    let health_info: std::collections::HashMap<Entity, (bool, u8, match_config::CharacterClass)> = combatants
+        .iter()
+        .map(|(entity, _, combatant, _, _)| (entity, (combatant.is_alive(), combatant.team, combatant.class)))
+        .collect();
+
+    for (caster_entity, _caster_transform, caster, channeling_state, _caster_auras) in combatants.iter_mut() {
+        let Some(mut channeling) = channeling_state else {
+            continue;
+        };
+
+        // Handle interrupted state display
+        if channeling.interrupted {
+            channeling.interrupted_display_time -= dt;
+            if channeling.interrupted_display_time <= 0.0 {
+                remove_channel.push(caster_entity);
+            }
+            continue;
+        }
+
+        // Check if caster died
+        if !caster.is_alive() {
+            remove_channel.push(caster_entity);
+            continue;
+        }
+
+        // Check if target died or no longer exists
+        let target_alive = health_info
+            .get(&channeling.target)
+            .map(|(alive, _, _)| *alive)
+            .unwrap_or(false);
+        if !target_alive {
+            remove_channel.push(caster_entity);
+            continue;
+        }
+
+        // Tick down timers
+        channeling.duration_remaining -= dt;
+        channeling.time_until_next_tick -= dt;
+
+        // Process tick if ready
+        if channeling.time_until_next_tick <= 0.0 {
+            let ability_def = abilities.get_unchecked(&channeling.ability);
+
+            // Calculate damage (flat damage per tick for Drain Life)
+            let damage = ability_def.damage_base_min;
+
+            // Track damage to apply later (includes target entity and caster info for death logging)
+            damage_to_apply.push((caster_entity, channeling.target, damage, caster.team, caster.class));
+
+            // Track healing for caster
+            let healing = ability_def.channel_healing_per_tick;
+            if healing > 0.0 {
+                caster_healing_updates.push((caster_entity, healing));
+            }
+
+            // Log the tick
+            if let Some(&(_, target_team, target_class)) = health_info.get(&channeling.target) {
+                let damage_message = format!(
+                    "Team {} {}'s {} ticks on Team {} {} for {:.0} damage",
+                    caster.team,
+                    caster.class.name(),
+                    ability_def.name,
+                    target_team,
+                    target_class.name(),
+                    damage
+                );
+                combat_log.log_damage(
+                    combatant_id(caster.team, caster.class),
+                    combatant_id(target_team, target_class),
+                    format!("{} (tick)", ability_def.name),
+                    damage,
+                    false, // Not a killing blow check here - will be handled when applying damage
+                    damage_message,
+                );
+
+                if healing > 0.0 {
+                    let heal_message = format!(
+                        "Team {} {}'s {} heals for {:.0}",
+                        caster.team,
+                        caster.class.name(),
+                        ability_def.name,
+                        healing
+                    );
+                    combat_log.log_healing(
+                        combatant_id(caster.team, caster.class),
+                        combatant_id(caster.team, caster.class),
+                        format!("{} (tick)", ability_def.name),
+                        healing,
+                        heal_message,
+                    );
+                }
+            }
+
+            // Spawn floating combat text for damage on target
+            if let Some(&target_pos) = positions.get(&channeling.target) {
+                let text_position = target_pos + Vec3::new(0.0, super::FCT_HEIGHT, 0.0);
+                let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(channeling.target) {
+                    get_next_fct_offset(&mut fct_state)
+                } else {
+                    (0.0, 0.0)
+                };
+                commands.spawn((
+                    FloatingCombatText {
+                        world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
+                        text: format!("{:.0}", damage),
+                        color: egui::Color32::from_rgb(255, 255, 0), // Yellow for ability damage
+                        lifetime: 1.5,
+                        vertical_offset: offset_y,
+                    },
+                    PlayMatchEntity,
+                ));
+            }
+
+            // Reset tick timer
+            channeling.time_until_next_tick = channeling.tick_interval;
+            channeling.ticks_applied += 1;
+        }
+
+        // Check if channel duration expired
+        if channeling.duration_remaining <= 0.0 {
+            remove_channel.push(caster_entity);
+
+            info!(
+                "Team {} {} completed {} channel ({} ticks)",
+                caster.team,
+                caster.class.name(),
+                abilities.get_unchecked(&channeling.ability).name,
+                channeling.ticks_applied
+            );
+        }
+    }
+
+    // Apply damage to targets and update caster stats
+    for (caster_entity, target_entity, damage, caster_team, caster_class) in damage_to_apply {
+        // Apply damage to target
+        if let Ok((_, target_transform, mut target, _, mut target_auras)) = combatants.get_mut(target_entity) {
+            if target.is_alive() {
+                let (actual_damage, absorbed) = apply_damage_with_absorb(
+                    damage,
+                    &mut target,
+                    target_auras.as_deref_mut(),
+                );
+
+                // Track damage for aura breaking
+                if actual_damage > 0.0 {
+                    commands.entity(target_entity).insert(DamageTakenThisFrame {
+                        amount: actual_damage,
+                    });
+                }
+
+                // Spawn absorbed text if any
+                if absorbed > 0.0 {
+                    let text_position = target_transform.translation + Vec3::new(0.0, super::FCT_HEIGHT, 0.0);
+                    let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
+                        get_next_fct_offset(&mut fct_state)
+                    } else {
+                        (0.0, 0.0)
+                    };
+                    commands.spawn((
+                        FloatingCombatText {
+                            world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
+                            text: format!("{:.0} absorbed", absorbed),
+                            color: egui::Color32::from_rgb(100, 180, 255), // Light blue
+                            lifetime: 1.5,
+                            vertical_offset: offset_y,
+                        },
+                        PlayMatchEntity,
+                    ));
+                }
+
+                // Warriors generate Rage from taking damage
+                if actual_damage > 0.0 && target.resource_type == ResourceType::Rage {
+                    let rage_gain = actual_damage * 0.15;
+                    target.current_mana = (target.current_mana + rage_gain).min(target.max_mana);
+                }
+
+                // Check for killing blow
+                if !target.is_alive() {
+                    let death_message = format!(
+                        "Team {} {} has been eliminated",
+                        target.team,
+                        target.class.name()
+                    );
+                    combat_log.log_death(
+                        combatant_id(target.team, target.class),
+                        Some(combatant_id(caster_team, caster_class)),
+                        death_message,
+                    );
+                }
+            }
+        }
+
+        // Update caster damage dealt stats
+        if let Ok((_, _, mut caster, _, _)) = combatants.get_mut(caster_entity) {
+            caster.damage_dealt += damage;
+        }
+    }
+
+    // Apply healing to casters and spawn healing FCT
+    for (caster_entity, healing) in caster_healing_updates {
+        if let Ok((_, caster_transform, mut caster, _, caster_auras)) = combatants.get_mut(caster_entity) {
+            let mut actual_healing = healing;
+
+            // Check for healing reduction auras
+            if let Some(auras) = caster_auras {
+                for aura in &auras.auras {
+                    if aura.effect_type == AuraType::HealingReduction {
+                        actual_healing *= aura.magnitude;
+                    }
+                }
+            }
+
+            // Apply healing
+            let effective_healing = actual_healing.min(caster.max_health - caster.current_health);
+            caster.current_health = (caster.current_health + actual_healing).min(caster.max_health);
+            caster.healing_done += effective_healing;
+
+            // Spawn floating combat text for healing
+            let text_position = caster_transform.translation + Vec3::new(0.0, super::FCT_HEIGHT, 0.0);
+            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(caster_entity) {
+                get_next_fct_offset(&mut fct_state)
+            } else {
+                (0.0, 0.0)
+            };
+            commands.spawn((
+                FloatingCombatText {
+                    world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
+                    text: format!("+{:.0}", effective_healing),
+                    color: egui::Color32::from_rgb(100, 255, 100), // Green for healing
+                    lifetime: 1.5,
+                    vertical_offset: offset_y,
+                },
+                PlayMatchEntity,
+            ));
+        }
+    }
+
+    // Remove completed/interrupted channels
+    for entity in remove_channel {
+        commands.entity(entity).remove::<ChannelingState>();
     }
 }
 

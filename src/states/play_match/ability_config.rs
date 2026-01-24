@@ -147,6 +147,17 @@ pub struct AbilityConfig {
     /// Spawn visual impact effect on hit (Mind Blast)
     #[serde(default)]
     pub spawn_impact_effect: bool,
+
+    // === Channeling ===
+    /// Duration of channel in seconds (None = not a channeled spell)
+    #[serde(default)]
+    pub channel_duration: Option<f32>,
+    /// How often channel ticks occur (in seconds, default 1.0)
+    #[serde(default = "default_channel_tick_interval")]
+    pub channel_tick_interval: f32,
+    /// Healing applied to caster per tick (for Drain Life style abilities)
+    #[serde(default)]
+    pub channel_healing_per_tick: f32,
 }
 
 fn default_scaling_none() -> ScalingStat {
@@ -155,6 +166,10 @@ fn default_scaling_none() -> ScalingStat {
 
 fn default_spell_school_none() -> SpellSchool {
     SpellSchool::None
+}
+
+fn default_channel_tick_interval() -> f32 {
+    1.0
 }
 
 impl AbilityConfig {
@@ -166,6 +181,11 @@ impl AbilityConfig {
     /// Returns true if this is a healing ability
     pub fn is_heal(&self) -> bool {
         self.healing_base_max > 0.0 || self.healing_coefficient > 0.0
+    }
+
+    /// Returns true if this is a channeled ability
+    pub fn is_channel(&self) -> bool {
+        self.channel_duration.is_some()
     }
 }
 
@@ -234,6 +254,7 @@ impl AbilityDefinitions {
             AbilityType::Shadowbolt,
             AbilityType::Fear,
             AbilityType::Immolate,
+            AbilityType::DrainLife,
             AbilityType::ArcaneIntellect,
             AbilityType::BattleShout,
             AbilityType::IceBarrier,
