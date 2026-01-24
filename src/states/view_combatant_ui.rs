@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use super::{GameState, match_config::CharacterClass};
 use super::configure_match_ui::ClassIcons;
 use super::play_match::AbilityType;
-use super::play_match::abilities::SpellSchool;
+use super::play_match::abilities::{ScalingStat, SpellSchool};
 use super::play_match::ability_config::{AbilityDefinitions, AbilityConfig};
 use super::play_match::components::AuraType;
 use super::play_match::rendering::get_ability_icon_path;
@@ -419,7 +419,7 @@ pub fn view_combatant_ui(
                             egui::vec2(panel_width, main_panel_height),
                             egui::Layout::top_down(egui::Align::LEFT),
                             |ui| {
-                                render_abilities_panel(ui, &abilities, panel_width, main_panel_height, &ability_icons, &ability_definitions);
+                                render_abilities_panel(ui, &abilities, panel_width, main_panel_height, &ability_icons, &ability_definitions, &stats);
                             },
                         );
                     },
@@ -511,6 +511,7 @@ fn render_abilities_panel(
     height: f32,
     ability_icons: &Option<Res<AbilityIcons>>,
     ability_definitions: &AbilityDefinitions,
+    stats: &ClassStats,
 ) {
     ui.group(|ui| {
         ui.set_min_width(width - 20.0);
@@ -594,7 +595,7 @@ fn render_abilities_panel(
                         ui.layer_id(),
                         ui.id().with(ability_name),
                         |ui| {
-                            render_ability_tooltip(ui, ability_name, config);
+                            render_ability_tooltip(ui, ability_name, config, stats);
                         },
                     );
                 }
@@ -619,7 +620,7 @@ fn get_spell_school_color(school: SpellSchool) -> egui::Color32 {
 }
 
 /// Render a WoW-style ability tooltip
-fn render_ability_tooltip(ui: &mut egui::Ui, name: &str, config: &AbilityConfig) {
+fn render_ability_tooltip(ui: &mut egui::Ui, name: &str, config: &AbilityConfig, stats: &ClassStats) {
     ui.set_min_width(250.0);
     ui.set_max_width(300.0);
 
@@ -697,8 +698,8 @@ fn render_ability_tooltip(ui: &mut egui::Ui, name: &str, config: &AbilityConfig)
     ui.separator();
     ui.add_space(4.0);
 
-    // Description - build dynamically based on ability effects
-    let description = build_ability_description(config);
+    // Description - build dynamically based on ability effects and stats
+    let description = build_ability_description(config, stats);
     ui.label(
         egui::RichText::new(description)
             .size(12.0)
@@ -717,23 +718,38 @@ fn render_ability_tooltip(ui: &mut egui::Ui, name: &str, config: &AbilityConfig)
     }
 }
 
-/// Build a description string for an ability based on its config
-fn build_ability_description(config: &AbilityConfig) -> String {
+/// Build a description string for an ability based on its config and combatant stats
+fn build_ability_description(config: &AbilityConfig, stats: &ClassStats) -> String {
     let mut parts = Vec::new();
+
+    // Calculate stat contribution for damage
+    let damage_stat_value = match config.damage_scales_with {
+        ScalingStat::AttackPower => stats.attack_power as f32,
+        ScalingStat::SpellPower => stats.spell_power as f32,
+        ScalingStat::None => 0.0,
+    };
+    let damage_bonus = damage_stat_value * config.damage_coefficient;
+
+    // Calculate stat contribution for healing (uses spell power)
+    let healing_bonus = stats.spell_power as f32 * config.healing_coefficient;
 
     // Damage
     if config.damage_base_max > 0.0 {
+        let min_damage = config.damage_base_min + damage_bonus;
+        let max_damage = config.damage_base_max + damage_bonus;
         if config.channel_duration.is_some() {
             // Channeled damage - show per tick
-            parts.push(format!("Deals {:.0}-{:.0} damage per tick.", config.damage_base_min, config.damage_base_max));
+            parts.push(format!("Deals {:.0}-{:.0} damage per tick.", min_damage, max_damage));
         } else {
-            parts.push(format!("Deals {:.0}-{:.0} damage.", config.damage_base_min, config.damage_base_max));
+            parts.push(format!("Deals {:.0}-{:.0} damage.", min_damage, max_damage));
         }
     }
 
     // Healing
     if config.healing_base_max > 0.0 {
-        parts.push(format!("Heals for {:.0}-{:.0}.", config.healing_base_min, config.healing_base_max));
+        let min_heal = config.healing_base_min + healing_bonus;
+        let max_heal = config.healing_base_max + healing_bonus;
+        parts.push(format!("Heals for {:.0}-{:.0}.", min_heal, max_heal));
     }
 
     // Channel healing (Drain Life style)
