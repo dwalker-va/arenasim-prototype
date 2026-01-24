@@ -253,6 +253,7 @@ fn try_kidney_shot(
                 ability_name: def.name.to_string(),
                 fear_direction: (0.0, 0.0),
                 fear_direction_timer: 0.0,
+                spell_school: None, // Physical stun, not dispellable
             },
         });
 

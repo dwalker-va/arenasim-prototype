@@ -300,6 +300,11 @@ pub fn process_projectile_hits(
             
             // Apply aura if ability has one
             if let Some(aura) = def.applies_aura.as_ref() {
+                // Convert spell school to Option (None for Physical, since physical = not magic-dispellable)
+                let aura_spell_school = match def.spell_school {
+                    super::abilities::SpellSchool::Physical | super::abilities::SpellSchool::None => None,
+                    school => Some(school),
+                };
                 commands.spawn(AuraPending {
                     target: target_entity,
                     aura: Aura {
@@ -314,6 +319,7 @@ pub fn process_projectile_hits(
                         ability_name: def.name.to_string(),
                         fear_direction: (0.0, 0.0),
                         fear_direction_timer: 0.0,
+                        spell_school: aura_spell_school,
                     },
                 });
             }

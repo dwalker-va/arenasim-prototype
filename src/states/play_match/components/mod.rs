@@ -628,6 +628,48 @@ pub struct Aura {
     pub fear_direction: (f32, f32),
     /// For Fear: time until direction change
     pub fear_direction_timer: f32,
+    /// Spell school of the ability that created this aura (None = physical)
+    /// Used to determine if DoTs can be dispelled (only magic DoTs are dispellable)
+    pub spell_school: Option<super::abilities::SpellSchool>,
+}
+
+impl AuraType {
+    /// Returns true if this aura type is inherently magic-dispellable.
+    /// This covers CC effects that are always magical in WoW.
+    pub fn is_magic_dispellable(&self) -> bool {
+        matches!(
+            self,
+            AuraType::MovementSpeedSlow
+                | AuraType::Root
+                | AuraType::Fear
+                | AuraType::Polymorph
+        )
+    }
+}
+
+impl Aura {
+    /// Returns true if this aura can be removed by Dispel Magic.
+    /// Magic-dispellable aura types (slows, roots, fear, polymorph) are always dispellable.
+    /// DoTs are dispellable only if they have a magic spell school (Corruption, Immolate)
+    /// but not if they're physical (Rend).
+    pub fn can_be_dispelled(&self) -> bool {
+        use super::abilities::SpellSchool;
+
+        // Inherently magic-dispellable aura types
+        if self.effect_type.is_magic_dispellable() {
+            return true;
+        }
+
+        // DoTs are dispellable only if magic school
+        if matches!(self.effect_type, AuraType::DamageOverTime) {
+            if let Some(school) = self.spell_school {
+                // Physical DoTs (Rend) are NOT dispellable
+                return school != SpellSchool::Physical;
+            }
+        }
+
+        false
+    }
 }
 
 /// Temporary component for pending auras to be applied.
@@ -650,7 +692,15 @@ impl AuraPending {
         caster: Entity,
         ability_def: &AbilityConfig,
     ) -> Option<Self> {
+        use super::abilities::SpellSchool;
+
         let aura_effect = ability_def.applies_aura.as_ref()?;
+
+        // Convert spell school to Option (None for Physical, since physical = not magic-dispellable)
+        let spell_school = match ability_def.spell_school {
+            SpellSchool::Physical | SpellSchool::None => None,
+            school => Some(school),
+        };
 
         Some(Self {
             target,
@@ -666,6 +716,7 @@ impl AuraPending {
                 ability_name: ability_def.name.clone(),
                 fear_direction: (0.0, 0.0),
                 fear_direction_timer: 0.0,
+                spell_school,
             },
         })
     }
@@ -679,7 +730,15 @@ impl AuraPending {
         ability_def: &AbilityConfig,
         tick_interval: f32,
     ) -> Option<Self> {
+        use super::abilities::SpellSchool;
+
         let aura_effect = ability_def.applies_aura.as_ref()?;
+
+        // Convert spell school to Option (None for Physical, since physical = not magic-dispellable)
+        let spell_school = match ability_def.spell_school {
+            SpellSchool::Physical | SpellSchool::None => None,
+            school => Some(school),
+        };
 
         Some(Self {
             target,
@@ -695,6 +754,7 @@ impl AuraPending {
                 ability_name: ability_def.name.clone(),
                 fear_direction: (0.0, 0.0),
                 fear_direction_timer: 0.0,
+                spell_school,
             },
         })
     }
@@ -708,7 +768,15 @@ impl AuraPending {
         ability_def: &AbilityConfig,
         ability_name: String,
     ) -> Option<Self> {
+        use super::abilities::SpellSchool;
+
         let aura_effect = ability_def.applies_aura.as_ref()?;
+
+        // Convert spell school to Option (None for Physical, since physical = not magic-dispellable)
+        let spell_school = match ability_def.spell_school {
+            SpellSchool::Physical | SpellSchool::None => None,
+            school => Some(school),
+        };
 
         Some(Self {
             target,
@@ -724,6 +792,7 @@ impl AuraPending {
                 ability_name,
                 fear_direction: (0.0, 0.0),
                 fear_direction_timer: 0.0,
+                spell_school,
             },
         })
     }

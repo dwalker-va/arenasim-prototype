@@ -179,6 +179,7 @@ pub fn check_orb_pickups(
                         ability_name: "Shadow Sight".to_string(),
                         fear_direction: (0.0, 0.0),
                         fear_direction_timer: 0.0,
+                        spell_school: None, // Shadow Sight is not dispellable
                     },
                 });
 

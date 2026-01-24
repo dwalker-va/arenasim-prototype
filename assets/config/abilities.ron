@@ -155,6 +155,16 @@
             spell_school: Holy,
         ),
 
+        DispelMagic: (
+            name: "Dispel Magic",
+            cast_time: 0.0,
+            range: 30.0,
+            mana_cost: 18.0,
+            cooldown: 0.0,
+            spell_school: Holy,
+            is_dispel: true,
+        ),
+
         // ============================================================================
         // WARRIOR ABILITIES
         // ============================================================================

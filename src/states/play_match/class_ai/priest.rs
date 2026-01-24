@@ -4,9 +4,11 @@
 //!
 //! ## Priority Order
 //! 1. Power Word: Fortitude (buff all allies pre-combat)
-//! 2. Power Word: Shield (shield low-health allies)
-//! 3. Flash Heal (heal injured allies)
-//! 4. Mind Blast (damage when allies are healthy)
+//! 2. Dispel Magic - Urgent (Polymorph, Fear - complete loss of control)
+//! 3. Power Word: Shield (shield low-health allies)
+//! 4. Flash Heal (heal injured allies)
+//! 5. Dispel Magic - Maintenance (Roots, DoTs when team HP is stable)
+//! 6. Mind Blast (damage when allies are healthy)
 
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -21,6 +23,21 @@ use crate::states::play_match::is_spell_school_locked;
 use crate::states::play_match::utils::combatant_id;
 
 use super::{AbilityDecision, ClassAI, CombatContext};
+
+/// Check if the team's HP is stable enough for maintenance dispels.
+/// Returns true if all living allies are above 70% HP.
+fn is_team_healthy(team: u8, combatant_info: &HashMap<Entity, (u8, CharacterClass, f32, f32)>) -> bool {
+    for &(ally_team, _, ally_hp, ally_max_hp) in combatant_info.values() {
+        if ally_team != team || ally_hp <= 0.0 {
+            continue;
+        }
+        let hp_percent = ally_hp / ally_max_hp;
+        if hp_percent < 0.70 {
+            return false; // Someone needs healing
+        }
+    }
+    true
+}
 
 /// Priest AI implementation.
 ///
@@ -74,7 +91,24 @@ pub fn decide_priest_action(
         return true;
     }
 
-    // Priority 2: Power Word: Shield (shield allies)
+    // Priority 2: Dispel Magic - Urgent (Polymorph, Fear - complete loss of control)
+    // These debuffs completely incapacitate, so dispel immediately - before anything else
+    if try_dispel_magic(
+        commands,
+        combat_log,
+        abilities,
+        combatant,
+        my_pos,
+        auras,
+        positions,
+        combatant_info,
+        active_auras_map,
+        90, // Only Polymorph (100) and Fear (90)
+    ) {
+        return true;
+    }
+
+    // Priority 3: Power Word: Shield (shield allies)
     if try_power_word_shield(
         commands,
         combat_log,
@@ -91,7 +125,7 @@ pub fn decide_priest_action(
         return true;
     }
 
-    // Priority 3: Flash Heal (heal injured allies)
+    // Priority 4: Flash Heal (heal injured allies)
     if try_flash_heal(
         commands,
         combat_log,
@@ -106,7 +140,26 @@ pub fn decide_priest_action(
         return true;
     }
 
-    // Priority 4: Mind Blast (damage)
+    // Priority 5: Dispel Magic - Maintenance (Roots, DoTs when team is healthy)
+    // Only clean up lesser debuffs when there's no urgent healing needed
+    if is_team_healthy(combatant.team, combatant_info) {
+        if try_dispel_magic(
+            commands,
+            combat_log,
+            abilities,
+            combatant,
+            my_pos,
+            auras,
+            positions,
+            combatant_info,
+            active_auras_map,
+            50, // Roots (80) and DoTs (50)
+        ) {
+            return true;
+        }
+    }
+
+    // Priority 6: Mind Blast (damage)
     if try_mind_blast(
         commands,
         combat_log,
@@ -221,6 +274,7 @@ fn try_fortitude(
                 ability_name: def.name.to_string(),
                 fear_direction: (0.0, 0.0),
                 fear_direction_timer: 0.0,
+                spell_school: Some(def.spell_school),
             },
         });
     }
@@ -354,6 +408,7 @@ fn try_power_word_shield(
                 ability_name: pw_shield_def.name.to_string(),
                 fear_direction: (0.0, 0.0),
                 fear_direction_timer: 0.0,
+                spell_school: Some(pw_shield_def.spell_school),
             },
         });
     }
@@ -373,6 +428,7 @@ fn try_power_word_shield(
             ability_name: "Weakened Soul".to_string(),
             fear_direction: (0.0, 0.0),
             fear_direction_timer: 0.0,
+            spell_school: None, // Weakened Soul is not dispellable
         },
     });
 
@@ -380,6 +436,187 @@ fn try_power_word_shield(
     shielded_this_frame.insert(shield_entity);
 
     true
+}
+
+/// Try to cast Dispel Magic on an ally with a dispellable debuff.
+/// Returns true if the ability was used.
+///
+/// AI prioritizes dispelling based on severity:
+/// - Polymorph (100) - complete incapacitate
+/// - Fear (90) - loss of control
+/// - Root (80) - movement impaired
+/// - Magic DoTs (50) - Corruption, Immolate
+/// - Movement slows (20) - Frostbolt slow (typically not worth dispelling)
+///
+/// The `min_priority` parameter controls which debuffs are considered:
+/// - 90: Only urgent CC (Polymorph, Fear)
+/// - 50: Include roots and DoTs
+/// - 20: Include slows (not recommended)
+///
+/// Note: The actual debuff removed is random per WoW Classic behavior.
+/// The AI just identifies which ally needs dispelling most.
+#[allow(clippy::too_many_arguments)]
+fn try_dispel_magic(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    positions: &HashMap<Entity, Vec3>,
+    combatant_info: &HashMap<Entity, (u8, CharacterClass, f32, f32)>,
+    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+    min_priority: i32,
+) -> bool {
+    let ability = AbilityType::DispelMagic;
+    let def = abilities.get_unchecked(&ability);
+
+    // Check if spell school is locked out
+    if is_spell_school_locked(def.spell_school, auras) {
+        return false;
+    }
+
+    if combatant.current_mana < def.mana_cost {
+        return false;
+    }
+
+    // Find ally with dispellable debuff, prioritized by severity
+    // Priority: Polymorph > Fear > Root > Magic DoT > Slow
+    let mut best_candidate: Option<(Entity, Vec3, i32)> = None; // (entity, pos, priority)
+
+    for (ally_entity, &(ally_team, _ally_class, ally_hp, _ally_max_hp)) in combatant_info.iter() {
+        // Must be same team and alive
+        if ally_team != combatant.team || ally_hp <= 0.0 {
+            continue;
+        }
+
+        // Check if ally has any dispellable debuffs
+        let ally_auras = match active_auras_map.get(ally_entity) {
+            Some(auras) => auras,
+            None => continue,
+        };
+
+        // Find highest priority dispellable debuff on this ally
+        let mut highest_priority = -1;
+        for aura in ally_auras {
+            if !aura.can_be_dispelled() {
+                continue;
+            }
+
+            // Calculate priority based on aura type
+            // Only dispel debuffs with priority >= 50 (meaningful CC or DoTs)
+            // Don't waste mana/GCDs on minor slows
+            let priority = match aura.effect_type {
+                AuraType::Polymorph => 100,  // Highest - complete incapacitate
+                AuraType::Fear => 90,         // Very high - loss of control
+                AuraType::Root => 80,         // High - can't move
+                AuraType::DamageOverTime => 50,  // Medium - taking damage
+                AuraType::MovementSpeedSlow => 20, // Too low to dispel (threshold is 50)
+                _ => 0, // Other types
+            };
+
+            if priority > highest_priority {
+                highest_priority = priority;
+            }
+        }
+
+        // Check against minimum priority threshold
+        if highest_priority < min_priority {
+            continue; // No debuffs worth dispelling at this priority level
+        }
+
+        // Get position
+        let Some(&ally_pos) = positions.get(ally_entity) else {
+            continue;
+        };
+
+        // Check if in range
+        let distance = my_pos.distance(ally_pos);
+        if distance > def.range {
+            continue;
+        }
+
+        // Track best candidate
+        match best_candidate {
+            None => best_candidate = Some((*ally_entity, ally_pos, highest_priority)),
+            Some((_, _, best_priority)) if highest_priority > best_priority => {
+                best_candidate = Some((*ally_entity, ally_pos, highest_priority));
+            }
+            _ => {}
+        }
+    }
+
+    let Some((dispel_target, _target_pos, _)) = best_candidate else {
+        return false;
+    };
+
+    // Execute the ability
+    combatant.current_mana -= def.mana_cost;
+    combatant.global_cooldown = GCD;
+
+    // Get the target's auras and remove a random dispellable one
+    if let Some(target_auras) = active_auras_map.get(&dispel_target) {
+        // Collect indices of dispellable auras
+        let dispellable_indices: Vec<usize> = target_auras
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| a.can_be_dispelled())
+            .map(|(i, _)| i)
+            .collect();
+
+        if let Some(&idx) = dispellable_indices.first() {
+            // We can't mutably access active_auras_map here, so we'll spawn a DispelPending
+            // component that will be processed in a separate system
+            let removed_aura = &target_auras[idx];
+            let removed_name = removed_aura.ability_name.clone();
+
+            // Spawn a marker to handle the dispel in the aura processing system
+            commands.spawn(DispelPending {
+                target: dispel_target,
+                dispelled_aura_name: removed_name.clone(),
+            });
+
+            // Log the dispel
+            let caster_id = combatant_id(combatant.team, combatant.class);
+            let target_id = combatant_info.get(&dispel_target).map(|(team, class, _, _)| {
+                format!("Team {} {}", team, class.name())
+            });
+            combat_log.log_ability_cast(
+                caster_id,
+                "Dispel Magic".to_string(),
+                target_id.clone(),
+                format!(
+                    "Team {} {} dispels {} from {}",
+                    combatant.team,
+                    combatant.class.name(),
+                    removed_name,
+                    target_id.unwrap_or_else(|| "ally".to_string())
+                ),
+            );
+
+            info!(
+                "Team {} {} dispels {} from ally",
+                combatant.team,
+                combatant.class.name(),
+                removed_name
+            );
+
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Pending dispel to be processed by the aura system.
+/// This allows dispels to be applied without holding mutable references
+/// to the aura map during AI decision making.
+#[derive(bevy::prelude::Component)]
+pub struct DispelPending {
+    /// Target entity to dispel
+    pub target: Entity,
+    /// Name of the aura to remove (used for logging)
+    pub dispelled_aura_name: String,
 }
 
 /// Try to cast Flash Heal on the lowest HP ally.

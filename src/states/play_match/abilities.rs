@@ -69,6 +69,8 @@ pub enum AbilityType {
     PowerWordShield, // Priest shield (self or ally)
     // Crowd Control abilities
     Polymorph, // Mage CC - transforms target into sheep, breaks on any damage
+    // Dispel abilities
+    DispelMagic, // Priest - removes one magic debuff from ally
 }
 
 impl AbilityType {

@@ -234,6 +234,7 @@ fn try_corruption(
                 ability_name: corruption_def.name.to_string(),
                 fear_direction: (0.0, 0.0),
                 fear_direction_timer: 0.0,
+                spell_school: Some(corruption_def.spell_school),
             },
         });
     }

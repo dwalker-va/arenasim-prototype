@@ -204,6 +204,7 @@ fn try_ice_barrier(
             ability_name: "Ice Barrier".to_string(),
             fear_direction: (0.0, 0.0),
             fear_direction_timer: 0.0,
+            spell_school: Some(barrier_def.spell_school),
         },
     });
 
@@ -322,6 +323,7 @@ fn try_arcane_intellect(
                 ability_name: def.name.to_string(),
                 fear_direction: (0.0, 0.0),
                 fear_direction_timer: 0.0,
+                spell_school: Some(def.spell_school),
             },
         });
     }
@@ -442,6 +444,7 @@ fn try_frost_nova(
                     ability_name: nova_def.name.to_string(),
                     fear_direction: (0.0, 0.0),
                     fear_direction_timer: 0.0,
+                    spell_school: Some(nova_def.spell_school),
                 },
             });
         }

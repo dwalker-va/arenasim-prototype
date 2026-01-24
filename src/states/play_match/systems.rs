@@ -34,6 +34,7 @@ pub use super::shadow_sight::track_shadow_sight_timer;
 pub use super::auras::process_dot_ticks;
 pub use super::auras::update_auras;
 pub use super::auras::apply_pending_auras;
+pub use super::auras::process_dispels;
 
 // === Phase 2: Combat and Movement ===
 pub use super::auras::process_aura_breaks;
@@ -121,6 +122,7 @@ where
             process_dot_ticks,
             update_auras,
             apply_pending_auras,
+            process_dispels,
         )
             .chain()
             .in_set(CombatSystemPhase::ResourcesAndAuras)

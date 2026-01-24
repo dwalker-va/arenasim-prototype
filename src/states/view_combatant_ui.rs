@@ -136,6 +136,7 @@ fn get_class_abilities(class: CharacterClass) -> Vec<AbilityType> {
             AbilityType::MindBlast,
             AbilityType::PowerWordFortitude,
             AbilityType::PowerWordShield,
+            AbilityType::DispelMagic,
         ],
         CharacterClass::Warlock => vec![
             AbilityType::Corruption,
@@ -174,6 +175,7 @@ fn get_ability_name(ability: AbilityType) -> &'static str {
         AbilityType::IceBarrier => "Ice Barrier",
         AbilityType::PowerWordShield => "Power Word: Shield",
         AbilityType::Polymorph => "Polymorph",
+        AbilityType::DispelMagic => "Dispel Magic",
     }
 }
 
@@ -196,7 +198,7 @@ pub fn load_ability_icons(
         "Charge", "Rend", "Mortal Strike", "Heroic Strike", "Ambush",
         "Sinister Strike", "Kidney Shot", "Corruption", "Shadowbolt", "Fear", "Immolate",
         "Drain Life", "Pummel", "Kick", "Arcane Intellect", "Battle Shout",
-        "Ice Barrier", "Power Word: Shield", "Polymorph",
+        "Ice Barrier", "Power Word: Shield", "Polymorph", "Dispel Magic",
     ];
 
     // Load handles if not already loaded
@@ -774,6 +776,11 @@ fn build_ability_description(config: &AbilityConfig, stats: &ClassStats) -> Stri
     // Stealth requirement
     if config.requires_stealth {
         parts.push("Must be stealthed.".to_string());
+    }
+
+    // Dispel
+    if config.is_dispel {
+        parts.push("Removes one magic debuff from an ally.".to_string());
     }
 
     if parts.is_empty() {

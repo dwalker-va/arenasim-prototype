@@ -12,6 +12,7 @@ use bevy_egui::egui;
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use super::match_config;
 use super::components::*;
+use super::class_ai::priest::DispelPending;
 use super::utils::{combatant_id, get_next_fct_offset};
 
 /// Update all active auras - tick down durations and remove expired ones.
@@ -326,6 +327,61 @@ pub fn apply_pending_auras(
     // Now insert ActiveAuras components for entities that didn't have them
     for (entity, auras) in new_auras_map {
         commands.entity(entity).insert(ActiveAuras { auras });
+    }
+}
+
+/// Process pending dispels from Dispel Magic.
+///
+/// When a Priest casts Dispel Magic, a DispelPending component is spawned.
+/// This system finds the target's auras and removes a random dispellable one.
+pub fn process_dispels(
+    mut commands: Commands,
+    mut combat_log: ResMut<CombatLog>,
+    pending_dispels: Query<(Entity, &DispelPending)>,
+    mut combatants: Query<(&Combatant, &mut ActiveAuras)>,
+    mut game_rng: ResMut<GameRng>,
+) {
+    for (pending_entity, pending) in pending_dispels.iter() {
+        // Get target's auras
+        if let Ok((combatant, mut active_auras)) = combatants.get_mut(pending.target) {
+            // Find all dispellable aura indices
+            let dispellable_indices: Vec<usize> = active_auras
+                .auras
+                .iter()
+                .enumerate()
+                .filter(|(_, a)| a.can_be_dispelled())
+                .map(|(i, _)| i)
+                .collect();
+
+            if !dispellable_indices.is_empty() {
+                // Randomly select one to remove (WoW Classic behavior)
+                let random_idx = (game_rng.random_f32() * dispellable_indices.len() as f32) as usize;
+                let idx_to_remove = dispellable_indices[random_idx.min(dispellable_indices.len() - 1)];
+
+                let removed_aura = active_auras.auras.remove(idx_to_remove);
+
+                // Log the dispel
+                combat_log.log(
+                    CombatLogEventType::Buff,
+                    format!(
+                        "[DISPEL] {} removed from Team {} {}",
+                        removed_aura.ability_name,
+                        combatant.team,
+                        combatant.class.name()
+                    ),
+                );
+
+                info!(
+                    "[DISPEL] {} removed from Team {} {}",
+                    removed_aura.ability_name,
+                    combatant.team,
+                    combatant.class.name()
+                );
+            }
+        }
+
+        // Remove the pending dispel entity
+        commands.entity(pending_entity).despawn();
     }
 }
 

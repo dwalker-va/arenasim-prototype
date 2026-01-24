@@ -989,6 +989,7 @@ fn apply_interrupt_lockout(
             ability_name: abilities.get_unchecked(&interrupt.ability).name.clone(),
             fear_direction: (0.0, 0.0),
             fear_direction_timer: 0.0,
+            spell_school: None, // Lockouts are not dispellable
         },
     });
 
@@ -1381,6 +1382,11 @@ pub fn process_casting(
         // Apply aura if applicable (store for later application)
         if let Some(aura) = def.applies_aura.as_ref() {
             // We'll apply auras in a separate pass to avoid borrow issues
+            // Convert spell school to Option (None for Physical, since physical = not magic-dispellable)
+            let aura_spell_school = match def.spell_school {
+                SpellSchool::Physical | SpellSchool::None => None,
+                school => Some(school),
+            };
             commands.spawn((
                 AuraPending {
                     target: target_entity,
@@ -1396,6 +1402,7 @@ pub fn process_casting(
                         ability_name: def.name.clone(),
                         fear_direction: (0.0, 0.0),
                         fear_direction_timer: 0.0,
+                        spell_school: aura_spell_school,
                     },
                 },
                 PlayMatchEntity,

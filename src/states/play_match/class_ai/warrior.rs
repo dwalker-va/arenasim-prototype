@@ -232,6 +232,7 @@ fn try_battle_shout(
                     ability_name: def.name.to_string(),
                     fear_direction: (0.0, 0.0),
                     fear_direction_timer: 0.0,
+                    spell_school: None, // Buff, not dispellable by Dispel Magic
                 },
             });
         }
@@ -387,6 +388,7 @@ fn try_rend(
                 ability_name: rend_def.name.to_string(),
                 fear_direction: (0.0, 0.0),
                 fear_direction_timer: 0.0,
+                spell_school: None, // Physical DoT, NOT dispellable
             },
         });
     }
@@ -492,6 +494,7 @@ fn try_mortal_strike(
                 ability_name: ms_def.name.to_string(),
                 fear_direction: (0.0, 0.0),
                 fear_direction_timer: 0.0,
+                spell_school: None, // Physical debuff, NOT dispellable
             },
         });
     }

@@ -158,6 +158,11 @@ pub struct AbilityConfig {
     /// Healing applied to caster per tick (for Drain Life style abilities)
     #[serde(default)]
     pub channel_healing_per_tick: f32,
+
+    // === Dispel ===
+    /// Whether this ability removes magic debuffs from the target
+    #[serde(default)]
+    pub is_dispel: bool,
 }
 
 fn default_scaling_none() -> ScalingStat {
@@ -260,6 +265,7 @@ impl AbilityDefinitions {
             AbilityType::IceBarrier,
             AbilityType::PowerWordShield,
             AbilityType::Polymorph,
+            AbilityType::DispelMagic,
         ];
 
         let missing: Vec<AbilityType> = expected_abilities
