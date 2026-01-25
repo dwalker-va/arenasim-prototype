@@ -4,6 +4,35 @@
 //! and Play Match states.
 
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
+
+/// Rogue stealth opener choice
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum RogueOpener {
+    /// High damage opener from stealth
+    #[default]
+    Ambush,
+    /// 4 second stun opener from stealth
+    CheapShot,
+}
+
+impl RogueOpener {
+    /// Get the display name
+    pub fn name(&self) -> &'static str {
+        match self {
+            RogueOpener::Ambush => "Ambush",
+            RogueOpener::CheapShot => "Cheap Shot",
+        }
+    }
+
+    /// Get a short description
+    pub fn description(&self) -> &'static str {
+        match self {
+            RogueOpener::Ambush => "High damage opener",
+            RogueOpener::CheapShot => "4 sec stun opener",
+        }
+    }
+}
 
 /// Available character classes
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -133,6 +162,10 @@ pub struct MatchConfig {
     pub team1_cc_target: Option<usize>,
     /// Team 2's CC target priority (index into enemy team, None = use heuristics)
     pub team2_cc_target: Option<usize>,
+    /// Team 1's rogue opener preferences (one per slot, defaults to Ambush)
+    pub team1_rogue_openers: Vec<RogueOpener>,
+    /// Team 2's rogue opener preferences (one per slot, defaults to Ambush)
+    pub team2_rogue_openers: Vec<RogueOpener>,
 }
 
 impl Default for MatchConfig {
@@ -147,6 +180,8 @@ impl Default for MatchConfig {
             team2_kill_target: None, // No priority by default
             team1_cc_target: None,   // Use heuristics by default
             team2_cc_target: None,   // Use heuristics by default
+            team1_rogue_openers: vec![RogueOpener::default()],
+            team2_rogue_openers: vec![RogueOpener::default()],
         }
     }
 }
@@ -157,6 +192,7 @@ impl MatchConfig {
         let size = size.clamp(1, 3);
         self.team1_size = size;
         self.team1.resize(size, None);
+        self.team1_rogue_openers.resize(size, RogueOpener::default());
     }
 
     /// Set team 2 size, adjusting the slots vector
@@ -164,6 +200,7 @@ impl MatchConfig {
         let size = size.clamp(1, 3);
         self.team2_size = size;
         self.team2.resize(size, None);
+        self.team2_rogue_openers.resize(size, RogueOpener::default());
     }
 
     /// Check if the match configuration is valid (all slots filled)

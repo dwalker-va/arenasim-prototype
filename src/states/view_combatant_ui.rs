@@ -10,7 +10,7 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use std::collections::HashMap;
-use super::{GameState, match_config::CharacterClass};
+use super::{GameState, match_config::{CharacterClass, MatchConfig, RogueOpener}};
 use super::configure_match_ui::ClassIcons;
 use super::play_match::AbilityType;
 use super::play_match::abilities::{ScalingStat, SpellSchool};
@@ -127,6 +127,7 @@ fn get_class_abilities(class: CharacterClass) -> Vec<AbilityType> {
         ],
         CharacterClass::Rogue => vec![
             AbilityType::Ambush,
+            AbilityType::CheapShot,
             AbilityType::SinisterStrike,
             AbilityType::KidneyShot,
             AbilityType::Kick,
@@ -155,6 +156,7 @@ fn get_ability_name(ability: AbilityType) -> &'static str {
         AbilityType::FlashHeal => "Flash Heal",
         AbilityType::HeroicStrike => "Heroic Strike",
         AbilityType::Ambush => "Ambush",
+        AbilityType::CheapShot => "Cheap Shot",
         AbilityType::FrostNova => "Frost Nova",
         AbilityType::MindBlast => "Mind Blast",
         AbilityType::SinisterStrike => "Sinister Strike",
@@ -195,7 +197,7 @@ pub fn load_ability_icons(
     // All abilities we need icons for
     let abilities = [
         "Frostbolt", "Frost Nova", "Flash Heal", "Mind Blast", "Power Word: Fortitude",
-        "Charge", "Rend", "Mortal Strike", "Heroic Strike", "Ambush",
+        "Charge", "Rend", "Mortal Strike", "Heroic Strike", "Ambush", "Cheap Shot",
         "Sinister Strike", "Kidney Shot", "Corruption", "Shadowbolt", "Fear", "Immolate",
         "Drain Life", "Pummel", "Kick", "Arcane Intellect", "Battle Shout",
         "Ice Barrier", "Power Word: Shield", "Polymorph", "Dispel Magic",
@@ -239,6 +241,7 @@ pub fn view_combatant_ui(
     class_icons: Res<ClassIcons>,
     ability_icons: Option<Res<AbilityIcons>>,
     ability_definitions: Res<AbilityDefinitions>,
+    mut match_config: ResMut<MatchConfig>,
 ) {
     use crate::keybindings::GameAction;
 
@@ -426,6 +429,26 @@ pub fn view_combatant_ui(
                         );
                     },
                 );
+
+                // Rogue-specific: Stealth Opener panel
+                if class == CharacterClass::Rogue {
+                    ui.add_space(15.0);
+
+                    let opener_panel_height = 100.0;
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(content_width, opener_panel_height),
+                        egui::Layout::left_to_right(egui::Align::TOP),
+                        |ui| {
+                            render_rogue_opener_panel(
+                                ui,
+                                content_width,
+                                opener_panel_height,
+                                &view_state,
+                                &mut match_config,
+                            );
+                        },
+                    );
+                }
 
                 ui.add_space(15.0);
 
@@ -869,5 +892,125 @@ fn render_coming_soon_panel(ui: &mut egui::Ui, title: &str, width: f32, height: 
                     .italics(),
             );
         });
+    });
+}
+
+/// Render the Rogue Stealth Opener selection panel
+fn render_rogue_opener_panel(
+    ui: &mut egui::Ui,
+    width: f32,
+    height: f32,
+    view_state: &Res<ViewCombatantState>,
+    match_config: &mut ResMut<MatchConfig>,
+) {
+    // Get current opener preference for this combatant
+    let current_opener = if view_state.team == 1 {
+        match_config.team1_rogue_openers.get(view_state.slot).copied().unwrap_or_default()
+    } else {
+        match_config.team2_rogue_openers.get(view_state.slot).copied().unwrap_or_default()
+    };
+
+    ui.group(|ui| {
+        ui.set_min_width(width - 20.0);
+        ui.set_min_height(height - 20.0);
+
+        ui.label(
+            egui::RichText::new("STEALTH OPENER")
+                .size(18.0)
+                .color(egui::Color32::from_rgb(230, 204, 153))
+                .strong(),
+        );
+
+        ui.add_space(12.0);
+
+        // Opener selection buttons
+        ui.horizontal(|ui| {
+            // Ambush button
+            let ambush_selected = current_opener == RogueOpener::Ambush;
+            let ambush_color = if ambush_selected {
+                egui::Color32::from_rgb(255, 215, 0) // Gold for selected
+            } else {
+                egui::Color32::from_rgb(120, 120, 120) // Gray for unselected
+            };
+
+            let ambush_button = egui::Button::new(
+                egui::RichText::new("Ambush")
+                    .size(16.0)
+                    .color(if ambush_selected {
+                        egui::Color32::BLACK
+                    } else {
+                        egui::Color32::WHITE
+                    }),
+            )
+            .fill(if ambush_selected {
+                ambush_color
+            } else {
+                egui::Color32::from_rgb(50, 50, 60)
+            })
+            .stroke(egui::Stroke::new(2.0, ambush_color))
+            .min_size(egui::vec2(100.0, 32.0));
+
+            if ui.add(ambush_button).clicked() && !ambush_selected {
+                if view_state.team == 1 {
+                    if let Some(opener) = match_config.team1_rogue_openers.get_mut(view_state.slot) {
+                        *opener = RogueOpener::Ambush;
+                    }
+                } else {
+                    if let Some(opener) = match_config.team2_rogue_openers.get_mut(view_state.slot) {
+                        *opener = RogueOpener::Ambush;
+                    }
+                }
+            }
+
+            ui.add_space(10.0);
+
+            // Cheap Shot button
+            let cheap_shot_selected = current_opener == RogueOpener::CheapShot;
+            let cheap_shot_color = if cheap_shot_selected {
+                egui::Color32::from_rgb(255, 215, 0) // Gold for selected
+            } else {
+                egui::Color32::from_rgb(120, 120, 120) // Gray for unselected
+            };
+
+            let cheap_shot_button = egui::Button::new(
+                egui::RichText::new("Cheap Shot")
+                    .size(16.0)
+                    .color(if cheap_shot_selected {
+                        egui::Color32::BLACK
+                    } else {
+                        egui::Color32::WHITE
+                    }),
+            )
+            .fill(if cheap_shot_selected {
+                cheap_shot_color
+            } else {
+                egui::Color32::from_rgb(50, 50, 60)
+            })
+            .stroke(egui::Stroke::new(2.0, cheap_shot_color))
+            .min_size(egui::vec2(100.0, 32.0));
+
+            if ui.add(cheap_shot_button).clicked() && !cheap_shot_selected {
+                if view_state.team == 1 {
+                    if let Some(opener) = match_config.team1_rogue_openers.get_mut(view_state.slot) {
+                        *opener = RogueOpener::CheapShot;
+                    }
+                } else {
+                    if let Some(opener) = match_config.team2_rogue_openers.get_mut(view_state.slot) {
+                        *opener = RogueOpener::CheapShot;
+                    }
+                }
+            }
+        });
+
+        ui.add_space(8.0);
+
+        // Description of current opener
+        let description = current_opener.description();
+        ui.label(
+            egui::RichText::new(description)
+                .size(13.0)
+                .color(egui::Color32::from_rgb(170, 170, 170))
+                .italics(),
+        );
     });
 }

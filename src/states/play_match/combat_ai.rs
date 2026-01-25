@@ -411,6 +411,7 @@ pub fn decide_abilities(
                 my_pos,
                 &positions,
                 &combatant_info,
+                &active_auras_map,
                 &mut instant_attacks,
             ) {
                 continue;

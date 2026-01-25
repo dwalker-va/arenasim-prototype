@@ -330,6 +330,9 @@ pub fn setup_play_match(
             // Register combatant with combat log for timeline display
             combat_log.register_combatant(combatant_id(1, *character));
 
+            // Get rogue opener preference for this slot
+            let rogue_opener = config.team1_rogue_openers.get(i).copied().unwrap_or_default();
+
             spawn_combatant(
                 &mut commands,
                 &mut meshes,
@@ -338,6 +341,7 @@ pub fn setup_play_match(
                 *character,
                 Vec3::new(team1_spawn_x, 1.0, (i as f32 - 1.0) * 3.0),
                 count,
+                rogue_opener,
             );
         }
     }
@@ -352,6 +356,9 @@ pub fn setup_play_match(
             // Register combatant with combat log for timeline display
             combat_log.register_combatant(combatant_id(2, *character));
 
+            // Get rogue opener preference for this slot
+            let rogue_opener = config.team2_rogue_openers.get(i).copied().unwrap_or_default();
+
             spawn_combatant(
                 &mut commands,
                 &mut meshes,
@@ -360,6 +367,7 @@ pub fn setup_play_match(
                 *character,
                 Vec3::new(team2_spawn_x, 1.0, (i as f32 - 1.0) * 3.0),
                 count,
+                rogue_opener,
             );
         }
     }
@@ -422,7 +430,7 @@ fn spawn_gate_bars(
 }
 
 /// Helper function to spawn a single combatant entity.
-/// 
+///
 /// Creates a capsule mesh colored by class, with darker shades for duplicates.
 /// The `duplicate_index` parameter determines how much to darken (0 = base color, 1+ = darkened).
 fn spawn_combatant(
@@ -433,6 +441,7 @@ fn spawn_combatant(
     class: match_config::CharacterClass,
     position: Vec3,
     duplicate_index: usize,
+    rogue_opener: match_config::RogueOpener,
 ) {
     // Get vibrant class colors for 3D visibility
     let base_color = match class {
@@ -466,7 +475,7 @@ fn spawn_combatant(
         Mesh3d(mesh_handle.clone()),
         MeshMaterial3d(material),
         Transform::from_translation(position),
-        Combatant::new(team, class),
+        Combatant::new_with_opener(team, class, rogue_opener),
         FloatingTextState {
             next_pattern_index: 0,
         },

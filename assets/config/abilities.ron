@@ -264,6 +264,21 @@
             requires_stealth: true,
         ),
 
+        CheapShot: (
+            name: "Cheap Shot",
+            cast_time: 0.0,
+            range: 2.5,
+            mana_cost: 60.0,
+            cooldown: 0.0,
+            applies_aura: Some((
+                aura_type: Stun,
+                duration: 4.0,
+                magnitude: 1.0,
+            )),
+            spell_school: Physical,
+            requires_stealth: true,
+        ),
+
         SinisterStrike: (
             name: "Sinister Strike",
             cast_time: 0.0,

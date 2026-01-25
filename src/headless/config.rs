@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-use crate::states::match_config::{ArenaMap, CharacterClass, MatchConfig};
+use crate::states::match_config::{ArenaMap, CharacterClass, MatchConfig, RogueOpener};
 
 /// Headless match configuration loaded from JSON
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,6 +39,12 @@ pub struct HeadlessMatchConfig {
     /// If provided, the match will use a seeded RNG for reproducible results
     #[serde(default)]
     pub random_seed: Option<u64>,
+    /// Team 1's rogue opener preferences (one per slot: "Ambush" or "CheapShot")
+    #[serde(default)]
+    pub team1_rogue_openers: Vec<String>,
+    /// Team 2's rogue opener preferences (one per slot: "Ambush" or "CheapShot")
+    #[serde(default)]
+    pub team2_rogue_openers: Vec<String>,
 }
 
 fn default_map() -> String {
@@ -155,6 +161,14 @@ impl HeadlessMatchConfig {
         }
     }
 
+    /// Parse a rogue opener name string into RogueOpener
+    fn parse_rogue_opener(name: &str) -> RogueOpener {
+        match name {
+            "CheapShot" | "Cheap Shot" => RogueOpener::CheapShot,
+            _ => RogueOpener::Ambush, // Default to Ambush for unknown values
+        }
+    }
+
     /// Convert to the game's MatchConfig format
     pub fn to_match_config(&self) -> Result<MatchConfig, String> {
         let team1: Vec<Option<CharacterClass>> = self
@@ -171,6 +185,21 @@ impl HeadlessMatchConfig {
 
         let map = Self::parse_map(&self.map)?;
 
+        // Parse rogue openers, defaulting to Ambush for missing entries
+        let mut team1_rogue_openers: Vec<RogueOpener> = self
+            .team1_rogue_openers
+            .iter()
+            .map(|s| Self::parse_rogue_opener(s))
+            .collect();
+        team1_rogue_openers.resize(team1.len(), RogueOpener::default());
+
+        let mut team2_rogue_openers: Vec<RogueOpener> = self
+            .team2_rogue_openers
+            .iter()
+            .map(|s| Self::parse_rogue_opener(s))
+            .collect();
+        team2_rogue_openers.resize(team2.len(), RogueOpener::default());
+
         Ok(MatchConfig {
             team1_size: team1.len(),
             team2_size: team2.len(),
@@ -181,6 +210,8 @@ impl HeadlessMatchConfig {
             team2_kill_target: self.team2_kill_target,
             team1_cc_target: self.team1_cc_target,
             team2_cc_target: self.team2_cc_target,
+            team1_rogue_openers,
+            team2_rogue_openers,
         })
     }
 }

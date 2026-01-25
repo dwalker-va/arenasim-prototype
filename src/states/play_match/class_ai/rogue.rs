@@ -13,7 +13,7 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 use crate::combat::log::CombatLog;
-use crate::states::match_config::CharacterClass;
+use crate::states::match_config::{CharacterClass, RogueOpener};
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
@@ -50,6 +50,7 @@ pub fn decide_rogue_action(
     my_pos: Vec3,
     positions: &HashMap<Entity, Vec3>,
     combatant_info: &HashMap<Entity, (u8, CharacterClass, f32, f32)>,
+    active_auras_map: &HashMap<Entity, Vec<Aura>>,
     instant_attacks: &mut Vec<(Entity, Entity, f32, u8, CharacterClass, AbilityType)>,
 ) -> bool {
     // Get target
@@ -62,19 +63,32 @@ pub fn decide_rogue_action(
     };
 
     if combatant.stealthed {
-        // Stealthed: Use Ambush
-        return try_ambush(
-            combat_log,
-            game_rng,
-            abilities,
-            entity,
-            combatant,
-            my_pos,
-            target_entity,
-            target_pos,
-            combatant_info,
-            instant_attacks,
-        );
+        // Stealthed: Use opener based on preference
+        return match combatant.rogue_opener {
+            RogueOpener::Ambush => try_ambush(
+                combat_log,
+                game_rng,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                target_entity,
+                target_pos,
+                combatant_info,
+                instant_attacks,
+            ),
+            RogueOpener::CheapShot => try_cheap_shot(
+                commands,
+                combat_log,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                target_entity,
+                target_pos,
+                combatant_info,
+            ),
+        };
     }
 
     // Not stealthed: Check GCD first
@@ -87,6 +101,7 @@ pub fn decide_rogue_action(
     // - If CC target is in melee range, use it (strategic CC on healer)
     // - If CC target is out of range but kill target is in range, use kill target
     // - A stun on kill target is still valuable (helps secure kill)
+    // - Don't use if target is already stunned (waste of CC)
     let kidney_shot_target = select_melee_cc_target(
         combatant.cc_target,
         combatant.target,
@@ -94,18 +109,26 @@ pub fn decide_rogue_action(
         positions,
     );
     if let Some((ks_target_entity, ks_target_pos)) = kidney_shot_target {
-        if try_kidney_shot(
-            commands,
-            combat_log,
-            abilities,
-            entity,
-            combatant,
-            my_pos,
-            ks_target_entity,
-            ks_target_pos,
-            combatant_info,
-        ) {
-            return true;
+        // Check if target is already stunned - don't waste Kidney Shot
+        let target_already_stunned = active_auras_map
+            .get(&ks_target_entity)
+            .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::Stun))
+            .unwrap_or(false);
+
+        if !target_already_stunned {
+            if try_kidney_shot(
+                commands,
+                combat_log,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                ks_target_entity,
+                ks_target_pos,
+                combatant_info,
+            ) {
+                return true;
+            }
         }
     }
 
@@ -177,6 +200,100 @@ fn try_ambush(
             combatant.class.name()
         ),
     );
+
+    info!(
+        "Team {} {} uses {} from stealth!",
+        combatant.team,
+        combatant.class.name(),
+        def.name
+    );
+
+    true
+}
+
+/// Try to use Cheap Shot from stealth.
+/// Returns true if Cheap Shot was used.
+#[allow(clippy::too_many_arguments)]
+fn try_cheap_shot(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    target_entity: Entity,
+    target_pos: Vec3,
+    combatant_info: &HashMap<Entity, (u8, CharacterClass, f32, f32)>,
+) -> bool {
+    let ability = AbilityType::CheapShot;
+    let def = abilities.get_unchecked(&ability);
+
+    if !ability.can_cast_config(combatant, target_pos, my_pos, def) {
+        return false;
+    }
+
+    // Execute Cheap Shot
+    spawn_speech_bubble(commands, entity, "Cheap Shot");
+    combatant.current_mana -= def.mana_cost;
+    combatant.stealthed = false;
+    combatant.global_cooldown = GCD;
+
+    // Log
+    let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
+    let target_id = combatant_info
+        .get(&target_entity)
+        .map(|(team, class, _, _)| format!("Team {} {}", team, class.name()));
+    combat_log.log_ability_cast(
+        caster_id,
+        "Cheap Shot".to_string(),
+        target_id.clone(),
+        format!(
+            "Team {} {} uses Cheap Shot from stealth",
+            combatant.team,
+            combatant.class.name()
+        ),
+    );
+
+    // Apply stun aura
+    if let Some(aura) = def.applies_aura.as_ref() {
+        commands.spawn(AuraPending {
+            target: target_entity,
+            aura: Aura {
+                effect_type: aura.aura_type,
+                duration: aura.duration,
+                magnitude: aura.magnitude,
+                break_on_damage_threshold: aura.break_on_damage,
+                accumulated_damage: 0.0,
+                tick_interval: 0.0,
+                time_until_next_tick: 0.0,
+                caster: Some(entity),
+                ability_name: def.name.to_string(),
+                fear_direction: (0.0, 0.0),
+                fear_direction_timer: 0.0,
+                spell_school: None, // Physical stun, not dispellable
+            },
+        });
+
+        // Log CC
+        if let Some((target_team, target_class, _, _)) = combatant_info.get(&target_entity) {
+            let cc_type = format!("{:?}", aura.aura_type);
+            let message = format!(
+                "Team {} {} uses {} on Team {} {}",
+                combatant.team,
+                combatant.class.name(),
+                def.name,
+                target_team,
+                target_class.name()
+            );
+            combat_log.log_crowd_control(
+                combatant_id(combatant.team, combatant.class),
+                combatant_id(*target_team, *target_class),
+                cc_type,
+                aura.duration,
+                message,
+            );
+        }
+    }
 
     info!(
         "Team {} {} uses {} from stealth!",

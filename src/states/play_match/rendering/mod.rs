@@ -39,6 +39,7 @@ pub fn get_ability_icon_path(ability: &str) -> Option<&'static str> {
         "Mortal Strike" => Some("icons/abilities/ability_warrior_savageblow.jpg"),
         "Heroic Strike" => Some("icons/abilities/ability_rogue_ambush.jpg"),
         "Ambush" => Some("icons/abilities/ability_rogue_ambush.jpg"),
+        "Cheap Shot" => Some("icons/abilities/ability_cheapshot.jpg"),
         "Sinister Strike" => Some("icons/abilities/spell_shadow_ritualofsacrifice.jpg"),
         "Kidney Shot" => Some("icons/abilities/ability_rogue_kidneyshot.jpg"),
         "Corruption" => Some("icons/abilities/spell_shadow_abominationexplosion.jpg"),
@@ -61,7 +62,7 @@ pub fn get_ability_icon_path(ability: &str) -> Option<&'static str> {
 /// All abilities that have icons
 pub const SPELL_ICON_ABILITIES: &[&str] = &[
     "Frostbolt", "Frost Nova", "Flash Heal", "Mind Blast", "Power Word: Fortitude",
-    "Charge", "Rend", "Mortal Strike", "Heroic Strike", "Ambush",
+    "Charge", "Rend", "Mortal Strike", "Heroic Strike", "Ambush", "Cheap Shot",
     "Sinister Strike", "Kidney Shot", "Corruption", "Shadowbolt", "Fear", "Immolate",
     "Drain Life", "Pummel", "Kick", "Arcane Intellect", "Battle Shout",
     "Ice Barrier", "Power Word: Shield", "Polymorph", "Dispel Magic",

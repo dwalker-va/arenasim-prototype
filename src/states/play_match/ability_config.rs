@@ -245,6 +245,7 @@ impl AbilityDefinitions {
             AbilityType::FlashHeal,
             AbilityType::HeroicStrike,
             AbilityType::Ambush,
+            AbilityType::CheapShot,
             AbilityType::FrostNova,
             AbilityType::MindBlast,
             AbilityType::SinisterStrike,

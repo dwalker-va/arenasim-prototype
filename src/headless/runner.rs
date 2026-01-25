@@ -146,9 +146,10 @@ fn headless_setup_match(
     for (i, character_opt) in config.team1.iter().enumerate() {
         if let Some(character) = character_opt {
             combat_log.register_combatant(combatant_id(1, *character));
+            let rogue_opener = config.team1_rogue_openers.get(i).copied().unwrap_or_default();
             commands.spawn((
                 Transform::from_xyz(team1_spawn_x, 1.0, (i as f32 - 1.0) * 3.0),
-                Combatant::new(1, *character),
+                Combatant::new_with_opener(1, *character, rogue_opener),
                 FloatingTextState {
                     next_pattern_index: 0,
                 },
@@ -161,9 +162,10 @@ fn headless_setup_match(
     for (i, character_opt) in config.team2.iter().enumerate() {
         if let Some(character) = character_opt {
             combat_log.register_combatant(combatant_id(2, *character));
+            let rogue_opener = config.team2_rogue_openers.get(i).copied().unwrap_or_default();
             commands.spawn((
                 Transform::from_xyz(team2_spawn_x, 1.0, (i as f32 - 1.0) * 3.0),
-                Combatant::new(2, *character),
+                Combatant::new_with_opener(2, *character, rogue_opener),
                 FloatingTextState {
                     next_pattern_index: 0,
                 },

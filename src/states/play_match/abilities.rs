@@ -45,6 +45,7 @@ pub enum AbilityType {
     FlashHeal,
     HeroicStrike,
     Ambush,
+    CheapShot, // Rogue stealth opener - 4s stun
     FrostNova,
     MindBlast,
     SinisterStrike,
@@ -93,8 +94,8 @@ impl AbilityType {
             return false;
         }
 
-        // Ambush requires stealth
-        if matches!(self, AbilityType::Ambush) && !caster.stealthed {
+        // Stealth abilities require stealth
+        if matches!(self, AbilityType::Ambush | AbilityType::CheapShot) && !caster.stealthed {
             return false;
         }
 

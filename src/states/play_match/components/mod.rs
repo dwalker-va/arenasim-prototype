@@ -22,7 +22,7 @@ use bevy_egui::egui;
 use rand::prelude::*;
 use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
-use super::match_config;
+use super::match_config::{self, RogueOpener};
 use super::abilities::{AbilityType, ScalingStat};
 use super::ability_config::AbilityConfig;
 
@@ -413,6 +413,8 @@ pub struct Combatant {
     pub global_cooldown: f32,
     /// When > 0, combatant will move away from enemies (kiting). Decrements over time.
     pub kiting_timer: f32,
+    /// Rogue-specific: which opener to use from stealth (Ambush or Cheap Shot)
+    pub rogue_opener: RogueOpener,
 }
 
 impl Combatant {
@@ -461,7 +463,15 @@ impl Combatant {
             ability_cooldowns: std::collections::HashMap::new(),
             global_cooldown: 0.0,
             kiting_timer: 0.0,
+            rogue_opener: RogueOpener::default(),
         }
+    }
+
+    /// Create a new combatant with a specific rogue opener preference.
+    pub fn new_with_opener(team: u8, class: match_config::CharacterClass, rogue_opener: RogueOpener) -> Self {
+        let mut combatant = Self::new(team, class);
+        combatant.rogue_opener = rogue_opener;
+        combatant
     }
     
     /// Check if this combatant is alive (health > 0).
