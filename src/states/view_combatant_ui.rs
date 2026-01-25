@@ -434,7 +434,7 @@ pub fn view_combatant_ui(
                 if class == CharacterClass::Rogue {
                     ui.add_space(15.0);
 
-                    let opener_panel_height = 100.0;
+                    let opener_panel_height = 120.0;
                     ui.allocate_ui_with_layout(
                         egui::vec2(content_width, opener_panel_height),
                         egui::Layout::left_to_right(egui::Align::TOP),
@@ -445,6 +445,7 @@ pub fn view_combatant_ui(
                                 opener_panel_height,
                                 &view_state,
                                 &mut match_config,
+                                &ability_icons,
                             );
                         },
                     );
@@ -895,13 +896,14 @@ fn render_coming_soon_panel(ui: &mut egui::Ui, title: &str, width: f32, height: 
     });
 }
 
-/// Render the Rogue Stealth Opener selection panel
+/// Render the Rogue Stealth Opener selection panel with ability icons
 fn render_rogue_opener_panel(
     ui: &mut egui::Ui,
     width: f32,
     height: f32,
     view_state: &Res<ViewCombatantState>,
     match_config: &mut ResMut<MatchConfig>,
+    ability_icons: &Option<Res<AbilityIcons>>,
 ) {
     // Get current opener preference for this combatant
     let current_opener = if view_state.team == 1 {
@@ -923,84 +925,91 @@ fn render_rogue_opener_panel(
 
         ui.add_space(12.0);
 
-        // Opener selection buttons
+        // Opener selection with icons
+        let icon_size = 48.0;
+        let gold = egui::Color32::from_rgb(255, 215, 0);
+        let gray = egui::Color32::from_rgb(80, 80, 90);
+
+        // Track which opener was clicked (if any)
+        let mut clicked_opener: Option<RogueOpener> = None;
+
         ui.horizontal(|ui| {
-            // Ambush button
-            let ambush_selected = current_opener == RogueOpener::Ambush;
-            let ambush_color = if ambush_selected {
-                egui::Color32::from_rgb(255, 215, 0) // Gold for selected
-            } else {
-                egui::Color32::from_rgb(120, 120, 120) // Gray for unselected
-            };
+            // Define opener options
+            let openers = [
+                (RogueOpener::Ambush, "Ambush"),
+                (RogueOpener::CheapShot, "Cheap Shot"),
+            ];
 
-            let ambush_button = egui::Button::new(
-                egui::RichText::new("Ambush")
-                    .size(16.0)
-                    .color(if ambush_selected {
-                        egui::Color32::BLACK
-                    } else {
-                        egui::Color32::WHITE
-                    }),
-            )
-            .fill(if ambush_selected {
-                ambush_color
-            } else {
-                egui::Color32::from_rgb(50, 50, 60)
-            })
-            .stroke(egui::Stroke::new(2.0, ambush_color))
-            .min_size(egui::vec2(100.0, 32.0));
-
-            if ui.add(ambush_button).clicked() && !ambush_selected {
-                if view_state.team == 1 {
-                    if let Some(opener) = match_config.team1_rogue_openers.get_mut(view_state.slot) {
-                        *opener = RogueOpener::Ambush;
-                    }
-                } else {
-                    if let Some(opener) = match_config.team2_rogue_openers.get_mut(view_state.slot) {
-                        *opener = RogueOpener::Ambush;
-                    }
+            for (i, (opener, icon_key)) in openers.iter().enumerate() {
+                if i > 0 {
+                    ui.add_space(20.0);
                 }
-            }
 
-            ui.add_space(10.0);
+                let is_selected = current_opener == *opener;
+                let border_color = if is_selected { gold } else { gray };
+                let border_width = if is_selected { 3.0 } else { 2.0 };
 
-            // Cheap Shot button
-            let cheap_shot_selected = current_opener == RogueOpener::CheapShot;
-            let cheap_shot_color = if cheap_shot_selected {
-                egui::Color32::from_rgb(255, 215, 0) // Gold for selected
-            } else {
-                egui::Color32::from_rgb(120, 120, 120) // Gray for unselected
-            };
+                ui.vertical(|ui| {
+                    // Get icon texture
+                    let icon_texture = ability_icons.as_ref().and_then(|icons| {
+                        icons.textures.get(*icon_key).copied()
+                    });
 
-            let cheap_shot_button = egui::Button::new(
-                egui::RichText::new("Cheap Shot")
-                    .size(16.0)
-                    .color(if cheap_shot_selected {
-                        egui::Color32::BLACK
+                    // Allocate space for the icon button
+                    let (rect, response) = ui.allocate_exact_size(
+                        egui::vec2(icon_size, icon_size),
+                        egui::Sense::click(),
+                    );
+
+                    // Draw icon or placeholder
+                    let painter = ui.painter();
+                    if let Some(texture_id) = icon_texture {
+                        painter.image(
+                            texture_id,
+                            rect,
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
                     } else {
-                        egui::Color32::WHITE
-                    }),
-            )
-            .fill(if cheap_shot_selected {
-                cheap_shot_color
-            } else {
-                egui::Color32::from_rgb(50, 50, 60)
-            })
-            .stroke(egui::Stroke::new(2.0, cheap_shot_color))
-            .min_size(egui::vec2(100.0, 32.0));
+                        painter.rect_filled(rect, 4.0, egui::Color32::from_rgb(50, 50, 65));
+                    }
 
-            if ui.add(cheap_shot_button).clicked() && !cheap_shot_selected {
-                if view_state.team == 1 {
-                    if let Some(opener) = match_config.team1_rogue_openers.get_mut(view_state.slot) {
-                        *opener = RogueOpener::CheapShot;
+                    // Draw border
+                    painter.rect_stroke(rect, 4.0, egui::Stroke::new(border_width, border_color));
+
+                    // Track click
+                    if response.clicked() && !is_selected {
+                        clicked_opener = Some(*opener);
                     }
-                } else {
-                    if let Some(opener) = match_config.team2_rogue_openers.get_mut(view_state.slot) {
-                        *opener = RogueOpener::CheapShot;
-                    }
-                }
+
+                    // Label below icon
+                    ui.add_space(4.0);
+                    let label_color = if is_selected {
+                        gold
+                    } else {
+                        egui::Color32::from_rgb(180, 180, 180)
+                    };
+                    ui.label(
+                        egui::RichText::new(opener.name())
+                            .size(13.0)
+                            .color(label_color),
+                    );
+                });
             }
         });
+
+        // Apply click outside of the loop to avoid borrow issues
+        if let Some(opener) = clicked_opener {
+            if view_state.team == 1 {
+                if let Some(o) = match_config.team1_rogue_openers.get_mut(view_state.slot) {
+                    *o = opener;
+                }
+            } else {
+                if let Some(o) = match_config.team2_rogue_openers.get_mut(view_state.slot) {
+                    *o = opener;
+                }
+            }
+        }
 
         ui.add_space(8.0);
 
