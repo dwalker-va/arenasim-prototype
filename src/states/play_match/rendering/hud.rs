@@ -850,5 +850,7 @@ fn get_aura_fallback_color(aura_type: &AuraType) -> egui::Color32 {
         AuraType::WeakenedSoul => egui::Color32::from_rgb(169, 169, 169), // Dark gray
         AuraType::Polymorph => egui::Color32::from_rgb(255, 182, 193), // Light pink
         AuraType::ShadowSight => egui::Color32::from_rgb(75, 0, 130), // Indigo
+        AuraType::DamageReduction => egui::Color32::from_rgb(139, 69, 19), // Saddle brown (debuff)
+        AuraType::CastTimeIncrease => egui::Color32::from_rgb(128, 0, 128), // Purple (curse)
     }
 }

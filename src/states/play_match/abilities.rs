@@ -57,11 +57,14 @@ pub enum AbilityType {
     Pummel,    // Warrior interrupt
     Kick,      // Rogue interrupt
     // Warlock abilities
-    Corruption, // Shadow DoT
-    Shadowbolt, // Shadow projectile
-    Fear,       // Shadow CC - target flees, breaks on damage
-    Immolate,   // Fire direct damage + DoT
-    DrainLife,  // Shadow channel - damages target, heals caster
+    Corruption,     // Shadow DoT
+    Shadowbolt,     // Shadow projectile
+    Fear,           // Shadow CC - target flees, breaks on damage
+    Immolate,       // Fire direct damage + DoT
+    DrainLife,      // Shadow channel - damages target, heals caster
+    CurseOfAgony,   // Shadow DoT - 84 damage over 24s
+    CurseOfWeakness, // Shadow debuff - reduces target damage dealt
+    CurseOfTongues, // Shadow debuff - increases target cast time
     // Buff abilities
     ArcaneIntellect, // Mage buff - increases max mana
     BattleShout,     // Warrior buff - increases attack power

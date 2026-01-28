@@ -406,5 +406,55 @@
             channel_tick_interval: 1.0,
             channel_healing_per_tick: 10.0,
         ),
+
+        // Curse of Agony: Shadow DoT dealing 84 damage over 24 seconds
+        // WoW Classic: 25 mana, 30yd range, instant, 24s duration
+        // 6 ticks (every 4 seconds), 14 damage per tick = 84 total
+        CurseOfAgony: (
+            name: "Curse of Agony",
+            cast_time: 0.0,
+            range: 30.0,
+            mana_cost: 25.0,
+            cooldown: 0.0,
+            applies_aura: Some((
+                aura_type: DamageOverTime,
+                duration: 24.0,
+                magnitude: 14.0,
+                tick_interval: 4.0,
+            )),
+            spell_school: Shadow,
+        ),
+
+        // Curse of Weakness: Reduces target's damage dealt by 3 for 2 minutes
+        // WoW Classic: 20 mana, 30yd range, instant, 2 min duration
+        CurseOfWeakness: (
+            name: "Curse of Weakness",
+            cast_time: 0.0,
+            range: 30.0,
+            mana_cost: 20.0,
+            cooldown: 0.0,
+            applies_aura: Some((
+                aura_type: DamageReduction,
+                duration: 120.0,
+                magnitude: 3.0,
+            )),
+            spell_school: Shadow,
+        ),
+
+        // Curse of Tongues: Increases target's cast time by 50% for 30 seconds
+        // WoW Classic: 80 mana, 30yd range, instant, 30s duration
+        CurseOfTongues: (
+            name: "Curse of Tongues",
+            cast_time: 0.0,
+            range: 30.0,
+            mana_cost: 80.0,
+            cooldown: 0.0,
+            applies_aura: Some((
+                aura_type: CastTimeIncrease,
+                duration: 30.0,
+                magnitude: 0.5,
+            )),
+            spell_school: Shadow,
+        ),
     }
 )

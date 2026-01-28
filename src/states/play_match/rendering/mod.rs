@@ -115,6 +115,8 @@ pub fn get_aura_icon_key(aura: &Aura) -> String {
         AuraType::WeakenedSoul => "aura_weakened_soul".to_string(),
         AuraType::Polymorph => "aura_stun".to_string(), // Reuse stun icon as fallback
         AuraType::ShadowSight => "aura_dot".to_string(), // Reuse DoT icon as fallback
+        AuraType::DamageReduction => "aura_dot".to_string(), // Curse debuff, reuse DoT icon
+        AuraType::CastTimeIncrease => "aura_dot".to_string(), // Curse debuff, reuse DoT icon
     }
 }
 

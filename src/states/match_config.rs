@@ -34,6 +34,43 @@ impl RogueOpener {
     }
 }
 
+/// Warlock curse preference for a specific enemy target
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum WarlockCurse {
+    /// Curse of Agony - DoT: 84 Shadow damage over 24 seconds
+    #[default]
+    Agony,
+    /// Curse of Weakness - reduces target's damage dealt by 3 for 2 minutes
+    Weakness,
+    /// Curse of Tongues - increases target's cast time by 50% for 30 seconds
+    Tongues,
+}
+
+impl WarlockCurse {
+    /// Get the display name
+    pub fn name(&self) -> &'static str {
+        match self {
+            WarlockCurse::Agony => "Curse of Agony",
+            WarlockCurse::Weakness => "Curse of Weakness",
+            WarlockCurse::Tongues => "Curse of Tongues",
+        }
+    }
+
+    /// Get a short description
+    pub fn description(&self) -> &'static str {
+        match self {
+            WarlockCurse::Agony => "84 damage over 24s",
+            WarlockCurse::Weakness => "-3 damage dealt",
+            WarlockCurse::Tongues => "+50% cast time",
+        }
+    }
+
+    /// Get all curse variants for UI iteration
+    pub fn all() -> &'static [WarlockCurse] {
+        &[WarlockCurse::Agony, WarlockCurse::Weakness, WarlockCurse::Tongues]
+    }
+}
+
 /// Available character classes
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CharacterClass {
@@ -166,6 +203,11 @@ pub struct MatchConfig {
     pub team1_rogue_openers: Vec<RogueOpener>,
     /// Team 2's rogue opener preferences (one per slot, defaults to Ambush)
     pub team2_rogue_openers: Vec<RogueOpener>,
+    /// Team 1's warlock curse preferences: [warlock_slot][enemy_target_index] -> curse
+    /// Outer vec indexed by team slot, inner vec indexed by enemy target slot
+    pub team1_warlock_curse_prefs: Vec<Vec<WarlockCurse>>,
+    /// Team 2's warlock curse preferences: [warlock_slot][enemy_target_index] -> curse
+    pub team2_warlock_curse_prefs: Vec<Vec<WarlockCurse>>,
 }
 
 impl Default for MatchConfig {
@@ -182,6 +224,9 @@ impl Default for MatchConfig {
             team2_cc_target: None,   // Use heuristics by default
             team1_rogue_openers: vec![RogueOpener::default()],
             team2_rogue_openers: vec![RogueOpener::default()],
+            // One vec per slot, inner vec has curse pref per enemy (defaults to Agony)
+            team1_warlock_curse_prefs: vec![vec![WarlockCurse::default()]],
+            team2_warlock_curse_prefs: vec![vec![WarlockCurse::default()]],
         }
     }
 }
@@ -193,6 +238,12 @@ impl MatchConfig {
         self.team1_size = size;
         self.team1.resize(size, None);
         self.team1_rogue_openers.resize(size, RogueOpener::default());
+        // Resize curse prefs: one inner vec per slot, each sized to enemy team
+        let enemy_size = self.team2_size;
+        self.team1_warlock_curse_prefs.resize(size, vec![WarlockCurse::default(); enemy_size]);
+        for prefs in &mut self.team1_warlock_curse_prefs {
+            prefs.resize(enemy_size, WarlockCurse::default());
+        }
     }
 
     /// Set team 2 size, adjusting the slots vector
@@ -201,12 +252,55 @@ impl MatchConfig {
         self.team2_size = size;
         self.team2.resize(size, None);
         self.team2_rogue_openers.resize(size, RogueOpener::default());
+        // Resize curse prefs: one inner vec per slot, each sized to enemy team
+        let enemy_size = self.team1_size;
+        self.team2_warlock_curse_prefs.resize(size, vec![WarlockCurse::default(); enemy_size]);
+        for prefs in &mut self.team2_warlock_curse_prefs {
+            prefs.resize(enemy_size, WarlockCurse::default());
+        }
+        // Also resize team1's curse prefs inner vecs to match new enemy count
+        for prefs in &mut self.team1_warlock_curse_prefs {
+            prefs.resize(size, WarlockCurse::default());
+        }
     }
 
     /// Check if the match configuration is valid (all slots filled)
     pub fn is_valid(&self) -> bool {
         self.team1.iter().all(|slot| slot.is_some())
             && self.team2.iter().all(|slot| slot.is_some())
+    }
+
+    /// Get the curse preference for a specific warlock slot and enemy target
+    pub fn get_curse_pref(&self, team: u8, slot: usize, enemy_target: usize) -> WarlockCurse {
+        let prefs = if team == 1 {
+            &self.team1_warlock_curse_prefs
+        } else {
+            &self.team2_warlock_curse_prefs
+        };
+        prefs
+            .get(slot)
+            .and_then(|slot_prefs| slot_prefs.get(enemy_target))
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// Set the curse preference for a specific warlock slot and enemy target
+    pub fn set_curse_pref(&mut self, team: u8, slot: usize, enemy_target: usize, curse: WarlockCurse) {
+        let prefs = if team == 1 {
+            &mut self.team1_warlock_curse_prefs
+        } else {
+            &mut self.team2_warlock_curse_prefs
+        };
+        // Ensure the outer vec is large enough
+        if prefs.len() <= slot {
+            let enemy_size = if team == 1 { self.team2_size } else { self.team1_size };
+            prefs.resize(slot + 1, vec![WarlockCurse::default(); enemy_size]);
+        }
+        // Ensure the inner vec is large enough
+        if prefs[slot].len() <= enemy_target {
+            prefs[slot].resize(enemy_target + 1, WarlockCurse::default());
+        }
+        prefs[slot][enemy_target] = curse;
     }
 }
 

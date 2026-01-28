@@ -433,6 +433,8 @@ pub fn process_aura_breaks(
                         AuraType::ShadowSight => "Shadow Sight", // Should never break on damage (has 0.0 threshold)
                         AuraType::Absorb => "Shield", // Shields don't break on damage, they absorb it
                         AuraType::WeakenedSoul => "Weakened Soul", // Debuff, doesn't break on damage
+                        AuraType::DamageReduction => "Curse of Weakness", // Curse, doesn't break on damage
+                        AuraType::CastTimeIncrease => "Curse of Tongues", // Curse, doesn't break on damage
                     };
                     
                     let message = format!(

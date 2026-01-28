@@ -354,6 +354,12 @@ pub enum AuraType {
     /// Polymorph - target wanders slowly, can't attack/cast, breaks on ANY damage.
     /// Separate from Stun for diminishing returns categories (incapacitates vs stuns).
     Polymorph,
+    /// Reduces outgoing damage by a flat amount (magnitude = damage reduction)
+    /// Used by Curse of Weakness to reduce enemy damage dealt.
+    DamageReduction,
+    /// Increases cast time by a percentage (magnitude = multiplier, e.g., 0.5 = 50% slower)
+    /// Used by Curse of Tongues to slow enemy casting.
+    CastTimeIncrease,
 }
 
 // ============================================================================

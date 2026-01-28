@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-use crate::states::match_config::{ArenaMap, CharacterClass, MatchConfig, RogueOpener};
+use crate::states::match_config::{ArenaMap, CharacterClass, MatchConfig, RogueOpener, WarlockCurse};
 
 /// Headless match configuration loaded from JSON
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,6 +45,13 @@ pub struct HeadlessMatchConfig {
     /// Team 2's rogue opener preferences (one per slot: "Ambush" or "CheapShot")
     #[serde(default)]
     pub team2_rogue_openers: Vec<String>,
+    /// Team 1's warlock curse preferences: outer vec indexed by slot, inner vec indexed by enemy target
+    /// Values: "Agony", "Weakness", "Tongues" (defaults to Agony)
+    #[serde(default)]
+    pub team1_warlock_curse_prefs: Vec<Option<Vec<String>>>,
+    /// Team 2's warlock curse preferences: outer vec indexed by slot, inner vec indexed by enemy target
+    #[serde(default)]
+    pub team2_warlock_curse_prefs: Vec<Option<Vec<String>>>,
 }
 
 fn default_map() -> String {
@@ -169,6 +176,41 @@ impl HeadlessMatchConfig {
         }
     }
 
+    /// Parse a warlock curse name string into WarlockCurse
+    fn parse_warlock_curse(name: &str) -> WarlockCurse {
+        match name {
+            "Weakness" | "CurseOfWeakness" | "Curse of Weakness" => WarlockCurse::Weakness,
+            "Tongues" | "CurseOfTongues" | "Curse of Tongues" => WarlockCurse::Tongues,
+            _ => WarlockCurse::Agony, // Default to Agony for unknown values
+        }
+    }
+
+    /// Parse warlock curse preferences from JSON format
+    /// Outer vec indexed by slot, inner vec indexed by enemy target
+    fn parse_warlock_curse_prefs(
+        prefs: &[Option<Vec<String>>],
+        team_size: usize,
+        enemy_size: usize,
+    ) -> Vec<Vec<WarlockCurse>> {
+        let mut result = Vec::with_capacity(team_size);
+        for slot in 0..team_size {
+            let slot_prefs = prefs
+                .get(slot)
+                .and_then(|opt| opt.as_ref())
+                .map(|curses| {
+                    let mut parsed: Vec<WarlockCurse> = curses
+                        .iter()
+                        .map(|s| Self::parse_warlock_curse(s))
+                        .collect();
+                    parsed.resize(enemy_size, WarlockCurse::default());
+                    parsed
+                })
+                .unwrap_or_else(|| vec![WarlockCurse::default(); enemy_size]);
+            result.push(slot_prefs);
+        }
+        result
+    }
+
     /// Convert to the game's MatchConfig format
     pub fn to_match_config(&self) -> Result<MatchConfig, String> {
         let team1: Vec<Option<CharacterClass>> = self
@@ -200,6 +242,18 @@ impl HeadlessMatchConfig {
             .collect();
         team2_rogue_openers.resize(team2.len(), RogueOpener::default());
 
+        // Parse warlock curse preferences
+        let team1_warlock_curse_prefs = Self::parse_warlock_curse_prefs(
+            &self.team1_warlock_curse_prefs,
+            team1.len(),
+            team2.len(),
+        );
+        let team2_warlock_curse_prefs = Self::parse_warlock_curse_prefs(
+            &self.team2_warlock_curse_prefs,
+            team2.len(),
+            team1.len(),
+        );
+
         Ok(MatchConfig {
             team1_size: team1.len(),
             team2_size: team2.len(),
@@ -212,6 +266,8 @@ impl HeadlessMatchConfig {
             team2_cc_target: self.team2_cc_target,
             team1_rogue_openers,
             team2_rogue_openers,
+            team1_warlock_curse_prefs,
+            team2_warlock_curse_prefs,
         })
     }
 }

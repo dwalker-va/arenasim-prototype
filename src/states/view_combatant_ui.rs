@@ -178,6 +178,9 @@ fn get_ability_name(ability: AbilityType) -> &'static str {
         AbilityType::PowerWordShield => "Power Word: Shield",
         AbilityType::Polymorph => "Polymorph",
         AbilityType::DispelMagic => "Dispel Magic",
+        AbilityType::CurseOfAgony => "Curse of Agony",
+        AbilityType::CurseOfWeakness => "Curse of Weakness",
+        AbilityType::CurseOfTongues => "Curse of Tongues",
     }
 }
 
@@ -866,6 +869,13 @@ fn build_aura_description(aura: &super::play_match::ability_config::AuraEffect) 
         }
         AuraType::WeakenedSoul => {
             format!("Cannot receive Power Word: Shield for {:.0} sec.", aura.duration)
+        }
+        AuraType::DamageReduction => {
+            format!("Reduces damage dealt by {:.0} for {:.0} sec.", aura.magnitude, aura.duration)
+        }
+        AuraType::CastTimeIncrease => {
+            let increase_pct = (aura.magnitude * 100.0) as i32;
+            format!("Increases cast time by {}% for {:.0} sec.", increase_pct, aura.duration)
         }
     }
 }
