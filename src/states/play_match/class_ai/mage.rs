@@ -20,6 +20,7 @@ use crate::states::play_match::components::*;
 use crate::states::play_match::constants::{
     DEFENSIVE_HP_THRESHOLD, GCD, MELEE_RANGE, SAFE_KITING_DISTANCE,
 };
+use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::is_spell_school_locked;
 use crate::states::play_match::utils::{combatant_id, spawn_speech_bubble};
 
@@ -532,12 +533,13 @@ fn try_polymorph(
         return false;
     }
 
-    // Start casting Polymorph
+    // Start casting Polymorph (affected by Curse of Tongues)
     combatant.global_cooldown = GCD;
+    let cast_time = calculate_cast_time(def.cast_time, auras);
 
     commands.entity(entity).insert(CastingState {
         ability,
-        time_remaining: def.cast_time,
+        time_remaining: cast_time,
         target: Some(cc_target),
         interrupted: false,
         interrupted_display_time: 0.0,
@@ -617,12 +619,13 @@ fn try_frostbolt(
         return false;
     }
 
-    // Start casting
+    // Start casting (affected by Curse of Tongues)
     combatant.global_cooldown = GCD;
+    let cast_time = calculate_cast_time(def.cast_time, auras);
 
     commands.entity(entity).insert(CastingState {
         ability,
-        time_remaining: def.cast_time,
+        time_remaining: cast_time,
         target: Some(target_entity),
         interrupted: false,
         interrupted_display_time: 0.0,

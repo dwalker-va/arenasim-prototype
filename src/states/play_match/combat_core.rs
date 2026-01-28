@@ -98,6 +98,42 @@ pub fn has_weakened_soul(auras: Option<&ActiveAuras>) -> bool {
     auras.map_or(false, |a| a.auras.iter().any(|aura| aura.effect_type == AuraType::WeakenedSoul))
 }
 
+/// Get the total damage reduction from DamageReduction auras on the attacker.
+/// Used by Curse of Weakness to reduce outgoing damage.
+/// Returns the flat damage reduction amount (not a multiplier).
+pub fn get_damage_reduction(auras: Option<&ActiveAuras>) -> f32 {
+    auras.map_or(0.0, |a| {
+        a.auras
+            .iter()
+            .filter(|aura| aura.effect_type == AuraType::DamageReduction)
+            .map(|aura| aura.magnitude)
+            .sum()
+    })
+}
+
+/// Get the total cast time increase from CastTimeIncrease auras on a combatant.
+/// Used by Curse of Tongues to slow casting.
+/// Returns the percentage increase (0.5 = 50% slower, so multiply cast time by 1.5).
+pub fn get_cast_time_increase(auras: Option<&ActiveAuras>) -> f32 {
+    auras.map_or(0.0, |a| {
+        a.auras
+            .iter()
+            .filter(|aura| aura.effect_type == AuraType::CastTimeIncrease)
+            .map(|aura| aura.magnitude)
+            .sum()
+    })
+}
+
+/// Calculate the modified cast time accounting for CastTimeIncrease auras.
+/// This should be called when starting a cast to get the actual cast duration.
+pub fn calculate_cast_time(base_cast_time: f32, auras: Option<&ActiveAuras>) -> f32 {
+    if base_cast_time <= 0.0 {
+        return 0.0; // Instant casts aren't affected
+    }
+    let cast_time_increase = get_cast_time_increase(auras);
+    base_cast_time * (1.0 + cast_time_increase)
+}
+
 fn find_best_kiting_direction(
     current_pos: Vec3,
     enemy_pos: Vec3,
@@ -582,7 +618,7 @@ pub fn combat_auto_attack(
         }
 
         // WoW Mechanic: Cannot auto-attack while stunned, feared, or polymorphed
-        let is_incapacitated = if let Some(auras) = auras {
+        let is_incapacitated = if let Some(ref auras) = auras {
             auras.auras.iter().any(|a| matches!(a.effect_type, AuraType::Stun | AuraType::Fear | AuraType::Polymorph))
         } else {
             false
@@ -619,7 +655,10 @@ pub fn combat_auto_attack(
                     
                     if combatant.in_attack_range(my_pos, target_pos) {
                         // Calculate total damage (base + bonus from Heroic Strike, etc.)
-                        let total_damage = combatant.attack_damage + combatant.next_attack_bonus_damage;
+                        let base_damage = combatant.attack_damage + combatant.next_attack_bonus_damage;
+                        // Apply DamageReduction from curses (Curse of Weakness)
+                        let damage_reduction = get_damage_reduction(auras.as_deref());
+                        let total_damage = (base_damage - damage_reduction).max(0.0);
                         let has_bonus = combatant.next_attack_bonus_damage > 0.0;
                         
                         attacks.push((attacker_entity, target_entity, total_damage, has_bonus));
@@ -1054,7 +1093,7 @@ pub fn process_casting(
     let mut completed_casts = Vec::new();
     
     // First pass: update cast timers and collect completed casts
-    for (caster_entity, caster_transform, mut caster, casting_state, _auras) in combatants.iter_mut() {
+    for (caster_entity, caster_transform, mut caster, casting_state, caster_auras) in combatants.iter_mut() {
         let Some(mut casting) = casting_state else {
             continue;
         };
@@ -1092,7 +1131,14 @@ pub fn process_casting(
             caster.current_mana -= def.mana_cost;
 
             // Pre-calculate damage/healing (using caster's stats)
-            let ability_damage = caster.calculate_ability_damage_config(def, &mut game_rng);
+            let mut ability_damage = caster.calculate_ability_damage_config(def, &mut game_rng);
+
+            // Apply DamageReduction for Physical abilities (Curse of Weakness)
+            if def.spell_school == SpellSchool::Physical {
+                let damage_reduction = get_damage_reduction(caster_auras.as_deref());
+                ability_damage = (ability_damage - damage_reduction).max(0.0);
+            }
+
             let ability_healing = caster.calculate_ability_healing_config(def, &mut game_rng);
             
             // Store cast info for processing
@@ -1167,7 +1213,7 @@ pub fn process_casting(
         
         // Handle damage spells
         if def.is_damage() {
-            // Use pre-calculated damage (already includes stat scaling)
+            // Use pre-calculated damage (already includes stat scaling and DamageReduction)
             let damage = ability_damage;
 
             // Apply damage with absorb shield consideration

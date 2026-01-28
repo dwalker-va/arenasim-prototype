@@ -18,6 +18,7 @@ use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
+use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::constants::GCD;
 use crate::states::play_match::is_spell_school_locked;
 use crate::states::play_match::utils::combatant_id;
@@ -678,12 +679,13 @@ fn try_flash_heal(
         return false;
     }
 
-    // Start casting
+    // Start casting (affected by Curse of Tongues)
     combatant.global_cooldown = GCD;
+    let cast_time = calculate_cast_time(def.cast_time, auras);
 
     commands.entity(entity).insert(CastingState {
         ability,
-        time_remaining: def.cast_time,
+        time_remaining: cast_time,
         target: Some(heal_target),
         interrupted: false,
         interrupted_display_time: 0.0,
@@ -755,13 +757,14 @@ fn try_mind_blast(
         return false;
     }
 
-    // Execute the ability
+    // Execute the ability (affected by Curse of Tongues)
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = GCD;
+    let cast_time = calculate_cast_time(def.cast_time, auras);
 
     commands.entity(entity).insert(CastingState {
         ability,
-        time_remaining: def.cast_time,
+        time_remaining: cast_time,
         target: Some(target_entity),
         interrupted: false,
         interrupted_display_time: 0.0,

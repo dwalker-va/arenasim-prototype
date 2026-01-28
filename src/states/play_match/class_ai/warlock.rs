@@ -19,6 +19,7 @@ use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::{
     ActiveAuras, Aura, AuraPending, AuraType, CastingState, ChannelingState, Combatant,
 };
+use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::constants::GCD;
 use crate::states::play_match::is_spell_school_locked;
 
@@ -297,12 +298,13 @@ fn try_immolate(
         return false;
     }
 
-    // Execute Immolate (start casting - 2s cast time)
+    // Execute Immolate (start casting - affected by Curse of Tongues)
     combatant.global_cooldown = GCD;
+    let cast_time = calculate_cast_time(immolate_def.cast_time, auras);
 
     commands.entity(entity).insert(CastingState {
         ability: immolate,
-        time_remaining: immolate_def.cast_time,
+        time_remaining: cast_time,
         target: Some(target_entity),
         interrupted: false,
         interrupted_display_time: 0.0,
@@ -380,12 +382,13 @@ fn try_fear(
         return false;
     }
 
-    // Execute Fear (start casting)
+    // Execute Fear (start casting - affected by Curse of Tongues)
     combatant.global_cooldown = GCD;
+    let cast_time = calculate_cast_time(fear_def.cast_time, auras);
 
     commands.entity(entity).insert(CastingState {
         ability: fear,
-        time_remaining: fear_def.cast_time,
+        time_remaining: cast_time,
         target: Some(target_entity),
         interrupted: false,
         interrupted_display_time: 0.0,
@@ -443,12 +446,13 @@ fn try_shadowbolt(
         return false;
     }
 
-    // Execute Shadow Bolt (start casting)
+    // Execute Shadow Bolt (start casting - affected by Curse of Tongues)
     combatant.global_cooldown = GCD;
+    let cast_time = calculate_cast_time(shadowbolt_def.cast_time, auras);
 
     commands.entity(entity).insert(CastingState {
         ability: shadowbolt,
-        time_remaining: shadowbolt_def.cast_time,
+        time_remaining: cast_time,
         target: Some(target_entity),
         interrupted: false,
         interrupted_display_time: 0.0,
