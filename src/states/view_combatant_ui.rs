@@ -10,7 +10,7 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use std::collections::HashMap;
-use super::{GameState, match_config::{CharacterClass, MatchConfig, RogueOpener}};
+use super::{GameState, match_config::{CharacterClass, MatchConfig, RogueOpener, WarlockCurse}};
 use super::configure_match_ui::ClassIcons;
 use super::play_match::AbilityType;
 use super::play_match::abilities::{ScalingStat, SpellSchool};
@@ -204,6 +204,7 @@ pub fn load_ability_icons(
         "Sinister Strike", "Kidney Shot", "Corruption", "Shadowbolt", "Fear", "Immolate",
         "Drain Life", "Pummel", "Kick", "Arcane Intellect", "Battle Shout",
         "Ice Barrier", "Power Word: Shield", "Polymorph", "Dispel Magic",
+        "Curse of Agony", "Curse of Weakness", "Curse of Tongues",
     ];
 
     // Load handles if not already loaded
@@ -446,6 +447,28 @@ pub fn view_combatant_ui(
                                 ui,
                                 content_width,
                                 opener_panel_height,
+                                &view_state,
+                                &mut match_config,
+                                &ability_icons,
+                            );
+                        },
+                    );
+                }
+
+                // Warlock-specific: Curse Preferences panel
+                if class == CharacterClass::Warlock {
+                    ui.add_space(15.0);
+
+                    // Curse panel needs enough height for 3 enemy slots
+                    let curse_panel_height = 170.0;
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(content_width, curse_panel_height),
+                        egui::Layout::left_to_right(egui::Align::TOP),
+                        |ui| {
+                            render_warlock_curse_panel(
+                                ui,
+                                content_width,
+                                curse_panel_height,
                                 &view_state,
                                 &mut match_config,
                                 &ability_icons,
@@ -1031,5 +1054,151 @@ fn render_rogue_opener_panel(
                 .color(egui::Color32::from_rgb(170, 170, 170))
                 .italics(),
         );
+    });
+}
+
+/// Render the Warlock Curse Preferences panel with ability icons
+fn render_warlock_curse_panel(
+    ui: &mut egui::Ui,
+    width: f32,
+    height: f32,
+    view_state: &Res<ViewCombatantState>,
+    match_config: &mut ResMut<MatchConfig>,
+    ability_icons: &Option<Res<AbilityIcons>>,
+) {
+    // Determine enemy team size
+    let enemy_size = if view_state.team == 1 {
+        match_config.team2_size
+    } else {
+        match_config.team1_size
+    };
+
+    // Get current curse preferences for this combatant
+    let current_prefs = if view_state.team == 1 {
+        match_config.team1_warlock_curse_prefs.get(view_state.slot).cloned().unwrap_or_default()
+    } else {
+        match_config.team2_warlock_curse_prefs.get(view_state.slot).cloned().unwrap_or_default()
+    };
+
+    ui.group(|ui| {
+        ui.set_min_width(width - 20.0);
+        ui.set_min_height(height - 20.0);
+
+        ui.label(
+            egui::RichText::new("CURSE PREFERENCES")
+                .size(18.0)
+                .color(egui::Color32::from_rgb(230, 204, 153))
+                .strong(),
+        );
+
+        ui.add_space(8.0);
+
+        ui.label(
+            egui::RichText::new("Select which curse to apply to each enemy target:")
+                .size(12.0)
+                .color(egui::Color32::from_rgb(170, 170, 170)),
+        );
+
+        ui.add_space(12.0);
+
+        // Track which curse was changed
+        let mut changed_curse: Option<(usize, WarlockCurse)> = None;
+
+        let icon_size = 36.0;
+        let gold = egui::Color32::from_rgb(255, 215, 0);
+        let gray = egui::Color32::from_rgb(80, 80, 90);
+
+        // One row per enemy slot
+        for enemy_slot in 0..enemy_size {
+            ui.horizontal(|ui| {
+                // Enemy slot label
+                ui.label(
+                    egui::RichText::new(format!("Target {}:", enemy_slot + 1))
+                        .size(13.0)
+                        .color(egui::Color32::from_rgb(180, 180, 180)),
+                );
+
+                ui.add_space(10.0);
+
+                // Get current curse for this enemy
+                let current_curse = current_prefs.get(enemy_slot).copied().unwrap_or_default();
+
+                // Curse options
+                let curses = [
+                    (WarlockCurse::Agony, "Curse of Agony", "Agony"),
+                    (WarlockCurse::Weakness, "Curse of Weakness", "Weakness"),
+                    (WarlockCurse::Tongues, "Curse of Tongues", "Tongues"),
+                ];
+
+                for (curse, icon_key, _label) in &curses {
+                    let is_selected = current_curse == *curse;
+                    let border_color = if is_selected { gold } else { gray };
+                    let border_width = if is_selected { 2.0 } else { 1.0 };
+
+                    // Get icon texture
+                    let icon_texture = ability_icons.as_ref().and_then(|icons| {
+                        icons.textures.get(*icon_key).copied()
+                    });
+
+                    // Allocate space for the icon button
+                    let (rect, response) = ui.allocate_exact_size(
+                        egui::vec2(icon_size, icon_size),
+                        egui::Sense::click(),
+                    );
+
+                    // Draw icon or placeholder
+                    let painter = ui.painter();
+                    if let Some(texture_id) = icon_texture {
+                        painter.image(
+                            texture_id,
+                            rect,
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
+                    } else {
+                        painter.rect_filled(rect, 4.0, egui::Color32::from_rgb(50, 50, 65));
+                    }
+
+                    // Draw border
+                    painter.rect_stroke(rect, 4.0, egui::Stroke::new(border_width, border_color));
+
+                    // Track click
+                    if response.clicked() && !is_selected {
+                        changed_curse = Some((enemy_slot, *curse));
+                    }
+
+                    // Tooltip on hover
+                    if response.hovered() {
+                        let tooltip_text = match curse {
+                            WarlockCurse::Agony => "Curse of Agony: DoT - 14 damage per 4s for 24s",
+                            WarlockCurse::Weakness => "Curse of Weakness: -3 damage for 2 min",
+                            WarlockCurse::Tongues => "Curse of Tongues: +50% cast time for 30s",
+                        };
+                        response.on_hover_text(tooltip_text);
+                    }
+
+                    ui.add_space(4.0);
+                }
+
+                // Show selected curse name
+                ui.add_space(10.0);
+                ui.label(
+                    egui::RichText::new(format!("({})", match current_curse {
+                        WarlockCurse::Agony => "Agony",
+                        WarlockCurse::Weakness => "Weakness",
+                        WarlockCurse::Tongues => "Tongues",
+                    }))
+                        .size(12.0)
+                        .color(gold),
+                );
+            });
+
+            ui.add_space(6.0);
+        }
+
+        // Apply change outside of the loop to avoid borrow issues
+        if let Some((enemy_slot, curse)) = changed_curse {
+            match_config.set_curse_pref(view_state.team, view_state.slot, enemy_slot, curse);
+        }
     });
 }

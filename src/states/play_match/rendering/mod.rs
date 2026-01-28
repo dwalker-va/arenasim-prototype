@@ -55,6 +55,9 @@ pub fn get_ability_icon_path(ability: &str) -> Option<&'static str> {
         "Power Word: Shield" => Some("icons/abilities/spell_holy_powerwordshield.jpg"),
         "Polymorph" => Some("icons/abilities/spell_nature_polymorph.jpg"),
         "Dispel Magic" => Some("icons/abilities/spell_holy_dispelmagic.jpg"),
+        "Curse of Agony" => Some("icons/abilities/spell_shadow_curseofsargeras.jpg"),
+        "Curse of Weakness" => Some("icons/abilities/spell_shadow_curseofmannoroth.jpg"),
+        "Curse of Tongues" => Some("icons/abilities/spell_shadow_curseoftounges.jpg"),
         _ => None,
     }
 }
@@ -66,6 +69,7 @@ pub const SPELL_ICON_ABILITIES: &[&str] = &[
     "Sinister Strike", "Kidney Shot", "Corruption", "Shadowbolt", "Fear", "Immolate",
     "Drain Life", "Pummel", "Kick", "Arcane Intellect", "Battle Shout",
     "Ice Barrier", "Power Word: Shield", "Polymorph", "Dispel Magic",
+    "Curse of Agony", "Curse of Weakness", "Curse of Tongues",
 ];
 
 // ==============================================================================
