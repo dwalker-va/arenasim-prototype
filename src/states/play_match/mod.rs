@@ -333,6 +333,9 @@ pub fn setup_play_match(
             // Get rogue opener preference for this slot
             let rogue_opener = config.team1_rogue_openers.get(i).copied().unwrap_or_default();
 
+            // Get warlock curse preferences for this slot (empty vec if none configured)
+            let warlock_curse_prefs = config.team1_warlock_curse_prefs.get(i).cloned().unwrap_or_default();
+
             spawn_combatant(
                 &mut commands,
                 &mut meshes,
@@ -342,6 +345,7 @@ pub fn setup_play_match(
                 Vec3::new(team1_spawn_x, 1.0, (i as f32 - 1.0) * 3.0),
                 count,
                 rogue_opener,
+                warlock_curse_prefs,
             );
         }
     }
@@ -359,6 +363,9 @@ pub fn setup_play_match(
             // Get rogue opener preference for this slot
             let rogue_opener = config.team2_rogue_openers.get(i).copied().unwrap_or_default();
 
+            // Get warlock curse preferences for this slot (empty vec if none configured)
+            let warlock_curse_prefs = config.team2_warlock_curse_prefs.get(i).cloned().unwrap_or_default();
+
             spawn_combatant(
                 &mut commands,
                 &mut meshes,
@@ -368,6 +375,7 @@ pub fn setup_play_match(
                 Vec3::new(team2_spawn_x, 1.0, (i as f32 - 1.0) * 3.0),
                 count,
                 rogue_opener,
+                warlock_curse_prefs,
             );
         }
     }
@@ -442,6 +450,7 @@ fn spawn_combatant(
     position: Vec3,
     duplicate_index: usize,
     rogue_opener: match_config::RogueOpener,
+    warlock_curse_prefs: Vec<match_config::WarlockCurse>,
 ) {
     // Get vibrant class colors for 3D visibility
     let base_color = match class {
@@ -475,7 +484,7 @@ fn spawn_combatant(
         Mesh3d(mesh_handle.clone()),
         MeshMaterial3d(material),
         Transform::from_translation(position),
-        Combatant::new_with_opener(team, class, rogue_opener),
+        Combatant::new_with_curse_prefs(team, class, rogue_opener, warlock_curse_prefs),
         FloatingTextState {
             next_pattern_index: 0,
         },

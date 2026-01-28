@@ -147,9 +147,10 @@ fn headless_setup_match(
         if let Some(character) = character_opt {
             combat_log.register_combatant(combatant_id(1, *character));
             let rogue_opener = config.team1_rogue_openers.get(i).copied().unwrap_or_default();
+            let warlock_curse_prefs = config.team1_warlock_curse_prefs.get(i).cloned().unwrap_or_default();
             commands.spawn((
                 Transform::from_xyz(team1_spawn_x, 1.0, (i as f32 - 1.0) * 3.0),
-                Combatant::new_with_opener(1, *character, rogue_opener),
+                Combatant::new_with_curse_prefs(1, *character, rogue_opener, warlock_curse_prefs),
                 FloatingTextState {
                     next_pattern_index: 0,
                 },
@@ -163,9 +164,10 @@ fn headless_setup_match(
         if let Some(character) = character_opt {
             combat_log.register_combatant(combatant_id(2, *character));
             let rogue_opener = config.team2_rogue_openers.get(i).copied().unwrap_or_default();
+            let warlock_curse_prefs = config.team2_warlock_curse_prefs.get(i).cloned().unwrap_or_default();
             commands.spawn((
                 Transform::from_xyz(team2_spawn_x, 1.0, (i as f32 - 1.0) * 3.0),
-                Combatant::new_with_opener(2, *character, rogue_opener),
+                Combatant::new_with_curse_prefs(2, *character, rogue_opener, warlock_curse_prefs),
                 FloatingTextState {
                     next_pattern_index: 0,
                 },

@@ -5,15 +5,16 @@
 //! ## Priority Order
 //! 1. Corruption (instant Shadow DoT)
 //! 2. Immolate (2s cast Fire DoT)
-//! 3. Fear (CC on non-CC'd target)
-//! 4. Drain Life (when HP < 80% and target has DoTs)
-//! 5. Shadow Bolt (main damage spell)
+//! 3. Spread curses to enemies (per-target preferences)
+//! 4. Fear (CC on non-CC'd target)
+//! 5. Drain Life (when HP < 80% and target has DoTs)
+//! 6. Shadow Bolt (main damage spell)
 
 use bevy::prelude::*;
 use std::collections::HashMap;
 
 use crate::combat::log::{CombatLog, CombatLogEventType};
-use crate::states::match_config::CharacterClass;
+use crate::states::match_config::{CharacterClass, WarlockCurse};
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::{
@@ -103,7 +104,23 @@ pub fn decide_warlock_action(
         return true;
     }
 
-    // Priority 3: Fear (uses CC target if available, otherwise kill target)
+    // Priority 3: Spread curses to all enemies based on preferences
+    if try_spread_curses(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        positions,
+        combatant_info,
+        active_auras_map,
+    ) {
+        return true;
+    }
+
+    // Priority 4: Fear (uses CC target if available, otherwise kill target)
     // CC target is separate from kill target to enable strategic CC on healers
     // while focusing damage on a different target
     let fear_target = combatant.cc_target.or(combatant.target);
@@ -127,7 +144,7 @@ pub fn decide_warlock_action(
         }
     }
 
-    // Priority 4: Drain Life (when HP < 80% and target has DoTs)
+    // Priority 5: Drain Life (when HP < 80% and target has DoTs)
     if try_drain_life(
         commands,
         combat_log,
@@ -144,7 +161,7 @@ pub fn decide_warlock_action(
         return true;
     }
 
-    // Priority 5: Shadow Bolt
+    // Priority 6: Shadow Bolt
     try_shadowbolt(
         commands,
         combat_log,
@@ -569,6 +586,203 @@ fn try_drain_life(
         combatant.team,
         combatant.class.name(),
         hp_percent * 100.0
+    );
+
+    true
+}
+
+/// Try to spread curses to all enemies based on per-target preferences.
+/// Returns true if a curse was cast.
+///
+/// Curses are mutually exclusive per target - only one curse can be active.
+/// Preferences are indexed by enemy slot (0, 1, 2).
+#[allow(clippy::too_many_arguments)]
+fn try_spread_curses(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    positions: &HashMap<Entity, Vec3>,
+    combatant_info: &HashMap<Entity, (u8, CharacterClass, f32, f32)>,
+    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+) -> bool {
+    // Skip if no curse preferences configured
+    if combatant.warlock_curse_prefs.is_empty() {
+        return false;
+    }
+
+    // Build list of enemy entities sorted by their slot index
+    let mut enemies: Vec<(Entity, Vec3, usize)> = positions
+        .iter()
+        .filter_map(|(&enemy_entity, &enemy_pos)| {
+            combatant_info.get(&enemy_entity).and_then(|(team, _, hp, _)| {
+                // Only target alive enemies on opposite team
+                if *team != combatant.team && *hp > 0.0 {
+                    Some((enemy_entity, enemy_pos))
+                } else {
+                    None
+                }
+            })
+        })
+        .enumerate()
+        .map(|(idx, (e, p))| (e, p, idx))
+        .collect();
+
+    // Sort by entity ID to ensure consistent slot ordering
+    enemies.sort_by_key(|(e, _, _)| *e);
+
+    // Try to curse each enemy based on preferences
+    for (enemy_entity, enemy_pos, slot_idx) in enemies {
+        // Get curse preference for this slot (default to Agony if not specified)
+        let curse_pref = combatant
+            .warlock_curse_prefs
+            .get(slot_idx)
+            .copied()
+            .unwrap_or(WarlockCurse::Agony);
+
+        // Check if target already has a curse from us
+        let has_our_curse = active_auras_map
+            .get(&enemy_entity)
+            .map(|auras| {
+                auras.iter().any(|a| {
+                    a.caster == Some(entity)
+                        && (a.ability_name == "Curse of Agony"
+                            || a.ability_name == "Curse of Weakness"
+                            || a.ability_name == "Curse of Tongues")
+                })
+            })
+            .unwrap_or(false);
+
+        if has_our_curse {
+            continue;
+        }
+
+        // Try to cast the preferred curse
+        let (ability, ability_name) = match curse_pref {
+            WarlockCurse::Agony => (AbilityType::CurseOfAgony, "Curse of Agony"),
+            WarlockCurse::Weakness => (AbilityType::CurseOfWeakness, "Curse of Weakness"),
+            WarlockCurse::Tongues => (AbilityType::CurseOfTongues, "Curse of Tongues"),
+        };
+
+        if try_cast_curse(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            enemy_entity,
+            enemy_pos,
+            combatant_info,
+            ability,
+            ability_name,
+        ) {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Cast a specific curse on a target.
+/// Returns true if the curse was cast successfully.
+#[allow(clippy::too_many_arguments)]
+fn try_cast_curse(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    target_entity: Entity,
+    target_pos: Vec3,
+    combatant_info: &HashMap<Entity, (u8, CharacterClass, f32, f32)>,
+    ability: AbilityType,
+    ability_name: &str,
+) -> bool {
+    let ability_def = abilities.get_unchecked(&ability);
+
+    // Check if Shadow school is locked out
+    if is_spell_school_locked(ability_def.spell_school, auras) {
+        return false;
+    }
+
+    // Check if we can cast (range, mana, etc.)
+    if !ability.can_cast_config(combatant, target_pos, my_pos, ability_def) {
+        return false;
+    }
+
+    // Execute curse (all curses are instant)
+    combatant.current_mana -= ability_def.mana_cost;
+    combatant.global_cooldown = GCD;
+
+    // Log
+    let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
+    let target_id = combatant_info
+        .get(&target_entity)
+        .map(|(team, class, _, _)| format!("Team {} {}", team, class.name()));
+    combat_log.log_ability_cast(
+        caster_id,
+        ability_name.to_string(),
+        target_id,
+        format!(
+            "Team {} {} casts {}",
+            combatant.team,
+            combatant.class.name(),
+            ability_name
+        ),
+    );
+
+    // Apply aura
+    if let Some(aura_config) = ability_def.applies_aura.as_ref() {
+        commands.spawn(AuraPending {
+            target: target_entity,
+            aura: Aura {
+                effect_type: aura_config.aura_type,
+                duration: aura_config.duration,
+                magnitude: aura_config.magnitude,
+                break_on_damage_threshold: aura_config.break_on_damage,
+                accumulated_damage: 0.0,
+                tick_interval: aura_config.tick_interval,
+                time_until_next_tick: aura_config.tick_interval,
+                caster: Some(entity),
+                ability_name: ability_def.name.to_string(),
+                fear_direction: (0.0, 0.0),
+                fear_direction_timer: 0.0,
+                spell_school: Some(ability_def.spell_school),
+            },
+        });
+    }
+
+    let effect_description = match ability {
+        AbilityType::CurseOfAgony => "14 damage per 4s for 24s",
+        AbilityType::CurseOfWeakness => "-3 damage for 2 min",
+        AbilityType::CurseOfTongues => "+50% cast time for 30s",
+        _ => "",
+    };
+
+    combat_log.log(
+        CombatLogEventType::Buff,
+        format!(
+            "Team {} {} applies {} to enemy ({})",
+            combatant.team,
+            combatant.class.name(),
+            ability_name,
+            effect_description
+        ),
+    );
+
+    info!(
+        "Team {} {} applies {} to enemy ({})",
+        combatant.team,
+        combatant.class.name(),
+        ability_name,
+        effect_description
     );
 
     true

@@ -22,7 +22,7 @@ use bevy_egui::egui;
 use rand::prelude::*;
 use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
-use super::match_config::{self, RogueOpener};
+use super::match_config::{self, RogueOpener, WarlockCurse};
 use super::abilities::{AbilityType, ScalingStat};
 use super::ability_config::AbilityConfig;
 
@@ -421,6 +421,8 @@ pub struct Combatant {
     pub kiting_timer: f32,
     /// Rogue-specific: which opener to use from stealth (Ambush or Cheap Shot)
     pub rogue_opener: RogueOpener,
+    /// Warlock-specific: which curse to apply to each enemy target (indexed by enemy slot)
+    pub warlock_curse_prefs: Vec<WarlockCurse>,
 }
 
 impl Combatant {
@@ -470,6 +472,7 @@ impl Combatant {
             global_cooldown: 0.0,
             kiting_timer: 0.0,
             rogue_opener: RogueOpener::default(),
+            warlock_curse_prefs: Vec::new(),
         }
     }
 
@@ -477,6 +480,19 @@ impl Combatant {
     pub fn new_with_opener(team: u8, class: match_config::CharacterClass, rogue_opener: RogueOpener) -> Self {
         let mut combatant = Self::new(team, class);
         combatant.rogue_opener = rogue_opener;
+        combatant
+    }
+
+    /// Create a new combatant with specific preferences for Warlock curses.
+    pub fn new_with_curse_prefs(
+        team: u8,
+        class: match_config::CharacterClass,
+        rogue_opener: RogueOpener,
+        warlock_curse_prefs: Vec<WarlockCurse>,
+    ) -> Self {
+        let mut combatant = Self::new(team, class);
+        combatant.rogue_opener = rogue_opener;
+        combatant.warlock_curse_prefs = warlock_curse_prefs;
         combatant
     }
     
