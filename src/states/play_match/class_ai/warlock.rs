@@ -761,7 +761,7 @@ fn try_cast_curse(
 
     let effect_description = match ability {
         AbilityType::CurseOfAgony => "14 damage per 4s for 24s",
-        AbilityType::CurseOfWeakness => "-3 damage for 2 min",
+        AbilityType::CurseOfWeakness => "-20% physical damage for 2 min",
         AbilityType::CurseOfTongues => "+50% cast time for 30s",
         _ => "",
     };

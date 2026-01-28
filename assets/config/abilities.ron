@@ -436,7 +436,7 @@
             applies_aura: Some((
                 aura_type: DamageReduction,
                 duration: 120.0,
-                magnitude: 3.0,
+                magnitude: 0.2,  // 20% physical damage reduction
             )),
             spell_school: Shadow,
         ),

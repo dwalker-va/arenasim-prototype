@@ -98,10 +98,11 @@ pub fn has_weakened_soul(auras: Option<&ActiveAuras>) -> bool {
     auras.map_or(false, |a| a.auras.iter().any(|aura| aura.effect_type == AuraType::WeakenedSoul))
 }
 
-/// Get the total damage reduction from DamageReduction auras on the attacker.
-/// Used by Curse of Weakness to reduce outgoing damage.
-/// Returns the flat damage reduction amount (not a multiplier).
-pub fn get_damage_reduction(auras: Option<&ActiveAuras>) -> f32 {
+/// Get the physical damage reduction multiplier from DamageReduction auras on the attacker.
+/// Used by Curse of Weakness to reduce outgoing physical damage by a percentage.
+/// Returns the percentage reduction (0.2 = 20% less damage).
+/// Multiple reductions stack additively (two 20% reductions = 40% total).
+pub fn get_physical_damage_reduction(auras: Option<&ActiveAuras>) -> f32 {
     auras.map_or(0.0, |a| {
         a.auras
             .iter()
@@ -656,9 +657,9 @@ pub fn combat_auto_attack(
                     if combatant.in_attack_range(my_pos, target_pos) {
                         // Calculate total damage (base + bonus from Heroic Strike, etc.)
                         let base_damage = combatant.attack_damage + combatant.next_attack_bonus_damage;
-                        // Apply DamageReduction from curses (Curse of Weakness)
-                        let damage_reduction = get_damage_reduction(auras.as_deref());
-                        let total_damage = (base_damage - damage_reduction).max(0.0);
+                        // Apply physical damage reduction from curses (Curse of Weakness: -20%)
+                        let damage_reduction = get_physical_damage_reduction(auras.as_deref());
+                        let total_damage = (base_damage * (1.0 - damage_reduction)).max(0.0);
                         let has_bonus = combatant.next_attack_bonus_damage > 0.0;
                         
                         attacks.push((attacker_entity, target_entity, total_damage, has_bonus));
@@ -1133,10 +1134,10 @@ pub fn process_casting(
             // Pre-calculate damage/healing (using caster's stats)
             let mut ability_damage = caster.calculate_ability_damage_config(def, &mut game_rng);
 
-            // Apply DamageReduction for Physical abilities (Curse of Weakness)
+            // Apply physical damage reduction for Physical abilities (Curse of Weakness: -20%)
             if def.spell_school == SpellSchool::Physical {
-                let damage_reduction = get_damage_reduction(caster_auras.as_deref());
-                ability_damage = (ability_damage - damage_reduction).max(0.0);
+                let damage_reduction = get_physical_damage_reduction(caster_auras.as_deref());
+                ability_damage = (ability_damage * (1.0 - damage_reduction)).max(0.0);
             }
 
             let ability_healing = caster.calculate_ability_healing_config(def, &mut game_rng);

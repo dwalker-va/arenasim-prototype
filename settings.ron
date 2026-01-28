@@ -1,69 +1,74 @@
 (
-    window_mode: Windowed,
+    window_mode: BorderlessFullscreen,
     resolution: HD720,
     vsync: true,
     keybindings: (
         bindings: {
-            PausePlay: (
-                primary: "Space",
-                secondary: None,
-            ),
-            SpeedNormal: (
-                primary: "Digit2",
-                secondary: None,
-            ),
             CycleCameraMode: (
                 primary: "Tab",
-                secondary: None,
-            ),
-            CameraMoveRight: (
-                primary: "KeyD",
-                secondary: None,
-            ),
-            SpeedSlow: (
-                primary: "Digit1",
-                secondary: None,
-            ),
-            Confirm: (
-                primary: "Enter",
-                secondary: None,
-            ),
-            SpeedFast: (
-                primary: "Digit3",
-                secondary: None,
-            ),
-            ResetCamera: (
-                primary: "KeyC",
                 secondary: None,
             ),
             CameraZoomIn: (
                 primary: "Equal",
                 secondary: Some("NumpadAdd"),
             ),
-            CameraMoveLeft: (
-                primary: "KeyA",
+            ToggleAuraIcons: (
+                primary: "KeyV",
+                secondary: None,
+            ),
+            Confirm: (
+                primary: "Enter",
+                secondary: None,
+            ),
+            SpeedVeryFast: (
+                primary: "Digit4",
+                secondary: None,
+            ),
+            ResetCamera: (
+                primary: "KeyC",
                 secondary: None,
             ),
             CameraMoveBackward: (
                 primary: "KeyS",
                 secondary: None,
             ),
-            Back: (
-                primary: "Escape",
-                secondary: None,
+            CameraZoomOut: (
+                primary: "Minus",
+                secondary: Some("NumpadSubtract"),
             ),
             CameraMoveForward: (
                 primary: "KeyW",
                 secondary: None,
             ),
-            CameraZoomOut: (
-                primary: "Minus",
-                secondary: Some("NumpadSubtract"),
+            Back: (
+                primary: "Escape",
+                secondary: None,
             ),
-            SpeedVeryFast: (
-                primary: "Digit4",
+            CameraMoveRight: (
+                primary: "KeyD",
+                secondary: None,
+            ),
+            PausePlay: (
+                primary: "Space",
+                secondary: None,
+            ),
+            SpeedSlow: (
+                primary: "Digit1",
+                secondary: None,
+            ),
+            SpeedNormal: (
+                primary: "Digit2",
+                secondary: None,
+            ),
+            CameraMoveLeft: (
+                primary: "KeyA",
+                secondary: None,
+            ),
+            SpeedFast: (
+                primary: "Digit3",
                 secondary: None,
             ),
         },
     ),
+    show_aura_icons: true,
 )

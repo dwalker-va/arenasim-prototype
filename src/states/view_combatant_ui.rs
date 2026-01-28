@@ -894,7 +894,8 @@ fn build_aura_description(aura: &super::play_match::ability_config::AuraEffect) 
             format!("Cannot receive Power Word: Shield for {:.0} sec.", aura.duration)
         }
         AuraType::DamageReduction => {
-            format!("Reduces damage dealt by {:.0} for {:.0} sec.", aura.magnitude, aura.duration)
+            let reduction_pct = (aura.magnitude * 100.0) as i32;
+            format!("Reduces physical damage dealt by {}% for {:.0} sec.", reduction_pct, aura.duration)
         }
         AuraType::CastTimeIncrease => {
             let increase_pct = (aura.magnitude * 100.0) as i32;
@@ -1171,7 +1172,7 @@ fn render_warlock_curse_panel(
                     if response.hovered() {
                         let tooltip_text = match curse {
                             WarlockCurse::Agony => "Curse of Agony: DoT - 14 damage per 4s for 24s",
-                            WarlockCurse::Weakness => "Curse of Weakness: -3 damage for 2 min",
+                            WarlockCurse::Weakness => "Curse of Weakness: -20% physical damage for 2 min",
                             WarlockCurse::Tongues => "Curse of Tongues: +50% cast time for 30s",
                         };
                         response.on_hover_text(tooltip_text);
