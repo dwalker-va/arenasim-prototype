@@ -472,6 +472,7 @@ pub fn view_combatant_ui(
                                 &view_state,
                                 &mut match_config,
                                 &ability_icons,
+                                &class_icons,
                             );
                         },
                     );
@@ -1066,13 +1067,15 @@ fn render_warlock_curse_panel(
     view_state: &Res<ViewCombatantState>,
     match_config: &mut ResMut<MatchConfig>,
     ability_icons: &Option<Res<AbilityIcons>>,
+    class_icons: &Res<ClassIcons>,
 ) {
-    // Determine enemy team size
-    let enemy_size = if view_state.team == 1 {
-        match_config.team2_size
+    // Clone enemy team composition to avoid borrow conflicts
+    let enemy_team: Vec<Option<CharacterClass>> = if view_state.team == 1 {
+        match_config.team2.clone()
     } else {
-        match_config.team1_size
+        match_config.team1.clone()
     };
+    let enemy_size = enemy_team.iter().filter(|c| c.is_some()).count();
 
     // Get current curse preferences for this combatant
     let current_prefs = if view_state.team == 1 {
@@ -1111,13 +1114,42 @@ fn render_warlock_curse_panel(
 
         // One section per enemy slot
         for enemy_slot in 0..enemy_size {
-            // Enemy target header
-            ui.label(
-                egui::RichText::new(format!("Enemy Target {}", enemy_slot + 1))
-                    .size(14.0)
-                    .color(egui::Color32::from_rgb(200, 180, 140))
-                    .strong(),
-            );
+            // Get enemy class for this slot
+            let enemy_class = enemy_team.get(enemy_slot).and_then(|c| *c);
+
+            // Enemy target header with class icon and name
+            ui.horizontal(|ui| {
+                // Small class icon
+                let class_icon_size = 20.0;
+                if let Some(class) = enemy_class {
+                    if let Some(&texture_id) = class_icons.textures.get(&class) {
+                        let (rect, _) = ui.allocate_exact_size(
+                            egui::vec2(class_icon_size, class_icon_size),
+                            egui::Sense::hover(),
+                        );
+                        ui.painter().image(
+                            texture_id,
+                            rect,
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
+                    }
+                    ui.add_space(6.0);
+                    ui.label(
+                        egui::RichText::new(class.name())
+                            .size(14.0)
+                            .color(egui::Color32::from_rgb(200, 180, 140))
+                            .strong(),
+                    );
+                } else {
+                    ui.label(
+                        egui::RichText::new(format!("Enemy Target {}", enemy_slot + 1))
+                            .size(14.0)
+                            .color(egui::Color32::from_rgb(200, 180, 140))
+                            .strong(),
+                    );
+                }
+            });
 
             ui.add_space(6.0);
 
