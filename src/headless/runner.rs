@@ -150,7 +150,7 @@ fn headless_setup_match(
             let warlock_curse_prefs = config.team1_warlock_curse_prefs.get(i).cloned().unwrap_or_default();
             commands.spawn((
                 Transform::from_xyz(team1_spawn_x, 1.0, (i as f32 - 1.0) * 3.0),
-                Combatant::new_with_curse_prefs(1, *character, rogue_opener, warlock_curse_prefs),
+                Combatant::new_with_curse_prefs(1, i as u8, *character, rogue_opener, warlock_curse_prefs),
                 FloatingTextState {
                     next_pattern_index: 0,
                 },
@@ -167,7 +167,7 @@ fn headless_setup_match(
             let warlock_curse_prefs = config.team2_warlock_curse_prefs.get(i).cloned().unwrap_or_default();
             commands.spawn((
                 Transform::from_xyz(team2_spawn_x, 1.0, (i as f32 - 1.0) * 3.0),
-                Combatant::new_with_curse_prefs(2, *character, rogue_opener, warlock_curse_prefs),
+                Combatant::new_with_curse_prefs(2, i as u8, *character, rogue_opener, warlock_curse_prefs),
                 FloatingTextState {
                     next_pattern_index: 0,
                 },

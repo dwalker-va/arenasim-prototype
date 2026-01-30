@@ -1915,7 +1915,7 @@ mod tests {
 
     /// Helper to create a test combatant
     fn create_test_combatant(health: f32) -> Combatant {
-        let mut combatant = Combatant::new(1, match_config::CharacterClass::Warrior);
+        let mut combatant = Combatant::new(1, 0, match_config::CharacterClass::Warrior);
         combatant.max_health = health;
         combatant.current_health = health;
         combatant.damage_taken = 0.0;
@@ -1936,6 +1936,7 @@ mod tests {
             ability_name: ability_name.to_string(),
             fear_direction: (0.0, 0.0),
             fear_direction_timer: 0.0,
+            spell_school: None,
         }
     }
 
@@ -2080,6 +2081,7 @@ mod tests {
                 ability_name: "Frostbolt".to_string(),
                 fear_direction: (0.0, 0.0),
                 fear_direction_timer: 0.0,
+                spell_school: None,
             }],
         };
         assert!(!has_absorb_shield(Some(&auras)));
@@ -2109,6 +2111,7 @@ mod tests {
                 ability_name: "Weakened Soul".to_string(),
                 fear_direction: (0.0, 0.0),
                 fear_direction_timer: 0.0,
+                spell_school: None,
             }],
         };
         assert!(has_weakened_soul(Some(&auras)));

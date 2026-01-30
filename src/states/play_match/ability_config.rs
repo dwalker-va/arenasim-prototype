@@ -361,6 +361,10 @@ mod tests {
             requires_stealth: false,
             is_charge: false,
             spawn_impact_effect: false,
+            channel_duration: None,
+            channel_tick_interval: 1.0,
+            channel_healing_per_tick: 0.0,
+            is_dispel: false,
         };
 
         assert!(config.is_damage());
@@ -391,6 +395,10 @@ mod tests {
             requires_stealth: false,
             is_charge: false,
             spawn_impact_effect: false,
+            channel_duration: None,
+            channel_tick_interval: 1.0,
+            channel_healing_per_tick: 0.0,
+            is_dispel: false,
         };
 
         assert!(!config.is_damage());

@@ -341,6 +341,7 @@ pub fn setup_play_match(
                 &mut meshes,
                 &mut materials,
                 1,
+                i as u8, // slot index
                 *character,
                 Vec3::new(team1_spawn_x, 1.0, (i as f32 - 1.0) * 3.0),
                 count,
@@ -371,6 +372,7 @@ pub fn setup_play_match(
                 &mut meshes,
                 &mut materials,
                 2,
+                i as u8, // slot index
                 *character,
                 Vec3::new(team2_spawn_x, 1.0, (i as f32 - 1.0) * 3.0),
                 count,
@@ -446,6 +448,7 @@ fn spawn_combatant(
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
     team: u8,
+    slot: u8,
     class: match_config::CharacterClass,
     position: Vec3,
     duplicate_index: usize,
@@ -484,7 +487,7 @@ fn spawn_combatant(
         Mesh3d(mesh_handle.clone()),
         MeshMaterial3d(material),
         Transform::from_translation(position),
-        Combatant::new_with_curse_prefs(team, class, rogue_opener, warlock_curse_prefs),
+        Combatant::new_with_curse_prefs(team, slot, class, rogue_opener, warlock_curse_prefs),
         FloatingTextState {
             next_pattern_index: 0,
         },

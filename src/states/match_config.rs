@@ -60,7 +60,7 @@ impl WarlockCurse {
     pub fn description(&self) -> &'static str {
         match self {
             WarlockCurse::Agony => "84 damage over 24s",
-            WarlockCurse::Weakness => "-3 damage dealt",
+            WarlockCurse::Weakness => "-20% physical damage",
             WarlockCurse::Tongues => "+50% cast time",
         }
     }

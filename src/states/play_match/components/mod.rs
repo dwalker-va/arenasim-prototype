@@ -371,6 +371,8 @@ pub enum AuraType {
 pub struct Combatant {
     /// Team identifier (1 or 2)
     pub team: u8,
+    /// Slot index within the team (0, 1, 2) - used for per-slot configuration like curse targets
+    pub slot: u8,
     /// Character class (Warrior, Mage, Rogue, Priest)
     pub class: match_config::CharacterClass,
     /// Resource type (Mana, Energy, Rage)
@@ -427,7 +429,7 @@ pub struct Combatant {
 
 impl Combatant {
     /// Create a new combatant with class-specific stats.
-    pub fn new(team: u8, class: match_config::CharacterClass) -> Self {
+    pub fn new(team: u8, slot: u8, class: match_config::CharacterClass) -> Self {
         // Class-specific stats (resource_type, health, max_resource, resource_regen, starting_resource, damage, attack speed, attack_power, spell_power, movement speed)
         let (resource_type, max_health, max_resource, resource_regen, starting_resource, attack_damage, attack_speed, attack_power, spell_power, movement_speed) = match class {
             // Warriors: High HP, physical damage, scales with Attack Power
@@ -447,6 +449,7 @@ impl Combatant {
         
         Self {
             team,
+            slot,
             class,
             resource_type,
             max_health,
@@ -477,8 +480,8 @@ impl Combatant {
     }
 
     /// Create a new combatant with a specific rogue opener preference.
-    pub fn new_with_opener(team: u8, class: match_config::CharacterClass, rogue_opener: RogueOpener) -> Self {
-        let mut combatant = Self::new(team, class);
+    pub fn new_with_opener(team: u8, slot: u8, class: match_config::CharacterClass, rogue_opener: RogueOpener) -> Self {
+        let mut combatant = Self::new(team, slot, class);
         combatant.rogue_opener = rogue_opener;
         combatant
     }
@@ -486,11 +489,12 @@ impl Combatant {
     /// Create a new combatant with specific preferences for Warlock curses.
     pub fn new_with_curse_prefs(
         team: u8,
+        slot: u8,
         class: match_config::CharacterClass,
         rogue_opener: RogueOpener,
         warlock_curse_prefs: Vec<WarlockCurse>,
     ) -> Self {
-        let mut combatant = Self::new(team, class);
+        let mut combatant = Self::new(team, slot, class);
         combatant.rogue_opener = rogue_opener;
         combatant.warlock_curse_prefs = warlock_curse_prefs;
         combatant

@@ -49,7 +49,7 @@ pub fn decide_rogue_action(
     combatant: &mut Combatant,
     my_pos: Vec3,
     positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, CharacterClass, f32, f32)>,
+    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32)>,
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
     instant_attacks: &mut Vec<(Entity, Entity, f32, u8, CharacterClass, AbilityType)>,
 ) -> bool {
@@ -159,7 +159,7 @@ fn try_ambush(
     my_pos: Vec3,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, (u8, CharacterClass, f32, f32)>,
+    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32)>,
     instant_attacks: &mut Vec<(Entity, Entity, f32, u8, CharacterClass, AbilityType)>,
 ) -> bool {
     let ability = AbilityType::Ambush;
@@ -189,7 +189,7 @@ fn try_ambush(
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
     let target_id = combatant_info
         .get(&target_entity)
-        .map(|(team, class, _, _)| format!("Team {} {}", team, class.name()));
+        .map(|(team, _, class, _, _)| format!("Team {} {}", team, class.name()));
     combat_log.log_ability_cast(
         caster_id,
         "Ambush".to_string(),
@@ -223,7 +223,7 @@ fn try_cheap_shot(
     my_pos: Vec3,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, (u8, CharacterClass, f32, f32)>,
+    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32)>,
 ) -> bool {
     let ability = AbilityType::CheapShot;
     let def = abilities.get_unchecked(&ability);
@@ -242,7 +242,7 @@ fn try_cheap_shot(
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
     let target_id = combatant_info
         .get(&target_entity)
-        .map(|(team, class, _, _)| format!("Team {} {}", team, class.name()));
+        .map(|(team, _, class, _, _)| format!("Team {} {}", team, class.name()));
     combat_log.log_ability_cast(
         caster_id,
         "Cheap Shot".to_string(),
@@ -275,7 +275,7 @@ fn try_cheap_shot(
         });
 
         // Log CC
-        if let Some((target_team, target_class, _, _)) = combatant_info.get(&target_entity) {
+        if let Some((target_team, _, target_class, _, _)) = combatant_info.get(&target_entity) {
             let cc_type = format!("{:?}", aura.aura_type);
             let message = format!(
                 "Team {} {} uses {} on Team {} {}",
@@ -317,7 +317,7 @@ fn try_kidney_shot(
     my_pos: Vec3,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, (u8, CharacterClass, f32, f32)>,
+    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32)>,
 ) -> bool {
     let kidney_shot = AbilityType::KidneyShot;
     let ks_on_cooldown = combatant.ability_cooldowns.contains_key(&kidney_shot);
@@ -342,7 +342,7 @@ fn try_kidney_shot(
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
     let target_id = combatant_info
         .get(&target_entity)
-        .map(|(team, class, _, _)| format!("Team {} {}", team, class.name()));
+        .map(|(team, _, class, _, _)| format!("Team {} {}", team, class.name()));
     combat_log.log_ability_cast(
         caster_id,
         "Kidney Shot".to_string(),
@@ -375,7 +375,7 @@ fn try_kidney_shot(
         });
 
         // Log CC
-        if let Some((target_team, target_class, _, _)) = combatant_info.get(&target_entity) {
+        if let Some((target_team, _, target_class, _, _)) = combatant_info.get(&target_entity) {
             let cc_type = format!("{:?}", aura.aura_type);
             let message = format!(
                 "Team {} {} uses {} on Team {} {}",
@@ -417,7 +417,7 @@ fn try_sinister_strike(
     my_pos: Vec3,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, (u8, CharacterClass, f32, f32)>,
+    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32)>,
     instant_attacks: &mut Vec<(Entity, Entity, f32, u8, CharacterClass, AbilityType)>,
 ) -> bool {
     let ability = AbilityType::SinisterStrike;
@@ -446,7 +446,7 @@ fn try_sinister_strike(
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
     let target_id = combatant_info
         .get(&target_entity)
-        .map(|(team, class, _, _)| format!("Team {} {}", team, class.name()));
+        .map(|(team, _, class, _, _)| format!("Team {} {}", team, class.name()));
     combat_log.log_ability_cast(
         caster_id,
         "Sinister Strike".to_string(),

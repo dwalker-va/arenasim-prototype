@@ -459,11 +459,11 @@ pub fn view_combatant_ui(
                 if class == CharacterClass::Warlock {
                     ui.add_space(15.0);
 
-                    // Curse panel needs enough height for 3 enemy slots
-                    let curse_panel_height = 170.0;
+                    // Curse panel needs enough height for up to 3 enemy slots stacked vertically
+                    let curse_panel_height = 280.0;
                     ui.allocate_ui_with_layout(
                         egui::vec2(content_width, curse_panel_height),
-                        egui::Layout::left_to_right(egui::Align::TOP),
+                        egui::Layout::top_down(egui::Align::LEFT),
                         |ui| {
                             render_warlock_curse_panel(
                                 ui,
@@ -1100,101 +1100,112 @@ fn render_warlock_curse_panel(
                 .color(egui::Color32::from_rgb(170, 170, 170)),
         );
 
-        ui.add_space(12.0);
+        ui.add_space(8.0);
 
         // Track which curse was changed
         let mut changed_curse: Option<(usize, WarlockCurse)> = None;
 
-        let icon_size = 36.0;
+        let icon_size = 42.0;
         let gold = egui::Color32::from_rgb(255, 215, 0);
         let gray = egui::Color32::from_rgb(80, 80, 90);
 
-        // One row per enemy slot
+        // One section per enemy slot
         for enemy_slot in 0..enemy_size {
-            ui.horizontal(|ui| {
-                // Enemy slot label
-                ui.label(
-                    egui::RichText::new(format!("Target {}:", enemy_slot + 1))
-                        .size(13.0)
-                        .color(egui::Color32::from_rgb(180, 180, 180)),
-                );
-
-                ui.add_space(10.0);
-
-                // Get current curse for this enemy
-                let current_curse = current_prefs.get(enemy_slot).copied().unwrap_or_default();
-
-                // Curse options
-                let curses = [
-                    (WarlockCurse::Agony, "Curse of Agony", "Agony"),
-                    (WarlockCurse::Weakness, "Curse of Weakness", "Weakness"),
-                    (WarlockCurse::Tongues, "Curse of Tongues", "Tongues"),
-                ];
-
-                for (curse, icon_key, _label) in &curses {
-                    let is_selected = current_curse == *curse;
-                    let border_color = if is_selected { gold } else { gray };
-                    let border_width = if is_selected { 2.0 } else { 1.0 };
-
-                    // Get icon texture
-                    let icon_texture = ability_icons.as_ref().and_then(|icons| {
-                        icons.textures.get(*icon_key).copied()
-                    });
-
-                    // Allocate space for the icon button
-                    let (rect, response) = ui.allocate_exact_size(
-                        egui::vec2(icon_size, icon_size),
-                        egui::Sense::click(),
-                    );
-
-                    // Draw icon or placeholder
-                    let painter = ui.painter();
-                    if let Some(texture_id) = icon_texture {
-                        painter.image(
-                            texture_id,
-                            rect,
-                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                            egui::Color32::WHITE,
-                        );
-                    } else {
-                        painter.rect_filled(rect, 4.0, egui::Color32::from_rgb(50, 50, 65));
-                    }
-
-                    // Draw border
-                    painter.rect_stroke(rect, 4.0, egui::Stroke::new(border_width, border_color));
-
-                    // Track click
-                    if response.clicked() && !is_selected {
-                        changed_curse = Some((enemy_slot, *curse));
-                    }
-
-                    // Tooltip on hover
-                    if response.hovered() {
-                        let tooltip_text = match curse {
-                            WarlockCurse::Agony => "Curse of Agony: DoT - 14 damage per 4s for 24s",
-                            WarlockCurse::Weakness => "Curse of Weakness: -20% physical damage for 2 min",
-                            WarlockCurse::Tongues => "Curse of Tongues: +50% cast time for 30s",
-                        };
-                        response.on_hover_text(tooltip_text);
-                    }
-
-                    ui.add_space(4.0);
-                }
-
-                // Show selected curse name
-                ui.add_space(10.0);
-                ui.label(
-                    egui::RichText::new(format!("({})", match current_curse {
-                        WarlockCurse::Agony => "Agony",
-                        WarlockCurse::Weakness => "Weakness",
-                        WarlockCurse::Tongues => "Tongues",
-                    }))
-                        .size(12.0)
-                        .color(gold),
-                );
-            });
+            // Enemy target header
+            ui.label(
+                egui::RichText::new(format!("Enemy Target {}", enemy_slot + 1))
+                    .size(14.0)
+                    .color(egui::Color32::from_rgb(200, 180, 140))
+                    .strong(),
+            );
 
             ui.add_space(6.0);
+
+            // Get current curse for this enemy
+            let current_curse = current_prefs.get(enemy_slot).copied().unwrap_or_default();
+
+            // Curse options displayed horizontally with labels below each icon
+            let curses = [
+                (WarlockCurse::Agony, "Curse of Agony", "Agony"),
+                (WarlockCurse::Weakness, "Curse of Weakness", "Weakness"),
+                (WarlockCurse::Tongues, "Curse of Tongues", "Tongues"),
+            ];
+
+            ui.horizontal(|ui| {
+                for (i, (curse, icon_key, label)) in curses.iter().enumerate() {
+                    if i > 0 {
+                        ui.add_space(16.0);
+                    }
+
+                    let is_selected = current_curse == *curse;
+                    let border_color = if is_selected { gold } else { gray };
+                    let border_width = if is_selected { 3.0 } else { 1.0 };
+
+                    ui.vertical(|ui| {
+                        // Get icon texture
+                        let icon_texture = ability_icons.as_ref().and_then(|icons| {
+                            icons.textures.get(*icon_key).copied()
+                        });
+
+                        // Allocate space for the icon button
+                        let (rect, response) = ui.allocate_exact_size(
+                            egui::vec2(icon_size, icon_size),
+                            egui::Sense::click(),
+                        );
+
+                        // Draw icon or placeholder
+                        let painter = ui.painter();
+                        if let Some(texture_id) = icon_texture {
+                            painter.image(
+                                texture_id,
+                                rect,
+                                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                egui::Color32::WHITE,
+                            );
+                        } else {
+                            painter.rect_filled(rect, 4.0, egui::Color32::from_rgb(50, 50, 65));
+                        }
+
+                        // Draw border
+                        painter.rect_stroke(rect, 4.0, egui::Stroke::new(border_width, border_color));
+
+                        // Track click
+                        if response.clicked() && !is_selected {
+                            changed_curse = Some((enemy_slot, *curse));
+                        }
+
+                        // Tooltip on hover
+                        if response.hovered() {
+                            let tooltip_text = match curse {
+                                WarlockCurse::Agony => "Curse of Agony: DoT - 14 damage per 4s for 24s",
+                                WarlockCurse::Weakness => "Curse of Weakness: -20% physical damage for 2 min",
+                                WarlockCurse::Tongues => "Curse of Tongues: +50% cast time for 30s",
+                            };
+                            response.on_hover_text(tooltip_text);
+                        }
+
+                        // Label below icon
+                        ui.add_space(4.0);
+                        let label_color = if is_selected {
+                            gold
+                        } else {
+                            egui::Color32::from_rgb(150, 150, 150)
+                        };
+                        ui.label(
+                            egui::RichText::new(*label)
+                                .size(11.0)
+                                .color(label_color),
+                        );
+                    });
+                }
+            });
+
+            // Add separator between targets (but not after the last one)
+            if enemy_slot < enemy_size - 1 {
+                ui.add_space(12.0);
+                ui.separator();
+                ui.add_space(8.0);
+            }
         }
 
         // Apply change outside of the loop to avoid borrow issues

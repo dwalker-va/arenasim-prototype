@@ -20,6 +20,10 @@ fn create_config(team1: Vec<&str>, team2: Vec<&str>, seed: Option<u64>) -> Headl
         output_path: None,
         max_duration_secs: 60.0, // Short duration for tests
         random_seed: seed,
+        team1_rogue_openers: vec![],
+        team2_rogue_openers: vec![],
+        team1_warlock_curse_prefs: vec![],
+        team2_warlock_curse_prefs: vec![],
     }
 }
 
