@@ -417,24 +417,19 @@ pub fn process_aura_breaks(
                 if aura.accumulated_damage > aura.break_on_damage_threshold {
                     auras_to_remove.push(index);
                     
-                    // Log the break
-                    let aura_name = match aura.effect_type {
-                        AuraType::Root => "Root",
-                        AuraType::MovementSpeedSlow => "Movement Speed Slow",
-                        AuraType::Stun => "Stun",
-                        AuraType::Fear => "Fear",
-                        AuraType::Polymorph => "Polymorph",
-                        AuraType::MaxHealthIncrease => "Power Word: Fortitude", // Should never break on damage
-                        AuraType::MaxManaIncrease => "Arcane Intellect", // Should never break on damage
-                        AuraType::AttackPowerIncrease => "Battle Shout", // Should never break on damage
-                        AuraType::DamageOverTime => "Rend", // Should never break on damage (has 0.0 threshold)
-                        AuraType::SpellSchoolLockout => "Lockout", // Should never break on damage (has 0.0 threshold)
-                        AuraType::HealingReduction => "Mortal Strike", // Should never break on damage (has 0.0 threshold)
-                        AuraType::ShadowSight => "Shadow Sight", // Should never break on damage (has 0.0 threshold)
-                        AuraType::Absorb => "Shield", // Shields don't break on damage, they absorb it
-                        AuraType::WeakenedSoul => "Weakened Soul", // Debuff, doesn't break on damage
-                        AuraType::DamageReduction => "Curse of Weakness", // Curse, doesn't break on damage
-                        AuraType::CastTimeIncrease => "Curse of Tongues", // Curse, doesn't break on damage
+                    // Log the break - use the ability name stored on the aura
+                    let aura_name = if aura.ability_name.is_empty() {
+                        // Fallback for auras without ability names
+                        match aura.effect_type {
+                            AuraType::Root => "Root",
+                            AuraType::MovementSpeedSlow => "Slow",
+                            AuraType::Stun => "Stun",
+                            AuraType::Fear => "Fear",
+                            AuraType::Polymorph => "Polymorph",
+                            _ => "Effect",
+                        }
+                    } else {
+                        aura.ability_name.as_str()
                     };
                     
                     let message = format!(

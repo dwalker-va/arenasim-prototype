@@ -47,27 +47,13 @@ pub enum WarlockCurse {
 }
 
 impl WarlockCurse {
-    /// Get the display name
-    pub fn name(&self) -> &'static str {
-        match self {
-            WarlockCurse::Agony => "Curse of Agony",
-            WarlockCurse::Weakness => "Curse of Weakness",
-            WarlockCurse::Tongues => "Curse of Tongues",
-        }
-    }
-
-    /// Get a short description
+    /// Get a short description for UI display
     pub fn description(&self) -> &'static str {
         match self {
             WarlockCurse::Agony => "84 damage over 24s",
             WarlockCurse::Weakness => "-20% physical damage",
             WarlockCurse::Tongues => "+50% cast time",
         }
-    }
-
-    /// Get all curse variants for UI iteration
-    pub fn all() -> &'static [WarlockCurse] {
-        &[WarlockCurse::Agony, WarlockCurse::Weakness, WarlockCurse::Tongues]
     }
 }
 

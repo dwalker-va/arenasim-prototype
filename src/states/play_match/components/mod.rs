@@ -354,8 +354,8 @@ pub enum AuraType {
     /// Polymorph - target wanders slowly, can't attack/cast, breaks on ANY damage.
     /// Separate from Stun for diminishing returns categories (incapacitates vs stuns).
     Polymorph,
-    /// Reduces outgoing damage by a flat amount (magnitude = damage reduction)
-    /// Used by Curse of Weakness to reduce enemy damage dealt.
+    /// Reduces outgoing physical damage by a percentage (magnitude = 0.2 means 20% reduction)
+    /// Used by Curse of Weakness to reduce enemy physical damage dealt.
     DamageReduction,
     /// Increases cast time by a percentage (magnitude = multiplier, e.g., 0.5 = 50% slower)
     /// Used by Curse of Tongues to slow enemy casting.
@@ -479,14 +479,7 @@ impl Combatant {
         }
     }
 
-    /// Create a new combatant with a specific rogue opener preference.
-    pub fn new_with_opener(team: u8, slot: u8, class: match_config::CharacterClass, rogue_opener: RogueOpener) -> Self {
-        let mut combatant = Self::new(team, slot, class);
-        combatant.rogue_opener = rogue_opener;
-        combatant
-    }
-
-    /// Create a new combatant with specific preferences for Warlock curses.
+    /// Create a new combatant with specific preferences for Warlock curses and rogue opener.
     pub fn new_with_curse_prefs(
         team: u8,
         slot: u8,
