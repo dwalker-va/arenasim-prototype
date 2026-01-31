@@ -7,7 +7,7 @@
 
 use bevy::prelude::*;
 use bevy_egui::egui;
-use crate::combat::log::{CombatLog, CombatLogEventType};
+use crate::combat::log::CombatLog;
 use super::match_config;
 use super::components::*;
 use super::abilities::AbilityType;
@@ -805,22 +805,12 @@ pub fn check_interrupts(
         );
 
         // Queue the interrupt for processing
+        // Note: The actual interrupt result (with school lockout info) is logged in process_interrupts
         commands.spawn(InterruptPending {
             caster: entity,
             target: target_entity,
             ability: interrupt_ability,
             lockout_duration: ability_def.lockout_duration,
         });
-
-        // Log to combat log
-        combat_log.log(
-            CombatLogEventType::AbilityUsed,
-            format!(
-                "Team {} {} uses {} to interrupt enemy cast",
-                combatant.team,
-                combatant.class.name(),
-                ability_def.name
-            )
-        );
     }
 }

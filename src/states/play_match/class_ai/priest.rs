@@ -565,19 +565,16 @@ fn try_dispel_magic(
             .map(|(i, _)| i)
             .collect();
 
-        if let Some(&idx) = dispellable_indices.first() {
+        if !dispellable_indices.is_empty() {
             // We can't mutably access active_auras_map here, so we'll spawn a DispelPending
-            // component that will be processed in a separate system
-            let removed_aura = &target_auras[idx];
-            let removed_name = removed_aura.ability_name.clone();
-
-            // Spawn a marker to handle the dispel in the aura processing system
+            // component that will be processed in a separate system.
+            // Note: The actual aura removed is randomly selected in process_dispels (WoW Classic behavior),
+            // so we don't log a specific aura name here - that's logged when the dispel actually happens.
             commands.spawn(DispelPending {
                 target: dispel_target,
-                dispelled_aura_name: removed_name.clone(),
             });
 
-            // Log the dispel
+            // Log the dispel cast (the actual removal is logged in process_dispels)
             let caster_id = combatant_id(combatant.team, combatant.class);
             let target_id = combatant_info.get(&dispel_target).map(|(team, _, class, _, _)| {
                 format!("Team {} {}", team, class.name())
@@ -587,19 +584,17 @@ fn try_dispel_magic(
                 "Dispel Magic".to_string(),
                 target_id.clone(),
                 format!(
-                    "Team {} {} dispels {} from {}",
+                    "Team {} {} casts Dispel Magic on {}",
                     combatant.team,
                     combatant.class.name(),
-                    removed_name,
                     target_id.unwrap_or_else(|| "ally".to_string())
                 ),
             );
 
             info!(
-                "Team {} {} dispels {} from ally",
+                "Team {} {} casts Dispel Magic on ally",
                 combatant.team,
-                combatant.class.name(),
-                removed_name
+                combatant.class.name()
             );
 
             return true;
@@ -612,12 +607,11 @@ fn try_dispel_magic(
 /// Pending dispel to be processed by the aura system.
 /// This allows dispels to be applied without holding mutable references
 /// to the aura map during AI decision making.
+/// Note: The actual aura removed is randomly selected in process_dispels (WoW Classic behavior).
 #[derive(bevy::prelude::Component)]
 pub struct DispelPending {
     /// Target entity to dispel
     pub target: Entity,
-    /// Name of the aura to remove (used for logging)
-    pub dispelled_aura_name: String,
 }
 
 /// Try to cast Flash Heal on the lowest HP ally.

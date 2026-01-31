@@ -694,7 +694,17 @@ pub fn combat_auto_attack(
     let mut damage_dealt_updates: Vec<(Entity, f32)> = Vec::new();
     let mut absorbed_per_target: HashMap<Entity, f32> = HashMap::new();
 
+    // Track which combatants have died during this frame's attack processing
+    // This prevents dead combatants from dealing damage after being killed
+    let mut died_this_frame: std::collections::HashSet<Entity> = std::collections::HashSet::new();
+
     for (attacker_entity, target_entity, damage, has_bonus) in attacks {
+        // Bug fix: Don't allow attacks from combatants who died earlier this frame
+        // This can happen when two combatants attack each other in the same frame
+        if died_this_frame.contains(&attacker_entity) {
+            continue;
+        }
+
         if let Ok((_, _, mut target, _, _, mut target_auras)) = combatants.get_mut(target_entity) {
             if target.is_alive() {
                 // Apply damage with absorb shield consideration
@@ -767,6 +777,10 @@ pub fn combat_auto_attack(
 
                     // Log death with killer tracking
                     if is_killing_blow {
+                        // Track that this target died - prevents them from dealing damage
+                        // if they had a queued attack later in this frame
+                        died_this_frame.insert(target_entity);
+
                         let death_message = format!(
                             "Team {} {} has been eliminated",
                             target_team,

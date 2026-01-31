@@ -4,11 +4,15 @@
 //!
 //! ## Priority Order
 //! 1. Corruption (instant Shadow DoT)
-//! 2. Immolate (2s cast Fire DoT)
-//! 3. Spread curses to enemies (per-target preferences)
+//! 2. Spread curses to enemies (per-target preferences)
+//! 3. Immolate (2s cast Fire DoT) - skipped when being kited
 //! 4. Fear (CC on non-CC'd target)
 //! 5. Drain Life (when HP < 80% and target has DoTs)
-//! 6. Shadow Bolt (main damage spell)
+//! 6. Shadow Bolt (main damage spell) - skipped when being kited
+//!
+//! ## Kiting Detection
+//! When being kited (slowed and out of range), the Warlock prioritizes instant-cast
+//! abilities over cast-time spells that would be interrupted by movement.
 
 use bevy::prelude::*;
 use std::collections::HashMap;
@@ -25,6 +29,29 @@ use crate::states::play_match::constants::GCD;
 use crate::states::play_match::is_spell_school_locked;
 
 use super::{AbilityDecision, ClassAI, CombatContext};
+
+/// Check if the Warlock is being kited (slowed and out of preferred range).
+/// Returns true if the Warlock should prioritize instant-cast abilities.
+fn is_being_kited(
+    combatant: &Combatant,
+    my_pos: Vec3,
+    target_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+) -> bool {
+    // Check if we have a movement speed slow
+    let is_slowed = auras
+        .map(|a| a.auras.iter().any(|aura| aura.effect_type == AuraType::MovementSpeedSlow))
+        .unwrap_or(false);
+
+    // Check if target is beyond our preferred range (we'd need to move)
+    let distance_to_target = my_pos.distance(target_pos);
+    let preferred_range = combatant.class.preferred_range();
+    let out_of_range = distance_to_target > preferred_range;
+
+    // We're being kited if we're slowed AND out of range
+    // This means we'll need to move to catch up, which would interrupt casts
+    is_slowed && out_of_range
+}
 
 /// Warlock AI implementation.
 ///
@@ -70,7 +97,11 @@ pub fn decide_warlock_action(
         return false;
     }
 
-    // Priority 1: Corruption (instant Shadow DoT)
+    // Detect if we're being kited (slowed and out of range)
+    // When kited, prioritize instant-cast abilities over cast-time spells
+    let being_kited = is_being_kited(combatant, my_pos, target_pos, auras);
+
+    // Priority 1: Corruption (instant Shadow DoT) - always try this first
     if try_corruption(
         commands,
         combat_log,
@@ -87,24 +118,7 @@ pub fn decide_warlock_action(
         return true;
     }
 
-    // Priority 2: Immolate (2s cast Fire DoT)
-    if try_immolate(
-        commands,
-        combat_log,
-        abilities,
-        entity,
-        combatant,
-        my_pos,
-        auras,
-        target_entity,
-        target_pos,
-        combatant_info,
-        active_auras_map,
-    ) {
-        return true;
-    }
-
-    // Priority 3: Spread curses to all enemies based on preferences
+    // Priority 2: Spread curses to all enemies (instant) - moved up when kiting
     if try_spread_curses(
         commands,
         combat_log,
@@ -120,9 +134,29 @@ pub fn decide_warlock_action(
         return true;
     }
 
+    // Priority 3: Immolate (2s cast Fire DoT) - skip when being kited
+    if !being_kited {
+        if try_immolate(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            target_entity,
+            target_pos,
+            combatant_info,
+            active_auras_map,
+        ) {
+            return true;
+        }
+    }
+
     // Priority 4: Fear (uses CC target if available, otherwise kill target)
     // CC target is separate from kill target to enable strategic CC on healers
     // while focusing damage on a different target
+    // Fear is high value even with cast time - landing it can turn the fight
     let fear_target = combatant.cc_target.or(combatant.target);
     if let Some(fear_target_entity) = fear_target {
         if let Some(&fear_target_pos) = positions.get(&fear_target_entity) {
@@ -145,23 +179,31 @@ pub fn decide_warlock_action(
     }
 
     // Priority 5: Drain Life (when HP < 80% and target has DoTs)
-    if try_drain_life(
-        commands,
-        combat_log,
-        abilities,
-        entity,
-        combatant,
-        my_pos,
-        auras,
-        target_entity,
-        target_pos,
-        combatant_info,
-        active_auras_map,
-    ) {
-        return true;
+    // Skip when being kited - channeling would be interrupted by movement
+    if !being_kited {
+        if try_drain_life(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            target_entity,
+            target_pos,
+            combatant_info,
+            active_auras_map,
+        ) {
+            return true;
+        }
     }
 
-    // Priority 6: Shadow Bolt
+    // Priority 6: Shadow Bolt - skip when being kited
+    // When kited, we'll rely on DoTs and wait for a better opportunity
+    if being_kited {
+        return false;
+    }
+
     try_shadowbolt(
         commands,
         combat_log,
