@@ -195,3 +195,25 @@ For auras that can break on damage:
 | `SpellLockout`      | Prevents casting school for duration     |
 | `WeakenedSoul`      | Prevents PW:S reapplication              |
 | `ShadowSight`       | Can see stealthed enemies                |
+
+---
+
+## Intended Behaviors (Not Bugs)
+
+These behaviors may look like bugs but are intentional design decisions. Do not report these during bug hunts.
+
+### Damage After Caster Death
+
+| Scenario | Intended? | Reason |
+|----------|-----------|--------|
+| DoT damage continues after caster dies | ✅ Yes | Authentic WoW behavior - applied effects persist |
+| Projectile in flight hits after caster dies | ✅ Yes | Projectile was already launched before death |
+| Simultaneous ability kills (both combatants die) | ✅ Yes | Abilities resolving at same timestamp is valid; RNG/gear/talents will reduce frequency |
+
+### What IS a Bug
+
+| Scenario | Bug? | Reason |
+|----------|------|--------|
+| Dead unit initiates NEW attack after death | ❌ Bug | Fixed via `died_this_frame` tracking |
+| Dead unit starts casting after death | ❌ Bug | Should be caught by alive checks |
+| Queued melee attack lands after attacker dies in same frame | ❌ Bug | Fixed in combat_core.rs |
