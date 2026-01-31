@@ -1478,9 +1478,82 @@ pub fn process_casting(
                 aura.duration
             );
 
-            // Spawn speech bubble for Fear (only when successfully applied, not when cast starts)
-            if aura.aura_type == AuraType::Fear {
-                spawn_speech_bubble(&mut commands, caster_entity, "Fear");
+            // Log CC application for all crowd control types
+            match aura.aura_type {
+                AuraType::Fear => {
+                    spawn_speech_bubble(&mut commands, caster_entity, "Fear");
+                    let message = format!(
+                        "Team {} {}'s {} lands on Team {} {} ({:.1}s)",
+                        caster_team,
+                        caster_class.name(),
+                        def.name,
+                        target.team,
+                        target.class.name(),
+                        aura.duration
+                    );
+                    combat_log.log_crowd_control(
+                        combatant_id(caster_team, caster_class),
+                        combatant_id(target.team, target.class),
+                        "Fear".to_string(),
+                        aura.duration,
+                        message,
+                    );
+                }
+                AuraType::Root => {
+                    let message = format!(
+                        "Team {} {}'s {} roots Team {} {} ({:.1}s)",
+                        caster_team,
+                        caster_class.name(),
+                        def.name,
+                        target.team,
+                        target.class.name(),
+                        aura.duration
+                    );
+                    combat_log.log_crowd_control(
+                        combatant_id(caster_team, caster_class),
+                        combatant_id(target.team, target.class),
+                        "Root".to_string(),
+                        aura.duration,
+                        message,
+                    );
+                }
+                AuraType::Stun => {
+                    let message = format!(
+                        "Team {} {}'s {} stuns Team {} {} ({:.1}s)",
+                        caster_team,
+                        caster_class.name(),
+                        def.name,
+                        target.team,
+                        target.class.name(),
+                        aura.duration
+                    );
+                    combat_log.log_crowd_control(
+                        combatant_id(caster_team, caster_class),
+                        combatant_id(target.team, target.class),
+                        "Stun".to_string(),
+                        aura.duration,
+                        message,
+                    );
+                }
+                AuraType::Polymorph => {
+                    let message = format!(
+                        "Team {} {}'s {} polymorphs Team {} {} ({:.1}s)",
+                        caster_team,
+                        caster_class.name(),
+                        def.name,
+                        target.team,
+                        target.class.name(),
+                        aura.duration
+                    );
+                    combat_log.log_crowd_control(
+                        combatant_id(caster_team, caster_class),
+                        combatant_id(target.team, target.class),
+                        "Polymorph".to_string(),
+                        aura.duration,
+                        message,
+                    );
+                }
+                _ => {} // Non-CC auras don't need logging here
             }
         }
 

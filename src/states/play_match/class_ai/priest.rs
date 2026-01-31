@@ -70,6 +70,7 @@ pub fn decide_priest_action(
     combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32)>,
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
     shielded_this_frame: &mut HashSet<Entity>,
+    fortified_this_frame: &mut HashSet<Entity>,
 ) -> bool {
     // Check if global cooldown is active
     if combatant.global_cooldown > 0.0 {
@@ -88,6 +89,7 @@ pub fn decide_priest_action(
         positions,
         combatant_info,
         active_auras_map,
+        fortified_this_frame,
     ) {
         return true;
     }
@@ -192,6 +194,7 @@ fn try_fortitude(
     positions: &HashMap<Entity, Vec3>,
     combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32)>,
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
+    fortified_this_frame: &mut HashSet<Entity>,
 ) -> bool {
     // Find an unbuffed ally
     let mut unbuffed_ally: Option<(Entity, Vec3)> = None;
@@ -209,6 +212,11 @@ fn try_fortitude(
             .unwrap_or(false);
 
         if has_fortitude {
+            continue;
+        }
+
+        // Check if target was fortified by another Priest this frame
+        if fortified_this_frame.contains(ally_entity) {
             continue;
         }
 
@@ -279,6 +287,9 @@ fn try_fortitude(
             },
         });
     }
+
+    // Mark target as fortified this frame
+    fortified_this_frame.insert(buff_target);
 
     info!(
         "Team {} {} casts Power Word: Fortitude on ally",

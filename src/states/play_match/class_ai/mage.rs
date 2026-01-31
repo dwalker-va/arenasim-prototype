@@ -448,6 +448,24 @@ fn try_frost_nova(
                     spell_school: Some(nova_def.spell_school),
                 },
             });
+
+            // Log CC application for Frost Nova root
+            let message = format!(
+                "Team {} {}'s {} roots Team {} {} ({:.1}s)",
+                combatant.team,
+                combatant.class.name(),
+                nova_def.name,
+                _target_team,
+                _target_class.name(),
+                aura.duration
+            );
+            combat_log.log_crowd_control(
+                combatant_id(combatant.team, combatant.class),
+                combatant_id(*_target_team, *_target_class),
+                "Root".to_string(),
+                aura.duration,
+                message,
+            );
         }
     }
 

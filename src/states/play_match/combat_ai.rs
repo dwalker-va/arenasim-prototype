@@ -320,6 +320,10 @@ pub fn decide_abilities(
     // Track targets that have been shielded THIS FRAME to prevent same-frame double-shielding
     // This handles the case where multiple Priests try to shield the same target before AuraPending is processed
     let mut shielded_this_frame: std::collections::HashSet<Entity> = std::collections::HashSet::new();
+
+    // Track targets that have been fortified THIS FRAME to prevent same-frame double-buffing
+    // This handles the case where multiple Priests try to buff the same target before AuraPending is processed
+    let mut fortified_this_frame: std::collections::HashSet<Entity> = std::collections::HashSet::new();
     
     // Queue for Frost Nova damage (caster, target, damage, caster_team, caster_class, target_pos)
     let mut frost_nova_damage: Vec<(Entity, Entity, f32, u8, match_config::CharacterClass, Vec3)> = Vec::new();
@@ -374,6 +378,7 @@ pub fn decide_abilities(
                 &combatant_info,
                 &active_auras_map,
                 &mut shielded_this_frame,
+                &mut fortified_this_frame,
             ) {
                 continue;
             }
