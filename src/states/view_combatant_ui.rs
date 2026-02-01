@@ -624,11 +624,7 @@ fn render_abilities_panel(
 
             // Get icon texture if available
             let icon_texture = ability_icons.as_ref().and_then(|icons| {
-                let icon_key = match ability_name {
-                    "Shadow Bolt" => "Shadowbolt",
-                    other => other,
-                };
-                icons.textures.get(icon_key).copied()
+                icons.textures.get(ability_name).copied()
             });
 
             // Allocate space for the row first, with hover sense

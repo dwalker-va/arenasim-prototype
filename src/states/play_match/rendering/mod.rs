@@ -43,7 +43,7 @@ pub fn get_ability_icon_path(ability: &str) -> Option<&'static str> {
         "Sinister Strike" => Some("icons/abilities/spell_shadow_ritualofsacrifice.jpg"),
         "Kidney Shot" => Some("icons/abilities/ability_rogue_kidneyshot.jpg"),
         "Corruption" => Some("icons/abilities/spell_shadow_abominationexplosion.jpg"),
-        "Shadowbolt" => Some("icons/abilities/spell_shadow_shadowbolt.jpg"),
+        "Shadowbolt" | "Shadow Bolt" => Some("icons/abilities/spell_shadow_shadowbolt.jpg"),
         "Fear" => Some("icons/abilities/spell_shadow_possession.jpg"),
         "Immolate" => Some("icons/abilities/spell_fire_immolation.jpg"),
         "Drain Life" => Some("icons/abilities/spell_shadow_lifedrain02.jpg"),
