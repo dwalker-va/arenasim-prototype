@@ -229,3 +229,28 @@ pub fn get_class_ai(class: CharacterClass) -> Box<dyn ClassAI> {
         CharacterClass::Paladin => Box::new(paladin::PaladinAI),
     }
 }
+
+// ============================================================================
+// Shared Healer Utilities
+// ============================================================================
+
+/// Check if the team's HP is stable enough for maintenance tasks.
+/// Returns true if all living allies are above 70% HP.
+///
+/// Used by Priest and Paladin to determine when to do maintenance dispels
+/// vs focusing on healing.
+pub fn is_team_healthy(
+    team: u8,
+    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32)>,
+) -> bool {
+    for &(ally_team, _, _, ally_hp, ally_max_hp) in combatant_info.values() {
+        if ally_team != team || ally_hp <= 0.0 {
+            continue;
+        }
+        let hp_percent = ally_hp / ally_max_hp;
+        if hp_percent < 0.70 {
+            return false;
+        }
+    }
+    true
+}

@@ -23,22 +23,7 @@ use crate::states::play_match::constants::GCD;
 use crate::states::play_match::is_spell_school_locked;
 use crate::states::play_match::utils::combatant_id;
 
-use super::{AbilityDecision, ClassAI, CombatContext};
-
-/// Check if the team's HP is stable enough for maintenance dispels.
-/// Returns true if all living allies are above 70% HP.
-fn is_team_healthy(team: u8, combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32)>) -> bool {
-    for &(ally_team, _, _, ally_hp, ally_max_hp) in combatant_info.values() {
-        if ally_team != team || ally_hp <= 0.0 {
-            continue;
-        }
-        let hp_percent = ally_hp / ally_max_hp;
-        if hp_percent < 0.70 {
-            return false; // Someone needs healing
-        }
-    }
-    true
-}
+use super::{AbilityDecision, ClassAI, CombatContext, is_team_healthy};
 
 /// Priest AI implementation.
 ///

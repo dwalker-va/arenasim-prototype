@@ -30,6 +30,10 @@ pub const CHARGE_MIN_RANGE: f32 = 8.0;
 /// Mages will prioritize movement over casting when closer than this to enemies.
 pub const SAFE_KITING_DISTANCE: f32 = 8.0;
 
+/// Holy Shock damage range (20 yards).
+/// Heal range uses the ability config (40 yards), but damage has a shorter range.
+pub const HOLY_SHOCK_DAMAGE_RANGE: f32 = 20.0;
+
 // ============================================================================
 // Health Thresholds
 // ============================================================================

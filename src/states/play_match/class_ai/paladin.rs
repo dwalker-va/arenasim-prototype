@@ -21,26 +21,11 @@ use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
 use crate::states::play_match::combat_core::calculate_cast_time;
-use crate::states::play_match::constants::GCD;
+use crate::states::play_match::constants::{GCD, HOLY_SHOCK_DAMAGE_RANGE};
 use crate::states::play_match::is_spell_school_locked;
 use crate::states::play_match::utils::combatant_id;
 
-use super::{AbilityDecision, ClassAI, CombatContext};
-
-/// Check if the team's HP is stable enough for maintenance dispels.
-/// Returns true if all living allies are above 70% HP.
-fn is_team_healthy(team: u8, combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32)>) -> bool {
-    for &(ally_team, _, _, ally_hp, ally_max_hp) in combatant_info.values() {
-        if ally_team != team || ally_hp <= 0.0 {
-            continue;
-        }
-        let hp_percent = ally_hp / ally_max_hp;
-        if hp_percent < 0.70 {
-            return false;
-        }
-    }
-    true
-}
+use super::{AbilityDecision, ClassAI, CombatContext, is_team_healthy};
 
 /// Check if any ally is in an emergency situation (< 40% HP)
 fn has_emergency_target(team: u8, combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32)>) -> bool {
@@ -447,8 +432,8 @@ fn try_holy_shock_heal(
             continue;
         };
 
-        // Ally range is 40 yards
-        if my_pos.distance(ally_pos) > 40.0 {
+        // Use ability's configured range
+        if my_pos.distance(ally_pos) > def.range {
             continue;
         }
 
@@ -489,7 +474,9 @@ fn try_holy_shock_heal(
 
     // Spawn pending heal
     commands.spawn(HolyShockHealPending {
-        caster: combatant.spell_power,
+        caster_spell_power: combatant.spell_power,
+        caster_team: combatant.team,
+        caster_class: combatant.class,
         target: heal_target,
     });
 
@@ -536,8 +523,8 @@ fn try_holy_shock_damage(
             continue;
         };
 
-        // Damage range is 20 yards
-        if my_pos.distance(enemy_pos) > 20.0 {
+        // Use constant for damage range (shorter than heal range)
+        if my_pos.distance(enemy_pos) > HOLY_SHOCK_DAMAGE_RANGE {
             continue;
         }
 
@@ -574,6 +561,8 @@ fn try_holy_shock_damage(
     // Spawn pending damage
     commands.spawn(HolyShockDamagePending {
         caster_spell_power: combatant.spell_power,
+        caster_team: combatant.team,
+        caster_class: combatant.class,
         target: target_entity,
     });
 
@@ -919,7 +908,9 @@ fn try_devotion_aura(
 /// Pending Holy Shock heal to be processed
 #[derive(Component)]
 pub struct HolyShockHealPending {
-    pub caster: f32, // caster's spell power
+    pub caster_spell_power: f32,
+    pub caster_team: u8,
+    pub caster_class: CharacterClass,
     pub target: Entity,
 }
 
@@ -927,5 +918,7 @@ pub struct HolyShockHealPending {
 #[derive(Component)]
 pub struct HolyShockDamagePending {
     pub caster_spell_power: f32,
+    pub caster_team: u8,
+    pub caster_class: CharacterClass,
     pub target: Entity,
 }

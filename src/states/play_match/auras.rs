@@ -755,14 +755,14 @@ pub fn process_holy_shock_heals(
     mut game_rng: ResMut<GameRng>,
     abilities: Res<AbilityDefinitions>,
     pending_heals: Query<(Entity, &HolyShockHealPending)>,
-    mut combatants: Query<(&mut Combatant, &Transform)>,
+    mut combatants: Query<(&mut Combatant, &Transform, Option<&ActiveAuras>)>,
     mut fct_states: Query<&mut FloatingTextState>,
 ) {
     let ability_def = abilities.get_unchecked(&AbilityType::HolyShock);
 
     for (pending_entity, pending) in pending_heals.iter() {
         // Get target combatant
-        if let Ok((mut target, target_transform)) = combatants.get_mut(pending.target) {
+        if let Ok((mut target, target_transform, target_auras)) = combatants.get_mut(pending.target) {
             if !target.is_alive() {
                 commands.entity(pending_entity).despawn();
                 continue;
@@ -771,12 +771,18 @@ pub fn process_holy_shock_heals(
             // Calculate healing amount using ability config
             let base_heal = ability_def.healing_base_min
                 + game_rng.random_f32() * (ability_def.healing_base_max - ability_def.healing_base_min);
-            let spell_power_bonus = pending.caster * ability_def.healing_coefficient;
-            let heal_amount = base_heal + spell_power_bonus;
+            let spell_power_bonus = pending.caster_spell_power * ability_def.healing_coefficient;
+            let mut heal_amount = base_heal + spell_power_bonus;
 
             // Check for healing reduction debuffs (e.g., Mortal Strike)
-            // Note: We don't have access to target auras here directly, but the heal is applied below
-            // If needed, we could add an aura query parameter
+            if let Some(auras) = target_auras {
+                for aura in &auras.auras {
+                    if aura.effect_type == AuraType::HealingReduction {
+                        // Magnitude is a multiplier (e.g., 0.65 = 35% reduction)
+                        heal_amount *= aura.magnitude;
+                    }
+                }
+            }
 
             let old_health = target.current_health;
             target.current_health = (target.current_health + heal_amount).min(target.max_health);
@@ -803,11 +809,13 @@ pub fn process_holy_shock_heals(
                 PlayMatchEntity,
             ));
 
-            // Log the heal
+            // Log the heal with caster attribution
+            let caster_id = combatant_id(pending.caster_team, pending.caster_class);
             combat_log.log(
                 CombatLogEventType::Healing,
                 format!(
-                    "Team {} {}'s Holy Shock heals for {:.0}",
+                    "{}'s Holy Shock heals Team {} {} for {:.0}",
+                    caster_id,
                     target_team,
                     target_class.name(),
                     actual_heal
@@ -815,13 +823,17 @@ pub fn process_holy_shock_heals(
             );
 
             info!(
-                "Holy Shock heals Team {} {} for {:.0} ({:.0}/{:.0})",
+                "Team {} {}'s Holy Shock heals Team {} {} for {:.0} ({:.0}/{:.0})",
+                pending.caster_team,
+                pending.caster_class.name(),
                 target_team,
                 target_class.name(),
                 actual_heal,
                 target.current_health,
                 target.max_health
             );
+        } else {
+            // Target entity no longer exists - clean up orphaned pending
         }
 
         // Remove the pending heal entity
@@ -916,11 +928,13 @@ pub fn process_holy_shock_damage(
                 ));
             }
 
-            // Log damage
+            // Log damage with caster attribution
+            let caster_id = combatant_id(pending.caster_team, pending.caster_class);
             let is_killing_blow = !target.is_alive();
             let message = if absorbed > 0.0 {
                 format!(
-                    "Holy Shock hits Team {} {} for {:.0} damage ({:.0} absorbed)",
+                    "{}'s Holy Shock hits Team {} {} for {:.0} damage ({:.0} absorbed)",
+                    caster_id,
                     target_team,
                     target_class.name(),
                     actual_damage,
@@ -928,14 +942,15 @@ pub fn process_holy_shock_damage(
                 )
             } else {
                 format!(
-                    "Holy Shock hits Team {} {} for {:.0} damage",
+                    "{}'s Holy Shock hits Team {} {} for {:.0} damage",
+                    caster_id,
                     target_team,
                     target_class.name(),
                     actual_damage
                 )
             };
             combat_log.log_damage(
-                "Paladin".to_string(), // We don't have caster info here, generic
+                caster_id.clone(),
                 combatant_id(target_team, target_class),
                 "Holy Shock".to_string(),
                 actual_damage,
@@ -946,16 +961,19 @@ pub fn process_holy_shock_damage(
             // Log death if killing blow
             if is_killing_blow {
                 let death_message = format!(
-                    "Team {} {} has been eliminated",
+                    "Team {} {} has been eliminated by {}'s Holy Shock",
                     target_team,
-                    target_class.name()
+                    target_class.name(),
+                    caster_id
                 );
                 combat_log.log_death(
                     combatant_id(target_team, target_class),
-                    Some("Paladin".to_string()),
+                    Some(caster_id),
                     death_message,
                 );
             }
+        } else {
+            // Target entity no longer exists - clean up orphaned pending
         }
 
         // Remove the pending damage entity
