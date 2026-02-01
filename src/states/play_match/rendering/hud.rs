@@ -852,5 +852,6 @@ fn get_aura_fallback_color(aura_type: &AuraType) -> egui::Color32 {
         AuraType::ShadowSight => egui::Color32::from_rgb(75, 0, 130), // Indigo
         AuraType::DamageReduction => egui::Color32::from_rgb(139, 69, 19), // Saddle brown (debuff)
         AuraType::CastTimeIncrease => egui::Color32::from_rgb(128, 0, 128), // Purple (curse)
+        AuraType::DamageTakenReduction => egui::Color32::from_rgb(255, 215, 0), // Gold (Paladin aura)
     }
 }

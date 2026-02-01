@@ -440,6 +440,24 @@ pub fn decide_abilities(
                 continue;
             }
         }
+
+        // Paladins use Flash of Light, Holy Light, Holy Shock, Hammer of Justice, and Cleanse
+        if combatant.class == match_config::CharacterClass::Paladin {
+            if class_ai::paladin::decide_paladin_action(
+                &mut commands,
+                &mut combat_log,
+                &abilities,
+                entity,
+                &mut combatant,
+                my_pos,
+                auras.as_deref(),
+                &positions,
+                &combatant_info,
+                &active_auras_map,
+            ) {
+                continue;
+            }
+        }
     }
 
     // Process queued instant attacks (Ambush, Sinister Strike)

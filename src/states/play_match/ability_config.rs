@@ -270,6 +270,13 @@ impl AbilityDefinitions {
             AbilityType::PowerWordShield,
             AbilityType::Polymorph,
             AbilityType::DispelMagic,
+            // Paladin abilities
+            AbilityType::FlashOfLight,
+            AbilityType::HolyLight,
+            AbilityType::HolyShock,
+            AbilityType::HammerOfJustice,
+            AbilityType::PaladinCleanse,
+            AbilityType::DevotionAura,
         ];
 
         let missing: Vec<AbilityType> = expected_abilities

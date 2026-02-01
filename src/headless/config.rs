@@ -149,8 +149,9 @@ impl HeadlessMatchConfig {
             "Rogue" => Ok(CharacterClass::Rogue),
             "Priest" => Ok(CharacterClass::Priest),
             "Warlock" => Ok(CharacterClass::Warlock),
+            "Paladin" => Ok(CharacterClass::Paladin),
             _ => Err(format!(
-                "Unknown class: '{}'. Valid classes: Warrior, Mage, Rogue, Priest, Warlock",
+                "Unknown class: '{}'. Valid classes: Warrior, Mage, Rogue, Priest, Warlock, Paladin",
                 name
             )),
         }

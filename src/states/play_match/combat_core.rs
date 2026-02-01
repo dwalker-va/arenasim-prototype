@@ -53,6 +53,16 @@ pub fn apply_damage_with_absorb(
     let mut remaining_damage = damage;
     let mut total_absorbed = 0.0;
 
+    // First, apply damage taken reduction (e.g., Devotion Aura)
+    // Multiple reductions stack multiplicatively (two 10% reductions = 19% total)
+    if let Some(ref auras) = active_auras {
+        for aura in auras.auras.iter() {
+            if aura.effect_type == AuraType::DamageTakenReduction && remaining_damage > 0.0 {
+                remaining_damage *= 1.0 - aura.magnitude;
+            }
+        }
+    }
+
     // Check for absorb shields and consume them
     if let Some(auras) = active_auras {
         for aura in auras.auras.iter_mut() {

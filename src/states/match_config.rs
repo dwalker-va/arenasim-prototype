@@ -65,6 +65,7 @@ pub enum CharacterClass {
     Rogue,
     Priest,
     Warlock,
+    Paladin,
 }
 
 impl CharacterClass {
@@ -76,6 +77,7 @@ impl CharacterClass {
             CharacterClass::Rogue,
             CharacterClass::Priest,
             CharacterClass::Warlock,
+            CharacterClass::Paladin,
         ]
     }
 
@@ -87,6 +89,7 @@ impl CharacterClass {
             CharacterClass::Rogue => "Rogue",
             CharacterClass::Priest => "Priest",
             CharacterClass::Warlock => "Warlock",
+            CharacterClass::Paladin => "Paladin",
         }
     }
 
@@ -98,6 +101,7 @@ impl CharacterClass {
             CharacterClass::Rogue => "Swift shadow striker",
             CharacterClass::Priest => "Healer and support",
             CharacterClass::Warlock => "Shadow magic and curses",
+            CharacterClass::Paladin => "Holy warrior and healer",
         }
     }
 
@@ -109,6 +113,7 @@ impl CharacterClass {
             CharacterClass::Rogue => Color::srgb(1.0, 0.96, 0.41),    // Yellow
             CharacterClass::Priest => Color::srgb(1.0, 1.0, 1.0),     // White
             CharacterClass::Warlock => Color::srgb(0.58, 0.51, 0.79), // Purple
+            CharacterClass::Paladin => Color::srgb(0.96, 0.55, 0.73), // Pink (WoW Paladin color)
         }
     }
 
@@ -129,6 +134,10 @@ impl CharacterClass {
             // Warlock: Fear 30, Shadowbolt 40, Corruption 40, Wand 30
             // Stay at ~28 to cast Fear without repositioning
             CharacterClass::Warlock => 28.0,
+            // Paladin: Healer that positions like Priest
+            // Healing range 40, but has melee utility (Hammer of Justice 10yd)
+            // Stay at ~28 for healing safety, move in for stuns
+            CharacterClass::Paladin => 28.0,
         }
     }
 }

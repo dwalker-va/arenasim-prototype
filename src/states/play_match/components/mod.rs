@@ -360,6 +360,9 @@ pub enum AuraType {
     /// Increases cast time by a percentage (magnitude = multiplier, e.g., 0.5 = 50% slower)
     /// Used by Curse of Tongues to slow enemy casting.
     CastTimeIncrease,
+    /// Reduces incoming damage taken by a percentage (magnitude = 0.10 means 10% reduction)
+    /// Used by Devotion Aura to reduce all damage taken by the target.
+    DamageTakenReduction,
 }
 
 // ============================================================================
@@ -442,6 +445,9 @@ impl Combatant {
             match_config::CharacterClass::Priest => (ResourceType::Mana, 150.0, 150.0, 8.0, 150.0, 6.0, 0.8, 0.0, 40.0, 5.0),
             // Warlocks: Medium HP, shadow damage (wand), scales with Spell Power, DoT focused
             match_config::CharacterClass::Warlock => (ResourceType::Mana, 160.0, 180.0, 9.0, 180.0, 8.0, 0.7, 0.0, 45.0, 4.5),
+            // Paladins: High HP (plate), healing & melee hybrid, scales with Spell Power primarily
+            // Tankier than Priest but lower spell power to offset utility
+            match_config::CharacterClass::Paladin => (ResourceType::Mana, 175.0, 160.0, 8.0, 160.0, 8.0, 0.9, 20.0, 35.0, 5.0),
         };
         
         // Rogues start stealthed
@@ -536,11 +542,14 @@ impl Combatant {
     }
     
     /// Check if this combatant is in range to attack the target position.
-    /// Mages, Priests, and Warlocks use wands (ranged), Warriors and Rogues use melee weapons.
+    /// Mages, Priests, Warlocks, and Paladins use wands (ranged), Warriors and Rogues use melee weapons.
     pub fn in_attack_range(&self, my_position: Vec3, target_position: Vec3) -> bool {
         let distance = my_position.distance(target_position);
         match self.class {
-            match_config::CharacterClass::Mage | match_config::CharacterClass::Priest | match_config::CharacterClass::Warlock => {
+            match_config::CharacterClass::Mage
+            | match_config::CharacterClass::Priest
+            | match_config::CharacterClass::Warlock
+            | match_config::CharacterClass::Paladin => {
                 distance <= WAND_RANGE
             }
             match_config::CharacterClass::Warrior | match_config::CharacterClass::Rogue => {

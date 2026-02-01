@@ -58,6 +58,15 @@ pub fn get_ability_icon_path(ability: &str) -> Option<&'static str> {
         "Curse of Agony" => Some("icons/abilities/spell_shadow_curseofsargeras.jpg"),
         "Curse of Weakness" => Some("icons/abilities/spell_shadow_curseofmannoroth.jpg"),
         "Curse of Tongues" => Some("icons/abilities/spell_shadow_curseoftounges.jpg"),
+        // Paladin abilities
+        "Flash of Light" => Some("icons/abilities/spell_holy_flashheal.jpg"),
+        "Holy Light" => Some("icons/abilities/spell_holy_holybolt.jpg"),
+        "Holy Shock" => Some("icons/abilities/spell_holy_searinglight.jpg"),
+        "Holy Shock (Heal)" => Some("icons/abilities/spell_holy_searinglight.jpg"),
+        "Holy Shock (Damage)" => Some("icons/abilities/spell_holy_searinglight.jpg"),
+        "Hammer of Justice" => Some("icons/abilities/spell_holy_sealofmight.jpg"),
+        "Cleanse" => Some("icons/abilities/spell_holy_renew.jpg"),
+        "Devotion Aura" => Some("icons/abilities/spell_holy_devotionaura.jpg"),
         _ => None,
     }
 }
@@ -70,6 +79,9 @@ pub const SPELL_ICON_ABILITIES: &[&str] = &[
     "Drain Life", "Pummel", "Kick", "Arcane Intellect", "Battle Shout",
     "Ice Barrier", "Power Word: Shield", "Polymorph", "Dispel Magic",
     "Curse of Agony", "Curse of Weakness", "Curse of Tongues",
+    // Paladin abilities
+    "Flash of Light", "Holy Light", "Holy Shock", "Holy Shock (Heal)", "Holy Shock (Damage)",
+    "Hammer of Justice", "Cleanse", "Devotion Aura",
 ];
 
 // ==============================================================================
@@ -121,6 +133,7 @@ pub fn get_aura_icon_key(aura: &Aura) -> String {
         AuraType::ShadowSight => "aura_dot".to_string(), // Reuse DoT icon as fallback
         AuraType::DamageReduction => "aura_dot".to_string(), // Curse debuff, reuse DoT icon
         AuraType::CastTimeIncrease => "aura_dot".to_string(), // Curse debuff, reuse DoT icon
+        AuraType::DamageTakenReduction => "aura_max_health".to_string(), // Devotion Aura buff, reuse buff icon
     }
 }
 
@@ -132,7 +145,8 @@ pub fn is_buff_aura(aura_type: &AuraType) -> bool {
         AuraType::MaxHealthIncrease |
         AuraType::MaxManaIncrease |
         AuraType::AttackPowerIncrease |
-        AuraType::ShadowSight
+        AuraType::ShadowSight |
+        AuraType::DamageTakenReduction
     )
 }
 

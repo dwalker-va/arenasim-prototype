@@ -75,6 +75,13 @@ pub enum AbilityType {
     Polymorph, // Mage CC - transforms target into sheep, breaks on any damage
     // Dispel abilities
     DispelMagic, // Priest - removes one magic debuff from ally
+    // Paladin abilities
+    FlashOfLight,     // Paladin fast heal
+    HolyLight,        // Paladin big heal (2.5s cast)
+    HolyShock,        // Paladin dual-purpose: damage enemy OR heal ally
+    HammerOfJustice,  // Paladin 6s stun
+    PaladinCleanse,   // Paladin dispel magic
+    DevotionAura,     // Paladin team buff - reduces damage taken by 10%
 }
 
 impl AbilityType {

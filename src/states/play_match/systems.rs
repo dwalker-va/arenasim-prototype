@@ -35,6 +35,9 @@ pub use super::auras::process_dot_ticks;
 pub use super::auras::update_auras;
 pub use super::auras::apply_pending_auras;
 pub use super::auras::process_dispels;
+pub use super::auras::process_paladin_dispels;
+pub use super::auras::process_holy_shock_heals;
+pub use super::auras::process_holy_shock_damage;
 
 // === Phase 2: Combat and Movement ===
 pub use super::auras::process_aura_breaks;
@@ -123,6 +126,9 @@ where
             update_auras,
             apply_pending_auras,
             process_dispels,
+            process_paladin_dispels,
+            process_holy_shock_heals,
+            process_holy_shock_damage,
         )
             .chain()
             .in_set(CombatSystemPhase::ResourcesAndAuras)

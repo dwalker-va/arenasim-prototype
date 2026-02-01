@@ -19,6 +19,7 @@ pub mod priest;
 pub mod warrior;
 pub mod rogue;
 pub mod warlock;
+pub mod paladin;
 
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -225,5 +226,6 @@ pub fn get_class_ai(class: CharacterClass) -> Box<dyn ClassAI> {
         CharacterClass::Warrior => Box::new(warrior::WarriorAI),
         CharacterClass::Rogue => Box::new(rogue::RogueAI),
         CharacterClass::Warlock => Box::new(warlock::WarlockAI),
+        CharacterClass::Paladin => Box::new(paladin::PaladinAI),
     }
 }

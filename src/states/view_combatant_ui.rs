@@ -104,6 +104,15 @@ fn get_class_stats(class: CharacterClass) -> ClassStats {
             attack_speed: 0.7,
             move_speed: 4.5,
         },
+        CharacterClass::Paladin => ClassStats {
+            health: 175,
+            resource_name: "Mana",
+            resource_max: 160,
+            attack_power: 20,
+            spell_power: 35,
+            attack_speed: 0.9,
+            move_speed: 5.0,
+        },
     }
 }
 
@@ -146,6 +155,14 @@ fn get_class_abilities(class: CharacterClass) -> Vec<AbilityType> {
             AbilityType::Immolate,
             AbilityType::DrainLife,
         ],
+        CharacterClass::Paladin => vec![
+            AbilityType::DevotionAura,
+            AbilityType::FlashOfLight,
+            AbilityType::HolyLight,
+            AbilityType::HolyShock,
+            AbilityType::HammerOfJustice,
+            AbilityType::PaladinCleanse,
+        ],
     }
 }
 
@@ -181,6 +198,13 @@ fn get_ability_name(ability: AbilityType) -> &'static str {
         AbilityType::CurseOfAgony => "Curse of Agony",
         AbilityType::CurseOfWeakness => "Curse of Weakness",
         AbilityType::CurseOfTongues => "Curse of Tongues",
+        // Paladin abilities
+        AbilityType::FlashOfLight => "Flash of Light",
+        AbilityType::HolyLight => "Holy Light",
+        AbilityType::HolyShock => "Holy Shock",
+        AbilityType::HammerOfJustice => "Hammer of Justice",
+        AbilityType::PaladinCleanse => "Cleanse",
+        AbilityType::DevotionAura => "Devotion Aura",
     }
 }
 
@@ -197,19 +221,34 @@ pub fn load_ability_icons(
         return;
     }
 
-    // All abilities we need icons for
-    let abilities = [
-        "Frostbolt", "Frost Nova", "Flash Heal", "Mind Blast", "Power Word: Fortitude",
-        "Charge", "Rend", "Mortal Strike", "Heroic Strike", "Ambush", "Cheap Shot",
-        "Sinister Strike", "Kidney Shot", "Corruption", "Shadowbolt", "Fear", "Immolate",
-        "Drain Life", "Pummel", "Kick", "Arcane Intellect", "Battle Shout",
-        "Ice Barrier", "Power Word: Shield", "Polymorph", "Dispel Magic",
-        "Curse of Agony", "Curse of Weakness", "Curse of Tongues",
+    // Dynamically collect all ability names from all classes
+    let all_classes = [
+        CharacterClass::Warrior,
+        CharacterClass::Mage,
+        CharacterClass::Rogue,
+        CharacterClass::Priest,
+        CharacterClass::Warlock,
+        CharacterClass::Paladin,
     ];
+    let mut ability_names: Vec<&'static str> = Vec::new();
+    for class in &all_classes {
+        for ability in get_class_abilities(*class) {
+            let name = get_ability_name(ability);
+            if !ability_names.contains(&name) {
+                ability_names.push(name);
+            }
+        }
+    }
+    // Add curse variants (not in class abilities list but used in UI)
+    for extra in ["Curse of Agony", "Curse of Weakness", "Curse of Tongues"] {
+        if !ability_names.contains(&extra) {
+            ability_names.push(extra);
+        }
+    }
 
     // Load handles if not already loaded
     if icon_handles.handles.is_empty() {
-        for ability in &abilities {
+        for ability in &ability_names {
             if let Some(path) = get_ability_icon_path(ability) {
                 let handle: Handle<Image> = asset_server.load(path);
                 icon_handles.handles.push((ability.to_string(), handle));
@@ -901,6 +940,10 @@ fn build_aura_description(aura: &super::play_match::ability_config::AuraEffect) 
         AuraType::CastTimeIncrease => {
             let increase_pct = (aura.magnitude * 100.0) as i32;
             format!("Increases cast time by {}% for {:.0} sec.", increase_pct, aura.duration)
+        }
+        AuraType::DamageTakenReduction => {
+            let reduction_pct = (aura.magnitude * 100.0) as i32;
+            format!("Reduces damage taken by {}% for {:.0} sec.", reduction_pct, aura.duration)
         }
     }
 }

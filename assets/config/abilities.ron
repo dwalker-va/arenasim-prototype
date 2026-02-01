@@ -456,5 +456,111 @@
             )),
             spell_school: Shadow,
         ),
+
+        // ============================================================================
+        // PALADIN ABILITIES
+        // ============================================================================
+
+        // Flash of Light: Fast, efficient heal
+        // WoW Classic: 1.5s cast, 35 mana, 67-77 healing
+        // Scaled for our stat system
+        FlashOfLight: (
+            name: "Flash of Light",
+            cast_time: 1.5,
+            range: 40.0,
+            mana_cost: 20.0,
+            cooldown: 0.0,
+            healing_base_min: 12.0,
+            healing_base_max: 16.0,
+            healing_coefficient: 0.65,
+            spell_school: Holy,
+        ),
+
+        // Holy Light: Slow, powerful heal
+        // WoW Classic: 2.5s cast, 35 mana (rank 1), much higher ranks exist
+        // Scaled for our stat system
+        HolyLight: (
+            name: "Holy Light",
+            cast_time: 2.5,
+            range: 40.0,
+            mana_cost: 35.0,
+            cooldown: 0.0,
+            healing_base_min: 25.0,
+            healing_base_max: 32.0,
+            healing_coefficient: 0.90,
+            spell_school: Holy,
+        ),
+
+        // Holy Shock: Dual-purpose instant ability
+        // Can damage enemies (20yd range) OR heal allies (40yd range)
+        // WoW Classic: Instant, 225 mana, 204-220 damage/healing, 30s CD
+        // Scaled for our stat system, reduced CD for faster gameplay
+        // Note: The dual-target behavior is handled in combat_core.rs
+        // For now, define with healing values (ally targeting is more common)
+        // Range is set to 40 for ally healing; AI checks 20yd for enemy targeting
+        HolyShock: (
+            name: "Holy Shock",
+            cast_time: 0.0,
+            range: 40.0,
+            mana_cost: 30.0,
+            cooldown: 15.0,
+            // Healing values for ally targeting (primary use)
+            healing_base_min: 20.0,
+            healing_base_max: 26.0,
+            healing_coefficient: 0.50,
+            // Damage values for enemy targeting
+            damage_base_min: 18.0,
+            damage_base_max: 24.0,
+            damage_coefficient: 0.45,
+            damage_scales_with: SpellPower,
+            spell_school: Holy,
+        ),
+
+        // Hammer of Justice: 6 second stun
+        // WoW Classic: Instant, 30 mana, 3s stun (rank 1), 1min CD
+        // Using 6s stun for maximum rank feel
+        HammerOfJustice: (
+            name: "Hammer of Justice",
+            cast_time: 0.0,
+            range: 10.0,
+            mana_cost: 25.0,
+            cooldown: 60.0,
+            applies_aura: Some((
+                aura_type: Stun,
+                duration: 6.0,
+                magnitude: 1.0,
+            )),
+            spell_school: Holy,
+        ),
+
+        // Cleanse: Removes magic debuffs from allies
+        // WoW Classic: Instant, 8% base mana, removes poison/disease/magic
+        // Our system only has magic debuffs, so it works like Dispel Magic
+        PaladinCleanse: (
+            name: "Cleanse",
+            cast_time: 0.0,
+            range: 30.0,
+            mana_cost: 15.0,
+            cooldown: 0.0,
+            spell_school: Holy,
+            is_dispel: true,
+        ),
+
+        // Devotion Aura: Passive 10% damage reduction for all team members
+        // WoW Classic: Instant, no cost, party-wide aura
+        // Lasts entire match (600s duration to cover any match length)
+        DevotionAura: (
+            name: "Devotion Aura",
+            cast_time: 0.0,
+            range: 100.0,  // Unlimited range for team buff
+            mana_cost: 0.0,
+            cooldown: 0.0,
+            applies_aura: Some((
+                aura_type: DamageTakenReduction,
+                duration: 600.0,  // 10 minutes - lasts entire match
+                magnitude: 0.10,  // 10% damage reduction
+            )),
+            spell_school: Holy,
+        ),
     }
 )
