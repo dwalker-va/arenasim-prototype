@@ -5,7 +5,7 @@
 //! ## Priority Order
 //! 1. Devotion Aura (buff all allies pre-combat)
 //! 2. Cleanse - Urgent (Polymorph, Fear on allies)
-//! 3. Emergency healing (ally < 40% HP) - Holy Shock (heal ally)
+//! 3. Emergency healing (ally < 40% HP) - Holy Shock (heal)
 //! 4. Hammer of Justice (stun enemy in melee range)
 //! 5. Standard healing (ally < 90% HP) - Flash of Light
 //! 6. Holy Light (ally 50-85% HP, safe to cast long heal)
@@ -109,7 +109,7 @@ pub fn decide_paladin_action(
         return true;
     }
 
-    // Priority 2: Emergency healing - Holy Shock (heal) when ally < 40% HP
+    // Priority 3: Emergency healing - Holy Shock (heal) when ally < 40% HP
     if has_emergency_target(combatant.team, combatant_info) {
         if try_holy_shock_heal(
             commands,
@@ -125,7 +125,7 @@ pub fn decide_paladin_action(
         }
     }
 
-    // Priority 3: Hammer of Justice (stun enemy in melee range)
+    // Priority 4: Hammer of Justice (stun enemy in melee range)
     if try_hammer_of_justice(
         commands,
         combat_log,
@@ -139,7 +139,7 @@ pub fn decide_paladin_action(
         return true;
     }
 
-    // Priority 4: Standard healing - Flash of Light (ally < 90% HP)
+    // Priority 5: Standard healing - Flash of Light (ally < 90% HP)
     if try_flash_of_light(
         commands,
         combat_log,
@@ -154,7 +154,7 @@ pub fn decide_paladin_action(
         return true;
     }
 
-    // Priority 5: Holy Light (ally damaged, safe to cast)
+    // Priority 6: Holy Light (ally damaged, safe to cast)
     // Use Holy Light when target is above 50% HP (safe to cast slow heal)
     if try_holy_light(
         commands,
@@ -170,7 +170,7 @@ pub fn decide_paladin_action(
         return true;
     }
 
-    // Priority 6: Cleanse - Maintenance (roots, DoTs when team stable)
+    // Priority 7: Cleanse - Maintenance (roots, DoTs when team stable)
     if is_team_healthy(combatant.team, combatant_info) {
         if try_cleanse(
             commands,
@@ -188,7 +188,7 @@ pub fn decide_paladin_action(
         }
     }
 
-    // Priority 7: Holy Shock (damage) - when team healthy
+    // Priority 8: Holy Shock (damage) - when team healthy
     if is_team_healthy(combatant.team, combatant_info) {
         if try_holy_shock_damage(
             commands,
@@ -815,6 +815,11 @@ fn try_devotion_aura(
         return false;
     }
 
+    // Check mana (for consistency, even though Devotion Aura costs 0)
+    if combatant.current_mana < def.mana_cost {
+        return false;
+    }
+
     // Find an ally without Devotion Aura (DamageTakenReduction from us)
     let mut buff_target: Option<Entity> = None;
 
@@ -895,12 +900,6 @@ fn try_devotion_aura(
             },
         });
     }
-
-    info!(
-        "Team {} {} casts Devotion Aura on ally",
-        combatant.team,
-        combatant.class.name()
-    );
 
     true
 }

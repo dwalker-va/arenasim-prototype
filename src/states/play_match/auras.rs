@@ -821,17 +821,6 @@ pub fn process_holy_shock_heals(
                     actual_heal
                 ),
             );
-
-            info!(
-                "Team {} {}'s Holy Shock heals Team {} {} for {:.0} ({:.0}/{:.0})",
-                pending.caster_team,
-                pending.caster_class.name(),
-                target_team,
-                target_class.name(),
-                actual_heal,
-                target.current_health,
-                target.max_health
-            );
         } else {
             // Target entity no longer exists - clean up orphaned pending
         }
