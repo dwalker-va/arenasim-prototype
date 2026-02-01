@@ -19,26 +19,38 @@ use crate::combat::log::CombatLog;
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
-use crate::states::play_match::components::*;
 use crate::states::play_match::combat_core::calculate_cast_time;
+use crate::states::play_match::components::*;
 use crate::states::play_match::constants::{GCD, HOLY_SHOCK_DAMAGE_RANGE};
 use crate::states::play_match::is_spell_school_locked;
 use crate::states::play_match::utils::combatant_id;
 
-use super::{AbilityDecision, ClassAI, CombatContext, is_team_healthy};
+use super::priest::DispelPending;
+use super::{AbilityDecision, ClassAI, CombatContext};
+
+/// Pre-computed ally information to avoid repeated iteration over combatant_info
+struct AllyInfo {
+    entity: Entity,
+    class: CharacterClass,
+    hp_percent: f32,
+    pos: Vec3,
+}
+
+/// Pre-computed enemy information to avoid repeated iteration over combatant_info
+struct EnemyInfo {
+    entity: Entity,
+    class: CharacterClass,
+    pos: Vec3,
+}
 
 /// Check if any ally is in an emergency situation (< 40% HP)
-fn has_emergency_target(team: u8, combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32)>) -> bool {
-    for &(ally_team, _, _, ally_hp, ally_max_hp) in combatant_info.values() {
-        if ally_team != team || ally_hp <= 0.0 {
-            continue;
-        }
-        let hp_percent = ally_hp / ally_max_hp;
-        if hp_percent < 0.40 {
-            return true;
-        }
-    }
-    false
+fn has_emergency_target(allies: &[AllyInfo]) -> bool {
+    allies.iter().any(|ally| ally.hp_percent < 0.40)
+}
+
+/// Check if all allies are healthy (> 70% HP)
+fn allies_are_healthy(allies: &[AllyInfo]) -> bool {
+    allies.iter().all(|ally| ally.hp_percent >= 0.70)
 }
 
 /// Paladin AI implementation
@@ -49,12 +61,6 @@ impl ClassAI for PaladinAI {
         // Uses decide_paladin_action() directly from combat_ai.rs
         AbilityDecision::None
     }
-}
-
-/// Pending dispel to be processed by the aura system.
-#[derive(Component)]
-pub struct PaladinDispelPending {
-    pub target: Entity,
 }
 
 /// Paladin AI: Decides and executes abilities for a Paladin combatant.
@@ -78,16 +84,42 @@ pub fn decide_paladin_action(
         return false;
     }
 
+    // Pre-compute allies and enemies once to avoid repeated iteration
+    let allies: Vec<AllyInfo> = combatant_info
+        .iter()
+        .filter(|(_, (team, _, _, hp, _))| *team == combatant.team && *hp > 0.0)
+        .filter_map(|(e, (_, _, class, hp, max_hp))| {
+            positions.get(e).map(|pos| AllyInfo {
+                entity: *e,
+                class: *class,
+                hp_percent: *hp / *max_hp,
+                pos: *pos,
+            })
+        })
+        .collect();
+
+    let enemies: Vec<EnemyInfo> = combatant_info
+        .iter()
+        .filter(|(_, (team, _, _, hp, _))| *team != combatant.team && *hp > 0.0)
+        .filter_map(|(e, (_, _, class, _, _))| {
+            positions.get(e).map(|pos| EnemyInfo {
+                entity: *e,
+                class: *class,
+                pos: *pos,
+            })
+        })
+        .collect();
+
     // Priority 1: Devotion Aura (buff all allies pre-combat)
     if try_devotion_aura(
         commands,
         combat_log,
         abilities,
+        entity,
         combatant,
         my_pos,
         auras,
-        positions,
-        combatant_info,
+        &allies,
         active_auras_map,
     ) {
         return true;
@@ -101,8 +133,7 @@ pub fn decide_paladin_action(
         combatant,
         my_pos,
         auras,
-        positions,
-        combatant_info,
+        &allies,
         active_auras_map,
         90, // Only Polymorph (100) and Fear (90)
     ) {
@@ -110,7 +141,7 @@ pub fn decide_paladin_action(
     }
 
     // Priority 3: Emergency healing - Holy Shock (heal) when ally < 40% HP
-    if has_emergency_target(combatant.team, combatant_info) {
+    if has_emergency_target(&allies) {
         if try_holy_shock_heal(
             commands,
             combat_log,
@@ -118,8 +149,7 @@ pub fn decide_paladin_action(
             combatant,
             my_pos,
             auras,
-            positions,
-            combatant_info,
+            &allies,
         ) {
             return true;
         }
@@ -133,8 +163,7 @@ pub fn decide_paladin_action(
         combatant,
         my_pos,
         auras,
-        positions,
-        combatant_info,
+        &enemies,
     ) {
         return true;
     }
@@ -148,8 +177,7 @@ pub fn decide_paladin_action(
         combatant,
         my_pos,
         auras,
-        positions,
-        combatant_info,
+        &allies,
     ) {
         return true;
     }
@@ -164,14 +192,13 @@ pub fn decide_paladin_action(
         combatant,
         my_pos,
         auras,
-        positions,
-        combatant_info,
+        &allies,
     ) {
         return true;
     }
 
     // Priority 7: Cleanse - Maintenance (roots, DoTs when team stable)
-    if is_team_healthy(combatant.team, combatant_info) {
+    if allies_are_healthy(&allies) {
         if try_cleanse(
             commands,
             combat_log,
@@ -179,8 +206,7 @@ pub fn decide_paladin_action(
             combatant,
             my_pos,
             auras,
-            positions,
-            combatant_info,
+            &allies,
             active_auras_map,
             50, // Include roots and DoTs
         ) {
@@ -189,7 +215,7 @@ pub fn decide_paladin_action(
     }
 
     // Priority 8: Holy Shock (damage) - when team healthy
-    if is_team_healthy(combatant.team, combatant_info) {
+    if allies_are_healthy(&allies) {
         if try_holy_shock_damage(
             commands,
             combat_log,
@@ -197,8 +223,7 @@ pub fn decide_paladin_action(
             combatant,
             my_pos,
             auras,
-            positions,
-            combatant_info,
+            &enemies,
         ) {
             return true;
         }
@@ -217,8 +242,7 @@ fn try_flash_of_light(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32)>,
+    allies: &[AllyInfo],
 ) -> bool {
     let ability = AbilityType::FlashOfLight;
     let def = abilities.get_unchecked(&ability);
@@ -232,36 +256,16 @@ fn try_flash_of_light(
     }
 
     // Find the lowest HP ally (below 90%)
-    let mut lowest_hp_ally: Option<(Entity, f32, Vec3)> = None;
+    let heal_target = allies
+        .iter()
+        .filter(|ally| ally.hp_percent < 0.9)
+        .min_by(|a, b| a.hp_percent.partial_cmp(&b.hp_percent).unwrap());
 
-    for (ally_entity, &(ally_team, _, _, ally_hp, ally_max_hp)) in combatant_info.iter() {
-        if ally_team != combatant.team || ally_hp <= 0.0 {
-            continue;
-        }
-
-        let hp_percent = ally_hp / ally_max_hp;
-        if hp_percent >= 0.9 {
-            continue;
-        }
-
-        let Some(&ally_pos) = positions.get(ally_entity) else {
-            continue;
-        };
-
-        match lowest_hp_ally {
-            None => lowest_hp_ally = Some((*ally_entity, hp_percent, ally_pos)),
-            Some((_, lowest_percent, _)) if hp_percent < lowest_percent => {
-                lowest_hp_ally = Some((*ally_entity, hp_percent, ally_pos));
-            }
-            _ => {}
-        }
-    }
-
-    let Some((heal_target, _, target_pos)) = lowest_hp_ally else {
+    let Some(target) = heal_target else {
         return false;
     };
 
-    if !ability.can_cast_config(combatant, target_pos, my_pos, def) {
+    if !ability.can_cast_config(combatant, target.pos, my_pos, def) {
         return false;
     }
 
@@ -272,19 +276,17 @@ fn try_flash_of_light(
     commands.entity(entity).insert(CastingState {
         ability,
         time_remaining: cast_time,
-        target: Some(heal_target),
+        target: Some(target.entity),
         interrupted: false,
         interrupted_display_time: 0.0,
     });
 
     let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = combatant_info
-        .get(&heal_target)
-        .map(|(team, _, class, _, _)| format!("Team {} {}", team, class.name()));
+    let target_id = format!("Team {} {}", combatant.team, target.class.name());
     combat_log.log_ability_cast(
         caster_id,
         def.name.to_string(),
-        target_id,
+        Some(target_id),
         format!(
             "Team {} {} begins casting {}",
             combatant.team,
@@ -306,8 +308,7 @@ fn try_holy_light(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32)>,
+    allies: &[AllyInfo],
 ) -> bool {
     let ability = AbilityType::HolyLight;
     let def = abilities.get_unchecked(&ability);
@@ -321,38 +322,17 @@ fn try_holy_light(
     }
 
     // Find an ally between 50-85% HP (safe to use slow heal)
-    let mut best_target: Option<(Entity, f32, Vec3)> = None;
+    // Too low = need fast heal, too high = waste mana
+    let heal_target = allies
+        .iter()
+        .filter(|ally| ally.hp_percent >= 0.50 && ally.hp_percent < 0.85)
+        .min_by(|a, b| a.hp_percent.partial_cmp(&b.hp_percent).unwrap());
 
-    for (ally_entity, &(ally_team, _, _, ally_hp, ally_max_hp)) in combatant_info.iter() {
-        if ally_team != combatant.team || ally_hp <= 0.0 {
-            continue;
-        }
-
-        let hp_percent = ally_hp / ally_max_hp;
-        // Only use Holy Light if ally is between 50-85% HP
-        // Too low = need fast heal, too high = waste mana
-        if hp_percent >= 0.85 || hp_percent < 0.50 {
-            continue;
-        }
-
-        let Some(&ally_pos) = positions.get(ally_entity) else {
-            continue;
-        };
-
-        match best_target {
-            None => best_target = Some((*ally_entity, hp_percent, ally_pos)),
-            Some((_, lowest_percent, _)) if hp_percent < lowest_percent => {
-                best_target = Some((*ally_entity, hp_percent, ally_pos));
-            }
-            _ => {}
-        }
-    }
-
-    let Some((heal_target, _, target_pos)) = best_target else {
+    let Some(target) = heal_target else {
         return false;
     };
 
-    if !ability.can_cast_config(combatant, target_pos, my_pos, def) {
+    if !ability.can_cast_config(combatant, target.pos, my_pos, def) {
         return false;
     }
 
@@ -363,19 +343,17 @@ fn try_holy_light(
     commands.entity(entity).insert(CastingState {
         ability,
         time_remaining: cast_time,
-        target: Some(heal_target),
+        target: Some(target.entity),
         interrupted: false,
         interrupted_display_time: 0.0,
     });
 
     let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = combatant_info
-        .get(&heal_target)
-        .map(|(team, _, class, _, _)| format!("Team {} {}", team, class.name()));
+    let target_id = format!("Team {} {}", combatant.team, target.class.name());
     combat_log.log_ability_cast(
         caster_id,
         def.name.to_string(),
-        target_id,
+        Some(target_id),
         format!(
             "Team {} {} begins casting {}",
             combatant.team,
@@ -396,8 +374,7 @@ fn try_holy_shock_heal(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32)>,
+    allies: &[AllyInfo],
 ) -> bool {
     let ability = AbilityType::HolyShock;
     let def = abilities.get_unchecked(&ability);
@@ -407,7 +384,13 @@ fn try_holy_shock_heal(
     }
 
     // Check cooldown
-    if combatant.ability_cooldowns.get(&ability).copied().unwrap_or(0.0) > 0.0 {
+    if combatant
+        .ability_cooldowns
+        .get(&ability)
+        .copied()
+        .unwrap_or(0.0)
+        > 0.0
+    {
         return false;
     }
 
@@ -415,38 +398,13 @@ fn try_holy_shock_heal(
         return false;
     }
 
-    // Find lowest HP ally below 50%
-    let mut lowest_hp_ally: Option<(Entity, f32, Vec3)> = None;
+    // Find lowest HP ally below 50% and in range
+    let heal_target = allies
+        .iter()
+        .filter(|ally| ally.hp_percent < 0.50 && my_pos.distance(ally.pos) <= def.range)
+        .min_by(|a, b| a.hp_percent.partial_cmp(&b.hp_percent).unwrap());
 
-    for (ally_entity, &(ally_team, _, _, ally_hp, ally_max_hp)) in combatant_info.iter() {
-        if ally_team != combatant.team || ally_hp <= 0.0 {
-            continue;
-        }
-
-        let hp_percent = ally_hp / ally_max_hp;
-        if hp_percent >= 0.50 {
-            continue;
-        }
-
-        let Some(&ally_pos) = positions.get(ally_entity) else {
-            continue;
-        };
-
-        // Use ability's configured range
-        if my_pos.distance(ally_pos) > def.range {
-            continue;
-        }
-
-        match lowest_hp_ally {
-            None => lowest_hp_ally = Some((*ally_entity, hp_percent, ally_pos)),
-            Some((_, lowest_percent, _)) if hp_percent < lowest_percent => {
-                lowest_hp_ally = Some((*ally_entity, hp_percent, ally_pos));
-            }
-            _ => {}
-        }
-    }
-
-    let Some((heal_target, _, _)) = lowest_hp_ally else {
+    let Some(target) = heal_target else {
         return false;
     };
 
@@ -457,18 +415,16 @@ fn try_holy_shock_heal(
 
     // Log the cast
     let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = combatant_info
-        .get(&heal_target)
-        .map(|(team, _, class, _, _)| format!("Team {} {}", team, class.name()));
+    let target_id = format!("Team {} {}", combatant.team, target.class.name());
     combat_log.log_ability_cast(
         caster_id,
         "Holy Shock (Heal)".to_string(),
-        target_id.clone(),
+        Some(target_id.clone()),
         format!(
             "Team {} {} casts Holy Shock on {}",
             combatant.team,
             combatant.class.name(),
-            target_id.as_deref().unwrap_or("ally")
+            target_id
         ),
     );
 
@@ -477,7 +433,7 @@ fn try_holy_shock_heal(
         caster_spell_power: combatant.spell_power,
         caster_team: combatant.team,
         caster_class: combatant.class,
-        target: heal_target,
+        target: target.entity,
     });
 
     true
@@ -492,8 +448,7 @@ fn try_holy_shock_damage(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32)>,
+    enemies: &[EnemyInfo],
 ) -> bool {
     let ability = AbilityType::HolyShock;
     let def = abilities.get_unchecked(&ability);
@@ -503,7 +458,13 @@ fn try_holy_shock_damage(
     }
 
     // Check cooldown
-    if combatant.ability_cooldowns.get(&ability).copied().unwrap_or(0.0) > 0.0 {
+    if combatant
+        .ability_cooldowns
+        .get(&ability)
+        .copied()
+        .unwrap_or(0.0)
+        > 0.0
+    {
         return false;
     }
 
@@ -512,27 +473,11 @@ fn try_holy_shock_damage(
     }
 
     // Find an enemy in range (20 yards for damage)
-    let mut damage_target: Option<(Entity, Vec3)> = None;
+    let damage_target = enemies
+        .iter()
+        .find(|enemy| my_pos.distance(enemy.pos) <= HOLY_SHOCK_DAMAGE_RANGE);
 
-    for (enemy_entity, &(enemy_team, _, _, enemy_hp, _)) in combatant_info.iter() {
-        if enemy_team == combatant.team || enemy_hp <= 0.0 {
-            continue;
-        }
-
-        let Some(&enemy_pos) = positions.get(enemy_entity) else {
-            continue;
-        };
-
-        // Use constant for damage range (shorter than heal range)
-        if my_pos.distance(enemy_pos) > HOLY_SHOCK_DAMAGE_RANGE {
-            continue;
-        }
-
-        damage_target = Some((*enemy_entity, enemy_pos));
-        break;
-    }
-
-    let Some((target_entity, _)) = damage_target else {
+    let Some(target) = damage_target else {
         return false;
     };
 
@@ -543,18 +488,17 @@ fn try_holy_shock_damage(
 
     // Log the cast
     let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = combatant_info
-        .get(&target_entity)
-        .map(|(team, _, class, _, _)| format!("Team {} {}", team, class.name()));
+    let enemy_team = if combatant.team == 1 { 2 } else { 1 };
+    let target_id = format!("Team {} {}", enemy_team, target.class.name());
     combat_log.log_ability_cast(
         caster_id,
         "Holy Shock (Damage)".to_string(),
-        target_id.clone(),
+        Some(target_id.clone()),
         format!(
             "Team {} {} casts Holy Shock on {}",
             combatant.team,
             combatant.class.name(),
-            target_id.as_deref().unwrap_or("enemy")
+            target_id
         ),
     );
 
@@ -563,7 +507,7 @@ fn try_holy_shock_damage(
         caster_spell_power: combatant.spell_power,
         caster_team: combatant.team,
         caster_class: combatant.class,
-        target: target_entity,
+        target: target.entity,
     });
 
     true
@@ -579,8 +523,7 @@ fn try_hammer_of_justice(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32)>,
+    enemies: &[EnemyInfo],
 ) -> bool {
     let ability = AbilityType::HammerOfJustice;
     let def = abilities.get_unchecked(&ability);
@@ -590,7 +533,13 @@ fn try_hammer_of_justice(
     }
 
     // Check cooldown
-    if combatant.ability_cooldowns.get(&ability).copied().unwrap_or(0.0) > 0.0 {
+    if combatant
+        .ability_cooldowns
+        .get(&ability)
+        .copied()
+        .unwrap_or(0.0)
+        > 0.0
+    {
         return false;
     }
 
@@ -598,37 +547,20 @@ fn try_hammer_of_justice(
         return false;
     }
 
-    // Find an enemy in range (prioritize healers)
-    let mut best_target: Option<(Entity, Vec3, bool)> = None; // (entity, pos, is_healer)
+    // Find an enemy in range, prioritizing healers
+    let enemies_in_range: Vec<&EnemyInfo> = enemies
+        .iter()
+        .filter(|enemy| my_pos.distance(enemy.pos) <= def.range)
+        .collect();
 
-    for (enemy_entity, &(enemy_team, _, enemy_class, enemy_hp, _)) in combatant_info.iter() {
-        if enemy_team == combatant.team || enemy_hp <= 0.0 {
-            continue;
-        }
+    // Prefer healers over DPS
+    let stun_target = enemies_in_range
+        .iter()
+        .find(|e| matches!(e.class, CharacterClass::Priest | CharacterClass::Paladin))
+        .or_else(|| enemies_in_range.first())
+        .copied();
 
-        let Some(&enemy_pos) = positions.get(enemy_entity) else {
-            continue;
-        };
-
-        // Check range (10 yards)
-        if my_pos.distance(enemy_pos) > def.range {
-            continue;
-        }
-
-        let is_healer = matches!(enemy_class, CharacterClass::Priest | CharacterClass::Paladin);
-
-        match best_target {
-            None => best_target = Some((*enemy_entity, enemy_pos, is_healer)),
-            Some((_, _, false)) if is_healer => {
-                // Prefer healers over DPS
-                best_target = Some((*enemy_entity, enemy_pos, true));
-            }
-            _ => {}
-        }
-    }
-
-    // Only use if we have a target in range
-    let Some((stun_target, _, _)) = best_target else {
+    let Some(target) = stun_target else {
         return false;
     };
 
@@ -639,25 +571,24 @@ fn try_hammer_of_justice(
 
     // Log
     let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = combatant_info
-        .get(&stun_target)
-        .map(|(team, _, class, _, _)| format!("Team {} {}", team, class.name()));
+    let enemy_team = if combatant.team == 1 { 2 } else { 1 };
+    let target_id = format!("Team {} {}", enemy_team, target.class.name());
     combat_log.log_ability_cast(
         caster_id,
         def.name.to_string(),
-        target_id.clone(),
+        Some(target_id.clone()),
         format!(
             "Team {} {} casts Hammer of Justice on {}",
             combatant.team,
             combatant.class.name(),
-            target_id.as_deref().unwrap_or("enemy")
+            target_id
         ),
     );
 
     // Apply stun aura
     if let Some(aura_def) = def.applies_aura.as_ref() {
         commands.spawn(AuraPending {
-            target: stun_target,
+            target: target.entity,
             aura: Aura {
                 effect_type: aura_def.aura_type,
                 duration: aura_def.duration,
@@ -687,8 +618,7 @@ fn try_cleanse(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32)>,
+    allies: &[AllyInfo],
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
     min_priority: i32,
 ) -> bool {
@@ -704,24 +634,16 @@ fn try_cleanse(
     }
 
     // Find ally with highest priority dispellable debuff
-    let mut best_candidate: Option<(Entity, Vec3, i32)> = None;
+    let mut best_candidate: Option<(&AllyInfo, i32)> = None;
 
-    for (ally_entity, &(ally_team, _, _, ally_hp, _)) in combatant_info.iter() {
-        if ally_team != combatant.team || ally_hp <= 0.0 {
-            continue;
-        }
-
-        let Some(&ally_pos) = positions.get(ally_entity) else {
-            continue;
-        };
-
+    for ally in allies {
         // Check range
-        if my_pos.distance(ally_pos) > def.range {
+        if my_pos.distance(ally.pos) > def.range {
             continue;
         }
 
         // Check if ally has any dispellable debuffs
-        let Some(ally_auras) = active_auras_map.get(ally_entity) else {
+        let Some(ally_auras) = active_auras_map.get(&ally.entity) else {
             continue;
         };
 
@@ -751,15 +673,15 @@ fn try_cleanse(
         }
 
         match best_candidate {
-            None => best_candidate = Some((*ally_entity, ally_pos, highest_priority)),
-            Some((_, _, best_prio)) if highest_priority > best_prio => {
-                best_candidate = Some((*ally_entity, ally_pos, highest_priority));
+            None => best_candidate = Some((ally, highest_priority)),
+            Some((_, best_prio)) if highest_priority > best_prio => {
+                best_candidate = Some((ally, highest_priority));
             }
             _ => {}
         }
     }
 
-    let Some((dispel_target, _, _)) = best_candidate else {
+    let Some((target, _)) = best_candidate else {
         return false;
     };
 
@@ -769,42 +691,49 @@ fn try_cleanse(
 
     // Log
     let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = combatant_info
-        .get(&dispel_target)
-        .map(|(team, _, class, _, _)| format!("Team {} {}", team, class.name()));
+    let target_id = format!("Team {} {}", combatant.team, target.class.name());
     combat_log.log_ability_cast(
         caster_id,
         "Cleanse".to_string(),
-        target_id.clone(),
+        Some(target_id.clone()),
         format!(
             "Team {} {} casts Cleanse on {}",
             combatant.team,
             combatant.class.name(),
-            target_id.as_deref().unwrap_or("ally")
+            target_id
         ),
     );
 
     // Spawn pending dispel (uses same system as Priest's DispelMagic)
-    commands.spawn(PaladinDispelPending {
-        target: dispel_target,
+    commands.spawn(DispelPending {
+        target: target.entity,
+        log_prefix: "[CLEANSE]",
     });
 
     true
 }
 
 /// Try to cast Devotion Aura on an unbuffed ally.
-/// Returns true if the ability was used.
+///
+/// **Design Note**: Unlike WoW Classic's toggle aura that instantly affects all party
+/// members, this implementation applies the buff to one ally per GCD. This is an
+/// intentional design choice for game balance - it creates a tactical window during
+/// the pre-combat phase where the enemy team can engage before the Paladin's team
+/// is fully buffed, adding strategic depth to match openings.
+///
 /// Similar to Priest's Power Word: Fortitude - buffs team pre-combat.
+///
+/// Returns true if the ability was used.
 #[allow(clippy::too_many_arguments)]
 fn try_devotion_aura(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     abilities: &AbilityDefinitions,
+    entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32)>,
+    allies: &[AllyInfo],
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
 ) -> bool {
     let ability = AbilityType::DevotionAura;
@@ -821,25 +750,15 @@ fn try_devotion_aura(
     }
 
     // Find an ally without Devotion Aura (DamageTakenReduction from us)
-    let mut buff_target: Option<Entity> = None;
-
-    for (ally_entity, &(ally_team, _, _, ally_hp, _)) in combatant_info.iter() {
-        if ally_team != combatant.team || ally_hp <= 0.0 {
-            continue;
-        }
-
-        let Some(&ally_pos) = positions.get(ally_entity) else {
-            continue;
-        };
-
+    let buff_target = allies.iter().find(|ally| {
         // Check range (should always be in range with 100.0 range)
-        if my_pos.distance(ally_pos) > def.range {
-            continue;
+        if my_pos.distance(ally.pos) > def.range {
+            return false;
         }
 
         // Check if ally already has Devotion Aura (DamageTakenReduction)
         let has_devotion_aura = active_auras_map
-            .get(ally_entity)
+            .get(&ally.entity)
             .map(|auras| {
                 auras.iter().any(|a| {
                     a.effect_type == AuraType::DamageTakenReduction
@@ -848,14 +767,8 @@ fn try_devotion_aura(
             })
             .unwrap_or(false);
 
-        if has_devotion_aura {
-            continue;
-        }
-
-        // Found an ally that needs buffing
-        buff_target = Some(*ally_entity);
-        break;
-    }
+        !has_devotion_aura
+    });
 
     let Some(target) = buff_target else {
         return false;
@@ -866,13 +779,11 @@ fn try_devotion_aura(
 
     // Log the cast
     let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = combatant_info
-        .get(&target)
-        .map(|(team, _, class, _, _)| format!("Team {} {}", team, class.name()));
+    let target_id = format!("Team {} {}", combatant.team, target.class.name());
     combat_log.log_ability_cast(
         caster_id,
         "Devotion Aura".to_string(),
-        target_id.clone(),
+        Some(target_id),
         format!(
             "Team {} {} casts Devotion Aura",
             combatant.team,
@@ -880,25 +791,9 @@ fn try_devotion_aura(
         ),
     );
 
-    // Apply the aura
-    if let Some(aura_def) = def.applies_aura.as_ref() {
-        commands.spawn(AuraPending {
-            target,
-            aura: Aura {
-                effect_type: aura_def.aura_type,
-                duration: aura_def.duration,
-                magnitude: aura_def.magnitude,
-                break_on_damage_threshold: -1.0, // Never breaks on damage
-                accumulated_damage: 0.0,
-                tick_interval: 0.0,
-                time_until_next_tick: 0.0,
-                caster: None,
-                ability_name: def.name.to_string(),
-                fear_direction: (0.0, 0.0),
-                fear_direction_timer: 0.0,
-                spell_school: Some(def.spell_school),
-            },
-        });
+    // Apply the aura using the helper
+    if let Some(pending) = AuraPending::from_ability(target.entity, entity, def) {
+        commands.spawn(pending);
     }
 
     true

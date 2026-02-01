@@ -35,7 +35,6 @@ pub use super::auras::process_dot_ticks;
 pub use super::auras::update_auras;
 pub use super::auras::apply_pending_auras;
 pub use super::auras::process_dispels;
-pub use super::auras::process_paladin_dispels;
 pub use super::auras::process_holy_shock_heals;
 pub use super::auras::process_holy_shock_damage;
 
@@ -126,7 +125,6 @@ where
             update_auras,
             apply_pending_auras,
             process_dispels,
-            process_paladin_dispels,
             process_holy_shock_heals,
             process_holy_shock_damage,
         )

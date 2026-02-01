@@ -568,6 +568,7 @@ fn try_dispel_magic(
             // so we don't log a specific aura name here - that's logged when the dispel actually happens.
             commands.spawn(DispelPending {
                 target: dispel_target,
+                log_prefix: "[DISPEL]",
             });
 
             // Log the dispel cast (the actual removal is logged in process_dispels)
@@ -604,10 +605,14 @@ fn try_dispel_magic(
 /// This allows dispels to be applied without holding mutable references
 /// to the aura map during AI decision making.
 /// Note: The actual aura removed is randomly selected in process_dispels (WoW Classic behavior).
+///
+/// Used by both Priest (Dispel Magic) and Paladin (Cleanse) - only the log_prefix differs.
 #[derive(bevy::prelude::Component)]
 pub struct DispelPending {
     /// Target entity to dispel
     pub target: Entity,
+    /// Log prefix for combat log (e.g., "[DISPEL]" for Priest, "[CLEANSE]" for Paladin)
+    pub log_prefix: &'static str,
 }
 
 /// Try to cast Flash Heal on the lowest HP ally.
