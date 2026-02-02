@@ -87,7 +87,7 @@ pub fn decide_paladin_action(
     // Pre-compute allies and enemies once to avoid repeated iteration
     let allies: Vec<AllyInfo> = combatant_info
         .iter()
-        .filter(|(_, (team, _, _, hp, _, _))| *team == combatant.team && *hp > 0.0)
+        .filter(|(_, (team, _, _, hp, max_hp, _))| *team == combatant.team && *hp > 0.0 && *max_hp > 0.0)
         .filter_map(|(e, (_, _, class, hp, max_hp, _))| {
             positions.get(e).map(|pos| AllyInfo {
                 entity: *e,
@@ -262,7 +262,7 @@ fn try_flash_of_light(
     let heal_target = allies
         .iter()
         .filter(|ally| ally.hp_percent < 0.9)
-        .min_by(|a, b| a.hp_percent.partial_cmp(&b.hp_percent).unwrap());
+        .min_by(|a, b| a.hp_percent.partial_cmp(&b.hp_percent).unwrap_or(std::cmp::Ordering::Equal));
 
     let Some(target) = heal_target else {
         return false;
@@ -329,7 +329,7 @@ fn try_holy_light(
     let heal_target = allies
         .iter()
         .filter(|ally| ally.hp_percent >= 0.50 && ally.hp_percent < 0.85)
-        .min_by(|a, b| a.hp_percent.partial_cmp(&b.hp_percent).unwrap());
+        .min_by(|a, b| a.hp_percent.partial_cmp(&b.hp_percent).unwrap_or(std::cmp::Ordering::Equal));
 
     let Some(target) = heal_target else {
         return false;
@@ -405,7 +405,7 @@ fn try_holy_shock_heal(
     let heal_target = allies
         .iter()
         .filter(|ally| ally.hp_percent < 0.50 && my_pos.distance(ally.pos) <= def.range)
-        .min_by(|a, b| a.hp_percent.partial_cmp(&b.hp_percent).unwrap());
+        .min_by(|a, b| a.hp_percent.partial_cmp(&b.hp_percent).unwrap_or(std::cmp::Ordering::Equal));
 
     let Some(target) = heal_target else {
         return false;
