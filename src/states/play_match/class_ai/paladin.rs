@@ -76,7 +76,7 @@ pub fn decide_paladin_action(
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
     positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32)>,
+    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
 ) -> bool {
     // Check if global cooldown is active
@@ -87,8 +87,8 @@ pub fn decide_paladin_action(
     // Pre-compute allies and enemies once to avoid repeated iteration
     let allies: Vec<AllyInfo> = combatant_info
         .iter()
-        .filter(|(_, (team, _, _, hp, _))| *team == combatant.team && *hp > 0.0)
-        .filter_map(|(e, (_, _, class, hp, max_hp))| {
+        .filter(|(_, (team, _, _, hp, _, _))| *team == combatant.team && *hp > 0.0)
+        .filter_map(|(e, (_, _, class, hp, max_hp, _))| {
             positions.get(e).map(|pos| AllyInfo {
                 entity: *e,
                 class: *class,
@@ -98,10 +98,13 @@ pub fn decide_paladin_action(
         })
         .collect();
 
+    // Filter out stealthed enemies - can't target what we can't see
     let enemies: Vec<EnemyInfo> = combatant_info
         .iter()
-        .filter(|(_, (team, _, _, hp, _))| *team != combatant.team && *hp > 0.0)
-        .filter_map(|(e, (_, _, class, _, _))| {
+        .filter(|(_, (team, _, _, hp, _, stealthed))| {
+            *team != combatant.team && *hp > 0.0 && !*stealthed
+        })
+        .filter_map(|(e, (_, _, class, _, _, _))| {
             positions.get(e).map(|pos| EnemyInfo {
                 entity: *e,
                 class: *class,

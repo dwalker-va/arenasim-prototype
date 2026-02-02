@@ -283,10 +283,10 @@ pub fn decide_abilities(
         .map(|(entity, _, transform, _)| (entity, transform.translation))
         .collect();
 
-    let combatant_info: std::collections::HashMap<Entity, (u8, u8, match_config::CharacterClass, f32, f32)> = combatants
+    let combatant_info: std::collections::HashMap<Entity, (u8, u8, match_config::CharacterClass, f32, f32, bool)> = combatants
         .iter()
         .map(|(entity, combatant, _, _)| {
-            (entity, (combatant.team, combatant.slot, combatant.class, combatant.current_health, combatant.max_health))
+            (entity, (combatant.team, combatant.slot, combatant.class, combatant.current_health, combatant.max_health, combatant.stealthed))
         })
         .collect();
 

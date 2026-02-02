@@ -241,9 +241,9 @@ pub fn get_class_ai(class: CharacterClass) -> Box<dyn ClassAI> {
 /// vs focusing on healing.
 pub fn is_team_healthy(
     team: u8,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32)>,
+    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
 ) -> bool {
-    for &(ally_team, _, _, ally_hp, ally_max_hp) in combatant_info.values() {
+    for &(ally_team, _, _, ally_hp, ally_max_hp, _) in combatant_info.values() {
         if ally_team != team || ally_hp <= 0.0 {
             continue;
         }

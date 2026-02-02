@@ -55,7 +55,7 @@ pub fn decide_warrior_action(
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
     positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32)>,
+    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
     instant_attacks: &mut Vec<(Entity, Entity, f32, u8, CharacterClass, AbilityType)>,
 ) -> bool {
@@ -154,13 +154,13 @@ fn try_battle_shout(
     combatant: &mut Combatant,
     my_pos: Vec3,
     positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32)>,
+    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
 ) -> bool {
     // Check if any nearby ally needs the buff
     let mut allies_to_buff: Vec<Entity> = Vec::new();
 
-    for (ally_entity, &(ally_team, _, _ally_class, ally_hp, _ally_max_hp)) in combatant_info.iter() {
+    for (ally_entity, &(ally_team, _, _ally_class, ally_hp, _ally_max_hp, _)) in combatant_info.iter() {
         // Must be same team and alive
         if ally_team != combatant.team || ally_hp <= 0.0 {
             continue;
@@ -260,7 +260,7 @@ fn try_charge(
     auras: Option<&ActiveAuras>,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32)>,
+    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
 ) -> bool {
     let charge = AbilityType::Charge;
     let charge_def = abilities.get_unchecked(&charge);
@@ -298,7 +298,7 @@ fn try_charge(
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
     let target_id = combatant_info
         .get(&target_entity)
-        .map(|(team, _, class, _, _)| format!("Team {} {}", team, class.name()));
+        .map(|(team, _, class, _, _, _)| format!("Team {} {}", team, class.name()));
     combat_log.log_ability_cast(
         caster_id,
         "Charge".to_string(),
@@ -332,7 +332,7 @@ fn try_rend(
     my_pos: Vec3,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32)>,
+    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
 ) -> bool {
     // Check if target already has Rend (any DoT for now)
@@ -360,7 +360,7 @@ fn try_rend(
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
     let target_id = combatant_info
         .get(&target_entity)
-        .map(|(team, _, class, _, _)| format!("Team {} {}", team, class.name()));
+        .map(|(team, _, class, _, _, _)| format!("Team {} {}", team, class.name()));
     combat_log.log_ability_cast(
         caster_id,
         "Rend".to_string(),
@@ -424,7 +424,7 @@ fn try_mortal_strike(
     my_pos: Vec3,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32)>,
+    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
     instant_attacks: &mut Vec<(Entity, Entity, f32, u8, CharacterClass, AbilityType)>,
 ) -> bool {
     let mortal_strike = AbilityType::MortalStrike;
@@ -445,7 +445,7 @@ fn try_mortal_strike(
 
     // Get target info
     let (target_team, target_class) = match combatant_info.get(&target_entity) {
-        Some(&(team, _, class, _, _)) => (team, class),
+        Some(&(team, _, class, _, _, _)) => (team, class),
         None => return false,
     };
 
