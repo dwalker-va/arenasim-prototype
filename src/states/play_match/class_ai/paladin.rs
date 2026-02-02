@@ -798,21 +798,3 @@ fn try_devotion_aura(
 
     true
 }
-
-/// Pending Holy Shock heal to be processed
-#[derive(Component)]
-pub struct HolyShockHealPending {
-    pub caster_spell_power: f32,
-    pub caster_team: u8,
-    pub caster_class: CharacterClass,
-    pub target: Entity,
-}
-
-/// Pending Holy Shock damage to be processed
-#[derive(Component)]
-pub struct HolyShockDamagePending {
-    pub caster_spell_power: f32,
-    pub caster_team: u8,
-    pub caster_class: CharacterClass,
-    pub target: Entity,
-}
