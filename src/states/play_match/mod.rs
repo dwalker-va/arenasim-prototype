@@ -37,6 +37,7 @@ pub mod camera;
 pub mod projectiles;
 pub mod rendering;
 pub mod auras;
+pub mod effects;
 pub mod match_flow;
 pub mod combat_ai;
 pub mod combat_core;

@@ -34,9 +34,10 @@ pub use super::shadow_sight::track_shadow_sight_timer;
 pub use super::auras::process_dot_ticks;
 pub use super::auras::update_auras;
 pub use super::auras::apply_pending_auras;
-pub use super::auras::process_dispels;
-pub use super::auras::process_holy_shock_heals;
-pub use super::auras::process_holy_shock_damage;
+// Effect processing (instant ability effects)
+pub use super::effects::process_dispels;
+pub use super::effects::process_holy_shock_heals;
+pub use super::effects::process_holy_shock_damage;
 
 // === Phase 2: Combat and Movement ===
 pub use super::auras::process_aura_breaks;
