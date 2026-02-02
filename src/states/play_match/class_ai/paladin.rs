@@ -569,12 +569,12 @@ fn try_hammer_of_justice(
     combatant.global_cooldown = GCD;
     combatant.ability_cooldowns.insert(ability, def.cooldown);
 
-    // Log
+    // Log the cast
     let caster_id = combatant_id(combatant.team, combatant.class);
     let enemy_team = if combatant.team == 1 { 2 } else { 1 };
     let target_id = format!("Team {} {}", enemy_team, target.class.name());
     combat_log.log_ability_cast(
-        caster_id,
+        caster_id.clone(),
         def.name.to_string(),
         Some(target_id.clone()),
         format!(
@@ -585,8 +585,22 @@ fn try_hammer_of_justice(
         ),
     );
 
-    // Apply stun aura
+    // Apply stun aura and log CC
     if let Some(aura_def) = def.applies_aura.as_ref() {
+        // Log the CC application
+        combat_log.log_crowd_control(
+            caster_id,
+            target_id.clone(),
+            "Stun".to_string(),
+            aura_def.duration,
+            format!(
+                "Team {} {}'s Hammer of Justice stuns {} ({:.1}s)",
+                combatant.team,
+                combatant.class.name(),
+                target_id,
+                aura_def.duration
+            ),
+        );
         commands.spawn(AuraPending {
             target: target.entity,
             aura: Aura {
@@ -749,41 +763,43 @@ fn try_devotion_aura(
         return false;
     }
 
-    // Find an ally without Devotion Aura (DamageTakenReduction from us)
-    let buff_target = allies.iter().find(|ally| {
-        // Check range (should always be in range with 100.0 range)
-        if my_pos.distance(ally.pos) > def.range {
-            return false;
-        }
-
-        // Check if ally already has Devotion Aura (DamageTakenReduction)
-        let has_devotion_aura = active_auras_map
-            .get(&ally.entity)
+    // Helper to check if an entity has Devotion Aura
+    let has_devotion_aura = |entity: Entity| -> bool {
+        active_auras_map
+            .get(&entity)
             .map(|auras| {
                 auras.iter().any(|a| {
                     a.effect_type == AuraType::DamageTakenReduction
                         && a.ability_name == "Devotion Aura"
                 })
             })
-            .unwrap_or(false);
-
-        !has_devotion_aura
-    });
-
-    let Some(target) = buff_target else {
-        return false;
+            .unwrap_or(false)
     };
 
-    // Apply Devotion Aura
+    // If ANY ally already has Devotion Aura, we've already buffed the team
+    if allies.iter().any(|ally| has_devotion_aura(ally.entity)) {
+        return false;
+    }
+
+    // Find all allies in range who need the buff
+    let allies_to_buff: Vec<&AllyInfo> = allies
+        .iter()
+        .filter(|ally| my_pos.distance(ally.pos) <= def.range)
+        .collect();
+
+    if allies_to_buff.is_empty() {
+        return false;
+    }
+
+    // Apply Devotion Aura to ALL allies at once (matches WoW behavior)
     combatant.global_cooldown = GCD;
 
-    // Log the cast
+    // Log the cast once
     let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = format!("Team {} {}", combatant.team, target.class.name());
     combat_log.log_ability_cast(
         caster_id,
         "Devotion Aura".to_string(),
-        Some(target_id),
+        None, // No single target - affects all allies
         format!(
             "Team {} {} casts Devotion Aura",
             combatant.team,
@@ -791,9 +807,11 @@ fn try_devotion_aura(
         ),
     );
 
-    // Apply the aura using the helper
-    if let Some(pending) = AuraPending::from_ability(target.entity, entity, def) {
-        commands.spawn(pending);
+    // Apply the aura to each ally
+    for ally in allies_to_buff {
+        if let Some(pending) = AuraPending::from_ability(ally.entity, entity, def) {
+            commands.spawn(pending);
+        }
     }
 
     true

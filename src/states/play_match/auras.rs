@@ -176,7 +176,7 @@ pub fn apply_pending_auras(
         let is_buff_aura = matches!(
             pending.aura.effect_type,
             AuraType::MaxHealthIncrease | AuraType::MaxManaIncrease | AuraType::AttackPowerIncrease
-            | AuraType::Absorb | AuraType::WeakenedSoul
+            | AuraType::Absorb | AuraType::WeakenedSoul | AuraType::DamageTakenReduction
         );
         if is_buff_aura {
             // For Absorb shields, use ability_name as the key to allow different absorbs to coexist
@@ -306,6 +306,21 @@ pub fn apply_pending_auras(
                     target_combatant.team,
                     target_combatant.class.name(),
                     ap_bonus
+                )
+            );
+        }
+
+        // Handle DamageTakenReduction aura (Devotion Aura) - log application
+        if pending.aura.effect_type == AuraType::DamageTakenReduction {
+            let reduction_percent = (pending.aura.magnitude * 100.0) as i32;
+            combat_log.log(
+                CombatLogEventType::Buff,
+                format!(
+                    "Team {} {} gains {} ({}% damage reduction)",
+                    target_combatant.team,
+                    target_combatant.class.name(),
+                    pending.aura.ability_name,
+                    reduction_percent
                 )
             );
         }
