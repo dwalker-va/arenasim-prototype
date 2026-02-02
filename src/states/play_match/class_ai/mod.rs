@@ -234,6 +234,20 @@ pub fn get_class_ai(class: CharacterClass) -> Box<dyn ClassAI> {
 // Shared Healer Utilities
 // ============================================================================
 
+/// Calculate dispel priority for an aura type.
+/// Higher values = more urgent to dispel.
+/// Used by Priest (Dispel Magic) and Paladin (Cleanse).
+pub fn dispel_priority(aura_type: AuraType) -> i32 {
+    match aura_type {
+        AuraType::Polymorph => 100,       // Complete incapacitate
+        AuraType::Fear => 90,              // Loss of control
+        AuraType::Root => 80,              // Can't move
+        AuraType::DamageOverTime => 50,    // Taking damage
+        AuraType::MovementSpeedSlow => 20, // Minor (typically not worth dispelling)
+        _ => 0,
+    }
+}
+
 /// Check if the team's HP is stable enough for maintenance tasks.
 /// Returns true if all living allies are above 70% HP.
 ///

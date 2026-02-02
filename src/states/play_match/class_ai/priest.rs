@@ -23,7 +23,7 @@ use crate::states::play_match::constants::GCD;
 use crate::states::play_match::is_spell_school_locked;
 use crate::states::play_match::utils::combatant_id;
 
-use super::{AbilityDecision, ClassAI, CombatContext, is_team_healthy};
+use super::{dispel_priority, AbilityDecision, ClassAI, CombatContext, is_team_healthy};
 
 /// Priest AI implementation.
 ///
@@ -500,17 +500,8 @@ fn try_dispel_magic(
                 continue;
             }
 
-            // Calculate priority based on aura type
-            // Only dispel debuffs with priority >= 50 (meaningful CC or DoTs)
-            // Don't waste mana/GCDs on minor slows
-            let priority = match aura.effect_type {
-                AuraType::Polymorph => 100,  // Highest - complete incapacitate
-                AuraType::Fear => 90,         // Very high - loss of control
-                AuraType::Root => 80,         // High - can't move
-                AuraType::DamageOverTime => 50,  // Medium - taking damage
-                AuraType::MovementSpeedSlow => 20, // Too low to dispel (threshold is 50)
-                _ => 0, // Other types
-            };
+            // Calculate priority based on aura type (shared logic in mod.rs)
+            let priority = dispel_priority(aura.effect_type);
 
             if priority > highest_priority {
                 highest_priority = priority;

@@ -53,6 +53,15 @@ pub const SHIELD_HP_THRESHOLD: f32 = 0.9;
 /// HP threshold considered "low" for general AI decisions
 pub const LOW_HP_THRESHOLD: f32 = 0.5;
 
+/// HP threshold for critical/emergency situations (Paladin Holy Shock heal)
+pub const CRITICAL_HP_THRESHOLD: f32 = 0.4;
+
+/// HP threshold above which allies are considered "healthy" (dispel maintenance)
+pub const HEALTHY_HP_THRESHOLD: f32 = 0.7;
+
+/// HP threshold for safe long casts (Holy Light)
+pub const SAFE_HEAL_MAX_THRESHOLD: f32 = 0.85;
+
 // ============================================================================
 // Damage Over Time
 // ============================================================================

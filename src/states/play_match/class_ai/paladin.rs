@@ -21,12 +21,16 @@ use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::components::*;
-use crate::states::play_match::constants::{GCD, HOLY_SHOCK_DAMAGE_RANGE};
+use crate::states::play_match::constants::{
+    CRITICAL_HP_THRESHOLD, GCD, HEALTHY_HP_THRESHOLD, HOLY_SHOCK_DAMAGE_RANGE,
+    LOW_HP_THRESHOLD, SAFE_HEAL_MAX_THRESHOLD,
+};
+use smallvec::SmallVec;
 use crate::states::play_match::is_spell_school_locked;
 use crate::states::play_match::utils::combatant_id;
 
 use super::priest::DispelPending;
-use super::{AbilityDecision, ClassAI, CombatContext};
+use super::{dispel_priority, AbilityDecision, ClassAI, CombatContext};
 
 /// Pre-computed ally information to avoid repeated iteration over combatant_info
 struct AllyInfo {
@@ -43,14 +47,14 @@ struct EnemyInfo {
     pos: Vec3,
 }
 
-/// Check if any ally is in an emergency situation (< 40% HP)
+/// Check if any ally is in an emergency situation (below critical HP threshold)
 fn has_emergency_target(allies: &[AllyInfo]) -> bool {
-    allies.iter().any(|ally| ally.hp_percent < 0.40)
+    allies.iter().any(|ally| ally.hp_percent < CRITICAL_HP_THRESHOLD)
 }
 
-/// Check if all allies are healthy (> 70% HP)
+/// Check if all allies are healthy (above healthy HP threshold)
 fn allies_are_healthy(allies: &[AllyInfo]) -> bool {
-    allies.iter().all(|ally| ally.hp_percent >= 0.70)
+    allies.iter().all(|ally| ally.hp_percent >= HEALTHY_HP_THRESHOLD)
 }
 
 /// Paladin AI implementation
@@ -84,8 +88,8 @@ pub fn decide_paladin_action(
         return false;
     }
 
-    // Pre-compute allies and enemies once to avoid repeated iteration
-    let allies: Vec<AllyInfo> = combatant_info
+    // Pre-compute allies and enemies once (SmallVec avoids heap allocation for 3v3)
+    let allies: SmallVec<[AllyInfo; 3]> = combatant_info
         .iter()
         .filter(|(_, (team, _, _, hp, max_hp, _))| *team == combatant.team && *hp > 0.0 && *max_hp > 0.0)
         .filter_map(|(e, (_, _, class, hp, max_hp, _))| {
@@ -99,7 +103,7 @@ pub fn decide_paladin_action(
         .collect();
 
     // Filter out stealthed enemies - can't target what we can't see
-    let enemies: Vec<EnemyInfo> = combatant_info
+    let enemies: SmallVec<[EnemyInfo; 3]> = combatant_info
         .iter()
         .filter(|(_, (team, _, _, hp, _, stealthed))| {
             *team != combatant.team && *hp > 0.0 && !*stealthed
@@ -328,7 +332,7 @@ fn try_holy_light(
     // Too low = need fast heal, too high = waste mana
     let heal_target = allies
         .iter()
-        .filter(|ally| ally.hp_percent >= 0.50 && ally.hp_percent < 0.85)
+        .filter(|ally| ally.hp_percent >= LOW_HP_THRESHOLD && ally.hp_percent < SAFE_HEAL_MAX_THRESHOLD)
         .min_by(|a, b| a.hp_percent.partial_cmp(&b.hp_percent).unwrap_or(std::cmp::Ordering::Equal));
 
     let Some(target) = heal_target else {
@@ -404,7 +408,7 @@ fn try_holy_shock_heal(
     // Find lowest HP ally below 50% and in range
     let heal_target = allies
         .iter()
-        .filter(|ally| ally.hp_percent < 0.50 && my_pos.distance(ally.pos) <= def.range)
+        .filter(|ally| ally.hp_percent < LOW_HP_THRESHOLD && my_pos.distance(ally.pos) <= def.range)
         .min_by(|a, b| a.hp_percent.partial_cmp(&b.hp_percent).unwrap_or(std::cmp::Ordering::Equal));
 
     let Some(target) = heal_target else {
@@ -671,14 +675,7 @@ fn try_cleanse(
                 continue;
             }
 
-            let priority = match aura.effect_type {
-                AuraType::Polymorph => 100,
-                AuraType::Fear => 90,
-                AuraType::Root => 80,
-                AuraType::DamageOverTime => 50,
-                AuraType::MovementSpeedSlow => 20,
-                _ => 0,
-            };
+            let priority = dispel_priority(aura.effect_type);
 
             if priority > highest_priority {
                 highest_priority = priority;
@@ -730,17 +727,8 @@ fn try_cleanse(
     true
 }
 
-/// Try to cast Devotion Aura on an unbuffed ally.
-///
-/// **Design Note**: Unlike WoW Classic's toggle aura that instantly affects all party
-/// members, this implementation applies the buff to one ally per GCD. This is an
-/// intentional design choice for game balance - it creates a tactical window during
-/// the pre-combat phase where the enemy team can engage before the Paladin's team
-/// is fully buffed, adding strategic depth to match openings.
-///
-/// Similar to Priest's Power Word: Fortitude - buffs team pre-combat.
-///
-/// Returns true if the ability was used.
+/// Try to cast Devotion Aura to buff all allies with damage reduction.
+/// Buffs all allies in range at once (unlike per-GCD pre-combat buffs).
 #[allow(clippy::too_many_arguments)]
 fn try_devotion_aura(
     commands: &mut Commands,
