@@ -3,8 +3,8 @@
 ## Current Status
 
 - **Core gameplay loop**: COMPLETE
-- **Classes**: Warrior, Mage, Rogue, Priest, Warlock (5)
-- **Abilities**: 22 across all classes
+- **Classes**: Warrior, Mage, Rogue, Priest, Warlock, Paladin (6)
+- **Abilities**: 28 across all classes
 - **Headless testing**: COMPLETE
 - **Results screen**: Enhanced with WoW Details-style breakdown
 
@@ -83,7 +83,7 @@ If matches get long, may need to limit log size or virtualize the display to pre
 - [x] Win/lose detection with victory celebration
 - [x] Pre-match countdown (10s) with gates
 - [x] Mana restoration during countdown (pre-buffing phase)
-- [x] 22 abilities across 5 classes
+- [x] 28 abilities across 6 classes
 - [x] Ability cooldowns
 - [x] Cast time handling (interruptible)
 - [x] Resource cost/generation (Mana, Rage, Energy)
@@ -128,6 +128,6 @@ If matches get long, may need to limit log size or virtualize the display to pre
 
 ### Data-Driven Configuration
 
-- [x] abilities.ron - All 22 ability definitions
+- [x] abilities.ron - All 28 ability definitions
 - [x] AbilityDefinitions Bevy resource
 - [x] Runtime balance changes without recompilation

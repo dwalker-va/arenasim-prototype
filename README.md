@@ -19,8 +19,8 @@ cargo run --release -- --headless /tmp/match.json
 
 ## Features
 
-- **5 Classes**: Warrior, Mage, Rogue, Priest, Warlock
-- **22 Abilities**: Spells, heals, interrupts, crowd control, absorb shields
+- **6 Classes**: Warrior, Mage, Rogue, Priest, Warlock, Paladin
+- **28 Abilities**: Spells, heals, interrupts, crowd control, absorb shields
 - **WoW Mechanics**: Mana/Energy/Rage, cooldowns, spell schools, cast times
 - **Smart AI**: Target priority, ability rotation, interrupts, kiting
 - **Match Config**: 1v1, 2v2, 3v3 with kill target strategy

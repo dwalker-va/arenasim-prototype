@@ -37,6 +37,7 @@ Implemented WoW Classic mechanics adapted for our autobattler. Reference this do
 | Mage    | 200      | 10        |
 | Priest  | 150      | 8         |
 | Warlock | 200      | 8         |
+| Paladin | 160      | 8         |
 
 ### Rage (Warrior)
 - Max: 100
@@ -129,7 +130,7 @@ Implemented WoW Classic mechanics adapted for our autobattler. Reference this do
 | Frost    | Blue        | Mage (Frostbolt, Frost Nova, Ice Barrier) |
 | Shadow   | Purple      | Warlock, Priest (Mind Blast)     |
 | Arcane   | Pink/Purple | Mage (Polymorph)                 |
-| Holy     | Gold        | Priest (Flash Heal, PW:S, Fort)  |
+| Holy     | Gold        | Priest, Paladin (heals, Holy Shock, HoJ) |
 | Nature   | Green       | (Future: Druid, Shaman)          |
 
 ---
@@ -155,6 +156,7 @@ Healing = Base + (Spell Power × Coefficient)
 | Mage    | 0            | 50          |
 | Priest  | 0            | 40          |
 | Warlock | 0            | 45          |
+| Paladin | 20           | 35          |
 
 ### Example Coefficients
 | Ability       | Base Damage | Coefficient | Scales With |
@@ -217,3 +219,16 @@ These behaviors may look like bugs but are intentional design decisions. Do not 
 | Dead unit initiates NEW attack after death | ❌ Bug | Fixed via `died_this_frame` tracking |
 | Dead unit starts casting after death | ❌ Bug | Should be caught by alive checks |
 | Queued melee attack lands after attacker dies in same frame | ❌ Bug | Fixed in combat_core.rs |
+
+---
+
+## Paladin Abilities
+
+| Ability | Type | Cast Time | Effect |
+|---------|------|-----------|--------|
+| Devotion Aura | Buff | Instant | 10% damage reduction to all allies |
+| Flash of Light | Heal | 1.5s | Fast, efficient single-target heal |
+| Holy Light | Heal | 2.5s | Large heal for safe situations |
+| Holy Shock | Instant | - | Heals ally OR damages enemy (20yd range for damage) |
+| Cleanse | Utility | Instant | Removes 1 dispellable debuff (Poly/Fear/Root/DoT) |
+| Hammer of Justice | CC | Instant | 10yd range, 6s stun, prioritizes healers |

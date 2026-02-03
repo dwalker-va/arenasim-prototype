@@ -19,7 +19,7 @@ cargo run --release -- --headless /tmp/test.json
 ```
 
 **Config options:**
-- `team1`, `team2`: Arrays of class names (Warrior, Mage, Rogue, Priest, Warlock)
+- `team1`, `team2`: Arrays of class names (Warrior, Mage, Rogue, Priest, Warlock, Paladin)
 - `map`: "BasicArena" or "PillaredArena"
 - `team1_kill_target`, `team2_kill_target`: Priority target index (0-based)
 - `max_duration_secs`: Timeout (default 300)
@@ -71,6 +71,7 @@ src/
         rogue.rs          # Rogue stealth, burst logic
         priest.rs         # Priest healing priorities
         warlock.rs        # Warlock DoT management
+        paladin.rs        # Paladin healing and utility
       combat_ai.rs        # Target selection, interrupt timing
       combat_core.rs      # Damage/healing application, casting
       constants.rs        # Centralized magic numbers (GCD, ranges, etc.)
@@ -178,6 +179,7 @@ mcp__wowhead-classic__lookup_spell("Pyroblast")
 - **Rogue**: Energy, melee, Stealth/Ambush/Kick/Eviscerate
 - **Priest**: Mana, healer, Flash Heal/Mind Blast/Power Word: Fortitude
 - **Warlock**: Mana, DoT caster, Corruption/Shadow Bolt/Fear
+- **Paladin**: Mana, healer/melee, Holy Shock/Flash of Light/Hammer of Justice
 
 ## Common Tasks
 
