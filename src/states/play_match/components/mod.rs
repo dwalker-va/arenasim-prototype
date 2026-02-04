@@ -987,6 +987,20 @@ pub struct DrainParticle {
     pub beam: Entity,
 }
 
+/// Visual effect for healing spells - a translucent column of light at the target.
+/// Spawned when a healing spell lands, fades over its lifetime.
+#[derive(Component)]
+pub struct HealingLightColumn {
+    /// The entity being healed (column follows this target)
+    pub target: Entity,
+    /// The class of the healer (affects color: Priest = white-gold, Paladin = golden)
+    pub healer_class: match_config::CharacterClass,
+    /// Time remaining before despawn (seconds)
+    pub lifetime: f32,
+    /// Initial lifetime for fade calculation
+    pub initial_lifetime: f32,
+}
+
 // ============================================================================
 // Paladin Pending Components
 // ============================================================================

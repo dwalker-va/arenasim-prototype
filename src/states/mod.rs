@@ -178,6 +178,16 @@ impl Plugin for StatesPlugin {
                 )
                     .run_if(in_state(GameState::PlayMatch)),
             )
+            // Healing light column visual effects (separate group to avoid tuple size limits)
+            .add_systems(
+                Update,
+                (
+                    play_match::spawn_healing_light_visuals,    // Spawn healing light columns
+                    play_match::update_healing_light_columns,   // Update position/fade
+                    play_match::cleanup_expired_healing_lights, // Remove expired columns
+                )
+                    .run_if(in_state(GameState::PlayMatch)),
+            )
             // Drain Life beam visual effects (separate group to avoid tuple size limits)
             .add_systems(
                 Update,

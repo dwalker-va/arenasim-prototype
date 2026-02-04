@@ -1448,8 +1448,19 @@ pub fn process_casting(
                 actual_healing,
                 message,
             );
+
+            // Spawn healing light column visual effect
+            commands.spawn((
+                HealingLightColumn {
+                    target: target_entity,
+                    healer_class: caster_class,
+                    lifetime: 0.8,
+                    initial_lifetime: 0.8,
+                },
+                PlayMatchEntity,
+            ));
         }
-        
+
         // Apply aura if applicable (store for later application)
         if let Some(aura) = def.applies_aura.as_ref() {
             // We'll apply auras in a separate pass to avoid borrow issues
