@@ -756,6 +756,7 @@ fn try_cleanse(
     commands.spawn(DispelPending {
         target: *target_entity,
         log_prefix: "[CLEANSE]",
+        caster_class: CharacterClass::Paladin,
     });
 
     true

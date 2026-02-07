@@ -1001,6 +1001,20 @@ pub struct HealingLightColumn {
     pub initial_lifetime: f32,
 }
 
+/// Visual effect for dispel spells - an expanding sphere burst at the target.
+/// Spawned when a dispel successfully removes an aura, expands and fades over its lifetime.
+#[derive(Component)]
+pub struct DispelBurst {
+    /// The entity that was dispelled (burst follows this target)
+    pub target: Entity,
+    /// The class of the dispeller (affects color: Priest = white/silver, Paladin = golden)
+    pub caster_class: match_config::CharacterClass,
+    /// Time remaining before despawn (seconds)
+    pub lifetime: f32,
+    /// Initial lifetime for fade calculation
+    pub initial_lifetime: f32,
+}
+
 // ============================================================================
 // Paladin Pending Components
 // ============================================================================

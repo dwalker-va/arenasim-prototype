@@ -188,6 +188,16 @@ impl Plugin for StatesPlugin {
                 )
                     .run_if(in_state(GameState::PlayMatch)),
             )
+            // Dispel burst visual effects (separate group to avoid tuple size limits)
+            .add_systems(
+                Update,
+                (
+                    play_match::spawn_dispel_visuals,          // Spawn burst when dispel succeeds
+                    play_match::update_dispel_bursts,          // Expand sphere and fade
+                    play_match::cleanup_expired_dispel_bursts, // Remove expired bursts
+                )
+                    .run_if(in_state(GameState::PlayMatch)),
+            )
             // Drain Life beam visual effects (separate group to avoid tuple size limits)
             .add_systems(
                 Update,

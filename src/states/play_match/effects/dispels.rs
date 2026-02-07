@@ -59,6 +59,17 @@ pub fn process_dispels(
                     combatant.team,
                     combatant.class.name()
                 );
+
+                // Spawn dispel visual effect
+                commands.spawn((
+                    DispelBurst {
+                        target: pending.target,
+                        caster_class: pending.caster_class,
+                        lifetime: 0.5,
+                        initial_lifetime: 0.5,
+                    },
+                    PlayMatchEntity,
+                ));
             }
         }
 

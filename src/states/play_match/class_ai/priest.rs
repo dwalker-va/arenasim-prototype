@@ -560,6 +560,7 @@ fn try_dispel_magic(
             commands.spawn(DispelPending {
                 target: dispel_target,
                 log_prefix: "[DISPEL]",
+                caster_class: CharacterClass::Priest,
             });
 
             // Log the dispel cast (the actual removal is logged in process_dispels)
@@ -604,6 +605,8 @@ pub struct DispelPending {
     pub target: Entity,
     /// Log prefix for combat log (e.g., "[DISPEL]" for Priest, "[CLEANSE]" for Paladin)
     pub log_prefix: &'static str,
+    /// Caster's class for visual effect coloring
+    pub caster_class: CharacterClass,
 }
 
 /// Try to cast Flash Heal on the lowest HP ally.
