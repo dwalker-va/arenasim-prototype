@@ -10,8 +10,8 @@ use crate::combat::log::CombatLog;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
-use crate::states::play_match::constants::CRIT_HEALING_MULTIPLIER;
-use crate::states::play_match::constants::CRIT_DAMAGE_MULTIPLIER;
+use crate::states::play_match::combat_core::{apply_damage_with_absorb, roll_crit};
+use crate::states::play_match::constants::{CRIT_DAMAGE_MULTIPLIER, CRIT_HEALING_MULTIPLIER};
 use crate::states::play_match::utils::{combatant_id, get_next_fct_offset};
 
 /// Process pending Holy Shock heals.
@@ -44,7 +44,7 @@ pub fn process_holy_shock_heals(
             let mut heal_amount = base_heal + spell_power_bonus;
 
             // Roll crit before reductions
-            let is_crit = super::super::combat_core::roll_crit(pending.caster_crit_chance, &mut game_rng);
+            let is_crit = roll_crit(pending.caster_crit_chance, &mut game_rng);
             if is_crit {
                 heal_amount *= CRIT_HEALING_MULTIPLIER;
             }
@@ -141,13 +141,13 @@ pub fn process_holy_shock_damage(
             let mut raw_damage = base_damage + spell_power_bonus;
 
             // Roll crit before absorbs/reductions
-            let is_crit = super::super::combat_core::roll_crit(pending.caster_crit_chance, &mut game_rng);
+            let is_crit = roll_crit(pending.caster_crit_chance, &mut game_rng);
             if is_crit {
                 raw_damage *= CRIT_DAMAGE_MULTIPLIER;
             }
 
             // Apply damage with absorb shield consideration
-            let (actual_damage, absorbed) = super::super::combat_core::apply_damage_with_absorb(
+            let (actual_damage, absorbed) = apply_damage_with_absorb(
                 raw_damage,
                 &mut target,
                 target_auras.as_deref_mut(),
