@@ -44,6 +44,7 @@ pub enum StructuredEventData {
         ability: String,
         amount: f32,
         is_killing_blow: bool,
+        is_crit: bool,
     },
     /// Healing done from one combatant to another (or self)
     Healing {
@@ -51,6 +52,7 @@ pub enum StructuredEventData {
         target: CombatantId,
         ability: String,
         amount: f32,
+        is_crit: bool,
     },
     /// Crowd control applied
     CrowdControl {
@@ -169,6 +171,7 @@ impl CombatLog {
         ability: String,
         amount: f32,
         is_killing_blow: bool,
+        is_crit: bool,
         message: String,
     ) {
         self.entries.push(CombatLogEntry {
@@ -182,6 +185,7 @@ impl CombatLog {
                 ability,
                 amount,
                 is_killing_blow,
+                is_crit,
             }),
         });
     }
@@ -193,6 +197,7 @@ impl CombatLog {
         target: CombatantId,
         ability: String,
         amount: f32,
+        is_crit: bool,
         message: String,
     ) {
         self.entries.push(CombatLogEntry {
@@ -205,6 +210,7 @@ impl CombatLog {
                 target,
                 ability,
                 amount,
+                is_crit,
             }),
         });
     }

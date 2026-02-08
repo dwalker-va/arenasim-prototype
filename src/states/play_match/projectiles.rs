@@ -9,6 +9,7 @@ use super::match_config;
 use super::components::*;
 use super::abilities::AbilityType;
 use super::ability_config::AbilityDefinitions;
+use super::constants::CRIT_DAMAGE_MULTIPLIER;
 use super::utils::{combatant_id, get_next_fct_offset};
 
 /// Spawn visual meshes for newly created projectiles.
@@ -107,8 +108,8 @@ pub fn process_projectile_hits(
     const HIT_DISTANCE: f32 = 0.5; // Projectile hits when within 0.5 units of target
     
     // Collect hits to process (to avoid borrow checker issues)
-    // Format: (projectile_entity, caster_entity, target_entity, ability, caster_team, caster_class, caster_pos, target_pos, ability_damage, ability_healing)
-    let mut hits_to_process: Vec<(Entity, Entity, Entity, AbilityType, u8, match_config::CharacterClass, Vec3, Vec3, f32, f32)> = Vec::new();
+    // Format: (projectile_entity, caster_entity, target_entity, ability, caster_team, caster_class, caster_pos, target_pos, ability_damage, ability_healing, is_crit)
+    let mut hits_to_process: Vec<(Entity, Entity, Entity, AbilityType, u8, match_config::CharacterClass, Vec3, Vec3, f32, f32, bool)> = Vec::new();
     
     for (projectile_entity, projectile, projectile_transform) in projectiles.iter() {
         // Get target position (immutable borrow)
@@ -147,9 +148,15 @@ pub fn process_projectile_hits(
             };
             
             let def = abilities.get_unchecked(&projectile.ability);
-            let ability_damage = caster_combatant.calculate_ability_damage_config(def, &mut game_rng);
+            let mut ability_damage = caster_combatant.calculate_ability_damage_config(def, &mut game_rng);
             let ability_healing = caster_combatant.calculate_ability_healing_config(def, &mut game_rng);
-            
+
+            // Roll crit at impact time using caster's live crit_chance
+            let is_crit = super::combat_core::roll_crit(caster_combatant.crit_chance, &mut game_rng);
+            if is_crit {
+                ability_damage *= CRIT_DAMAGE_MULTIPLIER;
+            }
+
             // Queue this hit for processing
             hits_to_process.push((
                 projectile_entity,
@@ -162,12 +169,13 @@ pub fn process_projectile_hits(
                 target_world_pos,
                 ability_damage,
                 ability_healing,
+                is_crit,
             ));
         }
     }
     
     // Process all queued hits
-    for (projectile_entity, caster_entity, target_entity, ability, caster_team, caster_class, caster_pos, target_pos, ability_damage, _ability_healing) in hits_to_process {
+    for (projectile_entity, caster_entity, target_entity, ability, caster_team, caster_class, caster_pos, target_pos, ability_damage, _ability_healing, is_crit) in hits_to_process {
         let def = abilities.get_unchecked(&ability);
         let text_position = target_pos + Vec3::new(0.0, super::FCT_HEIGHT, 0.0);
         let _ability_range = caster_pos.distance(target_pos);
@@ -229,6 +237,7 @@ pub fn process_projectile_hits(
                     color: egui::Color32::from_rgb(255, 255, 0), // Yellow
                     lifetime: 1.5,
                     vertical_offset: offset_y,
+                    is_crit,
                 },
                 PlayMatchEntity,
             ));
@@ -247,18 +256,21 @@ pub fn process_projectile_hits(
                         color: egui::Color32::from_rgb(100, 180, 255), // Light blue
                         lifetime: 1.5,
                         vertical_offset: absorb_offset_y,
+                        is_crit: false,
                     },
                     PlayMatchEntity,
                 ));
             }
 
             // Log the damage with structured data
+            let verb = if is_crit { "CRITS" } else { "hits" };
             let message = if absorbed > 0.0 {
                 format!(
-                    "Team {} {}'s {} hits Team {} {} for {:.0} damage ({:.0} absorbed)",
+                    "Team {} {}'s {} {} Team {} {} for {:.0} damage ({:.0} absorbed)",
                     caster_team,
                     caster_class.name(),
                     def.name,
+                    verb,
                     target_team,
                     target_class.name(),
                     actual_damage,
@@ -266,10 +278,11 @@ pub fn process_projectile_hits(
                 )
             } else {
                 format!(
-                    "Team {} {}'s {} hits Team {} {} for {:.0} damage",
+                    "Team {} {}'s {} {} Team {} {} for {:.0} damage",
                     caster_team,
                     caster_class.name(),
                     def.name,
+                    verb,
                     target_team,
                     target_class.name(),
                     actual_damage
@@ -281,6 +294,7 @@ pub fn process_projectile_hits(
                 def.name.to_string(),
                 actual_damage + absorbed, // Total damage dealt (including absorbed)
                 is_killing_blow,
+                is_crit,
                 message,
             );
 

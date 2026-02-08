@@ -18,9 +18,9 @@ use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
 use crate::states::play_match::constants::{
-    DEFENSIVE_HP_THRESHOLD, GCD, MELEE_RANGE, SAFE_KITING_DISTANCE,
+    CRIT_DAMAGE_MULTIPLIER, DEFENSIVE_HP_THRESHOLD, GCD, MELEE_RANGE, SAFE_KITING_DISTANCE,
 };
-use crate::states::play_match::combat_core::calculate_cast_time;
+use crate::states::play_match::combat_core::{calculate_cast_time, roll_crit};
 use crate::states::play_match::is_spell_school_locked;
 use crate::states::play_match::utils::{combatant_id, spawn_speech_bubble};
 
@@ -56,7 +56,7 @@ pub fn decide_mage_action(
     positions: &HashMap<Entity, Vec3>,
     combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
-    frost_nova_damage: &mut Vec<(Entity, Entity, f32, u8, CharacterClass, Vec3)>,
+    frost_nova_damage: &mut Vec<(Entity, Entity, f32, u8, CharacterClass, Vec3, bool)>,
 ) -> bool {
     // Check if global cooldown is active
     if combatant.global_cooldown > 0.0 {
@@ -352,7 +352,7 @@ fn try_frost_nova(
     auras: Option<&ActiveAuras>,
     positions: &HashMap<Entity, Vec3>,
     combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
-    frost_nova_damage: &mut Vec<(Entity, Entity, f32, u8, CharacterClass, Vec3)>,
+    frost_nova_damage: &mut Vec<(Entity, Entity, f32, u8, CharacterClass, Vec3, bool)>,
 ) -> bool {
     let frost_nova = AbilityType::FrostNova;
     let nova_def = abilities.get_unchecked(&frost_nova);
@@ -419,7 +419,9 @@ fn try_frost_nova(
 
     // Queue damage and apply root to all targets
     for (target_entity, target_pos, _target_team, _target_class) in &frost_nova_targets {
-        let damage = combatant.calculate_ability_damage_config(nova_def, game_rng);
+        let mut damage = combatant.calculate_ability_damage_config(nova_def, game_rng);
+        let is_crit = roll_crit(combatant.crit_chance, game_rng);
+        if is_crit { damage *= CRIT_DAMAGE_MULTIPLIER; }
         frost_nova_damage.push((
             entity,
             *target_entity,
@@ -427,6 +429,7 @@ fn try_frost_nova(
             combatant.team,
             combatant.class,
             *target_pos,
+            is_crit,
         ));
 
         // Apply root aura

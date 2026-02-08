@@ -34,6 +34,7 @@ fn test_damage_by_ability_single_source() {
         "Mortal Strike".to_string(),
         50.0,
         false,
+        false,
         "Test message".to_string(),
     );
     log.log_damage(
@@ -42,6 +43,7 @@ fn test_damage_by_ability_single_source() {
         "Mortal Strike".to_string(),
         45.0,
         false,
+        false,
         "Test message".to_string(),
     );
     log.log_damage(
@@ -49,6 +51,7 @@ fn test_damage_by_ability_single_source() {
         "Team 2 Mage".to_string(),
         "Auto Attack".to_string(),
         20.0,
+        false,
         false,
         "Test message".to_string(),
     );
@@ -71,6 +74,7 @@ fn test_damage_by_ability_multiple_sources() {
         "Mortal Strike".to_string(),
         50.0,
         false,
+        false,
         "Test".to_string(),
     );
     log.log_damage(
@@ -78,6 +82,7 @@ fn test_damage_by_ability_multiple_sources() {
         "Team 1 Mage".to_string(),
         "Mortal Strike".to_string(),
         60.0,
+        false,
         false,
         "Test".to_string(),
     );
@@ -99,6 +104,7 @@ fn test_total_damage_dealt() {
         "Mortal Strike".to_string(),
         50.0,
         false,
+        false,
         "Test".to_string(),
     );
     log.log_damage(
@@ -107,6 +113,7 @@ fn test_total_damage_dealt() {
         "Auto Attack".to_string(),
         20.0,
         false,
+        false,
         "Test".to_string(),
     );
     log.log_damage(
@@ -114,6 +121,7 @@ fn test_total_damage_dealt() {
         "Team 2 Priest".to_string(),
         "Rend".to_string(),
         30.0,
+        false,
         false,
         "Test".to_string(),
     );
@@ -132,6 +140,7 @@ fn test_total_damage_taken() {
         "Frostbolt".to_string(),
         40.0,
         false,
+        false,
         "Test".to_string(),
     );
     log.log_damage(
@@ -139,6 +148,7 @@ fn test_total_damage_taken() {
         "Team 2 Mage".to_string(),
         "Ambush".to_string(),
         80.0,
+        false,
         false,
         "Test".to_string(),
     );
@@ -160,6 +170,7 @@ fn test_healing_by_ability() {
         "Team 1 Warrior".to_string(),
         "Flash Heal".to_string(),
         50.0,
+        false,
         "Test".to_string(),
     );
     log.log_healing(
@@ -167,6 +178,7 @@ fn test_healing_by_ability() {
         "Team 1 Warrior".to_string(),
         "Flash Heal".to_string(),
         45.0,
+        false,
         "Test".to_string(),
     );
     log.log_healing(
@@ -174,6 +186,7 @@ fn test_healing_by_ability() {
         "Team 1 Priest".to_string(),
         "Flash Heal".to_string(),
         30.0,
+        false,
         "Test".to_string(),
     );
 
@@ -190,6 +203,7 @@ fn test_total_healing_done() {
         "Team 1 Warrior".to_string(),
         "Flash Heal".to_string(),
         50.0,
+        false,
         "Test".to_string(),
     );
     log.log_healing(
@@ -197,6 +211,7 @@ fn test_total_healing_done() {
         "Team 1 Priest".to_string(),
         "Flash Heal".to_string(),
         30.0,
+        false,
         "Test".to_string(),
     );
 
@@ -218,6 +233,7 @@ fn test_killing_blows_none() {
         "Mortal Strike".to_string(),
         50.0,
         false, // Not a killing blow
+        false,
         "Test".to_string(),
     );
 
@@ -235,6 +251,7 @@ fn test_killing_blows_counted() {
         "Mortal Strike".to_string(),
         50.0,
         false,
+        false,
         "Test".to_string(),
     );
 
@@ -245,6 +262,7 @@ fn test_killing_blows_counted() {
         "Mortal Strike".to_string(),
         100.0,
         true, // Killing blow
+        false,
         "Test".to_string(),
     );
 
@@ -255,6 +273,7 @@ fn test_killing_blows_counted() {
         "Auto Attack".to_string(),
         20.0,
         true, // Killing blow
+        false,
         "Test".to_string(),
     );
 
@@ -271,6 +290,7 @@ fn test_killing_blows_per_combatant() {
         "Mortal Strike".to_string(),
         100.0,
         true,
+        false,
         "Test".to_string(),
     );
     log.log_damage(
@@ -279,6 +299,7 @@ fn test_killing_blows_per_combatant() {
         "Ambush".to_string(),
         150.0,
         true,
+        false,
         "Test".to_string(),
     );
     log.log_damage(
@@ -287,6 +308,7 @@ fn test_killing_blows_per_combatant() {
         "Eviscerate".to_string(),
         80.0,
         true,
+        false,
         "Test".to_string(),
     );
 
@@ -359,6 +381,7 @@ fn test_combatant_survived_no_deaths() {
         "Team 2 Mage".to_string(),
         "Mortal Strike".to_string(),
         50.0,
+        false,
         false,
         "Test".to_string(),
     );
@@ -476,6 +499,7 @@ fn test_filter_by_type() {
         "Test".to_string(),
         50.0,
         false,
+        false,
         "Test".to_string(),
     );
     log.log_healing(
@@ -483,6 +507,7 @@ fn test_filter_by_type() {
         "Team 1 Warrior".to_string(),
         "Test".to_string(),
         30.0,
+        false,
         "Test".to_string(),
     );
 
@@ -507,6 +532,7 @@ fn test_hp_changes_only() {
         "Test".to_string(),
         50.0,
         false,
+        false,
         "Test".to_string(),
     );
     log.log_healing(
@@ -514,6 +540,7 @@ fn test_hp_changes_only() {
         "Team 1 Warrior".to_string(),
         "Test".to_string(),
         30.0,
+        false,
         "Test".to_string(),
     );
     log.log(CombatLogEventType::AuraApplied, "Buff applied".to_string());

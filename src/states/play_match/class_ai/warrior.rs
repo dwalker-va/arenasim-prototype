@@ -17,7 +17,8 @@ use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
-use crate::states::play_match::constants::{CHARGE_MIN_RANGE, GCD};
+use crate::states::play_match::combat_core::roll_crit;
+use crate::states::play_match::constants::{CHARGE_MIN_RANGE, CRIT_DAMAGE_MULTIPLIER, GCD};
 
 use super::{AbilityDecision, ClassAI, CombatContext};
 
@@ -57,7 +58,7 @@ pub fn decide_warrior_action(
     positions: &HashMap<Entity, Vec3>,
     combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
-    instant_attacks: &mut Vec<(Entity, Entity, f32, u8, CharacterClass, AbilityType)>,
+    instant_attacks: &mut Vec<(Entity, Entity, f32, u8, CharacterClass, AbilityType, bool)>,
 ) -> bool {
     // Check if global cooldown is active
     if combatant.global_cooldown > 0.0 {
@@ -425,7 +426,7 @@ fn try_mortal_strike(
     target_entity: Entity,
     target_pos: Vec3,
     combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
-    instant_attacks: &mut Vec<(Entity, Entity, f32, u8, CharacterClass, AbilityType)>,
+    instant_attacks: &mut Vec<(Entity, Entity, f32, u8, CharacterClass, AbilityType, bool)>,
 ) -> bool {
     let mortal_strike = AbilityType::MortalStrike;
     let ms_def = abilities.get_unchecked(&mortal_strike);
@@ -468,7 +469,9 @@ fn try_mortal_strike(
     );
 
     // Calculate and queue damage
-    let damage = combatant.calculate_ability_damage_config(ms_def, game_rng);
+    let mut damage = combatant.calculate_ability_damage_config(ms_def, game_rng);
+    let is_crit = roll_crit(combatant.crit_chance, game_rng);
+    if is_crit { damage *= CRIT_DAMAGE_MULTIPLIER; }
     instant_attacks.push((
         entity,
         target_entity,
@@ -476,6 +479,7 @@ fn try_mortal_strike(
         combatant.team,
         combatant.class,
         mortal_strike,
+        is_crit,
     ));
 
     // Apply healing reduction aura

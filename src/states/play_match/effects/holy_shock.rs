@@ -6,10 +6,12 @@
 use bevy::prelude::*;
 use bevy_egui::egui;
 
-use crate::combat::log::{CombatLog, CombatLogEventType};
+use crate::combat::log::CombatLog;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
+use crate::states::play_match::constants::CRIT_HEALING_MULTIPLIER;
+use crate::states::play_match::constants::CRIT_DAMAGE_MULTIPLIER;
 use crate::states::play_match::utils::{combatant_id, get_next_fct_offset};
 
 /// Process pending Holy Shock heals.
@@ -40,6 +42,12 @@ pub fn process_holy_shock_heals(
                 + game_rng.random_f32() * (ability_def.healing_base_max - ability_def.healing_base_min);
             let spell_power_bonus = pending.caster_spell_power * ability_def.healing_coefficient;
             let mut heal_amount = base_heal + spell_power_bonus;
+
+            // Roll crit before reductions
+            let is_crit = super::super::combat_core::roll_crit(pending.caster_crit_chance, &mut game_rng);
+            if is_crit {
+                heal_amount *= CRIT_HEALING_MULTIPLIER;
+            }
 
             // Check for healing reduction debuffs (e.g., Mortal Strike)
             if let Some(auras) = target_auras {
@@ -72,21 +80,29 @@ pub fn process_holy_shock_heals(
                     color: egui::Color32::from_rgb(0, 255, 0), // Green for healing
                     lifetime: 1.5,
                     vertical_offset: offset_y,
+                    is_crit,
                 },
                 PlayMatchEntity,
             ));
 
             // Log the heal with caster attribution
             let caster_id = combatant_id(pending.caster_team, pending.caster_class);
-            combat_log.log(
-                CombatLogEventType::Healing,
-                format!(
-                    "{}'s Holy Shock heals Team {} {} for {:.0}",
-                    caster_id,
-                    target_team,
-                    target_class.name(),
-                    actual_heal
-                ),
+            let verb = if is_crit { "CRITICALLY heals" } else { "heals" };
+            let message = format!(
+                "{}'s Holy Shock {} Team {} {} for {:.0}",
+                caster_id,
+                verb,
+                target_team,
+                target_class.name(),
+                actual_heal
+            );
+            combat_log.log_healing(
+                caster_id.clone(),
+                combatant_id(target_team, target_class),
+                "Holy Shock".to_string(),
+                actual_heal,
+                is_crit,
+                message,
             );
         }
 
@@ -122,7 +138,13 @@ pub fn process_holy_shock_damage(
             let base_damage = ability_def.damage_base_min
                 + game_rng.random_f32() * (ability_def.damage_base_max - ability_def.damage_base_min);
             let spell_power_bonus = pending.caster_spell_power * ability_def.damage_coefficient;
-            let raw_damage = base_damage + spell_power_bonus;
+            let mut raw_damage = base_damage + spell_power_bonus;
+
+            // Roll crit before absorbs/reductions
+            let is_crit = super::super::combat_core::roll_crit(pending.caster_crit_chance, &mut game_rng);
+            if is_crit {
+                raw_damage *= CRIT_DAMAGE_MULTIPLIER;
+            }
 
             // Apply damage with absorb shield consideration
             let (actual_damage, absorbed) = super::super::combat_core::apply_damage_with_absorb(
@@ -159,6 +181,7 @@ pub fn process_holy_shock_damage(
                     color: egui::Color32::from_rgb(255, 255, 0), // Yellow for ability damage
                     lifetime: 1.5,
                     vertical_offset: offset_y,
+                    is_crit,
                 },
                 PlayMatchEntity,
             ));
@@ -177,6 +200,7 @@ pub fn process_holy_shock_damage(
                         color: egui::Color32::from_rgb(100, 180, 255), // Light blue
                         lifetime: 1.5,
                         vertical_offset: absorb_offset_y,
+                        is_crit: false,
                     },
                     PlayMatchEntity,
                 ));
@@ -185,10 +209,12 @@ pub fn process_holy_shock_damage(
             // Log damage with caster attribution
             let caster_id = combatant_id(pending.caster_team, pending.caster_class);
             let is_killing_blow = !target.is_alive();
+            let verb = if is_crit { "CRITS" } else { "hits" };
             let message = if absorbed > 0.0 {
                 format!(
-                    "{}'s Holy Shock hits Team {} {} for {:.0} damage ({:.0} absorbed)",
+                    "{}'s Holy Shock {} Team {} {} for {:.0} damage ({:.0} absorbed)",
                     caster_id,
+                    verb,
                     target_team,
                     target_class.name(),
                     actual_damage,
@@ -196,8 +222,9 @@ pub fn process_holy_shock_damage(
                 )
             } else {
                 format!(
-                    "{}'s Holy Shock hits Team {} {} for {:.0} damage",
+                    "{}'s Holy Shock {} Team {} {} for {:.0} damage",
                     caster_id,
+                    verb,
                     target_team,
                     target_class.name(),
                     actual_damage
@@ -209,6 +236,7 @@ pub fn process_holy_shock_damage(
                 "Holy Shock".to_string(),
                 actual_damage,
                 is_killing_blow,
+                is_crit,
                 message,
             );
 

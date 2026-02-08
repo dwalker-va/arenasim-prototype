@@ -134,8 +134,14 @@ pub fn render_floating_combat_text(
                             color_with_alpha,
                         );
                     } else {
-                        // Regular text - render normally at 24pt
-                        let font_id = egui::FontId::proportional(24.0);
+                        // Regular text - 32pt for crits, 24pt for normal
+                        let font_size = if fct.is_crit { 32.0 } else { 24.0 };
+                        let display_text = if fct.is_crit {
+                            format!("{}!", fct.text)
+                        } else {
+                            fct.text.clone()
+                        };
+                        let font_id = egui::FontId::proportional(font_size);
 
                         // Draw thick black outline (8 directions for smooth outline)
                         for (dx, dy) in [
@@ -145,7 +151,7 @@ pub fn render_floating_combat_text(
                             ui.painter().text(
                                 egui::pos2(screen_pos.x + dx, screen_pos.y + dy),
                                 egui::Align2::CENTER_CENTER,
-                                &fct.text,
+                                &display_text,
                                 font_id.clone(),
                                 outline_color,
                             );
@@ -155,7 +161,7 @@ pub fn render_floating_combat_text(
                         ui.painter().text(
                             egui::pos2(screen_pos.x, screen_pos.y),
                             egui::Align2::CENTER_CENTER,
-                            &fct.text,
+                            &display_text,
                             font_id,
                             color_with_alpha,
                         );

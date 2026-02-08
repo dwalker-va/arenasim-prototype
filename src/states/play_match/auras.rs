@@ -136,6 +136,7 @@ pub fn apply_pending_auras(
                     color: egui::Color32::YELLOW,
                     lifetime: 1.5,
                     vertical_offset: offset_y,
+                    is_crit: false,
                 },
                 PlayMatchEntity,
             ));
@@ -568,6 +569,7 @@ pub fn process_dot_ticks(
                 color: egui::Color32::from_rgb(255, 255, 0), // Yellow for ability damage
                 lifetime: 1.5,
                 vertical_offset: offset_y,
+                is_crit: false, // DoT ticks never crit
             },
             PlayMatchEntity,
         ));
@@ -586,6 +588,7 @@ pub fn process_dot_ticks(
                     color: egui::Color32::from_rgb(100, 180, 255), // Light blue
                     lifetime: 1.5,
                     vertical_offset: absorb_offset_y,
+                    is_crit: false,
                 },
                 PlayMatchEntity,
             ));
@@ -621,6 +624,7 @@ pub fn process_dot_ticks(
             ability_name.clone(),
             actual_damage,
             is_killing_blow,
+            false, // is_crit - DoT ticks never crit
             message,
         );
 
