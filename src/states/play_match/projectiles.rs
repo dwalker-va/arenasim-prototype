@@ -157,6 +157,14 @@ pub fn process_projectile_hits(
                 ability_damage *= CRIT_DAMAGE_MULTIPLIER;
             }
 
+            // Apply Divine Shield outgoing damage penalty (50%) at impact time
+            let Ok((_, _, caster_auras)) = combatants.get(projectile.caster) else {
+                commands.entity(projectile_entity).despawn_recursive();
+                continue;
+            };
+            let ds_penalty = super::combat_core::get_divine_shield_damage_penalty(caster_auras.as_deref());
+            ability_damage = (ability_damage * ds_penalty).max(0.0);
+
             // Queue this hit for processing
             hits_to_process.push((
                 projectile_entity,

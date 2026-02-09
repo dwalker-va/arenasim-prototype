@@ -465,6 +465,18 @@ pub fn decide_abilities(
         let ability_name = abilities.get_unchecked(&ability).name.clone();
         let mut actual_damage = 0.0;
 
+        // Apply Divine Shield outgoing damage penalty (50%) if attacker has DamageImmunity
+        let ds_penalty = if let Some(attacker_auras) = active_auras_map.get(&attacker_entity) {
+            if attacker_auras.iter().any(|a| a.effect_type == AuraType::DamageImmunity) {
+                super::constants::DIVINE_SHIELD_DAMAGE_PENALTY
+            } else {
+                1.0
+            }
+        } else {
+            1.0
+        };
+        let damage = (damage * ds_penalty).max(0.0);
+
         if let Ok((_, mut target, target_transform, mut target_auras)) = combatants.get_mut(target_entity) {
             if target.is_alive() {
                 // Apply damage with absorb shield consideration

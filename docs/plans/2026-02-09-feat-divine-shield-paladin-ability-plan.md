@@ -177,14 +177,14 @@ Divine Shield is evaluated at **priority 0.5** (after Devotion Aura pre-buff, be
 
 #### Phase 2: Immunity Mechanics — Damage + Aura Blocking
 
-- [ ] Add immunity check at top of `apply_damage_with_absorb()` in `combat_core.rs` — return `(0.0, 0.0)` immediately (before `DamageTakenReduction` and `Absorb` checks)
-- [ ] Each call site: check `has_damage_immunity()` on target before spawning damage FCT; show "Immune" text instead of "0"
-- [ ] Add `get_divine_shield_damage_penalty()` check in `combat_auto_attack()` — multiply raw damage
-- [ ] Add `get_divine_shield_damage_penalty()` check in `process_casting()` for cast-completion damage
-- [ ] Add `get_divine_shield_damage_penalty()` check in instant attack processing in `combat_ai.rs`
-- [ ] Add `get_divine_shield_damage_penalty()` check in projectile damage at impact time (query caster's auras)
-- [ ] Block ALL hostile aura applications during `DamageImmunity` in `apply_pending_auras()` — show "Immune" FCT (follow `ChargingState` immunity pattern at auras.rs:116-170)
-- [ ] Handle Drain Life edge case: if damage is 0 due to immunity, healing is also 0
+- [x] Add immunity check at top of `apply_damage_with_absorb()` in `combat_core.rs` — return `(0.0, 0.0)` immediately (before `DamageTakenReduction` and `Absorb` checks)
+- [x] Each call site: check `has_damage_immunity()` on target before spawning damage FCT; show "Immune" text instead of "0"
+- [x] Add `get_divine_shield_damage_penalty()` check in `combat_auto_attack()` — multiply raw damage
+- [x] Add `get_divine_shield_damage_penalty()` check in `process_casting()` for cast-completion damage
+- [x] Add `get_divine_shield_damage_penalty()` check in instant attack processing in `combat_ai.rs`
+- [x] Add `get_divine_shield_damage_penalty()` check in projectile damage at impact time (query caster's auras)
+- [x] Block ALL hostile aura applications during `DamageImmunity` in `apply_pending_auras()` — show "Immune" FCT (follow `ChargingState` immunity pattern at auras.rs:116-170)
+- [x] Handle Drain Life edge case: if damage is 0 due to immunity, healing is also 0
 
 #### Phase 3: Activation — `effects/divine_shield.rs`
 
