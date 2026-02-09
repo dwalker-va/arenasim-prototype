@@ -141,6 +141,22 @@ pub fn get_cast_time_increase(auras: Option<&ActiveAuras>) -> f32 {
     })
 }
 
+/// Check if a combatant has damage immunity (Divine Shield active)
+pub fn has_damage_immunity(auras: Option<&ActiveAuras>) -> bool {
+    auras.map_or(false, |a| a.auras.iter().any(|aura| aura.effect_type == AuraType::DamageImmunity))
+}
+
+/// Returns the outgoing damage multiplier for the caster.
+/// If caster has DamageImmunity (Divine Shield), returns DIVINE_SHIELD_DAMAGE_PENALTY (0.5).
+/// Otherwise returns 1.0 (no penalty).
+pub fn get_divine_shield_damage_penalty(auras: Option<&ActiveAuras>) -> f32 {
+    if has_damage_immunity(auras) {
+        super::constants::DIVINE_SHIELD_DAMAGE_PENALTY
+    } else {
+        1.0
+    }
+}
+
 /// Calculate the modified cast time accounting for CastTimeIncrease auras.
 /// This should be called when starting a cast to get the actual cast duration.
 pub fn calculate_cast_time(base_cast_time: f32, auras: Option<&ActiveAuras>) -> f32 {

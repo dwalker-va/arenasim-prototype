@@ -104,6 +104,16 @@ pub const CRIT_DAMAGE_MULTIPLIER: f32 = 2.0;
 pub const CRIT_HEALING_MULTIPLIER: f32 = 1.5;
 
 // ============================================================================
+// Divine Shield
+// ============================================================================
+
+/// Outgoing damage penalty while Divine Shield is active (50% reduction)
+pub const DIVINE_SHIELD_DAMAGE_PENALTY: f32 = 0.5;
+
+/// HP threshold for AI to activate Divine Shield (30% HP)
+pub const DIVINE_SHIELD_HP_THRESHOLD: f32 = 0.3;
+
+// ============================================================================
 // Timing
 // ============================================================================
 

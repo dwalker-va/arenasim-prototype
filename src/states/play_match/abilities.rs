@@ -82,6 +82,7 @@ pub enum AbilityType {
     HammerOfJustice,  // Paladin 6s stun
     PaladinCleanse,   // Paladin dispel magic
     DevotionAura,     // Paladin team buff - reduces damage taken by 10%
+    DivineShield,     // Paladin bubble - damage immunity, purges debuffs, 50% damage penalty
 }
 
 impl AbilityType {

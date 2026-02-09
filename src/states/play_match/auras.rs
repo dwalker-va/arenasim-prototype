@@ -176,6 +176,7 @@ pub fn apply_pending_auras(
             pending.aura.effect_type,
             AuraType::MaxHealthIncrease | AuraType::MaxManaIncrease | AuraType::AttackPowerIncrease
             | AuraType::Absorb | AuraType::WeakenedSoul | AuraType::DamageTakenReduction
+            | AuraType::DamageImmunity
         );
         if is_buff_aura {
             // For Absorb shields, use ability_name as the key to allow different absorbs to coexist

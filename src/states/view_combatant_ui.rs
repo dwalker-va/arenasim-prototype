@@ -205,6 +205,7 @@ fn get_ability_name(ability: AbilityType) -> &'static str {
         AbilityType::HammerOfJustice => "Hammer of Justice",
         AbilityType::PaladinCleanse => "Cleanse",
         AbilityType::DevotionAura => "Devotion Aura",
+        AbilityType::DivineShield => "Divine Shield",
     }
 }
 
@@ -940,6 +941,9 @@ fn build_aura_description(aura: &super::play_match::ability_config::AuraEffect) 
         AuraType::DamageTakenReduction => {
             let reduction_pct = (aura.magnitude * 100.0) as i32;
             format!("Reduces damage taken by {}% for {:.0} sec.", reduction_pct, aura.duration)
+        }
+        AuraType::DamageImmunity => {
+            format!("Immune to all damage for {:.0} sec. Reduces damage dealt by 50%.", aura.duration)
         }
     }
 }

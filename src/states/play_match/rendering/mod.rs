@@ -134,6 +134,7 @@ pub fn get_aura_icon_key(aura: &Aura) -> String {
         AuraType::DamageReduction => "aura_dot".to_string(), // Curse debuff, reuse DoT icon
         AuraType::CastTimeIncrease => "aura_dot".to_string(), // Curse debuff, reuse DoT icon
         AuraType::DamageTakenReduction => "aura_max_health".to_string(), // Devotion Aura buff, reuse buff icon
+        AuraType::DamageImmunity => "aura_absorb".to_string(), // Divine Shield, reuse absorb icon as fallback
     }
 }
 
@@ -146,7 +147,8 @@ pub fn is_buff_aura(aura_type: &AuraType) -> bool {
         AuraType::MaxManaIncrease |
         AuraType::AttackPowerIncrease |
         AuraType::ShadowSight |
-        AuraType::DamageTakenReduction
+        AuraType::DamageTakenReduction |
+        AuraType::DamageImmunity
     )
 }
 

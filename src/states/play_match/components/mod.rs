@@ -363,6 +363,9 @@ pub enum AuraType {
     /// Reduces incoming damage taken by a percentage (magnitude = 0.10 means 10% reduction)
     /// Used by Devotion Aura to reduce all damage taken by the target.
     DamageTakenReduction,
+    /// Complete damage immunity - all incoming damage is negated, all hostile auras are blocked.
+    /// Used by Divine Shield. Magnitude unused (always 1.0 by convention).
+    DamageImmunity,
 }
 
 // ============================================================================
@@ -1043,6 +1046,16 @@ pub struct HolyShockDamagePending {
     pub caster_team: u8,
     pub caster_class: match_config::CharacterClass,
     pub target: Entity,
+}
+
+/// Pending Divine Shield activation to be processed.
+/// Uses the deferred pending pattern because Paladin AI has immutable aura access.
+/// The process_divine_shield() system has mutable ActiveAuras and can purge debuffs + apply immunity.
+#[derive(Component)]
+pub struct DivineShieldPending {
+    pub caster: Entity,
+    pub caster_team: u8,
+    pub caster_class: match_config::CharacterClass,
 }
 
 // =============================================================================
