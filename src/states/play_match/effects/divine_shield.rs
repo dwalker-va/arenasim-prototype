@@ -45,7 +45,7 @@ pub fn process_divine_shield(
                 magnitude: 1.0,
                 tick_interval: 0.0,
                 time_until_next_tick: 0.0,
-                break_on_damage_threshold: 0.0,
+                break_on_damage_threshold: -1.0, // Never break on damage (negative = immune to breaks)
                 accumulated_damage: 0.0,
                 fear_direction: (0.0, 0.0),
                 fear_direction_timer: 0.0,

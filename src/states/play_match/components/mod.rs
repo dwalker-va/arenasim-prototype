@@ -949,6 +949,9 @@ pub struct ShieldBubble {
     pub combatant: Entity,
     /// The spell school of the shield (affects color: Frost = blue, Holy = gold)
     pub spell_school: super::abilities::SpellSchool,
+    /// Whether this is a damage immunity bubble (Divine Shield) vs absorb shield
+    /// Immunity bubbles are larger, brighter gold, and have a pulse animation.
+    pub is_immunity: bool,
 }
 
 /// Component that stores the original mesh handle for a combatant.

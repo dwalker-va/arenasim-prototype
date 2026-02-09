@@ -116,6 +116,10 @@ impl Plugin for StatesPlugin {
                     play_match::process_dot_ticks,  // Process DoT ticks BEFORE updating auras (so final tick fires on expiration)
                     play_match::update_auras,
                     play_match::apply_pending_auras,
+                    play_match::process_dispels,
+                    play_match::process_holy_shock_heals,
+                    play_match::process_holy_shock_damage,
+                    play_match::process_divine_shield,
                 )
                     .chain()
                     .in_set(PlayMatchSystems::ResourcesAndAuras)
