@@ -157,6 +157,7 @@ fn get_class_abilities(class: CharacterClass) -> Vec<AbilityType> {
         ],
         CharacterClass::Paladin => vec![
             AbilityType::DevotionAura,
+            AbilityType::DivineShield,
             AbilityType::FlashOfLight,
             AbilityType::HolyLight,
             AbilityType::HolyShock,
