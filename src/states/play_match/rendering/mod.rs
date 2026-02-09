@@ -67,6 +67,7 @@ pub fn get_ability_icon_path(ability: &str) -> Option<&'static str> {
         "Hammer of Justice" => Some("icons/abilities/spell_holy_sealofmight.jpg"),
         "Cleanse" => Some("icons/abilities/spell_holy_renew.jpg"),
         "Devotion Aura" => Some("icons/abilities/spell_holy_devotionaura.jpg"),
+        "Divine Shield" => Some("icons/abilities/spell_holy_divineintervention.jpg"),
         _ => None,
     }
 }
@@ -81,7 +82,7 @@ pub const SPELL_ICON_ABILITIES: &[&str] = &[
     "Curse of Agony", "Curse of Weakness", "Curse of Tongues",
     // Paladin abilities
     "Flash of Light", "Holy Light", "Holy Shock", "Holy Shock (Heal)", "Holy Shock (Damage)",
-    "Hammer of Justice", "Cleanse", "Devotion Aura",
+    "Hammer of Justice", "Cleanse", "Devotion Aura", "Divine Shield",
 ];
 
 // ==============================================================================
@@ -134,6 +135,7 @@ pub fn get_aura_icon_key(aura: &Aura) -> String {
         AuraType::DamageReduction => "aura_dot".to_string(), // Curse debuff, reuse DoT icon
         AuraType::CastTimeIncrease => "aura_dot".to_string(), // Curse debuff, reuse DoT icon
         AuraType::DamageTakenReduction => "aura_max_health".to_string(), // Devotion Aura buff, reuse buff icon
+        AuraType::DamageImmunity => "aura_absorb".to_string(), // Divine Shield, reuse absorb icon as fallback
     }
 }
 
@@ -146,7 +148,8 @@ pub fn is_buff_aura(aura_type: &AuraType) -> bool {
         AuraType::MaxManaIncrease |
         AuraType::AttackPowerIncrease |
         AuraType::ShadowSight |
-        AuraType::DamageTakenReduction
+        AuraType::DamageTakenReduction |
+        AuraType::DamageImmunity
     )
 }
 

@@ -562,5 +562,24 @@
             )),
             spell_school: Holy,
         ),
+
+        // Divine Shield: Paladin bubble - complete damage immunity + debuff purge
+        // WoW Classic Spell ID 642: Instant, 75 mana, 5min CD, 10s duration
+        // Our values: 0 mana (usable OOM+stunned), 300s CD, 12s duration
+        // 50% outgoing damage penalty is handled by get_divine_shield_damage_penalty()
+        // Debuff purge is handled by process_divine_shield() system
+        DivineShield: (
+            name: "Divine Shield",
+            cast_time: 0.0,
+            range: 0.0,  // Self-cast
+            mana_cost: 0.0,
+            cooldown: 300.0,  // 5 minutes
+            applies_aura: Some((
+                aura_type: DamageImmunity,
+                duration: 12.0,
+                magnitude: 1.0,
+            )),
+            spell_school: None,  // Cannot be locked out by interrupts
+        ),
     }
 )

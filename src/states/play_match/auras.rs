@@ -169,6 +169,43 @@ pub fn apply_pending_auras(
             continue;
         }
 
+        // Check for DamageImmunity (Divine Shield): blocks ALL hostile aura applications
+        let is_hostile_aura = matches!(
+            pending.aura.effect_type,
+            AuraType::Fear | AuraType::Stun | AuraType::Root | AuraType::Polymorph
+            | AuraType::MovementSpeedSlow | AuraType::DamageOverTime | AuraType::SpellSchoolLockout
+            | AuraType::HealingReduction | AuraType::DamageReduction | AuraType::CastTimeIncrease
+        );
+        let has_immunity = if let Some(ref auras) = active_auras {
+            auras.auras.iter().any(|a| a.effect_type == AuraType::DamageImmunity)
+        } else {
+            false
+        };
+
+        if is_hostile_aura && has_immunity {
+            let text_position = target_transform.translation + Vec3::new(0.0, 2.5, 0.0);
+            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(pending.target) {
+                get_next_fct_offset(&mut fct_state)
+            } else {
+                (0.0, 0.0)
+            };
+
+            commands.spawn((
+                FloatingCombatText {
+                    world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
+                    text: "Immune".to_string(),
+                    color: egui::Color32::YELLOW,
+                    lifetime: 1.5,
+                    vertical_offset: offset_y,
+                    is_crit: false,
+                },
+                PlayMatchEntity,
+            ));
+
+            commands.entity(pending_entity).despawn();
+            continue;
+        }
+
         // Check if target already has this buff type (prevent stacking for buff auras)
         // Also includes Absorb shields and WeakenedSoul to prevent same-frame double-application
         // Note: Different Absorb abilities (Ice Barrier vs PW:S) CAN coexist - only same ability is blocked
@@ -176,6 +213,7 @@ pub fn apply_pending_auras(
             pending.aura.effect_type,
             AuraType::MaxHealthIncrease | AuraType::MaxManaIncrease | AuraType::AttackPowerIncrease
             | AuraType::Absorb | AuraType::WeakenedSoul | AuraType::DamageTakenReduction
+            | AuraType::DamageImmunity
         );
         if is_buff_aura {
             // For Absorb shields, use ability_name as the key to allow different absorbs to coexist

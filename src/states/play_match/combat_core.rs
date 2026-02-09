@@ -56,6 +56,13 @@ pub fn apply_damage_with_absorb(
         target.current_health
     );
 
+    // Check for damage immunity (Divine Shield) — blocks all incoming damage
+    if let Some(ref auras) = active_auras {
+        if auras.auras.iter().any(|a| a.effect_type == AuraType::DamageImmunity) {
+            return (0.0, 0.0);
+        }
+    }
+
     let mut remaining_damage = damage;
     let mut total_absorbed = 0.0;
 
@@ -139,6 +146,22 @@ pub fn get_cast_time_increase(auras: Option<&ActiveAuras>) -> f32 {
             .map(|aura| aura.magnitude)
             .sum()
     })
+}
+
+/// Check if a combatant has damage immunity (Divine Shield active)
+pub fn has_damage_immunity(auras: Option<&ActiveAuras>) -> bool {
+    auras.map_or(false, |a| a.auras.iter().any(|aura| aura.effect_type == AuraType::DamageImmunity))
+}
+
+/// Returns the outgoing damage multiplier for the caster.
+/// If caster has DamageImmunity (Divine Shield), returns DIVINE_SHIELD_DAMAGE_PENALTY (0.5).
+/// Otherwise returns 1.0 (no penalty).
+pub fn get_divine_shield_damage_penalty(auras: Option<&ActiveAuras>) -> f32 {
+    if has_damage_immunity(auras) {
+        super::constants::DIVINE_SHIELD_DAMAGE_PENALTY
+    } else {
+        1.0
+    }
 }
 
 /// Calculate the modified cast time accounting for CastTimeIncrease auras.
@@ -679,7 +702,9 @@ pub fn combat_auto_attack(
                         let crit_damage = if is_crit { base_damage * CRIT_DAMAGE_MULTIPLIER } else { base_damage };
                         // Apply physical damage reduction from curses (Curse of Weakness: -20%)
                         let damage_reduction = get_physical_damage_reduction(auras.as_deref());
-                        let total_damage = (crit_damage * (1.0 - damage_reduction)).max(0.0);
+                        // Apply Divine Shield outgoing damage penalty (50%)
+                        let ds_penalty = get_divine_shield_damage_penalty(auras.as_deref());
+                        let total_damage = (crit_damage * (1.0 - damage_reduction) * ds_penalty).max(0.0);
                         let has_bonus = combatant.next_attack_bonus_damage > 0.0;
 
                         attacks.push((attacker_entity, target_entity, total_damage, has_bonus, is_crit));
@@ -1194,6 +1219,10 @@ pub fn process_casting(
                 let damage_reduction = get_physical_damage_reduction(caster_auras.as_deref());
                 ability_damage = (ability_damage * (1.0 - damage_reduction)).max(0.0);
             }
+
+            // Apply Divine Shield outgoing damage penalty (50%)
+            let ds_penalty = get_divine_shield_damage_penalty(caster_auras.as_deref());
+            ability_damage = (ability_damage * ds_penalty).max(0.0);
 
             let mut ability_healing = caster.calculate_ability_healing_config(def, &mut game_rng);
 
@@ -1727,6 +1756,14 @@ pub fn process_channeling(
         .iter()
         .map(|(entity, _, combatant, _, _)| (entity, (combatant.is_alive(), combatant.team, combatant.class)))
         .collect();
+    // Snapshot target immunity status for Drain Life healing suppression
+    let immunity_info: std::collections::HashSet<Entity> = combatants
+        .iter()
+        .filter(|(_, _, _, _, auras)| {
+            auras.as_ref().map_or(false, |a| a.auras.iter().any(|aura| aura.effect_type == AuraType::DamageImmunity))
+        })
+        .map(|(entity, _, _, _, _)| entity)
+        .collect();
 
     for (caster_entity, _caster_transform, caster, channeling_state, _caster_auras) in combatants.iter_mut() {
         let Some(mut channeling) = channeling_state else {
@@ -1772,9 +1809,10 @@ pub fn process_channeling(
             // Track damage to apply later (includes target entity and caster info for death logging)
             damage_to_apply.push((caster_entity, channeling.target, damage, caster.team, caster.class));
 
-            // Track healing for caster
+            // Track healing for caster (Drain Life heals 0 if target has DamageImmunity)
             let healing = ability_def.channel_healing_per_tick;
-            if healing > 0.0 {
+            let target_immune = immunity_info.contains(&channeling.target);
+            if healing > 0.0 && !target_immune {
                 caster_healing_updates.push((caster_entity, healing));
             }
 

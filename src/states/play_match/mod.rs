@@ -61,6 +61,7 @@ pub use combat_core::*;
 pub use shadow_sight::*;
 pub use utils::*;
 pub use constants::*;
+pub use effects::*;
 
 use bevy::prelude::*;
 use super::match_config::{self, MatchConfig};

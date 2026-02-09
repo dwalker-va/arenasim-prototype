@@ -339,6 +339,23 @@ pub fn decide_abilities(
         } else {
             false
         };
+
+        // Paladin-specific: Divine Shield can be used while incapacitated
+        if is_incapacitated && combatant.class == match_config::CharacterClass::Paladin {
+            if class_ai::paladin::try_divine_shield_while_cc(
+                &mut commands,
+                &mut combat_log,
+                &abilities,
+                entity,
+                &mut combatant,
+                auras.as_deref(),
+                &combatant_info,
+            ) {
+                continue; // DivineShieldPending spawned — CC will be purged next frame
+            }
+            continue; // Still incapacitated, can't do anything else
+        }
+
         if is_incapacitated {
             continue;
         }
@@ -464,6 +481,18 @@ pub fn decide_abilities(
     for (attacker_entity, target_entity, damage, attacker_team, attacker_class, ability, is_crit) in instant_attacks {
         let ability_name = abilities.get_unchecked(&ability).name.clone();
         let mut actual_damage = 0.0;
+
+        // Apply Divine Shield outgoing damage penalty (50%) if attacker has DamageImmunity
+        let ds_penalty = if let Some(attacker_auras) = active_auras_map.get(&attacker_entity) {
+            if attacker_auras.iter().any(|a| a.effect_type == AuraType::DamageImmunity) {
+                super::constants::DIVINE_SHIELD_DAMAGE_PENALTY
+            } else {
+                1.0
+            }
+        } else {
+            1.0
+        };
+        let damage = (damage * ds_penalty).max(0.0);
 
         if let Ok((_, mut target, target_transform, mut target_auras)) = combatants.get_mut(target_entity) {
             if target.is_alive() {

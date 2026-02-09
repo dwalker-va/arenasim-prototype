@@ -277,6 +277,7 @@ impl AbilityDefinitions {
             AbilityType::HammerOfJustice,
             AbilityType::PaladinCleanse,
             AbilityType::DevotionAura,
+            AbilityType::DivineShield,
         ];
 
         let missing: Vec<AbilityType> = expected_abilities
