@@ -131,8 +131,8 @@ pub fn process_projectile_hits(
 
         // Check if projectile has reached target
         if distance <= HIT_DISTANCE {
-            // Get caster position (immutable borrow)
-            let Ok((caster_transform, _, _)) = combatants.get(projectile.caster) else {
+            // Get caster data (position, combatant stats, auras) in a single query
+            let Ok((caster_transform, caster_combatant, caster_auras)) = combatants.get(projectile.caster) else {
                 // Caster no longer exists, despawn projectile
                 commands.entity(projectile_entity).despawn_recursive();
                 continue;
@@ -141,12 +141,6 @@ pub fn process_projectile_hits(
             let caster_pos = caster_transform.translation;
             let target_world_pos = target_transform.translation;
 
-            // Get caster's combatant to calculate damage/healing with stats
-            let Ok((_, caster_combatant, _)) = combatants.get(projectile.caster) else {
-                commands.entity(projectile_entity).despawn_recursive();
-                continue;
-            };
-            
             let def = abilities.get_unchecked(&projectile.ability);
             let mut ability_damage = caster_combatant.calculate_ability_damage_config(def, &mut game_rng);
             let ability_healing = caster_combatant.calculate_ability_healing_config(def, &mut game_rng);
@@ -158,10 +152,6 @@ pub fn process_projectile_hits(
             }
 
             // Apply Divine Shield outgoing damage penalty (50%) at impact time
-            let Ok((_, _, caster_auras)) = combatants.get(projectile.caster) else {
-                commands.entity(projectile_entity).despawn_recursive();
-                continue;
-            };
             let ds_penalty = super::combat_core::get_divine_shield_damage_penalty(caster_auras.as_deref());
             ability_damage = (ability_damage * ds_penalty).max(0.0);
 

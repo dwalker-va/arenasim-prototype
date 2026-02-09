@@ -28,22 +28,15 @@ pub fn process_divine_shield(
                 continue;
             }
 
-            // Count and purge all debuffs
-            let debuffs_removed = active_auras.auras.iter()
-                .filter(|a| matches!(a.effect_type,
-                    AuraType::MovementSpeedSlow | AuraType::Root | AuraType::Stun |
-                    AuraType::DamageOverTime | AuraType::SpellSchoolLockout |
-                    AuraType::HealingReduction | AuraType::Fear | AuraType::Polymorph |
-                    AuraType::DamageReduction | AuraType::CastTimeIncrease
-                ))
-                .count();
-
+            // Purge all debuffs and count how many were removed
+            let before = active_auras.auras.len();
             active_auras.auras.retain(|a| !matches!(a.effect_type,
                 AuraType::MovementSpeedSlow | AuraType::Root | AuraType::Stun |
                 AuraType::DamageOverTime | AuraType::SpellSchoolLockout |
                 AuraType::HealingReduction | AuraType::Fear | AuraType::Polymorph |
                 AuraType::DamageReduction | AuraType::CastTimeIncrease
             ));
+            let debuffs_removed = before - active_auras.auras.len();
 
             // Apply DamageImmunity aura (12s duration)
             active_auras.auras.push(Aura {
