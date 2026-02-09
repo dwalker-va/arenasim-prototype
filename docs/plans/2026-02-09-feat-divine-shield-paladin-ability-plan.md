@@ -214,17 +214,17 @@ Divine Shield is evaluated at **priority 0.5** (after Devotion Aura pre-buff, be
 
 #### Phase 6: Testing
 
-- [ ] Run headless simulations: Paladin vs Warrior (test immunity to melee)
-- [ ] Run headless simulations: Paladin vs Mage (test immunity to spells + Polymorph)
-- [ ] Run headless simulations: Paladin vs Rogue (test CC break from Kidney Shot)
-- [ ] Run headless simulations: Paladin vs Warlock (test DoT purge + Fear break)
-- [ ] Run headless simulations: Priest+Paladin vs Warrior+Rogue (test AI uses bubble to survive burst)
-- [ ] Verify combat log shows "Immune" for blocked damage
-- [ ] Verify combat log shows debuff removal count
-- [ ] Verify 50% damage reduction applies to auto-attacks and Holy Shock damage
-- [ ] Verify Divine Shield expires after 12 seconds
-- [ ] Verify healing still works during Divine Shield
-- [ ] `cargo test` — all existing tests pass
+- [x] Run headless simulations: Paladin vs Warrior (test immunity to melee)
+- [x] Run headless simulations: Paladin vs Mage (test immunity to spells + Polymorph)
+- [x] Run headless simulations: Paladin vs Rogue (test CC break from Kidney Shot)
+- [x] Run headless simulations: Paladin vs Warlock (test DoT purge + Fear break)
+- [x] Run headless simulations: Priest+Paladin vs Warrior+Rogue (test AI uses bubble to survive burst)
+- [x] Verify combat log shows "Immune" for blocked damage (0 damage auto-attacks during DS)
+- [x] Verify combat log shows debuff removal count
+- [x] Verify 50% damage reduction applies to auto-attacks and Holy Shock damage
+- [x] Verify Divine Shield expires after 12 seconds (activates ~22.96s, expires ~34.96s)
+- [x] Verify healing still works during Divine Shield (38, 37, 21 heals during DS)
+- [x] `cargo test` — all existing tests pass
 
 ## Key Design Decisions
 
