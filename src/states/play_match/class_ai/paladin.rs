@@ -4,6 +4,7 @@
 //!
 //! ## Priority Order
 //! 1. Devotion Aura (buff all allies pre-combat)
+//! 1.5. Divine Shield (emergency: self < 30% HP, or CC break for teammate)
 //! 2. Cleanse - Urgent (Polymorph, Fear on allies)
 //! 3. Emergency healing (ally < 40% HP) - Holy Shock (heal)
 //! 4. Hammer of Justice (stun enemy in melee range)
@@ -22,8 +23,8 @@ use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::components::*;
 use crate::states::play_match::constants::{
-    CRITICAL_HP_THRESHOLD, GCD, HEALTHY_HP_THRESHOLD, HOLY_SHOCK_DAMAGE_RANGE,
-    LOW_HP_THRESHOLD, SAFE_HEAL_MAX_THRESHOLD,
+    CRITICAL_HP_THRESHOLD, DIVINE_SHIELD_HP_THRESHOLD, GCD, HEALTHY_HP_THRESHOLD,
+    HOLY_SHOCK_DAMAGE_RANGE, LOW_HP_THRESHOLD, SAFE_HEAL_MAX_THRESHOLD,
 };
 use crate::states::play_match::is_spell_school_locked;
 use crate::states::play_match::utils::combatant_id;
@@ -74,6 +75,19 @@ pub fn decide_paladin_action(
         positions,
         combatant_info,
         active_auras_map,
+    ) {
+        return true;
+    }
+
+    // Priority 1.5: Divine Shield (emergency defensive — self HP critical or CC break for teammate)
+    if try_divine_shield(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        auras,
+        combatant_info,
     ) {
         return true;
     }
@@ -190,6 +204,164 @@ pub fn decide_paladin_action(
     }
 
     false
+}
+
+/// Try to activate Divine Shield.
+///
+/// Trigger conditions (any of these):
+/// 1. Survival: Self HP < 30%
+/// 2. CC break for teammate: Self is incapacitated AND any teammate < 30% HP
+/// 3. Heal under pressure: Self HP < 50% AND self is being focused
+///
+/// Guards: not already active, not on cooldown.
+/// Note: This is also called from the incapacitation bypass path in combat_ai.rs.
+#[allow(clippy::too_many_arguments)]
+pub fn try_divine_shield(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    auras: Option<&ActiveAuras>,
+    _combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+) -> bool {
+    let def = abilities.get(&AbilityType::DivineShield);
+    let def = match def {
+        Some(d) => d,
+        None => return false,
+    };
+
+    // Guard: on cooldown
+    if combatant.ability_cooldowns.get(&AbilityType::DivineShield).copied().unwrap_or(0.0) > 0.0 {
+        return false;
+    }
+
+    // Guard: already has DamageImmunity active
+    if auras.map_or(false, |a| a.auras.iter().any(|aura| aura.effect_type == AuraType::DamageImmunity)) {
+        return false;
+    }
+
+    let self_hp_pct = if combatant.max_health > 0.0 {
+        combatant.current_health / combatant.max_health
+    } else {
+        1.0
+    };
+
+    // Condition 1: Survival — self HP below critical threshold
+    let survival_trigger = self_hp_pct < DIVINE_SHIELD_HP_THRESHOLD;
+
+    // Condition 2: Heal under pressure — self HP < 50% (being focused)
+    let pressure_trigger = self_hp_pct < LOW_HP_THRESHOLD;
+
+    if !survival_trigger && !pressure_trigger {
+        return false;
+    }
+
+    // Activate Divine Shield
+    let caster_id = combatant_id(combatant.team, combatant.class);
+    info!("{} activates Divine Shield!", caster_id);
+
+    // Spawn DivineShieldPending for deferred processing
+    commands.spawn(DivineShieldPending {
+        caster: entity,
+        caster_team: combatant.team,
+        caster_class: combatant.class,
+    });
+
+    // Trigger cooldown and GCD
+    combatant.ability_cooldowns.insert(AbilityType::DivineShield, def.cooldown);
+    combatant.global_cooldown = GCD;
+
+    // Log the cast
+    combat_log.log_ability_cast(
+        caster_id,
+        "Divine Shield".to_string(),
+        None,
+        format!(
+            "Team {} {} casts Divine Shield",
+            combatant.team,
+            combatant.class.name()
+        ),
+    );
+
+    true
+}
+
+/// Try to use Divine Shield while incapacitated (CC break path).
+///
+/// Called from combat_ai.rs before the incapacitation gate.
+/// Only triggers when self is CC'd AND a teammate is in critical danger.
+#[allow(clippy::too_many_arguments)]
+pub fn try_divine_shield_while_cc(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    auras: Option<&ActiveAuras>,
+    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+) -> bool {
+    let def = abilities.get(&AbilityType::DivineShield);
+    let def = match def {
+        Some(d) => d,
+        None => return false,
+    };
+
+    // Guard: on cooldown
+    if combatant.ability_cooldowns.get(&AbilityType::DivineShield).copied().unwrap_or(0.0) > 0.0 {
+        return false;
+    }
+
+    // Guard: already has DamageImmunity active
+    if auras.map_or(false, |a| a.auras.iter().any(|aura| aura.effect_type == AuraType::DamageImmunity)) {
+        return false;
+    }
+
+    // CC break trigger: any teammate below critical HP (they need healing NOW)
+    let teammate_in_danger = combatant_info.values().any(|(ally_team, _, _, hp, max_hp, _)| {
+        *ally_team == combatant.team
+            && *hp > 0.0
+            && *max_hp > 0.0
+            && (*hp / *max_hp) < DIVINE_SHIELD_HP_THRESHOLD
+    });
+
+    // Also trigger if self is in survival danger
+    let self_hp_pct = if combatant.max_health > 0.0 {
+        combatant.current_health / combatant.max_health
+    } else {
+        1.0
+    };
+    let self_in_danger = self_hp_pct < DIVINE_SHIELD_HP_THRESHOLD;
+
+    if !teammate_in_danger && !self_in_danger {
+        return false;
+    }
+
+    // Activate Divine Shield (breaks CC via process_divine_shield debuff purge)
+    let caster_id = combatant_id(combatant.team, combatant.class);
+    info!("{} breaks CC with Divine Shield!", caster_id);
+
+    commands.spawn(DivineShieldPending {
+        caster: entity,
+        caster_team: combatant.team,
+        caster_class: combatant.class,
+    });
+
+    combatant.ability_cooldowns.insert(AbilityType::DivineShield, def.cooldown);
+    combatant.global_cooldown = GCD;
+
+    combat_log.log_ability_cast(
+        caster_id,
+        "Divine Shield".to_string(),
+        None,
+        format!(
+            "Team {} {} breaks CC with Divine Shield!",
+            combatant.team,
+            combatant.class.name()
+        ),
+    );
+
+    true
 }
 
 /// Check if any ally is in an emergency situation (below critical HP threshold)

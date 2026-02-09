@@ -339,6 +339,23 @@ pub fn decide_abilities(
         } else {
             false
         };
+
+        // Paladin-specific: Divine Shield can be used while incapacitated
+        if is_incapacitated && combatant.class == match_config::CharacterClass::Paladin {
+            if class_ai::paladin::try_divine_shield_while_cc(
+                &mut commands,
+                &mut combat_log,
+                &abilities,
+                entity,
+                &mut combatant,
+                auras.as_deref(),
+                &combatant_info,
+            ) {
+                continue; // DivineShieldPending spawned — CC will be purged next frame
+            }
+            continue; // Still incapacitated, can't do anything else
+        }
+
         if is_incapacitated {
             continue;
         }

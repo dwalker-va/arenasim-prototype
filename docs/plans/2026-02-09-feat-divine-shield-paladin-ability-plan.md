@@ -199,11 +199,11 @@ Divine Shield is evaluated at **priority 0.5** (after Devotion Aura pre-buff, be
 
 #### Phase 4: AI Integration
 
-- [ ] Add `try_divine_shield()` function to `class_ai/paladin.rs` (follows existing `try_*` pattern)
-- [ ] Add incapacitation gate bypass in `decide_abilities()` in `combat_ai.rs` (Paladin-specific pre-check)
-- [ ] Implement trigger conditions: self HP < 30%, CC break for teammate, heal-under-pressure
-- [ ] Add guards: gates opened, not already active, not on cooldown
-- [ ] Insert Divine Shield at priority 0.5 in `decide_paladin_action()` priority list
+- [x] Add `try_divine_shield()` function to `class_ai/paladin.rs` (follows existing `try_*` pattern)
+- [x] Add incapacitation gate bypass in `decide_abilities()` in `combat_ai.rs` (Paladin-specific pre-check)
+- [x] Implement trigger conditions: self HP < 30%, CC break for teammate, heal-under-pressure
+- [x] Add guards: gates opened, not already active, not on cooldown
+- [x] Insert Divine Shield at priority 0.5 in `decide_paladin_action()` priority list
 
 #### Phase 5: Visual Effect + UI
 
