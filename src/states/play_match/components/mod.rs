@@ -400,6 +400,9 @@ pub struct Combatant {
     pub attack_power: f32,
     /// Spell Power - scales magical damage and healing abilities
     pub spell_power: f32,
+    /// Critical strike chance (0.0 = 0%, 1.0 = 100%). Determines probability of
+    /// dealing bonus damage/healing on direct abilities and auto-attacks.
+    pub crit_chance: f32,
     /// Base movement speed in units per second (modified by auras/debuffs)
     pub base_movement_speed: f32,
     /// Current target entity for damage (None if no valid target)
@@ -433,21 +436,21 @@ pub struct Combatant {
 impl Combatant {
     /// Create a new combatant with class-specific stats.
     pub fn new(team: u8, slot: u8, class: match_config::CharacterClass) -> Self {
-        // Class-specific stats (resource_type, health, max_resource, resource_regen, starting_resource, damage, attack speed, attack_power, spell_power, movement speed)
-        let (resource_type, max_health, max_resource, resource_regen, starting_resource, attack_damage, attack_speed, attack_power, spell_power, movement_speed) = match class {
-            // Warriors: High HP, physical damage, scales with Attack Power
-            match_config::CharacterClass::Warrior => (ResourceType::Rage, 200.0, 100.0, 0.0, 0.0, 12.0, 1.0, 30.0, 0.0, 5.0),
-            // Mages: Low HP, magical damage (wand), scales with Spell Power
-            match_config::CharacterClass::Mage => (ResourceType::Mana, 150.0, 200.0, 10.0, 200.0, 10.0, 0.7, 0.0, 50.0, 4.5),
-            // Rogues: Medium HP, physical burst damage, scales with Attack Power
-            match_config::CharacterClass::Rogue => (ResourceType::Energy, 175.0, 100.0, 20.0, 100.0, 10.0, 1.3, 35.0, 0.0, 6.0),
-            // Priests: Medium HP, healing & wand damage, scales with Spell Power
-            match_config::CharacterClass::Priest => (ResourceType::Mana, 150.0, 150.0, 8.0, 150.0, 6.0, 0.8, 0.0, 40.0, 5.0),
-            // Warlocks: Medium HP, shadow damage (wand), scales with Spell Power, DoT focused
-            match_config::CharacterClass::Warlock => (ResourceType::Mana, 160.0, 180.0, 9.0, 180.0, 8.0, 0.7, 0.0, 45.0, 4.5),
-            // Paladins: High HP (plate), healing & melee hybrid, scales with Spell Power primarily
+        // Class-specific stats (resource_type, health, max_resource, resource_regen, starting_resource, damage, attack speed, attack_power, spell_power, crit_chance, movement speed)
+        let (resource_type, max_health, max_resource, resource_regen, starting_resource, attack_damage, attack_speed, attack_power, spell_power, crit_chance, movement_speed) = match class {
+            // Warriors: High HP, physical damage, scales with Attack Power (8% crit)
+            match_config::CharacterClass::Warrior => (ResourceType::Rage, 200.0, 100.0, 0.0, 0.0, 12.0, 1.0, 30.0, 0.0, 0.08, 5.0),
+            // Mages: Low HP, magical damage (wand), scales with Spell Power (6% crit)
+            match_config::CharacterClass::Mage => (ResourceType::Mana, 150.0, 200.0, 10.0, 200.0, 10.0, 0.7, 0.0, 50.0, 0.06, 4.5),
+            // Rogues: Medium HP, physical burst damage, scales with Attack Power (10% crit - highest)
+            match_config::CharacterClass::Rogue => (ResourceType::Energy, 175.0, 100.0, 20.0, 100.0, 10.0, 1.3, 35.0, 0.0, 0.10, 6.0),
+            // Priests: Medium HP, healing & wand damage, scales with Spell Power (4% crit)
+            match_config::CharacterClass::Priest => (ResourceType::Mana, 150.0, 150.0, 8.0, 150.0, 6.0, 0.8, 0.0, 40.0, 0.04, 5.0),
+            // Warlocks: Medium HP, shadow damage (wand), scales with Spell Power, DoT focused (5% crit)
+            match_config::CharacterClass::Warlock => (ResourceType::Mana, 160.0, 180.0, 9.0, 180.0, 8.0, 0.7, 0.0, 45.0, 0.05, 4.5),
+            // Paladins: High HP (plate), healing & melee hybrid, scales with Spell Power primarily (6% crit)
             // Tankier than Priest but lower spell power to offset utility
-            match_config::CharacterClass::Paladin => (ResourceType::Mana, 175.0, 160.0, 8.0, 160.0, 8.0, 0.9, 20.0, 35.0, 5.0),
+            match_config::CharacterClass::Paladin => (ResourceType::Mana, 175.0, 160.0, 8.0, 160.0, 8.0, 0.9, 20.0, 35.0, 0.06, 5.0),
         };
         
         // Rogues start stealthed
@@ -468,6 +471,7 @@ impl Combatant {
             attack_timer: 0.0,
             attack_power,
             spell_power,
+            crit_chance,
             base_movement_speed: movement_speed,
             target: None,
             cc_target: None,
@@ -888,6 +892,8 @@ pub struct FloatingCombatText {
     pub lifetime: f32,
     /// Vertical offset accumulated over time (makes text float upward)
     pub vertical_offset: f32,
+    /// Whether this was a critical strike (renders larger with "!" suffix)
+    pub is_crit: bool,
 }
 
 /// Visual effect for spell impacts (Mind Blast, etc.)
@@ -1023,6 +1029,7 @@ pub struct DispelBurst {
 #[derive(Component)]
 pub struct HolyShockHealPending {
     pub caster_spell_power: f32,
+    pub caster_crit_chance: f32,
     pub caster_team: u8,
     pub caster_class: match_config::CharacterClass,
     pub target: Entity,
@@ -1032,6 +1039,7 @@ pub struct HolyShockHealPending {
 #[derive(Component)]
 pub struct HolyShockDamagePending {
     pub caster_spell_power: f32,
+    pub caster_crit_chance: f32,
     pub caster_team: u8,
     pub caster_class: match_config::CharacterClass,
     pub target: Entity,

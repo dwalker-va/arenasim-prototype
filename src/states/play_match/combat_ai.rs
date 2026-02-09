@@ -315,7 +315,7 @@ pub fn decide_abilities(
     // Queue for Ambush attacks (attacker, target, damage, team, class)
     // Queue for instant ability attacks (Ambush, Sinister Strike, Mortal Strike)
     // Format: (attacker_entity, target_entity, damage, attacker_team, attacker_class, ability_type)
-    let mut instant_attacks: Vec<(Entity, Entity, f32, u8, match_config::CharacterClass, AbilityType)> = Vec::new();
+    let mut instant_attacks: Vec<(Entity, Entity, f32, u8, match_config::CharacterClass, AbilityType, bool)> = Vec::new();
 
     // Track targets that have been shielded THIS FRAME to prevent same-frame double-shielding
     // This handles the case where multiple Priests try to shield the same target before AuraPending is processed
@@ -326,7 +326,7 @@ pub fn decide_abilities(
     let mut fortified_this_frame: std::collections::HashSet<Entity> = std::collections::HashSet::new();
     
     // Queue for Frost Nova damage (caster, target, damage, caster_team, caster_class, target_pos)
-    let mut frost_nova_damage: Vec<(Entity, Entity, f32, u8, match_config::CharacterClass, Vec3)> = Vec::new();
+    let mut frost_nova_damage: Vec<(Entity, Entity, f32, u8, match_config::CharacterClass, Vec3, bool)> = Vec::new();
     
     for (entity, mut combatant, transform, auras) in combatants.iter_mut() {
         if !combatant.is_alive() {
@@ -461,7 +461,7 @@ pub fn decide_abilities(
     }
 
     // Process queued instant attacks (Ambush, Sinister Strike)
-    for (attacker_entity, target_entity, damage, attacker_team, attacker_class, ability) in instant_attacks {
+    for (attacker_entity, target_entity, damage, attacker_team, attacker_class, ability, is_crit) in instant_attacks {
         let ability_name = abilities.get_unchecked(&ability).name.clone();
         let mut actual_damage = 0.0;
 
@@ -513,6 +513,7 @@ pub fn decide_abilities(
                         color: egui::Color32::from_rgb(255, 255, 0), // Yellow for abilities
                         lifetime: 1.5,
                         vertical_offset: offset_y,
+                        is_crit,
                     },
                     PlayMatchEntity,
                 ));
@@ -531,6 +532,7 @@ pub fn decide_abilities(
                             color: egui::Color32::from_rgb(100, 180, 255), // Light blue
                             lifetime: 1.5,
                             vertical_offset: absorb_offset_y,
+                            is_crit: false,
                         },
                         PlayMatchEntity,
                     ));
@@ -538,12 +540,14 @@ pub fn decide_abilities(
 
                 // Log the instant attack with structured data
                 let is_killing_blow = !target.is_alive();
+                let verb = if is_crit { "CRITS" } else { "hits" };
                 let message = if absorbed > 0.0 {
                     format!(
-                        "Team {} {}'s {} hits Team {} {} for {:.0} damage ({:.0} absorbed)",
+                        "Team {} {}'s {} {} Team {} {} for {:.0} damage ({:.0} absorbed)",
                         attacker_team,
                         attacker_class.name(),
                         ability_name,
+                        verb,
                         target_team,
                         target_class.name(),
                         actual_damage,
@@ -551,10 +555,11 @@ pub fn decide_abilities(
                     )
                 } else {
                     format!(
-                        "Team {} {}'s {} hits Team {} {} for {:.0} damage",
+                        "Team {} {}'s {} {} Team {} {} for {:.0} damage",
                         attacker_team,
                         attacker_class.name(),
                         ability_name,
+                        verb,
                         target_team,
                         target_class.name(),
                         actual_damage
@@ -566,6 +571,7 @@ pub fn decide_abilities(
                     ability_name.to_string(),
                     actual_damage,
                     is_killing_blow,
+                    is_crit,
                     message,
                 );
 
@@ -592,7 +598,7 @@ pub fn decide_abilities(
     }
     
     // Process queued Frost Nova damage
-    for (caster_entity, target_entity, damage, caster_team, caster_class, _target_pos) in frost_nova_damage {
+    for (caster_entity, target_entity, damage, caster_team, caster_class, _target_pos, is_crit) in frost_nova_damage {
         let mut actual_damage = 0.0;
 
         if let Ok((_, mut target, target_transform, mut target_auras)) = combatants.get_mut(target_entity) {
@@ -633,6 +639,7 @@ pub fn decide_abilities(
                         color: egui::Color32::from_rgb(255, 255, 0), // Yellow for abilities
                         lifetime: 1.5,
                         vertical_offset: offset_y,
+                        is_crit,
                     },
                     PlayMatchEntity,
                 ));
@@ -651,6 +658,7 @@ pub fn decide_abilities(
                             color: egui::Color32::from_rgb(100, 180, 255), // Light blue
                             lifetime: 1.5,
                             vertical_offset: absorb_offset_y,
+                            is_crit: false,
                         },
                         PlayMatchEntity,
                     ));
@@ -658,11 +666,13 @@ pub fn decide_abilities(
 
                 // Log the Frost Nova damage with structured data
                 let is_killing_blow = !target.is_alive();
+                let verb = if is_crit { "CRITS" } else { "hits" };
                 let message = if absorbed > 0.0 {
                     format!(
-                        "Team {} {}'s Frost Nova hits Team {} {} for {:.0} damage ({:.0} absorbed)",
+                        "Team {} {}'s Frost Nova {} Team {} {} for {:.0} damage ({:.0} absorbed)",
                         caster_team,
                         caster_class.name(),
+                        verb,
                         target_team,
                         target_class.name(),
                         actual_damage,
@@ -670,9 +680,10 @@ pub fn decide_abilities(
                     )
                 } else {
                     format!(
-                        "Team {} {}'s Frost Nova hits Team {} {} for {:.0} damage",
+                        "Team {} {}'s Frost Nova {} Team {} {} for {:.0} damage",
                         caster_team,
                         caster_class.name(),
+                        verb,
                         target_team,
                         target_class.name(),
                         actual_damage
@@ -684,6 +695,7 @@ pub fn decide_abilities(
                     "Frost Nova".to_string(),
                     actual_damage,
                     is_killing_blow,
+                    is_crit,
                     message,
                 );
 

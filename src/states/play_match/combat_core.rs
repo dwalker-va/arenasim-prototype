@@ -16,12 +16,18 @@ use super::match_config;
 use super::components::*;
 use super::abilities::{AbilityType, SpellSchool};
 use super::ability_config::AbilityDefinitions;
+use super::constants::{CRIT_DAMAGE_MULTIPLIER, CRIT_HEALING_MULTIPLIER};
 use super::utils::{spawn_speech_bubble, get_next_fct_offset};
 use super::components::ChannelingState;
 use super::{MELEE_RANGE, ARENA_HALF_X, ARENA_HALF_Z};
 
 // Re-export combatant_id for backward compatibility (used by other modules)
 pub use super::utils::combatant_id;
+
+/// Roll a critical strike check. Returns true if the roll is a crit.
+pub fn roll_crit(crit_chance: f32, rng: &mut GameRng) -> bool {
+    rng.random_f32() < crit_chance
+}
 
 /// Apply damage to a combatant, accounting for absorb shields.
 /// Returns (actual_damage_to_health, damage_absorbed).
@@ -585,6 +591,7 @@ pub fn combat_auto_attack(
     time: Res<Time>,
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
+    mut game_rng: ResMut<GameRng>,
     mut combatants: Query<(Entity, &Transform, &mut Combatant, Option<&CastingState>, Option<&ChannelingState>, Option<&mut ActiveAuras>)>,
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
@@ -667,12 +674,15 @@ pub fn combat_auto_attack(
                     if combatant.in_attack_range(my_pos, target_pos) {
                         // Calculate total damage (base + bonus from Heroic Strike, etc.)
                         let base_damage = combatant.attack_damage + combatant.next_attack_bonus_damage;
+                        // Roll crit before damage reduction
+                        let is_crit = roll_crit(combatant.crit_chance, &mut game_rng);
+                        let crit_damage = if is_crit { base_damage * CRIT_DAMAGE_MULTIPLIER } else { base_damage };
                         // Apply physical damage reduction from curses (Curse of Weakness: -20%)
                         let damage_reduction = get_physical_damage_reduction(auras.as_deref());
-                        let total_damage = (base_damage * (1.0 - damage_reduction)).max(0.0);
+                        let total_damage = (crit_damage * (1.0 - damage_reduction)).max(0.0);
                         let has_bonus = combatant.next_attack_bonus_damage > 0.0;
-                        
-                        attacks.push((attacker_entity, target_entity, total_damage, has_bonus));
+
+                        attacks.push((attacker_entity, target_entity, total_damage, has_bonus, is_crit));
                         combatant.attack_timer = 0.0;
                         
                         // Consume the bonus damage after queueing the attack
@@ -708,7 +718,12 @@ pub fn combat_auto_attack(
     // This prevents dead combatants from dealing damage after being killed
     let mut died_this_frame: std::collections::HashSet<Entity> = std::collections::HashSet::new();
 
-    for (attacker_entity, target_entity, damage, has_bonus) in attacks {
+    // Track crit status per target for FCT display (auto-attacks batch into damage_per_target)
+    let mut crit_per_target: HashMap<Entity, bool> = HashMap::new();
+
+    for (attacker_entity, target_entity, damage, has_bonus, is_crit) in attacks {
+        // If any attack to this target crits, mark the FCT as crit
+        crit_per_target.entry(target_entity).and_modify(|c| *c = *c || is_crit).or_insert(is_crit);
         // Bug fix: Don't allow attacks from combatants who died earlier this frame
         // This can happen when two combatants attack each other in the same frame
         if died_this_frame.contains(&attacker_entity) {
@@ -752,12 +767,14 @@ pub fn combat_auto_attack(
                             _ => "Auto Attack",
                         }
                     };
+                    let verb = if is_crit { "CRITS" } else { "hits" };
                     let message = if absorbed > 0.0 {
                         format!(
-                            "Team {} {}'s {} hits Team {} {} for {:.0} damage ({:.0} absorbed)",
+                            "Team {} {}'s {} {} Team {} {} for {:.0} damage ({:.0} absorbed)",
                             attacker_team,
                             attacker_class.name(),
                             attack_name,
+                            verb,
                             target_team,
                             target_class.name(),
                             actual_damage,
@@ -765,10 +782,11 @@ pub fn combat_auto_attack(
                         )
                     } else {
                         format!(
-                            "Team {} {}'s {} hits Team {} {} for {:.0} damage",
+                            "Team {} {}'s {} {} Team {} {} for {:.0} damage",
                             attacker_team,
                             attacker_class.name(),
                             attack_name,
+                            verb,
                             target_team,
                             target_class.name(),
                             actual_damage
@@ -782,6 +800,7 @@ pub fn combat_auto_attack(
                         attack_name.to_string(),
                         actual_damage + absorbed, // Total damage dealt (including absorbed)
                         is_killing_blow,
+                        is_crit,
                         message,
                     );
 
@@ -809,6 +828,7 @@ pub fn combat_auto_attack(
     
     // Spawn floating combat text for each target that took damage (batched)
     for (target_entity, total_damage) in damage_per_target {
+        let target_was_crit = crit_per_target.get(&target_entity).copied().unwrap_or(false);
         if let Some(&target_pos) = positions.get(&target_entity) {
             // Spawn floating text slightly above the combatant
             let text_position = target_pos + Vec3::new(0.0, super::FCT_HEIGHT, 0.0);
@@ -828,6 +848,7 @@ pub fn combat_auto_attack(
                     color: egui::Color32::WHITE, // White for auto-attacks
                     lifetime: 1.5, // Display for 1.5 seconds
                     vertical_offset: offset_y,
+                    is_crit: target_was_crit,
                 },
                 PlayMatchEntity,
             ));
@@ -847,6 +868,7 @@ pub fn combat_auto_attack(
                             color: egui::Color32::from_rgb(100, 180, 255), // Light blue
                             lifetime: 1.5,
                             vertical_offset: absorb_offset_y,
+                            is_crit: false,
                         },
                         PlayMatchEntity,
                     ));
@@ -1158,14 +1180,32 @@ pub fn process_casting(
             // Pre-calculate damage/healing (using caster's stats)
             let mut ability_damage = caster.calculate_ability_damage_config(def, &mut game_rng);
 
+            // Roll crit for damage (before physical damage reduction)
+            let is_crit_damage = if def.is_damage() {
+                let crit = roll_crit(caster.crit_chance, &mut game_rng);
+                if crit { ability_damage *= CRIT_DAMAGE_MULTIPLIER; }
+                crit
+            } else {
+                false
+            };
+
             // Apply physical damage reduction for Physical abilities (Curse of Weakness: -20%)
             if def.spell_school == SpellSchool::Physical {
                 let damage_reduction = get_physical_damage_reduction(caster_auras.as_deref());
                 ability_damage = (ability_damage * (1.0 - damage_reduction)).max(0.0);
             }
 
-            let ability_healing = caster.calculate_ability_healing_config(def, &mut game_rng);
-            
+            let mut ability_healing = caster.calculate_ability_healing_config(def, &mut game_rng);
+
+            // Roll crit for healing (before healing reduction)
+            let is_crit_heal = if def.is_heal() {
+                let crit = roll_crit(caster.crit_chance, &mut game_rng);
+                if crit { ability_healing *= CRIT_HEALING_MULTIPLIER; }
+                crit
+            } else {
+                false
+            };
+
             // Store cast info for processing
             completed_casts.push((
                 caster_entity,
@@ -1176,6 +1216,8 @@ pub fn process_casting(
                 ability_healing,
                 ability,
                 target_entity,
+                is_crit_damage,
+                is_crit_heal,
             ));
             
             // Remove casting state
@@ -1194,7 +1236,7 @@ pub fn process_casting(
     let mut break_stealth: Vec<Entity> = Vec::new();
     
     // Process completed casts
-    for (caster_entity, caster_team, caster_class, caster_pos, ability_damage, ability_healing, ability, target_entity) in completed_casts {
+    for (caster_entity, caster_team, caster_class, caster_pos, ability_damage, ability_healing, ability, target_entity, is_crit_damage, is_crit_heal) in completed_casts {
         let def = abilities.get_unchecked(&ability);
         
         // Get target
@@ -1286,6 +1328,7 @@ pub fn process_casting(
                     color: egui::Color32::from_rgb(255, 255, 0), // Yellow for abilities
                     lifetime: 1.5,
                     vertical_offset: offset_y,
+                    is_crit: is_crit_damage,
                 },
                 PlayMatchEntity,
             ));
@@ -1304,6 +1347,7 @@ pub fn process_casting(
                         color: egui::Color32::from_rgb(100, 180, 255), // Light blue
                         lifetime: 1.5,
                         vertical_offset: absorb_offset_y,
+                        is_crit: false,
                     },
                     PlayMatchEntity,
                 ));
@@ -1354,12 +1398,14 @@ pub fn process_casting(
 
             // Log the damage with structured data
             let is_killing_blow = !target.is_alive();
+            let verb = if is_crit_damage { "CRITS" } else { "hits" };
             let message = if absorbed > 0.0 {
                 format!(
-                    "Team {} {}'s {} hits Team {} {} for {:.0} damage ({:.0} absorbed)",
+                    "Team {} {}'s {} {} Team {} {} for {:.0} damage ({:.0} absorbed)",
                     caster_team,
                     caster_class.name(),
                     def.name,
+                    verb,
                     target.team,
                     target.class.name(),
                     actual_damage,
@@ -1367,10 +1413,11 @@ pub fn process_casting(
                 )
             } else {
                 format!(
-                    "Team {} {}'s {} hits Team {} {} for {:.0} damage",
+                    "Team {} {}'s {} {} Team {} {} for {:.0} damage",
                     caster_team,
                     caster_class.name(),
                     def.name,
+                    verb,
                     target.team,
                     target.class.name(),
                     actual_damage
@@ -1382,12 +1429,13 @@ pub fn process_casting(
                 def.name.to_string(),
                 total_damage_dealt, // Total damage including absorbed
                 is_killing_blow,
+                is_crit_damage,
                 message,
             );
         }
         // Handle healing spells
         else if def.is_heal() {
-            // Use pre-calculated healing (already includes stat scaling)
+            // Use pre-calculated healing (already includes stat scaling + crit)
             let mut healing = ability_healing;
             
             // Check for healing reduction auras
@@ -1427,16 +1475,19 @@ pub fn process_casting(
                     color: egui::Color32::from_rgb(100, 255, 100), // Green for healing
                     lifetime: 1.5,
                     vertical_offset: offset_y,
+                    is_crit: is_crit_heal,
                 },
                 PlayMatchEntity,
             ));
-            
+
             // Log the healing with structured data
+            let verb = if is_crit_heal { "CRITICALLY heals" } else { "heals" };
             let message = format!(
-                "Team {} {}'s {} heals Team {} {} for {:.0}",
+                "Team {} {}'s {} {} Team {} {} for {:.0}",
                 caster_team,
                 caster_class.name(),
                 def.name,
+                verb,
                 target.team,
                 target.class.name(),
                 actual_healing
@@ -1446,6 +1497,7 @@ pub fn process_casting(
                 combatant_id(target.team, target.class),
                 def.name.to_string(),
                 actual_healing,
+                is_crit_heal,
                 message,
             );
 
@@ -1743,6 +1795,7 @@ pub fn process_channeling(
                     format!("{} (tick)", ability_def.name),
                     damage,
                     false, // Not a killing blow check here - will be handled when applying damage
+                    false, // is_crit - channel ticks never crit
                     damage_message,
                 );
 
@@ -1759,6 +1812,7 @@ pub fn process_channeling(
                         combatant_id(caster.team, caster.class),
                         format!("{} (tick)", ability_def.name),
                         healing,
+                        false, // is_crit - channel ticks never crit
                         heal_message,
                     );
                 }
@@ -1779,6 +1833,7 @@ pub fn process_channeling(
                         color: egui::Color32::from_rgb(255, 255, 0), // Yellow for ability damage
                         lifetime: 1.5,
                         vertical_offset: offset_y,
+                        is_crit: false,
                     },
                     PlayMatchEntity,
                 ));
@@ -1836,6 +1891,7 @@ pub fn process_channeling(
                             color: egui::Color32::from_rgb(100, 180, 255), // Light blue
                             lifetime: 1.5,
                             vertical_offset: offset_y,
+                            is_crit: false,
                         },
                         PlayMatchEntity,
                     ));
@@ -1902,6 +1958,7 @@ pub fn process_channeling(
                     color: egui::Color32::from_rgb(100, 255, 100), // Green for healing
                     lifetime: 1.5,
                     vertical_offset: offset_y,
+                    is_crit: false,
                 },
                 PlayMatchEntity,
             ));

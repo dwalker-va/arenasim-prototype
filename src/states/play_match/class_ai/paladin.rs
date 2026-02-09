@@ -439,6 +439,7 @@ fn try_holy_shock_heal(
     // Spawn pending heal
     commands.spawn(HolyShockHealPending {
         caster_spell_power: combatant.spell_power,
+        caster_crit_chance: combatant.crit_chance,
         caster_team: combatant.team,
         caster_class: combatant.class,
         target: *target_entity,
@@ -525,6 +526,7 @@ fn try_holy_shock_damage(
     // Spawn pending damage
     commands.spawn(HolyShockDamagePending {
         caster_spell_power: combatant.spell_power,
+        caster_crit_chance: combatant.crit_chance,
         caster_team: combatant.team,
         caster_class: combatant.class,
         target: *target_entity,

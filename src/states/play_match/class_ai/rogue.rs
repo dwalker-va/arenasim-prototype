@@ -17,7 +17,8 @@ use crate::states::match_config::{CharacterClass, RogueOpener};
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
-use crate::states::play_match::constants::{GCD, MELEE_RANGE};
+use crate::states::play_match::combat_core::roll_crit;
+use crate::states::play_match::constants::{CRIT_DAMAGE_MULTIPLIER, GCD, MELEE_RANGE};
 use crate::states::play_match::utils::{combatant_id, spawn_speech_bubble};
 
 use super::{AbilityDecision, ClassAI, CombatContext};
@@ -51,7 +52,7 @@ pub fn decide_rogue_action(
     positions: &HashMap<Entity, Vec3>,
     combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
-    instant_attacks: &mut Vec<(Entity, Entity, f32, u8, CharacterClass, AbilityType)>,
+    instant_attacks: &mut Vec<(Entity, Entity, f32, u8, CharacterClass, AbilityType, bool)>,
 ) -> bool {
     // Get target
     let Some(target_entity) = combatant.target else {
@@ -160,7 +161,7 @@ fn try_ambush(
     target_entity: Entity,
     target_pos: Vec3,
     combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
-    instant_attacks: &mut Vec<(Entity, Entity, f32, u8, CharacterClass, AbilityType)>,
+    instant_attacks: &mut Vec<(Entity, Entity, f32, u8, CharacterClass, AbilityType, bool)>,
 ) -> bool {
     let ability = AbilityType::Ambush;
     let def = abilities.get_unchecked(&ability);
@@ -175,7 +176,9 @@ fn try_ambush(
     combatant.global_cooldown = GCD;
 
     // Calculate and queue damage
-    let damage = combatant.calculate_ability_damage_config(def, game_rng);
+    let mut damage = combatant.calculate_ability_damage_config(def, game_rng);
+    let is_crit = roll_crit(combatant.crit_chance, game_rng);
+    if is_crit { damage *= CRIT_DAMAGE_MULTIPLIER; }
     instant_attacks.push((
         entity,
         target_entity,
@@ -183,6 +186,7 @@ fn try_ambush(
         combatant.team,
         combatant.class,
         ability,
+        is_crit,
     ));
 
     // Log
@@ -418,7 +422,7 @@ fn try_sinister_strike(
     target_entity: Entity,
     target_pos: Vec3,
     combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
-    instant_attacks: &mut Vec<(Entity, Entity, f32, u8, CharacterClass, AbilityType)>,
+    instant_attacks: &mut Vec<(Entity, Entity, f32, u8, CharacterClass, AbilityType, bool)>,
 ) -> bool {
     let ability = AbilityType::SinisterStrike;
     let def = abilities.get_unchecked(&ability);
@@ -432,7 +436,9 @@ fn try_sinister_strike(
     combatant.global_cooldown = GCD;
 
     // Calculate and queue damage
-    let damage = combatant.calculate_ability_damage_config(def, game_rng);
+    let mut damage = combatant.calculate_ability_damage_config(def, game_rng);
+    let is_crit = roll_crit(combatant.crit_chance, game_rng);
+    if is_crit { damage *= CRIT_DAMAGE_MULTIPLIER; }
     instant_attacks.push((
         entity,
         target_entity,
@@ -440,6 +446,7 @@ fn try_sinister_strike(
         combatant.team,
         combatant.class,
         ability,
+        is_crit,
     ));
 
     // Log

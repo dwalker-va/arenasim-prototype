@@ -94,6 +94,16 @@ pub const FCT_HEIGHT: f32 = 4.0;
 pub const SPEECH_BUBBLE_DURATION: f32 = 2.0;
 
 // ============================================================================
+// Critical Strike
+// ============================================================================
+
+/// Critical strike damage multiplier (2x in WoW Classic for melee; we use 2x for all damage)
+pub const CRIT_DAMAGE_MULTIPLIER: f32 = 2.0;
+
+/// Critical strike healing multiplier (1.5x in WoW Classic)
+pub const CRIT_HEALING_MULTIPLIER: f32 = 1.5;
+
+// ============================================================================
 // Timing
 // ============================================================================
 
