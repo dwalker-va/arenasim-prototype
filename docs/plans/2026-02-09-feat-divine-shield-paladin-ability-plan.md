@@ -207,10 +207,10 @@ Divine Shield is evaluated at **priority 0.5** (after Devotion Aura pre-buff, be
 
 #### Phase 5: Visual Effect + UI
 
-- [ ] Extend `update_shield_bubbles()` in `rendering/effects.rs` to detect `DamageImmunity` aura
-- [ ] When `DamageImmunity` detected: spawn bubble with golden color, larger scale (1.3x), pulse animation
-- [ ] Download spell icon: `spell_holy_divineintervention.jpg` to `assets/icons/abilities/`
-- [ ] Add "Divine Shield" to `get_ability_icon_path()` and `SPELL_ICON_ABILITIES` in `rendering/mod.rs`
+- [x] Extend `update_shield_bubbles()` in `rendering/effects.rs` to detect `DamageImmunity` aura
+- [x] When `DamageImmunity` detected: spawn bubble with golden color, larger scale (1.3x), pulse animation
+- [x] Download spell icon: `spell_holy_divineintervention.jpg` to `assets/icons/abilities/`
+- [x] Add "Divine Shield" to `get_ability_icon_path()` and `SPELL_ICON_ABILITIES` in `rendering/mod.rs`
 
 #### Phase 6: Testing
 
