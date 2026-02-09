@@ -11,6 +11,8 @@
 
 pub mod holy_shock;
 pub mod dispels;
+pub mod divine_shield;
 
 pub use holy_shock::{process_holy_shock_damage, process_holy_shock_heals};
 pub use dispels::process_dispels;
+pub use divine_shield::process_divine_shield;

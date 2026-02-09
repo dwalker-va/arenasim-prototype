@@ -38,6 +38,7 @@ pub use super::auras::apply_pending_auras;
 pub use super::effects::process_dispels;
 pub use super::effects::process_holy_shock_heals;
 pub use super::effects::process_holy_shock_damage;
+pub use super::effects::process_divine_shield;
 
 // === Phase 2: Combat and Movement ===
 pub use super::auras::process_aura_breaks;
@@ -128,6 +129,7 @@ where
             process_dispels,
             process_holy_shock_heals,
             process_holy_shock_damage,
+            process_divine_shield,
         )
             .chain()
             .in_set(CombatSystemPhase::ResourcesAndAuras)

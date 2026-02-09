@@ -188,14 +188,14 @@ Divine Shield is evaluated at **priority 0.5** (after Devotion Aura pre-buff, be
 
 #### Phase 3: Activation — `effects/divine_shield.rs`
 
-- [ ] Create `effects/divine_shield.rs` module
-- [ ] Add `process_divine_shield()` system: query `DivineShieldPending`, get mutable `ActiveAuras` on caster
-- [ ] Purge debuffs: `auras.retain(|a| !matches!(a.effect_type, Stun | Fear | Polymorph | Root | ...))` (inline list)
-- [ ] Apply `DamageImmunity` aura (duration 12.0, magnitude 1.0)
-- [ ] Log: "[Paladin] uses Divine Shield" + "[Paladin]'s Divine Shield removes N debuffs"
-- [ ] Spawn golden "Divine Shield" FCT on the Paladin
-- [ ] Despawn the pending entity
-- [ ] Register in `effects/mod.rs` and `systems.rs`
+- [x] Create `effects/divine_shield.rs` module
+- [x] Add `process_divine_shield()` system: query `DivineShieldPending`, get mutable `ActiveAuras` on caster
+- [x] Purge debuffs: `auras.retain(|a| !matches!(a.effect_type, Stun | Fear | Polymorph | Root | ...))` (inline list)
+- [x] Apply `DamageImmunity` aura (duration 12.0, magnitude 1.0)
+- [x] Log: "[Paladin] uses Divine Shield" + "[Paladin]'s Divine Shield removes N debuffs"
+- [x] Spawn golden "Divine Shield" FCT on the Paladin
+- [x] Despawn the pending entity
+- [x] Register in `effects/mod.rs` and `systems.rs`
 
 #### Phase 4: AI Integration
 
