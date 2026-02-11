@@ -43,7 +43,6 @@ pub struct CombatantInfo {
     pub position: Vec3,
     pub is_alive: bool,
     pub stealthed: bool,
-    pub has_target: bool,
     pub target: Option<Entity>,
 }
 
@@ -107,8 +106,6 @@ pub struct CombatContext<'a> {
     pub active_auras: &'a HashMap<Entity, Vec<Aura>>,
     /// The combatant making the decision
     pub self_entity: Entity,
-    /// Whether gates have opened (combat has started)
-    pub gates_opened: bool,
 }
 
 impl<'a> CombatContext<'a> {

@@ -294,7 +294,6 @@ pub fn decide_abilities(
                 position: transform.translation,
                 is_alive: combatant.is_alive(),
                 stealthed: combatant.stealthed,
-                has_target: combatant.target.is_some(),
                 target: combatant.target,
             })
         })
@@ -354,7 +353,6 @@ pub fn decide_abilities(
                 combatants: &combatant_info,
                 active_auras: &active_auras_map,
                 self_entity: entity,
-                gates_opened: true, // If we're checking CC, gates must be open
             };
             if class_ai::paladin::try_divine_shield_while_cc(
                 &mut commands,
@@ -380,7 +378,6 @@ pub fn decide_abilities(
             combatants: &combatant_info,
             active_auras: &active_auras_map,
             self_entity: entity,
-            gates_opened: true, // decide_abilities only runs after gates open
         };
 
         // Mages cast spells on enemies
