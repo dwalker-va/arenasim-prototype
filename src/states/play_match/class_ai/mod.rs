@@ -22,7 +22,7 @@ pub mod warlock;
 pub mod paladin;
 
 use bevy::prelude::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use super::match_config::CharacterClass;
 use super::abilities::AbilityType;
@@ -101,12 +101,10 @@ impl CombatantInfo {
 /// This struct provides a read-only view of the game state that AI modules
 /// can use to make decisions without directly accessing ECS queries.
 pub struct CombatContext<'a> {
-    /// Map of entity to combatant info
+    /// Map of entity to combatant info (per-frame snapshot)
     pub combatants: &'a HashMap<Entity, CombatantInfo>,
     /// Map of entity to their active auras
     pub active_auras: &'a HashMap<Entity, Vec<Aura>>,
-    /// Entities that have been shielded this frame (to prevent double-shielding)
-    pub shielded_this_frame: &'a HashSet<Entity>,
     /// The combatant making the decision
     pub self_entity: Entity,
     /// Whether gates have opened (combat has started)
@@ -197,10 +195,6 @@ impl<'a> CombatContext<'a> {
             .min_by(|a, b| a.health_pct().partial_cmp(&b.health_pct()).unwrap())
     }
 
-    /// Check if the target entity has been shielded this frame
-    pub fn was_shielded_this_frame(&self, entity: Entity) -> bool {
-        self.shielded_this_frame.contains(&entity)
-    }
 }
 
 /// The result of an AI decision.

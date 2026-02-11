@@ -10,7 +10,6 @@
 //! 5. Heroic Strike (rage dump)
 
 use bevy::prelude::*;
-use std::collections::HashMap;
 
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use crate::states::play_match::abilities::AbilityType;
@@ -19,7 +18,7 @@ use crate::states::play_match::components::*;
 use crate::states::play_match::combat_core::roll_crit;
 use crate::states::play_match::constants::{CHARGE_MIN_RANGE, CRIT_DAMAGE_MULTIPLIER, GCD};
 
-use super::{AbilityDecision, ClassAI, CombatContext, CombatantInfo};
+use super::{AbilityDecision, ClassAI, CombatContext};
 
 /// Battle Shout range constant
 const BATTLE_SHOUT_RANGE: f32 = 30.0;
@@ -54,8 +53,7 @@ pub fn decide_warrior_action(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
-    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+    ctx: &CombatContext,
     instant_attacks: &mut Vec<super::QueuedInstantAttack>,
 ) -> bool {
     // Check if global cooldown is active
@@ -71,8 +69,7 @@ pub fn decide_warrior_action(
         entity,
         combatant,
         my_pos,
-        combatant_info,
-        active_auras_map,
+        ctx,
     ) {
         return true;
     }
@@ -82,7 +79,7 @@ pub fn decide_warrior_action(
         return false;
     };
 
-    let Some(target_info) = combatant_info.get(&target_entity) else {
+    let Some(target_info) = ctx.combatants.get(&target_entity) else {
         return false;
     };
     let target_pos = target_info.position;
@@ -98,7 +95,7 @@ pub fn decide_warrior_action(
         auras,
         target_entity,
         target_pos,
-        combatant_info,
+        ctx,
     ) {
         return true;
     }
@@ -113,8 +110,7 @@ pub fn decide_warrior_action(
         my_pos,
         target_entity,
         target_pos,
-        combatant_info,
-        active_auras_map,
+        ctx,
     ) {
         return true;
     }
@@ -130,7 +126,7 @@ pub fn decide_warrior_action(
         my_pos,
         target_entity,
         target_pos,
-        combatant_info,
+        ctx,
         instant_attacks,
     ) {
         return true;
@@ -152,13 +148,12 @@ fn try_battle_shout(
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
-    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+    ctx: &CombatContext,
 ) -> bool {
     // Check if any nearby ally needs the buff
     let mut allies_to_buff: Vec<Entity> = Vec::new();
 
-    for (ally_entity, info) in combatant_info.iter() {
+    for (ally_entity, info) in ctx.combatants.iter() {
         // Must be same team and alive
         if info.team != combatant.team || info.current_health <= 0.0 {
             continue;
@@ -170,7 +165,7 @@ fn try_battle_shout(
         }
 
         // Check if ally already has AttackPowerIncrease buff
-        let has_battle_shout = active_auras_map
+        let has_battle_shout = ctx.active_auras
             .get(ally_entity)
             .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::AttackPowerIncrease))
             .unwrap_or(false);
@@ -253,7 +248,7 @@ fn try_charge(
     auras: Option<&ActiveAuras>,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
+    ctx: &CombatContext,
 ) -> bool {
     let charge = AbilityType::Charge;
     let charge_def = abilities.get_unchecked(&charge);
@@ -289,7 +284,7 @@ fn try_charge(
 
     // Log
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = combatant_info
+    let target_id = ctx.combatants
         .get(&target_entity)
         .map(|info| format!("Team {} {}", info.team, info.class.name()));
     combat_log.log_ability_cast(
@@ -325,11 +320,10 @@ fn try_rend(
     my_pos: Vec3,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
-    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+    ctx: &CombatContext,
 ) -> bool {
     // Check if target already has Rend (any DoT for now)
-    let target_has_rend = active_auras_map
+    let target_has_rend = ctx.active_auras
         .get(&target_entity)
         .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::DamageOverTime))
         .unwrap_or(false);
@@ -351,7 +345,7 @@ fn try_rend(
 
     // Log
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = combatant_info
+    let target_id = ctx.combatants
         .get(&target_entity)
         .map(|info| format!("Team {} {}", info.team, info.class.name()));
     combat_log.log_ability_cast(
@@ -417,7 +411,7 @@ fn try_mortal_strike(
     my_pos: Vec3,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
+    ctx: &CombatContext,
     instant_attacks: &mut Vec<super::QueuedInstantAttack>,
 ) -> bool {
     let mortal_strike = AbilityType::MortalStrike;
@@ -437,7 +431,7 @@ fn try_mortal_strike(
     }
 
     // Get target info
-    let target_info = match combatant_info.get(&target_entity) {
+    let target_info = match ctx.combatants.get(&target_entity) {
         Some(info) => info,
         None => return false,
     };

@@ -15,7 +15,6 @@
 //! abilities over cast-time spells that would be interrupted by movement.
 
 use bevy::prelude::*;
-use std::collections::HashMap;
 
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use crate::states::match_config::WarlockCurse;
@@ -28,7 +27,7 @@ use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::constants::GCD;
 use crate::states::play_match::is_spell_school_locked;
 
-use super::{AbilityDecision, ClassAI, CombatContext, CombatantInfo};
+use super::{AbilityDecision, ClassAI, CombatContext};
 
 /// Check if the Warlock is being kited (slowed and out of preferred range).
 /// Returns true if the Warlock should prioritize instant-cast abilities.
@@ -79,15 +78,14 @@ pub fn decide_warlock_action(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
-    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+    ctx: &CombatContext,
 ) -> bool {
     // Get target
     let Some(target_entity) = combatant.target else {
         return false;
     };
 
-    let Some(target_info) = combatant_info.get(&target_entity) else {
+    let Some(target_info) = ctx.combatants.get(&target_entity) else {
         return false;
     };
     let target_pos = target_info.position;
@@ -112,8 +110,7 @@ pub fn decide_warlock_action(
         auras,
         target_entity,
         target_pos,
-        combatant_info,
-        active_auras_map,
+        ctx,
     ) {
         return true;
     }
@@ -127,8 +124,7 @@ pub fn decide_warlock_action(
         combatant,
         my_pos,
         auras,
-        combatant_info,
-        active_auras_map,
+        ctx,
     ) {
         return true;
     }
@@ -145,8 +141,7 @@ pub fn decide_warlock_action(
             auras,
             target_entity,
             target_pos,
-            combatant_info,
-            active_auras_map,
+            ctx,
         ) {
             return true;
         }
@@ -158,7 +153,7 @@ pub fn decide_warlock_action(
     // Fear is high value even with cast time - landing it can turn the fight
     let fear_target = combatant.cc_target.or(combatant.target);
     if let Some(fear_target_entity) = fear_target {
-        if let Some(fear_target_info) = combatant_info.get(&fear_target_entity) {
+        if let Some(fear_target_info) = ctx.combatants.get(&fear_target_entity) {
             let fear_target_pos = fear_target_info.position;
             if try_fear(
                 commands,
@@ -170,8 +165,7 @@ pub fn decide_warlock_action(
                 auras,
                 fear_target_entity,
                 fear_target_pos,
-                combatant_info,
-                active_auras_map,
+                ctx,
             ) {
                 return true;
             }
@@ -191,8 +185,7 @@ pub fn decide_warlock_action(
             auras,
             target_entity,
             target_pos,
-            combatant_info,
-            active_auras_map,
+            ctx,
         ) {
             return true;
         }
@@ -214,7 +207,7 @@ pub fn decide_warlock_action(
         auras,
         target_entity,
         target_pos,
-        combatant_info,
+        ctx,
     )
 }
 
@@ -231,11 +224,10 @@ fn try_corruption(
     auras: Option<&ActiveAuras>,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
-    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+    ctx: &CombatContext,
 ) -> bool {
     // Check if target already has Corruption (check by ability name to allow stacking with Immolate)
-    let target_has_corruption = active_auras_map
+    let target_has_corruption = ctx.active_auras
         .get(&target_entity)
         .map(|auras| auras.iter().any(|a|
             a.effect_type == AuraType::DamageOverTime && a.ability_name == "Corruption"
@@ -264,7 +256,7 @@ fn try_corruption(
 
     // Log
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = combatant_info
+    let target_id = ctx.combatants
         .get(&target_entity)
         .map(|info| format!("Team {} {}", info.team, info.class.name()));
     combat_log.log_ability_cast(
@@ -330,11 +322,10 @@ fn try_immolate(
     auras: Option<&ActiveAuras>,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
-    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+    ctx: &CombatContext,
 ) -> bool {
     // Check if target already has Immolate (check by ability name to allow stacking with Corruption)
-    let target_has_immolate = active_auras_map
+    let target_has_immolate = ctx.active_auras
         .get(&target_entity)
         .map(|auras| auras.iter().any(|a|
             a.effect_type == AuraType::DamageOverTime && a.ability_name == "Immolate"
@@ -371,7 +362,7 @@ fn try_immolate(
 
     // Log
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = combatant_info
+    let target_id = ctx.combatants
         .get(&target_entity)
         .map(|info| format!("Team {} {}", info.team, info.class.name()));
     combat_log.log_ability_cast(
@@ -407,8 +398,7 @@ fn try_fear(
     auras: Option<&ActiveAuras>,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
-    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+    ctx: &CombatContext,
 ) -> bool {
     let fear = AbilityType::Fear;
     let fear_def = abilities.get_unchecked(&fear);
@@ -419,7 +409,7 @@ fn try_fear(
     }
 
     // Check if target is already CC'd
-    let target_is_ccd = active_auras_map
+    let target_is_ccd = ctx.active_auras
         .get(&target_entity)
         .map(|auras| {
             auras
@@ -455,7 +445,7 @@ fn try_fear(
 
     // Log
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = combatant_info
+    let target_id = ctx.combatants
         .get(&target_entity)
         .map(|info| format!("Team {} {}", info.team, info.class.name()));
     combat_log.log_ability_cast(
@@ -491,7 +481,7 @@ fn try_shadowbolt(
     auras: Option<&ActiveAuras>,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
+    ctx: &CombatContext,
 ) -> bool {
     let shadowbolt = AbilityType::Shadowbolt;
     let shadowbolt_def = abilities.get_unchecked(&shadowbolt);
@@ -519,7 +509,7 @@ fn try_shadowbolt(
 
     // Log
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = combatant_info
+    let target_id = ctx.combatants
         .get(&target_entity)
         .map(|info| format!("Team {} {}", info.team, info.class.name()));
     combat_log.log_ability_cast(
@@ -557,8 +547,7 @@ fn try_drain_life(
     auras: Option<&ActiveAuras>,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
-    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+    ctx: &CombatContext,
 ) -> bool {
     // Only use Drain Life when we need healing (HP < 80%)
     let hp_percent = combatant.current_health / combatant.max_health;
@@ -567,7 +556,7 @@ fn try_drain_life(
     }
 
     // Only use when target has at least one DoT ticking (maintain pressure)
-    let target_has_dot = active_auras_map
+    let target_has_dot = ctx.active_auras
         .get(&target_entity)
         .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::DamageOverTime))
         .unwrap_or(false);
@@ -609,7 +598,7 @@ fn try_drain_life(
 
     // Log
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = combatant_info
+    let target_id = ctx.combatants
         .get(&target_entity)
         .map(|info| format!("Team {} {}", info.team, info.class.name()));
     combat_log.log_ability_cast(
@@ -647,8 +636,7 @@ fn try_spread_curses(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
-    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+    ctx: &CombatContext,
 ) -> bool {
     // Skip if no curse preferences configured
     if combatant.warlock_curse_prefs.is_empty() {
@@ -656,7 +644,7 @@ fn try_spread_curses(
     }
 
     // Build list of enemy entities with their slot indices
-    let mut enemies: Vec<(Entity, Vec3, u8)> = combatant_info
+    let mut enemies: Vec<(Entity, Vec3, u8)> = ctx.combatants
         .iter()
         .filter_map(|(&enemy_entity, info)| {
             // Only target alive enemies on opposite team
@@ -681,7 +669,7 @@ fn try_spread_curses(
             .unwrap_or(WarlockCurse::Agony);
 
         // Check if target already has a curse from us
-        let has_our_curse = active_auras_map
+        let has_our_curse = ctx.active_auras
             .get(&enemy_entity)
             .map(|auras| {
                 auras.iter().any(|a| {
@@ -714,7 +702,7 @@ fn try_spread_curses(
             auras,
             enemy_entity,
             enemy_pos,
-            combatant_info,
+            ctx,
             ability,
             ability_name,
         ) {
@@ -738,7 +726,7 @@ fn try_cast_curse(
     auras: Option<&ActiveAuras>,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
+    ctx: &CombatContext,
     ability: AbilityType,
     ability_name: &str,
 ) -> bool {
@@ -760,7 +748,7 @@ fn try_cast_curse(
 
     // Log
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = combatant_info
+    let target_id = ctx.combatants
         .get(&target_entity)
         .map(|info| format!("Team {} {}", info.team, info.class.name()));
     combat_log.log_ability_cast(

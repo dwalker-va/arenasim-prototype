@@ -10,8 +10,6 @@
 //! 5. Frostbolt (main damage spell with kiting behavior)
 
 use bevy::prelude::*;
-use std::collections::HashMap;
-
 use crate::combat::log::CombatLog;
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
@@ -24,7 +22,7 @@ use crate::states::play_match::combat_core::{calculate_cast_time, roll_crit};
 use crate::states::play_match::is_spell_school_locked;
 use crate::states::play_match::utils::{combatant_id, spawn_speech_bubble};
 
-use super::{ClassAI, CombatContext, AbilityDecision, CombatantInfo};
+use super::{ClassAI, CombatContext, AbilityDecision};
 
 /// Mage AI implementation.
 ///
@@ -53,8 +51,7 @@ pub fn decide_mage_action(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
-    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+    ctx: &CombatContext,
     frost_nova_damage: &mut Vec<super::QueuedAoeDamage>,
 ) -> bool {
     // Check if global cooldown is active
@@ -63,7 +60,7 @@ pub fn decide_mage_action(
     }
 
     // Priority 1: Ice Barrier (self-shield)
-    if try_ice_barrier(commands, combat_log, abilities, entity, combatant, active_auras_map) {
+    if try_ice_barrier(commands, combat_log, abilities, entity, combatant, ctx) {
         return true;
     }
 
@@ -76,8 +73,7 @@ pub fn decide_mage_action(
         combatant,
         my_pos,
         auras,
-        combatant_info,
-        active_auras_map,
+        ctx,
     ) {
         return true;
     }
@@ -92,7 +88,7 @@ pub fn decide_mage_action(
         combatant,
         my_pos,
         auras,
-        combatant_info,
+        ctx,
         frost_nova_damage,
     ) {
         return true;
@@ -107,8 +103,7 @@ pub fn decide_mage_action(
         combatant,
         my_pos,
         auras,
-        combatant_info,
-        active_auras_map,
+        ctx,
     ) {
         return true;
     }
@@ -122,7 +117,7 @@ pub fn decide_mage_action(
         combatant,
         my_pos,
         auras,
-        combatant_info,
+        ctx,
     ) {
         return true;
     }
@@ -138,10 +133,10 @@ fn try_ice_barrier(
     abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
-    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+    ctx: &CombatContext,
 ) -> bool {
     // Check if already shielded
-    let has_absorb_shield = active_auras_map
+    let has_absorb_shield = ctx.active_auras
         .get(&entity)
         .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::Absorb))
         .unwrap_or(false);
@@ -224,13 +219,12 @@ fn try_arcane_intellect(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
-    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+    ctx: &CombatContext,
 ) -> bool {
     // Find an unbuffed mana-using ally
     let mut unbuffed_mana_ally: Option<(Entity, Vec3)> = None;
 
-    for (ally_entity, info) in combatant_info.iter() {
+    for (ally_entity, info) in ctx.combatants.iter() {
         // Must be same team, alive, and use mana
         if info.team != combatant.team || info.current_health <= 0.0 {
             continue;
@@ -246,7 +240,7 @@ fn try_arcane_intellect(
         }
 
         // Check if ally already has MaxManaIncrease buff
-        let has_arcane_intellect = active_auras_map
+        let has_arcane_intellect = ctx.active_auras
             .get(ally_entity)
             .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::MaxManaIncrease))
             .unwrap_or(false);
@@ -283,7 +277,7 @@ fn try_arcane_intellect(
 
     // Log
     let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = combatant_info.get(&buff_target).map(|info| {
+    let target_id = ctx.combatants.get(&buff_target).map(|info| {
         format!("Team {} {}", info.team, info.class.name())
     });
     combat_log.log_ability_cast(
@@ -339,7 +333,7 @@ fn try_frost_nova(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
+    ctx: &CombatContext,
     frost_nova_damage: &mut Vec<super::QueuedAoeDamage>,
 ) -> bool {
     let frost_nova = AbilityType::FrostNova;
@@ -360,7 +354,7 @@ fn try_frost_nova(
     }
 
     // Check if any enemies are within melee range
-    let enemies_in_melee_range = combatant_info.iter().any(|(_, info)| {
+    let enemies_in_melee_range = ctx.combatants.iter().any(|(_, info)| {
         if info.team != combatant.team {
             return my_pos.distance(info.position) <= MELEE_RANGE;
         }
@@ -392,7 +386,7 @@ fn try_frost_nova(
 
     // Collect enemies in range for damage and root
     let mut frost_nova_targets: Vec<(Entity, Vec3, u8, CharacterClass)> = Vec::new();
-    for (enemy_entity, info) in combatant_info.iter() {
+    for (enemy_entity, info) in ctx.combatants.iter() {
         if info.team != combatant.team {
             let distance = my_pos.distance(info.position);
             if distance <= nova_def.range {
@@ -484,8 +478,7 @@ fn try_polymorph(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
-    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+    ctx: &CombatContext,
 ) -> bool {
     // Polymorph targets the cc_target, NOT the kill target
     let Some(cc_target) = combatant.cc_target else {
@@ -497,13 +490,13 @@ fn try_polymorph(
         return false;
     }
 
-    let Some(target_info) = combatant_info.get(&cc_target) else {
+    let Some(target_info) = ctx.combatants.get(&cc_target) else {
         return false;
     };
     let target_pos = target_info.position;
 
     // Check if target is already CC'd (don't waste Polymorph on already CC'd targets)
-    let target_already_ccd = active_auras_map
+    let target_already_ccd = ctx.active_auras
         .get(&cc_target)
         .map(|auras| {
             auras.iter().any(|a| {
@@ -552,7 +545,7 @@ fn try_polymorph(
 
     // Log
     let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = combatant_info
+    let target_id = ctx.combatants
         .get(&cc_target)
         .map(|info| format!("Team {} {}", info.team, info.class.name()));
     combat_log.log_ability_cast(
@@ -587,13 +580,13 @@ fn try_frostbolt(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
+    ctx: &CombatContext,
 ) -> bool {
     let Some(target_entity) = combatant.target else {
         return false;
     };
 
-    let Some(target_info) = combatant_info.get(&target_entity) else {
+    let Some(target_info) = ctx.combatants.get(&target_entity) else {
         return false;
     };
     let target_pos = target_info.position;
@@ -637,7 +630,7 @@ fn try_frostbolt(
 
     // Log
     let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = combatant_info
+    let target_id = ctx.combatants
         .get(&target_entity)
         .map(|info| format!("Team {} {}", info.team, info.class.name()));
     combat_log.log_ability_cast(

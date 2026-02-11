@@ -54,8 +54,7 @@ pub fn decide_paladin_action(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
-    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+    ctx: &CombatContext,
 ) -> bool {
     // Check if global cooldown is active
     if combatant.global_cooldown > 0.0 {
@@ -71,8 +70,7 @@ pub fn decide_paladin_action(
         combatant,
         my_pos,
         auras,
-        combatant_info,
-        active_auras_map,
+        ctx,
     ) {
         return true;
     }
@@ -85,7 +83,7 @@ pub fn decide_paladin_action(
         entity,
         combatant,
         auras,
-        combatant_info,
+        ctx,
     ) {
         return true;
     }
@@ -98,15 +96,14 @@ pub fn decide_paladin_action(
         combatant,
         my_pos,
         auras,
-        combatant_info,
-        active_auras_map,
+        ctx,
         90, // Only Polymorph (100) and Fear (90)
     ) {
         return true;
     }
 
     // Priority 3: Emergency healing - Holy Shock (heal) when ally < 40% HP
-    if has_emergency_target(combatant.team, combatant_info) {
+    if has_emergency_target(combatant.team, ctx.combatants) {
         if try_holy_shock_heal(
             commands,
             combat_log,
@@ -114,7 +111,7 @@ pub fn decide_paladin_action(
             combatant,
             my_pos,
             auras,
-            combatant_info,
+            ctx,
         ) {
             return true;
         }
@@ -128,7 +125,7 @@ pub fn decide_paladin_action(
         combatant,
         my_pos,
         auras,
-        combatant_info,
+        ctx,
     ) {
         return true;
     }
@@ -142,7 +139,7 @@ pub fn decide_paladin_action(
         combatant,
         my_pos,
         auras,
-        combatant_info,
+        ctx,
     ) {
         return true;
     }
@@ -157,13 +154,13 @@ pub fn decide_paladin_action(
         combatant,
         my_pos,
         auras,
-        combatant_info,
+        ctx,
     ) {
         return true;
     }
 
     // Priority 7: Cleanse - Maintenance (roots, DoTs when team stable)
-    if allies_are_healthy(combatant.team, combatant_info) {
+    if allies_are_healthy(combatant.team, ctx.combatants) {
         if try_cleanse(
             commands,
             combat_log,
@@ -171,8 +168,7 @@ pub fn decide_paladin_action(
             combatant,
             my_pos,
             auras,
-            combatant_info,
-            active_auras_map,
+            ctx,
             50, // Include roots and DoTs
         ) {
             return true;
@@ -180,7 +176,7 @@ pub fn decide_paladin_action(
     }
 
     // Priority 8: Holy Shock (damage) - when team healthy
-    if allies_are_healthy(combatant.team, combatant_info) {
+    if allies_are_healthy(combatant.team, ctx.combatants) {
         if try_holy_shock_damage(
             commands,
             combat_log,
@@ -188,7 +184,7 @@ pub fn decide_paladin_action(
             combatant,
             my_pos,
             auras,
-            combatant_info,
+            ctx,
         ) {
             return true;
         }
@@ -214,7 +210,7 @@ pub fn try_divine_shield(
     entity: Entity,
     combatant: &mut Combatant,
     auras: Option<&ActiveAuras>,
-    _combatant_info: &HashMap<Entity, CombatantInfo>,
+    _ctx: &CombatContext,
 ) -> bool {
     let def = abilities.get(&AbilityType::DivineShield);
     let def = match def {
@@ -290,7 +286,7 @@ pub fn try_divine_shield_while_cc(
     entity: Entity,
     combatant: &mut Combatant,
     auras: Option<&ActiveAuras>,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
+    ctx: &CombatContext,
 ) -> bool {
     let def = abilities.get(&AbilityType::DivineShield);
     let def = match def {
@@ -309,7 +305,7 @@ pub fn try_divine_shield_while_cc(
     }
 
     // CC break trigger: any teammate below critical HP (they need healing NOW)
-    let teammate_in_danger = combatant_info.values().any(|info| {
+    let teammate_in_danger = ctx.combatants.values().any(|info| {
         info.team == combatant.team
             && info.current_health > 0.0
             && info.max_health > 0.0
@@ -392,7 +388,7 @@ fn try_flash_of_light(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
+    ctx: &CombatContext,
 ) -> bool {
     let ability = AbilityType::FlashOfLight;
     let def = abilities.get_unchecked(&ability);
@@ -406,7 +402,7 @@ fn try_flash_of_light(
     }
 
     // Find the lowest HP ally (below 90%)
-    let heal_target = combatant_info
+    let heal_target = ctx.combatants
         .iter()
         .filter(|(_, info)| {
             info.team == combatant.team
@@ -466,7 +462,7 @@ fn try_holy_light(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
+    ctx: &CombatContext,
 ) -> bool {
     let ability = AbilityType::HolyLight;
     let def = abilities.get_unchecked(&ability);
@@ -480,7 +476,7 @@ fn try_holy_light(
     }
 
     // Find an ally between 50-85% HP (safe to use slow heal)
-    let heal_target = combatant_info
+    let heal_target = ctx.combatants
         .iter()
         .filter(|(_, info)| {
             if info.team != combatant.team || info.current_health <= 0.0 || info.max_health <= 0.0 {
@@ -540,7 +536,7 @@ fn try_holy_shock_heal(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
+    ctx: &CombatContext,
 ) -> bool {
     let ability = AbilityType::HolyShock;
     let def = abilities.get_unchecked(&ability);
@@ -565,7 +561,7 @@ fn try_holy_shock_heal(
     }
 
     // Find lowest HP ally below 50% and in range
-    let heal_target = combatant_info
+    let heal_target = ctx.combatants
         .iter()
         .filter(|(_, info)| {
             info.team == combatant.team
@@ -627,7 +623,7 @@ fn try_holy_shock_damage(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
+    ctx: &CombatContext,
 ) -> bool {
     let ability = AbilityType::HolyShock;
     let def = abilities.get_unchecked(&ability);
@@ -652,7 +648,7 @@ fn try_holy_shock_damage(
     }
 
     // Find an enemy in range (20 yards for damage), filter out stealthed
-    let damage_target = combatant_info
+    let damage_target = ctx.combatants
         .iter()
         .filter(|(_, info)| {
             info.team != combatant.team && info.current_health > 0.0 && !info.stealthed
@@ -712,7 +708,7 @@ fn try_hammer_of_justice(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
+    ctx: &CombatContext,
 ) -> bool {
     let ability = AbilityType::HammerOfJustice;
     let def = abilities.get_unchecked(&ability);
@@ -737,7 +733,7 @@ fn try_hammer_of_justice(
     }
 
     // Find enemies in range, filter out stealthed
-    let enemies_in_range: Vec<(&Entity, CharacterClass)> = combatant_info
+    let enemies_in_range: Vec<(&Entity, CharacterClass)> = ctx.combatants
         .iter()
         .filter(|(_, info)| {
             info.team != combatant.team && info.current_health > 0.0 && !info.stealthed
@@ -830,8 +826,7 @@ fn try_cleanse(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
-    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+    ctx: &CombatContext,
     min_priority: i32,
 ) -> bool {
     let ability = AbilityType::PaladinCleanse;
@@ -848,7 +843,7 @@ fn try_cleanse(
     // Find ally with highest priority dispellable debuff
     let mut best_candidate: Option<(&Entity, CharacterClass, i32)> = None;
 
-    for (e, info) in combatant_info.iter() {
+    for (e, info) in ctx.combatants.iter() {
         // Must be alive ally
         if info.team != combatant.team || info.current_health <= 0.0 {
             continue;
@@ -860,7 +855,7 @@ fn try_cleanse(
         }
 
         // Check if ally has any dispellable debuffs
-        let Some(ally_auras) = active_auras_map.get(e) else {
+        let Some(ally_auras) = ctx.active_auras.get(e) else {
             continue;
         };
 
@@ -935,8 +930,7 @@ fn try_devotion_aura(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
-    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+    ctx: &CombatContext,
 ) -> bool {
     let ability = AbilityType::DevotionAura;
     let def = abilities.get_unchecked(&ability);
@@ -953,7 +947,7 @@ fn try_devotion_aura(
 
     // Helper to check if an entity has Devotion Aura
     let has_devotion_aura = |e: &Entity| -> bool {
-        active_auras_map
+        ctx.active_auras
             .get(e)
             .map(|auras| {
                 auras.iter().any(|a| {
@@ -965,7 +959,7 @@ fn try_devotion_aura(
     };
 
     // Gather allies
-    let allies: Vec<(&Entity, CharacterClass)> = combatant_info
+    let allies: Vec<(&Entity, CharacterClass)> = ctx.combatants
         .iter()
         .filter(|(_, info)| info.team == combatant.team && info.current_health > 0.0)
         .map(|(e, info)| (e, info.class))
@@ -977,7 +971,7 @@ fn try_devotion_aura(
     }
 
     // Find all allies in range who need the buff
-    let allies_to_buff: Vec<&Entity> = combatant_info
+    let allies_to_buff: Vec<&Entity> = ctx.combatants
         .iter()
         .filter(|(_, info)| info.team == combatant.team && info.current_health > 0.0)
         .filter_map(|(e, info)| {

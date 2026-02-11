@@ -350,6 +350,12 @@ pub fn decide_abilities(
 
         // Paladin-specific: Divine Shield can be used while incapacitated
         if is_incapacitated && combatant.class == match_config::CharacterClass::Paladin {
+            let cc_ctx = class_ai::CombatContext {
+                combatants: &combatant_info,
+                active_auras: &active_auras_map,
+                self_entity: entity,
+                gates_opened: true, // If we're checking CC, gates must be open
+            };
             if class_ai::paladin::try_divine_shield_while_cc(
                 &mut commands,
                 &mut combat_log,
@@ -357,7 +363,7 @@ pub fn decide_abilities(
                 entity,
                 &mut combatant,
                 auras.as_deref(),
-                &combatant_info,
+                &cc_ctx,
             ) {
                 continue; // DivineShieldPending spawned — CC will be purged next frame
             }
@@ -369,7 +375,14 @@ pub fn decide_abilities(
         }
         
         let my_pos = transform.translation;
-        
+
+        let ctx = class_ai::CombatContext {
+            combatants: &combatant_info,
+            active_auras: &active_auras_map,
+            self_entity: entity,
+            gates_opened: true, // decide_abilities only runs after gates open
+        };
+
         // Mages cast spells on enemies
         if combatant.class == match_config::CharacterClass::Mage {
             if class_ai::mage::decide_mage_action(
@@ -381,8 +394,7 @@ pub fn decide_abilities(
                 &mut combatant,
                 my_pos,
                 auras.as_deref(),
-                &combatant_info,
-                &active_auras_map,
+                &ctx,
                 &mut frost_nova_damage,
             ) {
                 continue;
@@ -398,8 +410,7 @@ pub fn decide_abilities(
                 &mut combatant,
                 my_pos,
                 auras.as_deref(),
-                &combatant_info,
-                &active_auras_map,
+                &ctx,
                 &mut shielded_this_frame,
                 &mut fortified_this_frame,
             ) {
@@ -418,8 +429,7 @@ pub fn decide_abilities(
                 &mut combatant,
                 my_pos,
                 auras.as_deref(),
-                &combatant_info,
-                &active_auras_map,
+                &ctx,
                 &mut instant_attacks,
             ) {
                 continue;
@@ -436,8 +446,7 @@ pub fn decide_abilities(
                 entity,
                 &mut combatant,
                 my_pos,
-                &combatant_info,
-                &active_auras_map,
+                &ctx,
                 &mut instant_attacks,
             ) {
                 continue;
@@ -454,8 +463,7 @@ pub fn decide_abilities(
                 &mut combatant,
                 my_pos,
                 auras.as_deref(),
-                &combatant_info,
-                &active_auras_map,
+                &ctx,
             ) {
                 continue;
             }
@@ -471,8 +479,7 @@ pub fn decide_abilities(
                 &mut combatant,
                 my_pos,
                 auras.as_deref(),
-                &combatant_info,
-                &active_auras_map,
+                &ctx,
             ) {
                 continue;
             }

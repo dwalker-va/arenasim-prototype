@@ -10,7 +10,6 @@
 //! 2. Sinister Strike (combo point builder)
 
 use bevy::prelude::*;
-use std::collections::HashMap;
 
 use crate::combat::log::CombatLog;
 use crate::states::match_config::RogueOpener;
@@ -21,7 +20,7 @@ use crate::states::play_match::combat_core::roll_crit;
 use crate::states::play_match::constants::{CRIT_DAMAGE_MULTIPLIER, GCD, MELEE_RANGE};
 use crate::states::play_match::utils::{combatant_id, spawn_speech_bubble};
 
-use super::{AbilityDecision, ClassAI, CombatContext, CombatantInfo};
+use super::{AbilityDecision, ClassAI, CombatContext};
 
 /// Rogue AI implementation.
 ///
@@ -49,8 +48,7 @@ pub fn decide_rogue_action(
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
-    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+    ctx: &CombatContext,
     instant_attacks: &mut Vec<super::QueuedInstantAttack>,
 ) -> bool {
     // Get target
@@ -58,7 +56,7 @@ pub fn decide_rogue_action(
         return false;
     };
 
-    let Some(target_pos) = combatant_info.get(&target_entity).map(|info| info.position) else {
+    let Some(target_pos) = ctx.combatants.get(&target_entity).map(|info| info.position) else {
         return false;
     };
 
@@ -74,7 +72,7 @@ pub fn decide_rogue_action(
                 my_pos,
                 target_entity,
                 target_pos,
-                combatant_info,
+                ctx,
                 instant_attacks,
             ),
             RogueOpener::CheapShot => try_cheap_shot(
@@ -86,7 +84,7 @@ pub fn decide_rogue_action(
                 my_pos,
                 target_entity,
                 target_pos,
-                combatant_info,
+                ctx,
             ),
         };
     }
@@ -106,11 +104,11 @@ pub fn decide_rogue_action(
         combatant.cc_target,
         combatant.target,
         my_pos,
-        combatant_info,
+        ctx,
     );
     if let Some((ks_target_entity, ks_target_pos)) = kidney_shot_target {
         // Check if target is already stunned - don't waste Kidney Shot
-        let target_already_stunned = active_auras_map
+        let target_already_stunned = ctx.active_auras
             .get(&ks_target_entity)
             .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::Stun))
             .unwrap_or(false);
@@ -125,7 +123,7 @@ pub fn decide_rogue_action(
                 my_pos,
                 ks_target_entity,
                 ks_target_pos,
-                combatant_info,
+                ctx,
             ) {
                 return true;
             }
@@ -142,7 +140,7 @@ pub fn decide_rogue_action(
         my_pos,
         target_entity,
         target_pos,
-        combatant_info,
+        ctx,
         instant_attacks,
     )
 }
@@ -159,7 +157,7 @@ fn try_ambush(
     my_pos: Vec3,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
+    ctx: &CombatContext,
     instant_attacks: &mut Vec<super::QueuedInstantAttack>,
 ) -> bool {
     let ability = AbilityType::Ambush;
@@ -190,7 +188,7 @@ fn try_ambush(
 
     // Log
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = combatant_info
+    let target_id = ctx.combatants
         .get(&target_entity)
         .map(|info| format!("Team {} {}", info.team, info.class.name()));
     combat_log.log_ability_cast(
@@ -226,7 +224,7 @@ fn try_cheap_shot(
     my_pos: Vec3,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
+    ctx: &CombatContext,
 ) -> bool {
     let ability = AbilityType::CheapShot;
     let def = abilities.get_unchecked(&ability);
@@ -243,7 +241,7 @@ fn try_cheap_shot(
 
     // Log
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = combatant_info
+    let target_id = ctx.combatants
         .get(&target_entity)
         .map(|info| format!("Team {} {}", info.team, info.class.name()));
     combat_log.log_ability_cast(
@@ -278,7 +276,7 @@ fn try_cheap_shot(
         });
 
         // Log CC
-        if let Some(info) = combatant_info.get(&target_entity) {
+        if let Some(info) = ctx.combatants.get(&target_entity) {
             let cc_type = format!("{:?}", aura.aura_type);
             let message = format!(
                 "Team {} {} uses {} on Team {} {}",
@@ -320,7 +318,7 @@ fn try_kidney_shot(
     my_pos: Vec3,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
+    ctx: &CombatContext,
 ) -> bool {
     let kidney_shot = AbilityType::KidneyShot;
     let ks_on_cooldown = combatant.ability_cooldowns.contains_key(&kidney_shot);
@@ -343,7 +341,7 @@ fn try_kidney_shot(
 
     // Log
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = combatant_info
+    let target_id = ctx.combatants
         .get(&target_entity)
         .map(|info| format!("Team {} {}", info.team, info.class.name()));
     combat_log.log_ability_cast(
@@ -378,7 +376,7 @@ fn try_kidney_shot(
         });
 
         // Log CC
-        if let Some(info) = combatant_info.get(&target_entity) {
+        if let Some(info) = ctx.combatants.get(&target_entity) {
             let cc_type = format!("{:?}", aura.aura_type);
             let message = format!(
                 "Team {} {} uses {} on Team {} {}",
@@ -420,7 +418,7 @@ fn try_sinister_strike(
     my_pos: Vec3,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
+    ctx: &CombatContext,
     instant_attacks: &mut Vec<super::QueuedInstantAttack>,
 ) -> bool {
     let ability = AbilityType::SinisterStrike;
@@ -450,7 +448,7 @@ fn try_sinister_strike(
 
     // Log
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = combatant_info
+    let target_id = ctx.combatants
         .get(&target_entity)
         .map(|info| format!("Team {} {}", info.team, info.class.name()));
     combat_log.log_ability_cast(
@@ -486,11 +484,11 @@ fn select_melee_cc_target(
     cc_target: Option<Entity>,
     kill_target: Option<Entity>,
     my_pos: Vec3,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
+    ctx: &CombatContext,
 ) -> Option<(Entity, Vec3)> {
     // First, check if CC target is in melee range
     if let Some(cc_entity) = cc_target {
-        if let Some(info) = combatant_info.get(&cc_entity) {
+        if let Some(info) = ctx.combatants.get(&cc_entity) {
             if my_pos.distance(info.position) <= MELEE_RANGE {
                 return Some((cc_entity, info.position));
             }
@@ -499,7 +497,7 @@ fn select_melee_cc_target(
 
     // CC target not in range - fall back to kill target if in melee range
     if let Some(kill_entity) = kill_target {
-        if let Some(info) = combatant_info.get(&kill_entity) {
+        if let Some(info) = ctx.combatants.get(&kill_entity) {
             if my_pos.distance(info.position) <= MELEE_RANGE {
                 return Some((kill_entity, info.position));
             }
