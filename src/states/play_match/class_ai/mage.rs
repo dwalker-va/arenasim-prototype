@@ -56,7 +56,7 @@ pub fn decide_mage_action(
     positions: &HashMap<Entity, Vec3>,
     combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
-    frost_nova_damage: &mut Vec<(Entity, Entity, f32, u8, CharacterClass, Vec3, bool)>,
+    frost_nova_damage: &mut Vec<super::QueuedAoeDamage>,
 ) -> bool {
     // Check if global cooldown is active
     if combatant.global_cooldown > 0.0 {
@@ -352,7 +352,7 @@ fn try_frost_nova(
     auras: Option<&ActiveAuras>,
     positions: &HashMap<Entity, Vec3>,
     combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
-    frost_nova_damage: &mut Vec<(Entity, Entity, f32, u8, CharacterClass, Vec3, bool)>,
+    frost_nova_damage: &mut Vec<super::QueuedAoeDamage>,
 ) -> bool {
     let frost_nova = AbilityType::FrostNova;
     let nova_def = abilities.get_unchecked(&frost_nova);
@@ -422,15 +422,15 @@ fn try_frost_nova(
         let mut damage = combatant.calculate_ability_damage_config(nova_def, game_rng);
         let is_crit = roll_crit(combatant.crit_chance, game_rng);
         if is_crit { damage *= CRIT_DAMAGE_MULTIPLIER; }
-        frost_nova_damage.push((
-            entity,
-            *target_entity,
+        frost_nova_damage.push(super::QueuedAoeDamage {
+            caster: entity,
+            target: *target_entity,
             damage,
-            combatant.team,
-            combatant.class,
-            *target_pos,
+            caster_team: combatant.team,
+            caster_class: combatant.class,
+            target_pos: *target_pos,
             is_crit,
-        ));
+        });
 
         // Apply root aura
         if let Some(aura) = nova_def.applies_aura.as_ref() {

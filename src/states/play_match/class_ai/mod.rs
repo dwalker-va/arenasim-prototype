@@ -45,6 +45,30 @@ pub struct CombatantInfo {
     pub target: Option<Entity>,
 }
 
+/// Deferred instant melee attack (Mortal Strike, Ambush, Sinister Strike, etc.)
+#[derive(Clone, Copy)]
+pub struct QueuedInstantAttack {
+    pub attacker: Entity,
+    pub target: Entity,
+    pub damage: f32,
+    pub attacker_team: u8,
+    pub attacker_class: CharacterClass,
+    pub ability: AbilityType,
+    pub is_crit: bool,
+}
+
+/// Deferred AoE damage (Frost Nova).
+#[derive(Clone, Copy)]
+pub struct QueuedAoeDamage {
+    pub caster: Entity,
+    pub target: Entity,
+    pub damage: f32,
+    pub caster_team: u8,
+    pub caster_class: CharacterClass,
+    pub target_pos: Vec3,
+    pub is_crit: bool,
+}
+
 impl CombatantInfo {
     /// Health as a percentage (0.0 to 1.0)
     pub fn health_pct(&self) -> f32 {

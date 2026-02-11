@@ -58,7 +58,7 @@ pub fn decide_warrior_action(
     positions: &HashMap<Entity, Vec3>,
     combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
-    instant_attacks: &mut Vec<(Entity, Entity, f32, u8, CharacterClass, AbilityType, bool)>,
+    instant_attacks: &mut Vec<super::QueuedInstantAttack>,
 ) -> bool {
     // Check if global cooldown is active
     if combatant.global_cooldown > 0.0 {
@@ -426,7 +426,7 @@ fn try_mortal_strike(
     target_entity: Entity,
     target_pos: Vec3,
     combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
-    instant_attacks: &mut Vec<(Entity, Entity, f32, u8, CharacterClass, AbilityType, bool)>,
+    instant_attacks: &mut Vec<super::QueuedInstantAttack>,
 ) -> bool {
     let mortal_strike = AbilityType::MortalStrike;
     let ms_def = abilities.get_unchecked(&mortal_strike);
@@ -472,15 +472,15 @@ fn try_mortal_strike(
     let mut damage = combatant.calculate_ability_damage_config(ms_def, game_rng);
     let is_crit = roll_crit(combatant.crit_chance, game_rng);
     if is_crit { damage *= CRIT_DAMAGE_MULTIPLIER; }
-    instant_attacks.push((
-        entity,
-        target_entity,
+    instant_attacks.push(super::QueuedInstantAttack {
+        attacker: entity,
+        target: target_entity,
         damage,
-        combatant.team,
-        combatant.class,
-        mortal_strike,
+        attacker_team: combatant.team,
+        attacker_class: combatant.class,
+        ability: mortal_strike,
         is_crit,
-    ));
+    });
 
     // Apply healing reduction aura
     if let Some(aura) = ms_def.applies_aura.as_ref() {

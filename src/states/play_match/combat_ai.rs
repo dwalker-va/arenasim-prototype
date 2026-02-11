@@ -312,10 +312,8 @@ pub fn decide_abilities(
         active_auras_map.insert(entity, auras.auras.clone());
     }
     
-    // Queue for Ambush attacks (attacker, target, damage, team, class)
     // Queue for instant ability attacks (Ambush, Sinister Strike, Mortal Strike)
-    // Format: (attacker_entity, target_entity, damage, attacker_team, attacker_class, ability_type)
-    let mut instant_attacks: Vec<(Entity, Entity, f32, u8, match_config::CharacterClass, AbilityType, bool)> = Vec::new();
+    let mut instant_attacks: Vec<class_ai::QueuedInstantAttack> = Vec::new();
 
     // Track targets that have been shielded THIS FRAME to prevent same-frame double-shielding
     // This handles the case where multiple Priests try to shield the same target before AuraPending is processed
@@ -325,8 +323,8 @@ pub fn decide_abilities(
     // This handles the case where multiple Priests try to buff the same target before AuraPending is processed
     let mut fortified_this_frame: std::collections::HashSet<Entity> = std::collections::HashSet::new();
     
-    // Queue for Frost Nova damage (caster, target, damage, caster_team, caster_class, target_pos)
-    let mut frost_nova_damage: Vec<(Entity, Entity, f32, u8, match_config::CharacterClass, Vec3, bool)> = Vec::new();
+    // Queue for Frost Nova damage
+    let mut frost_nova_damage: Vec<class_ai::QueuedAoeDamage> = Vec::new();
     
     for (entity, mut combatant, transform, auras) in combatants.iter_mut() {
         if !combatant.is_alive() {
@@ -477,8 +475,17 @@ pub fn decide_abilities(
         }
     }
 
-    // Process queued instant attacks (Ambush, Sinister Strike)
-    for (attacker_entity, target_entity, damage, attacker_team, attacker_class, ability, is_crit) in instant_attacks {
+    // Process queued instant attacks (Ambush, Sinister Strike, Mortal Strike)
+    for atk in instant_attacks {
+        let class_ai::QueuedInstantAttack {
+            attacker: attacker_entity,
+            target: target_entity,
+            damage,
+            attacker_team,
+            attacker_class,
+            ability,
+            is_crit,
+        } = atk;
         let ability_name = abilities.get_unchecked(&ability).name.clone();
         let mut actual_damage = 0.0;
 
@@ -627,7 +634,16 @@ pub fn decide_abilities(
     }
     
     // Process queued Frost Nova damage
-    for (caster_entity, target_entity, damage, caster_team, caster_class, _target_pos, is_crit) in frost_nova_damage {
+    for aoe in frost_nova_damage {
+        let class_ai::QueuedAoeDamage {
+            caster: caster_entity,
+            target: target_entity,
+            damage,
+            caster_team,
+            caster_class,
+            target_pos: _target_pos,
+            is_crit,
+        } = aoe;
         let mut actual_damage = 0.0;
 
         if let Ok((_, mut target, target_transform, mut target_auras)) = combatants.get_mut(target_entity) {
