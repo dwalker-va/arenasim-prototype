@@ -23,7 +23,7 @@ use crate::states::play_match::constants::GCD;
 use crate::states::play_match::is_spell_school_locked;
 use crate::states::play_match::utils::combatant_id;
 
-use super::{dispel_priority, AbilityDecision, ClassAI, CombatContext, is_team_healthy};
+use super::{dispel_priority, AbilityDecision, ClassAI, CombatContext, CombatantInfo, is_team_healthy};
 
 /// Priest AI implementation.
 ///
@@ -51,8 +51,7 @@ pub fn decide_priest_action(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
     shielded_this_frame: &mut HashSet<Entity>,
     fortified_this_frame: &mut HashSet<Entity>,
@@ -71,7 +70,6 @@ pub fn decide_priest_action(
         combatant,
         my_pos,
         auras,
-        positions,
         combatant_info,
         active_auras_map,
         fortified_this_frame,
@@ -88,7 +86,6 @@ pub fn decide_priest_action(
         combatant,
         my_pos,
         auras,
-        positions,
         combatant_info,
         active_auras_map,
         90, // Only Polymorph (100) and Fear (90)
@@ -105,7 +102,6 @@ pub fn decide_priest_action(
         combatant,
         my_pos,
         auras,
-        positions,
         combatant_info,
         active_auras_map,
         shielded_this_frame,
@@ -122,7 +118,6 @@ pub fn decide_priest_action(
         combatant,
         my_pos,
         auras,
-        positions,
         combatant_info,
     ) {
         return true;
@@ -138,7 +133,6 @@ pub fn decide_priest_action(
             combatant,
             my_pos,
             auras,
-            positions,
             combatant_info,
             active_auras_map,
             50, // Roots (80) and DoTs (50)
@@ -156,7 +150,6 @@ pub fn decide_priest_action(
         combatant,
         my_pos,
         auras,
-        positions,
         combatant_info,
     ) {
         return true;
@@ -176,17 +169,16 @@ fn try_fortitude(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
     fortified_this_frame: &mut HashSet<Entity>,
 ) -> bool {
     // Find an unbuffed ally
     let mut unbuffed_ally: Option<(Entity, Vec3)> = None;
 
-    for (ally_entity, &(ally_team, _, _ally_class, ally_hp, _ally_max_hp, _)) in combatant_info.iter() {
+    for (ally_entity, info) in combatant_info.iter() {
         // Must be same team and alive
-        if ally_team != combatant.team || ally_hp <= 0.0 {
+        if info.team != combatant.team || info.current_health <= 0.0 {
             continue;
         }
 
@@ -205,12 +197,7 @@ fn try_fortitude(
             continue;
         }
 
-        // Get position
-        let Some(&ally_pos) = positions.get(ally_entity) else {
-            continue;
-        };
-
-        unbuffed_ally = Some((*ally_entity, ally_pos));
+        unbuffed_ally = Some((*ally_entity, info.position));
         break;
     }
 
@@ -238,8 +225,8 @@ fn try_fortitude(
 
     // Log
     let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = combatant_info.get(&buff_target).map(|(team, _, class, _, _, _)| {
-        format!("Team {} {}", team, class.name())
+    let target_id = combatant_info.get(&buff_target).map(|info| {
+        format!("Team {} {}", info.team, info.class.name())
     });
     combat_log.log_ability_cast(
         caster_id,
@@ -296,8 +283,7 @@ fn try_power_word_shield(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
     shielded_this_frame: &mut HashSet<Entity>,
 ) -> bool {
@@ -315,9 +301,9 @@ fn try_power_word_shield(
     // Find ally to shield (prioritize lowest HP)
     let mut best_candidate: Option<(Entity, Vec3, f32)> = None;
 
-    for (ally_entity, &(ally_team, _, _ally_class, ally_hp, ally_max_hp, _)) in combatant_info.iter() {
+    for (ally_entity, info) in combatant_info.iter() {
         // Must be same team and alive
-        if ally_team != combatant.team || ally_hp <= 0.0 {
+        if info.team != combatant.team || info.current_health <= 0.0 {
             continue;
         }
 
@@ -338,12 +324,7 @@ fn try_power_word_shield(
             continue;
         }
 
-        // Get position
-        let Some(&ally_pos) = positions.get(ally_entity) else {
-            continue;
-        };
-
-        let hp_percent = ally_hp / ally_max_hp;
+        let hp_percent = info.current_health / info.max_health;
 
         // Pre-combat (full HP): Shield anyone
         // In-combat: Only shield if below 70% HP
@@ -352,9 +333,9 @@ fn try_power_word_shield(
 
         if is_full_hp || is_below_threshold {
             match best_candidate {
-                None => best_candidate = Some((*ally_entity, ally_pos, hp_percent)),
+                None => best_candidate = Some((*ally_entity, info.position, hp_percent)),
                 Some((_, _, best_percent)) if hp_percent < best_percent => {
-                    best_candidate = Some((*ally_entity, ally_pos, hp_percent));
+                    best_candidate = Some((*ally_entity, info.position, hp_percent));
                 }
                 _ => {}
             }
@@ -375,8 +356,8 @@ fn try_power_word_shield(
 
     // Log
     let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = combatant_info.get(&shield_entity).map(|(team, _, class, _, _, _)| {
-        format!("Team {} {}", team, class.name())
+    let target_id = combatant_info.get(&shield_entity).map(|info| {
+        format!("Team {} {}", info.team, info.class.name())
     });
     combat_log.log_ability_cast(
         caster_id,
@@ -460,8 +441,7 @@ fn try_dispel_magic(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
     min_priority: i32,
 ) -> bool {
@@ -481,9 +461,9 @@ fn try_dispel_magic(
     // Priority: Polymorph > Fear > Root > Magic DoT > Slow
     let mut best_candidate: Option<(Entity, Vec3, i32)> = None; // (entity, pos, priority)
 
-    for (ally_entity, &(ally_team, _, _ally_class, ally_hp, _ally_max_hp, _)) in combatant_info.iter() {
+    for (ally_entity, info) in combatant_info.iter() {
         // Must be same team and alive
-        if ally_team != combatant.team || ally_hp <= 0.0 {
+        if info.team != combatant.team || info.current_health <= 0.0 {
             continue;
         }
 
@@ -513,10 +493,7 @@ fn try_dispel_magic(
             continue; // No debuffs worth dispelling at this priority level
         }
 
-        // Get position
-        let Some(&ally_pos) = positions.get(ally_entity) else {
-            continue;
-        };
+        let ally_pos = info.position;
 
         // Check if in range
         let distance = my_pos.distance(ally_pos);
@@ -565,8 +542,8 @@ fn try_dispel_magic(
 
             // Log the dispel cast (the actual removal is logged in process_dispels)
             let caster_id = combatant_id(combatant.team, combatant.class);
-            let target_id = combatant_info.get(&dispel_target).map(|(team, _, class, _, _, _)| {
-                format!("Team {} {}", team, class.name())
+            let target_id = combatant_info.get(&dispel_target).map(|info| {
+                format!("Team {} {}", info.team, info.class.name())
             });
             combat_log.log_ability_cast(
                 caster_id,
@@ -620,33 +597,27 @@ fn try_flash_heal(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
 ) -> bool {
     // Find the lowest HP ally
     let mut lowest_hp_ally: Option<(Entity, f32, Vec3)> = None;
 
-    for (ally_entity, &(ally_team, _, _ally_class, ally_hp, ally_max_hp, _)) in combatant_info.iter() {
+    for (ally_entity, info) in combatant_info.iter() {
         // Must be same team and alive
-        if ally_team != combatant.team || ally_hp <= 0.0 {
+        if info.team != combatant.team || info.current_health <= 0.0 {
             continue;
         }
 
         // Only heal if damaged (below 90% health)
-        let hp_percent = ally_hp / ally_max_hp;
+        let hp_percent = info.current_health / info.max_health;
         if hp_percent >= 0.9 {
             continue;
         }
 
-        // Get position
-        let Some(&ally_pos) = positions.get(ally_entity) else {
-            continue;
-        };
-
         match lowest_hp_ally {
-            None => lowest_hp_ally = Some((*ally_entity, hp_percent, ally_pos)),
+            None => lowest_hp_ally = Some((*ally_entity, hp_percent, info.position)),
             Some((_, lowest_percent, _)) if hp_percent < lowest_percent => {
-                lowest_hp_ally = Some((*ally_entity, hp_percent, ally_pos));
+                lowest_hp_ally = Some((*ally_entity, hp_percent, info.position));
             }
             _ => {}
         }
@@ -684,7 +655,7 @@ fn try_flash_heal(
     let caster_id = combatant_id(combatant.team, combatant.class);
     let target_id = combatant_info
         .get(&heal_target)
-        .map(|(team, _, class, _, _, _)| format!("Team {} {}", team, class.name()));
+        .map(|info| format!("Team {} {}", info.team, info.class.name()));
     combat_log.log_ability_cast(
         caster_id,
         def.name.to_string(),
@@ -718,16 +689,17 @@ fn try_mind_blast(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
 ) -> bool {
     let Some(target_entity) = combatant.target else {
         return false;
     };
 
-    let Some(&target_pos) = positions.get(&target_entity) else {
+    let Some(target_info) = combatant_info.get(&target_entity) else {
         return false;
     };
+
+    let target_pos = target_info.position;
 
     let ability = AbilityType::MindBlast;
     let on_cooldown = combatant.ability_cooldowns.contains_key(&ability);
@@ -763,7 +735,7 @@ fn try_mind_blast(
     let caster_id = combatant_id(combatant.team, combatant.class);
     let target_id = combatant_info
         .get(&target_entity)
-        .map(|(team, _, class, _, _, _)| format!("Team {} {}", team, class.name()));
+        .map(|info| format!("Team {} {}", info.team, info.class.name()));
     combat_log.log_ability_cast(
         caster_id,
         def.name.to_string(),

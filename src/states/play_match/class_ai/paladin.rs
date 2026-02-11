@@ -30,7 +30,7 @@ use crate::states::play_match::is_spell_school_locked;
 use crate::states::play_match::utils::combatant_id;
 
 use super::priest::DispelPending;
-use super::{dispel_priority, AbilityDecision, ClassAI, CombatContext};
+use super::{dispel_priority, AbilityDecision, ClassAI, CombatContext, CombatantInfo};
 
 /// Paladin AI implementation
 pub struct PaladinAI;
@@ -54,8 +54,7 @@ pub fn decide_paladin_action(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
 ) -> bool {
     // Check if global cooldown is active
@@ -72,7 +71,6 @@ pub fn decide_paladin_action(
         combatant,
         my_pos,
         auras,
-        positions,
         combatant_info,
         active_auras_map,
     ) {
@@ -100,7 +98,6 @@ pub fn decide_paladin_action(
         combatant,
         my_pos,
         auras,
-        positions,
         combatant_info,
         active_auras_map,
         90, // Only Polymorph (100) and Fear (90)
@@ -117,7 +114,6 @@ pub fn decide_paladin_action(
             combatant,
             my_pos,
             auras,
-            positions,
             combatant_info,
         ) {
             return true;
@@ -132,7 +128,6 @@ pub fn decide_paladin_action(
         combatant,
         my_pos,
         auras,
-        positions,
         combatant_info,
     ) {
         return true;
@@ -147,7 +142,6 @@ pub fn decide_paladin_action(
         combatant,
         my_pos,
         auras,
-        positions,
         combatant_info,
     ) {
         return true;
@@ -163,7 +157,6 @@ pub fn decide_paladin_action(
         combatant,
         my_pos,
         auras,
-        positions,
         combatant_info,
     ) {
         return true;
@@ -178,7 +171,6 @@ pub fn decide_paladin_action(
             combatant,
             my_pos,
             auras,
-            positions,
             combatant_info,
             active_auras_map,
             50, // Include roots and DoTs
@@ -196,7 +188,6 @@ pub fn decide_paladin_action(
             combatant,
             my_pos,
             auras,
-            positions,
             combatant_info,
         ) {
             return true;
@@ -223,7 +214,7 @@ pub fn try_divine_shield(
     entity: Entity,
     combatant: &mut Combatant,
     auras: Option<&ActiveAuras>,
-    _combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    _combatant_info: &HashMap<Entity, CombatantInfo>,
 ) -> bool {
     let def = abilities.get(&AbilityType::DivineShield);
     let def = match def {
@@ -299,7 +290,7 @@ pub fn try_divine_shield_while_cc(
     entity: Entity,
     combatant: &mut Combatant,
     auras: Option<&ActiveAuras>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
 ) -> bool {
     let def = abilities.get(&AbilityType::DivineShield);
     let def = match def {
@@ -318,11 +309,11 @@ pub fn try_divine_shield_while_cc(
     }
 
     // CC break trigger: any teammate below critical HP (they need healing NOW)
-    let teammate_in_danger = combatant_info.values().any(|(ally_team, _, _, hp, max_hp, _)| {
-        *ally_team == combatant.team
-            && *hp > 0.0
-            && *max_hp > 0.0
-            && (*hp / *max_hp) < DIVINE_SHIELD_HP_THRESHOLD
+    let teammate_in_danger = combatant_info.values().any(|info| {
+        info.team == combatant.team
+            && info.current_health > 0.0
+            && info.max_health > 0.0
+            && (info.current_health / info.max_health) < DIVINE_SHIELD_HP_THRESHOLD
     });
 
     // Also trigger if self is in survival danger
@@ -367,22 +358,28 @@ pub fn try_divine_shield_while_cc(
 /// Check if any ally is in an emergency situation (below critical HP threshold)
 fn has_emergency_target(
     team: u8,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
 ) -> bool {
-    combatant_info.values().any(|(ally_team, _, _, hp, max_hp, _)| {
-        *ally_team == team && *hp > 0.0 && *max_hp > 0.0 && (*hp / *max_hp) < CRITICAL_HP_THRESHOLD
+    combatant_info.values().any(|info| {
+        info.team == team
+            && info.current_health > 0.0
+            && info.max_health > 0.0
+            && (info.current_health / info.max_health) < CRITICAL_HP_THRESHOLD
     })
 }
 
 /// Check if all allies are healthy (above healthy HP threshold)
 fn allies_are_healthy(
     team: u8,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
 ) -> bool {
     combatant_info
         .values()
-        .filter(|(ally_team, _, _, hp, _, _)| *ally_team == team && *hp > 0.0)
-        .all(|(_, _, _, hp, max_hp, _)| *max_hp > 0.0 && (*hp / *max_hp) >= HEALTHY_HP_THRESHOLD)
+        .filter(|info| info.team == team && info.current_health > 0.0)
+        .all(|info| {
+            info.max_health > 0.0
+                && (info.current_health / info.max_health) >= HEALTHY_HP_THRESHOLD
+        })
 }
 
 /// Try to cast Flash of Light on an injured ally.
@@ -395,8 +392,7 @@ fn try_flash_of_light(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
 ) -> bool {
     let ability = AbilityType::FlashOfLight;
     let def = abilities.get_unchecked(&ability);
@@ -412,11 +408,14 @@ fn try_flash_of_light(
     // Find the lowest HP ally (below 90%)
     let heal_target = combatant_info
         .iter()
-        .filter(|(_, (team, _, _, hp, max_hp, _))| {
-            *team == combatant.team && *hp > 0.0 && *max_hp > 0.0 && (*hp / *max_hp) < 0.9
+        .filter(|(_, info)| {
+            info.team == combatant.team
+                && info.current_health > 0.0
+                && info.max_health > 0.0
+                && (info.current_health / info.max_health) < 0.9
         })
-        .filter_map(|(e, (_, _, class, hp, max_hp, _))| {
-            positions.get(e).map(|pos| (e, class, *hp / *max_hp, pos))
+        .map(|(e, info)| {
+            (e, info.class, info.current_health / info.max_health, info.position)
         })
         .min_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
 
@@ -424,7 +423,7 @@ fn try_flash_of_light(
         return false;
     };
 
-    if !ability.can_cast_config(combatant, *target_pos, my_pos, def) {
+    if !ability.can_cast_config(combatant, target_pos, my_pos, def) {
         return false;
     }
 
@@ -467,8 +466,7 @@ fn try_holy_light(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
 ) -> bool {
     let ability = AbilityType::HolyLight;
     let def = abilities.get_unchecked(&ability);
@@ -484,15 +482,15 @@ fn try_holy_light(
     // Find an ally between 50-85% HP (safe to use slow heal)
     let heal_target = combatant_info
         .iter()
-        .filter(|(_, (team, _, _, hp, max_hp, _))| {
-            if *team != combatant.team || *hp <= 0.0 || *max_hp <= 0.0 {
+        .filter(|(_, info)| {
+            if info.team != combatant.team || info.current_health <= 0.0 || info.max_health <= 0.0 {
                 return false;
             }
-            let pct = *hp / *max_hp;
+            let pct = info.current_health / info.max_health;
             pct >= LOW_HP_THRESHOLD && pct < SAFE_HEAL_MAX_THRESHOLD
         })
-        .filter_map(|(e, (_, _, class, hp, max_hp, _))| {
-            positions.get(e).map(|pos| (e, class, *hp / *max_hp, pos))
+        .map(|(e, info)| {
+            (e, info.class, info.current_health / info.max_health, info.position)
         })
         .min_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
 
@@ -500,7 +498,7 @@ fn try_holy_light(
         return false;
     };
 
-    if !ability.can_cast_config(combatant, *target_pos, my_pos, def) {
+    if !ability.can_cast_config(combatant, target_pos, my_pos, def) {
         return false;
     }
 
@@ -542,8 +540,7 @@ fn try_holy_shock_heal(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
 ) -> bool {
     let ability = AbilityType::HolyShock;
     let def = abilities.get_unchecked(&ability);
@@ -570,17 +567,18 @@ fn try_holy_shock_heal(
     // Find lowest HP ally below 50% and in range
     let heal_target = combatant_info
         .iter()
-        .filter(|(_, (team, _, _, hp, max_hp, _))| {
-            *team == combatant.team && *hp > 0.0 && *max_hp > 0.0 && (*hp / *max_hp) < LOW_HP_THRESHOLD
+        .filter(|(_, info)| {
+            info.team == combatant.team
+                && info.current_health > 0.0
+                && info.max_health > 0.0
+                && (info.current_health / info.max_health) < LOW_HP_THRESHOLD
         })
-        .filter_map(|(e, (_, _, class, hp, max_hp, _))| {
-            positions.get(e).and_then(|pos| {
-                if my_pos.distance(*pos) <= def.range {
-                    Some((e, class, *hp / *max_hp))
-                } else {
-                    None
-                }
-            })
+        .filter_map(|(e, info)| {
+            if my_pos.distance(info.position) <= def.range {
+                Some((e, info.class, info.current_health / info.max_health))
+            } else {
+                None
+            }
         })
         .min_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
 
@@ -629,8 +627,7 @@ fn try_holy_shock_damage(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
 ) -> bool {
     let ability = AbilityType::HolyShock;
     let def = abilities.get_unchecked(&ability);
@@ -657,17 +654,15 @@ fn try_holy_shock_damage(
     // Find an enemy in range (20 yards for damage), filter out stealthed
     let damage_target = combatant_info
         .iter()
-        .filter(|(_, (team, _, _, hp, _, stealthed))| {
-            *team != combatant.team && *hp > 0.0 && !*stealthed
+        .filter(|(_, info)| {
+            info.team != combatant.team && info.current_health > 0.0 && !info.stealthed
         })
-        .find_map(|(e, (_, _, class, _, _, _))| {
-            positions.get(e).and_then(|pos| {
-                if my_pos.distance(*pos) <= HOLY_SHOCK_DAMAGE_RANGE {
-                    Some((e, class))
-                } else {
-                    None
-                }
-            })
+        .find_map(|(e, info)| {
+            if my_pos.distance(info.position) <= HOLY_SHOCK_DAMAGE_RANGE {
+                Some((e, info.class))
+            } else {
+                None
+            }
         });
 
     let Some((target_entity, target_class)) = damage_target else {
@@ -717,8 +712,7 @@ fn try_hammer_of_justice(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
 ) -> bool {
     let ability = AbilityType::HammerOfJustice;
     let def = abilities.get_unchecked(&ability);
@@ -743,19 +737,17 @@ fn try_hammer_of_justice(
     }
 
     // Find enemies in range, filter out stealthed
-    let enemies_in_range: Vec<(&Entity, &CharacterClass)> = combatant_info
+    let enemies_in_range: Vec<(&Entity, CharacterClass)> = combatant_info
         .iter()
-        .filter(|(_, (team, _, _, hp, _, stealthed))| {
-            *team != combatant.team && *hp > 0.0 && !*stealthed
+        .filter(|(_, info)| {
+            info.team != combatant.team && info.current_health > 0.0 && !info.stealthed
         })
-        .filter_map(|(e, (_, _, class, _, _, _))| {
-            positions.get(e).and_then(|pos| {
-                if my_pos.distance(*pos) <= def.range {
-                    Some((e, class))
-                } else {
-                    None
-                }
-            })
+        .filter_map(|(e, info)| {
+            if my_pos.distance(info.position) <= def.range {
+                Some((e, info.class))
+            } else {
+                None
+            }
         })
         .collect();
 
@@ -838,8 +830,7 @@ fn try_cleanse(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
     min_priority: i32,
 ) -> bool {
@@ -855,19 +846,16 @@ fn try_cleanse(
     }
 
     // Find ally with highest priority dispellable debuff
-    let mut best_candidate: Option<(&Entity, &CharacterClass, i32)> = None;
+    let mut best_candidate: Option<(&Entity, CharacterClass, i32)> = None;
 
-    for (e, (team, _, class, hp, _, _)) in combatant_info.iter() {
+    for (e, info) in combatant_info.iter() {
         // Must be alive ally
-        if *team != combatant.team || *hp <= 0.0 {
+        if info.team != combatant.team || info.current_health <= 0.0 {
             continue;
         }
 
         // Check range
-        let Some(ally_pos) = positions.get(e) else {
-            continue;
-        };
-        if my_pos.distance(*ally_pos) > def.range {
+        if my_pos.distance(info.position) > def.range {
             continue;
         }
 
@@ -895,9 +883,9 @@ fn try_cleanse(
         }
 
         match best_candidate {
-            None => best_candidate = Some((e, class, highest_priority)),
+            None => best_candidate = Some((e, info.class, highest_priority)),
             Some((_, _, best_prio)) if highest_priority > best_prio => {
-                best_candidate = Some((e, class, highest_priority));
+                best_candidate = Some((e, info.class, highest_priority));
             }
             _ => {}
         }
@@ -947,8 +935,7 @@ fn try_devotion_aura(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
 ) -> bool {
     let ability = AbilityType::DevotionAura;
@@ -978,10 +965,10 @@ fn try_devotion_aura(
     };
 
     // Gather allies
-    let allies: Vec<(&Entity, &CharacterClass)> = combatant_info
+    let allies: Vec<(&Entity, CharacterClass)> = combatant_info
         .iter()
-        .filter(|(_, (team, _, _, hp, _, _))| *team == combatant.team && *hp > 0.0)
-        .map(|(e, (_, _, class, _, _, _))| (e, class))
+        .filter(|(_, info)| info.team == combatant.team && info.current_health > 0.0)
+        .map(|(e, info)| (e, info.class))
         .collect();
 
     // If ANY ally already has Devotion Aura, we've already buffed the team
@@ -990,16 +977,15 @@ fn try_devotion_aura(
     }
 
     // Find all allies in range who need the buff
-    let allies_to_buff: Vec<&Entity> = allies
+    let allies_to_buff: Vec<&Entity> = combatant_info
         .iter()
-        .filter_map(|(e, _)| {
-            positions.get(*e).and_then(|pos| {
-                if my_pos.distance(*pos) <= def.range {
-                    Some(*e)
-                } else {
-                    None
-                }
-            })
+        .filter(|(_, info)| info.team == combatant.team && info.current_health > 0.0)
+        .filter_map(|(e, info)| {
+            if my_pos.distance(info.position) <= def.range {
+                Some(e)
+            } else {
+                None
+            }
         })
         .collect();
 

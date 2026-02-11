@@ -28,16 +28,18 @@ use super::match_config::CharacterClass;
 use super::abilities::AbilityType;
 use super::components::{Aura, Combatant, AuraType};
 
-/// Information about a single combatant, used for AI decision making.
-#[derive(Clone, Debug)]
+/// Per-frame snapshot of a single combatant, used for AI decision making.
+#[derive(Clone, Copy, Debug)]
 pub struct CombatantInfo {
     pub entity: Entity,
     pub team: u8,
+    pub slot: u8,
     pub class: CharacterClass,
     pub current_health: f32,
     pub max_health: f32,
     pub current_mana: f32,
     pub max_mana: f32,
+    /// Per-frame snapshot from Transform.
     pub position: Vec3,
     pub is_alive: bool,
     pub stealthed: bool,
@@ -279,13 +281,13 @@ pub fn dispel_priority(aura_type: AuraType) -> i32 {
 /// vs focusing on healing.
 pub fn is_team_healthy(
     team: u8,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
 ) -> bool {
-    for &(ally_team, _, _, ally_hp, ally_max_hp, _) in combatant_info.values() {
-        if ally_team != team || ally_hp <= 0.0 {
+    for info in combatant_info.values() {
+        if info.team != team || info.current_health <= 0.0 {
             continue;
         }
-        let hp_percent = ally_hp / ally_max_hp;
+        let hp_percent = info.current_health / info.max_health;
         if hp_percent < 0.70 {
             return false;
         }

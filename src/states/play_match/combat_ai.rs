@@ -276,17 +276,27 @@ pub fn decide_abilities(
         return;
     }
 
-    // First pass: collect position and info from ALL combatants we can decide for
-    // (this query excludes casting/channeling combatants)
-    let positions: std::collections::HashMap<Entity, Vec3> = combatants
+    // CombatantInfo is a per-frame snapshot. Mutations to Combatant components
+    // during class AI dispatch are not reflected in other entities' views.
+    // Safe because each entity is dispatched at most once per frame.
+    let combatant_info: std::collections::HashMap<Entity, class_ai::CombatantInfo> = combatants
         .iter()
-        .map(|(entity, _, transform, _)| (entity, transform.translation))
-        .collect();
-
-    let combatant_info: std::collections::HashMap<Entity, (u8, u8, match_config::CharacterClass, f32, f32, bool)> = combatants
-        .iter()
-        .map(|(entity, combatant, _, _)| {
-            (entity, (combatant.team, combatant.slot, combatant.class, combatant.current_health, combatant.max_health, combatant.stealthed))
+        .map(|(entity, combatant, transform, _)| {
+            (entity, class_ai::CombatantInfo {
+                entity,
+                team: combatant.team,
+                slot: combatant.slot,
+                class: combatant.class,
+                current_health: combatant.current_health,
+                max_health: combatant.max_health,
+                current_mana: combatant.current_mana,
+                max_mana: combatant.max_mana,
+                position: transform.translation,
+                is_alive: combatant.is_alive(),
+                stealthed: combatant.stealthed,
+                has_target: combatant.target.is_some(),
+                target: combatant.target,
+            })
         })
         .collect();
 
@@ -371,7 +381,6 @@ pub fn decide_abilities(
                 &mut combatant,
                 my_pos,
                 auras.as_deref(),
-                &positions,
                 &combatant_info,
                 &active_auras_map,
                 &mut frost_nova_damage,
@@ -389,7 +398,6 @@ pub fn decide_abilities(
                 &mut combatant,
                 my_pos,
                 auras.as_deref(),
-                &positions,
                 &combatant_info,
                 &active_auras_map,
                 &mut shielded_this_frame,
@@ -410,7 +418,6 @@ pub fn decide_abilities(
                 &mut combatant,
                 my_pos,
                 auras.as_deref(),
-                &positions,
                 &combatant_info,
                 &active_auras_map,
                 &mut instant_attacks,
@@ -429,7 +436,6 @@ pub fn decide_abilities(
                 entity,
                 &mut combatant,
                 my_pos,
-                &positions,
                 &combatant_info,
                 &active_auras_map,
                 &mut instant_attacks,
@@ -448,7 +454,6 @@ pub fn decide_abilities(
                 &mut combatant,
                 my_pos,
                 auras.as_deref(),
-                &positions,
                 &combatant_info,
                 &active_auras_map,
             ) {
@@ -466,7 +471,6 @@ pub fn decide_abilities(
                 &mut combatant,
                 my_pos,
                 auras.as_deref(),
-                &positions,
                 &combatant_info,
                 &active_auras_map,
             ) {

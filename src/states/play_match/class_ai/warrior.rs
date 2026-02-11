@@ -13,14 +13,13 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 use crate::combat::log::{CombatLog, CombatLogEventType};
-use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
 use crate::states::play_match::combat_core::roll_crit;
 use crate::states::play_match::constants::{CHARGE_MIN_RANGE, CRIT_DAMAGE_MULTIPLIER, GCD};
 
-use super::{AbilityDecision, ClassAI, CombatContext};
+use super::{AbilityDecision, ClassAI, CombatContext, CombatantInfo};
 
 /// Battle Shout range constant
 const BATTLE_SHOUT_RANGE: f32 = 30.0;
@@ -55,8 +54,7 @@ pub fn decide_warrior_action(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
     instant_attacks: &mut Vec<super::QueuedInstantAttack>,
 ) -> bool {
@@ -73,7 +71,6 @@ pub fn decide_warrior_action(
         entity,
         combatant,
         my_pos,
-        positions,
         combatant_info,
         active_auras_map,
     ) {
@@ -85,9 +82,10 @@ pub fn decide_warrior_action(
         return false;
     };
 
-    let Some(&target_pos) = positions.get(&target_entity) else {
+    let Some(target_info) = combatant_info.get(&target_entity) else {
         return false;
     };
+    let target_pos = target_info.position;
 
     // Priority 2: Charge (gap closer)
     if try_charge(
@@ -154,25 +152,19 @@ fn try_battle_shout(
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
 ) -> bool {
     // Check if any nearby ally needs the buff
     let mut allies_to_buff: Vec<Entity> = Vec::new();
 
-    for (ally_entity, &(ally_team, _, _ally_class, ally_hp, _ally_max_hp, _)) in combatant_info.iter() {
+    for (ally_entity, info) in combatant_info.iter() {
         // Must be same team and alive
-        if ally_team != combatant.team || ally_hp <= 0.0 {
+        if info.team != combatant.team || info.current_health <= 0.0 {
             continue;
         }
 
-        // Get ally position to check range
-        let Some(&ally_pos) = positions.get(ally_entity) else {
-            continue;
-        };
-
-        let distance_to_ally = my_pos.distance(ally_pos);
+        let distance_to_ally = my_pos.distance(info.position);
         if distance_to_ally > BATTLE_SHOUT_RANGE {
             continue;
         }
@@ -261,7 +253,7 @@ fn try_charge(
     auras: Option<&ActiveAuras>,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
 ) -> bool {
     let charge = AbilityType::Charge;
     let charge_def = abilities.get_unchecked(&charge);
@@ -299,7 +291,7 @@ fn try_charge(
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
     let target_id = combatant_info
         .get(&target_entity)
-        .map(|(team, _, class, _, _, _)| format!("Team {} {}", team, class.name()));
+        .map(|info| format!("Team {} {}", info.team, info.class.name()));
     combat_log.log_ability_cast(
         caster_id,
         "Charge".to_string(),
@@ -333,7 +325,7 @@ fn try_rend(
     my_pos: Vec3,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
 ) -> bool {
     // Check if target already has Rend (any DoT for now)
@@ -361,7 +353,7 @@ fn try_rend(
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
     let target_id = combatant_info
         .get(&target_entity)
-        .map(|(team, _, class, _, _, _)| format!("Team {} {}", team, class.name()));
+        .map(|info| format!("Team {} {}", info.team, info.class.name()));
     combat_log.log_ability_cast(
         caster_id,
         "Rend".to_string(),
@@ -425,7 +417,7 @@ fn try_mortal_strike(
     my_pos: Vec3,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
     instant_attacks: &mut Vec<super::QueuedInstantAttack>,
 ) -> bool {
     let mortal_strike = AbilityType::MortalStrike;
@@ -445,8 +437,8 @@ fn try_mortal_strike(
     }
 
     // Get target info
-    let (target_team, target_class) = match combatant_info.get(&target_entity) {
-        Some(&(team, _, class, _, _, _)) => (team, class),
+    let target_info = match combatant_info.get(&target_entity) {
+        Some(info) => info,
         None => return false,
     };
 
@@ -460,7 +452,7 @@ fn try_mortal_strike(
     combat_log.log_ability_cast(
         caster_id,
         "Mortal Strike".to_string(),
-        Some(format!("Team {} {}", target_team, target_class.name())),
+        Some(format!("Team {} {}", target_info.team, target_info.class.name())),
         format!(
             "Team {} {} uses Mortal Strike",
             combatant.team,

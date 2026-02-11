@@ -18,7 +18,7 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 use crate::combat::log::{CombatLog, CombatLogEventType};
-use crate::states::match_config::{CharacterClass, WarlockCurse};
+use crate::states::match_config::WarlockCurse;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::{
@@ -28,7 +28,7 @@ use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::constants::GCD;
 use crate::states::play_match::is_spell_school_locked;
 
-use super::{AbilityDecision, ClassAI, CombatContext};
+use super::{AbilityDecision, ClassAI, CombatContext, CombatantInfo};
 
 /// Check if the Warlock is being kited (slowed and out of preferred range).
 /// Returns true if the Warlock should prioritize instant-cast abilities.
@@ -79,8 +79,7 @@ pub fn decide_warlock_action(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
 ) -> bool {
     // Get target
@@ -88,9 +87,10 @@ pub fn decide_warlock_action(
         return false;
     };
 
-    let Some(&target_pos) = positions.get(&target_entity) else {
+    let Some(target_info) = combatant_info.get(&target_entity) else {
         return false;
     };
+    let target_pos = target_info.position;
 
     // Check if global cooldown is active
     if combatant.global_cooldown > 0.0 {
@@ -127,7 +127,6 @@ pub fn decide_warlock_action(
         combatant,
         my_pos,
         auras,
-        positions,
         combatant_info,
         active_auras_map,
     ) {
@@ -159,7 +158,8 @@ pub fn decide_warlock_action(
     // Fear is high value even with cast time - landing it can turn the fight
     let fear_target = combatant.cc_target.or(combatant.target);
     if let Some(fear_target_entity) = fear_target {
-        if let Some(&fear_target_pos) = positions.get(&fear_target_entity) {
+        if let Some(fear_target_info) = combatant_info.get(&fear_target_entity) {
+            let fear_target_pos = fear_target_info.position;
             if try_fear(
                 commands,
                 combat_log,
@@ -231,7 +231,7 @@ fn try_corruption(
     auras: Option<&ActiveAuras>,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
 ) -> bool {
     // Check if target already has Corruption (check by ability name to allow stacking with Immolate)
@@ -266,7 +266,7 @@ fn try_corruption(
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
     let target_id = combatant_info
         .get(&target_entity)
-        .map(|(team, _, class, _, _, _)| format!("Team {} {}", team, class.name()));
+        .map(|info| format!("Team {} {}", info.team, info.class.name()));
     combat_log.log_ability_cast(
         caster_id,
         "Corruption".to_string(),
@@ -330,7 +330,7 @@ fn try_immolate(
     auras: Option<&ActiveAuras>,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
 ) -> bool {
     // Check if target already has Immolate (check by ability name to allow stacking with Corruption)
@@ -373,7 +373,7 @@ fn try_immolate(
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
     let target_id = combatant_info
         .get(&target_entity)
-        .map(|(team, _, class, _, _, _)| format!("Team {} {}", team, class.name()));
+        .map(|info| format!("Team {} {}", info.team, info.class.name()));
     combat_log.log_ability_cast(
         caster_id,
         "Immolate".to_string(),
@@ -407,7 +407,7 @@ fn try_fear(
     auras: Option<&ActiveAuras>,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
 ) -> bool {
     let fear = AbilityType::Fear;
@@ -457,7 +457,7 @@ fn try_fear(
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
     let target_id = combatant_info
         .get(&target_entity)
-        .map(|(team, _, class, _, _, _)| format!("Team {} {}", team, class.name()));
+        .map(|info| format!("Team {} {}", info.team, info.class.name()));
     combat_log.log_ability_cast(
         caster_id,
         "Fear".to_string(),
@@ -491,7 +491,7 @@ fn try_shadowbolt(
     auras: Option<&ActiveAuras>,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
 ) -> bool {
     let shadowbolt = AbilityType::Shadowbolt;
     let shadowbolt_def = abilities.get_unchecked(&shadowbolt);
@@ -521,7 +521,7 @@ fn try_shadowbolt(
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
     let target_id = combatant_info
         .get(&target_entity)
-        .map(|(team, _, class, _, _, _)| format!("Team {} {}", team, class.name()));
+        .map(|info| format!("Team {} {}", info.team, info.class.name()));
     combat_log.log_ability_cast(
         caster_id,
         "Shadowbolt".to_string(),
@@ -557,7 +557,7 @@ fn try_drain_life(
     auras: Option<&ActiveAuras>,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
 ) -> bool {
     // Only use Drain Life when we need healing (HP < 80%)
@@ -611,7 +611,7 @@ fn try_drain_life(
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
     let target_id = combatant_info
         .get(&target_entity)
-        .map(|(team, _, class, _, _, _)| format!("Team {} {}", team, class.name()));
+        .map(|info| format!("Team {} {}", info.team, info.class.name()));
     combat_log.log_ability_cast(
         caster_id,
         "Drain Life".to_string(),
@@ -647,8 +647,7 @@ fn try_spread_curses(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
     active_auras_map: &HashMap<Entity, Vec<Aura>>,
 ) -> bool {
     // Skip if no curse preferences configured
@@ -657,17 +656,15 @@ fn try_spread_curses(
     }
 
     // Build list of enemy entities with their slot indices
-    let mut enemies: Vec<(Entity, Vec3, u8)> = positions
+    let mut enemies: Vec<(Entity, Vec3, u8)> = combatant_info
         .iter()
-        .filter_map(|(&enemy_entity, &enemy_pos)| {
-            combatant_info.get(&enemy_entity).and_then(|(team, slot, _, hp, _, _)| {
-                // Only target alive enemies on opposite team
-                if *team != combatant.team && *hp > 0.0 {
-                    Some((enemy_entity, enemy_pos, *slot))
-                } else {
-                    None
-                }
-            })
+        .filter_map(|(&enemy_entity, info)| {
+            // Only target alive enemies on opposite team
+            if info.team != combatant.team && info.current_health > 0.0 {
+                Some((enemy_entity, info.position, info.slot))
+            } else {
+                None
+            }
         })
         .collect();
 
@@ -741,7 +738,7 @@ fn try_cast_curse(
     auras: Option<&ActiveAuras>,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
     ability: AbilityType,
     ability_name: &str,
 ) -> bool {
@@ -765,7 +762,7 @@ fn try_cast_curse(
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
     let target_id = combatant_info
         .get(&target_entity)
-        .map(|(team, _, class, _, _, _)| format!("Team {} {}", team, class.name()));
+        .map(|info| format!("Team {} {}", info.team, info.class.name()));
     combat_log.log_ability_cast(
         caster_id,
         ability_name.to_string(),
