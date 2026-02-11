@@ -13,6 +13,7 @@
 //! ## Kiting Detection
 //! When being kited (slowed and out of range), the Warlock prioritizes instant-cast
 //! abilities over cast-time spells that would be interrupted by movement.
+#![allow(clippy::too_many_arguments)]
 
 use bevy::prelude::*;
 
@@ -69,7 +70,6 @@ impl ClassAI for WarlockAI {
 /// Warlock AI: Decides and executes abilities for a Warlock combatant.
 ///
 /// Returns `true` if an action was taken this frame (caller should skip to next combatant).
-#[allow(clippy::too_many_arguments)]
 pub fn decide_warlock_action(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -213,7 +213,6 @@ pub fn decide_warlock_action(
 
 /// Try to apply Corruption DoT to target.
 /// Returns true if Corruption was cast.
-#[allow(clippy::too_many_arguments)]
 fn try_corruption(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -311,7 +310,6 @@ fn try_corruption(
 
 /// Try to cast Immolate on target.
 /// Returns true if Immolate cast was started.
-#[allow(clippy::too_many_arguments)]
 fn try_immolate(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -387,7 +385,6 @@ fn try_immolate(
 
 /// Try to cast Fear on target.
 /// Returns true if Fear was started.
-#[allow(clippy::too_many_arguments)]
 fn try_fear(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -470,7 +467,6 @@ fn try_fear(
 
 /// Try to cast Shadow Bolt on target.
 /// Returns true if Shadow Bolt was started.
-#[allow(clippy::too_many_arguments)]
 fn try_shadowbolt(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -536,7 +532,6 @@ fn try_shadowbolt(
 /// Try to channel Drain Life on target.
 /// Only used when HP < 80% and target has at least one DoT ticking.
 /// Returns true if Drain Life was started.
-#[allow(clippy::too_many_arguments)]
 fn try_drain_life(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -627,7 +622,6 @@ fn try_drain_life(
 ///
 /// Curses are mutually exclusive per target - only one curse can be active.
 /// Preferences are indexed by enemy slot (0, 1, 2).
-#[allow(clippy::too_many_arguments)]
 fn try_spread_curses(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -715,7 +709,6 @@ fn try_spread_curses(
 
 /// Cast a specific curse on a target.
 /// Returns true if the curse was cast successfully.
-#[allow(clippy::too_many_arguments)]
 fn try_cast_curse(
     commands: &mut Commands,
     combat_log: &mut CombatLog,

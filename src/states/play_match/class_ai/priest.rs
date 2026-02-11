@@ -9,6 +9,7 @@
 //! 4. Flash Heal (heal injured allies)
 //! 5. Dispel Magic - Maintenance (Roots, DoTs when team HP is stable)
 //! 6. Mind Blast (damage when allies are healthy)
+#![allow(clippy::too_many_arguments)]
 
 use bevy::prelude::*;
 use std::collections::HashSet;
@@ -42,7 +43,6 @@ impl ClassAI for PriestAI {
 /// Priest AI: Decides and executes abilities for a Priest combatant.
 ///
 /// Returns `true` if an action was taken this frame (caller should skip to next combatant).
-#[allow(clippy::too_many_arguments)]
 pub fn decide_priest_action(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -155,7 +155,6 @@ pub fn decide_priest_action(
 
 /// Try to cast Power Word: Fortitude on an unbuffed ally.
 /// Returns true if the ability was used.
-#[allow(clippy::too_many_arguments)]
 fn try_fortitude(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -268,7 +267,6 @@ fn try_fortitude(
 
 /// Try to cast Power Word: Shield on an ally.
 /// Returns true if the ability was used.
-#[allow(clippy::too_many_arguments)]
 fn try_power_word_shield(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -426,7 +424,6 @@ fn try_power_word_shield(
 ///
 /// Note: The actual debuff removed is random per WoW Classic behavior.
 /// The AI just identifies which ally needs dispelling most.
-#[allow(clippy::too_many_arguments)]
 fn try_dispel_magic(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -580,7 +577,6 @@ pub struct DispelPending {
 
 /// Try to cast Flash Heal on the lowest HP ally.
 /// Returns true if the ability was used (started casting).
-#[allow(clippy::too_many_arguments)]
 fn try_flash_heal(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -672,7 +668,6 @@ fn try_flash_heal(
 
 /// Try to cast Mind Blast on the current target.
 /// Returns true if casting was started.
-#[allow(clippy::too_many_arguments)]
 fn try_mind_blast(
     commands: &mut Commands,
     combat_log: &mut CombatLog,

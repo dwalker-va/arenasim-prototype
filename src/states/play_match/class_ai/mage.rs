@@ -8,6 +8,7 @@
 //! 3. Frost Nova (defensive AoE when enemies in melee)
 //! 4. Polymorph (CC non-kill target to create outnumbering situation)
 //! 5. Frostbolt (main damage spell with kiting behavior)
+#![allow(clippy::too_many_arguments)]
 
 use bevy::prelude::*;
 use crate::combat::log::CombatLog;
@@ -41,7 +42,6 @@ impl ClassAI for MageAI {
 /// Mage AI: Decides and executes abilities for a Mage combatant.
 ///
 /// Returns `true` if an action was taken this frame (caller should skip to next combatant).
-#[allow(clippy::too_many_arguments)]
 pub fn decide_mage_action(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -210,7 +210,6 @@ fn try_ice_barrier(
 
 /// Try to cast Arcane Intellect on an unbuffed mana-using ally.
 /// Returns true if the ability was used.
-#[allow(clippy::too_many_arguments)]
 fn try_arcane_intellect(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -323,7 +322,6 @@ fn try_arcane_intellect(
 
 /// Try to cast Frost Nova when enemies are in melee range.
 /// Returns true if the ability was used.
-#[allow(clippy::too_many_arguments)]
 fn try_frost_nova(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -469,7 +467,6 @@ fn try_frost_nova(
 /// be used on targets that won't take damage (the cc_target, not kill_target).
 ///
 /// Returns true if casting was started.
-#[allow(clippy::too_many_arguments)]
 fn try_polymorph(
     commands: &mut Commands,
     combat_log: &mut CombatLog,

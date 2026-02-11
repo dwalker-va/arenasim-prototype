@@ -12,6 +12,7 @@
 //! 6. Holy Light (ally 50-85% HP, safe to cast long heal)
 //! 7. Cleanse - Maintenance (roots, DoTs when team stable)
 //! 8. Holy Shock (damage) - when team healthy
+#![allow(clippy::too_many_arguments)]
 
 use bevy::prelude::*;
 use std::collections::HashMap;
@@ -45,7 +46,6 @@ impl ClassAI for PaladinAI {
 /// Paladin AI: Decides and executes abilities for a Paladin combatant.
 ///
 /// Returns `true` if an action was taken this frame.
-#[allow(clippy::too_many_arguments)]
 pub fn decide_paladin_action(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -202,7 +202,6 @@ pub fn decide_paladin_action(
 ///
 /// Guards: not already active, not on cooldown.
 /// Note: This is also called from the incapacitation bypass path in combat_ai.rs.
-#[allow(clippy::too_many_arguments)]
 pub fn try_divine_shield(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -278,7 +277,6 @@ pub fn try_divine_shield(
 ///
 /// Called from combat_ai.rs before the incapacitation gate.
 /// Only triggers when self is CC'd AND a teammate is in critical danger.
-#[allow(clippy::too_many_arguments)]
 pub fn try_divine_shield_while_cc(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -379,7 +377,6 @@ fn allies_are_healthy(
 }
 
 /// Try to cast Flash of Light on an injured ally.
-#[allow(clippy::too_many_arguments)]
 fn try_flash_of_light(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -453,7 +450,6 @@ fn try_flash_of_light(
 }
 
 /// Try to cast Holy Light on an injured ally (prioritize if above 50% HP for safe slow heal)
-#[allow(clippy::too_many_arguments)]
 fn try_holy_light(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -528,7 +524,6 @@ fn try_holy_light(
 }
 
 /// Try to cast Holy Shock as a heal on an emergency target (< 50% HP)
-#[allow(clippy::too_many_arguments)]
 fn try_holy_shock_heal(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -615,7 +610,6 @@ fn try_holy_shock_heal(
 }
 
 /// Try to cast Holy Shock as damage on an enemy
-#[allow(clippy::too_many_arguments)]
 fn try_holy_shock_damage(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -700,7 +694,6 @@ fn try_holy_shock_damage(
 
 /// Try to cast Hammer of Justice on an enemy in melee range
 /// Prioritizes healers over DPS
-#[allow(clippy::too_many_arguments)]
 fn try_hammer_of_justice(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -818,7 +811,6 @@ fn try_hammer_of_justice(
 }
 
 /// Try to cast Cleanse on an ally with a dispellable debuff.
-#[allow(clippy::too_many_arguments)]
 fn try_cleanse(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -921,7 +913,6 @@ fn try_cleanse(
 
 /// Try to cast Devotion Aura to buff all allies with damage reduction.
 /// Buffs all allies in range at once (unlike per-GCD pre-combat buffs).
-#[allow(clippy::too_many_arguments)]
 fn try_devotion_aura(
     commands: &mut Commands,
     combat_log: &mut CombatLog,

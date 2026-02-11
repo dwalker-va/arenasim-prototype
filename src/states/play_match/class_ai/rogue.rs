@@ -8,6 +8,7 @@
 //! ## Priority Order (In Combat)
 //! 1. Kidney Shot (stun)
 //! 2. Sinister Strike (combo point builder)
+#![allow(clippy::too_many_arguments)]
 
 use bevy::prelude::*;
 
@@ -39,7 +40,6 @@ impl ClassAI for RogueAI {
 /// Rogue AI: Decides and executes abilities for a Rogue combatant.
 ///
 /// Returns `true` if an action was taken this frame (caller should skip to next combatant).
-#[allow(clippy::too_many_arguments)]
 pub fn decide_rogue_action(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -147,7 +147,6 @@ pub fn decide_rogue_action(
 
 /// Try to use Ambush from stealth.
 /// Returns true if Ambush was used.
-#[allow(clippy::too_many_arguments)]
 fn try_ambush(
     combat_log: &mut CombatLog,
     game_rng: &mut GameRng,
@@ -214,7 +213,6 @@ fn try_ambush(
 
 /// Try to use Cheap Shot from stealth.
 /// Returns true if Cheap Shot was used.
-#[allow(clippy::too_many_arguments)]
 fn try_cheap_shot(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -308,7 +306,6 @@ fn try_cheap_shot(
 
 /// Try to use Kidney Shot.
 /// Returns true if Kidney Shot was used.
-#[allow(clippy::too_many_arguments)]
 fn try_kidney_shot(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -408,7 +405,6 @@ fn try_kidney_shot(
 
 /// Try to use Sinister Strike.
 /// Returns true if Sinister Strike was used.
-#[allow(clippy::too_many_arguments)]
 fn try_sinister_strike(
     combat_log: &mut CombatLog,
     game_rng: &mut GameRng,

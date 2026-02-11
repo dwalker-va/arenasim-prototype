@@ -8,6 +8,7 @@
 //! 3. Rend (bleed DoT on target)
 //! 4. Mortal Strike (main damage, healing reduction)
 //! 5. Heroic Strike (rage dump)
+#![allow(clippy::too_many_arguments)]
 
 use bevy::prelude::*;
 
@@ -43,7 +44,6 @@ impl ClassAI for WarriorAI {
 /// Warrior AI: Decides and executes abilities for a Warrior combatant.
 ///
 /// Returns `true` if an action was taken this frame (caller should skip to next combatant).
-#[allow(clippy::too_many_arguments)]
 pub fn decide_warrior_action(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -140,7 +140,6 @@ pub fn decide_warrior_action(
 
 /// Try to cast Battle Shout to buff nearby allies.
 /// Returns true if the ability was used.
-#[allow(clippy::too_many_arguments)]
 fn try_battle_shout(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -237,7 +236,6 @@ fn try_battle_shout(
 
 /// Try to use Charge to close distance.
 /// Returns true if Charge was used.
-#[allow(clippy::too_many_arguments)]
 fn try_charge(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -310,7 +308,6 @@ fn try_charge(
 
 /// Try to apply Rend DoT to target.
 /// Returns true if Rend was used.
-#[allow(clippy::too_many_arguments)]
 fn try_rend(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -400,7 +397,6 @@ fn try_rend(
 
 /// Try to use Mortal Strike.
 /// Returns true if Mortal Strike was used.
-#[allow(clippy::too_many_arguments)]
 fn try_mortal_strike(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
