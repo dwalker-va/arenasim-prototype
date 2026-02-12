@@ -8,12 +8,11 @@
 //! 3. Rend (bleed DoT on target)
 //! 4. Mortal Strike (main damage, healing reduction)
 //! 5. Heroic Strike (rage dump)
+#![allow(clippy::too_many_arguments)]
 
 use bevy::prelude::*;
-use std::collections::HashMap;
 
 use crate::combat::log::{CombatLog, CombatLogEventType};
-use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
@@ -45,7 +44,6 @@ impl ClassAI for WarriorAI {
 /// Warrior AI: Decides and executes abilities for a Warrior combatant.
 ///
 /// Returns `true` if an action was taken this frame (caller should skip to next combatant).
-#[allow(clippy::too_many_arguments)]
 pub fn decide_warrior_action(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -55,10 +53,8 @@ pub fn decide_warrior_action(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
-    active_auras_map: &HashMap<Entity, Vec<Aura>>,
-    instant_attacks: &mut Vec<(Entity, Entity, f32, u8, CharacterClass, AbilityType, bool)>,
+    ctx: &CombatContext,
+    instant_attacks: &mut Vec<super::QueuedInstantAttack>,
 ) -> bool {
     // Check if global cooldown is active
     if combatant.global_cooldown > 0.0 {
@@ -73,9 +69,7 @@ pub fn decide_warrior_action(
         entity,
         combatant,
         my_pos,
-        positions,
-        combatant_info,
-        active_auras_map,
+        ctx,
     ) {
         return true;
     }
@@ -85,9 +79,10 @@ pub fn decide_warrior_action(
         return false;
     };
 
-    let Some(&target_pos) = positions.get(&target_entity) else {
+    let Some(target_info) = ctx.combatants.get(&target_entity) else {
         return false;
     };
+    let target_pos = target_info.position;
 
     // Priority 2: Charge (gap closer)
     if try_charge(
@@ -100,7 +95,7 @@ pub fn decide_warrior_action(
         auras,
         target_entity,
         target_pos,
-        combatant_info,
+        ctx,
     ) {
         return true;
     }
@@ -115,8 +110,7 @@ pub fn decide_warrior_action(
         my_pos,
         target_entity,
         target_pos,
-        combatant_info,
-        active_auras_map,
+        ctx,
     ) {
         return true;
     }
@@ -132,7 +126,7 @@ pub fn decide_warrior_action(
         my_pos,
         target_entity,
         target_pos,
-        combatant_info,
+        ctx,
         instant_attacks,
     ) {
         return true;
@@ -146,7 +140,6 @@ pub fn decide_warrior_action(
 
 /// Try to cast Battle Shout to buff nearby allies.
 /// Returns true if the ability was used.
-#[allow(clippy::too_many_arguments)]
 fn try_battle_shout(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -154,31 +147,24 @@ fn try_battle_shout(
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
-    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+    ctx: &CombatContext,
 ) -> bool {
     // Check if any nearby ally needs the buff
     let mut allies_to_buff: Vec<Entity> = Vec::new();
 
-    for (ally_entity, &(ally_team, _, _ally_class, ally_hp, _ally_max_hp, _)) in combatant_info.iter() {
+    for (ally_entity, info) in ctx.combatants.iter() {
         // Must be same team and alive
-        if ally_team != combatant.team || ally_hp <= 0.0 {
+        if info.team != combatant.team || info.current_health <= 0.0 {
             continue;
         }
 
-        // Get ally position to check range
-        let Some(&ally_pos) = positions.get(ally_entity) else {
-            continue;
-        };
-
-        let distance_to_ally = my_pos.distance(ally_pos);
+        let distance_to_ally = my_pos.distance(info.position);
         if distance_to_ally > BATTLE_SHOUT_RANGE {
             continue;
         }
 
         // Check if ally already has AttackPowerIncrease buff
-        let has_battle_shout = active_auras_map
+        let has_battle_shout = ctx.active_auras
             .get(ally_entity)
             .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::AttackPowerIncrease))
             .unwrap_or(false);
@@ -250,7 +236,6 @@ fn try_battle_shout(
 
 /// Try to use Charge to close distance.
 /// Returns true if Charge was used.
-#[allow(clippy::too_many_arguments)]
 fn try_charge(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -261,7 +246,7 @@ fn try_charge(
     auras: Option<&ActiveAuras>,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    ctx: &CombatContext,
 ) -> bool {
     let charge = AbilityType::Charge;
     let charge_def = abilities.get_unchecked(&charge);
@@ -297,9 +282,9 @@ fn try_charge(
 
     // Log
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = combatant_info
+    let target_id = ctx.combatants
         .get(&target_entity)
-        .map(|(team, _, class, _, _, _)| format!("Team {} {}", team, class.name()));
+        .map(|info| format!("Team {} {}", info.team, info.class.name()));
     combat_log.log_ability_cast(
         caster_id,
         "Charge".to_string(),
@@ -323,7 +308,6 @@ fn try_charge(
 
 /// Try to apply Rend DoT to target.
 /// Returns true if Rend was used.
-#[allow(clippy::too_many_arguments)]
 fn try_rend(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -333,11 +317,10 @@ fn try_rend(
     my_pos: Vec3,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
-    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+    ctx: &CombatContext,
 ) -> bool {
     // Check if target already has Rend (any DoT for now)
-    let target_has_rend = active_auras_map
+    let target_has_rend = ctx.active_auras
         .get(&target_entity)
         .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::DamageOverTime))
         .unwrap_or(false);
@@ -359,9 +342,9 @@ fn try_rend(
 
     // Log
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = combatant_info
+    let target_id = ctx.combatants
         .get(&target_entity)
-        .map(|(team, _, class, _, _, _)| format!("Team {} {}", team, class.name()));
+        .map(|info| format!("Team {} {}", info.team, info.class.name()));
     combat_log.log_ability_cast(
         caster_id,
         "Rend".to_string(),
@@ -414,7 +397,6 @@ fn try_rend(
 
 /// Try to use Mortal Strike.
 /// Returns true if Mortal Strike was used.
-#[allow(clippy::too_many_arguments)]
 fn try_mortal_strike(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -425,8 +407,8 @@ fn try_mortal_strike(
     my_pos: Vec3,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
-    instant_attacks: &mut Vec<(Entity, Entity, f32, u8, CharacterClass, AbilityType, bool)>,
+    ctx: &CombatContext,
+    instant_attacks: &mut Vec<super::QueuedInstantAttack>,
 ) -> bool {
     let mortal_strike = AbilityType::MortalStrike;
     let ms_def = abilities.get_unchecked(&mortal_strike);
@@ -445,8 +427,8 @@ fn try_mortal_strike(
     }
 
     // Get target info
-    let (target_team, target_class) = match combatant_info.get(&target_entity) {
-        Some(&(team, _, class, _, _, _)) => (team, class),
+    let target_info = match ctx.combatants.get(&target_entity) {
+        Some(info) => info,
         None => return false,
     };
 
@@ -460,7 +442,7 @@ fn try_mortal_strike(
     combat_log.log_ability_cast(
         caster_id,
         "Mortal Strike".to_string(),
-        Some(format!("Team {} {}", target_team, target_class.name())),
+        Some(format!("Team {} {}", target_info.team, target_info.class.name())),
         format!(
             "Team {} {} uses Mortal Strike",
             combatant.team,
@@ -472,15 +454,15 @@ fn try_mortal_strike(
     let mut damage = combatant.calculate_ability_damage_config(ms_def, game_rng);
     let is_crit = roll_crit(combatant.crit_chance, game_rng);
     if is_crit { damage *= CRIT_DAMAGE_MULTIPLIER; }
-    instant_attacks.push((
-        entity,
-        target_entity,
+    instant_attacks.push(super::QueuedInstantAttack {
+        attacker: entity,
+        target: target_entity,
         damage,
-        combatant.team,
-        combatant.class,
-        mortal_strike,
+        attacker_team: combatant.team,
+        attacker_class: combatant.class,
+        ability: mortal_strike,
         is_crit,
-    ));
+    });
 
     // Apply healing reduction aura
     if let Some(aura) = ms_def.applies_aura.as_ref() {

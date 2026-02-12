@@ -22,27 +22,52 @@ pub mod warlock;
 pub mod paladin;
 
 use bevy::prelude::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use super::match_config::CharacterClass;
 use super::abilities::AbilityType;
 use super::components::{Aura, Combatant, AuraType};
 
-/// Information about a single combatant, used for AI decision making.
-#[derive(Clone, Debug)]
+/// Per-frame snapshot of a single combatant, used for AI decision making.
+#[derive(Clone, Copy, Debug)]
 pub struct CombatantInfo {
     pub entity: Entity,
     pub team: u8,
+    pub slot: u8,
     pub class: CharacterClass,
     pub current_health: f32,
     pub max_health: f32,
     pub current_mana: f32,
     pub max_mana: f32,
+    /// Per-frame snapshot from Transform.
     pub position: Vec3,
     pub is_alive: bool,
     pub stealthed: bool,
-    pub has_target: bool,
     pub target: Option<Entity>,
+}
+
+/// Deferred instant melee attack (Mortal Strike, Ambush, Sinister Strike, etc.)
+#[derive(Clone, Copy)]
+pub struct QueuedInstantAttack {
+    pub attacker: Entity,
+    pub target: Entity,
+    pub damage: f32,
+    pub attacker_team: u8,
+    pub attacker_class: CharacterClass,
+    pub ability: AbilityType,
+    pub is_crit: bool,
+}
+
+/// Deferred AoE damage (Frost Nova).
+#[derive(Clone, Copy)]
+pub struct QueuedAoeDamage {
+    pub caster: Entity,
+    pub target: Entity,
+    pub damage: f32,
+    pub caster_team: u8,
+    pub caster_class: CharacterClass,
+    pub target_pos: Vec3,
+    pub is_crit: bool,
 }
 
 impl CombatantInfo {
@@ -75,16 +100,12 @@ impl CombatantInfo {
 /// This struct provides a read-only view of the game state that AI modules
 /// can use to make decisions without directly accessing ECS queries.
 pub struct CombatContext<'a> {
-    /// Map of entity to combatant info
+    /// Map of entity to combatant info (per-frame snapshot)
     pub combatants: &'a HashMap<Entity, CombatantInfo>,
     /// Map of entity to their active auras
     pub active_auras: &'a HashMap<Entity, Vec<Aura>>,
-    /// Entities that have been shielded this frame (to prevent double-shielding)
-    pub shielded_this_frame: &'a HashSet<Entity>,
     /// The combatant making the decision
     pub self_entity: Entity,
-    /// Whether gates have opened (combat has started)
-    pub gates_opened: bool,
 }
 
 impl<'a> CombatContext<'a> {
@@ -171,10 +192,6 @@ impl<'a> CombatContext<'a> {
             .min_by(|a, b| a.health_pct().partial_cmp(&b.health_pct()).unwrap())
     }
 
-    /// Check if the target entity has been shielded this frame
-    pub fn was_shielded_this_frame(&self, entity: Entity) -> bool {
-        self.shielded_this_frame.contains(&entity)
-    }
 }
 
 /// The result of an AI decision.
@@ -255,13 +272,13 @@ pub fn dispel_priority(aura_type: AuraType) -> i32 {
 /// vs focusing on healing.
 pub fn is_team_healthy(
     team: u8,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
 ) -> bool {
-    for &(ally_team, _, _, ally_hp, ally_max_hp, _) in combatant_info.values() {
-        if ally_team != team || ally_hp <= 0.0 {
+    for info in combatant_info.values() {
+        if info.team != team || info.current_health <= 0.0 {
             continue;
         }
-        let hp_percent = ally_hp / ally_max_hp;
+        let hp_percent = info.current_health / info.max_health;
         if hp_percent < 0.70 {
             return false;
         }

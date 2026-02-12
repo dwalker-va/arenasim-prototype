@@ -276,17 +276,26 @@ pub fn decide_abilities(
         return;
     }
 
-    // First pass: collect position and info from ALL combatants we can decide for
-    // (this query excludes casting/channeling combatants)
-    let positions: std::collections::HashMap<Entity, Vec3> = combatants
+    // CombatantInfo is a per-frame snapshot. Mutations to Combatant components
+    // during class AI dispatch are not reflected in other entities' views.
+    // Safe because each entity is dispatched at most once per frame.
+    let combatant_info: std::collections::HashMap<Entity, class_ai::CombatantInfo> = combatants
         .iter()
-        .map(|(entity, _, transform, _)| (entity, transform.translation))
-        .collect();
-
-    let combatant_info: std::collections::HashMap<Entity, (u8, u8, match_config::CharacterClass, f32, f32, bool)> = combatants
-        .iter()
-        .map(|(entity, combatant, _, _)| {
-            (entity, (combatant.team, combatant.slot, combatant.class, combatant.current_health, combatant.max_health, combatant.stealthed))
+        .map(|(entity, combatant, transform, _)| {
+            (entity, class_ai::CombatantInfo {
+                entity,
+                team: combatant.team,
+                slot: combatant.slot,
+                class: combatant.class,
+                current_health: combatant.current_health,
+                max_health: combatant.max_health,
+                current_mana: combatant.current_mana,
+                max_mana: combatant.max_mana,
+                position: transform.translation,
+                is_alive: combatant.is_alive(),
+                stealthed: combatant.stealthed,
+                target: combatant.target,
+            })
         })
         .collect();
 
@@ -312,10 +321,8 @@ pub fn decide_abilities(
         active_auras_map.insert(entity, auras.auras.clone());
     }
     
-    // Queue for Ambush attacks (attacker, target, damage, team, class)
     // Queue for instant ability attacks (Ambush, Sinister Strike, Mortal Strike)
-    // Format: (attacker_entity, target_entity, damage, attacker_team, attacker_class, ability_type)
-    let mut instant_attacks: Vec<(Entity, Entity, f32, u8, match_config::CharacterClass, AbilityType, bool)> = Vec::new();
+    let mut instant_attacks: Vec<class_ai::QueuedInstantAttack> = Vec::new();
 
     // Track targets that have been shielded THIS FRAME to prevent same-frame double-shielding
     // This handles the case where multiple Priests try to shield the same target before AuraPending is processed
@@ -325,8 +332,8 @@ pub fn decide_abilities(
     // This handles the case where multiple Priests try to buff the same target before AuraPending is processed
     let mut fortified_this_frame: std::collections::HashSet<Entity> = std::collections::HashSet::new();
     
-    // Queue for Frost Nova damage (caster, target, damage, caster_team, caster_class, target_pos)
-    let mut frost_nova_damage: Vec<(Entity, Entity, f32, u8, match_config::CharacterClass, Vec3, bool)> = Vec::new();
+    // Queue for Frost Nova damage
+    let mut frost_nova_damage: Vec<class_ai::QueuedAoeDamage> = Vec::new();
     
     for (entity, mut combatant, transform, auras) in combatants.iter_mut() {
         if !combatant.is_alive() {
@@ -342,6 +349,11 @@ pub fn decide_abilities(
 
         // Paladin-specific: Divine Shield can be used while incapacitated
         if is_incapacitated && combatant.class == match_config::CharacterClass::Paladin {
+            let cc_ctx = class_ai::CombatContext {
+                combatants: &combatant_info,
+                active_auras: &active_auras_map,
+                self_entity: entity,
+            };
             if class_ai::paladin::try_divine_shield_while_cc(
                 &mut commands,
                 &mut combat_log,
@@ -349,7 +361,7 @@ pub fn decide_abilities(
                 entity,
                 &mut combatant,
                 auras.as_deref(),
-                &combatant_info,
+                &cc_ctx,
             ) {
                 continue; // DivineShieldPending spawned — CC will be purged next frame
             }
@@ -361,7 +373,13 @@ pub fn decide_abilities(
         }
         
         let my_pos = transform.translation;
-        
+
+        let ctx = class_ai::CombatContext {
+            combatants: &combatant_info,
+            active_auras: &active_auras_map,
+            self_entity: entity,
+        };
+
         // Mages cast spells on enemies
         if combatant.class == match_config::CharacterClass::Mage {
             if class_ai::mage::decide_mage_action(
@@ -373,9 +391,7 @@ pub fn decide_abilities(
                 &mut combatant,
                 my_pos,
                 auras.as_deref(),
-                &positions,
-                &combatant_info,
-                &active_auras_map,
+                &ctx,
                 &mut frost_nova_damage,
             ) {
                 continue;
@@ -391,9 +407,7 @@ pub fn decide_abilities(
                 &mut combatant,
                 my_pos,
                 auras.as_deref(),
-                &positions,
-                &combatant_info,
-                &active_auras_map,
+                &ctx,
                 &mut shielded_this_frame,
                 &mut fortified_this_frame,
             ) {
@@ -412,9 +426,7 @@ pub fn decide_abilities(
                 &mut combatant,
                 my_pos,
                 auras.as_deref(),
-                &positions,
-                &combatant_info,
-                &active_auras_map,
+                &ctx,
                 &mut instant_attacks,
             ) {
                 continue;
@@ -431,9 +443,7 @@ pub fn decide_abilities(
                 entity,
                 &mut combatant,
                 my_pos,
-                &positions,
-                &combatant_info,
-                &active_auras_map,
+                &ctx,
                 &mut instant_attacks,
             ) {
                 continue;
@@ -450,9 +460,7 @@ pub fn decide_abilities(
                 &mut combatant,
                 my_pos,
                 auras.as_deref(),
-                &positions,
-                &combatant_info,
-                &active_auras_map,
+                &ctx,
             ) {
                 continue;
             }
@@ -468,17 +476,24 @@ pub fn decide_abilities(
                 &mut combatant,
                 my_pos,
                 auras.as_deref(),
-                &positions,
-                &combatant_info,
-                &active_auras_map,
+                &ctx,
             ) {
                 continue;
             }
         }
     }
 
-    // Process queued instant attacks (Ambush, Sinister Strike)
-    for (attacker_entity, target_entity, damage, attacker_team, attacker_class, ability, is_crit) in instant_attacks {
+    // Process queued instant attacks (Ambush, Sinister Strike, Mortal Strike)
+    for atk in instant_attacks {
+        let class_ai::QueuedInstantAttack {
+            attacker: attacker_entity,
+            target: target_entity,
+            damage,
+            attacker_team,
+            attacker_class,
+            ability,
+            is_crit,
+        } = atk;
         let ability_name = abilities.get_unchecked(&ability).name.clone();
         let mut actual_damage = 0.0;
 
@@ -627,7 +642,16 @@ pub fn decide_abilities(
     }
     
     // Process queued Frost Nova damage
-    for (caster_entity, target_entity, damage, caster_team, caster_class, _target_pos, is_crit) in frost_nova_damage {
+    for aoe in frost_nova_damage {
+        let class_ai::QueuedAoeDamage {
+            caster: caster_entity,
+            target: target_entity,
+            damage,
+            caster_team,
+            caster_class,
+            target_pos: _target_pos,
+            is_crit,
+        } = aoe;
         let mut actual_damage = 0.0;
 
         if let Ok((_, mut target, target_transform, mut target_auras)) = combatants.get_mut(target_entity) {

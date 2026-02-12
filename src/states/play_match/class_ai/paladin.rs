@@ -12,6 +12,7 @@
 //! 6. Holy Light (ally 50-85% HP, safe to cast long heal)
 //! 7. Cleanse - Maintenance (roots, DoTs when team stable)
 //! 8. Holy Shock (damage) - when team healthy
+#![allow(clippy::too_many_arguments)]
 
 use bevy::prelude::*;
 use std::collections::HashMap;
@@ -30,7 +31,7 @@ use crate::states::play_match::is_spell_school_locked;
 use crate::states::play_match::utils::combatant_id;
 
 use super::priest::DispelPending;
-use super::{dispel_priority, AbilityDecision, ClassAI, CombatContext};
+use super::{dispel_priority, AbilityDecision, ClassAI, CombatContext, CombatantInfo};
 
 /// Paladin AI implementation
 pub struct PaladinAI;
@@ -45,7 +46,6 @@ impl ClassAI for PaladinAI {
 /// Paladin AI: Decides and executes abilities for a Paladin combatant.
 ///
 /// Returns `true` if an action was taken this frame.
-#[allow(clippy::too_many_arguments)]
 pub fn decide_paladin_action(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -54,9 +54,7 @@ pub fn decide_paladin_action(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
-    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+    ctx: &CombatContext,
 ) -> bool {
     // Check if global cooldown is active
     if combatant.global_cooldown > 0.0 {
@@ -72,9 +70,7 @@ pub fn decide_paladin_action(
         combatant,
         my_pos,
         auras,
-        positions,
-        combatant_info,
-        active_auras_map,
+        ctx,
     ) {
         return true;
     }
@@ -87,7 +83,7 @@ pub fn decide_paladin_action(
         entity,
         combatant,
         auras,
-        combatant_info,
+        ctx,
     ) {
         return true;
     }
@@ -100,16 +96,14 @@ pub fn decide_paladin_action(
         combatant,
         my_pos,
         auras,
-        positions,
-        combatant_info,
-        active_auras_map,
+        ctx,
         90, // Only Polymorph (100) and Fear (90)
     ) {
         return true;
     }
 
     // Priority 3: Emergency healing - Holy Shock (heal) when ally < 40% HP
-    if has_emergency_target(combatant.team, combatant_info) {
+    if has_emergency_target(combatant.team, ctx.combatants) {
         if try_holy_shock_heal(
             commands,
             combat_log,
@@ -117,8 +111,7 @@ pub fn decide_paladin_action(
             combatant,
             my_pos,
             auras,
-            positions,
-            combatant_info,
+            ctx,
         ) {
             return true;
         }
@@ -132,8 +125,7 @@ pub fn decide_paladin_action(
         combatant,
         my_pos,
         auras,
-        positions,
-        combatant_info,
+        ctx,
     ) {
         return true;
     }
@@ -147,8 +139,7 @@ pub fn decide_paladin_action(
         combatant,
         my_pos,
         auras,
-        positions,
-        combatant_info,
+        ctx,
     ) {
         return true;
     }
@@ -163,14 +154,13 @@ pub fn decide_paladin_action(
         combatant,
         my_pos,
         auras,
-        positions,
-        combatant_info,
+        ctx,
     ) {
         return true;
     }
 
     // Priority 7: Cleanse - Maintenance (roots, DoTs when team stable)
-    if allies_are_healthy(combatant.team, combatant_info) {
+    if allies_are_healthy(combatant.team, ctx.combatants) {
         if try_cleanse(
             commands,
             combat_log,
@@ -178,9 +168,7 @@ pub fn decide_paladin_action(
             combatant,
             my_pos,
             auras,
-            positions,
-            combatant_info,
-            active_auras_map,
+            ctx,
             50, // Include roots and DoTs
         ) {
             return true;
@@ -188,7 +176,7 @@ pub fn decide_paladin_action(
     }
 
     // Priority 8: Holy Shock (damage) - when team healthy
-    if allies_are_healthy(combatant.team, combatant_info) {
+    if allies_are_healthy(combatant.team, ctx.combatants) {
         if try_holy_shock_damage(
             commands,
             combat_log,
@@ -196,8 +184,7 @@ pub fn decide_paladin_action(
             combatant,
             my_pos,
             auras,
-            positions,
-            combatant_info,
+            ctx,
         ) {
             return true;
         }
@@ -215,7 +202,6 @@ pub fn decide_paladin_action(
 ///
 /// Guards: not already active, not on cooldown.
 /// Note: This is also called from the incapacitation bypass path in combat_ai.rs.
-#[allow(clippy::too_many_arguments)]
 pub fn try_divine_shield(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -223,7 +209,7 @@ pub fn try_divine_shield(
     entity: Entity,
     combatant: &mut Combatant,
     auras: Option<&ActiveAuras>,
-    _combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    _ctx: &CombatContext,
 ) -> bool {
     let def = abilities.get(&AbilityType::DivineShield);
     let def = match def {
@@ -291,7 +277,6 @@ pub fn try_divine_shield(
 ///
 /// Called from combat_ai.rs before the incapacitation gate.
 /// Only triggers when self is CC'd AND a teammate is in critical danger.
-#[allow(clippy::too_many_arguments)]
 pub fn try_divine_shield_while_cc(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -299,7 +284,7 @@ pub fn try_divine_shield_while_cc(
     entity: Entity,
     combatant: &mut Combatant,
     auras: Option<&ActiveAuras>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    ctx: &CombatContext,
 ) -> bool {
     let def = abilities.get(&AbilityType::DivineShield);
     let def = match def {
@@ -318,11 +303,11 @@ pub fn try_divine_shield_while_cc(
     }
 
     // CC break trigger: any teammate below critical HP (they need healing NOW)
-    let teammate_in_danger = combatant_info.values().any(|(ally_team, _, _, hp, max_hp, _)| {
-        *ally_team == combatant.team
-            && *hp > 0.0
-            && *max_hp > 0.0
-            && (*hp / *max_hp) < DIVINE_SHIELD_HP_THRESHOLD
+    let teammate_in_danger = ctx.combatants.values().any(|info| {
+        info.team == combatant.team
+            && info.current_health > 0.0
+            && info.max_health > 0.0
+            && (info.current_health / info.max_health) < DIVINE_SHIELD_HP_THRESHOLD
     });
 
     // Also trigger if self is in survival danger
@@ -367,26 +352,31 @@ pub fn try_divine_shield_while_cc(
 /// Check if any ally is in an emergency situation (below critical HP threshold)
 fn has_emergency_target(
     team: u8,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
 ) -> bool {
-    combatant_info.values().any(|(ally_team, _, _, hp, max_hp, _)| {
-        *ally_team == team && *hp > 0.0 && *max_hp > 0.0 && (*hp / *max_hp) < CRITICAL_HP_THRESHOLD
+    combatant_info.values().any(|info| {
+        info.team == team
+            && info.current_health > 0.0
+            && info.max_health > 0.0
+            && (info.current_health / info.max_health) < CRITICAL_HP_THRESHOLD
     })
 }
 
 /// Check if all allies are healthy (above healthy HP threshold)
 fn allies_are_healthy(
     team: u8,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    combatant_info: &HashMap<Entity, CombatantInfo>,
 ) -> bool {
     combatant_info
         .values()
-        .filter(|(ally_team, _, _, hp, _, _)| *ally_team == team && *hp > 0.0)
-        .all(|(_, _, _, hp, max_hp, _)| *max_hp > 0.0 && (*hp / *max_hp) >= HEALTHY_HP_THRESHOLD)
+        .filter(|info| info.team == team && info.current_health > 0.0)
+        .all(|info| {
+            info.max_health > 0.0
+                && (info.current_health / info.max_health) >= HEALTHY_HP_THRESHOLD
+        })
 }
 
 /// Try to cast Flash of Light on an injured ally.
-#[allow(clippy::too_many_arguments)]
 fn try_flash_of_light(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -395,8 +385,7 @@ fn try_flash_of_light(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    ctx: &CombatContext,
 ) -> bool {
     let ability = AbilityType::FlashOfLight;
     let def = abilities.get_unchecked(&ability);
@@ -410,13 +399,16 @@ fn try_flash_of_light(
     }
 
     // Find the lowest HP ally (below 90%)
-    let heal_target = combatant_info
+    let heal_target = ctx.combatants
         .iter()
-        .filter(|(_, (team, _, _, hp, max_hp, _))| {
-            *team == combatant.team && *hp > 0.0 && *max_hp > 0.0 && (*hp / *max_hp) < 0.9
+        .filter(|(_, info)| {
+            info.team == combatant.team
+                && info.current_health > 0.0
+                && info.max_health > 0.0
+                && (info.current_health / info.max_health) < 0.9
         })
-        .filter_map(|(e, (_, _, class, hp, max_hp, _))| {
-            positions.get(e).map(|pos| (e, class, *hp / *max_hp, pos))
+        .map(|(e, info)| {
+            (e, info.class, info.current_health / info.max_health, info.position)
         })
         .min_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
 
@@ -424,7 +416,7 @@ fn try_flash_of_light(
         return false;
     };
 
-    if !ability.can_cast_config(combatant, *target_pos, my_pos, def) {
+    if !ability.can_cast_config(combatant, target_pos, my_pos, def) {
         return false;
     }
 
@@ -458,7 +450,6 @@ fn try_flash_of_light(
 }
 
 /// Try to cast Holy Light on an injured ally (prioritize if above 50% HP for safe slow heal)
-#[allow(clippy::too_many_arguments)]
 fn try_holy_light(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -467,8 +458,7 @@ fn try_holy_light(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    ctx: &CombatContext,
 ) -> bool {
     let ability = AbilityType::HolyLight;
     let def = abilities.get_unchecked(&ability);
@@ -482,17 +472,17 @@ fn try_holy_light(
     }
 
     // Find an ally between 50-85% HP (safe to use slow heal)
-    let heal_target = combatant_info
+    let heal_target = ctx.combatants
         .iter()
-        .filter(|(_, (team, _, _, hp, max_hp, _))| {
-            if *team != combatant.team || *hp <= 0.0 || *max_hp <= 0.0 {
+        .filter(|(_, info)| {
+            if info.team != combatant.team || info.current_health <= 0.0 || info.max_health <= 0.0 {
                 return false;
             }
-            let pct = *hp / *max_hp;
+            let pct = info.current_health / info.max_health;
             pct >= LOW_HP_THRESHOLD && pct < SAFE_HEAL_MAX_THRESHOLD
         })
-        .filter_map(|(e, (_, _, class, hp, max_hp, _))| {
-            positions.get(e).map(|pos| (e, class, *hp / *max_hp, pos))
+        .map(|(e, info)| {
+            (e, info.class, info.current_health / info.max_health, info.position)
         })
         .min_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
 
@@ -500,7 +490,7 @@ fn try_holy_light(
         return false;
     };
 
-    if !ability.can_cast_config(combatant, *target_pos, my_pos, def) {
+    if !ability.can_cast_config(combatant, target_pos, my_pos, def) {
         return false;
     }
 
@@ -534,7 +524,6 @@ fn try_holy_light(
 }
 
 /// Try to cast Holy Shock as a heal on an emergency target (< 50% HP)
-#[allow(clippy::too_many_arguments)]
 fn try_holy_shock_heal(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -542,8 +531,7 @@ fn try_holy_shock_heal(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    ctx: &CombatContext,
 ) -> bool {
     let ability = AbilityType::HolyShock;
     let def = abilities.get_unchecked(&ability);
@@ -568,19 +556,20 @@ fn try_holy_shock_heal(
     }
 
     // Find lowest HP ally below 50% and in range
-    let heal_target = combatant_info
+    let heal_target = ctx.combatants
         .iter()
-        .filter(|(_, (team, _, _, hp, max_hp, _))| {
-            *team == combatant.team && *hp > 0.0 && *max_hp > 0.0 && (*hp / *max_hp) < LOW_HP_THRESHOLD
+        .filter(|(_, info)| {
+            info.team == combatant.team
+                && info.current_health > 0.0
+                && info.max_health > 0.0
+                && (info.current_health / info.max_health) < LOW_HP_THRESHOLD
         })
-        .filter_map(|(e, (_, _, class, hp, max_hp, _))| {
-            positions.get(e).and_then(|pos| {
-                if my_pos.distance(*pos) <= def.range {
-                    Some((e, class, *hp / *max_hp))
-                } else {
-                    None
-                }
-            })
+        .filter_map(|(e, info)| {
+            if my_pos.distance(info.position) <= def.range {
+                Some((e, info.class, info.current_health / info.max_health))
+            } else {
+                None
+            }
         })
         .min_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
 
@@ -621,7 +610,6 @@ fn try_holy_shock_heal(
 }
 
 /// Try to cast Holy Shock as damage on an enemy
-#[allow(clippy::too_many_arguments)]
 fn try_holy_shock_damage(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -629,8 +617,7 @@ fn try_holy_shock_damage(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    ctx: &CombatContext,
 ) -> bool {
     let ability = AbilityType::HolyShock;
     let def = abilities.get_unchecked(&ability);
@@ -655,19 +642,17 @@ fn try_holy_shock_damage(
     }
 
     // Find an enemy in range (20 yards for damage), filter out stealthed
-    let damage_target = combatant_info
+    let damage_target = ctx.combatants
         .iter()
-        .filter(|(_, (team, _, _, hp, _, stealthed))| {
-            *team != combatant.team && *hp > 0.0 && !*stealthed
+        .filter(|(_, info)| {
+            info.team != combatant.team && info.current_health > 0.0 && !info.stealthed
         })
-        .find_map(|(e, (_, _, class, _, _, _))| {
-            positions.get(e).and_then(|pos| {
-                if my_pos.distance(*pos) <= HOLY_SHOCK_DAMAGE_RANGE {
-                    Some((e, class))
-                } else {
-                    None
-                }
-            })
+        .find_map(|(e, info)| {
+            if my_pos.distance(info.position) <= HOLY_SHOCK_DAMAGE_RANGE {
+                Some((e, info.class))
+            } else {
+                None
+            }
         });
 
     let Some((target_entity, target_class)) = damage_target else {
@@ -709,7 +694,6 @@ fn try_holy_shock_damage(
 
 /// Try to cast Hammer of Justice on an enemy in melee range
 /// Prioritizes healers over DPS
-#[allow(clippy::too_many_arguments)]
 fn try_hammer_of_justice(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -717,8 +701,7 @@ fn try_hammer_of_justice(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    ctx: &CombatContext,
 ) -> bool {
     let ability = AbilityType::HammerOfJustice;
     let def = abilities.get_unchecked(&ability);
@@ -743,19 +726,17 @@ fn try_hammer_of_justice(
     }
 
     // Find enemies in range, filter out stealthed
-    let enemies_in_range: Vec<(&Entity, &CharacterClass)> = combatant_info
+    let enemies_in_range: Vec<(&Entity, CharacterClass)> = ctx.combatants
         .iter()
-        .filter(|(_, (team, _, _, hp, _, stealthed))| {
-            *team != combatant.team && *hp > 0.0 && !*stealthed
+        .filter(|(_, info)| {
+            info.team != combatant.team && info.current_health > 0.0 && !info.stealthed
         })
-        .filter_map(|(e, (_, _, class, _, _, _))| {
-            positions.get(e).and_then(|pos| {
-                if my_pos.distance(*pos) <= def.range {
-                    Some((e, class))
-                } else {
-                    None
-                }
-            })
+        .filter_map(|(e, info)| {
+            if my_pos.distance(info.position) <= def.range {
+                Some((e, info.class))
+            } else {
+                None
+            }
         })
         .collect();
 
@@ -830,7 +811,6 @@ fn try_hammer_of_justice(
 }
 
 /// Try to cast Cleanse on an ally with a dispellable debuff.
-#[allow(clippy::too_many_arguments)]
 fn try_cleanse(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -838,9 +818,7 @@ fn try_cleanse(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
-    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+    ctx: &CombatContext,
     min_priority: i32,
 ) -> bool {
     let ability = AbilityType::PaladinCleanse;
@@ -855,24 +833,21 @@ fn try_cleanse(
     }
 
     // Find ally with highest priority dispellable debuff
-    let mut best_candidate: Option<(&Entity, &CharacterClass, i32)> = None;
+    let mut best_candidate: Option<(&Entity, CharacterClass, i32)> = None;
 
-    for (e, (team, _, class, hp, _, _)) in combatant_info.iter() {
+    for (e, info) in ctx.combatants.iter() {
         // Must be alive ally
-        if *team != combatant.team || *hp <= 0.0 {
+        if info.team != combatant.team || info.current_health <= 0.0 {
             continue;
         }
 
         // Check range
-        let Some(ally_pos) = positions.get(e) else {
-            continue;
-        };
-        if my_pos.distance(*ally_pos) > def.range {
+        if my_pos.distance(info.position) > def.range {
             continue;
         }
 
         // Check if ally has any dispellable debuffs
-        let Some(ally_auras) = active_auras_map.get(e) else {
+        let Some(ally_auras) = ctx.active_auras.get(e) else {
             continue;
         };
 
@@ -895,9 +870,9 @@ fn try_cleanse(
         }
 
         match best_candidate {
-            None => best_candidate = Some((e, class, highest_priority)),
+            None => best_candidate = Some((e, info.class, highest_priority)),
             Some((_, _, best_prio)) if highest_priority > best_prio => {
-                best_candidate = Some((e, class, highest_priority));
+                best_candidate = Some((e, info.class, highest_priority));
             }
             _ => {}
         }
@@ -938,7 +913,6 @@ fn try_cleanse(
 
 /// Try to cast Devotion Aura to buff all allies with damage reduction.
 /// Buffs all allies in range at once (unlike per-GCD pre-combat buffs).
-#[allow(clippy::too_many_arguments)]
 fn try_devotion_aura(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -947,9 +921,7 @@ fn try_devotion_aura(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
-    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+    ctx: &CombatContext,
 ) -> bool {
     let ability = AbilityType::DevotionAura;
     let def = abilities.get_unchecked(&ability);
@@ -966,7 +938,7 @@ fn try_devotion_aura(
 
     // Helper to check if an entity has Devotion Aura
     let has_devotion_aura = |e: &Entity| -> bool {
-        active_auras_map
+        ctx.active_auras
             .get(e)
             .map(|auras| {
                 auras.iter().any(|a| {
@@ -978,10 +950,10 @@ fn try_devotion_aura(
     };
 
     // Gather allies
-    let allies: Vec<(&Entity, &CharacterClass)> = combatant_info
+    let allies: Vec<(&Entity, CharacterClass)> = ctx.combatants
         .iter()
-        .filter(|(_, (team, _, _, hp, _, _))| *team == combatant.team && *hp > 0.0)
-        .map(|(e, (_, _, class, _, _, _))| (e, class))
+        .filter(|(_, info)| info.team == combatant.team && info.current_health > 0.0)
+        .map(|(e, info)| (e, info.class))
         .collect();
 
     // If ANY ally already has Devotion Aura, we've already buffed the team
@@ -990,16 +962,15 @@ fn try_devotion_aura(
     }
 
     // Find all allies in range who need the buff
-    let allies_to_buff: Vec<&Entity> = allies
+    let allies_to_buff: Vec<&Entity> = ctx.combatants
         .iter()
-        .filter_map(|(e, _)| {
-            positions.get(*e).and_then(|pos| {
-                if my_pos.distance(*pos) <= def.range {
-                    Some(*e)
-                } else {
-                    None
-                }
-            })
+        .filter(|(_, info)| info.team == combatant.team && info.current_health > 0.0)
+        .filter_map(|(e, info)| {
+            if my_pos.distance(info.position) <= def.range {
+                Some(e)
+            } else {
+                None
+            }
         })
         .collect();
 

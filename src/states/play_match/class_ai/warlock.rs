@@ -13,12 +13,12 @@
 //! ## Kiting Detection
 //! When being kited (slowed and out of range), the Warlock prioritizes instant-cast
 //! abilities over cast-time spells that would be interrupted by movement.
+#![allow(clippy::too_many_arguments)]
 
 use bevy::prelude::*;
-use std::collections::HashMap;
 
 use crate::combat::log::{CombatLog, CombatLogEventType};
-use crate::states::match_config::{CharacterClass, WarlockCurse};
+use crate::states::match_config::WarlockCurse;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::{
@@ -70,7 +70,6 @@ impl ClassAI for WarlockAI {
 /// Warlock AI: Decides and executes abilities for a Warlock combatant.
 ///
 /// Returns `true` if an action was taken this frame (caller should skip to next combatant).
-#[allow(clippy::too_many_arguments)]
 pub fn decide_warlock_action(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -79,18 +78,17 @@ pub fn decide_warlock_action(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
-    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+    ctx: &CombatContext,
 ) -> bool {
     // Get target
     let Some(target_entity) = combatant.target else {
         return false;
     };
 
-    let Some(&target_pos) = positions.get(&target_entity) else {
+    let Some(target_info) = ctx.combatants.get(&target_entity) else {
         return false;
     };
+    let target_pos = target_info.position;
 
     // Check if global cooldown is active
     if combatant.global_cooldown > 0.0 {
@@ -112,8 +110,7 @@ pub fn decide_warlock_action(
         auras,
         target_entity,
         target_pos,
-        combatant_info,
-        active_auras_map,
+        ctx,
     ) {
         return true;
     }
@@ -127,9 +124,7 @@ pub fn decide_warlock_action(
         combatant,
         my_pos,
         auras,
-        positions,
-        combatant_info,
-        active_auras_map,
+        ctx,
     ) {
         return true;
     }
@@ -146,8 +141,7 @@ pub fn decide_warlock_action(
             auras,
             target_entity,
             target_pos,
-            combatant_info,
-            active_auras_map,
+            ctx,
         ) {
             return true;
         }
@@ -159,7 +153,8 @@ pub fn decide_warlock_action(
     // Fear is high value even with cast time - landing it can turn the fight
     let fear_target = combatant.cc_target.or(combatant.target);
     if let Some(fear_target_entity) = fear_target {
-        if let Some(&fear_target_pos) = positions.get(&fear_target_entity) {
+        if let Some(fear_target_info) = ctx.combatants.get(&fear_target_entity) {
+            let fear_target_pos = fear_target_info.position;
             if try_fear(
                 commands,
                 combat_log,
@@ -170,8 +165,7 @@ pub fn decide_warlock_action(
                 auras,
                 fear_target_entity,
                 fear_target_pos,
-                combatant_info,
-                active_auras_map,
+                ctx,
             ) {
                 return true;
             }
@@ -191,8 +185,7 @@ pub fn decide_warlock_action(
             auras,
             target_entity,
             target_pos,
-            combatant_info,
-            active_auras_map,
+            ctx,
         ) {
             return true;
         }
@@ -214,13 +207,12 @@ pub fn decide_warlock_action(
         auras,
         target_entity,
         target_pos,
-        combatant_info,
+        ctx,
     )
 }
 
 /// Try to apply Corruption DoT to target.
 /// Returns true if Corruption was cast.
-#[allow(clippy::too_many_arguments)]
 fn try_corruption(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -231,11 +223,10 @@ fn try_corruption(
     auras: Option<&ActiveAuras>,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
-    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+    ctx: &CombatContext,
 ) -> bool {
     // Check if target already has Corruption (check by ability name to allow stacking with Immolate)
-    let target_has_corruption = active_auras_map
+    let target_has_corruption = ctx.active_auras
         .get(&target_entity)
         .map(|auras| auras.iter().any(|a|
             a.effect_type == AuraType::DamageOverTime && a.ability_name == "Corruption"
@@ -264,9 +255,9 @@ fn try_corruption(
 
     // Log
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = combatant_info
+    let target_id = ctx.combatants
         .get(&target_entity)
-        .map(|(team, _, class, _, _, _)| format!("Team {} {}", team, class.name()));
+        .map(|info| format!("Team {} {}", info.team, info.class.name()));
     combat_log.log_ability_cast(
         caster_id,
         "Corruption".to_string(),
@@ -319,7 +310,6 @@ fn try_corruption(
 
 /// Try to cast Immolate on target.
 /// Returns true if Immolate cast was started.
-#[allow(clippy::too_many_arguments)]
 fn try_immolate(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -330,11 +320,10 @@ fn try_immolate(
     auras: Option<&ActiveAuras>,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
-    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+    ctx: &CombatContext,
 ) -> bool {
     // Check if target already has Immolate (check by ability name to allow stacking with Corruption)
-    let target_has_immolate = active_auras_map
+    let target_has_immolate = ctx.active_auras
         .get(&target_entity)
         .map(|auras| auras.iter().any(|a|
             a.effect_type == AuraType::DamageOverTime && a.ability_name == "Immolate"
@@ -371,9 +360,9 @@ fn try_immolate(
 
     // Log
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = combatant_info
+    let target_id = ctx.combatants
         .get(&target_entity)
-        .map(|(team, _, class, _, _, _)| format!("Team {} {}", team, class.name()));
+        .map(|info| format!("Team {} {}", info.team, info.class.name()));
     combat_log.log_ability_cast(
         caster_id,
         "Immolate".to_string(),
@@ -396,7 +385,6 @@ fn try_immolate(
 
 /// Try to cast Fear on target.
 /// Returns true if Fear was started.
-#[allow(clippy::too_many_arguments)]
 fn try_fear(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -407,8 +395,7 @@ fn try_fear(
     auras: Option<&ActiveAuras>,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
-    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+    ctx: &CombatContext,
 ) -> bool {
     let fear = AbilityType::Fear;
     let fear_def = abilities.get_unchecked(&fear);
@@ -419,7 +406,7 @@ fn try_fear(
     }
 
     // Check if target is already CC'd
-    let target_is_ccd = active_auras_map
+    let target_is_ccd = ctx.active_auras
         .get(&target_entity)
         .map(|auras| {
             auras
@@ -455,9 +442,9 @@ fn try_fear(
 
     // Log
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = combatant_info
+    let target_id = ctx.combatants
         .get(&target_entity)
-        .map(|(team, _, class, _, _, _)| format!("Team {} {}", team, class.name()));
+        .map(|info| format!("Team {} {}", info.team, info.class.name()));
     combat_log.log_ability_cast(
         caster_id,
         "Fear".to_string(),
@@ -480,7 +467,6 @@ fn try_fear(
 
 /// Try to cast Shadow Bolt on target.
 /// Returns true if Shadow Bolt was started.
-#[allow(clippy::too_many_arguments)]
 fn try_shadowbolt(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -491,7 +477,7 @@ fn try_shadowbolt(
     auras: Option<&ActiveAuras>,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    ctx: &CombatContext,
 ) -> bool {
     let shadowbolt = AbilityType::Shadowbolt;
     let shadowbolt_def = abilities.get_unchecked(&shadowbolt);
@@ -519,9 +505,9 @@ fn try_shadowbolt(
 
     // Log
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = combatant_info
+    let target_id = ctx.combatants
         .get(&target_entity)
-        .map(|(team, _, class, _, _, _)| format!("Team {} {}", team, class.name()));
+        .map(|info| format!("Team {} {}", info.team, info.class.name()));
     combat_log.log_ability_cast(
         caster_id,
         "Shadowbolt".to_string(),
@@ -546,7 +532,6 @@ fn try_shadowbolt(
 /// Try to channel Drain Life on target.
 /// Only used when HP < 80% and target has at least one DoT ticking.
 /// Returns true if Drain Life was started.
-#[allow(clippy::too_many_arguments)]
 fn try_drain_life(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -557,8 +542,7 @@ fn try_drain_life(
     auras: Option<&ActiveAuras>,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
-    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+    ctx: &CombatContext,
 ) -> bool {
     // Only use Drain Life when we need healing (HP < 80%)
     let hp_percent = combatant.current_health / combatant.max_health;
@@ -567,7 +551,7 @@ fn try_drain_life(
     }
 
     // Only use when target has at least one DoT ticking (maintain pressure)
-    let target_has_dot = active_auras_map
+    let target_has_dot = ctx.active_auras
         .get(&target_entity)
         .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::DamageOverTime))
         .unwrap_or(false);
@@ -609,9 +593,9 @@ fn try_drain_life(
 
     // Log
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = combatant_info
+    let target_id = ctx.combatants
         .get(&target_entity)
-        .map(|(team, _, class, _, _, _)| format!("Team {} {}", team, class.name()));
+        .map(|info| format!("Team {} {}", info.team, info.class.name()));
     combat_log.log_ability_cast(
         caster_id,
         "Drain Life".to_string(),
@@ -638,7 +622,6 @@ fn try_drain_life(
 ///
 /// Curses are mutually exclusive per target - only one curse can be active.
 /// Preferences are indexed by enemy slot (0, 1, 2).
-#[allow(clippy::too_many_arguments)]
 fn try_spread_curses(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -647,9 +630,7 @@ fn try_spread_curses(
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
-    positions: &HashMap<Entity, Vec3>,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
-    active_auras_map: &HashMap<Entity, Vec<Aura>>,
+    ctx: &CombatContext,
 ) -> bool {
     // Skip if no curse preferences configured
     if combatant.warlock_curse_prefs.is_empty() {
@@ -657,17 +638,15 @@ fn try_spread_curses(
     }
 
     // Build list of enemy entities with their slot indices
-    let mut enemies: Vec<(Entity, Vec3, u8)> = positions
+    let mut enemies: Vec<(Entity, Vec3, u8)> = ctx.combatants
         .iter()
-        .filter_map(|(&enemy_entity, &enemy_pos)| {
-            combatant_info.get(&enemy_entity).and_then(|(team, slot, _, hp, _, _)| {
-                // Only target alive enemies on opposite team
-                if *team != combatant.team && *hp > 0.0 {
-                    Some((enemy_entity, enemy_pos, *slot))
-                } else {
-                    None
-                }
-            })
+        .filter_map(|(&enemy_entity, info)| {
+            // Only target alive enemies on opposite team
+            if info.team != combatant.team && info.current_health > 0.0 {
+                Some((enemy_entity, info.position, info.slot))
+            } else {
+                None
+            }
         })
         .collect();
 
@@ -684,7 +663,7 @@ fn try_spread_curses(
             .unwrap_or(WarlockCurse::Agony);
 
         // Check if target already has a curse from us
-        let has_our_curse = active_auras_map
+        let has_our_curse = ctx.active_auras
             .get(&enemy_entity)
             .map(|auras| {
                 auras.iter().any(|a| {
@@ -717,7 +696,7 @@ fn try_spread_curses(
             auras,
             enemy_entity,
             enemy_pos,
-            combatant_info,
+            ctx,
             ability,
             ability_name,
         ) {
@@ -730,7 +709,6 @@ fn try_spread_curses(
 
 /// Cast a specific curse on a target.
 /// Returns true if the curse was cast successfully.
-#[allow(clippy::too_many_arguments)]
 fn try_cast_curse(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -741,7 +719,7 @@ fn try_cast_curse(
     auras: Option<&ActiveAuras>,
     target_entity: Entity,
     target_pos: Vec3,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32, bool)>,
+    ctx: &CombatContext,
     ability: AbilityType,
     ability_name: &str,
 ) -> bool {
@@ -763,9 +741,9 @@ fn try_cast_curse(
 
     // Log
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = combatant_info
+    let target_id = ctx.combatants
         .get(&target_entity)
-        .map(|(team, _, class, _, _, _)| format!("Team {} {}", team, class.name()));
+        .map(|info| format!("Team {} {}", info.team, info.class.name()));
     combat_log.log_ability_cast(
         caster_id,
         ability_name.to_string(),
