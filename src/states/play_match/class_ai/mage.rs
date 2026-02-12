@@ -492,6 +492,11 @@ fn try_polymorph(
     };
     let target_pos = target_info.position;
 
+    // Don't waste Polymorph on immune targets (Divine Shield)
+    if ctx.entity_is_immune(cc_target) {
+        return false;
+    }
+
     // Check if target is already CC'd (don't waste Polymorph on already CC'd targets)
     let target_already_ccd = ctx.active_auras
         .get(&cc_target)
@@ -587,6 +592,11 @@ fn try_frostbolt(
         return false;
     };
     let target_pos = target_info.position;
+
+    // Don't waste Frostbolt on immune targets (Divine Shield)
+    if ctx.entity_is_immune(target_entity) {
+        return false;
+    }
 
     let distance_to_target = my_pos.distance(target_pos);
 

@@ -95,27 +95,32 @@ pub fn decide_warlock_action(
         return false;
     }
 
+    // Check if kill target is immune (Divine Shield) - skip damage abilities
+    let target_immune = ctx.entity_is_immune(target_entity);
+
     // Detect if we're being kited (slowed and out of range)
     // When kited, prioritize instant-cast abilities over cast-time spells
     let being_kited = is_being_kited(combatant, my_pos, target_pos, auras);
 
-    // Priority 1: Corruption (instant Shadow DoT) - always try this first
-    if try_corruption(
-        commands,
-        combat_log,
-        abilities,
-        entity,
-        combatant,
-        my_pos,
-        auras,
-        target_entity,
-        target_pos,
-        ctx,
-    ) {
-        return true;
+    // Priority 1: Corruption (instant Shadow DoT) - skip if target immune
+    if !target_immune {
+        if try_corruption(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            target_entity,
+            target_pos,
+            ctx,
+        ) {
+            return true;
+        }
     }
 
-    // Priority 2: Spread curses to all enemies (instant) - moved up when kiting
+    // Priority 2: Spread curses to all enemies (instant) - per-enemy immunity filtering inside
     if try_spread_curses(
         commands,
         combat_log,
@@ -129,8 +134,8 @@ pub fn decide_warlock_action(
         return true;
     }
 
-    // Priority 3: Immolate (2s cast Fire DoT) - skip when being kited
-    if !being_kited {
+    // Priority 3: Immolate (2s cast Fire DoT) - skip when being kited or target immune
+    if !being_kited && !target_immune {
         if try_immolate(
             commands,
             combat_log,
@@ -153,7 +158,10 @@ pub fn decide_warlock_action(
     // Fear is high value even with cast time - landing it can turn the fight
     let fear_target = combatant.cc_target.or(combatant.target);
     if let Some(fear_target_entity) = fear_target {
-        if let Some(fear_target_info) = ctx.combatants.get(&fear_target_entity) {
+        // Don't waste Fear on immune targets (Divine Shield)
+        if ctx.entity_is_immune(fear_target_entity) {
+            // Skip Fear entirely
+        } else if let Some(fear_target_info) = ctx.combatants.get(&fear_target_entity) {
             let fear_target_pos = fear_target_info.position;
             if try_fear(
                 commands,
@@ -173,8 +181,8 @@ pub fn decide_warlock_action(
     }
 
     // Priority 5: Drain Life (when HP < 80% and target has DoTs)
-    // Skip when being kited - channeling would be interrupted by movement
-    if !being_kited {
+    // Skip when being kited or target immune - channeling would be interrupted by movement
+    if !being_kited && !target_immune {
         if try_drain_life(
             commands,
             combat_log,
@@ -191,9 +199,9 @@ pub fn decide_warlock_action(
         }
     }
 
-    // Priority 6: Shadow Bolt - skip when being kited
-    // When kited, we'll rely on DoTs and wait for a better opportunity
-    if being_kited {
+    // Priority 6: Shadow Bolt - skip when being kited or target immune
+    // When kited or target immune, we'll rely on DoTs and wait for a better opportunity
+    if being_kited || target_immune {
         return false;
     }
 
@@ -655,6 +663,11 @@ fn try_spread_curses(
 
     // Try to curse each enemy based on preferences
     for (enemy_entity, enemy_pos, enemy_slot) in enemies {
+        // Skip immune targets (Divine Shield)
+        if ctx.entity_is_immune(enemy_entity) {
+            continue;
+        }
+
         // Get curse preference for this enemy slot (default to Agony if not specified)
         let curse_pref = combatant
             .warlock_curse_prefs
