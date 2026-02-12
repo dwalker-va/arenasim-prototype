@@ -158,24 +158,23 @@ pub fn decide_warlock_action(
     // Fear is high value even with cast time - landing it can turn the fight
     let fear_target = combatant.cc_target.or(combatant.target);
     if let Some(fear_target_entity) = fear_target {
-        // Don't waste Fear on immune targets (Divine Shield)
-        if ctx.entity_is_immune(fear_target_entity) {
-            // Skip Fear entirely
-        } else if let Some(fear_target_info) = ctx.combatants.get(&fear_target_entity) {
-            let fear_target_pos = fear_target_info.position;
-            if try_fear(
-                commands,
-                combat_log,
-                abilities,
-                entity,
-                combatant,
-                my_pos,
-                auras,
-                fear_target_entity,
-                fear_target_pos,
-                ctx,
-            ) {
-                return true;
+        if !ctx.entity_is_immune(fear_target_entity) {
+            if let Some(fear_target_info) = ctx.combatants.get(&fear_target_entity) {
+                let fear_target_pos = fear_target_info.position;
+                if try_fear(
+                    commands,
+                    combat_log,
+                    abilities,
+                    entity,
+                    combatant,
+                    my_pos,
+                    auras,
+                    fear_target_entity,
+                    fear_target_pos,
+                    ctx,
+                ) {
+                    return true;
+                }
             }
         }
     }

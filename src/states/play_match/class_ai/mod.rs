@@ -200,13 +200,6 @@ impl<'a> CombatContext<'a> {
             .unwrap_or(false)
     }
 
-    /// Check if the current target has damage immunity (Divine Shield).
-    pub fn target_is_immune(&self) -> bool {
-        self.target_info()
-            .map(|info| self.entity_is_immune(info.entity))
-            .unwrap_or(false)
-    }
-
 }
 
 /// The result of an AI decision.
