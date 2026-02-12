@@ -140,6 +140,14 @@ pub fn acquire_targets(
 
                 combatant.target = nearest_enemy.map(|(entity, _, _, _, _, _, _)| *entity);
             }
+        } else if let Some(index) = kill_target_index {
+            // Current target is valid, but check if configured kill target has become
+            // available (e.g., Rogue broke stealth) and should take priority
+            if let Some((kt_entity, _, stealthed, enemy_ss, _, _, immune)) = enemy_combatants.get(index) {
+                if can_see(*stealthed, *enemy_ss) && !immune && combatant.target != Some(*kt_entity) {
+                    combatant.target = Some(*kt_entity);
+                }
+            }
         }
 
         // ===== CC Target Acquisition =====
@@ -176,6 +184,14 @@ pub fn acquire_targets(
                     &active_auras_map,
                     &can_see,
                 );
+            }
+        } else if let Some(index) = cc_target_index {
+            // Current CC target is valid, but check if configured CC target has become
+            // available (e.g., broke stealth) and should take priority
+            if let Some((cc_entity, _, stealthed, enemy_ss, _, _, immune)) = enemy_combatants.get(index) {
+                if can_see(*stealthed, *enemy_ss) && !immune && combatant.cc_target != Some(*cc_entity) {
+                    combatant.cc_target = Some(*cc_entity);
+                }
             }
         }
     }
