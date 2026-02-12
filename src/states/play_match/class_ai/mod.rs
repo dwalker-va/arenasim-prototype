@@ -192,6 +192,21 @@ impl<'a> CombatContext<'a> {
             .min_by(|a, b| a.health_pct().partial_cmp(&b.health_pct()).unwrap())
     }
 
+    /// Check if an entity has damage immunity (Divine Shield).
+    pub fn entity_is_immune(&self, entity: Entity) -> bool {
+        self.active_auras
+            .get(&entity)
+            .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::DamageImmunity))
+            .unwrap_or(false)
+    }
+
+    /// Check if the current target has damage immunity (Divine Shield).
+    pub fn target_is_immune(&self) -> bool {
+        self.target_info()
+            .map(|info| self.entity_is_immune(info.entity))
+            .unwrap_or(false)
+    }
+
 }
 
 /// The result of an AI decision.

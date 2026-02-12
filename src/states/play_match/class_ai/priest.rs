@@ -686,6 +686,11 @@ fn try_mind_blast(
         return false;
     };
 
+    // Don't waste Mind Blast on immune targets (Divine Shield)
+    if ctx.entity_is_immune(target_entity) {
+        return false;
+    }
+
     let target_pos = target_info.position;
 
     let ability = AbilityType::MindBlast;

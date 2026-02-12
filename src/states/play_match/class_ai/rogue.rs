@@ -60,6 +60,11 @@ pub fn decide_rogue_action(
         return false;
     };
 
+    // Don't waste abilities on immune targets (Divine Shield)
+    if ctx.entity_is_immune(target_entity) {
+        return false;
+    }
+
     if combatant.stealthed {
         // Stealthed: Use opener based on preference
         return match combatant.rogue_opener {
@@ -482,20 +487,24 @@ fn select_melee_cc_target(
     my_pos: Vec3,
     ctx: &CombatContext,
 ) -> Option<(Entity, Vec3)> {
-    // First, check if CC target is in melee range
+    // First, check if CC target is in melee range and not immune
     if let Some(cc_entity) = cc_target {
-        if let Some(info) = ctx.combatants.get(&cc_entity) {
-            if my_pos.distance(info.position) <= MELEE_RANGE {
-                return Some((cc_entity, info.position));
+        if !ctx.entity_is_immune(cc_entity) {
+            if let Some(info) = ctx.combatants.get(&cc_entity) {
+                if my_pos.distance(info.position) <= MELEE_RANGE {
+                    return Some((cc_entity, info.position));
+                }
             }
         }
     }
 
-    // CC target not in range - fall back to kill target if in melee range
+    // CC target not in range - fall back to kill target if in melee range and not immune
     if let Some(kill_entity) = kill_target {
-        if let Some(info) = ctx.combatants.get(&kill_entity) {
-            if my_pos.distance(info.position) <= MELEE_RANGE {
-                return Some((kill_entity, info.position));
+        if !ctx.entity_is_immune(kill_entity) {
+            if let Some(info) = ctx.combatants.get(&kill_entity) {
+                if my_pos.distance(info.position) <= MELEE_RANGE {
+                    return Some((kill_entity, info.position));
+                }
             }
         }
     }

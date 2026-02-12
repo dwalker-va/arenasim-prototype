@@ -84,6 +84,11 @@ pub fn decide_warrior_action(
     };
     let target_pos = target_info.position;
 
+    // Don't waste abilities on immune targets (Divine Shield)
+    if ctx.entity_is_immune(target_entity) {
+        return false;
+    }
+
     // Priority 2: Charge (gap closer)
     if try_charge(
         commands,

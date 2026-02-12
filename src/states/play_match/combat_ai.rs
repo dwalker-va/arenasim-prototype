@@ -42,9 +42,9 @@ pub fn acquire_targets(
         .collect();
 
     // Build list of all alive combatants with their info
-    // Tuple: (entity, position, stealthed, has_shadow_sight, class, current_health)
-    let mut team1_combatants: Vec<(Entity, Vec3, bool, bool, match_config::CharacterClass, f32)> = Vec::new();
-    let mut team2_combatants: Vec<(Entity, Vec3, bool, bool, match_config::CharacterClass, f32)> = Vec::new();
+    // Tuple: (entity, position, stealthed, has_shadow_sight, class, current_health, is_immune)
+    let mut team1_combatants: Vec<(Entity, Vec3, bool, bool, match_config::CharacterClass, f32, bool)> = Vec::new();
+    let mut team2_combatants: Vec<(Entity, Vec3, bool, bool, match_config::CharacterClass, f32, bool)> = Vec::new();
 
     // Collect active auras for CC checking
     let active_auras_map: std::collections::HashMap<Entity, Vec<Aura>> = combatants
@@ -60,18 +60,22 @@ pub fn acquire_targets(
         }
 
         let has_shadow_sight = shadow_sight_holders.contains(&entity);
+        let is_immune = active_auras_map
+            .get(&entity)
+            .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::DamageImmunity))
+            .unwrap_or(false);
 
         if c.team == 1 {
-            team1_combatants.push((entity, transform.translation, c.stealthed, has_shadow_sight, c.class, c.current_health));
+            team1_combatants.push((entity, transform.translation, c.stealthed, has_shadow_sight, c.class, c.current_health, is_immune));
         } else {
-            team2_combatants.push((entity, transform.translation, c.stealthed, has_shadow_sight, c.class, c.current_health));
+            team2_combatants.push((entity, transform.translation, c.stealthed, has_shadow_sight, c.class, c.current_health, is_immune));
         }
     }
 
     // Sort by entity ID to ensure deterministic ordering matching spawn order
     // Entity IDs are assigned sequentially at spawn time
-    team1_combatants.sort_by_key(|(entity, _, _, _, _, _)| entity.index());
-    team2_combatants.sort_by_key(|(entity, _, _, _, _, _)| entity.index());
+    team1_combatants.sort_by_key(|(entity, _, _, _, _, _, _)| entity.index());
+    team2_combatants.sort_by_key(|(entity, _, _, _, _, _, _)| entity.index());
 
     // For each combatant, ensure they have a valid target
     for (entity, mut combatant, transform, _) in combatants.iter_mut() {
@@ -99,22 +103,22 @@ pub fn acquire_targets(
             !stealthed || i_have_shadow_sight || enemy_has_shadow_sight
         };
 
-        // Check if current target is still valid (alive, on enemy team, and visible)
+        // Check if current target is still valid (alive, on enemy team, visible, and not immune)
         let target_valid = combatant.target.and_then(|target_entity| {
             enemy_combatants
                 .iter()
-                .find(|(e, _, _, _, _, _)| *e == target_entity)
-                .filter(|(_, _, stealthed, enemy_ss, _, _)| can_see(*stealthed, *enemy_ss))
+                .find(|(e, _, _, _, _, _, _)| *e == target_entity)
+                .filter(|(_, _, stealthed, enemy_ss, _, _, immune)| can_see(*stealthed, *enemy_ss) && !immune)
         }).is_some();
 
         // If no valid target, acquire a new one
         if !target_valid {
-            // Priority 1: Check if kill target is set and visible
+            // Priority 1: Check if kill target is set, visible, and not immune
             let kill_target = if let Some(index) = kill_target_index {
                 enemy_combatants
                     .get(index)
-                    .filter(|(_, _, stealthed, enemy_ss, _, _)| can_see(*stealthed, *enemy_ss))
-                    .map(|(entity, _, _, _, _, _)| *entity)
+                    .filter(|(_, _, stealthed, enemy_ss, _, _, immune)| can_see(*stealthed, *enemy_ss) && !immune)
+                    .map(|(entity, _, _, _, _, _, _)| *entity)
             } else {
                 None
             };
@@ -123,39 +127,39 @@ pub fn acquire_targets(
                 // Use the kill target
                 combatant.target = Some(priority_target);
             } else {
-                // Priority 2: Fall back to nearest visible enemy
+                // Priority 2: Fall back to nearest visible, non-immune enemy
                 let my_pos = transform.translation;
                 let nearest_enemy = enemy_combatants
                     .iter()
-                    .filter(|(_, _, stealthed, enemy_ss, _, _)| can_see(*stealthed, *enemy_ss))
-                    .min_by(|(_, pos_a, _, _, _, _), (_, pos_b, _, _, _, _)| {
+                    .filter(|(_, _, stealthed, enemy_ss, _, _, immune)| can_see(*stealthed, *enemy_ss) && !immune)
+                    .min_by(|(_, pos_a, _, _, _, _, _), (_, pos_b, _, _, _, _, _)| {
                         let dist_a = my_pos.distance(*pos_a);
                         let dist_b = my_pos.distance(*pos_b);
                         dist_a.partial_cmp(&dist_b).unwrap()
                     });
 
-                combatant.target = nearest_enemy.map(|(entity, _, _, _, _, _)| *entity);
+                combatant.target = nearest_enemy.map(|(entity, _, _, _, _, _, _)| *entity);
             }
         }
 
         // ===== CC Target Acquisition =====
         // Separate from kill target - use for CC abilities to create outnumbering situations
 
-        // Check if current CC target is still valid
+        // Check if current CC target is still valid (not immune)
         let cc_target_valid = combatant.cc_target.and_then(|cc_target_entity| {
             enemy_combatants
                 .iter()
-                .find(|(e, _, _, _, _, _)| *e == cc_target_entity)
-                .filter(|(_, _, stealthed, enemy_ss, _, _)| can_see(*stealthed, *enemy_ss))
+                .find(|(e, _, _, _, _, _, _)| *e == cc_target_entity)
+                .filter(|(_, _, stealthed, enemy_ss, _, _, immune)| can_see(*stealthed, *enemy_ss) && !immune)
         }).is_some();
 
         if !cc_target_valid {
-            // Priority 1: Use explicitly configured CC target
+            // Priority 1: Use explicitly configured CC target (if visible and not immune)
             let explicit_cc_target = if let Some(index) = cc_target_index {
                 enemy_combatants
                     .get(index)
-                    .filter(|(_, _, stealthed, enemy_ss, _, _)| can_see(*stealthed, *enemy_ss))
-                    .map(|(entity, _, _, _, _, _)| *entity)
+                    .filter(|(_, _, stealthed, enemy_ss, _, _, immune)| can_see(*stealthed, *enemy_ss) && !immune)
+                    .map(|(entity, _, _, _, _, _, _)| *entity)
             } else {
                 None
             };
@@ -187,7 +191,7 @@ pub fn acquire_targets(
 /// Special case: If kill_target is a healer, we INVERT healer priority.
 /// When killing the healer, we want to CC the DPS to prevent them from peeling.
 fn select_cc_target_heuristic(
-    enemy_combatants: &[(Entity, Vec3, bool, bool, match_config::CharacterClass, f32)],
+    enemy_combatants: &[(Entity, Vec3, bool, bool, match_config::CharacterClass, f32, bool)],
     kill_target: Option<Entity>,
     active_auras_map: &std::collections::HashMap<Entity, Vec<Aura>>,
     can_see: &impl Fn(bool, bool) -> bool,
@@ -197,17 +201,17 @@ fn select_cc_target_heuristic(
         .and_then(|kt| {
             enemy_combatants
                 .iter()
-                .find(|(e, _, _, _, _, _)| *e == kt)
-                .map(|(_, _, _, _, class, _)| *class == match_config::CharacterClass::Priest)
+                .find(|(e, _, _, _, _, _, _)| *e == kt)
+                .map(|(_, _, _, _, class, _, _)| *class == match_config::CharacterClass::Priest)
         })
         .unwrap_or(false);
 
-    // Filter to visible, non-CC'd enemies and score them
+    // Filter to visible, non-CC'd, non-immune enemies and score them
     let mut scored_targets: Vec<(Entity, i32)> = enemy_combatants
         .iter()
-        .filter(|(_, _, stealthed, enemy_ss, _, _)| can_see(*stealthed, *enemy_ss))
-        .filter(|(entity, _, _, _, _, _)| !is_entity_ccd(*entity, active_auras_map))
-        .map(|(entity, _, _, _, class, current_health)| {
+        .filter(|(_, _, stealthed, enemy_ss, _, _, immune)| can_see(*stealthed, *enemy_ss) && !immune)
+        .filter(|(entity, _, _, _, _, _, _)| !is_entity_ccd(*entity, active_auras_map))
+        .map(|(entity, _, _, _, class, current_health, _)| {
             let mut score = 0i32;
             let is_healer = *class == match_config::CharacterClass::Priest;
 
@@ -782,6 +786,7 @@ pub fn check_interrupts(
     casting_targets: Query<&CastingState>,
     channeling_targets: Query<&ChannelingState>,
     positions: Query<&Transform>,
+    all_auras: Query<&ActiveAuras>,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
     // Don't interrupt during victory celebration
@@ -803,6 +808,13 @@ pub fn check_interrupts(
         let Some(target_entity) = combatant.target else {
             continue;
         };
+
+        // Don't waste interrupts on immune targets (Divine Shield)
+        if let Ok(target_auras) = all_auras.get(target_entity) {
+            if target_auras.auras.iter().any(|a| a.effect_type == AuraType::DamageImmunity) {
+                continue;
+            }
+        }
 
         let Ok(target_transform) = positions.get(target_entity) else {
             continue;
