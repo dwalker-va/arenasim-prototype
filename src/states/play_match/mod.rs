@@ -548,11 +548,11 @@ fn spawn_pet(
 ) {
     let pet_slot = PET_SLOT_BASE + owner_combatant.slot;
     let pet_combatant = Combatant::new_pet(owner_combatant.team, pet_slot, pet_type, owner_combatant);
-    let pet_position = owner_position + Vec3::new(-2.0, 0.75, 1.5);
+    let pet_position = owner_position + Vec3::new(-2.0, 0.3, 1.5);
 
     let pet_color = pet_type.color();
-    // Smaller capsule mesh (75% scale of player combatants)
-    let mesh_handle = meshes.add(Capsule3d::new(0.375, 1.125));
+    // Stocky capsule for quadruped (tilted horizontal by apply_pet_mesh_tilt system)
+    let mesh_handle = meshes.add(Capsule3d::new(0.35, 0.6));
     let material = materials.add(StandardMaterial {
         base_color: pet_color,
         perceptual_roughness: 0.5,
@@ -561,10 +561,17 @@ fn spawn_pet(
         ..default()
     });
 
+    // Face toward arena center so tilt system has a valid initial facing
+    let initial_facing = if owner_combatant.team == 1 {
+        Quat::from_rotation_y(std::f32::consts::FRAC_PI_2) // Face right (+X)
+    } else {
+        Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2) // Face left (-X)
+    };
+
     commands.spawn((
         Mesh3d(mesh_handle.clone()),
         MeshMaterial3d(material),
-        Transform::from_translation(pet_position),
+        Transform::from_translation(pet_position).with_rotation(initial_facing),
         pet_combatant,
         Pet {
             owner: owner_entity,

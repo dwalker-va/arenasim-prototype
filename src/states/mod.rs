@@ -183,6 +183,13 @@ impl Plugin for StatesPlugin {
                 )
                     .run_if(in_state(GameState::PlayMatch)),
             )
+            // Pet mesh tilt must run after movement sets Y-facing rotation
+            .add_systems(
+                Update,
+                play_match::apply_pet_mesh_tilt
+                    .after(PlayMatchSystems::CombatAndMovement)
+                    .run_if(in_state(GameState::PlayMatch)),
+            )
             // Healing light column visual effects (separate group to avoid tuple size limits)
             .add_systems(
                 Update,
