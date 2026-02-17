@@ -2,6 +2,10 @@
 
 This is a WoW Classic-inspired arena combat autobattler built with Rust and Bevy. Teams of 1-3 combatants battle automatically using class-specific abilities, with mechanics inspired by World of Warcraft's PvP system.
 
+## Git Commits
+
+Never include attribution footers in commit messages. No `Co-Authored-By`, no `Generated with [Claude Code]`, no emoji badges. Just the commit subject and body.
+
 ## Available Tools
 
 ### 1. Headless Match Simulation (`/arena-match`)

@@ -78,6 +78,7 @@ pub fn apply_pending_auras(
     mut combatants: Query<(&mut Combatant, Option<&mut ActiveAuras>, &Transform)>,
     charging_query: Query<&ChargingState>,
     mut fct_states: Query<&mut FloatingTextState>,
+    pet_query: Query<&Pet>,
 ) {
     use std::collections::{HashSet, HashMap};
 
@@ -273,23 +274,29 @@ pub fn apply_pending_auras(
             let hp_bonus = pending.aura.magnitude;
             target_combatant.max_health += hp_bonus;
             target_combatant.current_health += hp_bonus; // Give them the extra HP
-            
+
+            let display_name = if let Ok(pet) = pet_query.get(pending.target) {
+                pet.pet_type.name().to_string()
+            } else {
+                target_combatant.class.name().to_string()
+            };
+
             info!(
                 "Team {} {} receives Power Word: Fortitude (+{:.0} max HP, now {:.0}/{:.0})",
                 target_combatant.team,
-                target_combatant.class.name(),
+                display_name,
                 hp_bonus,
                 target_combatant.current_health,
                 target_combatant.max_health
             );
-            
+
             // Log to combat log
             combat_log.log(
                 CombatLogEventType::Buff,
                 format!(
                     "Team {} {} gains Power Word: Fortitude (+{:.0} max HP)",
                     target_combatant.team,
-                    target_combatant.class.name(),
+                    display_name,
                     hp_bonus
                 )
             );
