@@ -117,6 +117,9 @@ pub const DIVINE_SHIELD_HP_THRESHOLD: f32 = 0.3;
 // Timing
 // ============================================================================
 
+/// Pet slots start at this offset. Pet of slot 0 = 10, slot 1 = 11, etc.
+pub const PET_SLOT_BASE: u8 = 10;
+
 /// Pre-match countdown duration before gates open (in seconds).
 pub const PREMATCH_COUNTDOWN: f32 = 10.0;
 

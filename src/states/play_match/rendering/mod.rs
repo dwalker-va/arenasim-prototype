@@ -68,6 +68,9 @@ pub fn get_ability_icon_path(ability: &str) -> Option<&'static str> {
         "Cleanse" => Some("icons/abilities/spell_holy_renew.jpg"),
         "Devotion Aura" => Some("icons/abilities/spell_holy_devotionaura.jpg"),
         "Divine Shield" => Some("icons/abilities/spell_holy_divineintervention.jpg"),
+        // Felhunter abilities
+        "Spell Lock" => Some("icons/abilities/spell_shadow_mindrot.jpg"),
+        "Devour Magic" => Some("icons/abilities/spell_nature_purge.jpg"),
         _ => None,
     }
 }
@@ -83,6 +86,8 @@ pub const SPELL_ICON_ABILITIES: &[&str] = &[
     // Paladin abilities
     "Flash of Light", "Holy Light", "Holy Shock", "Holy Shock (Heal)", "Holy Shock (Damage)",
     "Hammer of Justice", "Cleanse", "Devotion Aura", "Divine Shield",
+    // Felhunter abilities
+    "Spell Lock", "Devour Magic",
 ];
 
 // ==============================================================================

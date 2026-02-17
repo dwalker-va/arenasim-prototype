@@ -142,6 +142,7 @@ impl Plugin for StatesPlugin {
                     play_match::acquire_targets,
                     play_match::check_orb_pickups,  // Check for Shadow Sight orb pickups
                     play_match::decide_abilities,
+                    play_match::pet_ai_system,
                     apply_deferred,  // Flush commands so CastingState is visible
                     play_match::check_interrupts,  // Check for interrupts after CastingState is visible
                     play_match::process_interrupts,
@@ -180,6 +181,13 @@ impl Plugin for StatesPlugin {
                     play_match::spawn_flame_visuals,        // Visual meshes for flame particles
                     play_match::update_flame_particles,     // Move/fade flame particles
                 )
+                    .run_if(in_state(GameState::PlayMatch)),
+            )
+            // Pet mesh tilt must run after movement sets Y-facing rotation
+            .add_systems(
+                Update,
+                play_match::apply_pet_mesh_tilt
+                    .after(PlayMatchSystems::CombatAndMovement)
                     .run_if(in_state(GameState::PlayMatch)),
             )
             // Healing light column visual effects (separate group to avoid tuple size limits)

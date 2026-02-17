@@ -153,7 +153,7 @@ pub fn handle_time_controls(
 /// 4. Insert `MatchResults` resource for the Results scene
 /// 5. Start victory celebration (5 second countdown before transitioning)
 pub fn check_match_end(
-    combatants: Query<(Entity, &Combatant, &Transform)>,
+    combatants: Query<(Entity, &Combatant, &Transform), Without<Pet>>,
     config: Res<MatchConfig>,
     combat_log: Res<CombatLog>,
     celebration: Option<Res<VictoryCelebration>>,

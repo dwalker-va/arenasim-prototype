@@ -302,11 +302,12 @@ pub fn try_divine_shield_while_cc(
         return false;
     }
 
-    // CC break trigger: any teammate below critical HP (they need healing NOW)
+    // CC break trigger: any teammate (non-pet) below critical HP (they need healing NOW)
     let teammate_in_danger = ctx.combatants.values().any(|info| {
         info.team == combatant.team
             && info.current_health > 0.0
             && info.max_health > 0.0
+            && !info.is_pet
             && (info.current_health / info.max_health) < DIVINE_SHIELD_HP_THRESHOLD
     });
 
@@ -398,13 +399,14 @@ fn try_flash_of_light(
         return false;
     }
 
-    // Find the lowest HP ally (below 90%)
+    // Find the lowest HP ally (below 90%), excluding pets
     let heal_target = ctx.combatants
         .iter()
         .filter(|(_, info)| {
             info.team == combatant.team
                 && info.current_health > 0.0
                 && info.max_health > 0.0
+                && !info.is_pet
                 && (info.current_health / info.max_health) < 0.9
         })
         .map(|(e, info)| {
@@ -471,11 +473,11 @@ fn try_holy_light(
         return false;
     }
 
-    // Find an ally between 50-85% HP (safe to use slow heal)
+    // Find an ally between 50-85% HP (safe to use slow heal), excluding pets
     let heal_target = ctx.combatants
         .iter()
         .filter(|(_, info)| {
-            if info.team != combatant.team || info.current_health <= 0.0 || info.max_health <= 0.0 {
+            if info.team != combatant.team || info.current_health <= 0.0 || info.max_health <= 0.0 || info.is_pet {
                 return false;
             }
             let pct = info.current_health / info.max_health;
@@ -555,13 +557,14 @@ fn try_holy_shock_heal(
         return false;
     }
 
-    // Find lowest HP ally below 50% and in range
+    // Find lowest HP ally below 50% and in range, excluding pets
     let heal_target = ctx.combatants
         .iter()
         .filter(|(_, info)| {
             info.team == combatant.team
                 && info.current_health > 0.0
                 && info.max_health > 0.0
+                && !info.is_pet
                 && (info.current_health / info.max_health) < LOW_HP_THRESHOLD
         })
         .filter_map(|(e, info)| {
@@ -908,6 +911,7 @@ fn try_cleanse(
         target: *target_entity,
         log_prefix: "[CLEANSE]",
         caster_class: CharacterClass::Paladin,
+        heal_on_success: None,
     });
 
     true

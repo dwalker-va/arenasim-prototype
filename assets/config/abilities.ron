@@ -581,5 +581,35 @@
             )),
             spell_school: None,  // Cannot be locked out by interrupts
         ),
+        // ============================================================================
+        // PET ABILITIES (Felhunter)
+        // ============================================================================
+
+        // Spell Lock: Felhunter interrupt + spell school lockout
+        // WoW Classic Spell ID 19647: Instant, 30yd, 30s CD
+        // Silences target for 3 seconds, locks out school for 8 seconds on interrupt
+        SpellLock: (
+            name: "Spell Lock",
+            cast_time: 0.0,
+            range: 30.0,
+            mana_cost: 0.0,
+            cooldown: 30.0,
+            spell_school: Shadow,
+            is_interrupt: true,
+            lockout_duration: 3.0,
+        ),
+
+        // Devour Magic: Felhunter dispel — removes one magic effect from target
+        // WoW Classic Spell ID 19736: Instant, 30yd, 8s CD
+        // Heals Felhunter for 30 on successful devour (scaled from WoW's 619)
+        DevourMagic: (
+            name: "Devour Magic",
+            cast_time: 0.0,
+            range: 30.0,
+            mana_cost: 0.0,
+            cooldown: 8.0,
+            spell_school: Shadow,
+            is_dispel: true,
+        ),
     }
 )

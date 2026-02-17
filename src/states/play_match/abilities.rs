@@ -83,6 +83,9 @@ pub enum AbilityType {
     PaladinCleanse,   // Paladin dispel magic
     DevotionAura,     // Paladin team buff - reduces damage taken by 10%
     DivineShield,     // Paladin bubble - damage immunity, purges debuffs, 50% damage penalty
+    // Pet abilities (Felhunter)
+    SpellLock,        // Felhunter interrupt (instant, 30yd, 30s CD, 3s silence)
+    DevourMagic,      // Felhunter dispel (instant, 30yd, 8s CD, heals pet on success)
 }
 
 impl AbilityType {

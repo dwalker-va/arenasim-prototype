@@ -278,6 +278,9 @@ impl AbilityDefinitions {
             AbilityType::PaladinCleanse,
             AbilityType::DevotionAura,
             AbilityType::DivineShield,
+            // Pet abilities (Felhunter)
+            AbilityType::SpellLock,
+            AbilityType::DevourMagic,
         ];
 
         let missing: Vec<AbilityType> = expected_abilities

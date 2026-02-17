@@ -351,12 +351,10 @@ fn try_frost_nova(
         return false;
     }
 
-    // Check if any enemies are within melee range
+    // Check if any alive non-pet enemies are within melee range
     let enemies_in_melee_range = ctx.combatants.iter().any(|(_, info)| {
-        if info.team != combatant.team {
-            return my_pos.distance(info.position) <= MELEE_RANGE;
-        }
-        false
+        info.team != combatant.team && info.is_alive && !info.is_pet
+            && my_pos.distance(info.position) <= MELEE_RANGE
     });
 
     if !enemies_in_melee_range {

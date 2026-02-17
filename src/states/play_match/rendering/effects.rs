@@ -1030,3 +1030,24 @@ pub fn cleanup_expired_dispel_bursts(
         }
     }
 }
+
+// ==============================================================================
+// Pet Mesh Tilt (Quadruped Orientation)
+// ==============================================================================
+
+/// Reconstructs pet rotation as Y-facing * X-tilt so the capsule mesh lies
+/// horizontal like a four-legged creature. Uses Euler decomposition to
+/// extract the Y-facing angle regardless of whether the tilt is already
+/// baked into the current rotation or the movement system just set a fresh
+/// Y-only rotation this frame.
+pub fn apply_pet_mesh_tilt(
+    mut pets: Query<&mut Transform, With<Pet>>,
+) {
+    let tilt = Quat::from_rotation_x(std::f32::consts::FRAC_PI_2);
+    for mut transform in pets.iter_mut() {
+        // Euler YXZ decomposition correctly separates the Y-facing angle
+        // from the X-tilt, whether the rotation is Y-only or Y*X_tilt.
+        let (y_angle, _, _) = transform.rotation.to_euler(EulerRot::YXZ);
+        transform.rotation = Quat::from_rotation_y(y_angle) * tilt;
+    }
+}

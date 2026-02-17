@@ -30,6 +30,49 @@ use super::ability_config::AbilityConfig;
 use super::{MELEE_RANGE, WAND_RANGE};
 
 // ============================================================================
+// Pet Types
+// ============================================================================
+
+/// Pet type enum (extensible for future demons and hunter pets)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PetType {
+    Felhunter,
+}
+
+impl PetType {
+    pub fn name(&self) -> &'static str {
+        match self {
+            PetType::Felhunter => "Felhunter",
+        }
+    }
+
+    pub fn color(&self) -> Color {
+        match self {
+            PetType::Felhunter => Color::srgb(0.4, 0.75, 0.4), // Green (demon)
+        }
+    }
+
+    pub fn preferred_range(&self) -> f32 {
+        match self {
+            PetType::Felhunter => 2.0, // Melee
+        }
+    }
+
+    pub fn movement_speed(&self) -> f32 {
+        match self {
+            PetType::Felhunter => 5.5,
+        }
+    }
+}
+
+/// Marker component for pet entities. Links pet to its owner.
+#[derive(Component, Clone)]
+pub struct Pet {
+    pub owner: Entity,
+    pub pet_type: PetType,
+}
+
+// ============================================================================
 // Resources & Camera
 // ============================================================================
 
@@ -504,6 +547,31 @@ impl Combatant {
         combatant.rogue_opener = rogue_opener;
         combatant.warlock_curse_prefs = warlock_curse_prefs;
         combatant
+    }
+
+    /// Create a new pet combatant with stats derived from the owner.
+    /// The pet uses its owner's class (Warlock) for combat log identification,
+    /// but gets pet-specific stats scaled from the owner.
+    pub fn new_pet(team: u8, slot: u8, pet_type: PetType, owner: &Combatant) -> Self {
+        match pet_type {
+            PetType::Felhunter => {
+                let mut pet = Self::new(team, slot, match_config::CharacterClass::Warlock);
+                // Scale health to ~45% of owner's max health
+                pet.max_health = owner.max_health * 0.45;
+                pet.current_health = pet.max_health;
+                // Pet-specific stats
+                pet.max_mana = 200.0;
+                pet.current_mana = 200.0;
+                pet.mana_regen = 10.0;
+                pet.attack_damage = 8.0;
+                pet.attack_speed = 1.2;
+                pet.attack_power = 20.0;
+                pet.spell_power = owner.spell_power * 0.3;
+                pet.crit_chance = 0.05;
+                pet.base_movement_speed = pet_type.movement_speed();
+                pet
+            }
+        }
     }
     
     /// Check if this combatant is alive (health > 0).

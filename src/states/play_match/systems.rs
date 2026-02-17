@@ -46,6 +46,7 @@ pub use super::combat_ai::acquire_targets;
 pub use super::shadow_sight::check_orb_pickups;
 pub use super::shadow_sight::animate_orb_consumption;
 pub use super::combat_ai::decide_abilities;
+pub use super::class_ai::pet_ai::pet_ai_system;
 pub use super::combat_ai::check_interrupts;
 pub use super::combat_core::process_interrupts;
 pub use super::combat_core::process_casting;
@@ -154,6 +155,7 @@ where
             check_orb_pickups,
             animate_orb_consumption,
             decide_abilities,
+            pet_ai_system,
             apply_deferred, // Flush CastingState for interrupt checks
             check_interrupts,
             process_interrupts,
