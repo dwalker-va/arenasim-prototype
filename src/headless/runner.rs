@@ -14,6 +14,9 @@ use crate::states::play_match::systems::{
     self, combatant_id, Combatant, FloatingTextState, GameRng, MatchCountdown, ShadowSightState,
     SimulationSpeed,
 };
+use crate::states::play_match::components::{Pet, PetType};
+use crate::states::play_match::constants::PET_SLOT_BASE;
+use crate::states::match_config::CharacterClass;
 
 use super::config::HeadlessMatchConfig;
 
@@ -148,13 +151,30 @@ fn headless_setup_match(
             combat_log.register_combatant(combatant_id(1, *character));
             let rogue_opener = config.team1_rogue_openers.get(i).copied().unwrap_or_default();
             let warlock_curse_prefs = config.team1_warlock_curse_prefs.get(i).cloned().unwrap_or_default();
-            commands.spawn((
-                Transform::from_xyz(team1_spawn_x, 1.0, (i as f32 - 1.0) * 3.0),
-                Combatant::new_with_curse_prefs(1, i as u8, *character, rogue_opener, warlock_curse_prefs),
+            let position = Vec3::new(team1_spawn_x, 1.0, (i as f32 - 1.0) * 3.0);
+            let combatant = Combatant::new_with_curse_prefs(1, i as u8, *character, rogue_opener, warlock_curse_prefs);
+            let combatant_clone = combatant.clone();
+            let entity = commands.spawn((
+                Transform::from_translation(position),
+                combatant,
                 FloatingTextState {
                     next_pattern_index: 0,
                 },
-            ));
+            )).id();
+
+            // Spawn Felhunter pet for Warlocks
+            if *character == CharacterClass::Warlock {
+                let pet_slot = PET_SLOT_BASE + i as u8;
+                let pet_combatant = Combatant::new_pet(1, pet_slot, PetType::Felhunter, &combatant_clone);
+                let pet_pos = position + Vec3::new(-2.0, 0.75, 1.5);
+                commands.spawn((
+                    Transform::from_translation(pet_pos),
+                    pet_combatant,
+                    Pet { owner: entity, pet_type: PetType::Felhunter },
+                    FloatingTextState { next_pattern_index: 0 },
+                ));
+                combat_log.register_combatant(format!("Team 1 Felhunter"));
+            }
         }
     }
 
@@ -165,13 +185,30 @@ fn headless_setup_match(
             combat_log.register_combatant(combatant_id(2, *character));
             let rogue_opener = config.team2_rogue_openers.get(i).copied().unwrap_or_default();
             let warlock_curse_prefs = config.team2_warlock_curse_prefs.get(i).cloned().unwrap_or_default();
-            commands.spawn((
-                Transform::from_xyz(team2_spawn_x, 1.0, (i as f32 - 1.0) * 3.0),
-                Combatant::new_with_curse_prefs(2, i as u8, *character, rogue_opener, warlock_curse_prefs),
+            let position = Vec3::new(team2_spawn_x, 1.0, (i as f32 - 1.0) * 3.0);
+            let combatant = Combatant::new_with_curse_prefs(2, i as u8, *character, rogue_opener, warlock_curse_prefs);
+            let combatant_clone = combatant.clone();
+            let entity = commands.spawn((
+                Transform::from_translation(position),
+                combatant,
                 FloatingTextState {
                     next_pattern_index: 0,
                 },
-            ));
+            )).id();
+
+            // Spawn Felhunter pet for Warlocks
+            if *character == CharacterClass::Warlock {
+                let pet_slot = PET_SLOT_BASE + i as u8;
+                let pet_combatant = Combatant::new_pet(2, pet_slot, PetType::Felhunter, &combatant_clone);
+                let pet_pos = position + Vec3::new(2.0, 0.75, 1.5);
+                commands.spawn((
+                    Transform::from_translation(pet_pos),
+                    pet_combatant,
+                    Pet { owner: entity, pet_type: PetType::Felhunter },
+                    FloatingTextState { next_pattern_index: 0 },
+                ));
+                combat_log.register_combatant(format!("Team 2 Felhunter"));
+            }
         }
     }
 
@@ -201,7 +238,7 @@ fn headless_track_time(
 
 /// Check if the match has ended (one or both teams eliminated, or timeout)
 fn headless_check_match_end(
-    combatants: Query<(&Combatant, &Transform)>,
+    combatants: Query<(&Combatant, &Transform), Without<Pet>>,
     config: Res<MatchConfig>,
     combat_log: Res<CombatLog>,
     mut headless_state: ResMut<HeadlessMatchState>,
@@ -249,7 +286,7 @@ fn headless_check_match_end(
 
 /// Build the MatchResult from current combatant state
 fn build_match_result(
-    combatants: &Query<(&Combatant, &Transform)>,
+    combatants: &Query<(&Combatant, &Transform), Without<Pet>>,
     winner: Option<u8>,
     headless_state: &HeadlessMatchState,
 ) -> MatchResult {
@@ -284,7 +321,7 @@ fn build_match_result(
 
 /// Save the combat log to a file
 fn save_headless_match_log(
-    combatants: &Query<(&Combatant, &Transform)>,
+    combatants: &Query<(&Combatant, &Transform), Without<Pet>>,
     config: &Res<MatchConfig>,
     combat_log: &Res<CombatLog>,
     winner: Option<u8>,

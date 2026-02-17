@@ -293,8 +293,8 @@ fn try_power_word_shield(
     let mut best_candidate: Option<(Entity, Vec3, f32)> = None;
 
     for (ally_entity, info) in ctx.combatants.iter() {
-        // Must be same team and alive
-        if info.team != combatant.team || info.current_health <= 0.0 {
+        // Must be same team, alive, and not a pet
+        if info.team != combatant.team || info.current_health <= 0.0 || info.is_pet {
             continue;
         }
 
@@ -527,6 +527,7 @@ fn try_dispel_magic(
                 target: dispel_target,
                 log_prefix: "[DISPEL]",
                 caster_class: CharacterClass::Priest,
+                heal_on_success: None,
             });
 
             // Log the dispel cast (the actual removal is logged in process_dispels)
@@ -573,6 +574,8 @@ pub struct DispelPending {
     pub log_prefix: &'static str,
     /// Caster's class for visual effect coloring
     pub caster_class: CharacterClass,
+    /// Entity to heal on successful dispel (Felhunter's Devour Magic heals itself)
+    pub heal_on_success: Option<(Entity, f32)>,
 }
 
 /// Try to cast Flash Heal on the lowest HP ally.
@@ -591,8 +594,8 @@ fn try_flash_heal(
     let mut lowest_hp_ally: Option<(Entity, f32, Vec3)> = None;
 
     for (ally_entity, info) in ctx.combatants.iter() {
-        // Must be same team and alive
-        if info.team != combatant.team || info.current_health <= 0.0 {
+        // Must be same team, alive, and not a pet (don't waste heals on pets)
+        if info.team != combatant.team || info.current_health <= 0.0 || info.is_pet {
             continue;
         }
 

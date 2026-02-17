@@ -644,12 +644,12 @@ fn try_spread_curses(
         return false;
     }
 
-    // Build list of enemy entities with their slot indices
+    // Build list of enemy entities with their slot indices (exclude pets)
     let mut enemies: Vec<(Entity, Vec3, u8)> = ctx.combatants
         .iter()
         .filter_map(|(&enemy_entity, info)| {
-            // Only target alive enemies on opposite team
-            if info.team != combatant.team && info.current_health > 0.0 {
+            // Only target alive, non-pet enemies on opposite team
+            if info.team != combatant.team && info.current_health > 0.0 && !info.is_pet {
                 Some((enemy_entity, info.position, info.slot))
             } else {
                 None

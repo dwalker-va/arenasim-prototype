@@ -207,6 +207,9 @@ fn get_ability_name(ability: AbilityType) -> &'static str {
         AbilityType::PaladinCleanse => "Cleanse",
         AbilityType::DevotionAura => "Devotion Aura",
         AbilityType::DivineShield => "Divine Shield",
+        // Pet abilities (Felhunter)
+        AbilityType::SpellLock => "Spell Lock",
+        AbilityType::DevourMagic => "Devour Magic",
     }
 }
 

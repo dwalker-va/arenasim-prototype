@@ -142,6 +142,7 @@ impl Plugin for StatesPlugin {
                     play_match::acquire_targets,
                     play_match::check_orb_pickups,  // Check for Shadow Sight orb pickups
                     play_match::decide_abilities,
+                    play_match::pet_ai_system,
                     apply_deferred,  // Flush commands so CastingState is visible
                     play_match::check_interrupts,  // Check for interrupts after CastingState is visible
                     play_match::process_interrupts,

@@ -20,13 +20,14 @@ pub mod warrior;
 pub mod rogue;
 pub mod warlock;
 pub mod paladin;
+pub mod pet_ai;
 
 use bevy::prelude::*;
 use std::collections::HashMap;
 
 use super::match_config::CharacterClass;
 use super::abilities::AbilityType;
-use super::components::{Aura, Combatant, AuraType};
+use super::components::{Aura, Combatant, AuraType, PetType};
 
 /// Per-frame snapshot of a single combatant, used for AI decision making.
 #[derive(Clone, Copy, Debug)]
@@ -44,6 +45,8 @@ pub struct CombatantInfo {
     pub is_alive: bool,
     pub stealthed: bool,
     pub target: Option<Entity>,
+    pub is_pet: bool,
+    pub pet_type: Option<PetType>,
 }
 
 /// Deferred instant melee attack (Mortal Strike, Ambush, Sinister Strike, etc.)
@@ -283,7 +286,7 @@ pub fn is_team_healthy(
     combatant_info: &HashMap<Entity, CombatantInfo>,
 ) -> bool {
     for info in combatant_info.values() {
-        if info.team != team || info.current_health <= 0.0 {
+        if info.team != team || info.current_health <= 0.0 || info.is_pet {
             continue;
         }
         let hp_percent = info.current_health / info.max_health;

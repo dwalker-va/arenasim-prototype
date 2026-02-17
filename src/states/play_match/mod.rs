@@ -62,6 +62,7 @@ pub use shadow_sight::*;
 pub use utils::*;
 pub use constants::*;
 pub use effects::*;
+pub use class_ai::pet_ai::pet_ai_system;
 
 use bevy::prelude::*;
 use super::match_config::{self, MatchConfig};
@@ -338,18 +339,33 @@ pub fn setup_play_match(
             // Get warlock curse preferences for this slot (empty vec if none configured)
             let warlock_curse_prefs = config.team1_warlock_curse_prefs.get(i).cloned().unwrap_or_default();
 
-            spawn_combatant(
+            let position = Vec3::new(team1_spawn_x, 1.0, (i as f32 - 1.0) * 3.0);
+            let (entity, combatant) = spawn_combatant(
                 &mut commands,
                 &mut meshes,
                 &mut materials,
                 1,
                 i as u8, // slot index
                 *character,
-                Vec3::new(team1_spawn_x, 1.0, (i as f32 - 1.0) * 3.0),
+                position,
                 count,
                 rogue_opener,
                 warlock_curse_prefs,
             );
+
+            // Spawn Felhunter pet for Warlocks
+            if *character == match_config::CharacterClass::Warlock {
+                spawn_pet(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    &mut combat_log,
+                    entity,
+                    &combatant,
+                    position,
+                    PetType::Felhunter,
+                );
+            }
         }
     }
 
@@ -369,18 +385,33 @@ pub fn setup_play_match(
             // Get warlock curse preferences for this slot (empty vec if none configured)
             let warlock_curse_prefs = config.team2_warlock_curse_prefs.get(i).cloned().unwrap_or_default();
 
-            spawn_combatant(
+            let position = Vec3::new(team2_spawn_x, 1.0, (i as f32 - 1.0) * 3.0);
+            let (entity, combatant) = spawn_combatant(
                 &mut commands,
                 &mut meshes,
                 &mut materials,
                 2,
                 i as u8, // slot index
                 *character,
-                Vec3::new(team2_spawn_x, 1.0, (i as f32 - 1.0) * 3.0),
+                position,
                 count,
                 rogue_opener,
                 warlock_curse_prefs,
             );
+
+            // Spawn Felhunter pet for Warlocks
+            if *character == match_config::CharacterClass::Warlock {
+                spawn_pet(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    &mut combat_log,
+                    entity,
+                    &combatant,
+                    position,
+                    PetType::Felhunter,
+                );
+            }
         }
     }
     
@@ -456,7 +487,7 @@ fn spawn_combatant(
     duplicate_index: usize,
     rogue_opener: match_config::RogueOpener,
     warlock_curse_prefs: Vec<match_config::WarlockCurse>,
-) {
+) -> (Entity, Combatant) {
     // Get vibrant class colors for 3D visibility
     let base_color = match class {
         match_config::CharacterClass::Warrior => Color::srgb(0.9, 0.6, 0.3), // Orange/brown
@@ -486,17 +517,68 @@ fn spawn_combatant(
         ..default()
     });
 
-    commands.spawn((
+    let combatant = Combatant::new_with_curse_prefs(team, slot, class, rogue_opener, warlock_curse_prefs);
+    let combatant_clone = combatant.clone();
+
+    let entity = commands.spawn((
         Mesh3d(mesh_handle.clone()),
         MeshMaterial3d(material),
         Transform::from_translation(position),
-        Combatant::new_with_curse_prefs(team, slot, class, rogue_opener, warlock_curse_prefs),
+        combatant,
+        FloatingTextState {
+            next_pattern_index: 0,
+        },
+        OriginalMesh(mesh_handle),
+        PlayMatchEntity,
+    )).id();
+
+    (entity, combatant_clone)
+}
+
+/// Helper function to spawn a pet entity for a Warlock combatant.
+fn spawn_pet(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    combat_log: &mut CombatLog,
+    owner_entity: Entity,
+    owner_combatant: &Combatant,
+    owner_position: Vec3,
+    pet_type: PetType,
+) {
+    let pet_slot = PET_SLOT_BASE + owner_combatant.slot;
+    let pet_combatant = Combatant::new_pet(owner_combatant.team, pet_slot, pet_type, owner_combatant);
+    let pet_position = owner_position + Vec3::new(-2.0, 0.75, 1.5);
+
+    let pet_color = pet_type.color();
+    // Smaller capsule mesh (75% scale of player combatants)
+    let mesh_handle = meshes.add(Capsule3d::new(0.375, 1.125));
+    let material = materials.add(StandardMaterial {
+        base_color: pet_color,
+        perceptual_roughness: 0.5,
+        metallic: 0.2,
+        alpha_mode: bevy::prelude::AlphaMode::Blend,
+        ..default()
+    });
+
+    commands.spawn((
+        Mesh3d(mesh_handle.clone()),
+        MeshMaterial3d(material),
+        Transform::from_translation(pet_position),
+        pet_combatant,
+        Pet {
+            owner: owner_entity,
+            pet_type,
+        },
         FloatingTextState {
             next_pattern_index: 0,
         },
         OriginalMesh(mesh_handle),
         PlayMatchEntity,
     ));
+
+    // Register pet with combat log
+    combat_log.register_combatant(format!("Team {} {}", owner_combatant.team, pet_type.name()));
 }
 
 /// Handle camera input for mode switching, zoom, rotation, and drag

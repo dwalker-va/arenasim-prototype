@@ -249,6 +249,7 @@ pub fn move_to_target(
     mut commands: Commands,
     mut combatants: Query<(Entity, &mut Transform, &Combatant, Option<&ActiveAuras>, Option<&CastingState>, Option<&ChargingState>, Option<&ChannelingState>)>,
     orbs: Query<&Transform, (With<ShadowSightOrb>, Without<Combatant>)>,
+    pet_query: Query<&Pet>,
 ) {
     // Don't allow movement until gates open
     if !countdown.gates_opened {
@@ -455,6 +456,35 @@ pub fn move_to_target(
 
         // NORMAL MOVEMENT: Get target position
         let Some(target_entity) = combatant.target else {
+            // Pets with no target follow their owner
+            if let Ok(pet) = pet_query.get(entity) {
+                if let Some(&(owner_pos, _)) = positions.get(&pet.owner) {
+                    let dist_to_owner = my_pos.distance(owner_pos);
+                    if dist_to_owner > 3.0 {
+                        let direction = Vec3::new(
+                            owner_pos.x - my_pos.x, 0.0, owner_pos.z - my_pos.z,
+                        ).normalize_or_zero();
+                        if direction != Vec3::ZERO {
+                            let mut movement_speed = combatant.base_movement_speed;
+                            if let Some(auras) = auras {
+                                for aura in &auras.auras {
+                                    if aura.effect_type == AuraType::MovementSpeedSlow {
+                                        movement_speed *= aura.magnitude;
+                                    }
+                                }
+                            }
+                            let move_distance = movement_speed * dt;
+                            transform.translation += direction * move_distance;
+                            transform.translation.x = transform.translation.x.clamp(-ARENA_HALF_X, ARENA_HALF_X);
+                            transform.translation.z = transform.translation.z.clamp(-ARENA_HALF_Z, ARENA_HALF_Z);
+                            let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
+                            transform.rotation = target_rotation;
+                        }
+                    }
+                }
+                continue;
+            }
+
             // No target available (likely facing all-stealth team)
             // When orbs are spawned, ALL combatants (even stealthed) should seek them
             // to break the stalemate. This represents accepting the reveal to gain vision.
@@ -515,9 +545,12 @@ pub fn move_to_target(
         
         let distance = my_pos.distance(target_pos);
 
-        // Use class-specific preferred range - the optimal distance where they
-        // can use all their important abilities without unnecessary repositioning
-        let stop_distance = combatant.class.preferred_range();
+        // Use class-specific preferred range, or pet-type preferred range for pets
+        let stop_distance = if let Ok(pet) = pet_query.get(entity) {
+            pet.pet_type.preferred_range()
+        } else {
+            combatant.class.preferred_range()
+        };
 
         // If out of range, move towards target
         if distance > stop_distance {
@@ -618,6 +651,7 @@ pub fn combat_auto_attack(
     mut combatants: Query<(Entity, &Transform, &mut Combatant, Option<&CastingState>, Option<&ChannelingState>, Option<&mut ActiveAuras>)>,
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
+    auto_attack_pet_query: Query<&Pet>,
 ) {
     // Don't deal damage during victory celebration
     if celebration.is_some() {
@@ -640,9 +674,17 @@ pub fn combat_auto_attack(
         .collect();
 
     // Build a snapshot of combatant info for logging
-    let combatant_info: std::collections::HashMap<Entity, (u8, match_config::CharacterClass)> = combatants
+    // Tuple: (team, class, display_name) — display_name is "Felhunter" for pets, class name otherwise
+    let combatant_info: std::collections::HashMap<Entity, (u8, match_config::CharacterClass, String)> = combatants
         .iter()
-        .map(|(entity, _, combatant, _, _, _)| (entity, (combatant.team, combatant.class)))
+        .map(|(entity, _, combatant, _, _, _)| {
+            let display_name = if let Ok(pet) = auto_attack_pet_query.get(entity) {
+                pet.pet_type.name().to_string()
+            } else {
+                combatant.class.name().to_string()
+            };
+            (entity, (combatant.team, combatant.class, display_name))
+        })
         .collect();
     
     // Collect attacks that will happen this frame (attacker, target, damage)
@@ -781,7 +823,7 @@ pub fn combat_auto_attack(
                 damage_dealt_updates.push((attacker_entity, actual_damage + absorbed));
 
                 // Log the attack with structured data
-                if let (Some(&(attacker_team, attacker_class)), Some(&(target_team, target_class))) =
+                if let (Some((attacker_team, attacker_class, attacker_name)), Some((target_team, _target_class, target_name))) =
                     (combatant_info.get(&attacker_entity), combatant_info.get(&target_entity)) {
                     let attack_name = if has_bonus {
                         "Heroic Strike" // Enhanced auto-attack
@@ -797,11 +839,11 @@ pub fn combat_auto_attack(
                         format!(
                             "Team {} {}'s {} {} Team {} {} for {:.0} damage ({:.0} absorbed)",
                             attacker_team,
-                            attacker_class.name(),
+                            attacker_name,
                             attack_name,
                             verb,
                             target_team,
-                            target_class.name(),
+                            target_name,
                             actual_damage,
                             absorbed
                         )
@@ -809,19 +851,22 @@ pub fn combat_auto_attack(
                         format!(
                             "Team {} {}'s {} {} Team {} {} for {:.0} damage",
                             attacker_team,
-                            attacker_class.name(),
+                            attacker_name,
                             attack_name,
                             verb,
                             target_team,
-                            target_class.name(),
+                            target_name,
                             actual_damage
                         )
                     };
 
+                    let attacker_id = format!("Team {} {}", attacker_team, attacker_name);
+                    let target_id = format!("Team {} {}", target_team, target_name);
+
                     let is_killing_blow = !target.is_alive();
                     combat_log.log_damage(
-                        combatant_id(attacker_team, attacker_class),
-                        combatant_id(target_team, target_class),
+                        attacker_id.clone(),
+                        target_id.clone(),
                         attack_name.to_string(),
                         actual_damage + absorbed, // Total damage dealt (including absorbed)
                         is_killing_blow,
@@ -838,11 +883,11 @@ pub fn combat_auto_attack(
                         let death_message = format!(
                             "Team {} {} has been eliminated",
                             target_team,
-                            target_class.name()
+                            target_name
                         );
                         combat_log.log_death(
-                            combatant_id(target_team, target_class),
-                            Some(combatant_id(attacker_team, attacker_class)),
+                            target_id,
+                            Some(attacker_id),
                             death_message,
                         );
                     }
@@ -975,6 +1020,7 @@ pub fn process_interrupts(
     mut casting_targets: Query<(&mut CastingState, &Combatant), Without<ChannelingState>>,
     mut channeling_targets: Query<(&mut ChannelingState, &Combatant), Without<CastingState>>,
     combatants: Query<&Combatant>,
+    pet_query: Query<&Pet>,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
     // Don't process interrupts during victory celebration
@@ -1009,6 +1055,7 @@ pub fn process_interrupts(
                     &abilities,
                     interrupt,
                     &combatants,
+                    &pet_query,
                     target_combatant,
                     interrupted_school,
                     interrupted_spell_name,
@@ -1043,6 +1090,7 @@ pub fn process_interrupts(
                         &abilities,
                         interrupt,
                         &combatants,
+                        &pet_query,
                         target_combatant,
                         interrupted_school,
                         interrupted_spell_name,
@@ -1063,15 +1111,21 @@ fn apply_interrupt_lockout(
     abilities: &AbilityDefinitions,
     interrupt: &InterruptPending,
     combatants: &Query<&Combatant>,
+    pet_query: &Query<&Pet>,
     target_combatant: &Combatant,
     interrupted_school: SpellSchool,
     interrupted_spell_name: &str,
 ) {
     // Get caster info for logging
     let caster_info = if let Ok(caster) = combatants.get(interrupt.caster) {
-        (caster.team, caster.class)
+        let display_name = if let Ok(pet) = pet_query.get(interrupt.caster) {
+            pet.pet_type.name().to_string()
+        } else {
+            caster.class.name().to_string()
+        };
+        (caster.team, display_name)
     } else {
-        (0, match_config::CharacterClass::Warrior) // Fallback
+        (0, "Unknown".to_string()) // Fallback
     };
 
     // Apply spell school lockout aura
@@ -1118,7 +1172,7 @@ fn apply_interrupt_lockout(
     let message = format!(
         "Team {} {} interrupts Team {} {}'s {} - {} school locked for {:.1}s",
         caster_info.0,
-        caster_info.1.name(),
+        caster_info.1,
         target_combatant.team,
         target_combatant.class.name(),
         interrupted_spell_name,
