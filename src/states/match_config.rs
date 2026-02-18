@@ -134,10 +134,9 @@ impl CharacterClass {
             // Warlock: Fear 30, Shadowbolt 40, Corruption 40, Wand 30
             // Stay at ~28 to cast Fear without repositioning
             CharacterClass::Warlock => 28.0,
-            // Paladin: Healer that positions like Priest
-            // Healing range 40, but has melee utility (Hammer of Justice 10yd)
-            // Stay at ~28 for healing safety, move in for stuns
-            CharacterClass::Paladin => 28.0,
+            // Paladin: Holy warrior — melee positioning for auto-attacks + Hammer of Justice
+            // All heals are 40yd range, so melee positioning doesn't limit healing
+            CharacterClass::Paladin => 2.0,
         }
     }
 }

@@ -231,7 +231,7 @@ fn select_cc_target_heuristic(
             enemy_combatants
                 .iter()
                 .find(|(e, _, _, _, _, _, _, _)| *e == kt)
-                .map(|(_, _, _, _, class, _, _, _)| *class == match_config::CharacterClass::Priest)
+                .map(|(_, _, _, _, class, _, _, _)| matches!(*class, match_config::CharacterClass::Priest | match_config::CharacterClass::Paladin))
         })
         .unwrap_or(false);
 
@@ -243,7 +243,7 @@ fn select_cc_target_heuristic(
         .filter(|(entity, _, _, _, _, _, _, _)| !is_entity_ccd(*entity, active_auras_map))
         .map(|(entity, _, _, _, class, current_health, _, _)| {
             let mut score = 0i32;
-            let is_healer = *class == match_config::CharacterClass::Priest;
+            let is_healer = matches!(*class, match_config::CharacterClass::Priest | match_config::CharacterClass::Paladin);
 
             // Healer/DPS priority depends on who we're killing
             if killing_healer {

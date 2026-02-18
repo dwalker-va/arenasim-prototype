@@ -617,17 +617,18 @@ impl Combatant {
     }
     
     /// Check if this combatant is in range to attack the target position.
-    /// Mages, Priests, Warlocks, and Paladins use wands (ranged), Warriors and Rogues use melee weapons.
+    /// Mages, Priests, and Warlocks use wands (ranged); Warriors, Rogues, and Paladins use melee weapons.
     pub fn in_attack_range(&self, my_position: Vec3, target_position: Vec3) -> bool {
         let distance = my_position.distance(target_position);
         match self.class {
             match_config::CharacterClass::Mage
             | match_config::CharacterClass::Priest
-            | match_config::CharacterClass::Warlock
-            | match_config::CharacterClass::Paladin => {
+            | match_config::CharacterClass::Warlock => {
                 distance <= WAND_RANGE
             }
-            match_config::CharacterClass::Warrior | match_config::CharacterClass::Rogue => {
+            match_config::CharacterClass::Warrior
+            | match_config::CharacterClass::Rogue
+            | match_config::CharacterClass::Paladin => {
                 distance <= MELEE_RANGE
             }
         }
