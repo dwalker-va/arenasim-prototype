@@ -487,16 +487,16 @@ impl Combatant {
             // Warriors: High HP, physical damage, scales with Attack Power (8% crit)
             match_config::CharacterClass::Warrior => (ResourceType::Rage, 200.0, 100.0, 0.0, 0.0, 12.0, 1.0, 30.0, 0.0, 0.08, 5.0),
             // Mages: Low HP, magical damage (wand), scales with Spell Power (6% crit)
-            match_config::CharacterClass::Mage => (ResourceType::Mana, 150.0, 200.0, 10.0, 200.0, 10.0, 0.7, 0.0, 50.0, 0.06, 4.5),
+            match_config::CharacterClass::Mage => (ResourceType::Mana, 150.0, 200.0, 0.0, 200.0, 10.0, 0.7, 0.0, 50.0, 0.06, 4.5),
             // Rogues: Medium HP, physical burst damage, scales with Attack Power (10% crit - highest)
             match_config::CharacterClass::Rogue => (ResourceType::Energy, 175.0, 100.0, 20.0, 100.0, 10.0, 1.3, 35.0, 0.0, 0.10, 6.0),
             // Priests: Medium HP, healing & wand damage, scales with Spell Power (4% crit)
-            match_config::CharacterClass::Priest => (ResourceType::Mana, 150.0, 150.0, 8.0, 150.0, 6.0, 0.8, 0.0, 40.0, 0.04, 5.0),
+            match_config::CharacterClass::Priest => (ResourceType::Mana, 150.0, 150.0, 0.0, 150.0, 6.0, 0.8, 0.0, 40.0, 0.04, 5.0),
             // Warlocks: Medium HP, shadow damage (wand), scales with Spell Power, DoT focused (5% crit)
-            match_config::CharacterClass::Warlock => (ResourceType::Mana, 160.0, 180.0, 9.0, 180.0, 8.0, 0.7, 0.0, 45.0, 0.05, 4.5),
+            match_config::CharacterClass::Warlock => (ResourceType::Mana, 160.0, 180.0, 0.0, 180.0, 8.0, 0.7, 0.0, 45.0, 0.05, 4.5),
             // Paladins: High HP (plate), healing & melee hybrid, scales with Spell Power primarily (6% crit)
             // Tankier than Priest but lower spell power to offset utility
-            match_config::CharacterClass::Paladin => (ResourceType::Mana, 175.0, 160.0, 8.0, 160.0, 8.0, 0.9, 20.0, 35.0, 0.06, 5.0),
+            match_config::CharacterClass::Paladin => (ResourceType::Mana, 175.0, 160.0, 0.0, 160.0, 8.0, 0.9, 20.0, 35.0, 0.06, 5.0),
         };
         
         // Rogues start stealthed
