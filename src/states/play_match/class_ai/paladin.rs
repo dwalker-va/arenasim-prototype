@@ -748,7 +748,7 @@ fn try_hammer_of_justice(
     // Prefer healers over DPS
     let stun_target = enemies_in_range
         .iter()
-        .find(|(_, class)| matches!(class, CharacterClass::Priest | CharacterClass::Paladin))
+        .find(|(_, class)| class.is_healer())
         .or_else(|| enemies_in_range.first())
         .copied();
 

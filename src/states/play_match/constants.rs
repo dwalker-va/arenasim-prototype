@@ -18,7 +18,7 @@ pub const GCD: f32 = 1.5;
 /// Similar to WoW's melee range of ~5 yards.
 pub const MELEE_RANGE: f32 = 2.5;
 
-/// Ranged wand attack range for caster classes (Mage, Priest).
+/// Ranged wand attack range for caster classes.
 /// Similar to WoW's wand range of ~30 yards.
 pub const WAND_RANGE: f32 = 30.0;
 

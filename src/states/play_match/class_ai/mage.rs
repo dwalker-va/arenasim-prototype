@@ -229,12 +229,7 @@ fn try_arcane_intellect(
             continue;
         }
 
-        // Only buff mana users (Mage, Priest, Warlock)
-        let uses_mana = matches!(
-            info.class,
-            CharacterClass::Mage | CharacterClass::Priest | CharacterClass::Warlock
-        );
-        if !uses_mana {
+        if !info.class.uses_mana() {
             continue;
         }
 

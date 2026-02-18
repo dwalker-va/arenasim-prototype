@@ -212,7 +212,7 @@ pub fn acquire_targets(
 
 /// Select the best CC target using heuristics.
 /// Priority scoring:
-/// 1. Healer (Priest): +100 points - highest CC value (UNLESS we're killing the healer)
+/// 1. Healer: +100 points - highest CC value (UNLESS we're killing the healer)
 /// 2. Non-kill-target: +50 points - enables outnumbering
 /// 3. Higher HP: +20 points - don't waste CC on dying targets
 /// Required: Not already CC'd
@@ -231,7 +231,7 @@ fn select_cc_target_heuristic(
             enemy_combatants
                 .iter()
                 .find(|(e, _, _, _, _, _, _, _)| *e == kt)
-                .map(|(_, _, _, _, class, _, _, _)| *class == match_config::CharacterClass::Priest)
+                .map(|(_, _, _, _, class, _, _, _)| class.is_healer())
         })
         .unwrap_or(false);
 
@@ -243,7 +243,7 @@ fn select_cc_target_heuristic(
         .filter(|(entity, _, _, _, _, _, _, _)| !is_entity_ccd(*entity, active_auras_map))
         .map(|(entity, _, _, _, class, current_health, _, _)| {
             let mut score = 0i32;
-            let is_healer = *class == match_config::CharacterClass::Priest;
+            let is_healer = class.is_healer();
 
             // Healer/DPS priority depends on who we're killing
             if killing_healer {

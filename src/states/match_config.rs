@@ -117,6 +117,24 @@ impl CharacterClass {
         }
     }
 
+    /// Whether this class attacks in melee range (vs. ranged/wand).
+    pub fn is_melee(&self) -> bool {
+        matches!(self, CharacterClass::Warrior | CharacterClass::Rogue | CharacterClass::Paladin)
+    }
+
+    /// Whether this class is primarily a healer (for CC target prioritization).
+    pub fn is_healer(&self) -> bool {
+        matches!(self, CharacterClass::Priest | CharacterClass::Paladin)
+    }
+
+    /// Whether this class uses mana as its resource.
+    pub fn uses_mana(&self) -> bool {
+        matches!(
+            self,
+            CharacterClass::Mage | CharacterClass::Priest | CharacterClass::Warlock | CharacterClass::Paladin
+        )
+    }
+
     /// Get the preferred combat range for this class.
     /// This is the optimal distance to maintain - close enough for all important
     /// abilities without putting themselves in unnecessary danger.
@@ -134,10 +152,9 @@ impl CharacterClass {
             // Warlock: Fear 30, Shadowbolt 40, Corruption 40, Wand 30
             // Stay at ~28 to cast Fear without repositioning
             CharacterClass::Warlock => 28.0,
-            // Paladin: Healer that positions like Priest
-            // Healing range 40, but has melee utility (Hammer of Justice 10yd)
-            // Stay at ~28 for healing safety, move in for stuns
-            CharacterClass::Paladin => 28.0,
+            // Paladin: Holy warrior — melee positioning for auto-attacks + Hammer of Justice
+            // All heals are 40yd range, so melee positioning doesn't limit healing
+            CharacterClass::Paladin => 2.0,
         }
     }
 }
