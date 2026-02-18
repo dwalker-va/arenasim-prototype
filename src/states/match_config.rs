@@ -117,6 +117,24 @@ impl CharacterClass {
         }
     }
 
+    /// Whether this class attacks in melee range (vs. ranged/wand).
+    pub fn is_melee(&self) -> bool {
+        matches!(self, CharacterClass::Warrior | CharacterClass::Rogue | CharacterClass::Paladin)
+    }
+
+    /// Whether this class is primarily a healer (for CC target prioritization).
+    pub fn is_healer(&self) -> bool {
+        matches!(self, CharacterClass::Priest | CharacterClass::Paladin)
+    }
+
+    /// Whether this class uses mana as its resource.
+    pub fn uses_mana(&self) -> bool {
+        matches!(
+            self,
+            CharacterClass::Mage | CharacterClass::Priest | CharacterClass::Warlock | CharacterClass::Paladin
+        )
+    }
+
     /// Get the preferred combat range for this class.
     /// This is the optimal distance to maintain - close enough for all important
     /// abilities without putting themselves in unnecessary danger.

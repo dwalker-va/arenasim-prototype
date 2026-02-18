@@ -827,12 +827,10 @@ pub fn combat_auto_attack(
                     (combatant_info.get(&attacker_entity), combatant_info.get(&target_entity)) {
                     let attack_name = if has_bonus {
                         "Heroic Strike" // Enhanced auto-attack
+                    } else if attacker_class.is_melee() {
+                        "Auto Attack"
                     } else {
-                        // Distinguish between melee and wand attacks based on class
-                        match attacker_class {
-                            match_config::CharacterClass::Mage | match_config::CharacterClass::Priest => "Wand Shot",
-                            _ => "Auto Attack",
-                        }
+                        "Wand Shot"
                     };
                     let verb = if is_crit { "CRITS" } else { "hits" };
                     let message = if absorbed > 0.0 {

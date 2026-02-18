@@ -422,7 +422,7 @@ pub struct Combatant {
     pub team: u8,
     /// Slot index within the team (0, 1, 2) - used for per-slot configuration like curse targets
     pub slot: u8,
-    /// Character class (Warrior, Mage, Rogue, Priest)
+    /// Character class
     pub class: match_config::CharacterClass,
     /// Resource type (Mana, Energy, Rage)
     pub resource_type: ResourceType,
@@ -617,20 +617,12 @@ impl Combatant {
     }
     
     /// Check if this combatant is in range to attack the target position.
-    /// Mages, Priests, and Warlocks use wands (ranged); Warriors, Rogues, and Paladins use melee weapons.
     pub fn in_attack_range(&self, my_position: Vec3, target_position: Vec3) -> bool {
         let distance = my_position.distance(target_position);
-        match self.class {
-            match_config::CharacterClass::Mage
-            | match_config::CharacterClass::Priest
-            | match_config::CharacterClass::Warlock => {
-                distance <= WAND_RANGE
-            }
-            match_config::CharacterClass::Warrior
-            | match_config::CharacterClass::Rogue
-            | match_config::CharacterClass::Paladin => {
-                distance <= MELEE_RANGE
-            }
+        if self.class.is_melee() {
+            distance <= MELEE_RANGE
+        } else {
+            distance <= WAND_RANGE
         }
     }
     
