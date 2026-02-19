@@ -32,6 +32,7 @@ pub fn pet_ai_system(
     casting_targets: Query<(Entity, &Combatant, &CastingState), Without<Pet>>,
     channeling_targets: Query<(Entity, &Combatant, &ChannelingState), (Without<CastingState>, Without<Pet>)>,
     all_combatants: Query<(Entity, &Combatant, &Transform, Option<&ActiveAuras>), Without<Pet>>,
+    dr_tracker_query: Query<(Entity, &DRTracker)>,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
     if celebration.is_some() {
@@ -68,6 +69,11 @@ pub fn pet_ai_system(
         })
         .collect();
 
+    let dr_trackers: std::collections::HashMap<Entity, DRTracker> = dr_tracker_query
+        .iter()
+        .map(|(entity, tracker)| (entity, tracker.clone()))
+        .collect();
+
     for (entity, mut combatant, transform, pet, auras) in pets.iter_mut() {
         if !combatant.is_alive() {
             continue;
@@ -88,6 +94,7 @@ pub fn pet_ai_system(
         let ctx = CombatContext {
             combatants: &combatant_info,
             active_auras: &active_auras_map,
+            dr_trackers: &dr_trackers,
             self_entity: entity,
         };
 

@@ -27,11 +27,15 @@ pub fn update_auras(
     time: Res<Time>,
     mut commands: Commands,
     mut game_rng: ResMut<GameRng>,
-    mut combatants: Query<(Entity, &mut ActiveAuras)>,
+    mut combatants: Query<(Entity, &mut ActiveAuras, Option<&mut DRTracker>)>,
 ) {
     let dt = time.delta_secs();
 
-    for (entity, mut auras) in combatants.iter_mut() {
+    for (entity, mut auras, dr_tracker) in combatants.iter_mut() {
+        // Tick DR timers (resets DR level when 15s expires)
+        if let Some(mut tracker) = dr_tracker {
+            tracker.tick_timers(dt);
+        }
         // Tick down all aura durations and update fear timers
         for aura in auras.auras.iter_mut() {
             aura.duration -= dt;
@@ -75,7 +79,7 @@ pub fn apply_pending_auras(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
     pending_auras: Query<(Entity, &AuraPending)>,
-    mut combatants: Query<(&mut Combatant, Option<&mut ActiveAuras>, &Transform)>,
+    mut combatants: Query<(&mut Combatant, Option<&mut ActiveAuras>, &Transform, Option<&mut DRTracker>)>,
     charging_query: Query<&ChargingState>,
     mut fct_states: Query<&mut FloatingTextState>,
     pet_query: Query<&Pet>,
@@ -109,7 +113,7 @@ pub fn apply_pending_auras(
         );
 
         // Get target combatant
-        let Ok((mut target_combatant, active_auras, target_transform)) = combatants.get_mut(pending.target) else {
+        let Ok((mut target_combatant, mut active_auras, target_transform, mut dr_tracker)) = combatants.get_mut(pending.target) else {
             commands.entity(pending_entity).despawn();
             continue;
         };
@@ -205,6 +209,58 @@ pub fn apply_pending_auras(
 
             commands.entity(pending_entity).despawn();
             continue;
+        }
+
+        // Check diminishing returns for CC auras
+        let dr_category = DRCategory::from_aura_type(&pending.aura.effect_type);
+        let mut dr_multiplier: f32 = 1.0;
+        if let Some(category) = dr_category {
+            if let Some(ref mut tracker) = dr_tracker {
+                if tracker.is_immune(category) {
+                    // DR immune — block the CC, spawn "IMMUNE" FCT, log it
+                    let text_position = target_transform.translation + Vec3::new(0.0, 2.5, 0.0);
+                    let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(pending.target) {
+                        get_next_fct_offset(&mut fct_state)
+                    } else {
+                        (0.0, 0.0)
+                    };
+
+                    commands.spawn((
+                        FloatingCombatText {
+                            world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
+                            text: "IMMUNE".to_string(),
+                            color: egui::Color32::YELLOW,
+                            lifetime: 1.5,
+                            vertical_offset: offset_y,
+                            is_crit: false,
+                        },
+                        PlayMatchEntity,
+                    ));
+
+                    // Immune application does NOT restart timer
+                    let _ = tracker.apply(category);
+
+                    let display_name = if let Ok(pet) = pet_query.get(pending.target) {
+                        pet.pet_type.name().to_string()
+                    } else {
+                        target_combatant.class.name().to_string()
+                    };
+
+                    let message = format!(
+                        "{} IMMUNE on Team {} {} (DR immune)",
+                        pending.aura.ability_name,
+                        target_combatant.team,
+                        display_name,
+                    );
+                    combat_log.log(CombatLogEventType::CrowdControl, message);
+
+                    commands.entity(pending_entity).despawn();
+                    continue;
+                }
+
+                // Not immune — apply DR and get duration multiplier
+                dr_multiplier = tracker.apply(category);
+            }
         }
 
         // Check if target already has this buff type (prevent stacking for buff auras)
@@ -369,17 +425,52 @@ pub fn apply_pending_auras(
             );
         }
 
+        // Apply DR duration scaling to CC auras
+        let mut aura_to_add = pending.aura.clone();
+        if dr_category.is_some() && dr_multiplier < 1.0 {
+            aura_to_add.duration *= dr_multiplier;
+        }
+
+        // Log DR info for CC auras
+        if let Some(category) = dr_category {
+            let display_name = if let Ok(pet) = pet_query.get(pending.target) {
+                pet.pet_type.name().to_string()
+            } else {
+                target_combatant.class.name().to_string()
+            };
+
+            let dr_pct = (dr_multiplier * 100.0) as i32;
+            let message = format!(
+                "{} on Team {} {} ({:.1}s, DR: {}%)",
+                aura_to_add.ability_name,
+                target_combatant.team,
+                display_name,
+                aura_to_add.duration,
+                dr_pct,
+            );
+            combat_log.log(CombatLogEventType::CrowdControl, message);
+
+            // CC replacement: remove existing CC of same DR category before adding new one
+            if let Some(ref mut active_auras) = active_auras {
+                if let Some(pos) = active_auras.auras.iter().position(|a| {
+                    DRCategory::from_aura_type(&a.effect_type) == Some(category)
+                }) {
+                    active_auras.auras.swap_remove(pos);
+                }
+            }
+        }
+
         // Add aura to target
         if let Some(mut active_auras) = active_auras {
             // Add to existing ActiveAuras component
-            active_auras.auras.push(pending.aura.clone());
+            active_auras.auras.push(aura_to_add);
         } else {
             // Entity doesn't have ActiveAuras yet - accumulate in our map
             // This prevents multiple insert() calls from overwriting each other
             new_auras_map
                 .entry(pending.target)
                 .or_insert_with(Vec::new)
-                .push(pending.aura.clone());
+                .push(aura_to_add);
         }
 
         // Remove the pending aura entity

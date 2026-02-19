@@ -14,7 +14,7 @@ use crate::states::play_match::systems::{
     self, combatant_id, Combatant, FloatingTextState, GameRng, MatchCountdown, ShadowSightState,
     SimulationSpeed,
 };
-use crate::states::play_match::components::{Pet, PetType};
+use crate::states::play_match::components::{Pet, PetType, DRTracker};
 use crate::states::play_match::constants::PET_SLOT_BASE;
 use crate::states::match_config::CharacterClass;
 
@@ -157,6 +157,7 @@ fn headless_setup_match(
             let entity = commands.spawn((
                 Transform::from_translation(position),
                 combatant,
+                DRTracker::default(),
                 FloatingTextState {
                     next_pattern_index: 0,
                 },
@@ -170,6 +171,7 @@ fn headless_setup_match(
                 commands.spawn((
                     Transform::from_translation(pet_pos),
                     pet_combatant,
+                    DRTracker::default(),
                     Pet { owner: entity, pet_type: PetType::Felhunter },
                     FloatingTextState { next_pattern_index: 0 },
                 ));
@@ -191,6 +193,7 @@ fn headless_setup_match(
             let entity = commands.spawn((
                 Transform::from_translation(position),
                 combatant,
+                DRTracker::default(),
                 FloatingTextState {
                     next_pattern_index: 0,
                 },
@@ -204,6 +207,7 @@ fn headless_setup_match(
                 commands.spawn((
                     Transform::from_translation(pet_pos),
                     pet_combatant,
+                    DRTracker::default(),
                     Pet { owner: entity, pet_type: PetType::Felhunter },
                     FloatingTextState { next_pattern_index: 0 },
                 ));

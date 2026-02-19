@@ -112,13 +112,13 @@ pub fn decide_rogue_action(
         ctx,
     );
     if let Some((ks_target_entity, ks_target_pos)) = kidney_shot_target {
-        // Check if target is already stunned - don't waste Kidney Shot
+        // Check if target is already stunned or DR-immune to stuns
         let target_already_stunned = ctx.active_auras
             .get(&ks_target_entity)
             .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::Stun))
             .unwrap_or(false);
 
-        if !target_already_stunned {
+        if !target_already_stunned && !ctx.is_dr_immune(ks_target_entity, DRCategory::Stuns) {
             if try_kidney_shot(
                 commands,
                 combat_log,

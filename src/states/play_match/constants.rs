@@ -126,6 +126,19 @@ pub const PREMATCH_COUNTDOWN: f32 = 10.0;
 /// Victory celebration duration before transitioning to results (in seconds).
 pub const VICTORY_CELEBRATION_DURATION: f32 = 5.0;
 
+// ============================================================================
+// Diminishing Returns
+// ============================================================================
+
+/// Time in seconds before DR resets after last CC application (WoW Classic: 15s).
+pub const DR_RESET_TIMER: f32 = 15.0;
+
+/// DR level at which target becomes immune to that CC category.
+pub const DR_IMMUNE_LEVEL: u8 = 3;
+
+/// Duration multipliers indexed by DR level: 100% → 50% → 25% → Immune.
+pub const DR_MULTIPLIERS: [f32; 4] = [1.0, 0.5, 0.25, 0.0];
+
 #[cfg(test)]
 mod tests {
     use super::*;

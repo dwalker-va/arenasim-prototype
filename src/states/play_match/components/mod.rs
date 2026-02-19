@@ -28,6 +28,7 @@ use super::ability_config::AbilityConfig;
 
 // Re-export constants from parent module
 use super::{MELEE_RANGE, WAND_RANGE};
+use super::constants::{DR_RESET_TIMER, DR_IMMUNE_LEVEL, DR_MULTIPLIERS};
 
 // ============================================================================
 // Pet Types
@@ -409,6 +410,107 @@ pub enum AuraType {
     /// Complete damage immunity - all incoming damage is negated, all hostile auras are blocked.
     /// Used by Divine Shield. Magnitude unused (always 1.0 by convention).
     DamageImmunity,
+}
+
+// ============================================================================
+// Diminishing Returns
+// ============================================================================
+
+/// DR categories — fixed enum with known size for array indexing.
+/// Each category is independent: Stun DR doesn't affect Fear DR.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DRCategory {
+    Stuns = 0,
+    Fears = 1,
+    Incapacitates = 2,
+    Roots = 3,
+    Slows = 4,
+}
+
+impl DRCategory {
+    pub const COUNT: usize = 5;
+
+    #[inline]
+    pub fn index(self) -> usize {
+        self as usize
+    }
+
+    /// Map an AuraType to its DR category. Returns None for non-CC auras.
+    pub fn from_aura_type(aura_type: &AuraType) -> Option<DRCategory> {
+        match aura_type {
+            AuraType::Stun => Some(DRCategory::Stuns),
+            AuraType::Fear => Some(DRCategory::Fears),
+            AuraType::Polymorph => Some(DRCategory::Incapacitates),
+            AuraType::Root => Some(DRCategory::Roots),
+            AuraType::MovementSpeedSlow => Some(DRCategory::Slows),
+            _ => None,
+        }
+    }
+}
+
+/// Per-category DR state. Tracks diminishment level and reset timer.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DRState {
+    /// 0 = fresh, 1 = next will be 50%, 2 = next will be 25%, 3 = immune
+    pub level: u8,
+    /// Seconds remaining until DR resets (counts down from 15.0)
+    pub timer: f32,
+}
+
+/// Fixed-size DR tracker component. No heap allocation, fully inline in archetype table.
+/// Uses [DRState; 5] indexed by DRCategory discriminant — O(1) access.
+#[derive(Component, Debug, Clone)]
+pub struct DRTracker {
+    states: [DRState; DRCategory::COUNT],
+}
+
+impl Default for DRTracker {
+    fn default() -> Self {
+        Self {
+            states: [DRState::default(); DRCategory::COUNT],
+        }
+    }
+}
+
+impl DRTracker {
+    /// Apply a CC of the given category. Returns the duration multiplier (1.0, 0.5, 0.25, or 0.0).
+    /// Advances DR level and resets the 15s timer (unless already immune).
+    #[inline]
+    pub fn apply(&mut self, category: DRCategory) -> f32 {
+        let state = &mut self.states[category.index()];
+        let multiplier = DR_MULTIPLIERS[state.level.min(3) as usize];
+        if state.level < DR_IMMUNE_LEVEL {
+            state.level += 1;
+            state.timer = DR_RESET_TIMER;
+        }
+        // Immune applications do NOT restart the timer (decision #2)
+        multiplier
+    }
+
+    /// Check if target is immune to a DR category (level >= 3).
+    #[inline]
+    pub fn is_immune(&self, category: DRCategory) -> bool {
+        self.states[category.index()].level >= DR_IMMUNE_LEVEL
+    }
+
+    /// Tick all DR timers. Called from update_auras() each frame.
+    pub fn tick_timers(&mut self, dt: f32) {
+        for state in &mut self.states {
+            if state.timer > 0.0 {
+                state.timer -= dt;
+                if state.timer <= 0.0 {
+                    state.level = 0;
+                    state.timer = 0.0;
+                }
+            }
+        }
+    }
+
+    /// Get current DR level for a category (for combat log / AI queries).
+    #[inline]
+    pub fn level(&self, category: DRCategory) -> u8 {
+        self.states[category.index()].level
+    }
 }
 
 // ============================================================================
@@ -1260,5 +1362,110 @@ mod tests {
         assert!(pending.is_some());
         let pending = pending.unwrap();
         assert_eq!(pending.aura.ability_name, "Custom Shield Name");
+    }
+
+    // =========================================================================
+    // DRCategory Tests
+    // =========================================================================
+
+    #[test]
+    fn test_dr_category_from_aura_type_cc_types() {
+        assert_eq!(DRCategory::from_aura_type(&AuraType::Stun), Some(DRCategory::Stuns));
+        assert_eq!(DRCategory::from_aura_type(&AuraType::Fear), Some(DRCategory::Fears));
+        assert_eq!(DRCategory::from_aura_type(&AuraType::Polymorph), Some(DRCategory::Incapacitates));
+        assert_eq!(DRCategory::from_aura_type(&AuraType::Root), Some(DRCategory::Roots));
+        assert_eq!(DRCategory::from_aura_type(&AuraType::MovementSpeedSlow), Some(DRCategory::Slows));
+    }
+
+    #[test]
+    fn test_dr_category_from_aura_type_non_cc_returns_none() {
+        assert_eq!(DRCategory::from_aura_type(&AuraType::DamageOverTime), None);
+        assert_eq!(DRCategory::from_aura_type(&AuraType::MaxHealthIncrease), None);
+        assert_eq!(DRCategory::from_aura_type(&AuraType::Absorb), None);
+        assert_eq!(DRCategory::from_aura_type(&AuraType::SpellSchoolLockout), None);
+        assert_eq!(DRCategory::from_aura_type(&AuraType::HealingReduction), None);
+        assert_eq!(DRCategory::from_aura_type(&AuraType::DamageImmunity), None);
+    }
+
+    // =========================================================================
+    // DRTracker Tests
+    // =========================================================================
+
+    #[test]
+    fn test_dr_tracker_apply_returns_correct_multipliers() {
+        let mut tracker = DRTracker::default();
+        // First application: 100% duration
+        assert_eq!(tracker.apply(DRCategory::Stuns), 1.0);
+        // Second: 50%
+        assert_eq!(tracker.apply(DRCategory::Stuns), 0.5);
+        // Third: 25%
+        assert_eq!(tracker.apply(DRCategory::Stuns), 0.25);
+        // Fourth: immune (0%)
+        assert_eq!(tracker.apply(DRCategory::Stuns), 0.0);
+        // Fifth: still immune
+        assert_eq!(tracker.apply(DRCategory::Stuns), 0.0);
+    }
+
+    #[test]
+    fn test_dr_tracker_categories_are_independent() {
+        let mut tracker = DRTracker::default();
+        // Advance stun DR to immune
+        tracker.apply(DRCategory::Stuns);
+        tracker.apply(DRCategory::Stuns);
+        tracker.apply(DRCategory::Stuns);
+        assert!(tracker.is_immune(DRCategory::Stuns));
+        // Fear DR should still be fresh
+        assert!(!tracker.is_immune(DRCategory::Fears));
+        assert_eq!(tracker.apply(DRCategory::Fears), 1.0);
+    }
+
+    #[test]
+    fn test_dr_tracker_is_immune() {
+        let mut tracker = DRTracker::default();
+        assert!(!tracker.is_immune(DRCategory::Roots));
+        tracker.apply(DRCategory::Roots); // level 1
+        assert!(!tracker.is_immune(DRCategory::Roots));
+        tracker.apply(DRCategory::Roots); // level 2
+        assert!(!tracker.is_immune(DRCategory::Roots));
+        tracker.apply(DRCategory::Roots); // level 3 = immune
+        assert!(tracker.is_immune(DRCategory::Roots));
+    }
+
+    #[test]
+    fn test_dr_tracker_tick_timers_reset() {
+        let mut tracker = DRTracker::default();
+        tracker.apply(DRCategory::Fears); // level 1, timer = 15.0
+        assert_eq!(tracker.level(DRCategory::Fears), 1);
+
+        // Tick 14 seconds — still active
+        tracker.tick_timers(14.0);
+        assert_eq!(tracker.level(DRCategory::Fears), 1);
+
+        // Tick past 15s — should reset
+        tracker.tick_timers(2.0);
+        assert_eq!(tracker.level(DRCategory::Fears), 0);
+        assert!(!tracker.is_immune(DRCategory::Fears));
+    }
+
+    #[test]
+    fn test_dr_tracker_immune_apply_does_not_restart_timer() {
+        let mut tracker = DRTracker::default();
+        // Get to immune
+        tracker.apply(DRCategory::Slows);
+        tracker.apply(DRCategory::Slows);
+        tracker.apply(DRCategory::Slows);
+        assert!(tracker.is_immune(DRCategory::Slows));
+
+        // Tick 10 seconds
+        tracker.tick_timers(10.0);
+
+        // Apply while immune — should NOT restart the timer
+        let mult = tracker.apply(DRCategory::Slows);
+        assert_eq!(mult, 0.0);
+
+        // 6 more seconds (total 16s from original apply) — should have reset
+        tracker.tick_timers(6.0);
+        assert!(!tracker.is_immune(DRCategory::Slows));
+        assert_eq!(tracker.level(DRCategory::Slows), 0);
     }
 }
