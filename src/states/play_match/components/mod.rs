@@ -452,9 +452,9 @@ impl DRCategory {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DRState {
     /// 0 = fresh, 1 = next will be 50%, 2 = next will be 25%, 3 = immune
-    pub level: u8,
+    level: u8,
     /// Seconds remaining until DR resets (counts down from 15.0)
-    pub timer: f32,
+    timer: f32,
 }
 
 /// Fixed-size DR tracker component. No heap allocation, fully inline in archetype table.

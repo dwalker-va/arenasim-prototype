@@ -237,9 +237,6 @@ pub fn apply_pending_auras(
                         PlayMatchEntity,
                     ));
 
-                    // Immune application does NOT restart timer
-                    let _ = tracker.apply(category);
-
                     let display_name = if let Ok(pet) = pet_query.get(pending.target) {
                         pet.pet_type.name().to_string()
                     } else {
