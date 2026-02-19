@@ -359,7 +359,7 @@
             cast_time: 1.5,
             range: 30.0,
             mana_cost: 30.0,
-            cooldown: 30.0,
+            cooldown: 0.0,
             applies_aura: Some((
                 aura_type: Fear,
                 duration: 8.0,
