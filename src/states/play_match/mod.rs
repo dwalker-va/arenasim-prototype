@@ -366,6 +366,8 @@ pub fn setup_play_match(
                     PetType::Felhunter,
                 );
             }
+        } else {
+            warn!("Team 1 slot {} is empty — skipping spawn", i);
         }
     }
 
@@ -412,6 +414,8 @@ pub fn setup_play_match(
                     PetType::Felhunter,
                 );
             }
+        } else {
+            warn!("Team 2 slot {} is empty — skipping spawn", i);
         }
     }
     

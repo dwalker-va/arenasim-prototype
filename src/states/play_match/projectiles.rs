@@ -184,7 +184,7 @@ pub fn process_projectile_hits(
             let damage = ability_damage;
 
             // Get target info and apply damage
-            let (actual_damage, absorbed, target_team, target_class, is_killing_blow) = {
+            let (actual_damage, absorbed, target_team, target_class, is_killing_blow, is_first_death) = {
                 let Ok((_, mut target, mut target_auras)) = combatants.get_mut(target_entity) else {
                     commands.entity(projectile_entity).despawn_recursive();
                     continue;
@@ -209,7 +209,11 @@ pub fn process_projectile_hits(
                 });
 
                 let is_killing_blow = !target.is_alive();
-                (actual_damage, absorbed, target.team, target.class, is_killing_blow)
+                let is_first_death = is_killing_blow && !target.is_dead;
+                if is_first_death {
+                    target.is_dead = true;
+                }
+                (actual_damage, absorbed, target.team, target.class, is_killing_blow, is_first_death)
             }; // target borrow dropped here
 
             // Update caster damage dealt (include absorbed damage - caster dealt it)
@@ -296,8 +300,8 @@ pub fn process_projectile_hits(
                 message,
             );
 
-            // Log death with killer tracking
-            if is_killing_blow {
+            // Log death with killer tracking (only on first death to prevent duplicates)
+            if is_first_death {
                 let death_message = format!(
                     "Team {} {} has been eliminated",
                     target_team,

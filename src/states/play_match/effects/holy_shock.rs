@@ -209,6 +209,10 @@ pub fn process_holy_shock_damage(
             // Log damage with caster attribution
             let caster_id = combatant_id(pending.caster_team, pending.caster_class);
             let is_killing_blow = !target.is_alive();
+            let is_first_death = is_killing_blow && !target.is_dead;
+            if is_first_death {
+                target.is_dead = true;
+            }
             let verb = if is_crit { "CRITS" } else { "hits" };
             let message = if absorbed > 0.0 {
                 format!(
@@ -240,8 +244,8 @@ pub fn process_holy_shock_damage(
                 message,
             );
 
-            // Log death if killing blow
-            if is_killing_blow {
+            // Log death if killing blow (only on first death to prevent duplicates)
+            if is_first_death {
                 let death_message = format!(
                     "Team {} {} has been eliminated by {}'s Holy Shock",
                     target_team,

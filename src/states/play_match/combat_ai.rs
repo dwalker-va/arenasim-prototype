@@ -391,11 +391,7 @@ pub fn decide_abilities(
         }
 
         // WoW Mechanic: Cannot use abilities while stunned, feared, or polymorphed
-        let is_incapacitated = if let Some(ref auras) = auras {
-            auras.auras.iter().any(|a| matches!(a.effect_type, AuraType::Stun | AuraType::Fear | AuraType::Polymorph))
-        } else {
-            false
-        };
+        let is_incapacitated = super::utils::is_incapacitated(auras.as_deref());
 
         // Paladin-specific: Divine Shield can be used while incapacitated
         if is_incapacitated && combatant.class == match_config::CharacterClass::Paladin {
@@ -636,6 +632,10 @@ pub fn decide_abilities(
 
                 // Log the instant attack with structured data
                 let is_killing_blow = !target.is_alive();
+                let is_first_death = is_killing_blow && !target.is_dead;
+                if is_first_death {
+                    target.is_dead = true;
+                }
                 let verb = if is_crit { "CRITS" } else { "hits" };
                 let message = if absorbed > 0.0 {
                     format!(
@@ -671,8 +671,8 @@ pub fn decide_abilities(
                     message,
                 );
 
-                // Log death with killer tracking
-                if is_killing_blow {
+                // Log death with killer tracking (only on first death to prevent duplicates)
+                if is_first_death {
                     let death_message = format!(
                         "Team {} {} has been eliminated",
                         target_team,
@@ -771,6 +771,10 @@ pub fn decide_abilities(
 
                 // Log the Frost Nova damage with structured data
                 let is_killing_blow = !target.is_alive();
+                let is_first_death = is_killing_blow && !target.is_dead;
+                if is_first_death {
+                    target.is_dead = true;
+                }
                 let verb = if is_crit { "CRITS" } else { "hits" };
                 let message = if absorbed > 0.0 {
                     format!(
@@ -804,8 +808,8 @@ pub fn decide_abilities(
                     message,
                 );
 
-                // Log death with killer tracking
-                if is_killing_blow {
+                // Log death with killer tracking (only on first death to prevent duplicates)
+                if is_first_death {
                     let death_message = format!(
                         "Team {} {} has been eliminated",
                         target_team,

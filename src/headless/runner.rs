@@ -177,6 +177,8 @@ fn headless_setup_match(
                 ));
                 combat_log.register_combatant(format!("Team 1 Felhunter"));
             }
+        } else {
+            warn!("Team 1 slot {} is empty — skipping spawn", i);
         }
     }
 
@@ -213,6 +215,8 @@ fn headless_setup_match(
                 ));
                 combat_log.register_combatant(format!("Team 2 Felhunter"));
             }
+        } else {
+            warn!("Team 2 slot {} is empty — skipping spawn", i);
         }
     }
 

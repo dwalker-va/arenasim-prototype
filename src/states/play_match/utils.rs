@@ -55,6 +55,17 @@ pub fn get_next_fct_offset(state: &mut FloatingTextState) -> (f32, f32) {
     (x_offset, y_offset)
 }
 
+/// Check if a combatant is incapacitated by crowd control (Stun, Fear, or Polymorph).
+/// Root does NOT count as incapacitation — it only prevents movement.
+pub fn is_incapacitated(auras: Option<&super::components::ActiveAuras>) -> bool {
+    auras.map_or(false, |a| {
+        a.auras.iter().any(|aura| matches!(
+            aura.effect_type,
+            super::components::AuraType::Stun | super::components::AuraType::Fear | super::components::AuraType::Polymorph
+        ))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
