@@ -1581,6 +1581,23 @@ pub fn process_casting(
                 is_crit_damage,
                 message,
             );
+
+            if is_killing_blow {
+                // Cancel any in-progress cast or channel so dead combatants can't finish spells
+                commands.entity(target_entity).remove::<CastingState>();
+                commands.entity(target_entity).remove::<ChannelingState>();
+
+                let death_message = format!(
+                    "Team {} {} has been eliminated",
+                    target.team,
+                    target.class.name()
+                );
+                combat_log.log_death(
+                    combatant_id(target.team, target.class),
+                    Some(combatant_id(caster_team, caster_class)),
+                    death_message,
+                );
+            }
         }
         // Handle healing spells
         else if def.is_heal() {
@@ -2085,6 +2102,11 @@ pub fn process_channeling(
                 // Check for killing blow
                 if !target.is_alive() && !target.is_dead {
                     target.is_dead = true;
+
+                    // Cancel any in-progress cast or channel so dead combatants can't finish spells
+                    commands.entity(target_entity).remove::<CastingState>();
+                    commands.entity(target_entity).remove::<ChannelingState>();
+
                     let death_message = format!(
                         "Team {} {} has been eliminated",
                         target.team,

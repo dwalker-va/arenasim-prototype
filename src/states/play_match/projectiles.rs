@@ -320,30 +320,30 @@ pub fn process_projectile_hits(
             
             // Apply aura if ability has one (skip if target was killed — don't CC dead combatants)
             if !is_killing_blow {
-            if let Some(aura) = def.applies_aura.as_ref() {
-                // Convert spell school to Option (None for Physical, since physical = not magic-dispellable)
-                let aura_spell_school = match def.spell_school {
-                    super::abilities::SpellSchool::Physical | super::abilities::SpellSchool::None => None,
-                    school => Some(school),
-                };
-                commands.spawn(AuraPending {
-                    target: target_entity,
-                    aura: Aura {
-                        effect_type: aura.aura_type,
-                        duration: aura.duration,
-                        magnitude: aura.magnitude,
-                        break_on_damage_threshold: aura.break_on_damage,
-                        accumulated_damage: 0.0,
-                        tick_interval: if aura.aura_type == AuraType::DamageOverTime { aura.tick_interval } else { 0.0 },
-                        time_until_next_tick: if aura.aura_type == AuraType::DamageOverTime { aura.tick_interval } else { 0.0 },
-                        caster: Some(caster_entity),
-                        ability_name: def.name.to_string(),
-                        fear_direction: (0.0, 0.0),
-                        fear_direction_timer: 0.0,
-                        spell_school: aura_spell_school,
-                    },
-                });
-            }
+                if let Some(aura) = def.applies_aura.as_ref() {
+                    // Convert spell school to Option (None for Physical, since physical = not magic-dispellable)
+                    let aura_spell_school = match def.spell_school {
+                        super::abilities::SpellSchool::Physical | super::abilities::SpellSchool::None => None,
+                        school => Some(school),
+                    };
+                    commands.spawn(AuraPending {
+                        target: target_entity,
+                        aura: Aura {
+                            effect_type: aura.aura_type,
+                            duration: aura.duration,
+                            magnitude: aura.magnitude,
+                            break_on_damage_threshold: aura.break_on_damage,
+                            accumulated_damage: 0.0,
+                            tick_interval: if aura.aura_type == AuraType::DamageOverTime { aura.tick_interval } else { 0.0 },
+                            time_until_next_tick: if aura.aura_type == AuraType::DamageOverTime { aura.tick_interval } else { 0.0 },
+                            caster: Some(caster_entity),
+                            ability_name: def.name.to_string(),
+                            fear_direction: (0.0, 0.0),
+                            fear_direction_timer: 0.0,
+                            spell_school: aura_spell_school,
+                        },
+                    });
+                }
             }
         }
 
