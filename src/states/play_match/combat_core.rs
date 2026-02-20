@@ -872,15 +872,23 @@ pub fn combat_auto_attack(
                         message,
                     );
 
-                    // Log death with killer tracking
+                    // Log death with killer tracking (only on first death to prevent duplicates)
                     if is_killing_blow {
                         // Track that this target died - prevents them from dealing damage
                         // if they had a queued attack later in this frame
                         died_this_frame.insert(target_entity);
 
                         // Mark target as dead to prevent duplicate death processing across systems
-                        if let Ok((_, _, mut dead_target, _, _, _)) = combatants.get_mut(target_entity) {
+                        let was_already_dead = if let Ok((_, _, mut dead_target, _, _, _)) = combatants.get_mut(target_entity) {
+                            let already = dead_target.is_dead;
                             dead_target.is_dead = true;
+                            already
+                        } else {
+                            true // entity gone, treat as already dead
+                        };
+
+                        if was_already_dead {
+                            continue;
                         }
 
                         let death_message = format!(
@@ -1244,6 +1252,10 @@ pub fn process_casting(
             let ability_def = abilities.get_unchecked(&casting.ability);
             let caster_id = format!("Team {} {}", caster.team, caster.class.name());
             combat_log.mark_cast_interrupted(&caster_id, &ability_def.name);
+            combat_log.log(
+                CombatLogEventType::CrowdControl,
+                format!("{}'s {} interrupted by crowd control", caster_id, ability_def.name),
+            );
             commands.entity(caster_entity).remove::<CastingState>();
             continue;
         }
@@ -1499,7 +1511,8 @@ pub fn process_casting(
 
             // Log the damage with structured data
             let is_killing_blow = !target.is_alive();
-            if is_killing_blow && !target.is_dead {
+            let is_first_death = is_killing_blow && !target.is_dead;
+            if is_first_death {
                 target.is_dead = true;
             }
             let verb = if is_crit_damage { "CRITS" } else { "hits" };
@@ -1740,8 +1753,9 @@ pub fn process_casting(
         }
 
         // Check for death (log if killed by non-damage abilities/auras)
-        // Note: damage abilities already log death via is_killing_blow above
-        if !target.is_alive() && !def.is_damage() {
+        // Note: damage abilities already log death via is_first_death above
+        if !target.is_alive() && !def.is_damage() && !target.is_dead {
+            target.is_dead = true;
             let message = format!(
                 "Team {} {} has been eliminated",
                 target.team,
@@ -1871,6 +1885,10 @@ pub fn process_channeling(
             let ability_def = abilities.get_unchecked(&channeling.ability);
             let caster_id = format!("Team {} {}", caster.team, caster.class.name());
             combat_log.mark_cast_interrupted(&caster_id, &ability_def.name);
+            combat_log.log(
+                CombatLogEventType::CrowdControl,
+                format!("{}'s {} interrupted by crowd control", caster_id, ability_def.name),
+            );
             remove_channel.push(caster_entity);
             continue;
         }

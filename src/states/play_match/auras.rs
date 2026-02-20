@@ -735,7 +735,8 @@ pub fn process_dot_ticks(
 
         // Log to combat log with structured data
         let is_killing_blow = !target.is_alive();
-        if is_killing_blow && !target.is_dead {
+        let is_first_death = is_killing_blow && !target.is_dead;
+        if is_first_death {
             target.is_dead = true;
         }
         let message = if absorbed > 0.0 {
@@ -770,8 +771,8 @@ pub fn process_dot_ticks(
             message,
         );
 
-        // Log death with killer tracking
-        if is_killing_blow {
+        // Log death with killer tracking (only on first death to prevent duplicates)
+        if is_first_death {
             let death_message = format!(
                 "Team {} {} has been eliminated",
                 target_team,
@@ -784,7 +785,7 @@ pub fn process_dot_ticks(
             );
         }
     }
-    
+
     // Third pass: update caster damage_dealt stats
     for (caster_entity, damage_dealt) in caster_damage_updates {
         if let Ok((_, mut caster, _, _)) = combatants_with_auras.get_mut(caster_entity) {
