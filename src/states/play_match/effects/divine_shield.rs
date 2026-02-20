@@ -57,7 +57,7 @@ pub fn process_divine_shield(
                 removed
             } else {
                 // No auras yet — insert new ActiveAuras with DamageImmunity
-                // Note: deferred insert won't be visible to apply_pending_auras in the same chain
+                // Note: .chain() auto-inserts ApplyDeferred, so this is visible to apply_pending_auras
                 commands.entity(pending.caster).insert(ActiveAuras {
                     auras: vec![immunity_aura],
                 });
