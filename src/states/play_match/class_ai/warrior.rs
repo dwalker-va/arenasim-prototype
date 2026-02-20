@@ -55,6 +55,7 @@ pub fn decide_warrior_action(
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
     instant_attacks: &mut Vec<super::QueuedInstantAttack>,
+    battle_shouted_this_frame: &mut std::collections::HashSet<Entity>,
 ) -> bool {
     // Check if global cooldown is active
     if combatant.global_cooldown > 0.0 {
@@ -70,6 +71,7 @@ pub fn decide_warrior_action(
         combatant,
         my_pos,
         ctx,
+        battle_shouted_this_frame,
     ) {
         return true;
     }
@@ -153,6 +155,7 @@ fn try_battle_shout(
     combatant: &mut Combatant,
     my_pos: Vec3,
     ctx: &CombatContext,
+    battle_shouted_this_frame: &mut std::collections::HashSet<Entity>,
 ) -> bool {
     // Check if any nearby ally needs the buff
     let mut allies_to_buff: Vec<Entity> = Vec::new();
@@ -174,7 +177,8 @@ fn try_battle_shout(
             .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::AttackPowerIncrease))
             .unwrap_or(false);
 
-        if !has_battle_shout {
+        // Also check if another Warrior already buffed this ally this frame
+        if !has_battle_shout && !battle_shouted_this_frame.contains(ally_entity) {
             allies_to_buff.push(*ally_entity);
         }
     }
@@ -210,6 +214,7 @@ fn try_battle_shout(
     // Apply buff to all nearby allies
     if let Some(aura) = def.applies_aura.as_ref() {
         for ally_entity in allies_to_buff {
+            battle_shouted_this_frame.insert(ally_entity);
             commands.spawn(AuraPending {
                 target: ally_entity,
                 aura: Aura {

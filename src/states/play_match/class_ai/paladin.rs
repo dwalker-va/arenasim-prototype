@@ -55,6 +55,7 @@ pub fn decide_paladin_action(
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
+    devotion_aura_this_frame: &mut std::collections::HashSet<Entity>,
 ) -> bool {
     // Check if global cooldown is active
     if combatant.global_cooldown > 0.0 {
@@ -71,6 +72,7 @@ pub fn decide_paladin_action(
         my_pos,
         auras,
         ctx,
+        devotion_aura_this_frame,
     ) {
         return true;
     }
@@ -928,6 +930,7 @@ fn try_devotion_aura(
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
+    devotion_aura_this_frame: &mut std::collections::HashSet<Entity>,
 ) -> bool {
     let ability = AbilityType::DevotionAura;
     let def = abilities.get_unchecked(&ability);
@@ -962,8 +965,8 @@ fn try_devotion_aura(
         .map(|(e, info)| (e, info.class))
         .collect();
 
-    // If ANY ally already has Devotion Aura, we've already buffed the team
-    if allies.iter().any(|(e, _)| has_devotion_aura(e)) {
+    // If ANY ally already has Devotion Aura (or was buffed this frame), skip
+    if allies.iter().any(|(e, _)| has_devotion_aura(e) || devotion_aura_this_frame.contains(*e)) {
         return false;
     }
 
@@ -972,7 +975,7 @@ fn try_devotion_aura(
         .iter()
         .filter(|(_, info)| info.team == combatant.team && info.current_health > 0.0)
         .filter_map(|(e, info)| {
-            if my_pos.distance(info.position) <= def.range {
+            if my_pos.distance(info.position) <= def.range && !devotion_aura_this_frame.contains(e) {
                 Some(e)
             } else {
                 None
@@ -1002,6 +1005,7 @@ fn try_devotion_aura(
 
     // Apply the aura to each ally
     for ally_entity in allies_to_buff {
+        devotion_aura_this_frame.insert(*ally_entity);
         if let Some(pending) = AuraPending::from_ability(*ally_entity, entity, def) {
             commands.spawn(pending);
         }

@@ -246,6 +246,10 @@ pub fn process_holy_shock_damage(
 
             // Log death if killing blow (only on first death to prevent duplicates)
             if is_first_death {
+                // Cancel any in-progress cast or channel so dead combatants can't finish spells
+                commands.entity(pending.target).remove::<CastingState>();
+                commands.entity(pending.target).remove::<ChannelingState>();
+
                 let death_message = format!(
                     "Team {} {} has been eliminated by {}'s Holy Shock",
                     target_team,

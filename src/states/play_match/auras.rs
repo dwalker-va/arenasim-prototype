@@ -773,6 +773,10 @@ pub fn process_dot_ticks(
 
         // Log death with killer tracking (only on first death to prevent duplicates)
         if is_first_death {
+            // Cancel any in-progress cast or channel so dead combatants can't finish spells
+            commands.entity(target_entity).remove::<CastingState>();
+            commands.entity(target_entity).remove::<ChannelingState>();
+
             let death_message = format!(
                 "Team {} {} has been eliminated",
                 target_team,
