@@ -151,7 +151,9 @@ impl<'a> CombatContext<'a> {
             .unwrap_or(false)
     }
 
-    /// Check if self is incapacitated (stunned, feared, or polymorphed)
+    /// Check if self is incapacitated (stunned, feared, or polymorphed).
+    /// NOTE: The canonical CC type list lives in `utils::is_incapacitated`.
+    /// CombatContext can't delegate because it stores auras as `&[Aura]`, not `&ActiveAuras`.
     pub fn is_incapacitated(&self) -> bool {
         self.has_aura(AuraType::Stun) || self.has_aura(AuraType::Fear) || self.has_aura(AuraType::Polymorph)
     }

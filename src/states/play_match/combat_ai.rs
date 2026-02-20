@@ -391,11 +391,7 @@ pub fn decide_abilities(
         }
 
         // WoW Mechanic: Cannot use abilities while stunned, feared, or polymorphed
-        let is_incapacitated = if let Some(ref auras) = auras {
-            auras.auras.iter().any(|a| matches!(a.effect_type, AuraType::Stun | AuraType::Fear | AuraType::Polymorph))
-        } else {
-            false
-        };
+        let is_incapacitated = super::utils::is_incapacitated(auras.as_deref());
 
         // Paladin-specific: Divine Shield can be used while incapacitated
         if is_incapacitated && combatant.class == match_config::CharacterClass::Paladin {

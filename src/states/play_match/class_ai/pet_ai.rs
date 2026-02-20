@@ -80,11 +80,7 @@ pub fn pet_ai_system(
         }
 
         // Pets can't act while incapacitated
-        let is_incapacitated = auras
-            .map(|a| a.auras.iter().any(|aura| {
-                matches!(aura.effect_type, AuraType::Stun | AuraType::Fear | AuraType::Polymorph)
-            }))
-            .unwrap_or(false);
+        let is_incapacitated = crate::states::play_match::utils::is_incapacitated(auras);
 
         if is_incapacitated {
             continue;

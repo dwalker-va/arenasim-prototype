@@ -701,11 +701,7 @@ pub fn combat_auto_attack(
         }
 
         // WoW Mechanic: Cannot auto-attack while stunned, feared, or polymorphed
-        let is_incapacitated = if let Some(ref auras) = auras {
-            auras.auras.iter().any(|a| matches!(a.effect_type, AuraType::Stun | AuraType::Fear | AuraType::Polymorph))
-        } else {
-            false
-        };
+        let is_incapacitated = super::utils::is_incapacitated(auras.as_deref());
         if is_incapacitated {
             continue;
         }
@@ -1243,11 +1239,7 @@ pub fn process_casting(
 
         // WoW Mechanic: Stun, Fear, and Polymorph cancel casts in progress
         // (Root does NOT interrupt casting — only movement)
-        let is_incapacitated = if let Some(ref auras) = caster_auras {
-            auras.auras.iter().any(|a| matches!(a.effect_type, AuraType::Stun | AuraType::Fear | AuraType::Polymorph))
-        } else {
-            false
-        };
+        let is_incapacitated = super::utils::is_incapacitated(caster_auras.as_deref());
         if is_incapacitated {
             let ability_def = abilities.get_unchecked(&casting.ability);
             let caster_id = format!("Team {} {}", caster.team, caster.class.name());
@@ -1876,11 +1868,7 @@ pub fn process_channeling(
 
         // WoW Mechanic: Stun, Fear, and Polymorph cancel channels in progress
         // (Root does NOT interrupt channeling — only movement)
-        let is_incapacitated = if let Some(ref auras) = caster_auras {
-            auras.auras.iter().any(|a| matches!(a.effect_type, AuraType::Stun | AuraType::Fear | AuraType::Polymorph))
-        } else {
-            false
-        };
+        let is_incapacitated = super::utils::is_incapacitated(caster_auras.as_deref());
         if is_incapacitated {
             let ability_def = abilities.get_unchecked(&channeling.ability);
             let caster_id = format!("Team {} {}", caster.team, caster.class.name());
