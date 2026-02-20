@@ -217,14 +217,14 @@ impl HeadlessMatchConfig {
         let team1: Vec<Option<CharacterClass>> = self
             .team1
             .iter()
-            .map(|s| Self::parse_class(s).ok())
-            .collect();
+            .map(|s| Self::parse_class(s).map(Some))
+            .collect::<Result<Vec<_>, _>>()?;
 
         let team2: Vec<Option<CharacterClass>> = self
             .team2
             .iter()
-            .map(|s| Self::parse_class(s).ok())
-            .collect();
+            .map(|s| Self::parse_class(s).map(Some))
+            .collect::<Result<Vec<_>, _>>()?;
 
         let map = Self::parse_map(&self.map)?;
 

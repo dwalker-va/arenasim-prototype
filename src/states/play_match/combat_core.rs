@@ -878,6 +878,11 @@ pub fn combat_auto_attack(
                         // if they had a queued attack later in this frame
                         died_this_frame.insert(target_entity);
 
+                        // Mark target as dead to prevent duplicate death processing across systems
+                        if let Ok((_, _, mut dead_target, _, _, _)) = combatants.get_mut(target_entity) {
+                            dead_target.is_dead = true;
+                        }
+
                         let death_message = format!(
                             "Team {} {} has been eliminated",
                             target_team,
@@ -1227,7 +1232,22 @@ pub fn process_casting(
             commands.entity(caster_entity).remove::<CastingState>();
             continue;
         }
-        
+
+        // WoW Mechanic: Stun, Fear, and Polymorph cancel casts in progress
+        // (Root does NOT interrupt casting — only movement)
+        let is_incapacitated = if let Some(ref auras) = caster_auras {
+            auras.auras.iter().any(|a| matches!(a.effect_type, AuraType::Stun | AuraType::Fear | AuraType::Polymorph))
+        } else {
+            false
+        };
+        if is_incapacitated {
+            let ability_def = abilities.get_unchecked(&casting.ability);
+            let caster_id = format!("Team {} {}", caster.team, caster.class.name());
+            combat_log.mark_cast_interrupted(&caster_id, &ability_def.name);
+            commands.entity(caster_entity).remove::<CastingState>();
+            continue;
+        }
+
         // Handle interrupted casts
         if casting.interrupted {
             // Tick down the interrupted display timer
@@ -1479,6 +1499,9 @@ pub fn process_casting(
 
             // Log the damage with structured data
             let is_killing_blow = !target.is_alive();
+            if is_killing_blow && !target.is_dead {
+                target.is_dead = true;
+            }
             let verb = if is_crit_damage { "CRITS" } else { "hits" };
             let message = if absorbed > 0.0 {
                 format!(
@@ -1817,7 +1840,7 @@ pub fn process_channeling(
         .map(|(entity, _, _, _, _)| entity)
         .collect();
 
-    for (caster_entity, _caster_transform, caster, channeling_state, _caster_auras) in combatants.iter_mut() {
+    for (caster_entity, _caster_transform, caster, channeling_state, caster_auras) in combatants.iter_mut() {
         let Some(mut channeling) = channeling_state else {
             continue;
         };
@@ -1833,6 +1856,21 @@ pub fn process_channeling(
 
         // Check if caster died
         if !caster.is_alive() {
+            remove_channel.push(caster_entity);
+            continue;
+        }
+
+        // WoW Mechanic: Stun, Fear, and Polymorph cancel channels in progress
+        // (Root does NOT interrupt channeling — only movement)
+        let is_incapacitated = if let Some(ref auras) = caster_auras {
+            auras.auras.iter().any(|a| matches!(a.effect_type, AuraType::Stun | AuraType::Fear | AuraType::Polymorph))
+        } else {
+            false
+        };
+        if is_incapacitated {
+            let ability_def = abilities.get_unchecked(&channeling.ability);
+            let caster_id = format!("Team {} {}", caster.team, caster.class.name());
+            combat_log.mark_cast_interrupted(&caster_id, &ability_def.name);
             remove_channel.push(caster_entity);
             continue;
         }
@@ -1994,7 +2032,8 @@ pub fn process_channeling(
                 }
 
                 // Check for killing blow
-                if !target.is_alive() {
+                if !target.is_alive() && !target.is_dead {
+                    target.is_dead = true;
                     let death_message = format!(
                         "Team {} {} has been eliminated",
                         target.team,

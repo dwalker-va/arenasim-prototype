@@ -209,6 +209,9 @@ pub fn process_projectile_hits(
                 });
 
                 let is_killing_blow = !target.is_alive();
+                if is_killing_blow && !target.is_dead {
+                    target.is_dead = true;
+                }
                 (actual_damage, absorbed, target.team, target.class, is_killing_blow)
             }; // target borrow dropped here
 

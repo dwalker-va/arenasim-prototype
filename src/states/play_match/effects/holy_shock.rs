@@ -209,6 +209,9 @@ pub fn process_holy_shock_damage(
             // Log damage with caster attribution
             let caster_id = combatant_id(pending.caster_team, pending.caster_class);
             let is_killing_blow = !target.is_alive();
+            if is_killing_blow && !target.is_dead {
+                target.is_dead = true;
+            }
             let verb = if is_crit { "CRITS" } else { "hits" };
             let message = if absorbed > 0.0 {
                 format!(

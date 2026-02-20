@@ -118,6 +118,12 @@ pub fn apply_pending_auras(
             continue;
         };
 
+        // Don't apply auras to dead combatants
+        if !target_combatant.is_alive() {
+            commands.entity(pending_entity).despawn();
+            continue;
+        }
+
         // Check for CC immunity: Charging combatants are immune to crowd control
         let is_cc_aura = matches!(
             pending.aura.effect_type,
@@ -729,6 +735,9 @@ pub fn process_dot_ticks(
 
         // Log to combat log with structured data
         let is_killing_blow = !target.is_alive();
+        if is_killing_blow && !target.is_dead {
+            target.is_dead = true;
+        }
         let message = if absorbed > 0.0 {
             format!(
                 "Team {} {}'s {} ticks for {:.0} damage on Team {} {} ({:.0} absorbed)",

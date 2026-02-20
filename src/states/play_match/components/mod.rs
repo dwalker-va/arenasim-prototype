@@ -565,6 +565,8 @@ pub struct Combatant {
     pub healing_done: f32,
     /// Bonus damage for the next auto-attack (from abilities like Heroic Strike)
     pub next_attack_bonus_damage: f32,
+    /// Whether this combatant has died (prevents duplicate death processing)
+    pub is_dead: bool,
     /// Whether this combatant is currently stealthed (Rogues only)
     pub stealthed: bool,
     /// Original color before stealth visual effects were applied
@@ -627,6 +629,7 @@ impl Combatant {
             damage_taken: 0.0,
             healing_done: 0.0,
             next_attack_bonus_damage: 0.0,
+            is_dead: false,
             stealthed,
             original_color: Color::WHITE, // Will be set correctly when spawning the visual mesh
             ability_cooldowns: std::collections::HashMap::new(),
@@ -676,9 +679,9 @@ impl Combatant {
         }
     }
     
-    /// Check if this combatant is alive (health > 0).
+    /// Check if this combatant is alive (health > 0 and not marked dead).
     pub fn is_alive(&self) -> bool {
-        self.current_health > 0.0
+        self.current_health > 0.0 && !self.is_dead
     }
 
     /// Validate that all combatant invariants hold.

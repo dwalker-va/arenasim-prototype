@@ -177,6 +177,8 @@ fn headless_setup_match(
                 ));
                 combat_log.register_combatant(format!("Team 1 Felhunter"));
             }
+        } else {
+            warn!("Team 1 slot {} is empty — skipping spawn", i);
         }
     }
 
@@ -213,13 +215,25 @@ fn headless_setup_match(
                 ));
                 combat_log.register_combatant(format!("Team 2 Felhunter"));
             }
+        } else {
+            warn!("Team 2 slot {} is empty — skipping spawn", i);
         }
+    }
+
+    // Validate spawn counts
+    let spawned_team1 = config.team1.iter().filter(|c| c.is_some()).count();
+    let spawned_team2 = config.team2.iter().filter(|c| c.is_some()).count();
+    if spawned_team1 != config.team1_size || spawned_team2 != config.team2_size {
+        error!(
+            "Spawn count mismatch! Expected {}v{}, got {}v{}",
+            config.team1_size, config.team2_size, spawned_team1, spawned_team2
+        );
     }
 
     info!(
         "Headless match setup complete: Team 1 ({} members) vs Team 2 ({} members)",
-        config.team1.len(),
-        config.team2.len()
+        spawned_team1,
+        spawned_team2
     );
 }
 

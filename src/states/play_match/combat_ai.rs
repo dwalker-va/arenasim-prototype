@@ -636,6 +636,9 @@ pub fn decide_abilities(
 
                 // Log the instant attack with structured data
                 let is_killing_blow = !target.is_alive();
+                if is_killing_blow && !target.is_dead {
+                    target.is_dead = true;
+                }
                 let verb = if is_crit { "CRITS" } else { "hits" };
                 let message = if absorbed > 0.0 {
                     format!(
@@ -771,6 +774,9 @@ pub fn decide_abilities(
 
                 // Log the Frost Nova damage with structured data
                 let is_killing_blow = !target.is_alive();
+                if is_killing_blow && !target.is_dead {
+                    target.is_dead = true;
+                }
                 let verb = if is_crit { "CRITS" } else { "hits" };
                 let message = if absorbed > 0.0 {
                     format!(
