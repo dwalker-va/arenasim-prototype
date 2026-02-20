@@ -298,6 +298,10 @@ pub fn process_projectile_hits(
 
             // Log death with killer tracking
             if is_killing_blow {
+                // Cancel any in-progress cast or channel so dead combatants can't finish spells
+                commands.entity(target_entity).remove::<CastingState>();
+                commands.entity(target_entity).remove::<ChannelingState>();
+
                 let death_message = format!(
                     "Team {} {} has been eliminated",
                     target_team,
@@ -310,7 +314,8 @@ pub fn process_projectile_hits(
                 );
             }
             
-            // Apply aura if ability has one
+            // Apply aura if ability has one (skip if target was killed — don't CC dead combatants)
+            if !is_killing_blow {
             if let Some(aura) = def.applies_aura.as_ref() {
                 // Convert spell school to Option (None for Physical, since physical = not magic-dispellable)
                 let aura_spell_school = match def.spell_school {
@@ -335,8 +340,9 @@ pub fn process_projectile_hits(
                     },
                 });
             }
+            }
         }
-        
+
         // Despawn the projectile
         commands.entity(projectile_entity).despawn_recursive();
     }

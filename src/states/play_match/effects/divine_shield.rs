@@ -18,28 +18,17 @@ pub fn process_divine_shield(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
     pending_shields: Query<(Entity, &DivineShieldPending)>,
-    mut combatants: Query<(&Combatant, &Transform, &mut ActiveAuras)>,
+    mut combatants: Query<(&Combatant, &Transform, Option<&mut ActiveAuras>)>,
     mut fct_states: Query<&mut FloatingTextState>,
 ) {
     for (pending_entity, pending) in pending_shields.iter() {
-        if let Ok((combatant, transform, mut active_auras)) = combatants.get_mut(pending.caster) {
+        if let Ok((combatant, transform, active_auras_opt)) = combatants.get_mut(pending.caster) {
             if !combatant.is_alive() {
                 commands.entity(pending_entity).despawn();
                 continue;
             }
 
-            // Purge all debuffs and count how many were removed
-            let before = active_auras.auras.len();
-            active_auras.auras.retain(|a| !matches!(a.effect_type,
-                AuraType::MovementSpeedSlow | AuraType::Root | AuraType::Stun |
-                AuraType::DamageOverTime | AuraType::SpellSchoolLockout |
-                AuraType::HealingReduction | AuraType::Fear | AuraType::Polymorph |
-                AuraType::DamageReduction | AuraType::CastTimeIncrease
-            ));
-            let debuffs_removed = before - active_auras.auras.len();
-
-            // Apply DamageImmunity aura (12s duration)
-            active_auras.auras.push(Aura {
+            let immunity_aura = Aura {
                 effect_type: AuraType::DamageImmunity,
                 duration: 12.0,
                 magnitude: 1.0,
@@ -52,7 +41,28 @@ pub fn process_divine_shield(
                 caster: Some(pending.caster),
                 ability_name: "Divine Shield".to_string(),
                 spell_school: None,
-            });
+            };
+
+            let debuffs_removed = if let Some(mut active_auras) = active_auras_opt {
+                // Purge all debuffs and count how many were removed
+                let before = active_auras.auras.len();
+                active_auras.auras.retain(|a| !matches!(a.effect_type,
+                    AuraType::MovementSpeedSlow | AuraType::Root | AuraType::Stun |
+                    AuraType::DamageOverTime | AuraType::SpellSchoolLockout |
+                    AuraType::HealingReduction | AuraType::Fear | AuraType::Polymorph |
+                    AuraType::DamageReduction | AuraType::CastTimeIncrease
+                ));
+                let removed = before - active_auras.auras.len();
+                active_auras.auras.push(immunity_aura);
+                removed
+            } else {
+                // No auras yet — insert new ActiveAuras with DamageImmunity
+                // Note: deferred insert won't be visible to apply_pending_auras in the same chain
+                commands.entity(pending.caster).insert(ActiveAuras {
+                    auras: vec![immunity_aura],
+                });
+                0
+            };
 
             let caster_id = combatant_id(pending.caster_team, pending.caster_class);
 

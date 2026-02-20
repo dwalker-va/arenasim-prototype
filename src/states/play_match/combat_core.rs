@@ -788,6 +788,32 @@ pub fn combat_auto_attack(
     // Track crit status per target for FCT display (auto-attacks batch into damage_per_target)
     let mut crit_per_target: HashMap<Entity, bool> = HashMap::new();
 
+    // Build a map of targets with breakable CC from friendly casters.
+    // Key: target entity, Value: team of the CC caster.
+    // This prevents friendly auto-attacks from breaking their own team's Polymorph/Fear.
+    let mut friendly_cc_team: HashMap<Entity, u8> = HashMap::new();
+    for (entity, _, combatant, _, _, auras) in combatants.iter() {
+        if let Some(auras) = auras {
+            for aura in &auras.auras {
+                // Only care about CC auras that break on damage
+                if aura.break_on_damage_threshold >= 0.0
+                    && matches!(aura.effect_type, AuraType::Polymorph | AuraType::Fear)
+                {
+                    // Look up the caster's team
+                    if let Some(caster_entity) = aura.caster {
+                        if let Some(&(caster_team, _, _)) = combatant_info.get(&caster_entity) {
+                            // Only track if the CC is from the opposing team of the target
+                            // (i.e., the CC caster is an enemy of the CC'd target)
+                            if caster_team != combatant.team {
+                                friendly_cc_team.insert(entity, caster_team);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     for (attacker_entity, target_entity, damage, has_bonus, is_crit) in attacks {
         // If any attack to this target crits, mark the FCT as crit
         crit_per_target.entry(target_entity).and_modify(|c| *c = *c || is_crit).or_insert(is_crit);
@@ -795,6 +821,16 @@ pub fn combat_auto_attack(
         // This can happen when two combatants attack each other in the same frame
         if died_this_frame.contains(&attacker_entity) {
             continue;
+        }
+
+        // Bug fix: Don't auto-attack targets with breakable CC from a friendly caster.
+        // This prevents, e.g., a Warlock pet from breaking its team's Polymorph.
+        if let Some(&cc_caster_team) = friendly_cc_team.get(&target_entity) {
+            if let Some(&(attacker_team, _, _)) = combatant_info.get(&attacker_entity) {
+                if attacker_team == cc_caster_team {
+                    continue;
+                }
+            }
         }
 
         if let Ok((_, _, mut target, _, _, mut target_auras)) = combatants.get_mut(target_entity) {
@@ -877,6 +913,10 @@ pub fn combat_auto_attack(
                         // Track that this target died - prevents them from dealing damage
                         // if they had a queued attack later in this frame
                         died_this_frame.insert(target_entity);
+
+                        // Cancel any in-progress cast or channel so dead combatants can't finish spells
+                        commands.entity(target_entity).remove::<CastingState>();
+                        commands.entity(target_entity).remove::<ChannelingState>();
 
                         let death_message = format!(
                             "Team {} {} has been eliminated",
@@ -1719,6 +1759,10 @@ pub fn process_casting(
         // Check for death (log if killed by non-damage abilities/auras)
         // Note: damage abilities already log death via is_killing_blow above
         if !target.is_alive() && !def.is_damage() {
+            // Cancel any in-progress cast or channel so dead combatants can't finish spells
+            commands.entity(target_entity).remove::<CastingState>();
+            commands.entity(target_entity).remove::<ChannelingState>();
+
             let message = format!(
                 "Team {} {} has been eliminated",
                 target.team,

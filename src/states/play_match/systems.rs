@@ -126,11 +126,11 @@ where
             track_shadow_sight_timer,
             process_dot_ticks,
             update_auras,
+            process_divine_shield,  // Must run BEFORE apply_pending_auras so DamageImmunity blocks CC
             apply_pending_auras,
             process_dispels,
             process_holy_shock_heals,
             process_holy_shock_damage,
-            process_divine_shield,
         )
             .chain()
             .in_set(CombatSystemPhase::ResourcesAndAuras)

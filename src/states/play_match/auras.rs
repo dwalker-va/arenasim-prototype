@@ -118,6 +118,12 @@ pub fn apply_pending_auras(
             continue;
         };
 
+        // Don't apply auras to dead combatants
+        if !target_combatant.is_alive() {
+            commands.entity(pending_entity).despawn();
+            continue;
+        }
+
         // Check for CC immunity: Charging combatants are immune to crowd control
         let is_cc_aura = matches!(
             pending.aura.effect_type,
@@ -763,6 +769,10 @@ pub fn process_dot_ticks(
 
         // Log death with killer tracking
         if is_killing_blow {
+            // Cancel any in-progress cast or channel so dead combatants can't finish spells
+            commands.entity(target_entity).remove::<CastingState>();
+            commands.entity(target_entity).remove::<ChannelingState>();
+
             let death_message = format!(
                 "Team {} {} has been eliminated",
                 target_team,
@@ -775,7 +785,7 @@ pub fn process_dot_ticks(
             );
         }
     }
-    
+
     // Third pass: update caster damage_dealt stats
     for (caster_entity, damage_dealt) in caster_damage_updates {
         if let Ok((_, mut caster, _, _)) = combatants_with_auras.get_mut(caster_entity) {
