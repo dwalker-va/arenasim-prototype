@@ -525,6 +525,7 @@ fn spawn_combatant(
         MeshMaterial3d(material),
         Transform::from_translation(position),
         combatant,
+        DRTracker::default(),
         FloatingTextState {
             next_pattern_index: 0,
         },
@@ -573,6 +574,7 @@ fn spawn_pet(
         MeshMaterial3d(material),
         Transform::from_translation(pet_position).with_rotation(initial_facing),
         pet_combatant,
+        DRTracker::default(),
         Pet {
             owner: owner_entity,
             pet_type,

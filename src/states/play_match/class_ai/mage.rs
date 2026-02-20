@@ -485,8 +485,8 @@ fn try_polymorph(
     };
     let target_pos = target_info.position;
 
-    // Don't waste Polymorph on immune targets (Divine Shield)
-    if ctx.entity_is_immune(cc_target) {
+    // Don't waste Polymorph on immune targets (Divine Shield or DR immune)
+    if ctx.entity_is_immune(cc_target) || ctx.is_dr_immune(cc_target, DRCategory::Incapacitates) {
         return false;
     }
 

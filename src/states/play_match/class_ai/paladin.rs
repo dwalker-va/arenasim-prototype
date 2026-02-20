@@ -729,13 +729,13 @@ fn try_hammer_of_justice(
         return false;
     }
 
-    // Find enemies in range, filter out stealthed and immune
+    // Find enemies in range, filter out stealthed, immune, and DR-immune to stuns
     let enemies_in_range: Vec<(&Entity, CharacterClass)> = ctx.combatants
         .iter()
         .filter(|(_, info)| {
             info.team != combatant.team && info.current_health > 0.0 && !info.stealthed
         })
-        .filter(|(e, _)| !ctx.entity_is_immune(**e))
+        .filter(|(e, _)| !ctx.entity_is_immune(**e) && !ctx.is_dr_immune(**e, DRCategory::Stuns))
         .filter_map(|(e, info)| {
             if my_pos.distance(info.position) <= def.range {
                 Some((e, info.class))

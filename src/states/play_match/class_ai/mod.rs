@@ -27,7 +27,7 @@ use std::collections::HashMap;
 
 use super::match_config::CharacterClass;
 use super::abilities::AbilityType;
-use super::components::{Aura, Combatant, AuraType, PetType};
+use super::components::{Aura, Combatant, AuraType, PetType, DRCategory, DRTracker};
 
 /// Per-frame snapshot of a single combatant, used for AI decision making.
 #[derive(Clone, Copy, Debug)]
@@ -107,6 +107,8 @@ pub struct CombatContext<'a> {
     pub combatants: &'a HashMap<Entity, CombatantInfo>,
     /// Map of entity to their active auras
     pub active_auras: &'a HashMap<Entity, Vec<Aura>>,
+    /// Map of entity to their DR tracker (for immunity queries)
+    pub dr_trackers: &'a HashMap<Entity, DRTracker>,
     /// The combatant making the decision
     pub self_entity: Entity,
 }
@@ -200,6 +202,15 @@ impl<'a> CombatContext<'a> {
         self.active_auras
             .get(&entity)
             .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::DamageImmunity))
+            .unwrap_or(false)
+    }
+
+    /// Check if an entity is DR-immune to a specific CC category.
+    /// AI uses this to avoid wasting CC abilities into immunity.
+    pub fn is_dr_immune(&self, entity: Entity, category: DRCategory) -> bool {
+        self.dr_trackers
+            .get(&entity)
+            .map(|tracker| tracker.is_immune(category))
             .unwrap_or(false)
     }
 

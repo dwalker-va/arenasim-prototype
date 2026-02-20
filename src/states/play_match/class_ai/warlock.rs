@@ -23,6 +23,7 @@ use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::{
     ActiveAuras, Aura, AuraPending, AuraType, CastingState, ChannelingState, Combatant,
+    DRCategory,
 };
 use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::constants::GCD;
@@ -158,7 +159,9 @@ pub fn decide_warlock_action(
     // Fear is high value even with cast time - landing it can turn the fight
     let fear_target = combatant.cc_target.or(combatant.target);
     if let Some(fear_target_entity) = fear_target {
-        if !ctx.entity_is_immune(fear_target_entity) {
+        if !ctx.entity_is_immune(fear_target_entity)
+            && !ctx.is_dr_immune(fear_target_entity, DRCategory::Fears)
+        {
             if let Some(fear_target_info) = ctx.combatants.get(&fear_target_entity) {
                 let fear_target_pos = fear_target_info.position;
                 if try_fear(

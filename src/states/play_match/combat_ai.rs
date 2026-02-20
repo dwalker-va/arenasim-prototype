@@ -302,6 +302,7 @@ pub fn decide_abilities(
     mut combatants: Query<(Entity, &mut Combatant, &Transform, Option<&mut ActiveAuras>), (Without<CastingState>, Without<ChannelingState>)>,
     casting_auras: Query<(Entity, &ActiveAuras), With<CastingState>>,
     channeling_auras: Query<(Entity, &ActiveAuras), (With<ChannelingState>, Without<CastingState>)>,
+    dr_tracker_query: Query<(Entity, &DRTracker)>,
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
     pet_query: Query<&Pet>,
@@ -358,7 +359,13 @@ pub fn decide_abilities(
     for (entity, auras) in channeling_auras.iter() {
         active_auras_map.insert(entity, auras.auras.clone());
     }
-    
+
+    // Build DR tracker map for AI immunity queries
+    let dr_trackers: std::collections::HashMap<Entity, DRTracker> = dr_tracker_query
+        .iter()
+        .map(|(entity, tracker)| (entity, tracker.clone()))
+        .collect();
+
     // Queue for instant ability attacks (Ambush, Sinister Strike, Mortal Strike)
     let mut instant_attacks: Vec<class_ai::QueuedInstantAttack> = Vec::new();
 
@@ -395,6 +402,7 @@ pub fn decide_abilities(
             let cc_ctx = class_ai::CombatContext {
                 combatants: &combatant_info,
                 active_auras: &active_auras_map,
+                dr_trackers: &dr_trackers,
                 self_entity: entity,
             };
             if class_ai::paladin::try_divine_shield_while_cc(
@@ -420,6 +428,7 @@ pub fn decide_abilities(
         let ctx = class_ai::CombatContext {
             combatants: &combatant_info,
             active_auras: &active_auras_map,
+            dr_trackers: &dr_trackers,
             self_entity: entity,
         };
 
