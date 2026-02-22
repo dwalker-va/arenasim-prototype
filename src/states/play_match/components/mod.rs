@@ -64,6 +64,12 @@ impl PetType {
             PetType::Felhunter => 5.5,
         }
     }
+
+    pub fn is_melee(&self) -> bool {
+        match self {
+            PetType::Felhunter => true,
+        }
+    }
 }
 
 /// Marker component for pet entities. Links pet to its owner.
@@ -721,7 +727,11 @@ impl Combatant {
         );
     }
     
-    /// Check if this combatant is in range to attack the target position.
+    /// Check if this combatant is in range to auto-attack the target.
+    ///
+    /// WARNING: Uses `self.class.is_melee()` which does NOT account for pet entities.
+    /// For pet-aware range checks, use the `is_melee` flag from the `combatant_info`
+    /// snapshot in `combat_auto_attack` instead.
     pub fn in_attack_range(&self, my_position: Vec3, target_position: Vec3) -> bool {
         let distance = my_position.distance(target_position);
         if self.class.is_melee() {
