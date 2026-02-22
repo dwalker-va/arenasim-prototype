@@ -734,8 +734,7 @@ pub fn combat_auto_attack(
                     
                     // Use pet-aware is_melee from snapshot (pets inherit owner's class
                     // but may have different melee/ranged behavior)
-                    let attacker_is_melee = combatant_info.get(&attacker_entity)
-                        .map_or(combatant.class.is_melee(), |info| info.3);
+                    let &(_, _, _, attacker_is_melee) = &combatant_info[&attacker_entity];
                     let attack_range = if attacker_is_melee { MELEE_RANGE } else { WAND_RANGE };
                     if my_pos.distance(target_pos) <= attack_range {
                         // Calculate total damage (base + bonus from Heroic Strike, etc.)

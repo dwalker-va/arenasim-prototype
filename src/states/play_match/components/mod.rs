@@ -26,8 +26,6 @@ use super::match_config::{self, RogueOpener, WarlockCurse};
 use super::abilities::{AbilityType, ScalingStat};
 use super::ability_config::AbilityConfig;
 
-// Re-export constants from parent module
-use super::{MELEE_RANGE, WAND_RANGE};
 use super::constants::{DR_RESET_TIMER, DR_IMMUNE_LEVEL, DR_MULTIPLIERS};
 
 // ============================================================================
@@ -725,20 +723,6 @@ impl Combatant {
             "Combatant team must be 1 or 2, got {}",
             self.team
         );
-    }
-    
-    /// Check if this combatant is in range to auto-attack the target.
-    ///
-    /// WARNING: Uses `self.class.is_melee()` which does NOT account for pet entities.
-    /// For pet-aware range checks, use the `is_melee` flag from the `combatant_info`
-    /// snapshot in `combat_auto_attack` instead.
-    pub fn in_attack_range(&self, my_position: Vec3, target_position: Vec3) -> bool {
-        let distance = my_position.distance(target_position);
-        if self.class.is_melee() {
-            distance <= MELEE_RANGE
-        } else {
-            distance <= WAND_RANGE
-        }
     }
     
     /// Calculate damage for an ability based on character stats.
