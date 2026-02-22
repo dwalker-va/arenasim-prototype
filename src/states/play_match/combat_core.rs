@@ -19,7 +19,7 @@ use super::ability_config::AbilityDefinitions;
 use super::constants::{CRIT_DAMAGE_MULTIPLIER, CRIT_HEALING_MULTIPLIER};
 use super::utils::{spawn_speech_bubble, get_next_fct_offset};
 use super::components::ChannelingState;
-use super::{MELEE_RANGE, ARENA_HALF_X, ARENA_HALF_Z};
+use super::{MELEE_RANGE, WAND_RANGE, ARENA_HALF_X, ARENA_HALF_Z};
 
 // Re-export combatant_id for backward compatibility (used by other modules)
 pub use super::utils::combatant_id;
@@ -674,16 +674,16 @@ pub fn combat_auto_attack(
         .collect();
 
     // Build a snapshot of combatant info for logging
-    // Tuple: (team, class, display_name) — display_name is "Felhunter" for pets, class name otherwise
-    let combatant_info: std::collections::HashMap<Entity, (u8, match_config::CharacterClass, String)> = combatants
+    // Tuple: (team, class, display_name, is_melee) — pets use PetType for display_name and is_melee
+    let combatant_info: std::collections::HashMap<Entity, (u8, match_config::CharacterClass, String, bool)> = combatants
         .iter()
         .map(|(entity, _, combatant, _, _, _)| {
-            let display_name = if let Ok(pet) = auto_attack_pet_query.get(entity) {
-                pet.pet_type.name().to_string()
+            let (display_name, is_melee) = if let Ok(pet) = auto_attack_pet_query.get(entity) {
+                (pet.pet_type.name().to_string(), pet.pet_type.is_melee())
             } else {
-                combatant.class.name().to_string()
+                (combatant.class.name().to_string(), combatant.class.is_melee())
             };
-            (entity, (combatant.team, combatant.class, display_name))
+            (entity, (combatant.team, combatant.class, display_name, is_melee))
         })
         .collect();
     
@@ -732,7 +732,11 @@ pub fn combat_auto_attack(
                 if let Some(&target_pos) = positions.get(&target_entity) {
                     let my_pos = transform.translation;
                     
-                    if combatant.in_attack_range(my_pos, target_pos) {
+                    // Use pet-aware is_melee from snapshot (pets inherit owner's class
+                    // but may have different melee/ranged behavior)
+                    let &(_, _, _, attacker_is_melee) = &combatant_info[&attacker_entity];
+                    let attack_range = if attacker_is_melee { MELEE_RANGE } else { WAND_RANGE };
+                    if my_pos.distance(target_pos) <= attack_range {
                         // Calculate total damage (base + bonus from Heroic Strike, etc.)
                         let base_damage = combatant.attack_damage + combatant.next_attack_bonus_damage;
                         // Roll crit before damage reduction
@@ -855,11 +859,11 @@ pub fn combat_auto_attack(
                 damage_dealt_updates.push((attacker_entity, actual_damage + absorbed));
 
                 // Log the attack with structured data
-                if let (Some((attacker_team, attacker_class, attacker_name)), Some((target_team, _target_class, target_name))) =
+                if let (Some((attacker_team, _attacker_class, attacker_name, attacker_is_melee)), Some((target_team, _target_class, target_name, _))) =
                     (combatant_info.get(&attacker_entity), combatant_info.get(&target_entity)) {
                     let attack_name = if has_bonus {
                         "Heroic Strike" // Enhanced auto-attack
-                    } else if attacker_class.is_melee() {
+                    } else if *attacker_is_melee {
                         "Auto Attack"
                     } else {
                         "Wand Shot"
