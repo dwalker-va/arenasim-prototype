@@ -376,7 +376,15 @@ pub fn decide_abilities(
     // Track targets that have been fortified THIS FRAME to prevent same-frame double-buffing
     // This handles the case where multiple Priests try to buff the same target before AuraPending is processed
     let mut fortified_this_frame: std::collections::HashSet<Entity> = std::collections::HashSet::new();
-    
+
+    // Track targets that have received Battle Shout THIS FRAME to prevent duplicate buffs
+    // when multiple Warriors cast Battle Shout before AuraPending is processed
+    let mut battle_shouted_this_frame: std::collections::HashSet<Entity> = std::collections::HashSet::new();
+
+    // Track targets that have received Devotion Aura THIS FRAME to prevent duplicate buffs
+    // when multiple Paladins cast Devotion Aura before AuraPending is processed
+    let mut devotion_aura_this_frame: std::collections::HashSet<Entity> = std::collections::HashSet::new();
+
     // Queue for Frost Nova damage
     let mut frost_nova_damage: Vec<class_ai::QueuedAoeDamage> = Vec::new();
     
@@ -476,6 +484,7 @@ pub fn decide_abilities(
                 auras.as_deref(),
                 &ctx,
                 &mut instant_attacks,
+                &mut battle_shouted_this_frame,
             ) {
                 continue;
             }
@@ -525,6 +534,7 @@ pub fn decide_abilities(
                 my_pos,
                 auras.as_deref(),
                 &ctx,
+                &mut devotion_aura_this_frame,
             ) {
                 continue;
             }
@@ -673,6 +683,10 @@ pub fn decide_abilities(
 
                 // Log death with killer tracking (only on first death to prevent duplicates)
                 if is_first_death {
+                    // Cancel any in-progress cast or channel so dead combatants can't finish spells
+                    commands.entity(target_entity).remove::<CastingState>();
+                    commands.entity(target_entity).remove::<ChannelingState>();
+
                     let death_message = format!(
                         "Team {} {} has been eliminated",
                         target_team,
@@ -686,13 +700,13 @@ pub fn decide_abilities(
                 }
             }
         }
-        
+
         // Update attacker's damage dealt
         if let Ok((_, mut attacker, _, _)) = combatants.get_mut(attacker_entity) {
             attacker.damage_dealt += actual_damage;
         }
     }
-    
+
     // Process queued Frost Nova damage
     for aoe in frost_nova_damage {
         let class_ai::QueuedAoeDamage {
@@ -810,6 +824,10 @@ pub fn decide_abilities(
 
                 // Log death with killer tracking (only on first death to prevent duplicates)
                 if is_first_death {
+                    // Cancel any in-progress cast or channel so dead combatants can't finish spells
+                    commands.entity(target_entity).remove::<CastingState>();
+                    commands.entity(target_entity).remove::<ChannelingState>();
+
                     let death_message = format!(
                         "Team {} {} has been eliminated",
                         target_team,
@@ -823,7 +841,7 @@ pub fn decide_abilities(
                 }
             }
         }
-        
+
         // Update caster's damage dealt
         if let Ok((_, mut caster, _, _)) = combatants.get_mut(caster_entity) {
             caster.damage_dealt += actual_damage;

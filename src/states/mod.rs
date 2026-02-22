@@ -115,11 +115,11 @@ impl Plugin for StatesPlugin {
                     play_match::track_shadow_sight_timer,  // Track combat time and spawn Shadow Sight orbs
                     play_match::process_dot_ticks,  // Process DoT ticks BEFORE updating auras (so final tick fires on expiration)
                     play_match::update_auras,
+                    play_match::process_divine_shield,  // Must run BEFORE apply_pending_auras so DamageImmunity blocks CC
                     play_match::apply_pending_auras,
                     play_match::process_dispels,
                     play_match::process_holy_shock_heals,
                     play_match::process_holy_shock_damage,
-                    play_match::process_divine_shield,
                 )
                     .chain()
                     .in_set(PlayMatchSystems::ResourcesAndAuras)
