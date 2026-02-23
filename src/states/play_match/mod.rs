@@ -39,6 +39,7 @@ pub mod rendering;
 pub mod auras;
 pub mod effects;
 pub mod match_flow;
+pub mod traps;
 pub mod combat_ai;
 pub mod combat_core;
 pub mod shadow_sight;
@@ -62,6 +63,7 @@ pub use shadow_sight::*;
 pub use utils::*;
 pub use constants::*;
 pub use effects::*;
+pub use traps::*;
 pub use class_ai::pet_ai::pet_ai_system;
 
 use bevy::prelude::*;

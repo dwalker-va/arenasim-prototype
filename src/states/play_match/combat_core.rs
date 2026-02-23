@@ -19,7 +19,7 @@ use super::ability_config::AbilityDefinitions;
 use super::constants::{CRIT_DAMAGE_MULTIPLIER, CRIT_HEALING_MULTIPLIER};
 use super::utils::{spawn_speech_bubble, get_next_fct_offset};
 use super::components::ChannelingState;
-use super::{MELEE_RANGE, WAND_RANGE, ARENA_HALF_X, ARENA_HALF_Z};
+use super::{MELEE_RANGE, WAND_RANGE, ARENA_HALF_X, ARENA_HALF_Z, HUNTER_DEAD_ZONE, AUTO_SHOT_RANGE, DISENGAGE_SPEED};
 
 // Re-export combatant_id for backward compatibility (used by other modules)
 pub use super::utils::combatant_id;
@@ -247,7 +247,7 @@ pub fn move_to_target(
     countdown: Res<MatchCountdown>,
     time: Res<Time>,
     mut commands: Commands,
-    mut combatants: Query<(Entity, &mut Transform, &Combatant, Option<&ActiveAuras>, Option<&CastingState>, Option<&ChargingState>, Option<&ChannelingState>)>,
+    mut combatants: Query<(Entity, &mut Transform, &Combatant, Option<&ActiveAuras>, Option<&CastingState>, Option<&ChargingState>, Option<&ChannelingState>, Option<&DisengagingState>)>,
     orbs: Query<&Transform, (With<ShadowSightOrb>, Without<Combatant>)>,
     pet_query: Query<&Pet>,
 ) {
@@ -261,11 +261,11 @@ pub fn move_to_target(
     // Build a snapshot of all combatant positions and team info for lookups
     let positions: std::collections::HashMap<Entity, (Vec3, u8)> = combatants
         .iter()
-        .map(|(entity, transform, combatant, _, _, _, _)| (entity, (transform.translation, combatant.team)))
+        .map(|(entity, transform, combatant, _, _, _, _, _)| (entity, (transform.translation, combatant.team)))
         .collect();
 
     // Move each combatant towards their target if needed
-    for (entity, mut transform, combatant, auras, casting_state, charging_state, channeling_state) in combatants.iter_mut() {
+    for (entity, mut transform, combatant, auras, casting_state, charging_state, channeling_state, disengaging_state) in combatants.iter_mut() {
         if !combatant.is_alive() {
             continue;
         }
@@ -397,7 +397,34 @@ pub fn move_to_target(
             
             continue; // Skip normal movement logic while charging
         }
-        
+
+        // DISENGAGE BEHAVIOR: If disengaging, leap backward at high speed
+        if let Some(disengage) = disengaging_state {
+            if disengage.distance_remaining > 0.0 {
+                let move_amount = DISENGAGE_SPEED * dt;
+                let new_pos = transform.translation + disengage.direction * move_amount;
+
+                // Clamp to arena bounds
+                transform.translation.x = new_pos.x.clamp(-ARENA_HALF_X, ARENA_HALF_X);
+                transform.translation.z = new_pos.z.clamp(-ARENA_HALF_Z, ARENA_HALF_Z);
+
+                // Decrement distance remaining
+                let remaining = disengage.distance_remaining - move_amount;
+                if remaining <= 0.0 {
+                    commands.entity(entity).remove::<DisengagingState>();
+                } else {
+                    commands.entity(entity).try_insert(DisengagingState {
+                        direction: disengage.direction,
+                        distance_remaining: remaining,
+                    });
+                }
+
+                continue; // Skip normal movement logic while disengaging
+            } else {
+                commands.entity(entity).remove::<DisengagingState>();
+            }
+        }
+
         // KITING BEHAVIOR: If kiting_timer > 0, move away from nearest enemy
         // Uses intelligent pathfinding that considers arena boundaries
         if combatant.kiting_timer > 0.0 {
@@ -734,9 +761,20 @@ pub fn combat_auto_attack(
                     
                     // Use pet-aware is_melee from snapshot (pets inherit owner's class
                     // but may have different melee/ranged behavior)
-                    let &(_, _, _, attacker_is_melee) = &combatant_info[&attacker_entity];
-                    let attack_range = if attacker_is_melee { MELEE_RANGE } else { WAND_RANGE };
-                    if my_pos.distance(target_pos) <= attack_range {
+                    let &(_, attacker_class, _, attacker_is_melee) = &combatant_info[&attacker_entity];
+                    let attack_range = if attacker_is_melee {
+                        MELEE_RANGE
+                    } else if attacker_class == match_config::CharacterClass::Hunter {
+                        AUTO_SHOT_RANGE
+                    } else {
+                        WAND_RANGE
+                    };
+                    let distance = my_pos.distance(target_pos);
+                    // Hunter dead zone: can't auto-attack within 8 yards
+                    if attacker_class == match_config::CharacterClass::Hunter && distance < HUNTER_DEAD_ZONE {
+                        continue;
+                    }
+                    if distance <= attack_range {
                         // Calculate total damage (base + bonus from Heroic Strike, etc.)
                         let base_damage = combatant.attack_damage + combatant.next_attack_bonus_damage;
                         // Roll crit before damage reduction
@@ -859,12 +897,14 @@ pub fn combat_auto_attack(
                 damage_dealt_updates.push((attacker_entity, actual_damage + absorbed));
 
                 // Log the attack with structured data
-                if let (Some((attacker_team, _attacker_class, attacker_name, attacker_is_melee)), Some((target_team, _target_class, target_name, _))) =
+                if let (Some((attacker_team, attacker_class, attacker_name, attacker_is_melee)), Some((target_team, _target_class, target_name, _))) =
                     (combatant_info.get(&attacker_entity), combatant_info.get(&target_entity)) {
                     let attack_name = if has_bonus {
                         "Heroic Strike" // Enhanced auto-attack
                     } else if *attacker_is_melee {
                         "Auto Attack"
+                    } else if *attacker_class == match_config::CharacterClass::Hunter {
+                        "Auto Shot"
                     } else {
                         "Wand Shot"
                     };

@@ -81,6 +81,7 @@ pub fn apply_pending_auras(
     pending_auras: Query<(Entity, &AuraPending)>,
     mut combatants: Query<(&mut Combatant, Option<&mut ActiveAuras>, &Transform, Option<&mut DRTracker>)>,
     charging_query: Query<&ChargingState>,
+    disengaging_query: Query<&DisengagingState>,
     mut fct_states: Query<&mut FloatingTextState>,
     pet_query: Query<&Pet>,
 ) {
@@ -129,9 +130,10 @@ pub fn apply_pending_auras(
             pending.aura.effect_type,
             AuraType::Fear | AuraType::Stun | AuraType::Root | AuraType::Polymorph | AuraType::Incapacitate
         );
-        let is_charging = charging_query.get(pending.target).is_ok();
+        let is_unstoppable = charging_query.get(pending.target).is_ok()
+            || disengaging_query.get(pending.target).is_ok();
 
-        if is_cc_aura && is_charging {
+        if is_cc_aura && is_unstoppable {
             // Target is immune - show floating text and log
             let text_position = target_transform.translation + Vec3::new(0.0, 2.5, 0.0);
             let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(pending.target) {

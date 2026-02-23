@@ -115,6 +115,7 @@ impl Plugin for StatesPlugin {
                     play_match::track_shadow_sight_timer,  // Track combat time and spawn Shadow Sight orbs
                     play_match::process_dot_ticks,  // Process DoT ticks BEFORE updating auras (so final tick fires on expiration)
                     play_match::update_auras,
+                    play_match::slow_zone_system,       // Zone slow refresh before aura processing
                     play_match::process_divine_shield,  // Must run BEFORE apply_pending_auras so DamageImmunity blocks CC
                     play_match::apply_pending_auras,
                     play_match::process_dispels,
@@ -152,6 +153,7 @@ impl Plugin for StatesPlugin {
                     play_match::move_projectiles,
                     play_match::process_projectile_hits,
                     play_match::move_to_target,
+                    play_match::trap_system,  // After movement — needs current positions
                 )
                     .chain()
                     .in_set(PlayMatchSystems::CombatAndMovement)
