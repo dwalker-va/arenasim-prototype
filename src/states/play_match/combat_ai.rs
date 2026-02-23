@@ -539,6 +539,24 @@ pub fn decide_abilities(
                 continue;
             }
         }
+
+        // Hunters use Aimed Shot, Arcane Shot, Concussive Shot, Disengage, and Traps
+        if combatant.class == match_config::CharacterClass::Hunter {
+            if class_ai::hunter::decide_hunter_action(
+                &mut commands,
+                &mut combat_log,
+                &mut game_rng,
+                &abilities,
+                entity,
+                &mut combatant,
+                my_pos,
+                auras.as_deref(),
+                &ctx,
+                &mut instant_attacks,
+            ) {
+                continue;
+            }
+        }
     }
 
     // Process queued instant attacks (Ambush, Sinister Strike, Mortal Strike)
