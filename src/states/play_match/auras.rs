@@ -127,7 +127,7 @@ pub fn apply_pending_auras(
         // Check for CC immunity: Charging combatants are immune to crowd control
         let is_cc_aura = matches!(
             pending.aura.effect_type,
-            AuraType::Fear | AuraType::Stun | AuraType::Root | AuraType::Polymorph
+            AuraType::Fear | AuraType::Stun | AuraType::Root | AuraType::Polymorph | AuraType::Incapacitate
         );
         let is_charging = charging_query.get(pending.target).is_ok();
 
@@ -158,6 +158,7 @@ pub fn apply_pending_auras(
                 AuraType::Stun => "Stun",
                 AuraType::Root => "Root",
                 AuraType::Polymorph => "Polymorph",
+                AuraType::Incapacitate => "Incapacitate",
                 _ => "CC",
             };
             combat_log.log(
@@ -183,7 +184,7 @@ pub fn apply_pending_auras(
         // Check for DamageImmunity (Divine Shield): blocks ALL hostile aura applications
         let is_hostile_aura = matches!(
             pending.aura.effect_type,
-            AuraType::Fear | AuraType::Stun | AuraType::Root | AuraType::Polymorph
+            AuraType::Fear | AuraType::Stun | AuraType::Root | AuraType::Polymorph | AuraType::Incapacitate
             | AuraType::MovementSpeedSlow | AuraType::DamageOverTime | AuraType::SpellSchoolLockout
             | AuraType::HealingReduction | AuraType::DamageReduction | AuraType::CastTimeIncrease
         );
@@ -527,12 +528,13 @@ pub fn process_aura_breaks(
                             AuraType::Stun => "Stun",
                             AuraType::Fear => "Fear",
                             AuraType::Polymorph => "Polymorph",
+                            AuraType::Incapacitate => "Incapacitate",
                             _ => "Effect",
                         }
                     } else {
                         aura.ability_name.as_str()
                     };
-                    
+
                     let message = format!(
                         "Team {} {}'s {} broke from damage ({:.0}/{:.0})",
                         combatant.team,

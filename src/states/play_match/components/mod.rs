@@ -36,37 +36,60 @@ use super::constants::{DR_RESET_TIMER, DR_IMMUNE_LEVEL, DR_MULTIPLIERS};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PetType {
     Felhunter,
+    Spider,
+    Boar,
+    Bird,
 }
 
 impl PetType {
     pub fn name(&self) -> &'static str {
         match self {
             PetType::Felhunter => "Felhunter",
+            PetType::Spider => "Spider",
+            PetType::Boar => "Boar",
+            PetType::Bird => "Bird",
         }
     }
 
     pub fn color(&self) -> Color {
         match self {
             PetType::Felhunter => Color::srgb(0.4, 0.75, 0.4), // Green (demon)
+            PetType::Spider => Color::srgb(0.5, 0.4, 0.3),     // Brown
+            PetType::Boar => Color::srgb(0.6, 0.4, 0.3),       // Dark brown
+            PetType::Bird => Color::srgb(0.6, 0.7, 0.8),       // Light grey-blue
         }
     }
 
     pub fn preferred_range(&self) -> f32 {
         match self {
             PetType::Felhunter => 2.0, // Melee
+            PetType::Spider => 2.0,    // Melee
+            PetType::Boar => 2.0,      // Melee
+            PetType::Bird => 2.0,      // Melee
         }
     }
 
     pub fn movement_speed(&self) -> f32 {
         match self {
             PetType::Felhunter => 5.5,
+            PetType::Spider => 5.5,
+            PetType::Boar => 6.0, // Slightly faster — aggressive
+            PetType::Bird => 5.5,
         }
     }
 
     pub fn is_melee(&self) -> bool {
         match self {
             PetType::Felhunter => true,
+            PetType::Spider => true,
+            PetType::Boar => true,
+            PetType::Bird => true,
         }
+    }
+
+    /// Whether this is a Hunter pet type.
+    pub fn is_hunter_pet(&self) -> bool {
+        matches!(self, PetType::Spider | PetType::Boar | PetType::Bird)
     }
 }
 
@@ -414,6 +437,11 @@ pub enum AuraType {
     /// Complete damage immunity - all incoming damage is negated, all hostile auras are blocked.
     /// Used by Divine Shield. Magnitude unused (always 1.0 by convention).
     DamageImmunity,
+    /// Incapacitate - target is frozen in place, can't attack/cast, breaks on ANY damage.
+    /// Unlike Polymorph (target wanders), incapacitated targets stand still.
+    /// Shares DRCategory::Incapacitates with Polymorph.
+    /// Used by Freezing Trap.
+    Incapacitate,
 }
 
 // ============================================================================
@@ -444,7 +472,7 @@ impl DRCategory {
         match aura_type {
             AuraType::Stun => Some(DRCategory::Stuns),
             AuraType::Fear => Some(DRCategory::Fears),
-            AuraType::Polymorph => Some(DRCategory::Incapacitates),
+            AuraType::Polymorph | AuraType::Incapacitate => Some(DRCategory::Incapacitates),
             AuraType::Root => Some(DRCategory::Roots),
             AuraType::MovementSpeedSlow => Some(DRCategory::Slows),
             _ => None,
@@ -605,6 +633,9 @@ impl Combatant {
             // Paladins: High HP (plate), healing & melee hybrid, scales with Spell Power primarily (6% crit)
             // Tankier than Priest but lower spell power to offset utility
             match_config::CharacterClass::Paladin => (ResourceType::Mana, 175.0, 160.0, 0.0, 160.0, 8.0, 0.9, 20.0, 35.0, 0.06, 5.0),
+            // Hunters: Medium HP (mail), ranged physical, scales with Attack Power (7% crit)
+            // Auto Shot is the primary sustained damage. Mana for ability costs.
+            match_config::CharacterClass::Hunter => (ResourceType::Mana, 165.0, 150.0, 0.0, 150.0, 10.0, 0.7, 30.0, 0.0, 0.07, 5.0),
         };
         
         // Rogues start stealthed
@@ -676,6 +707,24 @@ impl Combatant {
                 pet.attack_speed = 1.2;
                 pet.attack_power = 20.0;
                 pet.spell_power = owner.spell_power * 0.3;
+                pet.crit_chance = 0.05;
+                pet.base_movement_speed = pet_type.movement_speed();
+                pet
+            }
+            PetType::Spider | PetType::Boar | PetType::Bird => {
+                let mut pet = Self::new(team, slot, match_config::CharacterClass::Hunter);
+                // Scale health to ~45% of owner's max health (consistent with Felhunter)
+                pet.max_health = owner.max_health * 0.45;
+                pet.current_health = pet.max_health;
+                // Hunter pets: melee auto-attackers, no mana needed for auto-attacks
+                // Pet special abilities use mana from the pet's pool
+                pet.max_mana = 100.0;
+                pet.current_mana = 100.0;
+                pet.mana_regen = 5.0;
+                pet.attack_damage = 7.0;
+                pet.attack_speed = 1.3;
+                pet.attack_power = owner.attack_power * 0.5;
+                pet.spell_power = 0.0;
                 pet.crit_chance = 0.05;
                 pet.base_movement_speed = pet_type.movement_speed();
                 pet
@@ -848,6 +897,7 @@ impl AuraType {
                 | AuraType::Root
                 | AuraType::Fear
                 | AuraType::Polymorph
+                | AuraType::Incapacitate
         )
     }
 }
@@ -1185,6 +1235,62 @@ pub struct DispelBurst {
     pub lifetime: f32,
     /// Initial lifetime for fade calculation
     pub initial_lifetime: f32,
+}
+
+// ============================================================================
+// Hunter Components
+// ============================================================================
+
+/// Trap type enum for Hunter traps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrapType {
+    /// Freezing Trap — incapacitates first enemy contact (breaks on damage)
+    Freezing,
+    /// Frost Trap — creates a persistent slow zone on trigger
+    Frost,
+}
+
+/// Component for Hunter traps placed on the ground.
+/// Traps have an arming delay, then trigger on enemy proximity.
+#[derive(Component)]
+pub struct Trap {
+    /// Which type of trap this is
+    pub trap_type: TrapType,
+    /// Team of the hunter who placed this trap
+    pub owner_team: u8,
+    /// Entity of the hunter who placed this trap
+    pub owner: Entity,
+    /// Time remaining before the trap is armed (seconds). 0 = armed.
+    pub arm_timer: f32,
+    /// Trigger radius — enemies within this distance of the trap trigger it
+    pub trigger_radius: f32,
+    /// Whether this trap has been triggered (pending despawn)
+    pub triggered: bool,
+}
+
+/// Component for persistent slow zones created by Frost Trap.
+/// Enemies inside the zone receive a refreshing movement speed slow.
+#[derive(Component)]
+pub struct SlowZone {
+    /// Team of the hunter who created this zone
+    pub owner_team: u8,
+    /// Entity of the hunter who created this zone
+    pub owner: Entity,
+    /// Radius of the slow zone
+    pub radius: f32,
+    /// Time remaining before the zone expires (seconds)
+    pub duration_remaining: f32,
+    /// Slow magnitude (movement speed multiplier, e.g., 0.4 = 60% slow)
+    pub slow_magnitude: f32,
+}
+
+/// Component tracking an active Disengage (Hunter backward leap).
+#[derive(Component)]
+pub struct DisengagingState {
+    /// Direction of the leap (normalized, away from nearest enemy)
+    pub direction: Vec3,
+    /// Distance remaining to travel
+    pub distance_remaining: f32,
 }
 
 // ============================================================================

@@ -23,6 +23,8 @@ pub enum SpellSchool {
     Arcane,
     /// Fire magic (Immolate)
     Fire,
+    /// Nature magic (Spider Web, Master's Call)
+    Nature,
     /// No spell school (can't be locked out)
     None,
 }
@@ -86,6 +88,17 @@ pub enum AbilityType {
     // Pet abilities (Felhunter)
     SpellLock,        // Felhunter interrupt (instant, 30yd, 30s CD, 3s silence)
     DevourMagic,      // Felhunter dispel (instant, 30yd, 8s CD, heals pet on success)
+    // Hunter abilities
+    AimedShot,        // Hunter cast-time physical damage + healing reduction (35yd, 10s CD)
+    ArcaneShot,       // Hunter instant Arcane damage (35yd, 6s CD)
+    ConcussiveShot,   // Hunter instant slow (35yd, 12s CD)
+    Disengage,        // Hunter backward leap (~15 yards, 25s CD, no range req)
+    FreezingTrap,     // Hunter trap — incapacitates first enemy (25s CD)
+    FrostTrap,        // Hunter trap — creates persistent slow zone (20s CD)
+    // Hunter pet abilities
+    SpiderWeb,        // Spider ranged root on target (45s CD)
+    BoarCharge,       // Boar gap closer + short stun (45s CD)
+    MastersCall,      // Bird removes movement impairments from friendly (45s CD)
 }
 
 impl AbilityType {
@@ -106,6 +119,13 @@ impl AbilityType {
         let distance = caster_position.distance(target_position);
         if distance > ability_def.range {
             return false;
+        }
+
+        // Check minimum range (Hunter dead zone)
+        if let Some(min_range) = ability_def.min_range {
+            if distance < min_range {
+                return false;
+            }
         }
 
         // Stealth abilities require stealth
@@ -130,6 +150,8 @@ pub fn is_spell_school_locked(spell_school: SpellSchool, auras: Option<&ActiveAu
                     3 => SpellSchool::Shadow,
                     4 => SpellSchool::Arcane,
                     5 => SpellSchool::Fire,
+                    6 => SpellSchool::Nature,
+                    7 => SpellSchool::None,
                     _ => SpellSchool::None,
                 };
                 locked_school == spell_school

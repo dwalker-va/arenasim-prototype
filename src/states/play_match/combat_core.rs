@@ -282,7 +282,7 @@ pub fn move_to_target(
 
         // Check for movement-preventing CC and wandering CC
         let (is_rooted_or_stunned, fear_direction, polymorph_direction) = if let Some(auras) = auras {
-            let rooted_or_stunned = auras.auras.iter().any(|a| matches!(a.effect_type, AuraType::Root | AuraType::Stun));
+            let rooted_or_stunned = auras.auras.iter().any(|a| matches!(a.effect_type, AuraType::Root | AuraType::Stun | AuraType::Incapacitate));
             let fear_dir = auras.auras.iter()
                 .find(|a| a.effect_type == AuraType::Fear)
                 .map(|a| a.fear_direction);
@@ -801,7 +801,7 @@ pub fn combat_auto_attack(
                 {
                     // Look up the caster's team
                     if let Some(caster_entity) = aura.caster {
-                        if let Some(&(caster_team, _, _)) = combatant_info.get(&caster_entity) {
+                        if let Some(&(caster_team, _, _, _)) = combatant_info.get(&caster_entity) {
                             // Only track if the CC is from the opposing team of the target
                             // (i.e., the CC caster is an enemy of the CC'd target)
                             if caster_team != combatant.team {
@@ -826,7 +826,7 @@ pub fn combat_auto_attack(
         // Bug fix: Don't auto-attack targets with breakable CC from a friendly caster.
         // This prevents, e.g., a Warlock pet from breaking its team's Polymorph.
         if let Some(&cc_caster_team) = friendly_cc_team.get(&target_entity) {
-            if let Some(&(attacker_team, _, _)) = combatant_info.get(&attacker_entity) {
+            if let Some(&(attacker_team, _, _, _)) = combatant_info.get(&attacker_entity) {
                 if attacker_team == cc_caster_team {
                     continue;
                 }
@@ -1188,7 +1188,8 @@ fn apply_interrupt_lockout(
         SpellSchool::Shadow => 3.0,
         SpellSchool::Arcane => 4.0,
         SpellSchool::Fire => 5.0,
-        SpellSchool::None => 6.0,
+        SpellSchool::Nature => 6.0,
+        SpellSchool::None => 7.0,
     };
 
     commands.spawn(AuraPending {
@@ -1217,6 +1218,7 @@ fn apply_interrupt_lockout(
         SpellSchool::Shadow => "Shadow",
         SpellSchool::Arcane => "Arcane",
         SpellSchool::Fire => "Fire",
+        SpellSchool::Nature => "Nature",
         SpellSchool::None => "None",
     };
 

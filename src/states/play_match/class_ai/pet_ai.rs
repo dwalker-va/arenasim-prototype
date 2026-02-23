@@ -108,6 +108,8 @@ pub fn pet_ai_system(
                     &channeling_targets,
                 );
             }
+            // Hunter pet AI will be implemented in Phase 3
+            PetType::Spider | PetType::Boar | PetType::Bird => {}
         }
     }
 }

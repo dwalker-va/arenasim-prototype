@@ -113,6 +113,15 @@ fn get_class_stats(class: CharacterClass) -> ClassStats {
             attack_speed: 0.9,
             move_speed: 5.0,
         },
+        CharacterClass::Hunter => ClassStats {
+            health: 165,
+            resource_name: "Mana",
+            resource_max: 150,
+            attack_power: 30,
+            spell_power: 0,
+            attack_speed: 0.7,
+            move_speed: 5.0,
+        },
     }
 }
 
@@ -164,6 +173,14 @@ fn get_class_abilities(class: CharacterClass) -> Vec<AbilityType> {
             AbilityType::HammerOfJustice,
             AbilityType::PaladinCleanse,
         ],
+        CharacterClass::Hunter => vec![
+            AbilityType::AimedShot,
+            AbilityType::ArcaneShot,
+            AbilityType::ConcussiveShot,
+            AbilityType::Disengage,
+            AbilityType::FreezingTrap,
+            AbilityType::FrostTrap,
+        ],
     }
 }
 
@@ -210,6 +227,17 @@ fn get_ability_name(ability: AbilityType) -> &'static str {
         // Pet abilities (Felhunter)
         AbilityType::SpellLock => "Spell Lock",
         AbilityType::DevourMagic => "Devour Magic",
+        // Hunter abilities
+        AbilityType::AimedShot => "Aimed Shot",
+        AbilityType::ArcaneShot => "Arcane Shot",
+        AbilityType::ConcussiveShot => "Concussive Shot",
+        AbilityType::Disengage => "Disengage",
+        AbilityType::FreezingTrap => "Freezing Trap",
+        AbilityType::FrostTrap => "Frost Trap",
+        // Hunter pet abilities
+        AbilityType::SpiderWeb => "Web",
+        AbilityType::BoarCharge => "Charge",
+        AbilityType::MastersCall => "Master's Call",
     }
 }
 
@@ -234,6 +262,7 @@ pub fn load_ability_icons(
         CharacterClass::Priest,
         CharacterClass::Warlock,
         CharacterClass::Paladin,
+        CharacterClass::Hunter,
     ];
     let mut ability_names: Vec<&'static str> = Vec::new();
     for class in &all_classes {
@@ -708,6 +737,7 @@ fn get_spell_school_color(school: SpellSchool) -> egui::Color32 {
         SpellSchool::Shadow => egui::Color32::from_rgb(148, 130, 201),   // Purple
         SpellSchool::Arcane => egui::Color32::from_rgb(255, 128, 255),   // Pink/magenta
         SpellSchool::Holy => egui::Color32::from_rgb(255, 230, 150),     // Golden yellow
+        SpellSchool::Nature => egui::Color32::from_rgb(76, 196, 30),      // Green
         SpellSchool::None => egui::Color32::from_rgb(220, 220, 220),     // Gray
     }
 }
@@ -948,6 +978,13 @@ fn build_aura_description(aura: &super::play_match::ability_config::AuraEffect) 
         }
         AuraType::DamageImmunity => {
             format!("Immune to all damage for {:.0} sec. Reduces damage dealt by 50%.", aura.duration)
+        }
+        AuraType::Incapacitate => {
+            if aura.break_on_damage > 0.0 {
+                format!("Incapacitates the target for {:.0} sec. Breaks on any damage.", aura.duration)
+            } else {
+                format!("Incapacitates the target for {:.0} sec.", aura.duration)
+            }
         }
     }
 }

@@ -71,6 +71,17 @@ pub fn get_ability_icon_path(ability: &str) -> Option<&'static str> {
         // Felhunter abilities
         "Spell Lock" => Some("icons/abilities/spell_shadow_mindrot.jpg"),
         "Devour Magic" => Some("icons/abilities/spell_nature_purge.jpg"),
+        // Hunter abilities
+        "Aimed Shot" => Some("icons/abilities/inv_spear_07.jpg"),
+        "Arcane Shot" => Some("icons/abilities/ability_impalingbolt.jpg"),
+        "Concussive Shot" => Some("icons/abilities/spell_frost_stun.jpg"),
+        "Disengage" => Some("icons/abilities/ability_rogue_feint.jpg"),
+        "Freezing Trap" => Some("icons/abilities/spell_frost_chainsofice.jpg"),
+        "Frost Trap" => Some("icons/abilities/spell_frost_freezingbreath.jpg"),
+        // Hunter pet abilities
+        "Spider Web" => Some("icons/abilities/spell_nature_web.jpg"),
+        "Boar Charge" => Some("icons/abilities/ability_golemstormbolt.jpg"),
+        "Master's Call" => Some("icons/abilities/ability_hunter_masterscall.jpg"),
         _ => None,
     }
 }
@@ -88,6 +99,11 @@ pub const SPELL_ICON_ABILITIES: &[&str] = &[
     "Hammer of Justice", "Cleanse", "Devotion Aura", "Divine Shield",
     // Felhunter abilities
     "Spell Lock", "Devour Magic",
+    // Hunter abilities
+    "Aimed Shot", "Arcane Shot", "Concussive Shot", "Disengage",
+    "Freezing Trap", "Frost Trap",
+    // Hunter pet abilities
+    "Spider Web", "Boar Charge", "Master's Call",
 ];
 
 // ==============================================================================
@@ -141,6 +157,7 @@ pub fn get_aura_icon_key(aura: &Aura) -> String {
         AuraType::CastTimeIncrease => "aura_dot".to_string(), // Curse debuff, reuse DoT icon
         AuraType::DamageTakenReduction => "aura_max_health".to_string(), // Devotion Aura buff, reuse buff icon
         AuraType::DamageImmunity => "aura_absorb".to_string(), // Divine Shield, reuse absorb icon as fallback
+        AuraType::Incapacitate => "aura_stun".to_string(), // Reuse stun icon (frozen in place)
     }
 }
 

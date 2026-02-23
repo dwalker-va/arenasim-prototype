@@ -83,6 +83,9 @@ pub struct AbilityConfig {
     pub cast_time: f32,
     /// Maximum range in units
     pub range: f32,
+    /// Minimum range in units (Hunter dead zone). None = no minimum range.
+    #[serde(default)]
+    pub min_range: Option<f32>,
     /// Resource cost (mana, energy, or rage)
     #[serde(default)]
     pub mana_cost: f32,
@@ -163,6 +166,12 @@ pub struct AbilityConfig {
     /// Whether this ability removes magic debuffs from the target
     #[serde(default)]
     pub is_dispel: bool,
+    /// Whether this is a trap ability (placed at target location, arms after delay)
+    #[serde(default)]
+    pub is_trap: bool,
+    /// Whether this is a disengage-type ability (backward leap)
+    #[serde(default)]
+    pub is_disengage: bool,
 }
 
 fn default_scaling_none() -> ScalingStat {
@@ -281,6 +290,17 @@ impl AbilityDefinitions {
             // Pet abilities (Felhunter)
             AbilityType::SpellLock,
             AbilityType::DevourMagic,
+            // Hunter abilities
+            AbilityType::AimedShot,
+            AbilityType::ArcaneShot,
+            AbilityType::ConcussiveShot,
+            AbilityType::Disengage,
+            AbilityType::FreezingTrap,
+            AbilityType::FrostTrap,
+            // Hunter pet abilities
+            AbilityType::SpiderWeb,
+            AbilityType::BoarCharge,
+            AbilityType::MastersCall,
         ];
 
         let missing: Vec<AbilityType> = expected_abilities
@@ -354,6 +374,7 @@ mod tests {
             name: "Test".to_string(),
             cast_time: 0.0,
             range: 40.0,
+            min_range: None,
             mana_cost: 0.0,
             cooldown: 0.0,
             damage_base_min: 10.0,
@@ -376,6 +397,8 @@ mod tests {
             channel_tick_interval: 1.0,
             channel_healing_per_tick: 0.0,
             is_dispel: false,
+            is_trap: false,
+            is_disengage: false,
         };
 
         assert!(config.is_damage());
@@ -388,6 +411,7 @@ mod tests {
             name: "Test Heal".to_string(),
             cast_time: 1.5,
             range: 40.0,
+            min_range: None,
             mana_cost: 25.0,
             cooldown: 0.0,
             damage_base_min: 0.0,
@@ -410,6 +434,8 @@ mod tests {
             channel_tick_interval: 1.0,
             channel_healing_per_tick: 0.0,
             is_dispel: false,
+            is_trap: false,
+            is_disengage: false,
         };
 
         assert!(!config.is_damage());

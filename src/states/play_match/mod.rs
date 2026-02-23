@@ -366,6 +366,26 @@ pub fn setup_play_match(
                     PetType::Felhunter,
                 );
             }
+
+            // Spawn pet for Hunters (based on configured pet type)
+            if *character == match_config::CharacterClass::Hunter {
+                let pet_type_pref = config.team1_hunter_pet_types.get(i).copied().unwrap_or_default();
+                let pet_type = match pet_type_pref {
+                    match_config::HunterPetType::Spider => PetType::Spider,
+                    match_config::HunterPetType::Boar => PetType::Boar,
+                    match_config::HunterPetType::Bird => PetType::Bird,
+                };
+                spawn_pet(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    &mut combat_log,
+                    entity,
+                    &combatant,
+                    position,
+                    pet_type,
+                );
+            }
         } else {
             warn!("Team 1 slot {} is empty — skipping spawn", i);
         }
@@ -412,6 +432,26 @@ pub fn setup_play_match(
                     &combatant,
                     position,
                     PetType::Felhunter,
+                );
+            }
+
+            // Spawn pet for Hunters (based on configured pet type)
+            if *character == match_config::CharacterClass::Hunter {
+                let pet_type_pref = config.team2_hunter_pet_types.get(i).copied().unwrap_or_default();
+                let pet_type = match pet_type_pref {
+                    match_config::HunterPetType::Spider => PetType::Spider,
+                    match_config::HunterPetType::Boar => PetType::Boar,
+                    match_config::HunterPetType::Bird => PetType::Bird,
+                };
+                spawn_pet(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    &mut combat_log,
+                    entity,
+                    &combatant,
+                    position,
+                    pet_type,
                 );
             }
         } else {
@@ -500,6 +540,7 @@ fn spawn_combatant(
         match_config::CharacterClass::Priest => Color::srgb(0.95, 0.95, 0.95), // White
         match_config::CharacterClass::Warlock => Color::srgb(0.58, 0.41, 0.93), // Purple
         match_config::CharacterClass::Paladin => Color::srgb(0.96, 0.55, 0.73), // Pink (WoW Paladin)
+        match_config::CharacterClass::Hunter => Color::srgb(0.67, 0.83, 0.45), // Green (WoW Hunter)
     };
     
     // Apply darkening for duplicate classes (0.65 multiplier per duplicate)

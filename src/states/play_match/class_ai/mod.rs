@@ -20,6 +20,7 @@ pub mod warrior;
 pub mod rogue;
 pub mod warlock;
 pub mod paladin;
+pub mod hunter;
 pub mod pet_ai;
 
 use bevy::prelude::*;
@@ -155,7 +156,7 @@ impl<'a> CombatContext<'a> {
     /// NOTE: The canonical CC type list lives in `utils::is_incapacitated`.
     /// CombatContext can't delegate because it stores auras as `&[Aura]`, not `&ActiveAuras`.
     pub fn is_incapacitated(&self) -> bool {
-        self.has_aura(AuraType::Stun) || self.has_aura(AuraType::Fear) || self.has_aura(AuraType::Polymorph)
+        self.has_aura(AuraType::Stun) || self.has_aura(AuraType::Fear) || self.has_aura(AuraType::Polymorph) || self.has_aura(AuraType::Incapacitate)
     }
 
     /// Check if an entity is currently CC'd (Stun, Fear, Root, or Polymorph).
@@ -167,7 +168,7 @@ impl<'a> CombatContext<'a> {
                 auras.iter().any(|a| {
                     matches!(
                         a.effect_type,
-                        AuraType::Stun | AuraType::Fear | AuraType::Root | AuraType::Polymorph
+                        AuraType::Stun | AuraType::Fear | AuraType::Root | AuraType::Polymorph | AuraType::Incapacitate
                     )
                 })
             })
@@ -246,6 +247,11 @@ pub enum AbilityDecision {
     AoeAbility {
         ability: AbilityType,
     },
+    /// Place a ground-targeted ability at a specific world position (traps)
+    GroundTargetAbility {
+        ability: AbilityType,
+        position: Vec3,
+    },
 }
 
 /// Trait for class-specific AI logic.
@@ -268,6 +274,7 @@ pub fn get_class_ai(class: CharacterClass) -> Box<dyn ClassAI> {
         CharacterClass::Rogue => Box::new(rogue::RogueAI),
         CharacterClass::Warlock => Box::new(warlock::WarlockAI),
         CharacterClass::Paladin => Box::new(paladin::PaladinAI),
+        CharacterClass::Hunter => Box::new(hunter::HunterAI),
     }
 }
 
