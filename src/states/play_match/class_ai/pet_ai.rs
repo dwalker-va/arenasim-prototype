@@ -367,6 +367,7 @@ fn try_devour_magic(
         log_prefix: "[DEVOUR]",
         caster_class: CharacterClass::Warlock,
         heal_on_success: Some((entity, heal_amount)),
+        aura_type_filter: None,
     });
 
     true
@@ -424,7 +425,7 @@ fn spider_ai(
                 continue;
             }
         }
-        if best_target.is_none() || dist_to_owner < best_target.unwrap().1 {
+        if best_target.map_or(true, |(_, d)| dist_to_owner < d) {
             best_target = Some((*target_entity, dist_to_owner));
         }
     }
@@ -626,12 +627,13 @@ fn bird_ai(
 
     let Some(target) = cleanse_target else { return };
 
-    // Master's Call: spawn a DispelPending that removes Root and MovementSpeedSlow
+    // Master's Call: only removes movement impairments (Root, MovementSpeedSlow)
     commands.spawn(DispelPending {
         target,
         log_prefix: "[MASTERS_CALL]",
         caster_class: CharacterClass::Hunter,
         heal_on_success: None,
+        aura_type_filter: Some(vec![AuraType::Root, AuraType::MovementSpeedSlow]),
     });
 
     combatant.ability_cooldowns.insert(ability, def.cooldown);

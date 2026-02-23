@@ -679,7 +679,6 @@
             mana_cost: 20.0,
             cooldown: 25.0,
             spell_school: Physical,
-            is_disengage: true,
         ),
 
         // Freezing Trap: Incapacitates first enemy contact (like Polymorph but stationary)
@@ -697,7 +696,6 @@
                 break_on_damage: 0.0,  // Breaks on ANY damage
             )),
             spell_school: None,
-            is_trap: true,
         ),
 
         // Frost Trap: Creates persistent slow zone on trigger
@@ -710,7 +708,6 @@
             mana_cost: 30.0,
             cooldown: 20.0,
             spell_school: None,
-            is_trap: true,
         ),
 
         // ============================================================================

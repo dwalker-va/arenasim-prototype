@@ -87,10 +87,6 @@ impl PetType {
         }
     }
 
-    /// Whether this is a Hunter pet type.
-    pub fn is_hunter_pet(&self) -> bool {
-        matches!(self, PetType::Spider | PetType::Boar | PetType::Bird)
-    }
 }
 
 /// Marker component for pet entities. Links pet to its owner.

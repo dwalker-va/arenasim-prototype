@@ -166,12 +166,6 @@ pub struct AbilityConfig {
     /// Whether this ability removes magic debuffs from the target
     #[serde(default)]
     pub is_dispel: bool,
-    /// Whether this is a trap ability (placed at target location, arms after delay)
-    #[serde(default)]
-    pub is_trap: bool,
-    /// Whether this is a disengage-type ability (backward leap)
-    #[serde(default)]
-    pub is_disengage: bool,
 }
 
 fn default_scaling_none() -> ScalingStat {
@@ -397,8 +391,6 @@ mod tests {
             channel_tick_interval: 1.0,
             channel_healing_per_tick: 0.0,
             is_dispel: false,
-            is_trap: false,
-            is_disengage: false,
         };
 
         assert!(config.is_damage());
@@ -434,8 +426,6 @@ mod tests {
             channel_tick_interval: 1.0,
             channel_healing_per_tick: 0.0,
             is_dispel: false,
-            is_trap: false,
-            is_disengage: false,
         };
 
         assert!(!config.is_damage());

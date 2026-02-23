@@ -247,11 +247,6 @@ pub enum AbilityDecision {
     AoeAbility {
         ability: AbilityType,
     },
-    /// Place a ground-targeted ability at a specific world position (traps)
-    GroundTargetAbility {
-        ability: AbilityType,
-        position: Vec3,
-    },
 }
 
 /// Trait for class-specific AI logic.

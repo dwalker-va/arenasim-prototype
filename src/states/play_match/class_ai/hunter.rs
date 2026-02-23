@@ -16,7 +16,7 @@ use crate::combat::log::{CombatLog, CombatLogEventType};
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
-use crate::states::play_match::combat_core::roll_crit;
+use crate::states::play_match::combat_core::{roll_crit, calculate_cast_time};
 use crate::states::play_match::constants::*;
 
 use super::{AbilityDecision, ClassAI, CombatContext};
@@ -127,7 +127,7 @@ pub fn decide_hunter_action(
         }
 
         // Priority 2: Frost Trap at current position
-        if try_place_trap(commands, combat_log, abilities, entity, combatant, my_pos, TrapType::Frost) {
+        if try_place_trap_at(commands, combat_log, abilities, entity, combatant, my_pos, TrapType::Frost) {
             return true;
         }
 
@@ -217,7 +217,7 @@ fn find_nearest_enemy(self_entity: Entity, my_team: u8, my_pos: Vec3, ctx: &Comb
             continue;
         }
         let dist = my_pos.distance(info.position);
-        if nearest.is_none() || dist < nearest.unwrap().1 {
+        if nearest.map_or(true, |(_, d)| dist < d) {
             nearest = Some((*entity, dist));
         }
     }
@@ -242,20 +242,7 @@ fn is_target_slowed(target: Entity, ctx: &CombatContext) -> bool {
     })
 }
 
-/// Attempt to place a trap at the Hunter's feet.
-fn try_place_trap(
-    commands: &mut Commands,
-    combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
-    entity: Entity,
-    combatant: &mut Combatant,
-    my_pos: Vec3,
-    trap_type: TrapType,
-) -> bool {
-    try_place_trap_at(commands, combat_log, abilities, entity, combatant, my_pos, trap_type)
-}
-
-/// Attempt to place a trap at a specific position.
+/// Attempt to place a trap at a specific position (or at the Hunter's feet).
 fn try_place_trap_at(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -493,14 +480,3 @@ fn try_arcane_shot(
     true
 }
 
-/// Calculate cast time with Curse of Tongues modifier.
-fn calculate_cast_time(base_cast_time: f32, auras: Option<&ActiveAuras>) -> f32 {
-    if let Some(auras) = auras {
-        for aura in &auras.auras {
-            if aura.effect_type == AuraType::CastTimeIncrease {
-                return base_cast_time * (1.0 + aura.magnitude);
-            }
-        }
-    }
-    base_cast_time
-}
