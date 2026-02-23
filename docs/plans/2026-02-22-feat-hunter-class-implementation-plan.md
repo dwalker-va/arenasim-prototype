@@ -514,7 +514,7 @@ Systematic testing across all matchups. **Use agent teams to parallelize bug det
 - [ ] Test on both maps: BasicArena and PillaredArena
 - [ ] Test all three pet types (Spider, Boar, Bird) in representative matchups
 - [ ] Verify no panics, no infinite loops, matches complete within timeout
-- [ ] Verify combat log correctness (see Phase 4 log entries)
+- [x] Verify combat log correctness (see Phase 4 log entries)
 - [ ] **Spawn parallel agent team for bug fixing:**
   - Agent 1: Fix AI/behavior bugs (hunter.rs, pet_ai.rs)
   - Agent 2: Fix systems/ECS bugs (traps.rs, combat_core.rs)

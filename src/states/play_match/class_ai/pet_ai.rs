@@ -405,7 +405,7 @@ fn spider_ai(
     // Find enemy closest to owner that is within Web range of the spider
     let mut best_target: Option<(Entity, f32)> = None;
     for (target_entity, info) in ctx.combatants.iter() {
-        if info.team == combatant.team || !info.is_alive || info.is_pet {
+        if info.team == combatant.team || !info.is_alive || info.is_pet || info.stealthed {
             continue;
         }
         let dist_to_owner = info.position.distance(owner_pos);
@@ -498,7 +498,7 @@ fn boar_ai(
     // Priority 1: Charge enemy mid-cast (especially healers)
     let mut charge_target: Option<Entity> = None;
     for (target_entity, target_combatant, _cast_state) in casting_targets.iter() {
-        if target_combatant.team == combatant.team || !target_combatant.is_alive() {
+        if target_combatant.team == combatant.team || !target_combatant.is_alive() || target_combatant.stealthed {
             continue;
         }
         if let Some(info) = ctx.combatants.get(&target_entity) {

@@ -48,13 +48,19 @@ pub fn decide_hunter_action(
     ctx: &CombatContext,
     instant_attacks: &mut Vec<super::QueuedInstantAttack>,
 ) -> bool {
+    // Find nearest enemy and distance
+    let (nearest_enemy, nearest_distance) = find_nearest_enemy(entity, combatant.team, my_pos, ctx);
+
+    // Always kite if an enemy is within 20 yards (regardless of GCD)
+    let nearest_dist = nearest_distance.unwrap_or(40.0);
+    if nearest_dist < 20.0 {
+        combatant.kiting_timer = combatant.kiting_timer.max(1.0);
+    }
+
     // Check if global cooldown is active
     if combatant.global_cooldown > 0.0 {
         return false;
     }
-
-    // Find nearest enemy and distance
-    let (nearest_enemy, nearest_distance) = find_nearest_enemy(entity, combatant.team, my_pos, ctx);
 
     // Get primary target info
     let Some(target_entity) = combatant.target else {
@@ -67,9 +73,6 @@ pub fn decide_hunter_action(
         return false;
     }
     let distance_to_target = my_pos.distance(target_info.position);
-
-    // Determine range zone based on nearest enemy
-    let nearest_dist = nearest_distance.unwrap_or(40.0);
 
     // === DEAD ZONE (<8 yards) — Escape priority ===
     if nearest_dist < HUNTER_DEAD_ZONE {
@@ -172,21 +175,24 @@ pub fn decide_hunter_action(
         return true;
     }
 
-    // Priority 2: Freezing Trap on healer/CC target
-    if let Some(healer_entity) = find_enemy_healer(combatant.team, ctx) {
-        if let Some(healer_info) = ctx.combatants.get(&healer_entity) {
-            if healer_info.is_alive {
-                // Place at healer's position
-                if try_place_trap_at(commands, combat_log, abilities, entity, combatant, healer_info.position, TrapType::Freezing) {
+    // Priority 2: Freezing Trap on healer/CC target (or primary target in 1v1)
+    let freezing_trap_target = find_enemy_healer(combatant.team, ctx)
+        .or(Some(target_entity));
+    if let Some(trap_target) = freezing_trap_target {
+        if let Some(trap_target_info) = ctx.combatants.get(&trap_target) {
+            if trap_target_info.is_alive {
+                // Place between self and target for interception
+                let midpoint = (my_pos + trap_target_info.position) / 2.0;
+                if try_place_trap_at(commands, combat_log, abilities, entity, combatant, midpoint, TrapType::Freezing) {
                     return true;
                 }
             }
         }
     }
 
-    // Priority 3: Aimed Shot (if target is slowed — safe to hardcast 2.5s)
+    // Priority 3: Aimed Shot (if target is slowed or far away — safe to hardcast 2.5s)
     let target_is_slowed = is_target_slowed(target_entity, ctx);
-    if target_is_slowed && distance_to_target >= HUNTER_DEAD_ZONE {
+    if (target_is_slowed || distance_to_target > 30.0) && distance_to_target >= HUNTER_DEAD_ZONE {
         if try_aimed_shot(commands, combat_log, abilities, entity, combatant, my_pos, target_entity, target_info, auras) {
             return true;
         }
@@ -207,7 +213,7 @@ pub fn decide_hunter_action(
 fn find_nearest_enemy(self_entity: Entity, my_team: u8, my_pos: Vec3, ctx: &CombatContext) -> (Option<(Entity, f32)>, Option<f32>) {
     let mut nearest: Option<(Entity, f32)> = None;
     for (entity, info) in ctx.combatants.iter() {
-        if *entity == self_entity || info.team == my_team || !info.is_alive || info.is_pet {
+        if *entity == self_entity || info.team == my_team || !info.is_alive || info.is_pet || info.stealthed {
             continue;
         }
         let dist = my_pos.distance(info.position);
