@@ -18,6 +18,7 @@ use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
 use crate::states::play_match::combat_core::{roll_crit, calculate_cast_time};
 use crate::states::play_match::constants::*;
+use crate::states::play_match::is_spell_school_locked;
 
 use super::{AbilityDecision, ClassAI, CombatContext};
 use super::super::utils::combatant_id;
@@ -70,6 +71,10 @@ pub fn decide_hunter_action(
         return false;
     };
     if !target_info.is_alive {
+        return false;
+    }
+    // Don't waste abilities on immune targets (Divine Shield)
+    if ctx.entity_is_immune(target_entity) {
         return false;
     }
     let distance_to_target = my_pos.distance(target_info.position);
@@ -158,7 +163,7 @@ pub fn decide_hunter_action(
         }
 
         // Priority 3: Arcane Shot while kiting (instant, decent damage)
-        if try_arcane_shot(commands, combat_log, game_rng, abilities, entity, combatant, my_pos, target_entity, target_info, ctx, instant_attacks) {
+        if try_arcane_shot(commands, combat_log, game_rng, abilities, entity, combatant, my_pos, target_entity, target_info, ctx, instant_attacks, auras) {
             combatant.kiting_timer = 3.0;
             return true;
         }
@@ -199,7 +204,7 @@ pub fn decide_hunter_action(
     }
 
     // Priority 4: Arcane Shot (instant filler)
-    if try_arcane_shot(commands, combat_log, game_rng, abilities, entity, combatant, my_pos, target_entity, target_info, ctx, instant_attacks) {
+    if try_arcane_shot(commands, combat_log, game_rng, abilities, entity, combatant, my_pos, target_entity, target_info, ctx, instant_attacks, auras) {
         return true;
     }
 
@@ -431,11 +436,13 @@ fn try_arcane_shot(
     target_info: &super::CombatantInfo,
     _ctx: &CombatContext,
     instant_attacks: &mut Vec<super::QueuedInstantAttack>,
+    auras: Option<&ActiveAuras>,
 ) -> bool {
     let ability = AbilityType::ArcaneShot;
     let Some(def) = abilities.get(&ability) else { return false };
     if combatant.ability_cooldowns.contains_key(&ability) { return false }
     if combatant.current_mana < def.mana_cost { return false }
+    if is_spell_school_locked(def.spell_school, auras) { return false }
 
     let distance = my_pos.distance(target_info.position);
     if let Some(min_range) = def.min_range {

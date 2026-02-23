@@ -165,6 +165,12 @@ pub fn slow_zone_system(
 
             let distance = zone_pos.distance(target_transform.translation);
             if distance <= zone.radius {
+                // Skip immune targets (Divine Shield)
+                if let Some(ref auras) = active_auras {
+                    if auras.auras.iter().any(|a| a.effect_type == AuraType::DamageImmunity) {
+                        continue;
+                    }
+                }
                 // Enemy is inside zone — refresh or apply slow aura
                 if let Some(mut auras) = active_auras {
                     // Look for existing Frost Trap slow aura

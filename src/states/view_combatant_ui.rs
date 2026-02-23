@@ -119,7 +119,7 @@ fn get_class_stats(class: CharacterClass) -> ClassStats {
             resource_max: 150,
             attack_power: 30,
             spell_power: 0,
-            attack_speed: 0.7,
+            attack_speed: 0.4,
             move_speed: 5.0,
         },
     }
