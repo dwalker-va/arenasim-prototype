@@ -611,5 +611,173 @@
             spell_school: Shadow,
             is_dispel: true,
         ),
+        // ============================================================================
+        // HUNTER ABILITIES
+        // ============================================================================
+
+        // Aimed Shot: Big cast-time physical damage + healing reduction
+        // WoW Classic Spell ID 19434: 3s cast, 75 mana, 35yd, 6s CD
+        // Scaled for our stat system — reduced cast time to 2.5s for flow
+        AimedShot: (
+            name: "Aimed Shot",
+            cast_time: 2.5,
+            range: 35.0,
+            min_range: Some(8.0),
+            mana_cost: 40.0,
+            cooldown: 10.0,
+            damage_base_min: 18.0,
+            damage_base_max: 28.0,
+            damage_coefficient: 1.0,
+            damage_scales_with: AttackPower,
+            applies_aura: Some((
+                aura_type: HealingReduction,
+                duration: 10.0,
+                magnitude: 0.65,  // 35% healing reduction (same as Mortal Strike)
+            )),
+            spell_school: Physical,
+            projectile_speed: Some(45.0),
+            projectile_visuals: Some((
+                color: (1.0, 0.85, 0.4),
+                emissive: (1.5, 1.3, 0.6),
+            )),
+        ),
+
+        // Arcane Shot: Instant Arcane damage filler
+        // WoW Classic Spell ID 3044: Instant, 25 mana, 35yd, 6s CD, Arcane school
+        ArcaneShot: (
+            name: "Arcane Shot",
+            cast_time: 0.0,
+            range: 35.0,
+            min_range: Some(8.0),
+            mana_cost: 25.0,
+            cooldown: 6.0,
+            damage_base_min: 10.0,
+            damage_base_max: 16.0,
+            damage_coefficient: 0.5,
+            damage_scales_with: AttackPower,
+            spell_school: Arcane,
+            projectile_speed: Some(45.0),
+            projectile_visuals: Some((
+                color: (1.0, 0.8, 0.3),
+                emissive: (1.5, 1.2, 0.5),
+            )),
+        ),
+
+        // Concussive Shot: Instant slow — key kiting tool
+        // WoW Classic Spell ID 5116: Instant, 35yd, 12s CD, 50% slow for 4s
+        ConcussiveShot: (
+            name: "Concussive Shot",
+            cast_time: 0.0,
+            range: 35.0,
+            min_range: Some(8.0),
+            mana_cost: 15.0,
+            cooldown: 12.0,
+            applies_aura: Some((
+                aura_type: MovementSpeedSlow,
+                duration: 4.0,
+                magnitude: 0.5,  // 50% slow
+            )),
+            spell_school: Physical,
+            projectile_speed: Some(40.0),
+            projectile_visuals: Some((
+                color: (0.8, 0.6, 0.3),
+                emissive: (1.2, 0.9, 0.5),
+            )),
+        ),
+
+        // Disengage: Backward leap to escape dead zone
+        // TBC ability adapted for Classic — instant, 25s CD, no range requirement
+        Disengage: (
+            name: "Disengage",
+            cast_time: 0.0,
+            range: 0.0,  // Self-cast, no target needed
+            mana_cost: 20.0,
+            cooldown: 25.0,
+            spell_school: Physical,
+        ),
+
+        // Freezing Trap: Incapacitates first enemy contact (like Polymorph but stationary)
+        // WoW Classic Spell ID 1499: Instant, 50 mana, 25s CD, 10s freeze
+        FreezingTrap: (
+            name: "Freezing Trap",
+            cast_time: 0.0,
+            range: 30.0,  // Placement range
+            mana_cost: 50.0,
+            cooldown: 25.0,
+            applies_aura: Some((
+                aura_type: Incapacitate,
+                duration: 10.0,
+                magnitude: 1.0,
+                break_on_damage: 0.0,  // Breaks on ANY damage
+            )),
+            spell_school: None,
+        ),
+
+        // Frost Trap: Creates persistent slow zone on trigger
+        // WoW Classic Spell ID 13809: Instant, 60 mana, 20s CD, 30s zone
+        // Scaled: 10s zone duration for faster ArenaSim gameplay
+        FrostTrap: (
+            name: "Frost Trap",
+            cast_time: 0.0,
+            range: 30.0,  // Placement range
+            mana_cost: 30.0,
+            cooldown: 20.0,
+            spell_school: None,
+        ),
+
+        // ============================================================================
+        // HUNTER PET ABILITIES
+        // ============================================================================
+
+        // Spider Web: Ranged root on target
+        // Gives Hunter breathing room to re-establish range
+        SpiderWeb: (
+            name: "Web",
+            cast_time: 0.0,
+            range: 20.0,
+            mana_cost: 0.0,
+            cooldown: 45.0,
+            applies_aura: Some((
+                aura_type: Root,
+                duration: 4.0,
+                magnitude: 1.0,
+                break_on_damage: 35.0,  // Same as Frost Nova
+            )),
+            spell_school: Nature,
+            projectile_speed: Some(50.0),
+            projectile_visuals: Some((
+                color: (0.95, 0.95, 0.9),
+                emissive: (1.5, 1.5, 1.4),
+            )),
+        ),
+
+        // Boar Charge: Gap closer + short stun
+        // Disrupts enemy casters, creates burst windows
+        BoarCharge: (
+            name: "Charge",
+            cast_time: 0.0,
+            range: 25.0,
+            mana_cost: 0.0,
+            cooldown: 45.0,
+            applies_aura: Some((
+                aura_type: Stun,
+                duration: 1.5,
+                magnitude: 1.0,
+            )),
+            spell_school: Physical,
+            is_charge: true,
+        ),
+
+        // Master's Call: Removes movement impairments from friendly target
+        // Counter to slows/roots — used on Hunter or teammate
+        MastersCall: (
+            name: "Master's Call",
+            cast_time: 0.0,
+            range: 40.0,  // Can target allies at range
+            mana_cost: 0.0,
+            cooldown: 45.0,
+            spell_school: Nature,
+            is_dispel: true,  // Functions as a movement-impairment dispel
+        ),
     }
 )

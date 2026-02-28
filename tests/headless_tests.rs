@@ -24,6 +24,8 @@ fn create_config(team1: Vec<&str>, team2: Vec<&str>, seed: Option<u64>) -> Headl
         team2_rogue_openers: vec![],
         team1_warlock_curse_prefs: vec![],
         team2_warlock_curse_prefs: vec![],
+        team1_hunter_pet_types: vec![],
+        team2_hunter_pet_types: vec![],
     }
 }
 

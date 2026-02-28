@@ -63,6 +63,7 @@ pub fn load_class_icons(
         (match_config::CharacterClass::Priest, "icons/classes/priest.png"),
         (match_config::CharacterClass::Warlock, "icons/classes/warlock.png"),
         (match_config::CharacterClass::Paladin, "icons/classes/paladin.png"),
+        (match_config::CharacterClass::Hunter, "icons/classes/hunter.png"),
     ];
 
     // Load handles if not already loaded
@@ -446,7 +447,7 @@ fn render_team_panel(
         let character = team_slots.get(slot).and_then(|c| *c);
         let is_active = slot < team_size;
 
-        render_character_slot(ui, team, slot, character, is_active, team_color, picker_state, max_width, class_icons, commands, next_state);
+        render_character_slot(ui, config, team, slot, character, is_active, team_color, picker_state, max_width, class_icons, commands, next_state);
 
         if slot < 2 {
             ui.add_space(12.0);
@@ -536,6 +537,7 @@ fn render_team_panel(
 /// - **Inactive**: Shows grayed-out dash
 fn render_character_slot(
     ui: &mut egui::Ui,
+    config: &mut MatchConfig,
     team: u8,
     slot: usize,
     character: Option<match_config::CharacterClass>,
@@ -630,13 +632,74 @@ fn render_character_slot(
             color32,
         );
 
-        ui.painter().text(
-            egui::pos2(text_pos.x, text_pos.y + 24.0),
-            egui::Align2::LEFT_TOP,
-            class.description(),
-            egui::FontId::proportional(14.0),
-            egui::Color32::from_rgb(153, 153, 153),
-        );
+        // For Hunter, show pet type with cycle hint; otherwise show class description
+        if class == match_config::CharacterClass::Hunter {
+            let pet_types = if team == 1 {
+                &config.team1_hunter_pet_types
+            } else {
+                &config.team2_hunter_pet_types
+            };
+            let pet_type = pet_types.get(slot).copied().unwrap_or_default();
+            let pet_text = format!("Pet: {} — {}", pet_type.name(), pet_type.description());
+            ui.painter().text(
+                egui::pos2(text_pos.x, text_pos.y + 24.0),
+                egui::Align2::LEFT_TOP,
+                &pet_text,
+                egui::FontId::proportional(14.0),
+                egui::Color32::from_rgb(171, 212, 115), // Hunter green
+            );
+
+            // Pet cycle button
+            let pet_btn_size = egui::vec2(18.0, 18.0);
+            let pet_btn_rect = egui::Rect::from_min_size(
+                egui::pos2(rect.right() - 56.0, rect.bottom() - 24.0),
+                pet_btn_size,
+            );
+            let pet_btn_hovered = ui.rect_contains_pointer(pet_btn_rect);
+            ui.painter().rect_filled(
+                pet_btn_rect,
+                4.0,
+                if pet_btn_hovered {
+                    egui::Color32::from_rgb(80, 100, 60)
+                } else {
+                    egui::Color32::from_rgb(50, 60, 40)
+                },
+            );
+            ui.painter().text(
+                pet_btn_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "\u{21BB}",
+                egui::FontId::proportional(13.0),
+                egui::Color32::from_rgb(171, 212, 115),
+            );
+
+            if pet_btn_hovered && response.clicked() {
+                let next_pet = match pet_type {
+                    match_config::HunterPetType::Spider => match_config::HunterPetType::Boar,
+                    match_config::HunterPetType::Boar => match_config::HunterPetType::Bird,
+                    match_config::HunterPetType::Bird => match_config::HunterPetType::Spider,
+                };
+                let pet_types_mut = if team == 1 {
+                    &mut config.team1_hunter_pet_types
+                } else {
+                    &mut config.team2_hunter_pet_types
+                };
+                // Ensure vec is large enough
+                while pet_types_mut.len() <= slot {
+                    pet_types_mut.push(match_config::HunterPetType::default());
+                }
+                pet_types_mut[slot] = next_pet;
+                return; // Don't navigate to View Combatant
+            }
+        } else {
+            ui.painter().text(
+                egui::pos2(text_pos.x, text_pos.y + 24.0),
+                egui::Align2::LEFT_TOP,
+                class.description(),
+                egui::FontId::proportional(14.0),
+                egui::Color32::from_rgb(153, 153, 153),
+            );
+        }
 
         // Add X button in top-right corner to change selection
         let btn_size = 20.0;

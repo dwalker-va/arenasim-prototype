@@ -61,7 +61,7 @@ pub fn is_incapacitated(auras: Option<&super::components::ActiveAuras>) -> bool 
     auras.map_or(false, |a| {
         a.auras.iter().any(|aura| matches!(
             aura.effect_type,
-            super::components::AuraType::Stun | super::components::AuraType::Fear | super::components::AuraType::Polymorph
+            super::components::AuraType::Stun | super::components::AuraType::Fear | super::components::AuraType::Polymorph | super::components::AuraType::Incapacitate
         ))
     })
 }

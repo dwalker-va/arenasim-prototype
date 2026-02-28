@@ -115,6 +115,7 @@ impl Plugin for StatesPlugin {
                     play_match::track_shadow_sight_timer,  // Track combat time and spawn Shadow Sight orbs
                     play_match::process_dot_ticks,  // Process DoT ticks BEFORE updating auras (so final tick fires on expiration)
                     play_match::update_auras,
+                    play_match::slow_zone_system,       // Zone slow refresh before aura processing
                     play_match::process_divine_shield,  // Must run BEFORE apply_pending_auras so DamageImmunity blocks CC
                     play_match::apply_pending_auras,
                     play_match::process_dispels,
@@ -152,6 +153,7 @@ impl Plugin for StatesPlugin {
                     play_match::move_projectiles,
                     play_match::process_projectile_hits,
                     play_match::move_to_target,
+                    play_match::trap_system,  // After movement — needs current positions
                 )
                     .chain()
                     .in_set(PlayMatchSystems::CombatAndMovement)
@@ -219,6 +221,40 @@ impl Plugin for StatesPlugin {
                     play_match::spawn_drain_particles,      // Spawn particles along beam
                     play_match::update_drain_particles,     // Move particles toward caster
                     play_match::cleanup_drain_life_beams,   // Remove beam when channel ends
+                )
+                    .run_if(in_state(GameState::PlayMatch)),
+            )
+            // Trap visual effects (ground circles + trigger bursts)
+            .add_systems(
+                Update,
+                (
+                    play_match::spawn_trap_visuals,              // Ground circle on new traps
+                    play_match::update_trap_visuals,             // Arming pulse → armed shimmer
+                    play_match::spawn_trap_burst_visuals,        // Burst sphere on trigger
+                    play_match::update_and_cleanup_trap_bursts,  // Expand + fade + despawn
+                )
+                    .run_if(in_state(GameState::PlayMatch)),
+            )
+            // Ice block + slow zone visual effects
+            .add_systems(
+                Update,
+                (
+                    play_match::spawn_ice_block_visuals,     // Cuboid around frozen targets
+                    play_match::update_ice_blocks,           // Follow target position
+                    play_match::cleanup_ice_blocks,          // Despawn when aura breaks
+                    play_match::spawn_slow_zone_visuals,     // Cyan disc on slow zones
+                    play_match::update_slow_zone_visuals,    // Pulse + fade out
+                )
+                    .run_if(in_state(GameState::PlayMatch)),
+            )
+            // Disengage trail + charge trail visual effects
+            .add_systems(
+                Update,
+                (
+                    play_match::spawn_disengage_trail,                 // Wind streak on Disengage
+                    play_match::update_and_cleanup_disengage_trails,   // Fade + despawn
+                    play_match::spawn_charge_trail,                    // Boar charge streak
+                    play_match::update_and_cleanup_charge_trails,      // Fade + despawn
                 )
                     .run_if(in_state(GameState::PlayMatch)),
             )

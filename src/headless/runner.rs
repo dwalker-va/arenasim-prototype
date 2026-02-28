@@ -177,6 +177,28 @@ fn headless_setup_match(
                 ));
                 combat_log.register_combatant(format!("Team 1 Felhunter"));
             }
+
+            // Spawn pet for Hunters
+            if *character == CharacterClass::Hunter {
+                use crate::states::match_config::HunterPetType;
+                let pet_type_pref = config.team1_hunter_pet_types.get(i).copied().unwrap_or_default();
+                let pet_type = match pet_type_pref {
+                    HunterPetType::Spider => PetType::Spider,
+                    HunterPetType::Boar => PetType::Boar,
+                    HunterPetType::Bird => PetType::Bird,
+                };
+                let pet_slot = PET_SLOT_BASE + i as u8;
+                let pet_combatant = Combatant::new_pet(1, pet_slot, pet_type, &combatant_clone);
+                let pet_pos = position + Vec3::new(-2.0, 0.75, 1.5);
+                commands.spawn((
+                    Transform::from_translation(pet_pos),
+                    pet_combatant,
+                    DRTracker::default(),
+                    Pet { owner: entity, pet_type },
+                    FloatingTextState { next_pattern_index: 0 },
+                ));
+                combat_log.register_combatant(format!("Team 1 {}", pet_type.name()));
+            }
         } else {
             warn!("Team 1 slot {} is empty — skipping spawn", i);
         }
@@ -214,6 +236,28 @@ fn headless_setup_match(
                     FloatingTextState { next_pattern_index: 0 },
                 ));
                 combat_log.register_combatant(format!("Team 2 Felhunter"));
+            }
+
+            // Spawn pet for Hunters
+            if *character == CharacterClass::Hunter {
+                use crate::states::match_config::HunterPetType;
+                let pet_type_pref = config.team2_hunter_pet_types.get(i).copied().unwrap_or_default();
+                let pet_type = match pet_type_pref {
+                    HunterPetType::Spider => PetType::Spider,
+                    HunterPetType::Boar => PetType::Boar,
+                    HunterPetType::Bird => PetType::Bird,
+                };
+                let pet_slot = PET_SLOT_BASE + i as u8;
+                let pet_combatant = Combatant::new_pet(2, pet_slot, pet_type, &combatant_clone);
+                let pet_pos = position + Vec3::new(2.0, 0.75, 1.5);
+                commands.spawn((
+                    Transform::from_translation(pet_pos),
+                    pet_combatant,
+                    DRTracker::default(),
+                    Pet { owner: entity, pet_type },
+                    FloatingTextState { next_pattern_index: 0 },
+                ));
+                combat_log.register_combatant(format!("Team 2 {}", pet_type.name()));
             }
         } else {
             warn!("Team 2 slot {} is empty — skipping spawn", i);

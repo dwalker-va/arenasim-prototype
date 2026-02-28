@@ -914,6 +914,7 @@ fn try_cleanse(
         log_prefix: "[CLEANSE]",
         caster_class: CharacterClass::Paladin,
         heal_on_success: None,
+        aura_type_filter: None,
     });
 
     true

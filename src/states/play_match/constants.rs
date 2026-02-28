@@ -127,6 +127,34 @@ pub const PREMATCH_COUNTDOWN: f32 = 10.0;
 pub const VICTORY_CELEBRATION_DURATION: f32 = 5.0;
 
 // ============================================================================
+// Hunter
+// ============================================================================
+
+/// Hunter dead zone range — ranged abilities cannot be used within this distance.
+pub const HUNTER_DEAD_ZONE: f32 = 8.0;
+
+/// Auto Shot range for Hunter ranged auto-attacks.
+pub const AUTO_SHOT_RANGE: f32 = 35.0;
+
+/// Delay in seconds before a placed trap becomes armed and can be triggered.
+pub const TRAP_ARM_DELAY: f32 = 1.5;
+
+/// Radius around an armed trap that triggers it when an enemy enters.
+pub const TRAP_TRIGGER_RADIUS: f32 = 5.0;
+
+/// Radius of the Frost Trap slow zone after triggering.
+pub const FROST_TRAP_ZONE_RADIUS: f32 = 8.0;
+
+/// Duration of the Frost Trap slow zone in seconds.
+pub const FROST_TRAP_ZONE_DURATION: f32 = 10.0;
+
+/// Distance in units that Disengage launches the Hunter backward.
+pub const DISENGAGE_DISTANCE: f32 = 15.0;
+
+/// Speed of the Disengage backward leap (units per second).
+pub const DISENGAGE_SPEED: f32 = 30.0;
+
+// ============================================================================
 // Diminishing Returns
 // ============================================================================
 
