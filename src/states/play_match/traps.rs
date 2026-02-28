@@ -68,6 +68,17 @@ pub fn trap_system(
             trap.triggered = true;
             let owner_name = format!("Team {}", trap.owner_team);
 
+            // Spawn visual burst at trap position before despawning
+            commands.spawn((
+                Transform::from_translation(trap_pos + Vec3::Y * 0.1),
+                TrapBurst {
+                    trap_type: trap.trap_type,
+                    lifetime: 0.3,
+                    initial_lifetime: 0.3,
+                },
+                PlayMatchEntity,
+            ));
+
             match trap.trap_type {
                 TrapType::Freezing => {
                     // Apply Incapacitate aura via AuraPending
@@ -88,6 +99,14 @@ pub fn trap_system(
                                 fear_direction_timer: 0.0,
                                 spell_school: Some(SpellSchool::Frost),
                             },
+                        },
+                        PlayMatchEntity,
+                    ));
+
+                    // Spawn ice block visual around the frozen target
+                    commands.spawn((
+                        IceBlockVisual {
+                            target: target_entity,
                         },
                         PlayMatchEntity,
                     ));

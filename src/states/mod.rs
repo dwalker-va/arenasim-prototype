@@ -224,6 +224,40 @@ impl Plugin for StatesPlugin {
                 )
                     .run_if(in_state(GameState::PlayMatch)),
             )
+            // Trap visual effects (ground circles + trigger bursts)
+            .add_systems(
+                Update,
+                (
+                    play_match::spawn_trap_visuals,              // Ground circle on new traps
+                    play_match::update_trap_visuals,             // Arming pulse → armed shimmer
+                    play_match::spawn_trap_burst_visuals,        // Burst sphere on trigger
+                    play_match::update_and_cleanup_trap_bursts,  // Expand + fade + despawn
+                )
+                    .run_if(in_state(GameState::PlayMatch)),
+            )
+            // Ice block + slow zone visual effects
+            .add_systems(
+                Update,
+                (
+                    play_match::spawn_ice_block_visuals,     // Cuboid around frozen targets
+                    play_match::update_ice_blocks,           // Follow target position
+                    play_match::cleanup_ice_blocks,          // Despawn when aura breaks
+                    play_match::spawn_slow_zone_visuals,     // Cyan disc on slow zones
+                    play_match::update_slow_zone_visuals,    // Pulse + fade out
+                )
+                    .run_if(in_state(GameState::PlayMatch)),
+            )
+            // Disengage trail + charge trail visual effects
+            .add_systems(
+                Update,
+                (
+                    play_match::spawn_disengage_trail,                 // Wind streak on Disengage
+                    play_match::update_and_cleanup_disengage_trails,   // Fade + despawn
+                    play_match::spawn_charge_trail,                    // Boar charge streak
+                    play_match::update_and_cleanup_charge_trails,      // Fade + despawn
+                )
+                    .run_if(in_state(GameState::PlayMatch)),
+            )
             // UI rendering systems
             .add_systems(
                 Update,

@@ -635,6 +635,11 @@
                 magnitude: 0.65,  // 35% healing reduction (same as Mortal Strike)
             )),
             spell_school: Physical,
+            projectile_speed: Some(45.0),
+            projectile_visuals: Some((
+                color: (1.0, 0.85, 0.4),
+                emissive: (1.5, 1.3, 0.6),
+            )),
         ),
 
         // Arcane Shot: Instant Arcane damage filler
@@ -651,6 +656,11 @@
             damage_coefficient: 0.5,
             damage_scales_with: AttackPower,
             spell_school: Arcane,
+            projectile_speed: Some(45.0),
+            projectile_visuals: Some((
+                color: (1.0, 0.8, 0.3),
+                emissive: (1.5, 1.2, 0.5),
+            )),
         ),
 
         // Concussive Shot: Instant slow — key kiting tool
@@ -668,6 +678,11 @@
                 magnitude: 0.5,  // 50% slow
             )),
             spell_school: Physical,
+            projectile_speed: Some(40.0),
+            projectile_visuals: Some((
+                color: (0.8, 0.6, 0.3),
+                emissive: (1.2, 0.9, 0.5),
+            )),
         ),
 
         // Disengage: Backward leap to escape dead zone
@@ -729,6 +744,11 @@
                 break_on_damage: 35.0,  // Same as Frost Nova
             )),
             spell_school: Nature,
+            projectile_speed: Some(50.0),
+            projectile_visuals: Some((
+                color: (0.95, 0.95, 0.9),
+                emissive: (1.5, 1.5, 1.4),
+            )),
         ),
 
         // Boar Charge: Gap closer + short stun

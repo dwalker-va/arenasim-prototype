@@ -1290,6 +1290,50 @@ pub struct DisengagingState {
 }
 
 // ============================================================================
+// Hunter Visual Components
+// ============================================================================
+
+/// Expanding burst sphere when a trap triggers.
+/// Spawned at the trap's position, expands and fades over 0.3s.
+#[derive(Component)]
+pub struct TrapBurst {
+    /// Which type of trap triggered (affects color)
+    pub trap_type: TrapType,
+    /// Time remaining before despawn (seconds)
+    pub lifetime: f32,
+    /// Initial lifetime for progress calculation
+    pub initial_lifetime: f32,
+}
+
+/// Translucent ice cuboid around a Freezing Trap target.
+/// Follows the target's position and despawns when Incapacitate aura breaks.
+#[derive(Component)]
+pub struct IceBlockVisual {
+    /// The entity frozen inside the ice block
+    pub target: Entity,
+}
+
+/// Wind streak trail left behind during Disengage leap.
+/// Static position, fades over its lifetime.
+#[derive(Component)]
+pub struct DisengageTrail {
+    /// Time remaining before despawn (seconds)
+    pub lifetime: f32,
+    /// Initial lifetime for fade calculation
+    pub initial_lifetime: f32,
+}
+
+/// Speed streak trail behind Boar during charge.
+/// Static position, fades over its lifetime.
+#[derive(Component)]
+pub struct ChargeTrail {
+    /// Time remaining before despawn (seconds)
+    pub lifetime: f32,
+    /// Initial lifetime for fade calculation
+    pub initial_lifetime: f32,
+}
+
+// ============================================================================
 // Paladin Pending Components
 // ============================================================================
 

@@ -432,29 +432,20 @@ fn spider_ai(
 
     let Some((target_entity, _)) = best_target else { return };
 
-    // Use Web
-    if let Some(aura_def) = &def.applies_aura {
-        commands.spawn((
-            AuraPending {
-                target: target_entity,
-                aura: Aura {
-                    effect_type: aura_def.aura_type,
-                    duration: aura_def.duration,
-                    magnitude: aura_def.magnitude,
-                    tick_interval: 0.0,
-                    time_until_next_tick: 0.0,
-                    caster: Some(entity),
-                    ability_name: def.name.to_string(),
-                    break_on_damage_threshold: aura_def.break_on_damage,
-                    accumulated_damage: 0.0,
-                    fear_direction: (0.0, 0.0),
-                    fear_direction_timer: 0.0,
-                    spell_school: Some(def.spell_school),
-                },
-            },
-            PlayMatchEntity,
-        ));
-    }
+    // Spawn projectile — root aura applied on impact by process_projectile_hits
+    let projectile_speed = def.projectile_speed.unwrap_or(50.0);
+    commands.spawn((
+        Projectile {
+            caster: entity,
+            target: target_entity,
+            ability,
+            speed: projectile_speed,
+            caster_team: combatant.team,
+            caster_class: combatant.class,
+        },
+        Transform::from_translation(my_pos + Vec3::new(0.0, 0.5, 0.0)),
+        PlayMatchEntity,
+    ));
 
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = super::super::constants::GCD;
@@ -635,6 +626,17 @@ fn bird_ai(
         heal_on_success: None,
         aura_type_filter: Some(vec![AuraType::Root, AuraType::MovementSpeedSlow]),
     });
+
+    // Spawn golden burst visual on the cleanse target
+    commands.spawn((
+        DispelBurst {
+            target,
+            caster_class: CharacterClass::Hunter,
+            lifetime: 0.3,
+            initial_lifetime: 0.3,
+        },
+        PlayMatchEntity,
+    ));
 
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = super::super::constants::GCD;

@@ -3,6 +3,7 @@
 //! Handles spell projectiles that travel from caster to target.
 
 use bevy::prelude::*;
+use bevy::color::LinearRgba;
 use bevy_egui::egui;
 use crate::combat::log::CombatLog;
 use super::match_config;
@@ -12,33 +13,56 @@ use super::ability_config::AbilityDefinitions;
 use super::constants::CRIT_DAMAGE_MULTIPLIER;
 use super::utils::{combatant_id, get_next_fct_offset};
 
+/// Returns true if the ability should use an arrow (cuboid) mesh instead of sphere.
+fn is_arrow_projectile(ability: AbilityType) -> bool {
+    matches!(
+        ability,
+        AbilityType::AimedShot
+            | AbilityType::ArcaneShot
+            | AbilityType::ConcussiveShot
+    )
+}
+
+/// Returns true if the ability should use a smaller web projectile mesh.
+fn is_web_projectile(ability: AbilityType) -> bool {
+    matches!(ability, AbilityType::SpiderWeb)
+}
+
 /// Spawn visual meshes for newly created projectiles.
-/// Creates a glowing sphere that travels through the air.
+/// Creates a glowing sphere (casters) or elongated cuboid (Hunter arrows) that travels through the air.
 /// Note: Projectiles already have a Transform (added in process_casting for headless compatibility).
 pub fn spawn_projectile_visuals(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     new_projectiles: Query<(Entity, &Projectile), (Added<Projectile>, Without<Mesh3d>)>,
+    ability_defs: Res<AbilityDefinitions>,
 ) {
     for (projectile_entity, projectile) in new_projectiles.iter() {
-        // Create a small sphere mesh for the projectile
-        let mesh = meshes.add(Sphere::new(0.3));
+        // Choose mesh shape based on ability type
+        let mesh = if is_arrow_projectile(projectile.ability) {
+            // Arrow: elongated cuboid, long axis on Z (matches rotation_arc(Z, direction))
+            meshes.add(Cuboid::new(0.08, 0.08, 0.6))
+        } else if is_web_projectile(projectile.ability) {
+            // Web: slightly smaller elongated cuboid
+            meshes.add(Cuboid::new(0.06, 0.06, 0.4))
+        } else {
+            // Default: sphere for caster projectiles
+            meshes.add(Sphere::new(0.3))
+        };
 
-        // Color based on spell school/ability type
-        let (base_color, emissive) = match projectile.ability {
-            AbilityType::Shadowbolt => (
-                Color::srgb(0.6, 0.3, 0.8),           // Purple
-                LinearRgba::rgb(0.8, 0.4, 1.2),       // Purple glow
-            ),
-            AbilityType::Frostbolt => (
-                Color::srgb(0.4, 0.7, 1.0),           // Ice blue
-                LinearRgba::rgb(0.6, 0.9, 1.5),       // Ice glow
-            ),
-            _ => (
-                Color::srgb(1.0, 0.8, 0.3),           // Default: golden/arcane
-                LinearRgba::rgb(1.2, 1.0, 0.5),       // Golden glow
-            ),
+        // Try to get color from ability config first (projectile_visuals)
+        let (base_color, emissive) = if let Some(def) = ability_defs.get(&projectile.ability) {
+            if let Some(visuals) = &def.projectile_visuals {
+                (
+                    Color::srgb(visuals.color[0], visuals.color[1], visuals.color[2]),
+                    LinearRgba::rgb(visuals.emissive[0], visuals.emissive[1], visuals.emissive[2]),
+                )
+            } else {
+                default_projectile_colors(projectile.ability)
+            }
+        } else {
+            default_projectile_colors(projectile.ability)
         };
 
         let material = materials.add(StandardMaterial {
@@ -52,6 +76,24 @@ pub fn spawn_projectile_visuals(
             Mesh3d(mesh),
             MeshMaterial3d(material),
         ));
+    }
+}
+
+/// Fallback colors for projectiles without projectile_visuals config.
+fn default_projectile_colors(ability: AbilityType) -> (Color, LinearRgba) {
+    match ability {
+        AbilityType::Shadowbolt => (
+            Color::srgb(0.6, 0.3, 0.8),
+            LinearRgba::rgb(0.8, 0.4, 1.2),
+        ),
+        AbilityType::Frostbolt => (
+            Color::srgb(0.4, 0.7, 1.0),
+            LinearRgba::rgb(0.6, 0.9, 1.5),
+        ),
+        _ => (
+            Color::srgb(1.0, 0.8, 0.3),
+            LinearRgba::rgb(1.2, 1.0, 0.5),
+        ),
     }
 }
 
@@ -345,6 +387,19 @@ pub fn process_projectile_hits(
                     });
                 }
             }
+        }
+
+        // Spawn visual impact burst for Concussive Shot (reuses DispelBurst with Hunter gold)
+        if ability == AbilityType::ConcussiveShot {
+            commands.spawn((
+                DispelBurst {
+                    target: target_entity,
+                    caster_class: match_config::CharacterClass::Hunter,
+                    lifetime: 0.3,
+                    initial_lifetime: 0.3,
+                },
+                PlayMatchEntity,
+            ));
         }
 
         // Despawn the projectile

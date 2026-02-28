@@ -16,7 +16,7 @@ use crate::combat::log::{CombatLog, CombatLogEventType};
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
-use crate::states::play_match::combat_core::{roll_crit, calculate_cast_time};
+use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::constants::*;
 use crate::states::play_match::is_spell_school_locked;
 
@@ -300,7 +300,7 @@ fn try_place_trap_at(
     true
 }
 
-/// Try Concussive Shot — slow target if not already slowed.
+/// Try Concussive Shot — fires a projectile that slows on arrival.
 fn try_concussive_shot(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -328,29 +328,20 @@ fn try_concussive_shot(
     // Don't use if target already slowed
     if is_target_slowed(target_entity, ctx) { return false }
 
-    // Apply slow via AuraPending
-    if let Some(aura_def) = &def.applies_aura {
-        commands.spawn((
-            AuraPending {
-                target: target_entity,
-                aura: Aura {
-                    effect_type: aura_def.aura_type,
-                    duration: aura_def.duration,
-                    magnitude: aura_def.magnitude,
-                    tick_interval: 0.0,
-                    time_until_next_tick: 0.0,
-                    caster: Some(entity),
-                    ability_name: def.name.to_string(),
-                    break_on_damage_threshold: aura_def.break_on_damage,
-                    accumulated_damage: 0.0,
-                    fear_direction: (0.0, 0.0),
-                    fear_direction_timer: 0.0,
-                    spell_school: Some(def.spell_school),
-                },
-            },
-            PlayMatchEntity,
-        ));
-    }
+    // Spawn projectile — aura applied on impact by process_projectile_hits
+    let projectile_speed = def.projectile_speed.unwrap_or(40.0);
+    commands.spawn((
+        Projectile {
+            caster: entity,
+            target: target_entity,
+            ability,
+            speed: projectile_speed,
+            caster_team: combatant.team,
+            caster_class: combatant.class,
+        },
+        Transform::from_translation(my_pos + Vec3::new(0.0, 1.5, 0.0)),
+        PlayMatchEntity,
+    ));
 
     combatant.current_mana -= def.mana_cost;
     combatant.ability_cooldowns.insert(ability, def.cooldown);
@@ -362,7 +353,7 @@ fn try_concussive_shot(
         def.name.to_string(),
         Some(format!("Team {} {}", target_info.team, target_info.class.name())),
         format!(
-            "Team {} {}'s {} hits Team {} {} — slowed!",
+            "Team {} {} fires {} at Team {} {}",
             combatant.team, combatant.class.name(), def.name,
             target_info.team, target_info.class.name()
         ),
@@ -423,11 +414,11 @@ fn try_aimed_shot(
     true
 }
 
-/// Try Arcane Shot (instant ranged damage).
+/// Try Arcane Shot — fires a projectile (damage applied on arrival).
 fn try_arcane_shot(
-    _commands: &mut Commands,
+    commands: &mut Commands,
     combat_log: &mut CombatLog,
-    game_rng: &mut GameRng,
+    _game_rng: &mut GameRng,
     abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
@@ -435,7 +426,7 @@ fn try_arcane_shot(
     target_entity: Entity,
     target_info: &super::CombatantInfo,
     _ctx: &CombatContext,
-    instant_attacks: &mut Vec<super::QueuedInstantAttack>,
+    _instant_attacks: &mut Vec<super::QueuedInstantAttack>,
     auras: Option<&ActiveAuras>,
 ) -> bool {
     let ability = AbilityType::ArcaneShot;
@@ -450,22 +441,20 @@ fn try_arcane_shot(
     }
     if distance > def.range { return false }
 
-    // Calculate damage
-    let base_damage = game_rng.random_range(def.damage_base_min, def.damage_base_max);
-    let scaling = combatant.attack_power * def.damage_coefficient;
-    let total = base_damage + scaling;
-    let is_crit = roll_crit(combatant.crit_chance, game_rng);
-    let damage = if is_crit { total * CRIT_DAMAGE_MULTIPLIER } else { total };
-
-    instant_attacks.push(super::QueuedInstantAttack {
-        attacker: entity,
-        target: target_entity,
-        damage,
-        attacker_team: combatant.team,
-        attacker_class: combatant.class,
-        ability,
-        is_crit,
-    });
+    // Spawn projectile — damage is calculated and applied on impact by process_projectile_hits
+    let projectile_speed = def.projectile_speed.unwrap_or(45.0);
+    commands.spawn((
+        Projectile {
+            caster: entity,
+            target: target_entity,
+            ability,
+            speed: projectile_speed,
+            caster_team: combatant.team,
+            caster_class: combatant.class,
+        },
+        Transform::from_translation(my_pos + Vec3::new(0.0, 1.5, 0.0)),
+        PlayMatchEntity,
+    ));
 
     combatant.current_mana -= def.mana_cost;
     combatant.ability_cooldowns.insert(ability, def.cooldown);
@@ -477,10 +466,9 @@ fn try_arcane_shot(
         def.name.to_string(),
         Some(format!("Team {} {}", target_info.team, target_info.class.name())),
         format!(
-            "Team {} {}'s {} hits Team {} {} for {:.0}{}",
+            "Team {} {} fires {} at Team {} {}",
             combatant.team, combatant.class.name(), def.name,
-            target_info.team, target_info.class.name(),
-            damage, if is_crit { " (CRIT)" } else { "" }
+            target_info.team, target_info.class.name()
         ),
     );
 
