@@ -1058,6 +1058,26 @@ pub fn apply_pet_mesh_tilt(
 }
 
 // ==============================================================================
+// Trap Visual Helpers
+// ==============================================================================
+
+/// Base RGB color for a trap type. Frost = cyan, Freezing = ice-white.
+fn trap_type_rgb(trap_type: TrapType) -> (f32, f32, f32) {
+    match trap_type {
+        TrapType::Frost => (0.3, 0.8, 1.0),
+        TrapType::Freezing => (0.8, 0.9, 1.0),
+    }
+}
+
+/// Emissive glow for a trap type.
+fn trap_type_emissive(trap_type: TrapType) -> LinearRgba {
+    match trap_type {
+        TrapType::Frost => LinearRgba::new(0.4, 1.2, 2.0, 1.0),
+        TrapType::Freezing => LinearRgba::new(1.6, 1.8, 2.0, 1.0),
+    }
+}
+
+// ==============================================================================
 // Trap Ground Circle Visual (spawned on Trap entity via Added<Trap>)
 // ==============================================================================
 
@@ -1072,16 +1092,9 @@ pub fn spawn_trap_visuals(
     for (trap_entity, trap) in new_traps.iter() {
         let mesh = meshes.add(Cylinder::new(1.5, 0.05));
 
-        let (base_color, emissive) = match trap.trap_type {
-            TrapType::Frost => (
-                Color::srgba(0.3, 0.8, 1.0, 0.15), // Cyan, dim while arming
-                LinearRgba::new(0.4, 1.2, 2.0, 1.0),
-            ),
-            TrapType::Freezing => (
-                Color::srgba(0.8, 0.9, 1.0, 0.15), // Ice-white, dim while arming
-                LinearRgba::new(1.6, 1.8, 2.0, 1.0),
-            ),
-        };
+        let (r, g, b) = trap_type_rgb(trap.trap_type);
+        let base_color = Color::srgba(r, g, b, 0.15); // Dim while arming
+        let emissive = trap_type_emissive(trap.trap_type);
 
         let material = materials.add(StandardMaterial {
             base_color,
@@ -1110,15 +1123,13 @@ pub fn update_trap_visuals(
             continue;
         };
 
-        let (base_rgb, emissive_base) = match trap.trap_type {
-            TrapType::Frost => ((0.3, 0.8, 1.0), LinearRgba::new(0.4, 1.2, 2.0, 1.0)),
-            TrapType::Freezing => ((0.8, 0.9, 1.0), LinearRgba::new(1.6, 1.8, 2.0, 1.0)),
-        };
+        let (r, g, b) = trap_type_rgb(trap.trap_type);
+        let emissive_base = trap_type_emissive(trap.trap_type);
 
         if trap.arm_timer > 0.0 {
             // Arming: low alpha with slow sine pulse
             let pulse = 0.1 + 0.05 * (t * 2.0).sin();
-            material.base_color = Color::srgba(base_rgb.0, base_rgb.1, base_rgb.2, pulse);
+            material.base_color = Color::srgba(r, g, b, pulse);
             // Dim emissive while arming
             material.emissive = LinearRgba::new(
                 emissive_base.red * 0.3,
@@ -1129,7 +1140,7 @@ pub fn update_trap_visuals(
         } else {
             // Armed: full brightness with subtle shimmer
             let shimmer = 0.35 + 0.05 * (t * 4.0).sin();
-            material.base_color = Color::srgba(base_rgb.0, base_rgb.1, base_rgb.2, shimmer);
+            material.base_color = Color::srgba(r, g, b, shimmer);
             material.emissive = emissive_base;
         }
     }
@@ -1149,15 +1160,12 @@ pub fn spawn_trap_burst_visuals(
     for (burst_entity, burst) in new_bursts.iter() {
         let mesh = meshes.add(Sphere::new(0.5));
 
-        let (base_color, emissive) = match burst.trap_type {
-            TrapType::Frost => (
-                Color::srgba(0.3, 0.8, 1.0, 0.6),
-                LinearRgba::new(0.6, 1.5, 2.5, 1.0),
-            ),
-            TrapType::Freezing => (
-                Color::srgba(0.8, 0.9, 1.0, 0.6),
-                LinearRgba::new(2.0, 2.2, 2.5, 1.0),
-            ),
+        let (r, g, b) = trap_type_rgb(burst.trap_type);
+        let base_color = Color::srgba(r, g, b, 0.6);
+        // Burst uses brighter emissive than ground circle
+        let emissive = match burst.trap_type {
+            TrapType::Frost => LinearRgba::new(0.6, 1.5, 2.5, 1.0),
+            TrapType::Freezing => LinearRgba::new(2.0, 2.2, 2.5, 1.0),
         };
 
         let material = materials.add(StandardMaterial {
@@ -1201,10 +1209,7 @@ pub fn update_and_cleanup_trap_bursts(
         // Fade out
         if let Some(material) = materials.get_mut(&material_handle.0) {
             let alpha = 0.6 * progress;
-            let (r, g, b) = match burst.trap_type {
-                TrapType::Frost => (0.3, 0.8, 1.0),
-                TrapType::Freezing => (0.8, 0.9, 1.0),
-            };
+            let (r, g, b) = trap_type_rgb(burst.trap_type);
             material.base_color = Color::srgba(r, g, b, alpha);
         }
     }
@@ -1296,9 +1301,10 @@ pub fn spawn_slow_zone_visuals(
 ) {
     for (zone_entity, zone) in new_zones.iter() {
         let mesh = meshes.add(Cylinder::new(zone.radius, 0.03));
+        let (r, g, b) = trap_type_rgb(TrapType::Frost); // Slow zones are always Frost Trap
         let material = materials.add(StandardMaterial {
-            base_color: Color::srgba(0.3, 0.8, 1.0, 0.2),
-            emissive: LinearRgba::new(0.4, 1.2, 2.0, 1.0),
+            base_color: Color::srgba(r, g, b, 0.2),
+            emissive: trap_type_emissive(TrapType::Frost),
             alpha_mode: AlphaMode::Add,
             ..default()
         });
@@ -1333,7 +1339,8 @@ pub fn update_slow_zone_visuals(
             base_alpha
         };
 
-        material.base_color = Color::srgba(0.3, 0.8, 1.0, alpha);
+        let (r, g, b) = trap_type_rgb(TrapType::Frost);
+        material.base_color = Color::srgba(r, g, b, alpha);
     }
 }
 
