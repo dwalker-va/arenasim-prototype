@@ -1263,10 +1263,17 @@ pub fn update_ice_blocks(
 /// Cleanup ice blocks when the Incapacitate aura breaks or target dies.
 pub fn cleanup_ice_blocks(
     mut commands: Commands,
-    ice_blocks: Query<(Entity, &IceBlockVisual)>,
+    time: Res<Time>,
+    mut ice_blocks: Query<(Entity, &mut IceBlockVisual)>,
     combatants: Query<(&Combatant, Option<&ActiveAuras>)>,
 ) {
-    for (block_entity, block) in ice_blocks.iter() {
+    let dt = time.delta_secs();
+    for (block_entity, mut block) in ice_blocks.iter_mut() {
+        // Grace period: skip cleanup check to let apply_pending_auras process the aura
+        if block.grace_timer > 0.0 {
+            block.grace_timer -= dt;
+            continue;
+        }
         let should_despawn = match combatants.get(block.target) {
             Ok((combatant, auras)) => {
                 // Despawn if target died

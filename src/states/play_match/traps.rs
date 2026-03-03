@@ -107,6 +107,7 @@ pub fn trap_system(
                     commands.spawn((
                         IceBlockVisual {
                             target: target_entity,
+                            grace_timer: 0.1,
                         },
                         PlayMatchEntity,
                     ));

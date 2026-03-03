@@ -79,7 +79,7 @@ pub fn get_ability_icon_path(ability: &str) -> Option<&'static str> {
         "Freezing Trap" => Some("icons/abilities/spell_frost_chainsofice.jpg"),
         "Frost Trap" => Some("icons/abilities/spell_frost_freezingbreath.jpg"),
         // Hunter pet abilities
-        "Spider Web" => Some("icons/abilities/spell_nature_web.jpg"),
+        "Web" | "Spider Web" => Some("icons/abilities/spell_nature_web.jpg"),
         "Boar Charge" => Some("icons/abilities/ability_golemstormbolt.jpg"),
         "Master's Call" => Some("icons/abilities/ability_hunter_masterscall.jpg"),
         _ => None,
@@ -103,7 +103,7 @@ pub const SPELL_ICON_ABILITIES: &[&str] = &[
     "Aimed Shot", "Arcane Shot", "Concussive Shot", "Disengage",
     "Freezing Trap", "Frost Trap",
     // Hunter pet abilities
-    "Spider Web", "Boar Charge", "Master's Call",
+    "Web", "Spider Web", "Boar Charge", "Master's Call",
 ];
 
 // ==============================================================================

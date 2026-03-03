@@ -82,6 +82,9 @@ pub const ARENA_HALF_X: f32 = 36.5;
 /// Arena half-size on Z axis (inside the visual walls).
 pub const ARENA_HALF_Z: f32 = 21.5;
 
+/// Maximum |x| + |z| permitted at octagonal arena corners (diagonal wall boundary with wall+buffer offset).
+pub const ARENA_CORNER_SUM: f32 = 48.88;
+
 // ============================================================================
 // Visual/UI
 // ============================================================================
@@ -135,6 +138,9 @@ pub const HUNTER_DEAD_ZONE: f32 = 8.0;
 
 /// Auto Shot range for Hunter ranged auto-attacks.
 pub const AUTO_SHOT_RANGE: f32 = 35.0;
+
+/// Range at which Hunter proactively kites to maintain distance.
+pub const HUNTER_KITE_RANGE: f32 = 30.0;
 
 /// Delay in seconds before a placed trap becomes armed and can be triggered.
 pub const TRAP_ARM_DELAY: f32 = 1.5;

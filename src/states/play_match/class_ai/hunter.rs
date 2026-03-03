@@ -12,7 +12,7 @@
 
 use bevy::prelude::*;
 
-use crate::combat::log::{CombatLog, CombatLogEventType};
+use crate::combat::log::CombatLog;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
@@ -52,10 +52,14 @@ pub fn decide_hunter_action(
     // Find nearest enemy and distance
     let (nearest_enemy, nearest_distance) = find_nearest_enemy(entity, combatant.team, my_pos, ctx);
 
-    // Always kite if an enemy is within 20 yards (regardless of GCD)
+    // Kite if a melee enemy is within kite range (regardless of GCD)
+    // Don't kite ranged classes — two Hunters shouldn't flee from each other
     let nearest_dist = nearest_distance.unwrap_or(40.0);
-    if nearest_dist < 20.0 {
-        combatant.kiting_timer = combatant.kiting_timer.max(1.0);
+    let nearest_is_melee = nearest_enemy
+        .and_then(|(e, _)| ctx.combatants.get(&e))
+        .map_or(false, |info| info.class.is_melee());
+    if nearest_is_melee && nearest_dist < HUNTER_KITE_RANGE {
+        combatant.kiting_timer = combatant.kiting_timer.max(0.5);
     }
 
     // Check if global cooldown is active
@@ -119,8 +123,11 @@ pub fn decide_hunter_action(
                     combatant.ability_cooldowns.insert(AbilityType::Disengage, def.cooldown);
                     combatant.global_cooldown = GCD;
 
-                    combat_log.log(
-                        CombatLogEventType::AbilityUsed,
+                    let caster_id = combatant_id(combatant.team, combatant.class);
+                    combat_log.log_ability_cast(
+                        caster_id,
+                        "Disengage".to_string(),
+                        None,
                         format!(
                             "[MOVE] Team {} {} disengages {:.0} yards",
                             combatant.team, combatant.class.name(), DISENGAGE_DISTANCE
@@ -195,9 +202,8 @@ pub fn decide_hunter_action(
         }
     }
 
-    // Priority 3: Aimed Shot (if target is slowed or far away — safe to hardcast 2.5s)
-    let target_is_slowed = is_target_slowed(target_entity, ctx);
-    if (target_is_slowed || distance_to_target > 30.0) && distance_to_target >= HUNTER_DEAD_ZONE {
+    // Priority 3: Aimed Shot (safe to hardcast at 20+ yards — ~2.4s before Warrior reaches dead zone)
+    if distance_to_target >= 20.0 {
         if try_aimed_shot(commands, combat_log, abilities, entity, combatant, my_pos, target_entity, target_info, auras) {
             return true;
         }
@@ -270,6 +276,9 @@ fn try_place_trap_at(
         return false;
     }
 
+    // Clamp to octagonal arena bounds (midpoint can land outside corners)
+    let position = crate::states::play_match::combat_core::clamp_to_arena(position);
+
     // Spawn trap entity
     commands.spawn((
         Transform::from_translation(Vec3::new(position.x, 0.0, position.z)),
@@ -289,8 +298,11 @@ fn try_place_trap_at(
     combatant.global_cooldown = GCD;
 
     let trap_name = if trap_type == TrapType::Freezing { "Freezing Trap" } else { "Frost Trap" };
-    combat_log.log(
-        CombatLogEventType::AbilityUsed,
+    let caster_id = combatant_id(combatant.team, combatant.class);
+    combat_log.log_ability_cast(
+        caster_id,
+        trap_name.to_string(),
+        None,
         format!(
             "[TRAP] Team {} {} places {} at ({:.0}, {:.0})",
             combatant.team, combatant.class.name(), trap_name, position.x, position.z

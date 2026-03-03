@@ -754,7 +754,7 @@
         // Boar Charge: Gap closer + short stun
         // Disrupts enemy casters, creates burst windows
         BoarCharge: (
-            name: "Charge",
+            name: "Boar Charge",
             cast_time: 0.0,
             range: 25.0,
             mana_cost: 0.0,

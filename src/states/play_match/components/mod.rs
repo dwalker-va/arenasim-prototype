@@ -631,7 +631,7 @@ impl Combatant {
             match_config::CharacterClass::Paladin => (ResourceType::Mana, 175.0, 160.0, 0.0, 160.0, 8.0, 0.9, 20.0, 35.0, 0.06, 5.0),
             // Hunters: Medium HP (mail), ranged physical, scales with Attack Power (7% crit)
             // Auto Shot is the primary sustained damage (~18 per 2.5s = 7.2 DPS base).
-            match_config::CharacterClass::Hunter => (ResourceType::Mana, 165.0, 150.0, 0.0, 150.0, 18.0, 0.4, 30.0, 0.0, 0.07, 5.0),
+            match_config::CharacterClass::Hunter => (ResourceType::Mana, 165.0, 150.0, 3.0, 150.0, 18.0, 0.4, 30.0, 0.0, 0.07, 5.0),
         };
         
         // Rogues start stealthed
@@ -1311,6 +1311,8 @@ pub struct TrapBurst {
 pub struct IceBlockVisual {
     /// The entity frozen inside the ice block
     pub target: Entity,
+    /// Skip cleanup check until expired (gives apply_pending_auras time to process)
+    pub grace_timer: f32,
 }
 
 /// Wind streak trail left behind during Disengage leap.

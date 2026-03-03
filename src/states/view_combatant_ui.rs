@@ -236,7 +236,7 @@ fn get_ability_name(ability: AbilityType) -> &'static str {
         AbilityType::FrostTrap => "Frost Trap",
         // Hunter pet abilities
         AbilityType::SpiderWeb => "Web",
-        AbilityType::BoarCharge => "Charge",
+        AbilityType::BoarCharge => "Boar Charge",
         AbilityType::MastersCall => "Master's Call",
     }
 }
