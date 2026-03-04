@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-use crate::states::match_config::{ArenaMap, CharacterClass, MatchConfig, RogueOpener, WarlockCurse};
+use crate::states::match_config::{ArenaMap, CharacterClass, HunterPetType, MatchConfig, RogueOpener, WarlockCurse};
 
 /// Headless match configuration loaded from JSON
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,6 +52,12 @@ pub struct HeadlessMatchConfig {
     /// Team 2's warlock curse preferences: outer vec indexed by slot, inner vec indexed by enemy target
     #[serde(default)]
     pub team2_warlock_curse_prefs: Vec<Option<Vec<String>>>,
+    /// Team 1's hunter pet type preferences (one per slot: "Spider", "Boar", "Bird")
+    #[serde(default)]
+    pub team1_hunter_pet_types: Vec<String>,
+    /// Team 2's hunter pet type preferences (one per slot: "Spider", "Boar", "Bird")
+    #[serde(default)]
+    pub team2_hunter_pet_types: Vec<String>,
 }
 
 fn default_map() -> String {
@@ -150,8 +156,9 @@ impl HeadlessMatchConfig {
             "Priest" => Ok(CharacterClass::Priest),
             "Warlock" => Ok(CharacterClass::Warlock),
             "Paladin" => Ok(CharacterClass::Paladin),
+            "Hunter" => Ok(CharacterClass::Hunter),
             _ => Err(format!(
-                "Unknown class: '{}'. Valid classes: Warrior, Mage, Rogue, Priest, Warlock, Paladin",
+                "Unknown class: '{}'. Valid classes: Warrior, Mage, Rogue, Priest, Warlock, Paladin, Hunter",
                 name
             )),
         }
@@ -174,6 +181,15 @@ impl HeadlessMatchConfig {
         match name {
             "CheapShot" | "Cheap Shot" => RogueOpener::CheapShot,
             _ => RogueOpener::Ambush, // Default to Ambush for unknown values
+        }
+    }
+
+    /// Parse a hunter pet type name string into HunterPetType
+    fn parse_hunter_pet_type(name: &str) -> HunterPetType {
+        match name {
+            "Boar" => HunterPetType::Boar,
+            "Bird" => HunterPetType::Bird,
+            _ => HunterPetType::Spider, // Default to Spider for unknown values
         }
     }
 
@@ -255,6 +271,21 @@ impl HeadlessMatchConfig {
             team1.len(),
         );
 
+        // Parse hunter pet types, defaulting to Spider for missing entries
+        let mut team1_hunter_pet_types: Vec<HunterPetType> = self
+            .team1_hunter_pet_types
+            .iter()
+            .map(|s| Self::parse_hunter_pet_type(s))
+            .collect();
+        team1_hunter_pet_types.resize(team1.len(), HunterPetType::default());
+
+        let mut team2_hunter_pet_types: Vec<HunterPetType> = self
+            .team2_hunter_pet_types
+            .iter()
+            .map(|s| Self::parse_hunter_pet_type(s))
+            .collect();
+        team2_hunter_pet_types.resize(team2.len(), HunterPetType::default());
+
         Ok(MatchConfig {
             team1_size: team1.len(),
             team2_size: team2.len(),
@@ -269,6 +300,8 @@ impl HeadlessMatchConfig {
             team2_rogue_openers,
             team1_warlock_curse_prefs,
             team2_warlock_curse_prefs,
+            team1_hunter_pet_types,
+            team2_hunter_pet_types,
         })
     }
 }

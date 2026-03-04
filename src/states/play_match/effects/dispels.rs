@@ -32,7 +32,14 @@ pub fn process_dispels(
                 .auras
                 .iter()
                 .enumerate()
-                .filter(|(_, a)| a.can_be_dispelled())
+                .filter(|(_, a)| {
+                    // If aura_type_filter is set, only match those specific types
+                    if let Some(ref filter) = pending.aura_type_filter {
+                        filter.contains(&a.effect_type)
+                    } else {
+                        a.can_be_dispelled()
+                    }
+                })
                 .map(|(i, _)| i)
                 .collect();
 

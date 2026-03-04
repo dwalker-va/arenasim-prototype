@@ -57,6 +57,38 @@ impl WarlockCurse {
     }
 }
 
+/// Hunter pet type choice
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum HunterPetType {
+    /// Spider — Offensive CC: Web (ranged root)
+    #[default]
+    Spider,
+    /// Boar — Aggressive pressure: Charge (gap closer + stun)
+    Boar,
+    /// Bird — Defensive utility: Master's Call (removes movement impairments)
+    Bird,
+}
+
+impl HunterPetType {
+    /// Get the display name
+    pub fn name(&self) -> &'static str {
+        match self {
+            HunterPetType::Spider => "Spider",
+            HunterPetType::Boar => "Boar",
+            HunterPetType::Bird => "Bird",
+        }
+    }
+
+    /// Get a short description
+    pub fn description(&self) -> &'static str {
+        match self {
+            HunterPetType::Spider => "Web root (CC)",
+            HunterPetType::Boar => "Charge + stun (pressure)",
+            HunterPetType::Bird => "Master's Call (freedom)",
+        }
+    }
+}
+
 /// Available character classes
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CharacterClass {
@@ -66,6 +98,7 @@ pub enum CharacterClass {
     Priest,
     Warlock,
     Paladin,
+    Hunter,
 }
 
 impl CharacterClass {
@@ -78,6 +111,7 @@ impl CharacterClass {
             CharacterClass::Priest,
             CharacterClass::Warlock,
             CharacterClass::Paladin,
+            CharacterClass::Hunter,
         ]
     }
 
@@ -90,6 +124,7 @@ impl CharacterClass {
             CharacterClass::Priest => "Priest",
             CharacterClass::Warlock => "Warlock",
             CharacterClass::Paladin => "Paladin",
+            CharacterClass::Hunter => "Hunter",
         }
     }
 
@@ -102,6 +137,7 @@ impl CharacterClass {
             CharacterClass::Priest => "Healer and support",
             CharacterClass::Warlock => "Shadow magic and curses",
             CharacterClass::Paladin => "Holy warrior and healer",
+            CharacterClass::Hunter => "Ranged physical DPS with pet",
         }
     }
 
@@ -114,6 +150,7 @@ impl CharacterClass {
             CharacterClass::Priest => Color::srgb(1.0, 1.0, 1.0),     // White
             CharacterClass::Warlock => Color::srgb(0.58, 0.51, 0.79), // Purple
             CharacterClass::Paladin => Color::srgb(0.96, 0.55, 0.73), // Pink (WoW Paladin color)
+            CharacterClass::Hunter => Color::srgb(0.67, 0.83, 0.45),   // Green (WoW Hunter color #ABD473)
         }
     }
 
@@ -131,7 +168,7 @@ impl CharacterClass {
     pub fn uses_mana(&self) -> bool {
         matches!(
             self,
-            CharacterClass::Mage | CharacterClass::Priest | CharacterClass::Warlock | CharacterClass::Paladin
+            CharacterClass::Mage | CharacterClass::Priest | CharacterClass::Warlock | CharacterClass::Paladin | CharacterClass::Hunter
         )
     }
 
@@ -155,7 +192,14 @@ impl CharacterClass {
             // Paladin: Holy warrior — melee positioning for auto-attacks + Hammer of Justice
             // All heals are 40yd range, so melee positioning doesn't limit healing
             CharacterClass::Paladin => 2.0,
+            // Hunter stays at 25 yards — between dead zone (8) and max range (35)
+            CharacterClass::Hunter => 25.0,
         }
+    }
+
+    /// Whether this class has a pet.
+    pub fn has_pet(&self) -> bool {
+        matches!(self, CharacterClass::Warlock | CharacterClass::Hunter)
     }
 }
 
@@ -220,6 +264,10 @@ pub struct MatchConfig {
     pub team1_warlock_curse_prefs: Vec<Vec<WarlockCurse>>,
     /// Team 2's warlock curse preferences: [warlock_slot][enemy_target_index] -> curse
     pub team2_warlock_curse_prefs: Vec<Vec<WarlockCurse>>,
+    /// Team 1's hunter pet type preferences (one per slot, defaults to Spider)
+    pub team1_hunter_pet_types: Vec<HunterPetType>,
+    /// Team 2's hunter pet type preferences (one per slot, defaults to Spider)
+    pub team2_hunter_pet_types: Vec<HunterPetType>,
 }
 
 impl Default for MatchConfig {
@@ -239,6 +287,8 @@ impl Default for MatchConfig {
             // One vec per slot, inner vec has curse pref per enemy (defaults to Agony)
             team1_warlock_curse_prefs: vec![vec![WarlockCurse::default()]],
             team2_warlock_curse_prefs: vec![vec![WarlockCurse::default()]],
+            team1_hunter_pet_types: vec![HunterPetType::default()],
+            team2_hunter_pet_types: vec![HunterPetType::default()],
         }
     }
 }

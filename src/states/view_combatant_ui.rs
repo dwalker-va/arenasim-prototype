@@ -10,7 +10,7 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use std::collections::HashMap;
-use super::{GameState, match_config::{CharacterClass, MatchConfig, RogueOpener, WarlockCurse}};
+use super::{GameState, match_config::{CharacterClass, HunterPetType, MatchConfig, RogueOpener, WarlockCurse}};
 use super::configure_match_ui::ClassIcons;
 use super::play_match::AbilityType;
 use super::play_match::abilities::{ScalingStat, SpellSchool};
@@ -113,6 +113,15 @@ fn get_class_stats(class: CharacterClass) -> ClassStats {
             attack_speed: 0.9,
             move_speed: 5.0,
         },
+        CharacterClass::Hunter => ClassStats {
+            health: 165,
+            resource_name: "Mana",
+            resource_max: 150,
+            attack_power: 30,
+            spell_power: 0,
+            attack_speed: 0.4,
+            move_speed: 5.0,
+        },
     }
 }
 
@@ -164,6 +173,14 @@ fn get_class_abilities(class: CharacterClass) -> Vec<AbilityType> {
             AbilityType::HammerOfJustice,
             AbilityType::PaladinCleanse,
         ],
+        CharacterClass::Hunter => vec![
+            AbilityType::AimedShot,
+            AbilityType::ArcaneShot,
+            AbilityType::ConcussiveShot,
+            AbilityType::Disengage,
+            AbilityType::FreezingTrap,
+            AbilityType::FrostTrap,
+        ],
     }
 }
 
@@ -210,6 +227,17 @@ fn get_ability_name(ability: AbilityType) -> &'static str {
         // Pet abilities (Felhunter)
         AbilityType::SpellLock => "Spell Lock",
         AbilityType::DevourMagic => "Devour Magic",
+        // Hunter abilities
+        AbilityType::AimedShot => "Aimed Shot",
+        AbilityType::ArcaneShot => "Arcane Shot",
+        AbilityType::ConcussiveShot => "Concussive Shot",
+        AbilityType::Disengage => "Disengage",
+        AbilityType::FreezingTrap => "Freezing Trap",
+        AbilityType::FrostTrap => "Frost Trap",
+        // Hunter pet abilities
+        AbilityType::SpiderWeb => "Web",
+        AbilityType::BoarCharge => "Boar Charge",
+        AbilityType::MastersCall => "Master's Call",
     }
 }
 
@@ -234,6 +262,7 @@ pub fn load_ability_icons(
         CharacterClass::Priest,
         CharacterClass::Warlock,
         CharacterClass::Paladin,
+        CharacterClass::Hunter,
     ];
     let mut ability_names: Vec<&'static str> = Vec::new();
     for class in &all_classes {
@@ -499,6 +528,26 @@ pub fn view_combatant_ui(
                     );
                 }
 
+                // Hunter-specific: Pet Type panel
+                if class == CharacterClass::Hunter {
+                    ui.add_space(15.0);
+
+                    let pet_panel_height = 120.0;
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(content_width, pet_panel_height),
+                        egui::Layout::left_to_right(egui::Align::TOP),
+                        |ui| {
+                            render_hunter_pet_panel(
+                                ui,
+                                content_width,
+                                pet_panel_height,
+                                &view_state,
+                                &mut match_config,
+                            );
+                        },
+                    );
+                }
+
                 // Warlock-specific: Curse Preferences panel
                 if class == CharacterClass::Warlock {
                     ui.add_space(15.0);
@@ -708,6 +757,7 @@ fn get_spell_school_color(school: SpellSchool) -> egui::Color32 {
         SpellSchool::Shadow => egui::Color32::from_rgb(148, 130, 201),   // Purple
         SpellSchool::Arcane => egui::Color32::from_rgb(255, 128, 255),   // Pink/magenta
         SpellSchool::Holy => egui::Color32::from_rgb(255, 230, 150),     // Golden yellow
+        SpellSchool::Nature => egui::Color32::from_rgb(76, 196, 30),      // Green
         SpellSchool::None => egui::Color32::from_rgb(220, 220, 220),     // Gray
     }
 }
@@ -949,6 +999,13 @@ fn build_aura_description(aura: &super::play_match::ability_config::AuraEffect) 
         AuraType::DamageImmunity => {
             format!("Immune to all damage for {:.0} sec. Reduces damage dealt by 50%.", aura.duration)
         }
+        AuraType::Incapacitate => {
+            if aura.break_on_damage > 0.0 {
+                format!("Incapacitates the target for {:.0} sec. Breaks on any damage.", aura.duration)
+            } else {
+                format!("Incapacitates the target for {:.0} sec.", aura.duration)
+            }
+        }
     }
 }
 
@@ -1097,6 +1154,108 @@ fn render_rogue_opener_panel(
 
         // Description of current opener
         let description = current_opener.description();
+        ui.label(
+            egui::RichText::new(description)
+                .size(13.0)
+                .color(egui::Color32::from_rgb(170, 170, 170))
+                .italics(),
+        );
+    });
+}
+
+/// Render the Hunter Pet Type selection panel
+fn render_hunter_pet_panel(
+    ui: &mut egui::Ui,
+    width: f32,
+    height: f32,
+    view_state: &Res<ViewCombatantState>,
+    match_config: &mut ResMut<MatchConfig>,
+) {
+    let current_pet = if view_state.team == 1 {
+        match_config.team1_hunter_pet_types.get(view_state.slot).copied().unwrap_or_default()
+    } else {
+        match_config.team2_hunter_pet_types.get(view_state.slot).copied().unwrap_or_default()
+    };
+
+    ui.group(|ui| {
+        ui.set_min_width(width - 20.0);
+        ui.set_min_height(height - 20.0);
+
+        ui.label(
+            egui::RichText::new("PET TYPE")
+                .size(18.0)
+                .color(egui::Color32::from_rgb(230, 204, 153))
+                .strong(),
+        );
+
+        ui.add_space(12.0);
+
+        let icon_size = 48.0;
+        let gold = egui::Color32::from_rgb(255, 215, 0);
+        let gray = egui::Color32::from_rgb(80, 80, 90);
+
+        let mut clicked_pet: Option<HunterPetType> = None;
+
+        ui.horizontal(|ui| {
+            let pets = [
+                (HunterPetType::Spider, egui::Color32::from_rgb(128, 102, 77)),  // Brown
+                (HunterPetType::Boar, egui::Color32::from_rgb(153, 102, 77)),    // Dark brown
+                (HunterPetType::Bird, egui::Color32::from_rgb(153, 179, 204)),   // Light grey-blue
+            ];
+
+            for (i, (pet, color)) in pets.iter().enumerate() {
+                if i > 0 {
+                    ui.add_space(20.0);
+                }
+
+                let is_selected = current_pet == *pet;
+                let border_color = if is_selected { gold } else { gray };
+                let border_width = if is_selected { 3.0 } else { 2.0 };
+
+                ui.vertical(|ui| {
+                    let (rect, response) = ui.allocate_exact_size(
+                        egui::vec2(icon_size, icon_size),
+                        egui::Sense::click(),
+                    );
+
+                    let painter = ui.painter();
+                    painter.rect_filled(rect, 4.0, *color);
+                    painter.rect_stroke(rect, 4.0, egui::Stroke::new(border_width, border_color));
+
+                    if response.clicked() && !is_selected {
+                        clicked_pet = Some(*pet);
+                    }
+
+                    ui.add_space(4.0);
+                    let label_color = if is_selected {
+                        gold
+                    } else {
+                        egui::Color32::from_rgb(180, 180, 180)
+                    };
+                    ui.label(
+                        egui::RichText::new(pet.name())
+                            .size(13.0)
+                            .color(label_color),
+                    );
+                });
+            }
+        });
+
+        if let Some(pet) = clicked_pet {
+            let pet_types = if view_state.team == 1 {
+                &mut match_config.team1_hunter_pet_types
+            } else {
+                &mut match_config.team2_hunter_pet_types
+            };
+            while pet_types.len() <= view_state.slot {
+                pet_types.push(HunterPetType::default());
+            }
+            pet_types[view_state.slot] = pet;
+        }
+
+        ui.add_space(8.0);
+
+        let description = current_pet.description();
         ui.label(
             egui::RichText::new(description)
                 .size(13.0)

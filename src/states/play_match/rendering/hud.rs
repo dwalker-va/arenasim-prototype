@@ -854,5 +854,6 @@ fn get_aura_fallback_color(aura_type: &AuraType) -> egui::Color32 {
         AuraType::CastTimeIncrease => egui::Color32::from_rgb(128, 0, 128), // Purple (curse)
         AuraType::DamageTakenReduction => egui::Color32::from_rgb(255, 215, 0), // Gold (Paladin aura)
         AuraType::DamageImmunity => egui::Color32::from_rgb(255, 215, 0), // Gold (Divine Shield)
+        AuraType::Incapacitate => egui::Color32::from_rgb(135, 206, 250), // Light sky blue (frozen)
     }
 }

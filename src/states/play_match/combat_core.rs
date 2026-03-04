@@ -19,7 +19,7 @@ use super::ability_config::AbilityDefinitions;
 use super::constants::{CRIT_DAMAGE_MULTIPLIER, CRIT_HEALING_MULTIPLIER};
 use super::utils::{spawn_speech_bubble, get_next_fct_offset};
 use super::components::ChannelingState;
-use super::{MELEE_RANGE, WAND_RANGE, ARENA_HALF_X, ARENA_HALF_Z};
+use super::{MELEE_RANGE, WAND_RANGE, ARENA_HALF_X, ARENA_HALF_Z, ARENA_CORNER_SUM, HUNTER_DEAD_ZONE, AUTO_SHOT_RANGE, DISENGAGE_SPEED};
 
 // Re-export combatant_id for backward compatibility (used by other modules)
 pub use super::utils::combatant_id;
@@ -27,6 +27,29 @@ pub use super::utils::combatant_id;
 /// Roll a critical strike check. Returns true if the roll is a crit.
 pub fn roll_crit(crit_chance: f32, rng: &mut GameRng) -> bool {
     rng.random_f32() < crit_chance
+}
+
+/// Returns true if the XZ position is inside the octagonal arena bounds.
+pub fn is_in_arena_bounds(pos: Vec3) -> bool {
+    if pos.x < -ARENA_HALF_X || pos.x > ARENA_HALF_X { return false; }
+    if pos.z < -ARENA_HALF_Z || pos.z > ARENA_HALF_Z { return false; }
+    // Diagonal corner check: each 45° wall constrains |x|+|z|
+    pos.x.abs() + pos.z.abs() <= ARENA_CORNER_SUM
+}
+
+/// Clamp a position to stay inside the octagonal arena.
+pub fn clamp_to_arena(mut pos: Vec3) -> Vec3 {
+    // Rectangular edges
+    pos.x = pos.x.clamp(-ARENA_HALF_X, ARENA_HALF_X);
+    pos.z = pos.z.clamp(-ARENA_HALF_Z, ARENA_HALF_Z);
+    // Diagonal corners: project inward along the 45° normal
+    let corner_excess = pos.x.abs() + pos.z.abs() - ARENA_CORNER_SUM;
+    if corner_excess > 0.0 {
+        let half = corner_excess / 2.0;
+        pos.x -= half * pos.x.signum();
+        pos.z -= half * pos.z.signum();
+    }
+    pos
 }
 
 /// Apply damage to a combatant, accounting for absorb shields.
@@ -192,9 +215,7 @@ fn find_best_kiting_direction(
     
     // Check if ideal direction keeps us in bounds
     let ideal_next_pos = current_pos + ideal_direction * move_distance;
-    let ideal_in_bounds =
-        ideal_next_pos.x >= -ARENA_HALF_X && ideal_next_pos.x <= ARENA_HALF_X &&
-        ideal_next_pos.z >= -ARENA_HALF_Z && ideal_next_pos.z <= ARENA_HALF_Z;
+    let ideal_in_bounds = is_in_arena_bounds(ideal_next_pos);
     
     if ideal_in_bounds {
         return ideal_direction; // Ideal direction works, use it!
@@ -219,9 +240,7 @@ fn find_best_kiting_direction(
         let candidate_next_pos = current_pos + candidate_direction * move_distance;
         
         // Check if this keeps us in bounds
-        let in_bounds =
-            candidate_next_pos.x >= -ARENA_HALF_X && candidate_next_pos.x <= ARENA_HALF_X &&
-            candidate_next_pos.z >= -ARENA_HALF_Z && candidate_next_pos.z <= ARENA_HALF_Z;
+        let in_bounds = is_in_arena_bounds(candidate_next_pos);
         
         if !in_bounds {
             continue; // Skip directions that go out of bounds
@@ -232,7 +251,9 @@ fn find_best_kiting_direction(
         // 2. Alignment with ideal direction (bonus for moving away, not sideways)
         let distance_from_enemy = candidate_next_pos.distance(enemy_pos);
         let alignment_with_ideal = candidate_direction.dot(ideal_direction).max(0.0);
-        let score = distance_from_enemy * 2.0 + alignment_with_ideal * 5.0;
+        let center_dist = Vec3::new(candidate_next_pos.x, 0.0, candidate_next_pos.z).length();
+        let center_bonus = (40.0 - center_dist).max(0.0) * 0.1;
+        let score = distance_from_enemy * 2.0 + alignment_with_ideal * 5.0 + center_bonus;
         
         if score > best_score {
             best_score = score;
@@ -247,7 +268,7 @@ pub fn move_to_target(
     countdown: Res<MatchCountdown>,
     time: Res<Time>,
     mut commands: Commands,
-    mut combatants: Query<(Entity, &mut Transform, &Combatant, Option<&ActiveAuras>, Option<&CastingState>, Option<&ChargingState>, Option<&ChannelingState>)>,
+    mut combatants: Query<(Entity, &mut Transform, &Combatant, Option<&ActiveAuras>, Option<&CastingState>, Option<&ChargingState>, Option<&ChannelingState>, Option<&DisengagingState>)>,
     orbs: Query<&Transform, (With<ShadowSightOrb>, Without<Combatant>)>,
     pet_query: Query<&Pet>,
 ) {
@@ -261,11 +282,11 @@ pub fn move_to_target(
     // Build a snapshot of all combatant positions and team info for lookups
     let positions: std::collections::HashMap<Entity, (Vec3, u8)> = combatants
         .iter()
-        .map(|(entity, transform, combatant, _, _, _, _)| (entity, (transform.translation, combatant.team)))
+        .map(|(entity, transform, combatant, _, _, _, _, _)| (entity, (transform.translation, combatant.team)))
         .collect();
 
     // Move each combatant towards their target if needed
-    for (entity, mut transform, combatant, auras, casting_state, charging_state, channeling_state) in combatants.iter_mut() {
+    for (entity, mut transform, combatant, auras, casting_state, charging_state, channeling_state, disengaging_state) in combatants.iter_mut() {
         if !combatant.is_alive() {
             continue;
         }
@@ -282,7 +303,7 @@ pub fn move_to_target(
 
         // Check for movement-preventing CC and wandering CC
         let (is_rooted_or_stunned, fear_direction, polymorph_direction) = if let Some(auras) = auras {
-            let rooted_or_stunned = auras.auras.iter().any(|a| matches!(a.effect_type, AuraType::Root | AuraType::Stun));
+            let rooted_or_stunned = auras.auras.iter().any(|a| matches!(a.effect_type, AuraType::Root | AuraType::Stun | AuraType::Incapacitate));
             let fear_dir = auras.auras.iter()
                 .find(|a| a.effect_type == AuraType::Fear)
                 .map(|a| a.fear_direction);
@@ -313,8 +334,7 @@ pub fn move_to_target(
                 transform.translation += direction * move_distance;
 
                 // Clamp to arena bounds
-                transform.translation.x = transform.translation.x.clamp(-ARENA_HALF_X, ARENA_HALF_X);
-                transform.translation.z = transform.translation.z.clamp(-ARENA_HALF_Z, ARENA_HALF_Z);
+                transform.translation = clamp_to_arena(transform.translation);
 
                 // Rotate to face direction of travel
                 let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
@@ -336,8 +356,7 @@ pub fn move_to_target(
                 transform.translation += direction * move_distance;
 
                 // Clamp to arena bounds
-                transform.translation.x = transform.translation.x.clamp(-ARENA_HALF_X, ARENA_HALF_X);
-                transform.translation.z = transform.translation.z.clamp(-ARENA_HALF_Z, ARENA_HALF_Z);
+                transform.translation = clamp_to_arena(transform.translation);
 
                 // Rotate to face direction of travel
                 let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
@@ -387,8 +406,7 @@ pub fn move_to_target(
                 transform.translation += direction * move_distance;
 
                 // Clamp position to arena bounds
-                transform.translation.x = transform.translation.x.clamp(-ARENA_HALF_X, ARENA_HALF_X);
-                transform.translation.z = transform.translation.z.clamp(-ARENA_HALF_Z, ARENA_HALF_Z);
+                transform.translation = clamp_to_arena(transform.translation);
                 
                 // Rotate to face target
                 let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
@@ -397,7 +415,33 @@ pub fn move_to_target(
             
             continue; // Skip normal movement logic while charging
         }
-        
+
+        // DISENGAGE BEHAVIOR: If disengaging, leap backward at high speed
+        if let Some(disengage) = disengaging_state {
+            if disengage.distance_remaining > 0.0 {
+                let move_amount = DISENGAGE_SPEED * dt;
+                let new_pos = transform.translation + disengage.direction * move_amount;
+
+                // Clamp to arena bounds
+                transform.translation = clamp_to_arena(new_pos);
+
+                // Decrement distance remaining
+                let remaining = disengage.distance_remaining - move_amount;
+                if remaining <= 0.0 {
+                    commands.entity(entity).remove::<DisengagingState>();
+                } else {
+                    commands.entity(entity).try_insert(DisengagingState {
+                        direction: disengage.direction,
+                        distance_remaining: remaining,
+                    });
+                }
+
+                continue; // Skip normal movement logic while disengaging
+            } else {
+                commands.entity(entity).remove::<DisengagingState>();
+            }
+        }
+
         // KITING BEHAVIOR: If kiting_timer > 0, move away from nearest enemy
         // Uses intelligent pathfinding that considers arena boundaries
         if combatant.kiting_timer > 0.0 {
@@ -442,8 +486,7 @@ pub fn move_to_target(
                     transform.translation += best_direction * move_distance;
 
                     // Ensure we stay in bounds (in case of floating point errors)
-                    transform.translation.x = transform.translation.x.clamp(-ARENA_HALF_X, ARENA_HALF_X);
-                    transform.translation.z = transform.translation.z.clamp(-ARENA_HALF_Z, ARENA_HALF_Z);
+                    transform.translation = clamp_to_arena(transform.translation);
 
                     // Rotate to face direction of travel
                     let target_rotation = Quat::from_rotation_y(best_direction.x.atan2(best_direction.z));
@@ -475,8 +518,7 @@ pub fn move_to_target(
                             }
                             let move_distance = movement_speed * dt;
                             transform.translation += direction * move_distance;
-                            transform.translation.x = transform.translation.x.clamp(-ARENA_HALF_X, ARENA_HALF_X);
-                            transform.translation.z = transform.translation.z.clamp(-ARENA_HALF_Z, ARENA_HALF_Z);
+                            transform.translation = clamp_to_arena(transform.translation);
                             let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
                             transform.rotation = target_rotation;
                         }
@@ -527,8 +569,7 @@ pub fn move_to_target(
                     transform.translation += direction * move_distance;
 
                     // Clamp position to arena bounds
-                    transform.translation.x = transform.translation.x.clamp(-ARENA_HALF_X, ARENA_HALF_X);
-                    transform.translation.z = transform.translation.z.clamp(-ARENA_HALF_Z, ARENA_HALF_Z);
+                    transform.translation = clamp_to_arena(transform.translation);
 
                     // Rotate to face destination
                     let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
@@ -577,8 +618,7 @@ pub fn move_to_target(
                 transform.translation += direction * move_distance;
 
                 // Clamp position to arena bounds
-                transform.translation.x = transform.translation.x.clamp(-ARENA_HALF_X, ARENA_HALF_X);
-                transform.translation.z = transform.translation.z.clamp(-ARENA_HALF_Z, ARENA_HALF_Z);
+                transform.translation = clamp_to_arena(transform.translation);
 
                 // Rotate to face target
                 let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
@@ -734,9 +774,20 @@ pub fn combat_auto_attack(
                     
                     // Use pet-aware is_melee from snapshot (pets inherit owner's class
                     // but may have different melee/ranged behavior)
-                    let &(_, _, _, attacker_is_melee) = &combatant_info[&attacker_entity];
-                    let attack_range = if attacker_is_melee { MELEE_RANGE } else { WAND_RANGE };
-                    if my_pos.distance(target_pos) <= attack_range {
+                    let &(_, attacker_class, _, attacker_is_melee) = &combatant_info[&attacker_entity];
+                    let attack_range = if attacker_is_melee {
+                        MELEE_RANGE
+                    } else if attacker_class == match_config::CharacterClass::Hunter {
+                        AUTO_SHOT_RANGE
+                    } else {
+                        WAND_RANGE
+                    };
+                    let distance = my_pos.distance(target_pos);
+                    // Hunter dead zone: can't auto-attack within 8 yards
+                    if attacker_class == match_config::CharacterClass::Hunter && distance < HUNTER_DEAD_ZONE {
+                        continue;
+                    }
+                    if distance <= attack_range {
                         // Calculate total damage (base + bonus from Heroic Strike, etc.)
                         let base_damage = combatant.attack_damage + combatant.next_attack_bonus_damage;
                         // Roll crit before damage reduction
@@ -801,7 +852,7 @@ pub fn combat_auto_attack(
                 {
                     // Look up the caster's team
                     if let Some(caster_entity) = aura.caster {
-                        if let Some(&(caster_team, _, _)) = combatant_info.get(&caster_entity) {
+                        if let Some(&(caster_team, _, _, _)) = combatant_info.get(&caster_entity) {
                             // Only track if the CC is from the opposing team of the target
                             // (i.e., the CC caster is an enemy of the CC'd target)
                             if caster_team != combatant.team {
@@ -826,7 +877,7 @@ pub fn combat_auto_attack(
         // Bug fix: Don't auto-attack targets with breakable CC from a friendly caster.
         // This prevents, e.g., a Warlock pet from breaking its team's Polymorph.
         if let Some(&cc_caster_team) = friendly_cc_team.get(&target_entity) {
-            if let Some(&(attacker_team, _, _)) = combatant_info.get(&attacker_entity) {
+            if let Some(&(attacker_team, _, _, _)) = combatant_info.get(&attacker_entity) {
                 if attacker_team == cc_caster_team {
                     continue;
                 }
@@ -859,12 +910,14 @@ pub fn combat_auto_attack(
                 damage_dealt_updates.push((attacker_entity, actual_damage + absorbed));
 
                 // Log the attack with structured data
-                if let (Some((attacker_team, _attacker_class, attacker_name, attacker_is_melee)), Some((target_team, _target_class, target_name, _))) =
+                if let (Some((attacker_team, attacker_class, attacker_name, attacker_is_melee)), Some((target_team, _target_class, target_name, _))) =
                     (combatant_info.get(&attacker_entity), combatant_info.get(&target_entity)) {
                     let attack_name = if has_bonus {
                         "Heroic Strike" // Enhanced auto-attack
                     } else if *attacker_is_melee {
                         "Auto Attack"
+                    } else if *attacker_class == match_config::CharacterClass::Hunter {
+                        "Auto Shot"
                     } else {
                         "Wand Shot"
                     };
@@ -1188,7 +1241,8 @@ fn apply_interrupt_lockout(
         SpellSchool::Shadow => 3.0,
         SpellSchool::Arcane => 4.0,
         SpellSchool::Fire => 5.0,
-        SpellSchool::None => 6.0,
+        SpellSchool::Nature => 6.0,
+        SpellSchool::None => 7.0,
     };
 
     commands.spawn(AuraPending {
@@ -1217,6 +1271,7 @@ fn apply_interrupt_lockout(
         SpellSchool::Shadow => "Shadow",
         SpellSchool::Arcane => "Arcane",
         SpellSchool::Fire => "Fire",
+        SpellSchool::Nature => "Nature",
         SpellSchool::None => "None",
     };
 
@@ -2276,6 +2331,30 @@ fn ease_out_quad(t: f32) -> f32 {
     1.0 - (1.0 - t).powi(2)
 }
 
+/// Despawn pets whose owner has died by setting their HP to 0.
+pub fn despawn_pets_of_dead_owners(
+    mut combat_log: ResMut<CombatLog>,
+    mut pets: Query<(Entity, &Pet, &mut Combatant)>,
+    owners: Query<&Combatant, Without<Pet>>,
+    celebration: Option<Res<VictoryCelebration>>,
+) {
+    if celebration.is_some() { return; }
+    for (_pet_entity, pet, mut pet_combatant) in pets.iter_mut() {
+        if !pet_combatant.is_alive() {
+            continue;
+        }
+        if let Ok(owner) = owners.get(pet.owner) {
+            if !owner.is_alive() {
+                pet_combatant.current_health = 0.0;
+                combat_log.log(
+                    CombatLogEventType::Death,
+                    format!("[DEATH] Team {} {} despawns (owner died)", pet_combatant.team, pet.pet_type.name()),
+                );
+            }
+        }
+    }
+}
+
 // =============================================================================
 // Unit Tests
 // =============================================================================
@@ -2519,6 +2598,75 @@ mod tests {
         let mid = ease_out_quad(0.5);
         assert!(mid > 0.5, "Ease-out should be > 0.5 at t=0.5, got {}", mid);
         assert!(mid < 1.0, "Ease-out should be < 1.0 at t=0.5, got {}", mid);
+    }
+
+    // =========================================================================
+    // Arena Boundary Tests
+    // =========================================================================
+
+    #[test]
+    fn test_is_in_arena_bounds_center() {
+        assert!(is_in_arena_bounds(Vec3::new(0.0, 0.0, 0.0)));
+    }
+
+    #[test]
+    fn test_is_in_arena_bounds_outside_x() {
+        assert!(!is_in_arena_bounds(Vec3::new(40.0, 0.0, 0.0)));
+    }
+
+    #[test]
+    fn test_is_in_arena_bounds_outside_z() {
+        assert!(!is_in_arena_bounds(Vec3::new(0.0, 0.0, 25.0)));
+    }
+
+    #[test]
+    fn test_is_in_arena_bounds_outside_diagonal_corner() {
+        // Inside rectangle but outside diagonal: |30| + |20| = 50 > 48.88
+        assert!(!is_in_arena_bounds(Vec3::new(30.0, 0.0, 20.0)));
+    }
+
+    #[test]
+    fn test_is_in_arena_bounds_inside_diagonal_corner() {
+        // |25| + |15| = 40 < 48.88
+        assert!(is_in_arena_bounds(Vec3::new(25.0, 0.0, 15.0)));
+    }
+
+    #[test]
+    fn test_clamp_to_arena_inside_unchanged() {
+        let pos = Vec3::new(10.0, 5.0, 8.0);
+        let clamped = clamp_to_arena(pos);
+        assert_eq!(clamped, pos);
+    }
+
+    #[test]
+    fn test_clamp_to_arena_outside_x() {
+        let clamped = clamp_to_arena(Vec3::new(50.0, 1.0, 0.0));
+        assert_eq!(clamped.x, ARENA_HALF_X);
+        assert_eq!(clamped.z, 0.0);
+    }
+
+    #[test]
+    fn test_clamp_to_arena_diagonal_corner() {
+        // (35, 20) is inside rectangle but |35|+|20|=55 > 48.88
+        let clamped = clamp_to_arena(Vec3::new(35.0, 1.0, 20.0));
+        let sum = clamped.x.abs() + clamped.z.abs();
+        assert!((sum - ARENA_CORNER_SUM).abs() < 0.01, "Corner sum should equal ARENA_CORNER_SUM, got {}", sum);
+        assert!(clamped.x > 0.0, "Should stay in same quadrant");
+        assert!(clamped.z > 0.0, "Should stay in same quadrant");
+    }
+
+    #[test]
+    fn test_clamp_to_arena_preserves_y() {
+        let clamped = clamp_to_arena(Vec3::new(50.0, 3.5, 30.0));
+        assert_eq!(clamped.y, 3.5, "Y should be unchanged");
+    }
+
+    #[test]
+    fn test_clamp_to_arena_idempotent() {
+        let pos = Vec3::new(35.0, 1.0, 20.0);
+        let once = clamp_to_arena(pos);
+        let twice = clamp_to_arena(once);
+        assert_eq!(once, twice, "Clamping twice should give the same result");
     }
 }
 

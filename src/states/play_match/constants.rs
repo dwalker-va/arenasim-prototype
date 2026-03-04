@@ -82,6 +82,9 @@ pub const ARENA_HALF_X: f32 = 36.5;
 /// Arena half-size on Z axis (inside the visual walls).
 pub const ARENA_HALF_Z: f32 = 21.5;
 
+/// Maximum |x| + |z| permitted at octagonal arena corners (diagonal wall boundary with wall+buffer offset).
+pub const ARENA_CORNER_SUM: f32 = 48.88;
+
 // ============================================================================
 // Visual/UI
 // ============================================================================
@@ -125,6 +128,47 @@ pub const PREMATCH_COUNTDOWN: f32 = 10.0;
 
 /// Victory celebration duration before transitioning to results (in seconds).
 pub const VICTORY_CELEBRATION_DURATION: f32 = 5.0;
+
+// ============================================================================
+// Hunter
+// ============================================================================
+
+/// Hunter dead zone range — ranged abilities cannot be used within this distance.
+pub const HUNTER_DEAD_ZONE: f32 = 8.0;
+
+/// Auto Shot range for Hunter ranged auto-attacks.
+pub const AUTO_SHOT_RANGE: f32 = 35.0;
+
+/// Range at which Hunter proactively kites to maintain distance.
+pub const HUNTER_KITE_RANGE: f32 = 30.0;
+
+/// Delay in seconds before a placed trap becomes armed and can be triggered.
+pub const TRAP_ARM_DELAY: f32 = 1.5;
+
+/// Radius around an armed trap that triggers it when an enemy enters.
+pub const TRAP_TRIGGER_RADIUS: f32 = 5.0;
+
+/// Radius of the Frost Trap slow zone after triggering.
+pub const FROST_TRAP_ZONE_RADIUS: f32 = 8.0;
+
+/// Duration of the Frost Trap slow zone in seconds.
+pub const FROST_TRAP_ZONE_DURATION: f32 = 10.0;
+
+/// Minimum distance from Hunter to target for trap to be "launched" (arc projectile).
+/// Within this range, traps drop instantly at feet.
+pub const TRAP_LAUNCH_MIN_RANGE: f32 = 10.0;
+
+/// Horizontal travel speed of a launched trap projectile (units per second).
+pub const TRAP_LAUNCH_SPEED: f32 = 20.0;
+
+/// Peak Y offset of the parabolic arc at midpoint of trap launch travel.
+pub const TRAP_LAUNCH_ARC_HEIGHT: f32 = 6.0;
+
+/// Distance in units that Disengage launches the Hunter backward.
+pub const DISENGAGE_DISTANCE: f32 = 15.0;
+
+/// Speed of the Disengage backward leap (units per second).
+pub const DISENGAGE_SPEED: f32 = 30.0;
 
 // ============================================================================
 // Diminishing Returns

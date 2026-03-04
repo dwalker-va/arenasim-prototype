@@ -528,6 +528,7 @@ fn try_dispel_magic(
                 log_prefix: "[DISPEL]",
                 caster_class: CharacterClass::Priest,
                 heal_on_success: None,
+                aura_type_filter: None,
             });
 
             // Log the dispel cast (the actual removal is logged in process_dispels)
@@ -565,7 +566,8 @@ fn try_dispel_magic(
 /// to the aura map during AI decision making.
 /// Note: The actual aura removed is randomly selected in process_dispels (WoW Classic behavior).
 ///
-/// Used by both Priest (Dispel Magic) and Paladin (Cleanse) - only the log_prefix differs.
+/// Used by Priest (Dispel Magic), Paladin (Cleanse), Felhunter (Devour Magic),
+/// and Bird (Master's Call).
 #[derive(bevy::prelude::Component)]
 pub struct DispelPending {
     /// Target entity to dispel
@@ -576,6 +578,8 @@ pub struct DispelPending {
     pub caster_class: CharacterClass,
     /// Entity to heal on successful dispel (Felhunter's Devour Magic heals itself)
     pub heal_on_success: Option<(Entity, f32)>,
+    /// Optional filter: only remove auras matching these types (Master's Call only removes movement impairments)
+    pub aura_type_filter: Option<Vec<AuraType>>,
 }
 
 /// Try to cast Flash Heal on the lowest HP ally.

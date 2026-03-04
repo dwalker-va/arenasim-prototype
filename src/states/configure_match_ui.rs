@@ -63,6 +63,7 @@ pub fn load_class_icons(
         (match_config::CharacterClass::Priest, "icons/classes/priest.png"),
         (match_config::CharacterClass::Warlock, "icons/classes/warlock.png"),
         (match_config::CharacterClass::Paladin, "icons/classes/paladin.png"),
+        (match_config::CharacterClass::Hunter, "icons/classes/hunter.png"),
     ];
 
     // Load handles if not already loaded
@@ -446,7 +447,7 @@ fn render_team_panel(
         let character = team_slots.get(slot).and_then(|c| *c);
         let is_active = slot < team_size;
 
-        render_character_slot(ui, team, slot, character, is_active, team_color, picker_state, max_width, class_icons, commands, next_state);
+        render_character_slot(ui, config, team, slot, character, is_active, team_color, picker_state, max_width, class_icons, commands, next_state);
 
         if slot < 2 {
             ui.add_space(12.0);
@@ -536,6 +537,7 @@ fn render_team_panel(
 /// - **Inactive**: Shows grayed-out dash
 fn render_character_slot(
     ui: &mut egui::Ui,
+    _config: &mut MatchConfig,
     team: u8,
     slot: usize,
     character: Option<match_config::CharacterClass>,

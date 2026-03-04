@@ -83,6 +83,9 @@ pub struct AbilityConfig {
     pub cast_time: f32,
     /// Maximum range in units
     pub range: f32,
+    /// Minimum range in units (Hunter dead zone). None = no minimum range.
+    #[serde(default)]
+    pub min_range: Option<f32>,
     /// Resource cost (mana, energy, or rage)
     #[serde(default)]
     pub mana_cost: f32,
@@ -281,6 +284,17 @@ impl AbilityDefinitions {
             // Pet abilities (Felhunter)
             AbilityType::SpellLock,
             AbilityType::DevourMagic,
+            // Hunter abilities
+            AbilityType::AimedShot,
+            AbilityType::ArcaneShot,
+            AbilityType::ConcussiveShot,
+            AbilityType::Disengage,
+            AbilityType::FreezingTrap,
+            AbilityType::FrostTrap,
+            // Hunter pet abilities
+            AbilityType::SpiderWeb,
+            AbilityType::BoarCharge,
+            AbilityType::MastersCall,
         ];
 
         let missing: Vec<AbilityType> = expected_abilities
@@ -354,6 +368,7 @@ mod tests {
             name: "Test".to_string(),
             cast_time: 0.0,
             range: 40.0,
+            min_range: None,
             mana_cost: 0.0,
             cooldown: 0.0,
             damage_base_min: 10.0,
@@ -388,6 +403,7 @@ mod tests {
             name: "Test Heal".to_string(),
             cast_time: 1.5,
             range: 40.0,
+            min_range: None,
             mana_cost: 25.0,
             cooldown: 0.0,
             damage_base_min: 0.0,
