@@ -282,7 +282,7 @@ fn try_place_trap_at(
     // Clamp to octagonal arena bounds (midpoint can land outside corners)
     let position = crate::states::play_match::combat_core::clamp_to_arena(position);
 
-    let trap_name = if trap_type == TrapType::Freezing { "Freezing Trap" } else { "Frost Trap" };
+    let trap_name = trap_type.name();
     let caster_id = combatant_id(combatant.team, combatant.class);
 
     // Distance check uses XZ plane only (ignore Y)
@@ -292,14 +292,21 @@ fn try_place_trap_at(
     if distance > TRAP_LAUNCH_MIN_RANGE {
         // Launch: spawn arc projectile from Hunter position
         let origin = Vec3::new(my_pos.x, 1.5, my_pos.z);
+        let landing = Vec3::new(position.x, 0.0, position.z);
+        let direction = (landing - origin).normalize_or_zero();
+        let rotation = if direction != Vec3::ZERO {
+            Quat::from_rotation_y(direction.x.atan2(direction.z))
+        } else {
+            Quat::IDENTITY
+        };
         commands.spawn((
-            Transform::from_translation(origin),
+            Transform::from_translation(origin).with_rotation(rotation),
             TrapLaunchProjectile {
                 trap_type,
                 owner_team: combatant.team,
                 owner: entity,
                 origin,
-                landing_position: Vec3::new(position.x, 0.0, position.z),
+                landing_position: landing,
                 total_distance: distance,
                 distance_traveled: 0.0,
             },

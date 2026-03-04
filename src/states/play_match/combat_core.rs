@@ -2331,6 +2331,30 @@ fn ease_out_quad(t: f32) -> f32 {
     1.0 - (1.0 - t).powi(2)
 }
 
+/// Despawn pets whose owner has died by setting their HP to 0.
+pub fn despawn_pets_of_dead_owners(
+    mut combat_log: ResMut<CombatLog>,
+    mut pets: Query<(Entity, &Pet, &mut Combatant)>,
+    owners: Query<&Combatant, Without<Pet>>,
+    celebration: Option<Res<VictoryCelebration>>,
+) {
+    if celebration.is_some() { return; }
+    for (_pet_entity, pet, mut pet_combatant) in pets.iter_mut() {
+        if !pet_combatant.is_alive() {
+            continue;
+        }
+        if let Ok(owner) = owners.get(pet.owner) {
+            if !owner.is_alive() {
+                pet_combatant.current_health = 0.0;
+                combat_log.log(
+                    CombatLogEventType::Death,
+                    format!("[DEATH] Team {} {} despawns (owner died)", pet_combatant.team, pet.pet_type.name()),
+                );
+            }
+        }
+    }
+}
+
 // =============================================================================
 // Unit Tests
 // =============================================================================

@@ -1246,6 +1246,15 @@ pub enum TrapType {
     Frost,
 }
 
+impl TrapType {
+    pub fn name(&self) -> &'static str {
+        match self {
+            TrapType::Freezing => "Freezing Trap",
+            TrapType::Frost => "Frost Trap",
+        }
+    }
+}
+
 /// Component for Hunter traps placed on the ground.
 /// Traps have an arming delay, then trigger on enemy proximity.
 #[derive(Component)]

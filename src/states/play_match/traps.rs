@@ -285,10 +285,7 @@ pub fn move_trap_launch_projectiles(
                 },
                 PlayMatchEntity,
             ));
-            let trap_name = match proj.trap_type {
-                TrapType::Freezing => "Freezing Trap",
-                TrapType::Frost => "Frost Trap",
-            };
+            let trap_name = proj.trap_type.name();
             combat_log.log(
                 CombatLogEventType::CrowdControl,
                 format!(
@@ -308,11 +305,5 @@ pub fn move_trap_launch_projectiles(
         );
         let arc_y = (t * PI).sin() * TRAP_LAUNCH_ARC_HEIGHT;
         transform.translation = Vec3::new(horizontal.x, arc_y, horizontal.z);
-
-        // Rotate to face travel direction
-        let direction = (proj.landing_position - proj.origin).normalize_or_zero();
-        if direction != Vec3::ZERO {
-            transform.rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
-        }
     }
 }
