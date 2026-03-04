@@ -1216,6 +1216,37 @@ pub fn update_and_cleanup_trap_bursts(
 }
 
 // ==============================================================================
+// Trap Launch Arc Visual (in-flight sphere while trap travels to landing position)
+// ==============================================================================
+
+/// Spawn glowing sphere mesh on newly created trap launch projectiles.
+pub fn spawn_trap_launch_visuals(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    new_projectiles: Query<(Entity, &TrapLaunchProjectile), (Added<TrapLaunchProjectile>, Without<Mesh3d>)>,
+) {
+    for (entity, proj) in new_projectiles.iter() {
+        let mesh = meshes.add(Sphere::new(0.3));
+
+        let (r, g, b) = trap_type_rgb(proj.trap_type);
+        let emissive = trap_type_emissive(proj.trap_type);
+
+        let material = materials.add(StandardMaterial {
+            base_color: Color::srgba(r, g, b, 0.8),
+            emissive,
+            alpha_mode: AlphaMode::Add,
+            ..default()
+        });
+
+        commands.entity(entity).try_insert((
+            Mesh3d(mesh),
+            MeshMaterial3d(material),
+        ));
+    }
+}
+
+// ==============================================================================
 // Ice Block Visual (Freezing Trap cuboid)
 // ==============================================================================
 

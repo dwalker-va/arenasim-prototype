@@ -139,7 +139,7 @@ pub fn decide_hunter_action(
         }
 
         // Priority 2: Frost Trap at current position
-        if try_place_trap_at(commands, combat_log, abilities, entity, combatant, my_pos, TrapType::Frost) {
+        if try_place_trap_at(commands, combat_log, abilities, entity, combatant, my_pos, my_pos, TrapType::Frost) {
             return true;
         }
 
@@ -162,7 +162,7 @@ pub fn decide_hunter_action(
         if let Some((enemy_entity, _)) = nearest_enemy {
             if let Some(enemy_info) = ctx.combatants.get(&enemy_entity) {
                 let midpoint = (my_pos + enemy_info.position) / 2.0;
-                if try_place_trap_at(commands, combat_log, abilities, entity, combatant, midpoint, TrapType::Frost) {
+                if try_place_trap_at(commands, combat_log, abilities, entity, combatant, my_pos, midpoint, TrapType::Frost) {
                     combatant.kiting_timer = 3.0;
                     return true;
                 }
@@ -195,7 +195,7 @@ pub fn decide_hunter_action(
             if trap_target_info.is_alive {
                 // Place between self and target for interception
                 let midpoint = (my_pos + trap_target_info.position) / 2.0;
-                if try_place_trap_at(commands, combat_log, abilities, entity, combatant, midpoint, TrapType::Freezing) {
+                if try_place_trap_at(commands, combat_log, abilities, entity, combatant, my_pos, midpoint, TrapType::Freezing) {
                     return true;
                 }
             }
@@ -254,12 +254,15 @@ fn is_target_slowed(target: Entity, ctx: &CombatContext) -> bool {
 }
 
 /// Attempt to place a trap at a specific position (or at the Hunter's feet).
+/// If the target position is > TRAP_LAUNCH_MIN_RANGE from the hunter, spawns a
+/// TrapLaunchProjectile that arcs to the target before the trap begins arming.
 fn try_place_trap_at(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
+    my_pos: Vec3,
     position: Vec3,
     trap_type: TrapType,
 ) -> bool {
@@ -279,35 +282,66 @@ fn try_place_trap_at(
     // Clamp to octagonal arena bounds (midpoint can land outside corners)
     let position = crate::states::play_match::combat_core::clamp_to_arena(position);
 
-    // Spawn trap entity
-    commands.spawn((
-        Transform::from_translation(Vec3::new(position.x, 0.0, position.z)),
-        Trap {
-            trap_type,
-            owner_team: combatant.team,
-            owner: entity,
-            arm_timer: TRAP_ARM_DELAY,
-            trigger_radius: TRAP_TRIGGER_RADIUS,
-            triggered: false,
-        },
-        PlayMatchEntity,
-    ));
+    let trap_name = if trap_type == TrapType::Freezing { "Freezing Trap" } else { "Frost Trap" };
+    let caster_id = combatant_id(combatant.team, combatant.class);
+
+    // Distance check uses XZ plane only (ignore Y)
+    let distance = Vec3::new(my_pos.x, 0.0, my_pos.z)
+        .distance(Vec3::new(position.x, 0.0, position.z));
+
+    if distance > TRAP_LAUNCH_MIN_RANGE {
+        // Launch: spawn arc projectile from Hunter position
+        let origin = Vec3::new(my_pos.x, 1.5, my_pos.z);
+        commands.spawn((
+            Transform::from_translation(origin),
+            TrapLaunchProjectile {
+                trap_type,
+                owner_team: combatant.team,
+                owner: entity,
+                origin,
+                landing_position: Vec3::new(position.x, 0.0, position.z),
+                total_distance: distance,
+                distance_traveled: 0.0,
+            },
+            PlayMatchEntity,
+        ));
+        combat_log.log_ability_cast(
+            caster_id,
+            trap_name.to_string(),
+            None,
+            format!(
+                "[TRAP] Team {} {} launches {} toward ({:.0}, {:.0})",
+                combatant.team, combatant.class.name(), trap_name, position.x, position.z
+            ),
+        );
+    } else {
+        // Drop: instant spawn at target position (short range)
+        commands.spawn((
+            Transform::from_translation(Vec3::new(position.x, 0.0, position.z)),
+            Trap {
+                trap_type,
+                owner_team: combatant.team,
+                owner: entity,
+                arm_timer: TRAP_ARM_DELAY,
+                trigger_radius: TRAP_TRIGGER_RADIUS,
+                triggered: false,
+            },
+            PlayMatchEntity,
+        ));
+        combat_log.log_ability_cast(
+            caster_id,
+            trap_name.to_string(),
+            None,
+            format!(
+                "[TRAP] Team {} {} places {} at ({:.0}, {:.0})",
+                combatant.team, combatant.class.name(), trap_name, position.x, position.z
+            ),
+        );
+    }
 
     combatant.current_mana -= def.mana_cost;
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = GCD;
-
-    let trap_name = if trap_type == TrapType::Freezing { "Freezing Trap" } else { "Frost Trap" };
-    let caster_id = combatant_id(combatant.team, combatant.class);
-    combat_log.log_ability_cast(
-        caster_id,
-        trap_name.to_string(),
-        None,
-        format!(
-            "[TRAP] Team {} {} places {} at ({:.0}, {:.0})",
-            combatant.team, combatant.class.name(), trap_name, position.x, position.z
-        ),
-    );
 
     true
 }

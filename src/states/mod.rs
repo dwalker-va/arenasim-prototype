@@ -151,9 +151,11 @@ impl Plugin for StatesPlugin {
                     play_match::process_channeling,  // Process channeled spell ticks
                     play_match::spawn_projectile_visuals,
                     play_match::move_projectiles,
+                    play_match::move_trap_launch_projectiles,  // Arc travel for launched traps
                     play_match::process_projectile_hits,
                     play_match::move_to_target,
                     play_match::trap_system,  // After movement — needs current positions
+                    play_match::despawn_pets_of_dead_owners,  // Kill pets whose owner has died
                 )
                     .chain()
                     .in_set(PlayMatchSystems::CombatAndMovement)
@@ -232,6 +234,7 @@ impl Plugin for StatesPlugin {
                     play_match::update_trap_visuals,             // Arming pulse → armed shimmer
                     play_match::spawn_trap_burst_visuals,        // Burst sphere on trigger
                     play_match::update_and_cleanup_trap_bursts,  // Expand + fade + despawn
+                    play_match::spawn_trap_launch_visuals,       // Glowing sphere on launched traps
                 )
                     .run_if(in_state(GameState::PlayMatch)),
             )

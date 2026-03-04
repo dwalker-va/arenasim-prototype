@@ -154,6 +154,16 @@ pub const FROST_TRAP_ZONE_RADIUS: f32 = 8.0;
 /// Duration of the Frost Trap slow zone in seconds.
 pub const FROST_TRAP_ZONE_DURATION: f32 = 10.0;
 
+/// Minimum distance from Hunter to target for trap to be "launched" (arc projectile).
+/// Within this range, traps drop instantly at feet.
+pub const TRAP_LAUNCH_MIN_RANGE: f32 = 10.0;
+
+/// Horizontal travel speed of a launched trap projectile (units per second).
+pub const TRAP_LAUNCH_SPEED: f32 = 20.0;
+
+/// Peak Y offset of the parabolic arc at midpoint of trap launch travel.
+pub const TRAP_LAUNCH_ARC_HEIGHT: f32 = 6.0;
+
 /// Distance in units that Disengage launches the Hunter backward.
 pub const DISENGAGE_DISTANCE: f32 = 15.0;
 

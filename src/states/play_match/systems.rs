@@ -55,6 +55,8 @@ pub use super::projectiles::move_projectiles;
 pub use super::projectiles::process_projectile_hits;
 pub use super::combat_core::move_to_target;
 pub use super::traps::trap_system;
+pub use super::traps::move_trap_launch_projectiles;
+pub use super::combat_core::despawn_pets_of_dead_owners;
 
 // === Phase 1 (additional): Slow Zone ===
 pub use super::traps::slow_zone_system;
@@ -167,9 +169,11 @@ where
             process_casting,
             process_channeling,
             move_projectiles,
+            move_trap_launch_projectiles,  // Arc travel for launched traps — before trap_system
             process_projectile_hits,
             move_to_target,
             trap_system,  // After movement — needs current positions for proximity check
+            despawn_pets_of_dead_owners,  // Kill pets whose owner has died
         )
             .chain()
             .in_set(CombatSystemPhase::CombatAndMovement)

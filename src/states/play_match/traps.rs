@@ -1,10 +1,12 @@
 //! Trap and Slow Zone Systems
 //!
-//! Two systems handle the full Hunter trap lifecycle:
+//! Three systems handle the full Hunter trap lifecycle:
+//! - `move_trap_launch_projectiles()` — arc travel for launched traps
 //! - `trap_system()` — arm timer, proximity trigger, effect application
 //! - `slow_zone_system()` — zone duration tick, slow aura refresh
 
 use bevy::prelude::*;
+use std::f32::consts::PI;
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use super::components::*;
 use super::constants::*;
@@ -19,7 +21,7 @@ pub fn trap_system(
     time: Res<Time>,
     mut combat_log: ResMut<CombatLog>,
     mut traps: Query<(Entity, &mut Trap, &Transform)>,
-    combatants: Query<(Entity, &Combatant, &Transform), Without<Trap>>,
+    mut combatants: Query<(Entity, &mut Combatant, &Transform), Without<Trap>>,
 ) {
     let dt = time.delta_secs();
 
@@ -41,7 +43,7 @@ pub fn trap_system(
         let trap_pos = trap_transform.translation;
         let mut triggered_by: Option<(Entity, u8, String)> = None;
 
-        for (target_entity, target_combatant, target_transform) in combatants.iter() {
+        for (target_entity, target_combatant, target_transform) in combatants.iter_mut() {
             // Skip dead combatants
             if !target_combatant.is_alive() {
                 continue;
@@ -67,6 +69,17 @@ pub fn trap_system(
         if let Some((target_entity, _target_team, target_name)) = triggered_by {
             trap.triggered = true;
             let owner_name = format!("Team {}", trap.owner_team);
+
+            // Traps break stealth on trigger
+            if let Ok((_, mut target_combatant, _)) = combatants.get_mut(target_entity) {
+                if target_combatant.stealthed {
+                    target_combatant.stealthed = false;
+                    combat_log.log(
+                        CombatLogEventType::CrowdControl,
+                        format!("[STEALTH] {} breaks stealth from trap!", target_name),
+                    );
+                }
+            }
 
             // Spawn visual burst at trap position before despawning
             commands.spawn((
@@ -239,6 +252,67 @@ pub fn slow_zone_system(
                     });
                 }
             }
+        }
+    }
+}
+
+/// Move trap launch projectiles along a parabolic arc toward their landing position.
+/// On arrival, spawns a regular Trap entity and despawns the projectile.
+pub fn move_trap_launch_projectiles(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut projectiles: Query<(Entity, &mut Transform, &mut TrapLaunchProjectile)>,
+    mut combat_log: ResMut<CombatLog>,
+    celebration: Option<Res<VictoryCelebration>>,
+) {
+    if celebration.is_some() { return; }
+    let dt = time.delta_secs();
+
+    for (entity, mut transform, mut proj) in projectiles.iter_mut() {
+        proj.distance_traveled += TRAP_LAUNCH_SPEED * dt;
+
+        if proj.distance_traveled >= proj.total_distance {
+            // Arrived — spawn Trap at landing position, despawn projectile
+            commands.spawn((
+                Transform::from_translation(proj.landing_position),
+                Trap {
+                    trap_type: proj.trap_type,
+                    owner_team: proj.owner_team,
+                    owner: proj.owner,
+                    arm_timer: TRAP_ARM_DELAY,
+                    trigger_radius: TRAP_TRIGGER_RADIUS,
+                    triggered: false,
+                },
+                PlayMatchEntity,
+            ));
+            let trap_name = match proj.trap_type {
+                TrapType::Freezing => "Freezing Trap",
+                TrapType::Frost => "Frost Trap",
+            };
+            combat_log.log(
+                CombatLogEventType::CrowdControl,
+                format!(
+                    "[TRAP] {} lands at ({:.0}, {:.0})",
+                    trap_name, proj.landing_position.x, proj.landing_position.z
+                ),
+            );
+            commands.entity(entity).despawn();
+            continue;
+        }
+
+        // Interpolate position along parabolic arc
+        let t = proj.distance_traveled / proj.total_distance;
+        let horizontal = proj.origin.lerp(
+            Vec3::new(proj.landing_position.x, proj.origin.y, proj.landing_position.z),
+            t,
+        );
+        let arc_y = (t * PI).sin() * TRAP_LAUNCH_ARC_HEIGHT;
+        transform.translation = Vec3::new(horizontal.x, arc_y, horizontal.z);
+
+        // Rotate to face travel direction
+        let direction = (proj.landing_position - proj.origin).normalize_or_zero();
+        if direction != Vec3::ZERO {
+            transform.rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
         }
     }
 }

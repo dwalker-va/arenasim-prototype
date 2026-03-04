@@ -1264,6 +1264,23 @@ pub struct Trap {
     pub triggered: bool,
 }
 
+/// A trap that has been lobbed and is traveling through the air to its landing position.
+/// On arrival, despawns and spawns a regular Trap entity at the landing position.
+#[derive(Component)]
+pub struct TrapLaunchProjectile {
+    pub trap_type: TrapType,
+    pub owner_team: u8,
+    pub owner: Entity,
+    /// Hunter's position at launch (needed for lerp — Transform is mutated each frame)
+    pub origin: Vec3,
+    /// World-space target position (post-clamp)
+    pub landing_position: Vec3,
+    /// Precomputed horizontal distance for progress calculation
+    pub total_distance: f32,
+    /// Accumulated horizontal travel distance
+    pub distance_traveled: f32,
+}
+
 /// Component for persistent slow zones created by Frost Trap.
 /// Enemies inside the zone receive a refreshing movement speed slow.
 #[derive(Component)]
