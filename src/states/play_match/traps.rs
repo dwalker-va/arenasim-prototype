@@ -22,7 +22,13 @@ pub fn trap_system(
     mut combat_log: ResMut<CombatLog>,
     mut traps: Query<(Entity, &mut Trap, &Transform)>,
     mut combatants: Query<(Entity, &mut Combatant, &Transform), Without<Trap>>,
+    celebration: Option<Res<VictoryCelebration>>,
 ) {
+    // Don't trigger traps during victory celebration
+    if celebration.is_some() {
+        return;
+    }
+
     let dt = time.delta_secs();
 
     for (trap_entity, mut trap, trap_transform) in traps.iter_mut() {
@@ -171,7 +177,13 @@ pub fn slow_zone_system(
     time: Res<Time>,
     mut zones: Query<(Entity, &mut SlowZone, &Transform)>,
     mut combatants: Query<(Entity, &Combatant, &Transform, Option<&mut ActiveAuras>), Without<SlowZone>>,
+    celebration: Option<Res<VictoryCelebration>>,
 ) {
+    // Don't apply slow zone auras during victory celebration
+    if celebration.is_some() {
+        return;
+    }
+
     let dt = time.delta_secs();
 
     for (zone_entity, mut zone, zone_transform) in zones.iter_mut() {

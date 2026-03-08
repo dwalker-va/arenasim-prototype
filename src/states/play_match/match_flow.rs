@@ -159,6 +159,10 @@ pub fn check_match_end(
     celebration: Option<Res<VictoryCelebration>>,
     projectiles: Query<Entity, With<Projectile>>,
     spell_effects: Query<Entity, With<SpellImpactEffect>>,
+    traps: Query<Entity, With<Trap>>,
+    trap_projectiles: Query<Entity, With<TrapLaunchProjectile>>,
+    slow_zones: Query<Entity, With<SlowZone>>,
+    ice_blocks: Query<Entity, With<IceBlockVisual>>,
     mut commands: Commands,
 ) {
     // If celebration is already active, don't check for match end again
@@ -242,7 +246,27 @@ pub fn check_match_end(
         for effect_entity in spell_effects.iter() {
             commands.entity(effect_entity).despawn_recursive();
         }
-        
+
+        // Despawn all active traps to prevent triggering during celebration
+        for trap_entity in traps.iter() {
+            commands.entity(trap_entity).despawn_recursive();
+        }
+
+        // Despawn all in-flight trap projectiles
+        for trap_proj_entity in trap_projectiles.iter() {
+            commands.entity(trap_proj_entity).despawn_recursive();
+        }
+
+        // Despawn all active slow zones
+        for zone_entity in slow_zones.iter() {
+            commands.entity(zone_entity).despawn_recursive();
+        }
+
+        // Despawn all ice block visuals (aura system frozen during celebration prevents self-cleanup)
+        for ice_entity in ice_blocks.iter() {
+            commands.entity(ice_entity).despawn_recursive();
+        }
+
         // Save combat log to file for debugging
         let match_metadata = MatchMetadata {
             arena_name: config.map.name().to_string(),
