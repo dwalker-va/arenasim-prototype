@@ -26,9 +26,14 @@ pub mod pet_ai;
 use bevy::prelude::*;
 use std::collections::HashMap;
 
+use crate::combat::log::CombatLog;
 use super::match_config::CharacterClass;
 use super::abilities::AbilityType;
-use super::components::{Aura, AuraType, PetType, DRCategory, DRTracker};
+use super::ability_config::AbilityDefinitions;
+use super::components::{Aura, ActiveAuras, Combatant, AuraType, DispelPending, PetType, DRCategory, DRTracker};
+use super::constants::GCD;
+use super::is_spell_school_locked;
+use super::utils::combatant_id;
 
 /// Per-frame snapshot of a single combatant, used for AI decision making.
 #[derive(Clone, Copy, Debug)]
@@ -255,5 +260,132 @@ pub fn is_team_healthy(
             return false;
         }
     }
+    true
+}
+
+/// Shared dispel logic used by Priest (Dispel Magic) and Paladin (Cleanse).
+///
+/// Finds the ally with the highest priority dispellable debuff and casts
+/// the specified dispel ability on them. The actual aura removed is randomly
+/// selected in process_dispels (WoW Classic behavior).
+///
+/// The `min_priority` parameter controls which debuffs are considered:
+/// - 90: Only urgent CC (Polymorph, Fear)
+/// - 50: Include roots and DoTs
+/// - 20: Include slows (not recommended)
+#[allow(clippy::too_many_arguments)]
+pub fn try_dispel_ally(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
+    min_priority: i32,
+    ability_type: AbilityType,
+    log_prefix: &'static str,
+    log_name: &str,
+    caster_class: CharacterClass,
+) -> bool {
+    let def = abilities.get_unchecked(&ability_type);
+
+    // Check if spell school is locked out
+    if is_spell_school_locked(def.spell_school, auras) {
+        return false;
+    }
+
+    if combatant.current_mana < def.mana_cost {
+        return false;
+    }
+
+    // Find ally with highest priority dispellable debuff
+    let mut best_candidate: Option<(Entity, i32)> = None;
+
+    for (e, info) in ctx.combatants.iter() {
+        // Must be alive ally
+        if info.team != combatant.team || info.current_health <= 0.0 {
+            continue;
+        }
+
+        // Check range
+        if my_pos.distance(info.position) > def.range {
+            continue;
+        }
+
+        // Check if ally has any dispellable debuffs
+        let Some(ally_auras) = ctx.active_auras.get(e) else {
+            continue;
+        };
+
+        // Find highest priority dispellable debuff on this ally
+        let mut highest_priority = -1;
+        for aura in ally_auras {
+            if !aura.can_be_dispelled() {
+                continue;
+            }
+
+            let priority = dispel_priority(aura.effect_type);
+
+            if priority > highest_priority {
+                highest_priority = priority;
+            }
+        }
+
+        if highest_priority < min_priority {
+            continue;
+        }
+
+        match best_candidate {
+            None => best_candidate = Some((*e, highest_priority)),
+            Some((_, best_prio)) if highest_priority > best_prio => {
+                best_candidate = Some((*e, highest_priority));
+            }
+            _ => {}
+        }
+    }
+
+    let Some((dispel_target, _)) = best_candidate else {
+        return false;
+    };
+
+    // Execute the ability
+    combatant.current_mana -= def.mana_cost;
+    combatant.global_cooldown = GCD;
+
+    // Log
+    let caster_id = combatant_id(combatant.team, combatant.class);
+    let target_id = ctx.combatants.get(&dispel_target).map(|info| {
+        format!("Team {} {}", info.team, info.class.name())
+    });
+    combat_log.log_ability_cast(
+        caster_id,
+        log_name.to_string(),
+        target_id.clone(),
+        format!(
+            "Team {} {} casts {} on {}",
+            combatant.team,
+            combatant.class.name(),
+            log_name,
+            target_id.as_deref().unwrap_or("ally")
+        ),
+    );
+
+    // Spawn pending dispel
+    commands.spawn(DispelPending {
+        target: dispel_target,
+        log_prefix,
+        caster_class,
+        heal_on_success: None,
+        aura_type_filter: None,
+    });
+
+    info!(
+        "Team {} {} casts {} on ally",
+        combatant.team,
+        combatant.class.name(),
+        log_name
+    );
+
     true
 }

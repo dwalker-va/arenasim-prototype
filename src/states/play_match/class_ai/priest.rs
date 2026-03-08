@@ -24,7 +24,7 @@ use crate::states::play_match::constants::GCD;
 use crate::states::play_match::is_spell_school_locked;
 use crate::states::play_match::utils::combatant_id;
 
-use super::{dispel_priority, CombatContext, is_team_healthy};
+use super::{CombatContext, is_team_healthy};
 
 /// Priest AI: Decides and executes abilities for a Priest combatant.
 ///
@@ -396,20 +396,7 @@ fn try_power_word_shield(
 /// Try to cast Dispel Magic on an ally with a dispellable debuff.
 /// Returns true if the ability was used.
 ///
-/// AI prioritizes dispelling based on severity:
-/// - Polymorph (100) - complete incapacitate
-/// - Fear (90) - loss of control
-/// - Root (80) - movement impaired
-/// - Magic DoTs (50) - Corruption, Immolate
-/// - Movement slows (20) - Frostbolt slow (typically not worth dispelling)
-///
-/// The `min_priority` parameter controls which debuffs are considered:
-/// - 90: Only urgent CC (Polymorph, Fear)
-/// - 50: Include roots and DoTs
-/// - 20: Include slows (not recommended)
-///
-/// Note: The actual debuff removed is random per WoW Classic behavior.
-/// The AI just identifies which ally needs dispelling most.
+/// Delegates to the shared `try_dispel_ally()` in `class_ai/mod.rs`.
 fn try_dispel_magic(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -420,152 +407,20 @@ fn try_dispel_magic(
     ctx: &CombatContext,
     min_priority: i32,
 ) -> bool {
-    let ability = AbilityType::DispelMagic;
-    let def = abilities.get_unchecked(&ability);
-
-    // Check if spell school is locked out
-    if is_spell_school_locked(def.spell_school, auras) {
-        return false;
-    }
-
-    if combatant.current_mana < def.mana_cost {
-        return false;
-    }
-
-    // Find ally with dispellable debuff, prioritized by severity
-    // Priority: Polymorph > Fear > Root > Magic DoT > Slow
-    let mut best_candidate: Option<(Entity, Vec3, i32)> = None; // (entity, pos, priority)
-
-    for (ally_entity, info) in ctx.combatants.iter() {
-        // Must be same team and alive
-        if info.team != combatant.team || info.current_health <= 0.0 {
-            continue;
-        }
-
-        // Check if ally has any dispellable debuffs
-        let ally_auras = match ctx.active_auras.get(ally_entity) {
-            Some(auras) => auras,
-            None => continue,
-        };
-
-        // Find highest priority dispellable debuff on this ally
-        let mut highest_priority = -1;
-        for aura in ally_auras {
-            if !aura.can_be_dispelled() {
-                continue;
-            }
-
-            // Calculate priority based on aura type (shared logic in mod.rs)
-            let priority = dispel_priority(aura.effect_type);
-
-            if priority > highest_priority {
-                highest_priority = priority;
-            }
-        }
-
-        // Check against minimum priority threshold
-        if highest_priority < min_priority {
-            continue; // No debuffs worth dispelling at this priority level
-        }
-
-        let ally_pos = info.position;
-
-        // Check if in range
-        let distance = my_pos.distance(ally_pos);
-        if distance > def.range {
-            continue;
-        }
-
-        // Track best candidate
-        match best_candidate {
-            None => best_candidate = Some((*ally_entity, ally_pos, highest_priority)),
-            Some((_, _, best_priority)) if highest_priority > best_priority => {
-                best_candidate = Some((*ally_entity, ally_pos, highest_priority));
-            }
-            _ => {}
-        }
-    }
-
-    let Some((dispel_target, _target_pos, _)) = best_candidate else {
-        return false;
-    };
-
-    // Execute the ability
-    combatant.current_mana -= def.mana_cost;
-    combatant.global_cooldown = GCD;
-
-    // Get the target's auras and remove a random dispellable one
-    if let Some(target_auras) = ctx.active_auras.get(&dispel_target) {
-        // Collect indices of dispellable auras
-        let dispellable_indices: Vec<usize> = target_auras
-            .iter()
-            .enumerate()
-            .filter(|(_, a)| a.can_be_dispelled())
-            .map(|(i, _)| i)
-            .collect();
-
-        if !dispellable_indices.is_empty() {
-            // We can't mutably access active_auras here, so we'll spawn a DispelPending
-            // component that will be processed in a separate system.
-            // Note: The actual aura removed is randomly selected in process_dispels (WoW Classic behavior),
-            // so we don't log a specific aura name here - that's logged when the dispel actually happens.
-            commands.spawn(DispelPending {
-                target: dispel_target,
-                log_prefix: "[DISPEL]",
-                caster_class: CharacterClass::Priest,
-                heal_on_success: None,
-                aura_type_filter: None,
-            });
-
-            // Log the dispel cast (the actual removal is logged in process_dispels)
-            let caster_id = combatant_id(combatant.team, combatant.class);
-            let target_id = ctx.combatants.get(&dispel_target).map(|info| {
-                format!("Team {} {}", info.team, info.class.name())
-            });
-            combat_log.log_ability_cast(
-                caster_id,
-                "Dispel Magic".to_string(),
-                target_id.clone(),
-                format!(
-                    "Team {} {} casts Dispel Magic on {}",
-                    combatant.team,
-                    combatant.class.name(),
-                    target_id.unwrap_or_else(|| "ally".to_string())
-                ),
-            );
-
-            info!(
-                "Team {} {} casts Dispel Magic on ally",
-                combatant.team,
-                combatant.class.name()
-            );
-
-            return true;
-        }
-    }
-
-    false
-}
-
-/// Pending dispel to be processed by the aura system.
-/// This allows dispels to be applied without holding mutable references
-/// to the aura map during AI decision making.
-/// Note: The actual aura removed is randomly selected in process_dispels (WoW Classic behavior).
-///
-/// Used by Priest (Dispel Magic), Paladin (Cleanse), Felhunter (Devour Magic),
-/// and Bird (Master's Call).
-#[derive(bevy::prelude::Component)]
-pub struct DispelPending {
-    /// Target entity to dispel
-    pub target: Entity,
-    /// Log prefix for combat log (e.g., "[DISPEL]" for Priest, "[CLEANSE]" for Paladin)
-    pub log_prefix: &'static str,
-    /// Caster's class for visual effect coloring
-    pub caster_class: CharacterClass,
-    /// Entity to heal on successful dispel (Felhunter's Devour Magic heals itself)
-    pub heal_on_success: Option<(Entity, f32)>,
-    /// Optional filter: only remove auras matching these types (Master's Call only removes movement impairments)
-    pub aura_type_filter: Option<Vec<AuraType>>,
+    super::try_dispel_ally(
+        commands,
+        combat_log,
+        abilities,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        min_priority,
+        AbilityType::DispelMagic,
+        "[DISPEL]",
+        "Dispel Magic",
+        CharacterClass::Priest,
+    )
 }
 
 /// Try to cast Flash Heal on the lowest HP ally.

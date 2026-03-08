@@ -1395,6 +1395,27 @@ pub struct DivineShieldPending {
     pub caster_class: match_config::CharacterClass,
 }
 
+/// Pending dispel to be processed by the aura system.
+/// This allows dispels to be applied without holding mutable references
+/// to the aura map during AI decision making.
+/// Note: The actual aura removed is randomly selected in process_dispels (WoW Classic behavior).
+///
+/// Used by Priest (Dispel Magic), Paladin (Cleanse), Felhunter (Devour Magic),
+/// and Bird (Master's Call).
+#[derive(Component)]
+pub struct DispelPending {
+    /// Target entity to dispel
+    pub target: Entity,
+    /// Log prefix for combat log (e.g., "[DISPEL]" for Priest, "[CLEANSE]" for Paladin)
+    pub log_prefix: &'static str,
+    /// Caster's class for visual effect coloring
+    pub caster_class: match_config::CharacterClass,
+    /// Entity to heal on successful dispel (Felhunter's Devour Magic heals itself)
+    pub heal_on_success: Option<(Entity, f32)>,
+    /// Optional filter: only remove auras matching these types (Master's Call only removes movement impairments)
+    pub aura_type_filter: Option<Vec<AuraType>>,
+}
+
 // =============================================================================
 // Unit Tests
 // =============================================================================

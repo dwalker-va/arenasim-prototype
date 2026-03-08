@@ -30,8 +30,7 @@ use crate::states::play_match::constants::{
 use crate::states::play_match::is_spell_school_locked;
 use crate::states::play_match::utils::combatant_id;
 
-use super::priest::DispelPending;
-use super::{dispel_priority, CombatContext, CombatantInfo};
+use super::{CombatContext, CombatantInfo};
 
 /// Paladin AI: Decides and executes abilities for a Paladin combatant.
 ///
@@ -808,6 +807,8 @@ fn try_hammer_of_justice(
 }
 
 /// Try to cast Cleanse on an ally with a dispellable debuff.
+///
+/// Delegates to the shared `try_dispel_ally()` in `class_ai/mod.rs`.
 fn try_cleanse(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -818,96 +819,20 @@ fn try_cleanse(
     ctx: &CombatContext,
     min_priority: i32,
 ) -> bool {
-    let ability = AbilityType::PaladinCleanse;
-    let def = abilities.get_unchecked(&ability);
-
-    if is_spell_school_locked(def.spell_school, auras) {
-        return false;
-    }
-
-    if combatant.current_mana < def.mana_cost {
-        return false;
-    }
-
-    // Find ally with highest priority dispellable debuff
-    let mut best_candidate: Option<(&Entity, CharacterClass, i32)> = None;
-
-    for (e, info) in ctx.combatants.iter() {
-        // Must be alive ally
-        if info.team != combatant.team || info.current_health <= 0.0 {
-            continue;
-        }
-
-        // Check range
-        if my_pos.distance(info.position) > def.range {
-            continue;
-        }
-
-        // Check if ally has any dispellable debuffs
-        let Some(ally_auras) = ctx.active_auras.get(e) else {
-            continue;
-        };
-
-        // Find highest priority dispellable debuff on this ally
-        let mut highest_priority = 0;
-        for aura in ally_auras {
-            if !aura.can_be_dispelled() {
-                continue;
-            }
-
-            let priority = dispel_priority(aura.effect_type);
-
-            if priority > highest_priority {
-                highest_priority = priority;
-            }
-        }
-
-        if highest_priority < min_priority {
-            continue;
-        }
-
-        match best_candidate {
-            None => best_candidate = Some((e, info.class, highest_priority)),
-            Some((_, _, best_prio)) if highest_priority > best_prio => {
-                best_candidate = Some((e, info.class, highest_priority));
-            }
-            _ => {}
-        }
-    }
-
-    let Some((target_entity, target_class, _)) = best_candidate else {
-        return false;
-    };
-
-    // Execute Cleanse
-    combatant.current_mana -= def.mana_cost;
-    combatant.global_cooldown = GCD;
-
-    // Log
-    let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = format!("Team {} {}", combatant.team, target_class.name());
-    combat_log.log_ability_cast(
-        caster_id,
-        "Cleanse".to_string(),
-        Some(target_id.clone()),
-        format!(
-            "Team {} {} casts Cleanse on {}",
-            combatant.team,
-            combatant.class.name(),
-            target_id
-        ),
-    );
-
-    // Spawn pending dispel (uses same system as Priest's DispelMagic)
-    commands.spawn(DispelPending {
-        target: *target_entity,
-        log_prefix: "[CLEANSE]",
-        caster_class: CharacterClass::Paladin,
-        heal_on_success: None,
-        aura_type_filter: None,
-    });
-
-    true
+    super::try_dispel_ally(
+        commands,
+        combat_log,
+        abilities,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        min_priority,
+        AbilityType::PaladinCleanse,
+        "[CLEANSE]",
+        "Cleanse",
+        CharacterClass::Paladin,
+    )
 }
 
 /// Try to cast Devotion Aura to buff all allies with damage reduction.
