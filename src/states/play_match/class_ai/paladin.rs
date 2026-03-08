@@ -151,7 +151,7 @@ pub fn decide_paladin_action(
     }
 
     // Priority 7: Cleanse - Maintenance (roots, DoTs when team stable)
-    if allies_are_healthy(combatant.team, ctx.combatants) {
+    if ctx.is_team_healthy(HEALTHY_HP_THRESHOLD, my_pos) {
         if try_cleanse(
             commands,
             combat_log,
@@ -167,7 +167,7 @@ pub fn decide_paladin_action(
     }
 
     // Priority 8: Holy Shock (damage) - when team healthy
-    if allies_are_healthy(combatant.team, ctx.combatants) {
+    if ctx.is_team_healthy(HEALTHY_HP_THRESHOLD, my_pos) {
         if try_holy_shock_damage(
             commands,
             combat_log,
@@ -354,20 +354,6 @@ fn has_emergency_target(
     })
 }
 
-/// Check if all allies are healthy (above healthy HP threshold)
-fn allies_are_healthy(
-    team: u8,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
-) -> bool {
-    combatant_info
-        .values()
-        .filter(|info| info.team == team && info.current_health > 0.0)
-        .all(|info| {
-            info.max_health > 0.0
-                && (info.current_health / info.max_health) >= HEALTHY_HP_THRESHOLD
-        })
-}
-
 /// Try to cast Flash of Light on an injured ally.
 fn try_flash_of_light(
     commands: &mut Commands,
@@ -390,24 +376,13 @@ fn try_flash_of_light(
         return false;
     }
 
-    // Find the lowest HP ally (below 90%), excluding pets
-    let heal_target = ctx.combatants
-        .iter()
-        .filter(|(_, info)| {
-            info.team == combatant.team
-                && info.current_health > 0.0
-                && info.max_health > 0.0
-                && !info.is_pet
-                && (info.current_health / info.max_health) < 0.9
-        })
-        .map(|(e, info)| {
-            (e, info.class, info.current_health / info.max_health, info.position)
-        })
-        .min_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
-
-    let Some((target_entity, target_class, _, target_pos)) = heal_target else {
+    // Find the lowest HP ally (below 90%), excluding pets, within range
+    let Some(target_info) = ctx.lowest_health_ally_below(0.9, def.range, my_pos) else {
         return false;
     };
+    let target_entity = &target_info.entity;
+    let target_class = target_info.class;
+    let target_pos = target_info.position;
 
     if !ability.can_cast_config(combatant, target_pos, my_pos, def) {
         return false;
@@ -464,24 +439,17 @@ fn try_holy_light(
         return false;
     }
 
-    // Find an ally between 50-85% HP (safe to use slow heal), excluding pets
-    let heal_target = ctx.combatants
-        .iter()
-        .filter(|(_, info)| {
-            if info.team != combatant.team || info.current_health <= 0.0 || info.max_health <= 0.0 || info.is_pet {
-                return false;
-            }
-            let pct = info.current_health / info.max_health;
-            pct >= LOW_HP_THRESHOLD && pct < SAFE_HEAL_MAX_THRESHOLD
-        })
-        .map(|(e, info)| {
-            (e, info.class, info.current_health / info.max_health, info.position)
-        })
-        .min_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
-
-    let Some((target_entity, target_class, _, target_pos)) = heal_target else {
+    // Find an ally between 50-85% HP (safe to use slow heal), excluding pets, within range
+    let Some(target_info) = ctx.lowest_health_ally_below(SAFE_HEAL_MAX_THRESHOLD, def.range, my_pos) else {
         return false;
     };
+    // Skip if target is critically low — Flash of Light or Holy Shock should handle that
+    if target_info.health_pct() < LOW_HP_THRESHOLD {
+        return false;
+    }
+    let target_entity = &target_info.entity;
+    let target_class = target_info.class;
+    let target_pos = target_info.position;
 
     if !ability.can_cast_config(combatant, target_pos, my_pos, def) {
         return false;
@@ -549,27 +517,11 @@ fn try_holy_shock_heal(
     }
 
     // Find lowest HP ally below 50% and in range, excluding pets
-    let heal_target = ctx.combatants
-        .iter()
-        .filter(|(_, info)| {
-            info.team == combatant.team
-                && info.current_health > 0.0
-                && info.max_health > 0.0
-                && !info.is_pet
-                && (info.current_health / info.max_health) < LOW_HP_THRESHOLD
-        })
-        .filter_map(|(e, info)| {
-            if my_pos.distance(info.position) <= def.range {
-                Some((e, info.class, info.current_health / info.max_health))
-            } else {
-                None
-            }
-        })
-        .min_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
-
-    let Some((target_entity, target_class, _)) = heal_target else {
+    let Some(target_info) = ctx.lowest_health_ally_below(LOW_HP_THRESHOLD, def.range, my_pos) else {
         return false;
     };
+    let target_entity = &target_info.entity;
+    let target_class = target_info.class;
 
     // Execute instant heal
     combatant.current_mana -= def.mana_cost;

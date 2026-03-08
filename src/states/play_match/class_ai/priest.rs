@@ -24,7 +24,7 @@ use crate::states::play_match::constants::GCD;
 use crate::states::play_match::is_spell_school_locked;
 use crate::states::play_match::utils::combatant_id;
 
-use super::{CombatContext, is_team_healthy};
+use super::CombatContext;
 
 /// Priest AI: Decides and executes abilities for a Priest combatant.
 ///
@@ -107,7 +107,7 @@ pub fn decide_priest_action(
 
     // Priority 5: Dispel Magic - Maintenance (Roots, DoTs when team is healthy)
     // Only clean up lesser debuffs when there's no urgent healing needed
-    if is_team_healthy(combatant.team, ctx.combatants) {
+    if ctx.is_team_healthy(0.70, my_pos) {
         if try_dispel_magic(
             commands,
             combat_log,
@@ -435,36 +435,15 @@ fn try_flash_heal(
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
 ) -> bool {
-    // Find the lowest HP ally
-    let mut lowest_hp_ally: Option<(Entity, f32, Vec3)> = None;
-
-    for (ally_entity, info) in ctx.combatants.iter() {
-        // Must be same team, alive, and not a pet (don't waste heals on pets)
-        if info.team != combatant.team || info.current_health <= 0.0 || info.is_pet {
-            continue;
-        }
-
-        // Only heal if damaged (below 90% health)
-        let hp_percent = info.current_health / info.max_health;
-        if hp_percent >= 0.9 {
-            continue;
-        }
-
-        match lowest_hp_ally {
-            None => lowest_hp_ally = Some((*ally_entity, hp_percent, info.position)),
-            Some((_, lowest_percent, _)) if hp_percent < lowest_percent => {
-                lowest_hp_ally = Some((*ally_entity, hp_percent, info.position));
-            }
-            _ => {}
-        }
-    }
-
-    let Some((heal_target, _, target_pos)) = lowest_hp_ally else {
-        return false;
-    };
-
     let ability = AbilityType::FlashHeal;
     let def = abilities.get_unchecked(&ability);
+
+    // Find the lowest HP ally below 90% health, within range, excluding pets
+    let Some(target_info) = ctx.lowest_health_ally_below(0.9, def.range, my_pos) else {
+        return false;
+    };
+    let heal_target = target_info.entity;
+    let target_pos = target_info.position;
 
     // Check if spell school is locked out
     if is_spell_school_locked(def.spell_school, auras) {

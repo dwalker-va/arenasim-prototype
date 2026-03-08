@@ -205,6 +205,28 @@ impl<'a> CombatContext<'a> {
             .min_by(|a, b| a.health_pct().partial_cmp(&b.health_pct()).unwrap())
     }
 
+    /// Find the lowest-health ally below a given HP percentage threshold, within range, excluding pets.
+    pub fn lowest_health_ally_below(
+        &self,
+        max_hp_pct: f32,
+        max_range: f32,
+        my_pos: Vec3,
+    ) -> Option<&CombatantInfo> {
+        self.alive_allies()
+            .into_iter()
+            .filter(|info| {
+                !info.is_pet
+                    && info.health_pct() < max_hp_pct
+                    && my_pos.distance(info.position) <= max_range
+            })
+            .min_by(|a, b| a.health_pct().partial_cmp(&b.health_pct()).unwrap())
+    }
+
+    /// Returns true if all allies are above the given HP threshold.
+    pub fn is_team_healthy(&self, threshold: f32, my_pos: Vec3) -> bool {
+        self.lowest_health_ally_below(threshold, f32::MAX, my_pos).is_none()
+    }
+
     /// Check if an entity has damage immunity (Divine Shield).
     pub fn entity_is_immune(&self, entity: Entity) -> bool {
         self.active_auras
@@ -240,27 +262,6 @@ pub fn dispel_priority(aura_type: AuraType) -> i32 {
         AuraType::MovementSpeedSlow => 20, // Minor (typically not worth dispelling)
         _ => 0,
     }
-}
-
-/// Check if the team's HP is stable enough for maintenance tasks.
-/// Returns true if all living allies are above 70% HP.
-///
-/// Used by Priest and Paladin to determine when to do maintenance dispels
-/// vs focusing on healing.
-pub fn is_team_healthy(
-    team: u8,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
-) -> bool {
-    for info in combatant_info.values() {
-        if info.team != team || info.current_health <= 0.0 || info.is_pet {
-            continue;
-        }
-        let hp_percent = info.current_health / info.max_health;
-        if hp_percent < 0.70 {
-            return false;
-        }
-    }
-    true
 }
 
 /// Shared dispel logic used by Priest (Dispel Magic) and Paladin (Cleanse).
