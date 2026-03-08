@@ -1061,11 +1061,11 @@ pub fn apply_pet_mesh_tilt(
 // Trap Visual Helpers
 // ==============================================================================
 
-/// Base RGB color for a trap type. Frost = cyan, Freezing = ice-white.
+/// Base RGB color for a trap type. Frost = cyan, Freezing = deep blue.
 fn trap_type_rgb(trap_type: TrapType) -> (f32, f32, f32) {
     match trap_type {
         TrapType::Frost => (0.3, 0.8, 1.0),
-        TrapType::Freezing => (0.8, 0.9, 1.0),
+        TrapType::Freezing => (0.3, 0.55, 1.0),
     }
 }
 
@@ -1073,7 +1073,7 @@ fn trap_type_rgb(trap_type: TrapType) -> (f32, f32, f32) {
 fn trap_type_emissive(trap_type: TrapType) -> LinearRgba {
     match trap_type {
         TrapType::Frost => LinearRgba::new(0.4, 1.2, 2.0, 1.0),
-        TrapType::Freezing => LinearRgba::new(1.6, 1.8, 2.0, 1.0),
+        TrapType::Freezing => LinearRgba::new(0.6, 1.2, 2.8, 1.0),
     }
 }
 
@@ -1090,7 +1090,7 @@ pub fn spawn_trap_visuals(
     new_traps: Query<(Entity, &Trap), (Added<Trap>, Without<Mesh3d>)>,
 ) {
     for (trap_entity, trap) in new_traps.iter() {
-        let mesh = meshes.add(Cylinder::new(1.5, 0.05));
+        let mesh = meshes.add(Cylinder::new(2.0, 0.05));
 
         let (r, g, b) = trap_type_rgb(trap.trap_type);
         let base_color = Color::srgba(r, g, b, 0.15); // Dim while arming
@@ -1158,14 +1158,14 @@ pub fn spawn_trap_burst_visuals(
     new_bursts: Query<(Entity, &TrapBurst), (Added<TrapBurst>, Without<Mesh3d>)>,
 ) {
     for (burst_entity, burst) in new_bursts.iter() {
-        let mesh = meshes.add(Sphere::new(0.5));
+        let mesh = meshes.add(Sphere::new(0.6));
 
         let (r, g, b) = trap_type_rgb(burst.trap_type);
         let base_color = Color::srgba(r, g, b, 0.6);
         // Burst uses brighter emissive than ground circle
         let emissive = match burst.trap_type {
             TrapType::Frost => LinearRgba::new(0.6, 1.5, 2.5, 1.0),
-            TrapType::Freezing => LinearRgba::new(2.0, 2.2, 2.5, 1.0),
+            TrapType::Freezing => LinearRgba::new(0.8, 1.5, 3.5, 1.0),
         };
 
         let material = materials.add(StandardMaterial {
@@ -1202,8 +1202,8 @@ pub fn update_and_cleanup_trap_bursts(
         // Progress: 1.0 (just spawned) → 0.0 (expired)
         let progress = (burst.lifetime / burst.initial_lifetime).max(0.0);
 
-        // Scale up: 1.0 → 3.0
-        let scale = 1.0 + (1.0 - progress) * 2.0;
+        // Scale up: 1.0 → 4.0
+        let scale = 1.0 + (1.0 - progress) * 3.0;
         transform.scale = Vec3::splat(scale);
 
         // Fade out
@@ -1263,10 +1263,10 @@ pub fn spawn_ice_block_visuals(
             continue;
         };
 
-        let mesh = meshes.add(Cuboid::new(1.2, 2.0, 1.2));
+        let mesh = meshes.add(Cuboid::new(1.5, 2.3, 1.5));
         let material = materials.add(StandardMaterial {
-            base_color: Color::srgba(0.6, 0.85, 1.0, 0.4),
-            emissive: LinearRgba::new(0.8, 1.2, 2.0, 1.0),
+            base_color: Color::srgba(0.3, 0.6, 1.0, 0.45),
+            emissive: LinearRgba::new(0.5, 1.0, 2.8, 1.0),
             alpha_mode: AlphaMode::Blend,
             ..default()
         });
