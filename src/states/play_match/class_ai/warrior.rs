@@ -19,27 +19,13 @@ use crate::states::play_match::components::*;
 use crate::states::play_match::combat_core::roll_crit;
 use crate::states::play_match::constants::{CHARGE_MIN_RANGE, CRIT_DAMAGE_MULTIPLIER, GCD};
 
-use super::{AbilityDecision, ClassAI, CombatContext};
+use super::CombatContext;
 
 /// Battle Shout range constant
 const BATTLE_SHOUT_RANGE: f32 = 30.0;
 
 /// Rage reserve for essential abilities
 const RAGE_RESERVE: f32 = 50.0;
-
-/// Warrior AI implementation.
-///
-/// Note: Currently uses direct execution via `decide_warrior_action()`.
-/// The trait implementation is a stub for future refactoring.
-pub struct WarriorAI;
-
-impl ClassAI for WarriorAI {
-    fn decide_action(&self, _ctx: &CombatContext, _combatant: &Combatant) -> AbilityDecision {
-        // TODO: Migrate to trait-based decision making
-        // For now, use decide_warrior_action() directly from combat_ai.rs
-        AbilityDecision::None
-    }
-}
 
 /// Warrior AI: Decides and executes abilities for a Warrior combatant.
 ///

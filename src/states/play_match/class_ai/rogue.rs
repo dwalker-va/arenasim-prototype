@@ -21,21 +21,7 @@ use crate::states::play_match::combat_core::roll_crit;
 use crate::states::play_match::constants::{CRIT_DAMAGE_MULTIPLIER, GCD, MELEE_RANGE};
 use crate::states::play_match::utils::{combatant_id, spawn_speech_bubble};
 
-use super::{AbilityDecision, ClassAI, CombatContext};
-
-/// Rogue AI implementation.
-///
-/// Note: Currently uses direct execution via `decide_rogue_action()`.
-/// The trait implementation is a stub for future refactoring.
-pub struct RogueAI;
-
-impl ClassAI for RogueAI {
-    fn decide_action(&self, _ctx: &CombatContext, _combatant: &Combatant) -> AbilityDecision {
-        // TODO: Migrate to trait-based decision making
-        // For now, use decide_rogue_action() directly from combat_ai.rs
-        AbilityDecision::None
-    }
-}
+use super::CombatContext;
 
 /// Rogue AI: Decides and executes abilities for a Rogue combatant.
 ///

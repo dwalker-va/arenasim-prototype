@@ -1,18 +1,18 @@
 //! Class-Specific AI Modules
 //!
 //! This module contains the AI decision logic for each character class.
-//! Each class has its own module that implements the `ClassAI` trait.
+//! Each class has a standalone `decide_<class>_action()` function that is
+//! called from `combat_ai.rs` based on the combatant's `CharacterClass`.
 //!
 //! ## Architecture
 //!
 //! The combat AI works in two phases:
 //! 1. **Context Building**: `CombatContext` collects all game state needed for decisions
-//! 2. **Decision Making**: Each class's `decide_action()` returns an `AbilityDecision`
+//! 2. **Decision Making**: `combat_ai.rs` dispatches to the appropriate class module's
+//!    `decide_<class>_action()` function, which directly executes abilities
 //!
-//! This separation allows:
-//! - Each class AI to be tested in isolation
-//! - New classes to be added without modifying other files
-//! - Clear boundaries between shared state and class-specific logic
+//! Shared helpers like `CombatContext`, `CombatantInfo`, and healer utilities
+//! live in this module and are used by all class AI files.
 
 pub mod mage;
 pub mod priest;
@@ -28,7 +28,7 @@ use std::collections::HashMap;
 
 use super::match_config::CharacterClass;
 use super::abilities::AbilityType;
-use super::components::{Aura, Combatant, AuraType, PetType, DRCategory, DRTracker};
+use super::components::{Aura, AuraType, PetType, DRCategory, DRTracker};
 
 /// Per-frame snapshot of a single combatant, used for AI decision making.
 #[derive(Clone, Copy, Debug)]
@@ -217,60 +217,6 @@ impl<'a> CombatContext<'a> {
             .unwrap_or(false)
     }
 
-}
-
-/// The result of an AI decision.
-#[derive(Debug, Clone)]
-pub enum AbilityDecision {
-    /// Do nothing this frame
-    None,
-    /// Use an instant ability on a target
-    InstantAbility {
-        ability: AbilityType,
-        target: Entity,
-    },
-    /// Start casting a spell on a target
-    StartCast {
-        ability: AbilityType,
-        target: Entity,
-    },
-    /// Apply a buff to self
-    SelfBuff {
-        ability: AbilityType,
-    },
-    /// Apply a buff to an ally
-    AllyBuff {
-        ability: AbilityType,
-        target: Entity,
-    },
-    /// Use an AoE ability centered on self
-    AoeAbility {
-        ability: AbilityType,
-    },
-}
-
-/// Trait for class-specific AI logic.
-///
-/// Each class implements this trait to provide its decision-making logic.
-/// The trait takes a read-only context and returns a decision.
-pub trait ClassAI {
-    /// Decide what ability (if any) to use this frame.
-    ///
-    /// Returns `AbilityDecision::None` if no ability should be used.
-    fn decide_action(&self, ctx: &CombatContext, combatant: &Combatant) -> AbilityDecision;
-}
-
-/// Get the AI implementation for a given class.
-pub fn get_class_ai(class: CharacterClass) -> Box<dyn ClassAI> {
-    match class {
-        CharacterClass::Mage => Box::new(mage::MageAI),
-        CharacterClass::Priest => Box::new(priest::PriestAI),
-        CharacterClass::Warrior => Box::new(warrior::WarriorAI),
-        CharacterClass::Rogue => Box::new(rogue::RogueAI),
-        CharacterClass::Warlock => Box::new(warlock::WarlockAI),
-        CharacterClass::Paladin => Box::new(paladin::PaladinAI),
-        CharacterClass::Hunter => Box::new(hunter::HunterAI),
-    }
 }
 
 // ============================================================================

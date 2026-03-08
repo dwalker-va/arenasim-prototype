@@ -24,21 +24,7 @@ use crate::states::play_match::constants::GCD;
 use crate::states::play_match::is_spell_school_locked;
 use crate::states::play_match::utils::combatant_id;
 
-use super::{dispel_priority, AbilityDecision, ClassAI, CombatContext, is_team_healthy};
-
-/// Priest AI implementation.
-///
-/// Note: Currently uses direct execution via `decide_priest_action()`.
-/// The trait implementation is a stub for future refactoring.
-pub struct PriestAI;
-
-impl ClassAI for PriestAI {
-    fn decide_action(&self, _ctx: &CombatContext, _combatant: &Combatant) -> AbilityDecision {
-        // TODO: Migrate to trait-based decision making
-        // For now, use decide_priest_action() directly from combat_ai.rs
-        AbilityDecision::None
-    }
-}
+use super::{dispel_priority, CombatContext, is_team_healthy};
 
 /// Priest AI: Decides and executes abilities for a Priest combatant.
 ///

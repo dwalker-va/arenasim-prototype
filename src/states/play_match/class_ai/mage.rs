@@ -23,21 +23,7 @@ use crate::states::play_match::combat_core::{calculate_cast_time, roll_crit};
 use crate::states::play_match::is_spell_school_locked;
 use crate::states::play_match::utils::{combatant_id, spawn_speech_bubble};
 
-use super::{ClassAI, CombatContext, AbilityDecision};
-
-/// Mage AI implementation.
-///
-/// Note: Currently uses direct execution via `decide_mage_action()`.
-/// The trait implementation is a stub for future refactoring.
-pub struct MageAI;
-
-impl ClassAI for MageAI {
-    fn decide_action(&self, _ctx: &CombatContext, _combatant: &Combatant) -> AbilityDecision {
-        // TODO: Migrate to trait-based decision making
-        // For now, use decide_mage_action() directly from combat_ai.rs
-        AbilityDecision::None
-    }
-}
+use super::CombatContext;
 
 /// Mage AI: Decides and executes abilities for a Mage combatant.
 ///

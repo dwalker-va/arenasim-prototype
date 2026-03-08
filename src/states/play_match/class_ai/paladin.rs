@@ -31,17 +31,7 @@ use crate::states::play_match::is_spell_school_locked;
 use crate::states::play_match::utils::combatant_id;
 
 use super::priest::DispelPending;
-use super::{dispel_priority, AbilityDecision, ClassAI, CombatContext, CombatantInfo};
-
-/// Paladin AI implementation
-pub struct PaladinAI;
-
-impl ClassAI for PaladinAI {
-    fn decide_action(&self, _ctx: &CombatContext, _combatant: &Combatant) -> AbilityDecision {
-        // Uses decide_paladin_action() directly from combat_ai.rs
-        AbilityDecision::None
-    }
-}
+use super::{dispel_priority, CombatContext, CombatantInfo};
 
 /// Paladin AI: Decides and executes abilities for a Paladin combatant.
 ///

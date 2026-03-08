@@ -20,19 +20,8 @@ use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::constants::*;
 use crate::states::play_match::is_spell_school_locked;
 
-use super::{AbilityDecision, ClassAI, CombatContext};
+use super::CombatContext;
 use super::super::utils::combatant_id;
-
-/// Hunter AI implementation.
-///
-/// Note: Currently uses direct execution via `decide_hunter_action()`.
-pub struct HunterAI;
-
-impl ClassAI for HunterAI {
-    fn decide_action(&self, _ctx: &CombatContext, _combatant: &Combatant) -> AbilityDecision {
-        AbilityDecision::None
-    }
-}
 
 /// Hunter AI: Decides and executes abilities for a Hunter combatant.
 ///

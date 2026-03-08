@@ -29,7 +29,7 @@ use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::constants::GCD;
 use crate::states::play_match::is_spell_school_locked;
 
-use super::{AbilityDecision, ClassAI, CombatContext};
+use super::CombatContext;
 
 /// Check if the Warlock is being kited (slowed and out of preferred range).
 /// Returns true if the Warlock should prioritize instant-cast abilities.
@@ -52,20 +52,6 @@ fn is_being_kited(
     // We're being kited if we're slowed AND out of range
     // This means we'll need to move to catch up, which would interrupt casts
     is_slowed && out_of_range
-}
-
-/// Warlock AI implementation.
-///
-/// Note: Currently uses direct execution via `decide_warlock_action()`.
-/// The trait implementation is a stub for future refactoring.
-pub struct WarlockAI;
-
-impl ClassAI for WarlockAI {
-    fn decide_action(&self, _ctx: &CombatContext, _combatant: &Combatant) -> AbilityDecision {
-        // TODO: Migrate to trait-based decision making
-        // For now, use decide_warlock_action() directly from combat_ai.rs
-        AbilityDecision::None
-    }
 }
 
 /// Warlock AI: Decides and executes abilities for a Warlock combatant.
