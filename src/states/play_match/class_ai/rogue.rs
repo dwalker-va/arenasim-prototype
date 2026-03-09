@@ -246,23 +246,9 @@ fn try_cheap_shot(
 
     // Apply stun aura
     if let Some(aura) = def.applies_aura.as_ref() {
-        commands.spawn(AuraPending {
-            target: target_entity,
-            aura: Aura {
-                effect_type: aura.aura_type,
-                duration: aura.duration,
-                magnitude: aura.magnitude,
-                break_on_damage_threshold: aura.break_on_damage,
-                accumulated_damage: 0.0,
-                tick_interval: 0.0,
-                time_until_next_tick: 0.0,
-                caster: Some(entity),
-                ability_name: def.name.to_string(),
-                fear_direction: (0.0, 0.0),
-                fear_direction_timer: 0.0,
-                spell_school: None, // Physical stun, not dispellable
-            },
-        });
+        if let Some(aura_pending) = AuraPending::from_ability(target_entity, entity, def) {
+            commands.spawn(aura_pending);
+        }
 
         // Log CC
         if let Some(info) = ctx.combatants.get(&target_entity) {
@@ -345,23 +331,9 @@ fn try_kidney_shot(
 
     // Apply stun aura
     if let Some(aura) = def.applies_aura.as_ref() {
-        commands.spawn(AuraPending {
-            target: target_entity,
-            aura: Aura {
-                effect_type: aura.aura_type,
-                duration: aura.duration,
-                magnitude: aura.magnitude,
-                break_on_damage_threshold: aura.break_on_damage,
-                accumulated_damage: 0.0,
-                tick_interval: 0.0,
-                time_until_next_tick: 0.0,
-                caster: Some(entity),
-                ability_name: def.name.to_string(),
-                fear_direction: (0.0, 0.0),
-                fear_direction_timer: 0.0,
-                spell_school: None, // Physical stun, not dispellable
-            },
-        });
+        if let Some(aura_pending) = AuraPending::from_ability(target_entity, entity, def) {
+            commands.spawn(aura_pending);
+        }
 
         // Log CC
         if let Some(info) = ctx.combatants.get(&target_entity) {

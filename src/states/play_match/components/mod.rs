@@ -818,6 +818,20 @@ pub struct CastingState {
     pub interrupted_display_time: f32,
 }
 
+impl CastingState {
+    /// Create a new CastingState with sensible defaults.
+    /// Sets `interrupted` to false and `interrupted_display_time` to 0.0.
+    pub fn new(ability: AbilityType, target: Entity, cast_time: f32) -> Self {
+        Self {
+            ability,
+            time_remaining: cast_time,
+            target: Some(target),
+            interrupted: false,
+            interrupted_display_time: 0.0,
+        }
+    }
+}
+
 /// Component tracking an active channel in progress.
 /// Channeled spells deal their effects over time while the caster remains stationary.
 #[derive(Component)]

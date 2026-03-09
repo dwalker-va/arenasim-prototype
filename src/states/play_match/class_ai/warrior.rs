@@ -198,26 +198,10 @@ fn try_battle_shout(
     );
 
     // Apply buff to all nearby allies
-    if let Some(aura) = def.applies_aura.as_ref() {
-        for ally_entity in allies_to_buff {
-            battle_shouted_this_frame.insert(ally_entity);
-            commands.spawn(AuraPending {
-                target: ally_entity,
-                aura: Aura {
-                    effect_type: aura.aura_type,
-                    duration: aura.duration,
-                    magnitude: aura.magnitude,
-                    break_on_damage_threshold: aura.break_on_damage,
-                    accumulated_damage: 0.0,
-                    tick_interval: 0.0,
-                    time_until_next_tick: 0.0,
-                    caster: Some(entity),
-                    ability_name: def.name.to_string(),
-                    fear_direction: (0.0, 0.0),
-                    fear_direction_timer: 0.0,
-                    spell_school: None, // Buff, not dispellable by Dispel Magic
-                },
-            });
+    for ally_entity in allies_to_buff {
+        battle_shouted_this_frame.insert(ally_entity);
+        if let Some(aura_pending) = AuraPending::from_ability(ally_entity, entity, def) {
+            commands.spawn(aura_pending);
         }
     }
 
@@ -353,24 +337,8 @@ fn try_rend(
     );
 
     // Apply DoT aura
-    if let Some(aura) = rend_def.applies_aura.as_ref() {
-        commands.spawn(AuraPending {
-            target: target_entity,
-            aura: Aura {
-                effect_type: aura.aura_type,
-                duration: aura.duration,
-                magnitude: aura.magnitude,
-                break_on_damage_threshold: aura.break_on_damage,
-                accumulated_damage: 0.0,
-                tick_interval: aura.tick_interval,
-                time_until_next_tick: aura.tick_interval,
-                caster: Some(entity),
-                ability_name: rend_def.name.to_string(),
-                fear_direction: (0.0, 0.0),
-                fear_direction_timer: 0.0,
-                spell_school: None, // Physical DoT, NOT dispellable
-            },
-        });
+    if let Some(aura_pending) = AuraPending::from_ability(target_entity, entity, rend_def) {
+        commands.spawn(aura_pending);
     }
 
     combat_log.log(
@@ -461,24 +429,8 @@ fn try_mortal_strike(
     });
 
     // Apply healing reduction aura
-    if let Some(aura) = ms_def.applies_aura.as_ref() {
-        commands.spawn(AuraPending {
-            target: target_entity,
-            aura: Aura {
-                effect_type: aura.aura_type,
-                duration: aura.duration,
-                magnitude: aura.magnitude,
-                break_on_damage_threshold: aura.break_on_damage,
-                accumulated_damage: 0.0,
-                tick_interval: 0.0,
-                time_until_next_tick: 0.0,
-                caster: Some(entity),
-                ability_name: ms_def.name.to_string(),
-                fear_direction: (0.0, 0.0),
-                fear_direction_timer: 0.0,
-                spell_school: None, // Physical debuff, NOT dispellable
-            },
-        });
+    if let Some(aura_pending) = AuraPending::from_ability(target_entity, entity, ms_def) {
+        commands.spawn(aura_pending);
     }
 
     info!(

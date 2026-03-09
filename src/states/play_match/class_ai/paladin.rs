@@ -392,13 +392,7 @@ fn try_flash_of_light(
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras);
 
-    commands.entity(entity).insert(CastingState {
-        ability,
-        time_remaining: cast_time,
-        target: Some(*target_entity),
-        interrupted: false,
-        interrupted_display_time: 0.0,
-    });
+    commands.entity(entity).insert(CastingState::new(ability, *target_entity, cast_time));
 
     let caster_id = combatant_id(combatant.team, combatant.class);
     let target_id = format!("Team {} {}", combatant.team, target_class.name());
@@ -459,13 +453,7 @@ fn try_holy_light(
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras);
 
-    commands.entity(entity).insert(CastingState {
-        ability,
-        time_remaining: cast_time,
-        target: Some(*target_entity),
-        interrupted: false,
-        interrupted_display_time: 0.0,
-    });
+    commands.entity(entity).insert(CastingState::new(ability, *target_entity, cast_time));
 
     let caster_id = combatant_id(combatant.team, combatant.class);
     let target_id = format!("Team {} {}", combatant.team, target_class.name());

@@ -523,27 +523,8 @@ fn boar_ai(
     commands.entity(entity).try_insert(ChargingState { target });
 
     // Apply stun via AuraPending
-    if let Some(aura_def) = &def.applies_aura {
-        commands.spawn((
-            AuraPending {
-                target,
-                aura: Aura {
-                    effect_type: aura_def.aura_type,
-                    duration: aura_def.duration,
-                    magnitude: aura_def.magnitude,
-                    tick_interval: 0.0,
-                    time_until_next_tick: 0.0,
-                    caster: Some(entity),
-                    ability_name: def.name.to_string(),
-                    break_on_damage_threshold: aura_def.break_on_damage,
-                    accumulated_damage: 0.0,
-                    fear_direction: (0.0, 0.0),
-                    fear_direction_timer: 0.0,
-                    spell_school: Some(def.spell_school),
-                },
-            },
-            PlayMatchEntity,
-        ));
+    if let Some(aura_pending) = AuraPending::from_ability(target, entity, def) {
+        commands.spawn((aura_pending, PlayMatchEntity));
     }
 
     combatant.ability_cooldowns.insert(ability, def.cooldown);

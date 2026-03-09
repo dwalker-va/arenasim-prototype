@@ -429,13 +429,7 @@ fn try_aimed_shot(
 
     // Start casting
     let cast_time = calculate_cast_time(def.cast_time, auras);
-    commands.entity(entity).insert(CastingState {
-        ability,
-        time_remaining: cast_time,
-        target: Some(target_entity),
-        interrupted: false,
-        interrupted_display_time: 0.0,
-    });
+    commands.entity(entity).insert(CastingState::new(ability, target_entity, cast_time));
 
     combatant.current_mana -= def.mana_cost;
     combatant.ability_cooldowns.insert(ability, def.cooldown);

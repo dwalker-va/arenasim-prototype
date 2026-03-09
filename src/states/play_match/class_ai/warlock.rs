@@ -22,7 +22,7 @@ use crate::states::match_config::WarlockCurse;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::{
-    ActiveAuras, Aura, AuraPending, AuraType, CastingState, ChannelingState, Combatant,
+    ActiveAuras, AuraPending, AuraType, CastingState, ChannelingState, Combatant,
     DRCategory,
 };
 use crate::states::play_match::combat_core::calculate_cast_time;
@@ -266,24 +266,8 @@ fn try_corruption(
     );
 
     // Apply DoT aura
-    if let Some(aura) = corruption_def.applies_aura.as_ref() {
-        commands.spawn(AuraPending {
-            target: target_entity,
-            aura: Aura {
-                effect_type: aura.aura_type,
-                duration: aura.duration,
-                magnitude: aura.magnitude,
-                break_on_damage_threshold: aura.break_on_damage,
-                accumulated_damage: 0.0,
-                tick_interval: aura.tick_interval,
-                time_until_next_tick: aura.tick_interval,
-                caster: Some(entity),
-                ability_name: corruption_def.name.to_string(),
-                fear_direction: (0.0, 0.0),
-                fear_direction_timer: 0.0,
-                spell_school: Some(corruption_def.spell_school),
-            },
-        });
+    if let Some(aura_pending) = AuraPending::from_ability(target_entity, entity, corruption_def) {
+        commands.spawn(aura_pending);
     }
 
     combat_log.log(
@@ -346,13 +330,7 @@ fn try_immolate(
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(immolate_def.cast_time, auras);
 
-    commands.entity(entity).insert(CastingState {
-        ability: immolate,
-        time_remaining: cast_time,
-        target: Some(target_entity),
-        interrupted: false,
-        interrupted_display_time: 0.0,
-    });
+    commands.entity(entity).insert(CastingState::new(immolate, target_entity, cast_time));
 
     // Log
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
@@ -428,13 +406,7 @@ fn try_fear(
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(fear_def.cast_time, auras);
 
-    commands.entity(entity).insert(CastingState {
-        ability: fear,
-        time_remaining: cast_time,
-        target: Some(target_entity),
-        interrupted: false,
-        interrupted_display_time: 0.0,
-    });
+    commands.entity(entity).insert(CastingState::new(fear, target_entity, cast_time));
 
     // Log
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
@@ -491,13 +463,7 @@ fn try_shadowbolt(
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(shadowbolt_def.cast_time, auras);
 
-    commands.entity(entity).insert(CastingState {
-        ability: shadowbolt,
-        time_remaining: cast_time,
-        target: Some(target_entity),
-        interrupted: false,
-        interrupted_display_time: 0.0,
-    });
+    commands.entity(entity).insert(CastingState::new(shadowbolt, target_entity, cast_time));
 
     // Log
     let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
@@ -758,24 +724,8 @@ fn try_cast_curse(
     );
 
     // Apply aura
-    if let Some(aura_config) = ability_def.applies_aura.as_ref() {
-        commands.spawn(AuraPending {
-            target: target_entity,
-            aura: Aura {
-                effect_type: aura_config.aura_type,
-                duration: aura_config.duration,
-                magnitude: aura_config.magnitude,
-                break_on_damage_threshold: aura_config.break_on_damage,
-                accumulated_damage: 0.0,
-                tick_interval: aura_config.tick_interval,
-                time_until_next_tick: aura_config.tick_interval,
-                caster: Some(entity),
-                ability_name: ability_def.name.to_string(),
-                fear_direction: (0.0, 0.0),
-                fear_direction_timer: 0.0,
-                spell_school: Some(ability_def.spell_school),
-            },
-        });
+    if let Some(aura_pending) = AuraPending::from_ability(target_entity, entity, ability_def) {
+        commands.spawn(aura_pending);
     }
 
     let effect_description = match ability {

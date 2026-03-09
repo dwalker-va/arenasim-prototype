@@ -219,24 +219,8 @@ fn try_fortitude(
     );
 
     // Apply buff aura
-    if let Some(aura) = def.applies_aura.as_ref() {
-        commands.spawn(AuraPending {
-            target: buff_target,
-            aura: Aura {
-                effect_type: aura.aura_type,
-                duration: aura.duration,
-                magnitude: aura.magnitude,
-                break_on_damage_threshold: aura.break_on_damage,
-                accumulated_damage: 0.0,
-                tick_interval: 0.0,
-                time_until_next_tick: 0.0,
-                caster: Some(entity),
-                ability_name: def.name.to_string(),
-                fear_direction: (0.0, 0.0),
-                fear_direction_timer: 0.0,
-                spell_school: Some(def.spell_school),
-            },
-        });
+    if let Some(aura_pending) = AuraPending::from_ability(buff_target, entity, def) {
+        commands.spawn(aura_pending);
     }
 
     // Mark target as fortified this frame
@@ -348,24 +332,8 @@ fn try_power_word_shield(
     );
 
     // Apply absorb shield aura
-    if let Some(aura) = pw_shield_def.applies_aura.as_ref() {
-        commands.spawn(AuraPending {
-            target: shield_entity,
-            aura: Aura {
-                effect_type: aura.aura_type,
-                duration: aura.duration,
-                magnitude: aura.magnitude,
-                break_on_damage_threshold: aura.break_on_damage,
-                accumulated_damage: 0.0,
-                tick_interval: aura.tick_interval,
-                time_until_next_tick: aura.tick_interval,
-                caster: Some(entity),
-                ability_name: pw_shield_def.name.to_string(),
-                fear_direction: (0.0, 0.0),
-                fear_direction_timer: 0.0,
-                spell_school: Some(pw_shield_def.spell_school),
-            },
-        });
+    if let Some(aura_pending) = AuraPending::from_ability(shield_entity, entity, pw_shield_def) {
+        commands.spawn(aura_pending);
     }
 
     // Apply Weakened Soul debuff (doesn't break on damage)
@@ -458,13 +426,7 @@ fn try_flash_heal(
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras);
 
-    commands.entity(entity).insert(CastingState {
-        ability,
-        time_remaining: cast_time,
-        target: Some(heal_target),
-        interrupted: false,
-        interrupted_display_time: 0.0,
-    });
+    commands.entity(entity).insert(CastingState::new(ability, heal_target, cast_time));
 
     // Log
     let caster_id = combatant_id(combatant.team, combatant.class);
@@ -542,13 +504,7 @@ fn try_mind_blast(
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras);
 
-    commands.entity(entity).insert(CastingState {
-        ability,
-        time_remaining: cast_time,
-        target: Some(target_entity),
-        interrupted: false,
-        interrupted_display_time: 0.0,
-    });
+    commands.entity(entity).insert(CastingState::new(ability, target_entity, cast_time));
 
     // Log
     let caster_id = combatant_id(combatant.team, combatant.class);

@@ -166,24 +166,9 @@ fn try_ice_barrier(
     );
 
     // Apply absorb shield aura
-    let aura = barrier_def.applies_aura.as_ref().unwrap();
-    commands.spawn(AuraPending {
-        target: entity,
-        aura: Aura {
-            effect_type: aura.aura_type,
-            duration: aura.duration,
-            magnitude: aura.magnitude,
-            break_on_damage_threshold: 0.0,
-            accumulated_damage: 0.0,
-            tick_interval: 0.0,
-            time_until_next_tick: 0.0,
-            caster: Some(entity),
-            ability_name: "Ice Barrier".to_string(),
-            fear_direction: (0.0, 0.0),
-            fear_direction_timer: 0.0,
-            spell_school: Some(barrier_def.spell_school),
-        },
-    });
+    if let Some(aura_pending) = AuraPending::from_ability(entity, entity, barrier_def) {
+        commands.spawn(aura_pending);
+    }
 
     info!(
         "Team {} {} casts Ice Barrier",
@@ -272,24 +257,8 @@ fn try_arcane_intellect(
     );
 
     // Apply buff aura
-    if let Some(aura) = def.applies_aura.as_ref() {
-        commands.spawn(AuraPending {
-            target: buff_target,
-            aura: Aura {
-                effect_type: aura.aura_type,
-                duration: aura.duration,
-                magnitude: aura.magnitude,
-                break_on_damage_threshold: aura.break_on_damage,
-                accumulated_damage: 0.0,
-                tick_interval: 0.0,
-                time_until_next_tick: 0.0,
-                caster: Some(entity),
-                ability_name: def.name.to_string(),
-                fear_direction: (0.0, 0.0),
-                fear_direction_timer: 0.0,
-                spell_school: Some(def.spell_school),
-            },
-        });
+    if let Some(aura_pending) = AuraPending::from_ability(buff_target, entity, def) {
+        commands.spawn(aura_pending);
     }
 
     info!(
@@ -389,23 +358,9 @@ fn try_frost_nova(
 
         // Apply root aura
         if let Some(aura) = nova_def.applies_aura.as_ref() {
-            commands.spawn(AuraPending {
-                target: *target_entity,
-                aura: Aura {
-                    effect_type: aura.aura_type,
-                    duration: aura.duration,
-                    magnitude: aura.magnitude,
-                    break_on_damage_threshold: aura.break_on_damage,
-                    accumulated_damage: 0.0,
-                    tick_interval: 0.0,
-                    time_until_next_tick: 0.0,
-                    caster: Some(entity),
-                    ability_name: nova_def.name.to_string(),
-                    fear_direction: (0.0, 0.0),
-                    fear_direction_timer: 0.0,
-                    spell_school: Some(nova_def.spell_school),
-                },
-            });
+            if let Some(aura_pending) = AuraPending::from_ability(*target_entity, entity, nova_def) {
+                commands.spawn(aura_pending);
+            }
 
             // Log CC application for Frost Nova root
             let message = format!(
@@ -516,13 +471,7 @@ fn try_polymorph(
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras);
 
-    commands.entity(entity).insert(CastingState {
-        ability,
-        time_remaining: cast_time,
-        target: Some(cc_target),
-        interrupted: false,
-        interrupted_display_time: 0.0,
-    });
+    commands.entity(entity).insert(CastingState::new(ability, cc_target, cast_time));
 
     // Log
     let caster_id = combatant_id(combatant.team, combatant.class);
@@ -606,13 +555,7 @@ fn try_frostbolt(
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras);
 
-    commands.entity(entity).insert(CastingState {
-        ability,
-        time_remaining: cast_time,
-        target: Some(target_entity),
-        interrupted: false,
-        interrupted_display_time: 0.0,
-    });
+    commands.entity(entity).insert(CastingState::new(ability, target_entity, cast_time));
 
     // Log
     let caster_id = combatant_id(combatant.team, combatant.class);
