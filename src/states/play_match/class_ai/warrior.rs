@@ -19,6 +19,8 @@ use crate::states::play_match::components::*;
 use crate::states::play_match::combat_core::roll_crit;
 use crate::states::play_match::constants::{CHARGE_MIN_RANGE, CRIT_DAMAGE_MULTIPLIER, GCD};
 
+use crate::states::play_match::utils::log_ability_use;
+
 use super::CombatContext;
 
 /// Battle Shout range constant
@@ -185,17 +187,7 @@ fn try_battle_shout(
     combatant.global_cooldown = GCD;
 
     // Log
-    let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    combat_log.log_ability_cast(
-        caster_id,
-        "Battle Shout".to_string(),
-        None,
-        format!(
-            "Team {} {} uses Battle Shout",
-            combatant.team,
-            combatant.class.name()
-        ),
-    );
+    log_ability_use(combat_log, combatant.team, combatant.class, "Battle Shout", None, "uses");
 
     // Apply buff to all nearby allies
     for ally_entity in allies_to_buff {
@@ -261,20 +253,10 @@ fn try_charge(
     });
 
     // Log
-    let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = ctx.combatants
+    let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| format!("Team {} {}", info.team, info.class.name()));
-    combat_log.log_ability_cast(
-        caster_id,
-        "Charge".to_string(),
-        target_id,
-        format!(
-            "Team {} {} uses Charge",
-            combatant.team,
-            combatant.class.name()
-        ),
-    );
+        .map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, "Charge", target_tuple, "uses");
 
     info!(
         "Team {} {} uses Charge on enemy (distance: {:.1} units)",
@@ -321,20 +303,10 @@ fn try_rend(
     combatant.global_cooldown = GCD;
 
     // Log
-    let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = ctx.combatants
+    let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| format!("Team {} {}", info.team, info.class.name()));
-    combat_log.log_ability_cast(
-        caster_id,
-        "Rend".to_string(),
-        target_id,
-        format!(
-            "Team {} {} uses Rend",
-            combatant.team,
-            combatant.class.name()
-        ),
-    );
+        .map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, "Rend", target_tuple, "uses");
 
     // Apply DoT aura
     if let Some(aura_pending) = AuraPending::from_ability(target_entity, entity, rend_def) {
@@ -402,17 +374,7 @@ fn try_mortal_strike(
     combatant.global_cooldown = GCD;
 
     // Log
-    let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    combat_log.log_ability_cast(
-        caster_id,
-        "Mortal Strike".to_string(),
-        Some(format!("Team {} {}", target_info.team, target_info.class.name())),
-        format!(
-            "Team {} {} uses Mortal Strike",
-            combatant.team,
-            combatant.class.name()
-        ),
-    );
+    log_ability_use(combat_log, combatant.team, combatant.class, "Mortal Strike", Some((target_info.team, target_info.class)), "uses");
 
     // Calculate and queue damage
     let mut damage = combatant.calculate_ability_damage_config(ms_def, game_rng);

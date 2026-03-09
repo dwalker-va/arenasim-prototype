@@ -29,6 +29,8 @@ use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::constants::GCD;
 use crate::states::play_match::is_spell_school_locked;
 
+use crate::states::play_match::utils::log_ability_use;
+
 use super::CombatContext;
 
 /// Check if the Warlock is being kited (slowed and out of preferred range).
@@ -250,20 +252,10 @@ fn try_corruption(
     combatant.global_cooldown = GCD;
 
     // Log
-    let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = ctx.combatants
+    let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| format!("Team {} {}", info.team, info.class.name()));
-    combat_log.log_ability_cast(
-        caster_id,
-        "Corruption".to_string(),
-        target_id,
-        format!(
-            "Team {} {} casts Corruption",
-            combatant.team,
-            combatant.class.name()
-        ),
-    );
+        .map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, "Corruption", target_tuple, "casts");
 
     // Apply DoT aura
     if let Some(aura_pending) = AuraPending::from_ability(target_entity, entity, corruption_def) {
@@ -333,20 +325,10 @@ fn try_immolate(
     commands.entity(entity).insert(CastingState::new(immolate, target_entity, cast_time));
 
     // Log
-    let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = ctx.combatants
+    let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| format!("Team {} {}", info.team, info.class.name()));
-    combat_log.log_ability_cast(
-        caster_id,
-        "Immolate".to_string(),
-        target_id,
-        format!(
-            "Team {} {} begins casting Immolate",
-            combatant.team,
-            combatant.class.name()
-        ),
-    );
+        .map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, "Immolate", target_tuple, "begins casting");
 
     info!(
         "Team {} {} starts casting Immolate on enemy",
@@ -409,20 +391,10 @@ fn try_fear(
     commands.entity(entity).insert(CastingState::new(fear, target_entity, cast_time));
 
     // Log
-    let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = ctx.combatants
+    let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| format!("Team {} {}", info.team, info.class.name()));
-    combat_log.log_ability_cast(
-        caster_id,
-        "Fear".to_string(),
-        target_id,
-        format!(
-            "Team {} {} begins casting Fear",
-            combatant.team,
-            combatant.class.name()
-        ),
-    );
+        .map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, "Fear", target_tuple, "begins casting");
 
     info!(
         "Team {} {} starts casting Fear on enemy",
@@ -466,20 +438,10 @@ fn try_shadowbolt(
     commands.entity(entity).insert(CastingState::new(shadowbolt, target_entity, cast_time));
 
     // Log
-    let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = ctx.combatants
+    let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| format!("Team {} {}", info.team, info.class.name()));
-    combat_log.log_ability_cast(
-        caster_id,
-        "Shadowbolt".to_string(),
-        target_id,
-        format!(
-            "Team {} {} begins casting Shadowbolt",
-            combatant.team,
-            combatant.class.name()
-        ),
-    );
+        .map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, "Shadowbolt", target_tuple, "begins casting");
 
     info!(
         "Team {} {} starts casting {} on enemy",
@@ -554,20 +516,10 @@ fn try_drain_life(
     });
 
     // Log
-    let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = ctx.combatants
+    let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| format!("Team {} {}", info.team, info.class.name()));
-    combat_log.log_ability_cast(
-        caster_id,
-        "Drain Life".to_string(),
-        target_id,
-        format!(
-            "Team {} {} begins channeling Drain Life",
-            combatant.team,
-            combatant.class.name()
-        ),
-    );
+        .map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, "Drain Life", target_tuple, "begins channeling");
 
     info!(
         "Team {} {} starts channeling Drain Life on enemy (HP: {:.0}%)",
@@ -707,21 +659,10 @@ fn try_cast_curse(
     combatant.global_cooldown = GCD;
 
     // Log
-    let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = ctx.combatants
+    let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| format!("Team {} {}", info.team, info.class.name()));
-    combat_log.log_ability_cast(
-        caster_id,
-        ability_name.to_string(),
-        target_id,
-        format!(
-            "Team {} {} casts {}",
-            combatant.team,
-            combatant.class.name(),
-            ability_name
-        ),
-    );
+        .map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, ability_name, target_tuple, "casts");
 
     // Apply aura
     if let Some(aura_pending) = AuraPending::from_ability(target_entity, entity, ability_def) {

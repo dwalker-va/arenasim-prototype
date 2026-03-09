@@ -28,7 +28,7 @@ use crate::states::play_match::constants::{
     HOLY_SHOCK_DAMAGE_RANGE, LOW_HP_THRESHOLD, SAFE_HEAL_MAX_THRESHOLD,
 };
 use crate::states::play_match::is_spell_school_locked;
-use crate::states::play_match::utils::combatant_id;
+use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
 use super::{CombatContext, CombatantInfo};
 
@@ -250,16 +250,7 @@ pub fn try_divine_shield(
     combatant.global_cooldown = GCD;
 
     // Log the cast
-    combat_log.log_ability_cast(
-        caster_id,
-        "Divine Shield".to_string(),
-        None,
-        format!(
-            "Team {} {} casts Divine Shield",
-            combatant.team,
-            combatant.class.name()
-        ),
-    );
+    log_ability_use(combat_log, combatant.team, combatant.class, "Divine Shield", None, "casts");
 
     true
 }
@@ -327,16 +318,7 @@ pub fn try_divine_shield_while_cc(
     combatant.ability_cooldowns.insert(AbilityType::DivineShield, def.cooldown);
     combatant.global_cooldown = GCD;
 
-    combat_log.log_ability_cast(
-        caster_id,
-        "Divine Shield".to_string(),
-        None,
-        format!(
-            "Team {} {} breaks CC with Divine Shield!",
-            combatant.team,
-            combatant.class.name()
-        ),
-    );
+    log_ability_use(combat_log, combatant.team, combatant.class, "Divine Shield", None, "casts");
 
     true
 }
@@ -394,19 +376,7 @@ fn try_flash_of_light(
 
     commands.entity(entity).insert(CastingState::new(ability, *target_entity, cast_time));
 
-    let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = format!("Team {} {}", combatant.team, target_class.name());
-    combat_log.log_ability_cast(
-        caster_id,
-        def.name.to_string(),
-        Some(target_id),
-        format!(
-            "Team {} {} begins casting {}",
-            combatant.team,
-            combatant.class.name(),
-            def.name
-        ),
-    );
+    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, Some((combatant.team, target_class)), "begins casting");
 
     true
 }
@@ -455,19 +425,7 @@ fn try_holy_light(
 
     commands.entity(entity).insert(CastingState::new(ability, *target_entity, cast_time));
 
-    let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = format!("Team {} {}", combatant.team, target_class.name());
-    combat_log.log_ability_cast(
-        caster_id,
-        def.name.to_string(),
-        Some(target_id),
-        format!(
-            "Team {} {} begins casting {}",
-            combatant.team,
-            combatant.class.name(),
-            def.name
-        ),
-    );
+    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, Some((combatant.team, target_class)), "begins casting");
 
     true
 }
@@ -517,19 +475,7 @@ fn try_holy_shock_heal(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
 
     // Log the cast
-    let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = format!("Team {} {}", combatant.team, target_class.name());
-    combat_log.log_ability_cast(
-        caster_id,
-        "Holy Shock (Heal)".to_string(),
-        Some(target_id.clone()),
-        format!(
-            "Team {} {} casts Holy Shock on {}",
-            combatant.team,
-            combatant.class.name(),
-            target_id
-        ),
-    );
+    log_ability_use(combat_log, combatant.team, combatant.class, "Holy Shock (Heal)", Some((combatant.team, target_class)), "casts");
 
     // Spawn pending heal
     commands.spawn(HolyShockHealPending {
@@ -600,20 +546,8 @@ fn try_holy_shock_damage(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
 
     // Log the cast
-    let caster_id = combatant_id(combatant.team, combatant.class);
     let enemy_team = if combatant.team == 1 { 2 } else { 1 };
-    let target_id = format!("Team {} {}", enemy_team, target_class.name());
-    combat_log.log_ability_cast(
-        caster_id,
-        "Holy Shock (Damage)".to_string(),
-        Some(target_id.clone()),
-        format!(
-            "Team {} {} casts Holy Shock on {}",
-            combatant.team,
-            combatant.class.name(),
-            target_id
-        ),
-    );
+    log_ability_use(combat_log, combatant.team, combatant.class, "Holy Shock (Damage)", Some((enemy_team, target_class)), "casts");
 
     // Spawn pending damage
     commands.spawn(HolyShockDamagePending {
@@ -696,17 +630,7 @@ fn try_hammer_of_justice(
     let caster_id = combatant_id(combatant.team, combatant.class);
     let enemy_team = if combatant.team == 1 { 2 } else { 1 };
     let target_id = format!("Team {} {}", enemy_team, target_class.name());
-    combat_log.log_ability_cast(
-        caster_id.clone(),
-        def.name.to_string(),
-        Some(target_id.clone()),
-        format!(
-            "Team {} {} casts Hammer of Justice on {}",
-            combatant.team,
-            combatant.class.name(),
-            target_id
-        ),
-    );
+    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, Some((enemy_team, target_class)), "casts");
 
     // Apply stun aura and log CC
     if let Some(aura_def) = def.applies_aura.as_ref() {
@@ -847,17 +771,7 @@ fn try_devotion_aura(
     combatant.global_cooldown = GCD;
 
     // Log the cast once
-    let caster_id = combatant_id(combatant.team, combatant.class);
-    combat_log.log_ability_cast(
-        caster_id,
-        "Devotion Aura".to_string(),
-        None, // No single target - affects all allies
-        format!(
-            "Team {} {} casts Devotion Aura",
-            combatant.team,
-            combatant.class.name()
-        ),
-    );
+    log_ability_use(combat_log, combatant.team, combatant.class, "Devotion Aura", None, "casts");
 
     // Apply the aura to each ally
     for ally_entity in allies_to_buff {

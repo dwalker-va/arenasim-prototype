@@ -33,7 +33,7 @@ use super::ability_config::AbilityDefinitions;
 use super::components::{Aura, ActiveAuras, Combatant, AuraType, DispelPending, PetType, DRCategory, DRTracker};
 use super::constants::GCD;
 use super::is_spell_school_locked;
-use super::utils::combatant_id;
+use super::utils::log_ability_use;
 
 /// Per-frame snapshot of a single combatant, used for AI decision making.
 #[derive(Clone, Copy, Debug)]
@@ -355,22 +355,8 @@ pub fn try_dispel_ally(
     combatant.global_cooldown = GCD;
 
     // Log
-    let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = ctx.combatants.get(&dispel_target).map(|info| {
-        format!("Team {} {}", info.team, info.class.name())
-    });
-    combat_log.log_ability_cast(
-        caster_id,
-        log_name.to_string(),
-        target_id.clone(),
-        format!(
-            "Team {} {} casts {} on {}",
-            combatant.team,
-            combatant.class.name(),
-            log_name,
-            target_id.as_deref().unwrap_or("ally")
-        ),
-    );
+    let target_tuple = ctx.combatants.get(&dispel_target).map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, log_name, target_tuple, "casts");
 
     // Spawn pending dispel
     commands.spawn(DispelPending {

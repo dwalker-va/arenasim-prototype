@@ -19,7 +19,7 @@ use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
 use crate::states::play_match::combat_core::roll_crit;
 use crate::states::play_match::constants::{CRIT_DAMAGE_MULTIPLIER, GCD, MELEE_RANGE};
-use crate::states::play_match::utils::{combatant_id, spawn_speech_bubble};
+use crate::states::play_match::utils::{combatant_id, log_ability_use, spawn_speech_bubble};
 
 use super::CombatContext;
 
@@ -177,20 +177,10 @@ fn try_ambush(
     });
 
     // Log
-    let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = ctx.combatants
+    let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| format!("Team {} {}", info.team, info.class.name()));
-    combat_log.log_ability_cast(
-        caster_id,
-        "Ambush".to_string(),
-        target_id,
-        format!(
-            "Team {} {} uses Ambush from stealth",
-            combatant.team,
-            combatant.class.name()
-        ),
-    );
+        .map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, "Ambush", target_tuple, "uses");
 
     info!(
         "Team {} {} uses {} from stealth!",
@@ -229,20 +219,10 @@ fn try_cheap_shot(
     combatant.global_cooldown = GCD;
 
     // Log
-    let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = ctx.combatants
+    let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| format!("Team {} {}", info.team, info.class.name()));
-    combat_log.log_ability_cast(
-        caster_id,
-        "Cheap Shot".to_string(),
-        target_id.clone(),
-        format!(
-            "Team {} {} uses Cheap Shot from stealth",
-            combatant.team,
-            combatant.class.name()
-        ),
-    );
+        .map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, "Cheap Shot", target_tuple, "uses");
 
     // Apply stun aura
     if let Some(aura) = def.applies_aura.as_ref() {
@@ -314,20 +294,10 @@ fn try_kidney_shot(
     combatant.global_cooldown = GCD;
 
     // Log
-    let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = ctx.combatants
+    let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| format!("Team {} {}", info.team, info.class.name()));
-    combat_log.log_ability_cast(
-        caster_id,
-        "Kidney Shot".to_string(),
-        target_id.clone(),
-        format!(
-            "Team {} {} uses Kidney Shot",
-            combatant.team,
-            combatant.class.name()
-        ),
-    );
+        .map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, "Kidney Shot", target_tuple, "uses");
 
     // Apply stun aura
     if let Some(aura) = def.applies_aura.as_ref() {
@@ -406,20 +376,10 @@ fn try_sinister_strike(
     });
 
     // Log
-    let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = ctx.combatants
+    let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| format!("Team {} {}", info.team, info.class.name()));
-    combat_log.log_ability_cast(
-        caster_id,
-        "Sinister Strike".to_string(),
-        target_id,
-        format!(
-            "Team {} {} uses Sinister Strike",
-            combatant.team,
-            combatant.class.name()
-        ),
-    );
+        .map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, "Sinister Strike", target_tuple, "uses");
 
     info!(
         "Team {} {} uses {}!",

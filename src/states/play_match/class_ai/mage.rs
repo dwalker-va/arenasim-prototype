@@ -21,7 +21,7 @@ use crate::states::play_match::constants::{
 };
 use crate::states::play_match::combat_core::{calculate_cast_time, roll_crit};
 use crate::states::play_match::is_spell_school_locked;
-use crate::states::play_match::utils::{combatant_id, spawn_speech_bubble};
+use crate::states::play_match::utils::{combatant_id, log_ability_use, spawn_speech_bubble};
 
 use super::CombatContext;
 
@@ -153,17 +153,7 @@ fn try_ice_barrier(
     combatant.global_cooldown = GCD;
 
     // Log
-    let caster_id = combatant_id(combatant.team, combatant.class);
-    combat_log.log_ability_cast(
-        caster_id,
-        "Ice Barrier".to_string(),
-        None,
-        format!(
-            "Team {} {} casts Ice Barrier",
-            combatant.team,
-            combatant.class.name()
-        ),
-    );
+    log_ability_use(combat_log, combatant.team, combatant.class, "Ice Barrier", None, "casts");
 
     // Apply absorb shield aura
     if let Some(aura_pending) = AuraPending::from_ability(entity, entity, barrier_def) {
@@ -241,20 +231,8 @@ fn try_arcane_intellect(
     combatant.global_cooldown = GCD;
 
     // Log
-    let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = ctx.combatants.get(&buff_target).map(|info| {
-        format!("Team {} {}", info.team, info.class.name())
-    });
-    combat_log.log_ability_cast(
-        caster_id,
-        "Arcane Intellect".to_string(),
-        target_id,
-        format!(
-            "Team {} {} casts Arcane Intellect",
-            combatant.team,
-            combatant.class.name()
-        ),
-    );
+    let target_tuple = ctx.combatants.get(&buff_target).map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, "Arcane Intellect", target_tuple, "casts");
 
     // Apply buff aura
     if let Some(aura_pending) = AuraPending::from_ability(buff_target, entity, def) {
@@ -318,17 +296,7 @@ fn try_frost_nova(
     combatant.global_cooldown = GCD;
 
     // Log
-    let caster_id = combatant_id(combatant.team, combatant.class);
-    combat_log.log_ability_cast(
-        caster_id,
-        "Frost Nova".to_string(),
-        None,
-        format!(
-            "Team {} {} casts Frost Nova",
-            combatant.team,
-            combatant.class.name()
-        ),
-    );
+    log_ability_use(combat_log, combatant.team, combatant.class, "Frost Nova", None, "casts");
 
     // Collect enemies in range for damage and root
     let mut frost_nova_targets: Vec<(Entity, Vec3, u8, CharacterClass)> = Vec::new();
@@ -474,21 +442,10 @@ fn try_polymorph(
     commands.entity(entity).insert(CastingState::new(ability, cc_target, cast_time));
 
     // Log
-    let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = ctx.combatants
+    let target_tuple = ctx.combatants
         .get(&cc_target)
-        .map(|info| format!("Team {} {}", info.team, info.class.name()));
-    combat_log.log_ability_cast(
-        caster_id,
-        def.name.to_string(),
-        target_id,
-        format!(
-            "Team {} {} begins casting {}",
-            combatant.team,
-            combatant.class.name(),
-            def.name
-        ),
-    );
+        .map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, target_tuple, "begins casting");
 
     info!(
         "Team {} {} starts casting {} on cc_target",
@@ -558,21 +515,10 @@ fn try_frostbolt(
     commands.entity(entity).insert(CastingState::new(ability, target_entity, cast_time));
 
     // Log
-    let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = ctx.combatants
+    let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| format!("Team {} {}", info.team, info.class.name()));
-    combat_log.log_ability_cast(
-        caster_id,
-        def.name.to_string(),
-        target_id,
-        format!(
-            "Team {} {} begins casting {}",
-            combatant.team,
-            combatant.class.name(),
-            def.name
-        ),
-    );
+        .map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, target_tuple, "begins casting");
 
     info!(
         "Team {} {} starts casting {} on enemy",

@@ -22,7 +22,7 @@ use crate::states::play_match::components::*;
 use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::constants::GCD;
 use crate::states::play_match::is_spell_school_locked;
-use crate::states::play_match::utils::combatant_id;
+use crate::states::play_match::utils::log_ability_use;
 
 use super::CombatContext;
 
@@ -203,20 +203,8 @@ fn try_fortitude(
     combatant.global_cooldown = GCD;
 
     // Log
-    let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = ctx.combatants.get(&buff_target).map(|info| {
-        format!("Team {} {}", info.team, info.class.name())
-    });
-    combat_log.log_ability_cast(
-        caster_id,
-        "Power Word: Fortitude".to_string(),
-        target_id,
-        format!(
-            "Team {} {} casts Power Word: Fortitude",
-            combatant.team,
-            combatant.class.name()
-        ),
-    );
+    let target_tuple = ctx.combatants.get(&buff_target).map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, "Power Word: Fortitude", target_tuple, "casts");
 
     // Apply buff aura
     if let Some(aura_pending) = AuraPending::from_ability(buff_target, entity, def) {
@@ -316,20 +304,8 @@ fn try_power_word_shield(
     combatant.global_cooldown = GCD;
 
     // Log
-    let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = ctx.combatants.get(&shield_entity).map(|info| {
-        format!("Team {} {}", info.team, info.class.name())
-    });
-    combat_log.log_ability_cast(
-        caster_id,
-        "Power Word: Shield".to_string(),
-        target_id,
-        format!(
-            "Team {} {} casts Power Word: Shield",
-            combatant.team,
-            combatant.class.name()
-        ),
-    );
+    let target_tuple = ctx.combatants.get(&shield_entity).map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, "Power Word: Shield", target_tuple, "casts");
 
     // Apply absorb shield aura
     if let Some(aura_pending) = AuraPending::from_ability(shield_entity, entity, pw_shield_def) {
@@ -429,21 +405,10 @@ fn try_flash_heal(
     commands.entity(entity).insert(CastingState::new(ability, heal_target, cast_time));
 
     // Log
-    let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = ctx.combatants
+    let target_tuple = ctx.combatants
         .get(&heal_target)
-        .map(|info| format!("Team {} {}", info.team, info.class.name()));
-    combat_log.log_ability_cast(
-        caster_id,
-        def.name.to_string(),
-        target_id,
-        format!(
-            "Team {} {} begins casting {}",
-            combatant.team,
-            combatant.class.name(),
-            def.name
-        ),
-    );
+        .map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, target_tuple, "begins casting");
 
     info!(
         "Team {} {} starts casting {} on ally",
@@ -507,21 +472,10 @@ fn try_mind_blast(
     commands.entity(entity).insert(CastingState::new(ability, target_entity, cast_time));
 
     // Log
-    let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = ctx.combatants
+    let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| format!("Team {} {}", info.team, info.class.name()));
-    combat_log.log_ability_cast(
-        caster_id,
-        def.name.to_string(),
-        target_id,
-        format!(
-            "Team {} {} begins casting {}",
-            combatant.team,
-            combatant.class.name(),
-            def.name
-        ),
-    );
+        .map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, target_tuple, "begins casting");
 
     info!(
         "Team {} {} starts casting {} on enemy",
