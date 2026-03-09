@@ -19,27 +19,15 @@ use crate::states::play_match::components::*;
 use crate::states::play_match::combat_core::roll_crit;
 use crate::states::play_match::constants::{CHARGE_MIN_RANGE, CRIT_DAMAGE_MULTIPLIER, GCD};
 
-use super::{AbilityDecision, ClassAI, CombatContext};
+use crate::states::play_match::utils::log_ability_use;
+
+use super::CombatContext;
 
 /// Battle Shout range constant
 const BATTLE_SHOUT_RANGE: f32 = 30.0;
 
 /// Rage reserve for essential abilities
 const RAGE_RESERVE: f32 = 50.0;
-
-/// Warrior AI implementation.
-///
-/// Note: Currently uses direct execution via `decide_warrior_action()`.
-/// The trait implementation is a stub for future refactoring.
-pub struct WarriorAI;
-
-impl ClassAI for WarriorAI {
-    fn decide_action(&self, _ctx: &CombatContext, _combatant: &Combatant) -> AbilityDecision {
-        // TODO: Migrate to trait-based decision making
-        // For now, use decide_warrior_action() directly from combat_ai.rs
-        AbilityDecision::None
-    }
-}
 
 /// Warrior AI: Decides and executes abilities for a Warrior combatant.
 ///
@@ -199,39 +187,13 @@ fn try_battle_shout(
     combatant.global_cooldown = GCD;
 
     // Log
-    let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    combat_log.log_ability_cast(
-        caster_id,
-        "Battle Shout".to_string(),
-        None,
-        format!(
-            "Team {} {} uses Battle Shout",
-            combatant.team,
-            combatant.class.name()
-        ),
-    );
+    log_ability_use(combat_log, combatant.team, combatant.class, "Battle Shout", None, "uses");
 
     // Apply buff to all nearby allies
-    if let Some(aura) = def.applies_aura.as_ref() {
-        for ally_entity in allies_to_buff {
-            battle_shouted_this_frame.insert(ally_entity);
-            commands.spawn(AuraPending {
-                target: ally_entity,
-                aura: Aura {
-                    effect_type: aura.aura_type,
-                    duration: aura.duration,
-                    magnitude: aura.magnitude,
-                    break_on_damage_threshold: aura.break_on_damage,
-                    accumulated_damage: 0.0,
-                    tick_interval: 0.0,
-                    time_until_next_tick: 0.0,
-                    caster: Some(entity),
-                    ability_name: def.name.to_string(),
-                    fear_direction: (0.0, 0.0),
-                    fear_direction_timer: 0.0,
-                    spell_school: None, // Buff, not dispellable by Dispel Magic
-                },
-            });
+    for ally_entity in allies_to_buff {
+        battle_shouted_this_frame.insert(ally_entity);
+        if let Some(aura_pending) = AuraPending::from_ability(ally_entity, entity, def) {
+            commands.spawn(aura_pending);
         }
     }
 
@@ -291,20 +253,10 @@ fn try_charge(
     });
 
     // Log
-    let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = ctx.combatants
+    let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| format!("Team {} {}", info.team, info.class.name()));
-    combat_log.log_ability_cast(
-        caster_id,
-        "Charge".to_string(),
-        target_id,
-        format!(
-            "Team {} {} uses Charge",
-            combatant.team,
-            combatant.class.name()
-        ),
-    );
+        .map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, "Charge", target_tuple, "uses");
 
     info!(
         "Team {} {} uses Charge on enemy (distance: {:.1} units)",
@@ -351,40 +303,14 @@ fn try_rend(
     combatant.global_cooldown = GCD;
 
     // Log
-    let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    let target_id = ctx.combatants
+    let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| format!("Team {} {}", info.team, info.class.name()));
-    combat_log.log_ability_cast(
-        caster_id,
-        "Rend".to_string(),
-        target_id,
-        format!(
-            "Team {} {} uses Rend",
-            combatant.team,
-            combatant.class.name()
-        ),
-    );
+        .map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, "Rend", target_tuple, "uses");
 
     // Apply DoT aura
-    if let Some(aura) = rend_def.applies_aura.as_ref() {
-        commands.spawn(AuraPending {
-            target: target_entity,
-            aura: Aura {
-                effect_type: aura.aura_type,
-                duration: aura.duration,
-                magnitude: aura.magnitude,
-                break_on_damage_threshold: aura.break_on_damage,
-                accumulated_damage: 0.0,
-                tick_interval: aura.tick_interval,
-                time_until_next_tick: aura.tick_interval,
-                caster: Some(entity),
-                ability_name: rend_def.name.to_string(),
-                fear_direction: (0.0, 0.0),
-                fear_direction_timer: 0.0,
-                spell_school: None, // Physical DoT, NOT dispellable
-            },
-        });
+    if let Some(aura_pending) = AuraPending::from_ability(target_entity, entity, rend_def) {
+        commands.spawn(aura_pending);
     }
 
     combat_log.log(
@@ -448,17 +374,7 @@ fn try_mortal_strike(
     combatant.global_cooldown = GCD;
 
     // Log
-    let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-    combat_log.log_ability_cast(
-        caster_id,
-        "Mortal Strike".to_string(),
-        Some(format!("Team {} {}", target_info.team, target_info.class.name())),
-        format!(
-            "Team {} {} uses Mortal Strike",
-            combatant.team,
-            combatant.class.name()
-        ),
-    );
+    log_ability_use(combat_log, combatant.team, combatant.class, "Mortal Strike", Some((target_info.team, target_info.class)), "uses");
 
     // Calculate and queue damage
     let mut damage = combatant.calculate_ability_damage_config(ms_def, game_rng);
@@ -475,24 +391,8 @@ fn try_mortal_strike(
     });
 
     // Apply healing reduction aura
-    if let Some(aura) = ms_def.applies_aura.as_ref() {
-        commands.spawn(AuraPending {
-            target: target_entity,
-            aura: Aura {
-                effect_type: aura.aura_type,
-                duration: aura.duration,
-                magnitude: aura.magnitude,
-                break_on_damage_threshold: aura.break_on_damage,
-                accumulated_damage: 0.0,
-                tick_interval: 0.0,
-                time_until_next_tick: 0.0,
-                caster: Some(entity),
-                ability_name: ms_def.name.to_string(),
-                fear_direction: (0.0, 0.0),
-                fear_direction_timer: 0.0,
-                spell_school: None, // Physical debuff, NOT dispellable
-            },
-        });
+    if let Some(aura_pending) = AuraPending::from_ability(target_entity, entity, ms_def) {
+        commands.spawn(aura_pending);
     }
 
     info!(

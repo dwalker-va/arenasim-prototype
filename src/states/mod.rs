@@ -33,16 +33,7 @@ pub enum GameState {
     Results,
 }
 
-/// System sets for PlayMatch state to ensure proper execution order.
-/// ResourcesAndAuras must run before CombatAndMovement so that timer
-/// decrements (like kiting_timer) are visible to movement systems.
-#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
-enum PlayMatchSystems {
-    /// First phase: resource regeneration, DoT ticks, aura updates
-    ResourcesAndAuras,
-    /// Second phase: targeting, abilities, casting, projectiles, movement
-    CombatAndMovement,
-}
+use play_match::systems::{CombatSystemPhase, configure_combat_system_ordering, add_core_combat_systems};
 
 /// Plugin for managing game states and transitions
 pub struct StatesPlugin;
@@ -58,13 +49,6 @@ impl Plugin for StatesPlugin {
             // Initialize ability icon resources for view combatant screen
             .init_resource::<view_combatant_ui::AbilityIcons>()
             .init_resource::<view_combatant_ui::AbilityIconHandles>()
-            // Configure PlayMatch system sets ordering
-            // ResourcesAndAuras must run before CombatAndMovement so that
-            // kiting_timer decrements are visible to move_to_target
-            .configure_sets(
-                Update,
-                PlayMatchSystems::CombatAndMovement.after(PlayMatchSystems::ResourcesAndAuras),
-            )
             // Main menu systems (now using egui)
             .add_systems(
                 Update,
@@ -100,73 +84,43 @@ impl Plugin for StatesPlugin {
                     .run_if(in_state(GameState::ViewCombatant)),
             )
             // Play match systems (defined in play_match module)
-            .add_systems(OnEnter(GameState::PlayMatch), play_match::setup_play_match)
-            // Phase 1: Resources and Auras - includes kiting_timer decrement
-            .add_systems(
+            .add_systems(OnEnter(GameState::PlayMatch), play_match::setup_play_match);
+
+        // Configure combat system phase ordering and add core combat systems
+        // These are shared between graphical and headless modes
+        configure_combat_system_ordering(app);
+        add_core_combat_systems(app, in_state(GameState::PlayMatch));
+
+        // Graphical-only systems: camera, input, gate animation, projectile visuals
+        // These run before core combat in Phase 1 (ResourcesAndAuras)
+        app.add_systems(
                 Update,
                 (
                     play_match::handle_time_controls,
                     play_match::handle_camera_input,
                     play_match::update_camera_position,
-                    play_match::update_countdown,
                     play_match::animate_gate_bars,
                     play_match::update_play_match,
-                    play_match::regenerate_resources,
-                    play_match::track_shadow_sight_timer,  // Track combat time and spawn Shadow Sight orbs
-                    play_match::process_dot_ticks,  // Process DoT ticks BEFORE updating auras (so final tick fires on expiration)
-                    play_match::update_auras,
-                    play_match::slow_zone_system,       // Zone slow refresh before aura processing
-                    play_match::process_divine_shield,  // Must run BEFORE apply_pending_auras so DamageImmunity blocks CC
-                    play_match::apply_pending_auras,
-                    play_match::process_dispels,
-                    play_match::process_holy_shock_heals,
-                    play_match::process_holy_shock_damage,
                 )
                     .chain()
-                    .in_set(PlayMatchSystems::ResourcesAndAuras)
+                    .before(CombatSystemPhase::ResourcesAndAuras)
                     .run_if(in_state(GameState::PlayMatch)),
             )
-            // Apply deferred commands (e.g., inserting ActiveAuras) before processing them
-            // This runs after ResourcesAndAuras, before CombatAndMovement
+            // Graphical-only: projectile visuals must run after process_casting spawns projectiles
+            // but before move_projectiles. We chain it after process_channeling in Phase 2.
             .add_systems(
                 Update,
-                apply_deferred
-                    .after(PlayMatchSystems::ResourcesAndAuras)
-                    .before(PlayMatchSystems::CombatAndMovement)
+                play_match::spawn_projectile_visuals
+                    .in_set(CombatSystemPhase::CombatAndMovement)
+                    .after(play_match::process_channeling)
+                    .before(play_match::move_projectiles)
                     .run_if(in_state(GameState::PlayMatch)),
             )
-            // Phase 2: Combat and Movement - uses kiting_timer to decide movement
-            .add_systems(
-                Update,
-                (
-                    play_match::process_aura_breaks,
-                    play_match::acquire_targets,
-                    play_match::check_orb_pickups,  // Check for Shadow Sight orb pickups
-                    play_match::decide_abilities,
-                    play_match::pet_ai_system,
-                    apply_deferred,  // Flush commands so CastingState is visible
-                    play_match::check_interrupts,  // Check for interrupts after CastingState is visible
-                    play_match::process_interrupts,
-                    play_match::process_casting,
-                    play_match::process_channeling,  // Process channeled spell ticks
-                    play_match::spawn_projectile_visuals,
-                    play_match::move_projectiles,
-                    play_match::move_trap_launch_projectiles,  // Arc travel for launched traps
-                    play_match::process_projectile_hits,
-                    play_match::move_to_target,
-                    play_match::trap_system,  // After movement — needs current positions
-                    play_match::despawn_pets_of_dead_owners,  // Kill pets whose owner has died
-                )
-                    .chain()
-                    .in_set(PlayMatchSystems::CombatAndMovement)
-                    .run_if(in_state(GameState::PlayMatch)),
-            )
-            // Combat resolution, death, and effects
+            // Combat resolution, death, and visual effects (after core combat)
             .add_systems(
                 Update,
                 (
                     play_match::update_stealth_visuals,
-                    play_match::combat_auto_attack,
                     play_match::check_match_end,
                     play_match::trigger_death_animation,
                     play_match::animate_death,
@@ -178,20 +132,21 @@ impl Plugin for StatesPlugin {
                     play_match::update_spell_impact_effects,
                     play_match::cleanup_expired_spell_impacts,
                     play_match::animate_shadow_sight_orbs,  // Pulsing orb animation
-                    play_match::animate_orb_consumption,    // Orb pickup animation
+                    play_match::animate_orb_consumption,    // Orb pickup shrink/move animation
                     play_match::update_shield_bubbles,      // Spawn/despawn shield bubbles
                     play_match::follow_shield_bubbles,      // Update bubble positions
                     play_match::update_polymorph_visuals,   // Cuboid mesh when polymorphed
                     play_match::spawn_flame_visuals,        // Visual meshes for flame particles
                     play_match::update_flame_particles,     // Move/fade flame particles
                 )
+                    .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_state(GameState::PlayMatch)),
             )
             // Pet mesh tilt must run after movement sets Y-facing rotation
             .add_systems(
                 Update,
                 play_match::apply_pet_mesh_tilt
-                    .after(PlayMatchSystems::CombatAndMovement)
+                    .after(CombatSystemPhase::CombatAndMovement)
                     .run_if(in_state(GameState::PlayMatch)),
             )
             // Healing light column visual effects (separate group to avoid tuple size limits)
@@ -202,6 +157,7 @@ impl Plugin for StatesPlugin {
                     play_match::update_healing_light_columns,   // Update position/fade
                     play_match::cleanup_expired_healing_lights, // Remove expired columns
                 )
+                    .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_state(GameState::PlayMatch)),
             )
             // Dispel burst visual effects (separate group to avoid tuple size limits)
@@ -212,6 +168,7 @@ impl Plugin for StatesPlugin {
                     play_match::update_dispel_bursts,          // Expand sphere and fade
                     play_match::cleanup_expired_dispel_bursts, // Remove expired bursts
                 )
+                    .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_state(GameState::PlayMatch)),
             )
             // Drain Life beam visual effects (separate group to avoid tuple size limits)
@@ -224,6 +181,7 @@ impl Plugin for StatesPlugin {
                     play_match::update_drain_particles,     // Move particles toward caster
                     play_match::cleanup_drain_life_beams,   // Remove beam when channel ends
                 )
+                    .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_state(GameState::PlayMatch)),
             )
             // Trap visual effects (ground circles + trigger bursts)
@@ -236,6 +194,7 @@ impl Plugin for StatesPlugin {
                     play_match::update_and_cleanup_trap_bursts,  // Expand + fade + despawn
                     play_match::spawn_trap_launch_visuals,       // Glowing sphere on launched traps
                 )
+                    .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_state(GameState::PlayMatch)),
             )
             // Ice block + slow zone visual effects
@@ -248,6 +207,7 @@ impl Plugin for StatesPlugin {
                     play_match::spawn_slow_zone_visuals,     // Cyan disc on slow zones
                     play_match::update_slow_zone_visuals,    // Pulse + fade out
                 )
+                    .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_state(GameState::PlayMatch)),
             )
             // Disengage trail + charge trail visual effects
@@ -259,6 +219,7 @@ impl Plugin for StatesPlugin {
                     play_match::spawn_charge_trail,                    // Boar charge streak
                     play_match::update_and_cleanup_charge_trails,      // Fade + despawn
                 )
+                    .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_state(GameState::PlayMatch)),
             )
             // UI rendering systems

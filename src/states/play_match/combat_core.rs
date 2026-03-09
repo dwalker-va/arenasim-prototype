@@ -1740,32 +1740,9 @@ pub fn process_casting(
 
         // Apply aura if applicable (store for later application)
         if let Some(aura) = def.applies_aura.as_ref() {
-            // We'll apply auras in a separate pass to avoid borrow issues
-            // Convert spell school to Option (None for Physical, since physical = not magic-dispellable)
-            let aura_spell_school = match def.spell_school {
-                SpellSchool::Physical | SpellSchool::None => None,
-                school => Some(school),
-            };
-            commands.spawn((
-                AuraPending {
-                    target: target_entity,
-                    aura: Aura {
-                        effect_type: aura.aura_type,
-                        duration: aura.duration,
-                        magnitude: aura.magnitude,
-                        break_on_damage_threshold: aura.break_on_damage,
-                        accumulated_damage: 0.0,
-                        tick_interval: aura.tick_interval,
-                        time_until_next_tick: aura.tick_interval,
-                        caster: Some(caster_entity),
-                        ability_name: def.name.clone(),
-                        fear_direction: (0.0, 0.0),
-                        fear_direction_timer: 0.0,
-                        spell_school: aura_spell_school,
-                    },
-                },
-                PlayMatchEntity,
-            ));
+            if let Some(aura_pending) = AuraPending::from_ability(target_entity, caster_entity, def) {
+                commands.spawn((aura_pending, PlayMatchEntity));
+            }
             
             info!(
                 "Queued {:?} aura for Team {} {} (magnitude: {}, duration: {}s)",

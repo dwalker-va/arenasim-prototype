@@ -7,7 +7,6 @@ use bevy::prelude::*;
 use smallvec::SmallVec;
 
 use crate::combat::log::{CombatLog, CombatLogEventType};
-use crate::states::play_match::class_ai::priest::DispelPending;
 use crate::states::play_match::components::*;
 
 /// Process pending dispels from Dispel Magic, Cleanse, or Devour Magic.

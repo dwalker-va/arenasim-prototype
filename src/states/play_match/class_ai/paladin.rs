@@ -28,20 +28,9 @@ use crate::states::play_match::constants::{
     HOLY_SHOCK_DAMAGE_RANGE, LOW_HP_THRESHOLD, SAFE_HEAL_MAX_THRESHOLD,
 };
 use crate::states::play_match::is_spell_school_locked;
-use crate::states::play_match::utils::combatant_id;
+use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
-use super::priest::DispelPending;
-use super::{dispel_priority, AbilityDecision, ClassAI, CombatContext, CombatantInfo};
-
-/// Paladin AI implementation
-pub struct PaladinAI;
-
-impl ClassAI for PaladinAI {
-    fn decide_action(&self, _ctx: &CombatContext, _combatant: &Combatant) -> AbilityDecision {
-        // Uses decide_paladin_action() directly from combat_ai.rs
-        AbilityDecision::None
-    }
-}
+use super::{CombatContext, CombatantInfo};
 
 /// Paladin AI: Decides and executes abilities for a Paladin combatant.
 ///
@@ -162,7 +151,7 @@ pub fn decide_paladin_action(
     }
 
     // Priority 7: Cleanse - Maintenance (roots, DoTs when team stable)
-    if allies_are_healthy(combatant.team, ctx.combatants) {
+    if ctx.is_team_healthy(HEALTHY_HP_THRESHOLD, my_pos) {
         if try_cleanse(
             commands,
             combat_log,
@@ -178,7 +167,7 @@ pub fn decide_paladin_action(
     }
 
     // Priority 8: Holy Shock (damage) - when team healthy
-    if allies_are_healthy(combatant.team, ctx.combatants) {
+    if ctx.is_team_healthy(HEALTHY_HP_THRESHOLD, my_pos) {
         if try_holy_shock_damage(
             commands,
             combat_log,
@@ -261,16 +250,7 @@ pub fn try_divine_shield(
     combatant.global_cooldown = GCD;
 
     // Log the cast
-    combat_log.log_ability_cast(
-        caster_id,
-        "Divine Shield".to_string(),
-        None,
-        format!(
-            "Team {} {} casts Divine Shield",
-            combatant.team,
-            combatant.class.name()
-        ),
-    );
+    log_ability_use(combat_log, combatant.team, combatant.class, "Divine Shield", None, "casts");
 
     true
 }
@@ -338,16 +318,7 @@ pub fn try_divine_shield_while_cc(
     combatant.ability_cooldowns.insert(AbilityType::DivineShield, def.cooldown);
     combatant.global_cooldown = GCD;
 
-    combat_log.log_ability_cast(
-        caster_id,
-        "Divine Shield".to_string(),
-        None,
-        format!(
-            "Team {} {} breaks CC with Divine Shield!",
-            combatant.team,
-            combatant.class.name()
-        ),
-    );
+    log_ability_use(combat_log, combatant.team, combatant.class, "Divine Shield", None, "casts");
 
     true
 }
@@ -363,20 +334,6 @@ fn has_emergency_target(
             && info.max_health > 0.0
             && (info.current_health / info.max_health) < CRITICAL_HP_THRESHOLD
     })
-}
-
-/// Check if all allies are healthy (above healthy HP threshold)
-fn allies_are_healthy(
-    team: u8,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
-) -> bool {
-    combatant_info
-        .values()
-        .filter(|info| info.team == team && info.current_health > 0.0)
-        .all(|info| {
-            info.max_health > 0.0
-                && (info.current_health / info.max_health) >= HEALTHY_HP_THRESHOLD
-        })
 }
 
 /// Try to cast Flash of Light on an injured ally.
@@ -401,24 +358,13 @@ fn try_flash_of_light(
         return false;
     }
 
-    // Find the lowest HP ally (below 90%), excluding pets
-    let heal_target = ctx.combatants
-        .iter()
-        .filter(|(_, info)| {
-            info.team == combatant.team
-                && info.current_health > 0.0
-                && info.max_health > 0.0
-                && !info.is_pet
-                && (info.current_health / info.max_health) < 0.9
-        })
-        .map(|(e, info)| {
-            (e, info.class, info.current_health / info.max_health, info.position)
-        })
-        .min_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
-
-    let Some((target_entity, target_class, _, target_pos)) = heal_target else {
+    // Find the lowest HP ally (below 90%), excluding pets, within range
+    let Some(target_info) = ctx.lowest_health_ally_below(0.9, def.range, my_pos) else {
         return false;
     };
+    let target_entity = &target_info.entity;
+    let target_class = target_info.class;
+    let target_pos = target_info.position;
 
     if !ability.can_cast_config(combatant, target_pos, my_pos, def) {
         return false;
@@ -428,27 +374,9 @@ fn try_flash_of_light(
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras);
 
-    commands.entity(entity).insert(CastingState {
-        ability,
-        time_remaining: cast_time,
-        target: Some(*target_entity),
-        interrupted: false,
-        interrupted_display_time: 0.0,
-    });
+    commands.entity(entity).insert(CastingState::new(ability, *target_entity, cast_time));
 
-    let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = format!("Team {} {}", combatant.team, target_class.name());
-    combat_log.log_ability_cast(
-        caster_id,
-        def.name.to_string(),
-        Some(target_id),
-        format!(
-            "Team {} {} begins casting {}",
-            combatant.team,
-            combatant.class.name(),
-            def.name
-        ),
-    );
+    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, Some((combatant.team, target_class)), "begins casting");
 
     true
 }
@@ -475,24 +403,17 @@ fn try_holy_light(
         return false;
     }
 
-    // Find an ally between 50-85% HP (safe to use slow heal), excluding pets
-    let heal_target = ctx.combatants
-        .iter()
-        .filter(|(_, info)| {
-            if info.team != combatant.team || info.current_health <= 0.0 || info.max_health <= 0.0 || info.is_pet {
-                return false;
-            }
-            let pct = info.current_health / info.max_health;
-            pct >= LOW_HP_THRESHOLD && pct < SAFE_HEAL_MAX_THRESHOLD
-        })
-        .map(|(e, info)| {
-            (e, info.class, info.current_health / info.max_health, info.position)
-        })
-        .min_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
-
-    let Some((target_entity, target_class, _, target_pos)) = heal_target else {
+    // Find an ally between 50-85% HP (safe to use slow heal), excluding pets, within range
+    let Some(target_info) = ctx.lowest_health_ally_below(SAFE_HEAL_MAX_THRESHOLD, def.range, my_pos) else {
         return false;
     };
+    // Skip if target is critically low — Flash of Light or Holy Shock should handle that
+    if target_info.health_pct() < LOW_HP_THRESHOLD {
+        return false;
+    }
+    let target_entity = &target_info.entity;
+    let target_class = target_info.class;
+    let target_pos = target_info.position;
 
     if !ability.can_cast_config(combatant, target_pos, my_pos, def) {
         return false;
@@ -502,27 +423,9 @@ fn try_holy_light(
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras);
 
-    commands.entity(entity).insert(CastingState {
-        ability,
-        time_remaining: cast_time,
-        target: Some(*target_entity),
-        interrupted: false,
-        interrupted_display_time: 0.0,
-    });
+    commands.entity(entity).insert(CastingState::new(ability, *target_entity, cast_time));
 
-    let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = format!("Team {} {}", combatant.team, target_class.name());
-    combat_log.log_ability_cast(
-        caster_id,
-        def.name.to_string(),
-        Some(target_id),
-        format!(
-            "Team {} {} begins casting {}",
-            combatant.team,
-            combatant.class.name(),
-            def.name
-        ),
-    );
+    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, Some((combatant.team, target_class)), "begins casting");
 
     true
 }
@@ -560,27 +463,11 @@ fn try_holy_shock_heal(
     }
 
     // Find lowest HP ally below 50% and in range, excluding pets
-    let heal_target = ctx.combatants
-        .iter()
-        .filter(|(_, info)| {
-            info.team == combatant.team
-                && info.current_health > 0.0
-                && info.max_health > 0.0
-                && !info.is_pet
-                && (info.current_health / info.max_health) < LOW_HP_THRESHOLD
-        })
-        .filter_map(|(e, info)| {
-            if my_pos.distance(info.position) <= def.range {
-                Some((e, info.class, info.current_health / info.max_health))
-            } else {
-                None
-            }
-        })
-        .min_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
-
-    let Some((target_entity, target_class, _)) = heal_target else {
+    let Some(target_info) = ctx.lowest_health_ally_below(LOW_HP_THRESHOLD, def.range, my_pos) else {
         return false;
     };
+    let target_entity = &target_info.entity;
+    let target_class = target_info.class;
 
     // Execute instant heal
     combatant.current_mana -= def.mana_cost;
@@ -588,19 +475,7 @@ fn try_holy_shock_heal(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
 
     // Log the cast
-    let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = format!("Team {} {}", combatant.team, target_class.name());
-    combat_log.log_ability_cast(
-        caster_id,
-        "Holy Shock (Heal)".to_string(),
-        Some(target_id.clone()),
-        format!(
-            "Team {} {} casts Holy Shock on {}",
-            combatant.team,
-            combatant.class.name(),
-            target_id
-        ),
-    );
+    log_ability_use(combat_log, combatant.team, combatant.class, "Holy Shock (Heal)", Some((combatant.team, target_class)), "casts");
 
     // Spawn pending heal
     commands.spawn(HolyShockHealPending {
@@ -671,20 +546,8 @@ fn try_holy_shock_damage(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
 
     // Log the cast
-    let caster_id = combatant_id(combatant.team, combatant.class);
     let enemy_team = if combatant.team == 1 { 2 } else { 1 };
-    let target_id = format!("Team {} {}", enemy_team, target_class.name());
-    combat_log.log_ability_cast(
-        caster_id,
-        "Holy Shock (Damage)".to_string(),
-        Some(target_id.clone()),
-        format!(
-            "Team {} {} casts Holy Shock on {}",
-            combatant.team,
-            combatant.class.name(),
-            target_id
-        ),
-    );
+    log_ability_use(combat_log, combatant.team, combatant.class, "Holy Shock (Damage)", Some((enemy_team, target_class)), "casts");
 
     // Spawn pending damage
     commands.spawn(HolyShockDamagePending {
@@ -767,17 +630,7 @@ fn try_hammer_of_justice(
     let caster_id = combatant_id(combatant.team, combatant.class);
     let enemy_team = if combatant.team == 1 { 2 } else { 1 };
     let target_id = format!("Team {} {}", enemy_team, target_class.name());
-    combat_log.log_ability_cast(
-        caster_id.clone(),
-        def.name.to_string(),
-        Some(target_id.clone()),
-        format!(
-            "Team {} {} casts Hammer of Justice on {}",
-            combatant.team,
-            combatant.class.name(),
-            target_id
-        ),
-    );
+    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, Some((enemy_team, target_class)), "casts");
 
     // Apply stun aura and log CC
     if let Some(aura_def) = def.applies_aura.as_ref() {
@@ -818,6 +671,8 @@ fn try_hammer_of_justice(
 }
 
 /// Try to cast Cleanse on an ally with a dispellable debuff.
+///
+/// Delegates to the shared `try_dispel_ally()` in `class_ai/mod.rs`.
 fn try_cleanse(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -828,96 +683,20 @@ fn try_cleanse(
     ctx: &CombatContext,
     min_priority: i32,
 ) -> bool {
-    let ability = AbilityType::PaladinCleanse;
-    let def = abilities.get_unchecked(&ability);
-
-    if is_spell_school_locked(def.spell_school, auras) {
-        return false;
-    }
-
-    if combatant.current_mana < def.mana_cost {
-        return false;
-    }
-
-    // Find ally with highest priority dispellable debuff
-    let mut best_candidate: Option<(&Entity, CharacterClass, i32)> = None;
-
-    for (e, info) in ctx.combatants.iter() {
-        // Must be alive ally
-        if info.team != combatant.team || info.current_health <= 0.0 {
-            continue;
-        }
-
-        // Check range
-        if my_pos.distance(info.position) > def.range {
-            continue;
-        }
-
-        // Check if ally has any dispellable debuffs
-        let Some(ally_auras) = ctx.active_auras.get(e) else {
-            continue;
-        };
-
-        // Find highest priority dispellable debuff on this ally
-        let mut highest_priority = 0;
-        for aura in ally_auras {
-            if !aura.can_be_dispelled() {
-                continue;
-            }
-
-            let priority = dispel_priority(aura.effect_type);
-
-            if priority > highest_priority {
-                highest_priority = priority;
-            }
-        }
-
-        if highest_priority < min_priority {
-            continue;
-        }
-
-        match best_candidate {
-            None => best_candidate = Some((e, info.class, highest_priority)),
-            Some((_, _, best_prio)) if highest_priority > best_prio => {
-                best_candidate = Some((e, info.class, highest_priority));
-            }
-            _ => {}
-        }
-    }
-
-    let Some((target_entity, target_class, _)) = best_candidate else {
-        return false;
-    };
-
-    // Execute Cleanse
-    combatant.current_mana -= def.mana_cost;
-    combatant.global_cooldown = GCD;
-
-    // Log
-    let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = format!("Team {} {}", combatant.team, target_class.name());
-    combat_log.log_ability_cast(
-        caster_id,
-        "Cleanse".to_string(),
-        Some(target_id.clone()),
-        format!(
-            "Team {} {} casts Cleanse on {}",
-            combatant.team,
-            combatant.class.name(),
-            target_id
-        ),
-    );
-
-    // Spawn pending dispel (uses same system as Priest's DispelMagic)
-    commands.spawn(DispelPending {
-        target: *target_entity,
-        log_prefix: "[CLEANSE]",
-        caster_class: CharacterClass::Paladin,
-        heal_on_success: None,
-        aura_type_filter: None,
-    });
-
-    true
+    super::try_dispel_ally(
+        commands,
+        combat_log,
+        abilities,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        min_priority,
+        AbilityType::PaladinCleanse,
+        "[CLEANSE]",
+        "Cleanse",
+        CharacterClass::Paladin,
+    )
 }
 
 /// Try to cast Devotion Aura to buff all allies with damage reduction.
@@ -992,17 +771,7 @@ fn try_devotion_aura(
     combatant.global_cooldown = GCD;
 
     // Log the cast once
-    let caster_id = combatant_id(combatant.team, combatant.class);
-    combat_log.log_ability_cast(
-        caster_id,
-        "Devotion Aura".to_string(),
-        None, // No single target - affects all allies
-        format!(
-            "Team {} {} casts Devotion Aura",
-            combatant.team,
-            combatant.class.name()
-        ),
-    );
+    log_ability_use(combat_log, combatant.team, combatant.class, "Devotion Aura", None, "casts");
 
     // Apply the aura to each ally
     for ally_entity in allies_to_buff {
