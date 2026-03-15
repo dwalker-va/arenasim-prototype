@@ -44,7 +44,7 @@ pub use super::effects::process_divine_shield;
 pub use super::auras::process_aura_breaks;
 pub use super::combat_ai::acquire_targets;
 pub use super::shadow_sight::check_orb_pickups;
-pub use super::shadow_sight::animate_orb_consumption;
+pub use super::shadow_sight::cleanup_consumed_orbs;
 pub use super::combat_ai::decide_abilities;
 pub use super::class_ai::pet_ai::pet_ai_system;
 pub use super::combat_ai::check_interrupts;
@@ -160,7 +160,7 @@ where
             process_aura_breaks,
             acquire_targets,
             check_orb_pickups,
-            animate_orb_consumption,
+            cleanup_consumed_orbs,
             decide_abilities,
             pet_ai_system,
             apply_deferred, // Flush CastingState for interrupt checks

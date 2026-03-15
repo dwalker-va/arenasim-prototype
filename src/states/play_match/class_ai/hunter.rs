@@ -20,19 +20,8 @@ use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::constants::*;
 use crate::states::play_match::is_spell_school_locked;
 
-use super::{AbilityDecision, ClassAI, CombatContext};
-use super::super::utils::combatant_id;
-
-/// Hunter AI implementation.
-///
-/// Note: Currently uses direct execution via `decide_hunter_action()`.
-pub struct HunterAI;
-
-impl ClassAI for HunterAI {
-    fn decide_action(&self, _ctx: &CombatContext, _combatant: &Combatant) -> AbilityDecision {
-        AbilityDecision::None
-    }
-}
+use super::CombatContext;
+use super::super::utils::log_ability_use;
 
 /// Hunter AI: Decides and executes abilities for a Hunter combatant.
 ///
@@ -123,16 +112,7 @@ pub fn decide_hunter_action(
                     combatant.ability_cooldowns.insert(AbilityType::Disengage, def.cooldown);
                     combatant.global_cooldown = GCD;
 
-                    let caster_id = combatant_id(combatant.team, combatant.class);
-                    combat_log.log_ability_cast(
-                        caster_id,
-                        "Disengage".to_string(),
-                        None,
-                        format!(
-                            "[MOVE] Team {} {} disengages {:.0} yards",
-                            combatant.team, combatant.class.name(), DISENGAGE_DISTANCE
-                        ),
-                    );
+                    log_ability_use(combat_log, combatant.team, combatant.class, "Disengage", None, "uses");
                     return true;
                 }
             }
@@ -283,7 +263,6 @@ fn try_place_trap_at(
     let position = crate::states::play_match::combat_core::clamp_to_arena(position);
 
     let trap_name = trap_type.name();
-    let caster_id = combatant_id(combatant.team, combatant.class);
 
     // Distance check uses XZ plane only (ignore Y)
     let distance = Vec3::new(my_pos.x, 0.0, my_pos.z)
@@ -312,15 +291,7 @@ fn try_place_trap_at(
             },
             PlayMatchEntity,
         ));
-        combat_log.log_ability_cast(
-            caster_id,
-            trap_name.to_string(),
-            None,
-            format!(
-                "[TRAP] Team {} {} launches {} toward ({:.0}, {:.0})",
-                combatant.team, combatant.class.name(), trap_name, position.x, position.z
-            ),
-        );
+        log_ability_use(combat_log, combatant.team, combatant.class, trap_name, None, "uses");
     } else {
         // Drop: instant spawn at target position (short range)
         commands.spawn((
@@ -335,15 +306,7 @@ fn try_place_trap_at(
             },
             PlayMatchEntity,
         ));
-        combat_log.log_ability_cast(
-            caster_id,
-            trap_name.to_string(),
-            None,
-            format!(
-                "[TRAP] Team {} {} places {} at ({:.0}, {:.0})",
-                combatant.team, combatant.class.name(), trap_name, position.x, position.z
-            ),
-        );
+        log_ability_use(combat_log, combatant.team, combatant.class, trap_name, None, "uses");
     }
 
     combatant.current_mana -= def.mana_cost;
@@ -400,17 +363,7 @@ fn try_concussive_shot(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = GCD;
 
-    let caster_id = combatant_id(combatant.team, combatant.class);
-    combat_log.log_ability_cast(
-        caster_id,
-        def.name.to_string(),
-        Some(format!("Team {} {}", target_info.team, target_info.class.name())),
-        format!(
-            "Team {} {} fires {} at Team {} {}",
-            combatant.team, combatant.class.name(), def.name,
-            target_info.team, target_info.class.name()
-        ),
-    );
+    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, Some((target_info.team, target_info.class)), "fires");
 
     true
 }
@@ -440,29 +393,13 @@ fn try_aimed_shot(
 
     // Start casting
     let cast_time = calculate_cast_time(def.cast_time, auras);
-    commands.entity(entity).insert(CastingState {
-        ability,
-        time_remaining: cast_time,
-        target: Some(target_entity),
-        interrupted: false,
-        interrupted_display_time: 0.0,
-    });
+    commands.entity(entity).insert(CastingState::new(ability, target_entity, cast_time));
 
     combatant.current_mana -= def.mana_cost;
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = GCD;
 
-    let caster_id = combatant_id(combatant.team, combatant.class);
-    combat_log.log_ability_cast(
-        caster_id,
-        def.name.to_string(),
-        Some(format!("Team {} {}", target_info.team, target_info.class.name())),
-        format!(
-            "Team {} {} begins casting {} on Team {} {}",
-            combatant.team, combatant.class.name(), def.name,
-            target_info.team, target_info.class.name()
-        ),
-    );
+    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, Some((target_info.team, target_info.class)), "begins casting");
 
     true
 }
@@ -513,17 +450,7 @@ fn try_arcane_shot(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = GCD;
 
-    let caster_id = combatant_id(combatant.team, combatant.class);
-    combat_log.log_ability_cast(
-        caster_id,
-        def.name.to_string(),
-        Some(format!("Team {} {}", target_info.team, target_info.class.name())),
-        format!(
-            "Team {} {} fires {} at Team {} {}",
-            combatant.team, combatant.class.name(), def.name,
-            target_info.team, target_info.class.name()
-        ),
-    );
+    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, Some((target_info.team, target_info.class)), "fires");
 
     true
 }

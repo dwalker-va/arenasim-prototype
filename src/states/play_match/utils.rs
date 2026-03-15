@@ -4,8 +4,8 @@
 //! Having them here breaks circular dependencies between combat_ai and combat_core.
 
 use bevy::prelude::*;
-use crate::combat::log::CombatantId;
-use super::match_config;
+use crate::combat::log::{CombatLog, CombatantId};
+use super::match_config::{self, CharacterClass};
 use super::components::{FloatingTextState, SpeechBubble, PlayMatchEntity};
 
 /// Floating combat text horizontal spread (multiplied by -0.5 to +0.5 range)
@@ -21,6 +21,31 @@ pub const FCT_VERTICAL_SPREAD: f32 = 0.8;
 /// Format: "Team {team} {class}" e.g., "Team 1 Warrior"
 pub fn combatant_id(team: u8, class: match_config::CharacterClass) -> CombatantId {
     format!("Team {} {}", team, class.name())
+}
+
+/// Helper to log an ability cast with consistent formatting.
+///
+/// Builds caster/target IDs from team + class, formats the message, and delegates
+/// to `CombatLog::log_ability_cast()`.
+///
+/// `verb` should match the action: `"casts"` for spells, `"uses"` for instants,
+/// `"begins casting"` / `"begins channeling"` for cast-start logs, or any custom verb.
+/// `target` is `None` for self-buffs and untargeted abilities.
+pub fn log_ability_use(
+    combat_log: &mut CombatLog,
+    caster_team: u8,
+    caster_class: CharacterClass,
+    ability_name: &str,
+    target: Option<(u8, CharacterClass)>,
+    verb: &str,
+) {
+    let caster_id = combatant_id(caster_team, caster_class);
+    let target_id = target.map(|(team, class)| combatant_id(team, class));
+    let message = match &target_id {
+        Some(tid) => format!("{} {} {} on {}", caster_id, verb, ability_name, tid),
+        None => format!("{} {} {}", caster_id, verb, ability_name),
+    };
+    combat_log.log_ability_cast(caster_id, ability_name.to_string(), target_id, message);
 }
 
 /// Helper function to spawn a speech bubble when a combatant uses an ability.

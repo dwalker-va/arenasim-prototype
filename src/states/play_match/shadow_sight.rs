@@ -233,18 +233,38 @@ pub fn animate_shadow_sight_orbs(
     }
 }
 
-/// Animate orbs being consumed - shrink and move toward the collector before despawning.
-pub fn animate_orb_consumption(
+/// Core cleanup for consumed orbs - timer countdown and despawn.
+///
+/// This runs in both graphical and headless modes to ensure consumed orbs
+/// are properly cleaned up after their lifetime expires.
+pub fn cleanup_consumed_orbs(
     time: Res<Time>,
     mut commands: Commands,
-    mut consuming_orbs: Query<(Entity, &mut Transform, &mut ShadowSightOrbConsuming), Without<Combatant>>,
-    collectors: Query<&Transform, (With<Combatant>, Without<ShadowSightOrbConsuming>)>,
+    mut consuming_orbs: Query<(Entity, &mut ShadowSightOrbConsuming)>,
 ) {
     let delta = time.delta_secs();
 
-    for (entity, mut orb_transform, mut consuming) in consuming_orbs.iter_mut() {
+    for (entity, mut consuming) in consuming_orbs.iter_mut() {
         consuming.lifetime -= delta;
 
+        // Despawn when lifetime expires
+        if consuming.lifetime <= 0.0 {
+            commands.entity(entity).despawn_recursive();
+        }
+    }
+}
+
+/// Animate orbs being consumed - shrink and move toward the collector.
+///
+/// This is graphical-only; the core timer/despawn logic is in `cleanup_consumed_orbs`.
+pub fn animate_orb_consumption(
+    mut consuming_orbs: Query<(&mut Transform, &ShadowSightOrbConsuming), Without<Combatant>>,
+    collectors: Query<&Transform, (With<Combatant>, Without<ShadowSightOrbConsuming>)>,
+    time: Res<Time>,
+) {
+    let delta = time.delta_secs();
+
+    for (mut orb_transform, consuming) in consuming_orbs.iter_mut() {
         // Calculate animation progress (0 = just picked up, 1 = about to despawn)
         let progress = 1.0 - (consuming.lifetime / consuming.initial_lifetime).max(0.0);
 
@@ -258,11 +278,6 @@ pub fn animate_orb_consumption(
             let direction = (target - orb_transform.translation).normalize_or_zero();
             let speed = 8.0 * progress + 2.0; // Accelerate as it gets closer
             orb_transform.translation += direction * speed * delta;
-        }
-
-        // Despawn when animation completes
-        if consuming.lifetime <= 0.0 {
-            commands.entity(entity).despawn_recursive();
         }
     }
 }

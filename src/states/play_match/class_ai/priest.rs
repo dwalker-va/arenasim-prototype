@@ -22,23 +22,9 @@ use crate::states::play_match::components::*;
 use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::constants::GCD;
 use crate::states::play_match::is_spell_school_locked;
-use crate::states::play_match::utils::combatant_id;
+use crate::states::play_match::utils::log_ability_use;
 
-use super::{dispel_priority, AbilityDecision, ClassAI, CombatContext, is_team_healthy};
-
-/// Priest AI implementation.
-///
-/// Note: Currently uses direct execution via `decide_priest_action()`.
-/// The trait implementation is a stub for future refactoring.
-pub struct PriestAI;
-
-impl ClassAI for PriestAI {
-    fn decide_action(&self, _ctx: &CombatContext, _combatant: &Combatant) -> AbilityDecision {
-        // TODO: Migrate to trait-based decision making
-        // For now, use decide_priest_action() directly from combat_ai.rs
-        AbilityDecision::None
-    }
-}
+use super::CombatContext;
 
 /// Priest AI: Decides and executes abilities for a Priest combatant.
 ///
@@ -121,7 +107,7 @@ pub fn decide_priest_action(
 
     // Priority 5: Dispel Magic - Maintenance (Roots, DoTs when team is healthy)
     // Only clean up lesser debuffs when there's no urgent healing needed
-    if is_team_healthy(combatant.team, ctx.combatants) {
+    if ctx.is_team_healthy(0.70, my_pos) {
         if try_dispel_magic(
             commands,
             combat_log,
@@ -217,40 +203,12 @@ fn try_fortitude(
     combatant.global_cooldown = GCD;
 
     // Log
-    let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = ctx.combatants.get(&buff_target).map(|info| {
-        format!("Team {} {}", info.team, info.class.name())
-    });
-    combat_log.log_ability_cast(
-        caster_id,
-        "Power Word: Fortitude".to_string(),
-        target_id,
-        format!(
-            "Team {} {} casts Power Word: Fortitude",
-            combatant.team,
-            combatant.class.name()
-        ),
-    );
+    let target_tuple = ctx.combatants.get(&buff_target).map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, "Power Word: Fortitude", target_tuple, "casts");
 
     // Apply buff aura
-    if let Some(aura) = def.applies_aura.as_ref() {
-        commands.spawn(AuraPending {
-            target: buff_target,
-            aura: Aura {
-                effect_type: aura.aura_type,
-                duration: aura.duration,
-                magnitude: aura.magnitude,
-                break_on_damage_threshold: aura.break_on_damage,
-                accumulated_damage: 0.0,
-                tick_interval: 0.0,
-                time_until_next_tick: 0.0,
-                caster: Some(entity),
-                ability_name: def.name.to_string(),
-                fear_direction: (0.0, 0.0),
-                fear_direction_timer: 0.0,
-                spell_school: Some(def.spell_school),
-            },
-        });
+    if let Some(aura_pending) = AuraPending::from_ability(buff_target, entity, def) {
+        commands.spawn(aura_pending);
     }
 
     // Mark target as fortified this frame
@@ -346,40 +304,12 @@ fn try_power_word_shield(
     combatant.global_cooldown = GCD;
 
     // Log
-    let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = ctx.combatants.get(&shield_entity).map(|info| {
-        format!("Team {} {}", info.team, info.class.name())
-    });
-    combat_log.log_ability_cast(
-        caster_id,
-        "Power Word: Shield".to_string(),
-        target_id,
-        format!(
-            "Team {} {} casts Power Word: Shield",
-            combatant.team,
-            combatant.class.name()
-        ),
-    );
+    let target_tuple = ctx.combatants.get(&shield_entity).map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, "Power Word: Shield", target_tuple, "casts");
 
     // Apply absorb shield aura
-    if let Some(aura) = pw_shield_def.applies_aura.as_ref() {
-        commands.spawn(AuraPending {
-            target: shield_entity,
-            aura: Aura {
-                effect_type: aura.aura_type,
-                duration: aura.duration,
-                magnitude: aura.magnitude,
-                break_on_damage_threshold: aura.break_on_damage,
-                accumulated_damage: 0.0,
-                tick_interval: aura.tick_interval,
-                time_until_next_tick: aura.tick_interval,
-                caster: Some(entity),
-                ability_name: pw_shield_def.name.to_string(),
-                fear_direction: (0.0, 0.0),
-                fear_direction_timer: 0.0,
-                spell_school: Some(pw_shield_def.spell_school),
-            },
-        });
+    if let Some(aura_pending) = AuraPending::from_ability(shield_entity, entity, pw_shield_def) {
+        commands.spawn(aura_pending);
     }
 
     // Apply Weakened Soul debuff (doesn't break on damage)
@@ -410,20 +340,7 @@ fn try_power_word_shield(
 /// Try to cast Dispel Magic on an ally with a dispellable debuff.
 /// Returns true if the ability was used.
 ///
-/// AI prioritizes dispelling based on severity:
-/// - Polymorph (100) - complete incapacitate
-/// - Fear (90) - loss of control
-/// - Root (80) - movement impaired
-/// - Magic DoTs (50) - Corruption, Immolate
-/// - Movement slows (20) - Frostbolt slow (typically not worth dispelling)
-///
-/// The `min_priority` parameter controls which debuffs are considered:
-/// - 90: Only urgent CC (Polymorph, Fear)
-/// - 50: Include roots and DoTs
-/// - 20: Include slows (not recommended)
-///
-/// Note: The actual debuff removed is random per WoW Classic behavior.
-/// The AI just identifies which ally needs dispelling most.
+/// Delegates to the shared `try_dispel_ally()` in `class_ai/mod.rs`.
 fn try_dispel_magic(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -434,152 +351,20 @@ fn try_dispel_magic(
     ctx: &CombatContext,
     min_priority: i32,
 ) -> bool {
-    let ability = AbilityType::DispelMagic;
-    let def = abilities.get_unchecked(&ability);
-
-    // Check if spell school is locked out
-    if is_spell_school_locked(def.spell_school, auras) {
-        return false;
-    }
-
-    if combatant.current_mana < def.mana_cost {
-        return false;
-    }
-
-    // Find ally with dispellable debuff, prioritized by severity
-    // Priority: Polymorph > Fear > Root > Magic DoT > Slow
-    let mut best_candidate: Option<(Entity, Vec3, i32)> = None; // (entity, pos, priority)
-
-    for (ally_entity, info) in ctx.combatants.iter() {
-        // Must be same team and alive
-        if info.team != combatant.team || info.current_health <= 0.0 {
-            continue;
-        }
-
-        // Check if ally has any dispellable debuffs
-        let ally_auras = match ctx.active_auras.get(ally_entity) {
-            Some(auras) => auras,
-            None => continue,
-        };
-
-        // Find highest priority dispellable debuff on this ally
-        let mut highest_priority = -1;
-        for aura in ally_auras {
-            if !aura.can_be_dispelled() {
-                continue;
-            }
-
-            // Calculate priority based on aura type (shared logic in mod.rs)
-            let priority = dispel_priority(aura.effect_type);
-
-            if priority > highest_priority {
-                highest_priority = priority;
-            }
-        }
-
-        // Check against minimum priority threshold
-        if highest_priority < min_priority {
-            continue; // No debuffs worth dispelling at this priority level
-        }
-
-        let ally_pos = info.position;
-
-        // Check if in range
-        let distance = my_pos.distance(ally_pos);
-        if distance > def.range {
-            continue;
-        }
-
-        // Track best candidate
-        match best_candidate {
-            None => best_candidate = Some((*ally_entity, ally_pos, highest_priority)),
-            Some((_, _, best_priority)) if highest_priority > best_priority => {
-                best_candidate = Some((*ally_entity, ally_pos, highest_priority));
-            }
-            _ => {}
-        }
-    }
-
-    let Some((dispel_target, _target_pos, _)) = best_candidate else {
-        return false;
-    };
-
-    // Execute the ability
-    combatant.current_mana -= def.mana_cost;
-    combatant.global_cooldown = GCD;
-
-    // Get the target's auras and remove a random dispellable one
-    if let Some(target_auras) = ctx.active_auras.get(&dispel_target) {
-        // Collect indices of dispellable auras
-        let dispellable_indices: Vec<usize> = target_auras
-            .iter()
-            .enumerate()
-            .filter(|(_, a)| a.can_be_dispelled())
-            .map(|(i, _)| i)
-            .collect();
-
-        if !dispellable_indices.is_empty() {
-            // We can't mutably access active_auras here, so we'll spawn a DispelPending
-            // component that will be processed in a separate system.
-            // Note: The actual aura removed is randomly selected in process_dispels (WoW Classic behavior),
-            // so we don't log a specific aura name here - that's logged when the dispel actually happens.
-            commands.spawn(DispelPending {
-                target: dispel_target,
-                log_prefix: "[DISPEL]",
-                caster_class: CharacterClass::Priest,
-                heal_on_success: None,
-                aura_type_filter: None,
-            });
-
-            // Log the dispel cast (the actual removal is logged in process_dispels)
-            let caster_id = combatant_id(combatant.team, combatant.class);
-            let target_id = ctx.combatants.get(&dispel_target).map(|info| {
-                format!("Team {} {}", info.team, info.class.name())
-            });
-            combat_log.log_ability_cast(
-                caster_id,
-                "Dispel Magic".to_string(),
-                target_id.clone(),
-                format!(
-                    "Team {} {} casts Dispel Magic on {}",
-                    combatant.team,
-                    combatant.class.name(),
-                    target_id.unwrap_or_else(|| "ally".to_string())
-                ),
-            );
-
-            info!(
-                "Team {} {} casts Dispel Magic on ally",
-                combatant.team,
-                combatant.class.name()
-            );
-
-            return true;
-        }
-    }
-
-    false
-}
-
-/// Pending dispel to be processed by the aura system.
-/// This allows dispels to be applied without holding mutable references
-/// to the aura map during AI decision making.
-/// Note: The actual aura removed is randomly selected in process_dispels (WoW Classic behavior).
-///
-/// Used by Priest (Dispel Magic), Paladin (Cleanse), Felhunter (Devour Magic),
-/// and Bird (Master's Call).
-#[derive(bevy::prelude::Component)]
-pub struct DispelPending {
-    /// Target entity to dispel
-    pub target: Entity,
-    /// Log prefix for combat log (e.g., "[DISPEL]" for Priest, "[CLEANSE]" for Paladin)
-    pub log_prefix: &'static str,
-    /// Caster's class for visual effect coloring
-    pub caster_class: CharacterClass,
-    /// Entity to heal on successful dispel (Felhunter's Devour Magic heals itself)
-    pub heal_on_success: Option<(Entity, f32)>,
-    /// Optional filter: only remove auras matching these types (Master's Call only removes movement impairments)
-    pub aura_type_filter: Option<Vec<AuraType>>,
+    super::try_dispel_ally(
+        commands,
+        combat_log,
+        abilities,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        min_priority,
+        AbilityType::DispelMagic,
+        "[DISPEL]",
+        "Dispel Magic",
+        CharacterClass::Priest,
+    )
 }
 
 /// Try to cast Flash Heal on the lowest HP ally.
@@ -594,36 +379,15 @@ fn try_flash_heal(
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
 ) -> bool {
-    // Find the lowest HP ally
-    let mut lowest_hp_ally: Option<(Entity, f32, Vec3)> = None;
-
-    for (ally_entity, info) in ctx.combatants.iter() {
-        // Must be same team, alive, and not a pet (don't waste heals on pets)
-        if info.team != combatant.team || info.current_health <= 0.0 || info.is_pet {
-            continue;
-        }
-
-        // Only heal if damaged (below 90% health)
-        let hp_percent = info.current_health / info.max_health;
-        if hp_percent >= 0.9 {
-            continue;
-        }
-
-        match lowest_hp_ally {
-            None => lowest_hp_ally = Some((*ally_entity, hp_percent, info.position)),
-            Some((_, lowest_percent, _)) if hp_percent < lowest_percent => {
-                lowest_hp_ally = Some((*ally_entity, hp_percent, info.position));
-            }
-            _ => {}
-        }
-    }
-
-    let Some((heal_target, _, target_pos)) = lowest_hp_ally else {
-        return false;
-    };
-
     let ability = AbilityType::FlashHeal;
     let def = abilities.get_unchecked(&ability);
+
+    // Find the lowest HP ally below 90% health, within range, excluding pets
+    let Some(target_info) = ctx.lowest_health_ally_below(0.9, def.range, my_pos) else {
+        return false;
+    };
+    let heal_target = target_info.entity;
+    let target_pos = target_info.position;
 
     // Check if spell school is locked out
     if is_spell_school_locked(def.spell_school, auras) {
@@ -638,30 +402,13 @@ fn try_flash_heal(
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras);
 
-    commands.entity(entity).insert(CastingState {
-        ability,
-        time_remaining: cast_time,
-        target: Some(heal_target),
-        interrupted: false,
-        interrupted_display_time: 0.0,
-    });
+    commands.entity(entity).insert(CastingState::new(ability, heal_target, cast_time));
 
     // Log
-    let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = ctx.combatants
+    let target_tuple = ctx.combatants
         .get(&heal_target)
-        .map(|info| format!("Team {} {}", info.team, info.class.name()));
-    combat_log.log_ability_cast(
-        caster_id,
-        def.name.to_string(),
-        target_id,
-        format!(
-            "Team {} {} begins casting {}",
-            combatant.team,
-            combatant.class.name(),
-            def.name
-        ),
-    );
+        .map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, target_tuple, "begins casting");
 
     info!(
         "Team {} {} starts casting {} on ally",
@@ -722,30 +469,13 @@ fn try_mind_blast(
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras);
 
-    commands.entity(entity).insert(CastingState {
-        ability,
-        time_remaining: cast_time,
-        target: Some(target_entity),
-        interrupted: false,
-        interrupted_display_time: 0.0,
-    });
+    commands.entity(entity).insert(CastingState::new(ability, target_entity, cast_time));
 
     // Log
-    let caster_id = combatant_id(combatant.team, combatant.class);
-    let target_id = ctx.combatants
+    let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| format!("Team {} {}", info.team, info.class.name()));
-    combat_log.log_ability_cast(
-        caster_id,
-        def.name.to_string(),
-        target_id,
-        format!(
-            "Team {} {} begins casting {}",
-            combatant.team,
-            combatant.class.name(),
-            def.name
-        ),
-    );
+        .map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, target_tuple, "begins casting");
 
     info!(
         "Team {} {} starts casting {} on enemy",

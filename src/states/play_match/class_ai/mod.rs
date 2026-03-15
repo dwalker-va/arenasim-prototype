@@ -1,18 +1,18 @@
 //! Class-Specific AI Modules
 //!
 //! This module contains the AI decision logic for each character class.
-//! Each class has its own module that implements the `ClassAI` trait.
+//! Each class has a standalone `decide_<class>_action()` function that is
+//! called from `combat_ai.rs` based on the combatant's `CharacterClass`.
 //!
 //! ## Architecture
 //!
 //! The combat AI works in two phases:
 //! 1. **Context Building**: `CombatContext` collects all game state needed for decisions
-//! 2. **Decision Making**: Each class's `decide_action()` returns an `AbilityDecision`
+//! 2. **Decision Making**: `combat_ai.rs` dispatches to the appropriate class module's
+//!    `decide_<class>_action()` function, which directly executes abilities
 //!
-//! This separation allows:
-//! - Each class AI to be tested in isolation
-//! - New classes to be added without modifying other files
-//! - Clear boundaries between shared state and class-specific logic
+//! Shared helpers like `CombatContext`, `CombatantInfo`, and healer utilities
+//! live in this module and are used by all class AI files.
 
 pub mod mage;
 pub mod priest;
@@ -26,9 +26,14 @@ pub mod pet_ai;
 use bevy::prelude::*;
 use std::collections::HashMap;
 
+use crate::combat::log::CombatLog;
 use super::match_config::CharacterClass;
 use super::abilities::AbilityType;
-use super::components::{Aura, Combatant, AuraType, PetType, DRCategory, DRTracker};
+use super::ability_config::AbilityDefinitions;
+use super::components::{Aura, ActiveAuras, Combatant, AuraType, DispelPending, PetType, DRCategory, DRTracker};
+use super::constants::GCD;
+use super::is_spell_school_locked;
+use super::utils::log_ability_use;
 
 /// Per-frame snapshot of a single combatant, used for AI decision making.
 #[derive(Clone, Copy, Debug)]
@@ -200,6 +205,28 @@ impl<'a> CombatContext<'a> {
             .min_by(|a, b| a.health_pct().partial_cmp(&b.health_pct()).unwrap())
     }
 
+    /// Find the lowest-health ally below a given HP percentage threshold, within range, excluding pets.
+    pub fn lowest_health_ally_below(
+        &self,
+        max_hp_pct: f32,
+        max_range: f32,
+        my_pos: Vec3,
+    ) -> Option<&CombatantInfo> {
+        self.alive_allies()
+            .into_iter()
+            .filter(|info| {
+                !info.is_pet
+                    && info.health_pct() < max_hp_pct
+                    && my_pos.distance(info.position) <= max_range
+            })
+            .min_by(|a, b| a.health_pct().partial_cmp(&b.health_pct()).unwrap())
+    }
+
+    /// Returns true if all allies are above the given HP threshold.
+    pub fn is_team_healthy(&self, threshold: f32, my_pos: Vec3) -> bool {
+        self.lowest_health_ally_below(threshold, f32::MAX, my_pos).is_none()
+    }
+
     /// Check if an entity has damage immunity (Divine Shield).
     pub fn entity_is_immune(&self, entity: Entity) -> bool {
         self.active_auras
@@ -217,60 +244,6 @@ impl<'a> CombatContext<'a> {
             .unwrap_or(false)
     }
 
-}
-
-/// The result of an AI decision.
-#[derive(Debug, Clone)]
-pub enum AbilityDecision {
-    /// Do nothing this frame
-    None,
-    /// Use an instant ability on a target
-    InstantAbility {
-        ability: AbilityType,
-        target: Entity,
-    },
-    /// Start casting a spell on a target
-    StartCast {
-        ability: AbilityType,
-        target: Entity,
-    },
-    /// Apply a buff to self
-    SelfBuff {
-        ability: AbilityType,
-    },
-    /// Apply a buff to an ally
-    AllyBuff {
-        ability: AbilityType,
-        target: Entity,
-    },
-    /// Use an AoE ability centered on self
-    AoeAbility {
-        ability: AbilityType,
-    },
-}
-
-/// Trait for class-specific AI logic.
-///
-/// Each class implements this trait to provide its decision-making logic.
-/// The trait takes a read-only context and returns a decision.
-pub trait ClassAI {
-    /// Decide what ability (if any) to use this frame.
-    ///
-    /// Returns `AbilityDecision::None` if no ability should be used.
-    fn decide_action(&self, ctx: &CombatContext, combatant: &Combatant) -> AbilityDecision;
-}
-
-/// Get the AI implementation for a given class.
-pub fn get_class_ai(class: CharacterClass) -> Box<dyn ClassAI> {
-    match class {
-        CharacterClass::Mage => Box::new(mage::MageAI),
-        CharacterClass::Priest => Box::new(priest::PriestAI),
-        CharacterClass::Warrior => Box::new(warrior::WarriorAI),
-        CharacterClass::Rogue => Box::new(rogue::RogueAI),
-        CharacterClass::Warlock => Box::new(warlock::WarlockAI),
-        CharacterClass::Paladin => Box::new(paladin::PaladinAI),
-        CharacterClass::Hunter => Box::new(hunter::HunterAI),
-    }
 }
 
 // ============================================================================
@@ -291,23 +264,115 @@ pub fn dispel_priority(aura_type: AuraType) -> i32 {
     }
 }
 
-/// Check if the team's HP is stable enough for maintenance tasks.
-/// Returns true if all living allies are above 70% HP.
+/// Shared dispel logic used by Priest (Dispel Magic) and Paladin (Cleanse).
 ///
-/// Used by Priest and Paladin to determine when to do maintenance dispels
-/// vs focusing on healing.
-pub fn is_team_healthy(
-    team: u8,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
+/// Finds the ally with the highest priority dispellable debuff and casts
+/// the specified dispel ability on them. The actual aura removed is randomly
+/// selected in process_dispels (WoW Classic behavior).
+///
+/// The `min_priority` parameter controls which debuffs are considered:
+/// - 90: Only urgent CC (Polymorph, Fear)
+/// - 50: Include roots and DoTs
+/// - 20: Include slows (not recommended)
+#[allow(clippy::too_many_arguments)]
+pub fn try_dispel_ally(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
+    min_priority: i32,
+    ability_type: AbilityType,
+    log_prefix: &'static str,
+    log_name: &str,
+    caster_class: CharacterClass,
 ) -> bool {
-    for info in combatant_info.values() {
-        if info.team != team || info.current_health <= 0.0 || info.is_pet {
+    let def = abilities.get_unchecked(&ability_type);
+
+    // Check if spell school is locked out
+    if is_spell_school_locked(def.spell_school, auras) {
+        return false;
+    }
+
+    if combatant.current_mana < def.mana_cost {
+        return false;
+    }
+
+    // Find ally with highest priority dispellable debuff
+    let mut best_candidate: Option<(Entity, i32)> = None;
+
+    for (e, info) in ctx.combatants.iter() {
+        // Must be alive ally
+        if info.team != combatant.team || info.current_health <= 0.0 {
             continue;
         }
-        let hp_percent = info.current_health / info.max_health;
-        if hp_percent < 0.70 {
-            return false;
+
+        // Check range
+        if my_pos.distance(info.position) > def.range {
+            continue;
+        }
+
+        // Check if ally has any dispellable debuffs
+        let Some(ally_auras) = ctx.active_auras.get(e) else {
+            continue;
+        };
+
+        // Find highest priority dispellable debuff on this ally
+        let mut highest_priority = -1;
+        for aura in ally_auras {
+            if !aura.can_be_dispelled() {
+                continue;
+            }
+
+            let priority = dispel_priority(aura.effect_type);
+
+            if priority > highest_priority {
+                highest_priority = priority;
+            }
+        }
+
+        if highest_priority < min_priority {
+            continue;
+        }
+
+        match best_candidate {
+            None => best_candidate = Some((*e, highest_priority)),
+            Some((_, best_prio)) if highest_priority > best_prio => {
+                best_candidate = Some((*e, highest_priority));
+            }
+            _ => {}
         }
     }
+
+    let Some((dispel_target, _)) = best_candidate else {
+        return false;
+    };
+
+    // Execute the ability
+    combatant.current_mana -= def.mana_cost;
+    combatant.global_cooldown = GCD;
+
+    // Log
+    let target_tuple = ctx.combatants.get(&dispel_target).map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, log_name, target_tuple, "casts");
+
+    // Spawn pending dispel
+    commands.spawn(DispelPending {
+        target: dispel_target,
+        log_prefix,
+        caster_class,
+        heal_on_success: None,
+        aura_type_filter: None,
+    });
+
+    info!(
+        "Team {} {} casts {} on ally",
+        combatant.team,
+        combatant.class.name(),
+        log_name
+    );
+
     true
 }

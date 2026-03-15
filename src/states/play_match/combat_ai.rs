@@ -12,7 +12,7 @@ use super::match_config;
 use super::components::*;
 use super::abilities::AbilityType;
 use super::ability_config::AbilityDefinitions;
-use super::utils::{combatant_id, get_next_fct_offset};
+use super::utils::{combatant_id, get_next_fct_offset, log_ability_use};
 use super::class_ai;
 
 // Re-export spawn_speech_bubble for backward compatibility (used by other modules)
@@ -984,13 +984,7 @@ pub fn check_interrupts(
         // Interrupts do NOT trigger GCD in WoW!
 
         // Log ability cast for timeline
-        let caster_id = format!("Team {} {}", combatant.team, combatant.class.name());
-        combat_log.log_ability_cast(
-            caster_id,
-            ability_def.name.to_string(),
-            None, // Interrupts don't have a "target" in the same way
-            format!("Team {} {} uses {}", combatant.team, combatant.class.name(), ability_def.name),
-        );
+        log_ability_use(&mut combat_log, combatant.team, combatant.class, &ability_def.name, None, "uses");
 
         // Queue the interrupt for processing
         // Note: The actual interrupt result (with school lockout info) is logged in process_interrupts
