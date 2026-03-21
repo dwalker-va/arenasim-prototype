@@ -79,6 +79,14 @@ pub fn acquire_targets(
     team1_combatants.sort_by_key(|(entity, _, _, _, _, _, _, _)| entity.index());
     team2_combatants.sort_by_key(|(entity, _, _, _, _, _, _, _)| entity.index());
 
+    // Build pet-filtered lists for config index lookups (kill_target, cc_target).
+    // Config indices are 0-based slot indices into primary combatants only.
+    // The full lists (including pets) are kept for nearest-enemy fallback targeting.
+    let team1_primary: Vec<_> = team1_combatants.iter()
+        .filter(|(_, _, _, _, _, _, _, is_pet)| !is_pet).collect();
+    let team2_primary: Vec<_> = team2_combatants.iter()
+        .filter(|(_, _, _, _, _, _, _, is_pet)| !is_pet).collect();
+
     // For each combatant, ensure they have a valid target
     for (entity, mut combatant, transform, _) in combatants.iter_mut() {
         if !combatant.is_alive() {
@@ -91,10 +99,10 @@ pub fn acquire_targets(
         let i_have_shadow_sight = shadow_sight_holders.contains(&entity);
 
         // Get enemy team combatants and target priorities
-        let (enemy_combatants, kill_target_index, cc_target_index) = if combatant.team == 1 {
-            (&team2_combatants, config.team1_kill_target, config.team1_cc_target)
+        let (enemy_combatants, enemy_primary, kill_target_index, cc_target_index) = if combatant.team == 1 {
+            (&team2_combatants, &team2_primary, config.team1_kill_target, config.team1_cc_target)
         } else {
-            (&team1_combatants, config.team2_kill_target, config.team2_cc_target)
+            (&team1_combatants, &team1_primary, config.team2_kill_target, config.team2_cc_target)
         };
 
         // Visibility check: can see enemy if:
@@ -116,8 +124,9 @@ pub fn acquire_targets(
         // If no valid target, acquire a new one
         if !target_valid {
             // Priority 1: Check if kill target is set, visible, and not immune
+            // Use pet-filtered list so config indices map to primary combatant slots
             let kill_target = if let Some(index) = kill_target_index {
-                enemy_combatants
+                enemy_primary
                     .get(index)
                     .filter(|(_, _, stealthed, enemy_ss, _, _, immune, _)| can_see(*stealthed, *enemy_ss) && !immune)
                     .map(|(entity, _, _, _, _, _, _, _)| *entity)
@@ -156,7 +165,7 @@ pub fn acquire_targets(
         } else if let Some(index) = kill_target_index {
             // Current target is valid, but check if configured kill target has become
             // available (e.g., Rogue broke stealth) and should take priority
-            if let Some((kt_entity, _, stealthed, enemy_ss, _, _, immune, _)) = enemy_combatants.get(index) {
+            if let Some((kt_entity, _, stealthed, enemy_ss, _, _, immune, _)) = enemy_primary.get(index) {
                 if can_see(*stealthed, *enemy_ss) && !immune && combatant.target != Some(*kt_entity) {
                     combatant.target = Some(*kt_entity);
                 }
@@ -176,8 +185,9 @@ pub fn acquire_targets(
 
         if !cc_target_valid {
             // Priority 1: Use explicitly configured CC target (if visible and not immune)
+            // Use pet-filtered list so config indices map to primary combatant slots
             let explicit_cc_target = if let Some(index) = cc_target_index {
-                enemy_combatants
+                enemy_primary
                     .get(index)
                     .filter(|(_, _, stealthed, enemy_ss, _, _, immune, _)| can_see(*stealthed, *enemy_ss) && !immune)
                     .map(|(entity, _, _, _, _, _, _, _)| *entity)
@@ -201,7 +211,7 @@ pub fn acquire_targets(
         } else if let Some(index) = cc_target_index {
             // Current CC target is valid, but check if configured CC target has become
             // available (e.g., broke stealth) and should take priority
-            if let Some((cc_entity, _, stealthed, enemy_ss, _, _, immune, _)) = enemy_combatants.get(index) {
+            if let Some((cc_entity, _, stealthed, enemy_ss, _, _, immune, _)) = enemy_primary.get(index) {
                 if can_see(*stealthed, *enemy_ss) && !immune && combatant.cc_target != Some(*cc_entity) {
                     combatant.cc_target = Some(*cc_entity);
                 }

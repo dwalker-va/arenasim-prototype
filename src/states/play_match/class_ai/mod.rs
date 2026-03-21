@@ -108,6 +108,11 @@ impl CombatantInfo {
 ///
 /// This struct provides a read-only view of the game state that AI modules
 /// can use to make decisions without directly accessing ECS queries.
+///
+/// The `combatants` map contains ALL entities including pets.
+/// Use `alive_enemies()` / `alive_allies()` for primary-combatant-only queries.
+/// When iterating `combatants` directly, filter with `!info.is_pet`
+/// unless the ability should affect pets (e.g., AoE damage, auto-attacks).
 pub struct CombatContext<'a> {
     /// Map of entity to combatant info (per-frame snapshot)
     pub combatants: &'a HashMap<Entity, CombatantInfo>,
@@ -180,21 +185,21 @@ impl<'a> CombatContext<'a> {
             .unwrap_or(false)
     }
 
-    /// Get all alive enemies
+    /// Get all alive enemies (excluding pets)
     pub fn alive_enemies(&self) -> Vec<&CombatantInfo> {
         let my_team = self.self_info().map(|i| i.team).unwrap_or(0);
         self.combatants
             .values()
-            .filter(|c| c.team != my_team && c.is_alive)
+            .filter(|c| c.team != my_team && c.is_alive && !c.is_pet)
             .collect()
     }
 
-    /// Get all alive allies (including self)
+    /// Get all alive allies (including self, excluding pets)
     pub fn alive_allies(&self) -> Vec<&CombatantInfo> {
         let my_team = self.self_info().map(|i| i.team).unwrap_or(0);
         self.combatants
             .values()
-            .filter(|c| c.team == my_team && c.is_alive)
+            .filter(|c| c.team == my_team && c.is_alive && !c.is_pet)
             .collect()
     }
 
@@ -304,8 +309,8 @@ pub fn try_dispel_ally(
     let mut best_candidate: Option<(Entity, i32)> = None;
 
     for (e, info) in ctx.combatants.iter() {
-        // Must be alive ally
-        if info.team != combatant.team || info.current_health <= 0.0 {
+        // Must be alive ally, skip pets (Felhunter handles its own dispels)
+        if info.team != combatant.team || info.current_health <= 0.0 || info.is_pet {
             continue;
         }
 

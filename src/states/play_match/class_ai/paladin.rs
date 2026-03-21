@@ -330,6 +330,7 @@ fn has_emergency_target(
 ) -> bool {
     combatant_info.values().any(|info| {
         info.team == team
+            && !info.is_pet
             && info.current_health > 0.0
             && info.max_health > 0.0
             && (info.current_health / info.max_health) < CRITICAL_HP_THRESHOLD
@@ -594,11 +595,11 @@ fn try_hammer_of_justice(
         return false;
     }
 
-    // Find enemies in range, filter out stealthed, immune, and DR-immune to stuns
+    // Find enemies in range, filter out stealthed, immune, pets, and DR-immune to stuns
     let enemies_in_range: Vec<(&Entity, CharacterClass)> = ctx.combatants
         .iter()
         .filter(|(_, info)| {
-            info.team != combatant.team && info.current_health > 0.0 && !info.stealthed
+            info.team != combatant.team && info.current_health > 0.0 && !info.stealthed && !info.is_pet
         })
         .filter(|(e, _)| !ctx.entity_is_immune(**e) && !ctx.is_dr_immune(**e, DRCategory::Stuns))
         .filter_map(|(e, info)| {
@@ -738,10 +739,10 @@ fn try_devotion_aura(
             .unwrap_or(false)
     };
 
-    // Gather allies
+    // Gather allies (exclude pets — Devotion Aura is for primary combatants)
     let allies: Vec<(&Entity, CharacterClass)> = ctx.combatants
         .iter()
-        .filter(|(_, info)| info.team == combatant.team && info.current_health > 0.0)
+        .filter(|(_, info)| info.team == combatant.team && info.current_health > 0.0 && !info.is_pet)
         .map(|(e, info)| (e, info.class))
         .collect();
 
@@ -750,10 +751,10 @@ fn try_devotion_aura(
         return false;
     }
 
-    // Find all allies in range who need the buff
+    // Find all allies in range who need the buff (exclude pets)
     let allies_to_buff: Vec<&Entity> = ctx.combatants
         .iter()
-        .filter(|(_, info)| info.team == combatant.team && info.current_health > 0.0)
+        .filter(|(_, info)| info.team == combatant.team && info.current_health > 0.0 && !info.is_pet)
         .filter_map(|(e, info)| {
             if my_pos.distance(info.position) <= def.range && !devotion_aura_this_frame.contains(e) {
                 Some(e)
