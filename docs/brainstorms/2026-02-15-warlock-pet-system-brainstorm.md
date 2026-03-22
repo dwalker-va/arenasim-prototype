@@ -1,7 +1,7 @@
 # Warlock Pet System Brainstorm
 
 **Date:** 2026-02-15
-**Status:** Ready for planning
+**Status:** Implemented
 
 ## What We're Building
 

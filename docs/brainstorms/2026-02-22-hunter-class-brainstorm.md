@@ -1,7 +1,7 @@
 # Hunter Class Brainstorm
 
 **Date:** 2026-02-22
-**Status:** Ready for planning
+**Status:** Implemented
 
 ## What We're Building
 
