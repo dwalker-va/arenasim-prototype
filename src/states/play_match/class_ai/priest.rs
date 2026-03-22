@@ -156,8 +156,8 @@ fn try_fortitude(
     let mut unbuffed_ally: Option<(Entity, Vec3)> = None;
 
     for (ally_entity, info) in ctx.combatants.iter() {
-        // Must be same team and alive
-        if info.team != combatant.team || info.current_health <= 0.0 {
+        // Must be same team, alive, and not a pet
+        if info.team != combatant.team || info.current_health <= 0.0 || info.is_pet {
             continue;
         }
 
