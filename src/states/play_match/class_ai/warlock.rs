@@ -223,6 +223,11 @@ fn try_corruption(
     target_pos: Vec3,
     ctx: &CombatContext,
 ) -> bool {
+    // Don't apply Corruption to a target polymorphed by our own team
+    if ctx.has_friendly_breakable_cc(target_entity) {
+        return false;
+    }
+
     // Check if target already has Corruption (check by ability name to allow stacking with Immolate)
     let target_has_corruption = ctx.active_auras
         .get(&target_entity)
@@ -643,6 +648,11 @@ fn try_cast_curse(
     ability_name: &str,
 ) -> bool {
     let ability_def = abilities.get_unchecked(&ability);
+
+    // Don't apply curses to a target polymorphed by our own team
+    if ctx.has_friendly_breakable_cc(target_entity) {
+        return false;
+    }
 
     // Check if Shadow school is locked out
     if is_spell_school_locked(ability_def.spell_school, auras) {

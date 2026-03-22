@@ -401,6 +401,11 @@ fn try_polymorph(
         return false;
     }
 
+    // Don't Polymorph a target with friendly DoTs — they'll break it immediately
+    if ctx.has_friendly_dots_on_target(cc_target) {
+        return false;
+    }
+
     // Check if target is already CC'd (don't waste Polymorph on already CC'd targets)
     let target_already_ccd = ctx.active_auras
         .get(&cc_target)
@@ -482,6 +487,11 @@ fn try_frostbolt(
 
     // Don't waste Frostbolt on immune targets (Divine Shield)
     if ctx.entity_is_immune(target_entity) {
+        return false;
+    }
+
+    // Don't Frostbolt a target polymorphed by our own team
+    if ctx.has_friendly_breakable_cc(target_entity) {
         return false;
     }
 

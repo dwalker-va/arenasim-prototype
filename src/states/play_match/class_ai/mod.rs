@@ -232,6 +232,39 @@ impl<'a> CombatContext<'a> {
         self.lowest_health_ally_below(threshold, f32::MAX, my_pos).is_none()
     }
 
+    /// Check if target has a breakable CC (Polymorph) from a friendly caster.
+    /// Used to prevent AI from breaking own team's CC with damage/DoTs.
+    pub fn has_friendly_breakable_cc(&self, target: Entity) -> bool {
+        let my_team = self.self_info().map(|i| i.team).unwrap_or(0);
+        self.active_auras
+            .get(&target)
+            .map(|auras| {
+                auras.iter().any(|a| {
+                    a.effect_type == AuraType::Polymorph
+                        && a.caster
+                            .and_then(|c| self.combatants.get(&c).map(|info| info.team))
+                            == Some(my_team)
+                })
+            })
+            .unwrap_or(false)
+    }
+
+    /// Check if target has DoTs from a friendly caster that would break Polymorph.
+    pub fn has_friendly_dots_on_target(&self, target: Entity) -> bool {
+        let my_team = self.self_info().map(|i| i.team).unwrap_or(0);
+        self.active_auras
+            .get(&target)
+            .map(|auras| {
+                auras.iter().any(|a| {
+                    a.effect_type == AuraType::DamageOverTime
+                        && a.caster
+                            .and_then(|c| self.combatants.get(&c).map(|info| info.team))
+                            == Some(my_team)
+                })
+            })
+            .unwrap_or(false)
+    }
+
     /// Check if an entity has damage immunity (Divine Shield).
     pub fn entity_is_immune(&self, entity: Entity) -> bool {
         self.active_auras
