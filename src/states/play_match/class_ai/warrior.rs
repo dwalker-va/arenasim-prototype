@@ -281,6 +281,11 @@ fn try_rend(
     target_pos: Vec3,
     ctx: &CombatContext,
 ) -> bool {
+    // Don't apply Rend to a target polymorphed by our own team
+    if ctx.has_friendly_breakable_cc(target_entity) {
+        return false;
+    }
+
     // Check if target already has Rend (any DoT for now)
     let target_has_rend = ctx.active_auras
         .get(&target_entity)
