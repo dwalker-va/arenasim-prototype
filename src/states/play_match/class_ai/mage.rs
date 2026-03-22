@@ -324,29 +324,31 @@ fn try_frost_nova(
             is_crit,
         });
 
-        // Apply root aura
+        // Apply root aura (skip immune targets — Divine Shield blocks CC)
         if let Some(aura) = nova_def.applies_aura.as_ref() {
-            if let Some(aura_pending) = AuraPending::from_ability(*target_entity, entity, nova_def) {
-                commands.spawn(aura_pending);
-            }
+            if !ctx.entity_is_immune(*target_entity) {
+                if let Some(aura_pending) = AuraPending::from_ability(*target_entity, entity, nova_def) {
+                    commands.spawn(aura_pending);
+                }
 
-            // Log CC application for Frost Nova root
-            let message = format!(
-                "Team {} {}'s {} roots Team {} {} ({:.1}s)",
-                combatant.team,
-                combatant.class.name(),
-                nova_def.name,
-                target_team,
-                target_class.name(),
-                aura.duration
-            );
-            combat_log.log_crowd_control(
-                combatant_id(combatant.team, combatant.class),
-                combatant_id(*target_team, *target_class),
-                "Root".to_string(),
-                aura.duration,
-                message,
-            );
+                // Log CC application for Frost Nova root
+                let message = format!(
+                    "Team {} {}'s {} roots Team {} {} ({:.1}s)",
+                    combatant.team,
+                    combatant.class.name(),
+                    nova_def.name,
+                    target_team,
+                    target_class.name(),
+                    aura.duration
+                );
+                combat_log.log_crowd_control(
+                    combatant_id(combatant.team, combatant.class),
+                    combatant_id(*target_team, *target_class),
+                    "Root".to_string(),
+                    aura.duration,
+                    message,
+                );
+            }
         }
     }
 
