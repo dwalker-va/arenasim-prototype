@@ -301,7 +301,7 @@ fn try_frost_nova(
     // Collect enemies in range for damage and root
     let mut frost_nova_targets: Vec<(Entity, Vec3, u8, CharacterClass)> = Vec::new();
     for (enemy_entity, info) in ctx.combatants.iter() {
-        if info.team != combatant.team {
+        if info.team != combatant.team && info.is_alive {
             let distance = my_pos.distance(info.position);
             if distance <= nova_def.range {
                 frost_nova_targets.push((*enemy_entity, info.position, info.team, info.class));

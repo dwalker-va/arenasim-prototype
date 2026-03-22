@@ -53,9 +53,9 @@ pub fn combat_auto_attack(
         .map(|(entity, transform, _, _, _, _)| (entity, transform.translation))
         .collect();
 
-    // Build a snapshot of combatant info for logging
-    // Tuple: (team, class, display_name, is_melee) — pets use PetType for display_name and is_melee
-    let combatant_info: std::collections::HashMap<Entity, (u8, match_config::CharacterClass, String, bool)> = combatants
+    // Build a snapshot of combatant info for logging and alive checks
+    // Tuple: (team, class, display_name, is_melee, is_alive)
+    let combatant_info: std::collections::HashMap<Entity, (u8, match_config::CharacterClass, String, bool, bool)> = combatants
         .iter()
         .map(|(entity, _, combatant, _, _, _)| {
             let (display_name, is_melee) = if let Ok(pet) = auto_attack_pet_query.get(entity) {
@@ -63,7 +63,7 @@ pub fn combat_auto_attack(
             } else {
                 (combatant.class.name().to_string(), combatant.class.is_melee())
             };
-            (entity, (combatant.team, combatant.class, display_name, is_melee))
+            (entity, (combatant.team, combatant.class, display_name, is_melee, combatant.is_alive()))
         })
         .collect();
 
@@ -108,13 +108,17 @@ pub fn combat_auto_attack(
         let attack_interval = 1.0 / combatant.attack_speed;
         if combatant.attack_timer >= attack_interval {
             if let Some(target_entity) = combatant.target {
+                // Skip if target is dead (will be retargeted next frame)
+                if !combatant_info.get(&target_entity).map_or(false, |info| info.4) {
+                    continue;
+                }
                 // Check if target is in range before attacking
                 if let Some(&target_pos) = positions.get(&target_entity) {
                     let my_pos = transform.translation;
 
                     // Use pet-aware is_melee from snapshot (pets inherit owner's class
                     // but may have different melee/ranged behavior)
-                    let &(_, attacker_class, _, attacker_is_melee) = &combatant_info[&attacker_entity];
+                    let &(_, attacker_class, _, attacker_is_melee, _) = &combatant_info[&attacker_entity];
                     let attack_range = if attacker_is_melee {
                         MELEE_RANGE
                     } else if attacker_class == match_config::CharacterClass::Hunter {
@@ -192,7 +196,7 @@ pub fn combat_auto_attack(
                 {
                     // Look up the caster's team
                     if let Some(caster_entity) = aura.caster {
-                        if let Some(&(caster_team, _, _, _)) = combatant_info.get(&caster_entity) {
+                        if let Some(&(caster_team, _, _, _, _)) = combatant_info.get(&caster_entity) {
                             // Only track if the CC is from the opposing team of the target
                             // (i.e., the CC caster is an enemy of the CC'd target)
                             if caster_team != combatant.team {
@@ -217,7 +221,7 @@ pub fn combat_auto_attack(
         // Bug fix: Don't auto-attack targets with breakable CC from a friendly caster.
         // This prevents, e.g., a Warlock pet from breaking its team's Polymorph.
         if let Some(&cc_caster_team) = friendly_cc_team.get(&target_entity) {
-            if let Some(&(attacker_team, _, _, _)) = combatant_info.get(&attacker_entity) {
+            if let Some(&(attacker_team, _, _, _, _)) = combatant_info.get(&attacker_entity) {
                 if attacker_team == cc_caster_team {
                     continue;
                 }
@@ -250,7 +254,7 @@ pub fn combat_auto_attack(
                 damage_dealt_updates.push((attacker_entity, actual_damage + absorbed));
 
                 // Log the attack with structured data
-                if let (Some((attacker_team, attacker_class, attacker_name, attacker_is_melee)), Some((target_team, _target_class, target_name, _))) =
+                if let (Some((attacker_team, attacker_class, attacker_name, attacker_is_melee, _)), Some((target_team, _target_class, target_name, _, _))) =
                     (combatant_info.get(&attacker_entity), combatant_info.get(&target_entity)) {
                     let attack_name = if has_bonus {
                         "Heroic Strike" // Enhanced auto-attack
