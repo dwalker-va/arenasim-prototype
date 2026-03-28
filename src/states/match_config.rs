@@ -90,7 +90,7 @@ impl HunterPetType {
 }
 
 /// Available character classes
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CharacterClass {
     Warrior,
     Mage,

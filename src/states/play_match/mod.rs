@@ -32,6 +32,7 @@
 // Submodules
 pub mod abilities;
 pub mod ability_config;
+pub mod equipment;
 pub mod components;
 pub mod camera;
 pub mod projectiles;
