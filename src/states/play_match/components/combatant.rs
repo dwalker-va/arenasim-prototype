@@ -1,7 +1,9 @@
 use bevy::prelude::*;
+use std::collections::HashMap;
 use super::super::match_config::{self, RogueOpener, WarlockCurse};
 use super::super::abilities::{AbilityType, ScalingStat};
 use super::super::ability_config::AbilityConfig;
+use super::super::equipment::{ItemSlot, ItemId, ItemDefinitions};
 use super::auras::AuraType;
 use super::pets::PetType;
 use super::resources::GameRng;
@@ -348,6 +350,49 @@ impl Combatant {
 
         // Add spell power scaling (healing always scales with spell power in WoW)
         base_healing + (self.spell_power * ability_config.healing_coefficient)
+    }
+
+    /// Apply equipment stats from a resolved loadout to this combatant.
+    ///
+    /// - Armor/accessory items: ADD their stats to combatant fields.
+    /// - Weapon in the primary slot (MainHand for melee, Ranged for ranged): REPLACE
+    ///   attack_damage and attack_speed, ADD other stats.
+    /// - Off Hand weapons: only ADD non-weapon stats (no attack_damage/attack_speed replacement).
+    /// - After all items: reset current_health and current_mana to their new maximums.
+    pub fn apply_equipment(&mut self, loadout: &HashMap<ItemSlot, ItemId>, items: &ItemDefinitions) {
+        // Determine the primary weapon slot based on class
+        let primary_weapon_slot = if self.class.is_melee() {
+            ItemSlot::MainHand
+        } else {
+            ItemSlot::Ranged
+        };
+
+        for (slot, item_id) in loadout {
+            let Some(item) = items.get(item_id) else {
+                continue;
+            };
+
+            // Always add general stats from every item
+            self.max_health += item.max_health;
+            self.max_mana += item.max_mana;
+            self.mana_regen += item.mana_regen;
+            self.attack_power += item.attack_power;
+            self.spell_power += item.spell_power;
+            self.crit_chance += item.crit_chance;
+            self.base_movement_speed += item.movement_speed;
+
+            // For the primary weapon slot, replace attack_damage and attack_speed
+            if item.is_weapon && *slot == primary_weapon_slot {
+                let avg_damage = (item.attack_damage_min + item.attack_damage_max) / 2.0;
+                self.attack_damage = avg_damage;
+                self.attack_speed = item.attack_speed;
+            }
+            // Off Hand weapons: no attack_damage/attack_speed replacement (stats already added above)
+        }
+
+        // Reset current pools to new maximums
+        self.current_health = self.max_health;
+        self.current_mana = self.max_mana;
     }
 }
 

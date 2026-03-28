@@ -5,6 +5,9 @@
 
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+use crate::states::play_match::equipment::{ItemId, ItemSlot};
 
 /// Rogue stealth opener choice
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
@@ -268,6 +271,10 @@ pub struct MatchConfig {
     pub team1_hunter_pet_types: Vec<HunterPetType>,
     /// Team 2's hunter pet type preferences (one per slot, defaults to Spider)
     pub team2_hunter_pet_types: Vec<HunterPetType>,
+    /// Team 1's equipment overrides per slot (one HashMap per team slot)
+    pub team1_equipment: Vec<HashMap<ItemSlot, ItemId>>,
+    /// Team 2's equipment overrides per slot (one HashMap per team slot)
+    pub team2_equipment: Vec<HashMap<ItemSlot, ItemId>>,
 }
 
 impl Default for MatchConfig {
@@ -289,6 +296,8 @@ impl Default for MatchConfig {
             team2_warlock_curse_prefs: vec![vec![WarlockCurse::default()]],
             team1_hunter_pet_types: vec![HunterPetType::default()],
             team2_hunter_pet_types: vec![HunterPetType::default()],
+            team1_equipment: vec![HashMap::new()],
+            team2_equipment: vec![HashMap::new()],
         }
     }
 }
@@ -306,6 +315,7 @@ impl MatchConfig {
         for prefs in &mut self.team1_warlock_curse_prefs {
             prefs.resize(enemy_size, WarlockCurse::default());
         }
+        self.team1_equipment.resize(size, HashMap::new());
     }
 
     /// Set team 2 size, adjusting the slots vector
@@ -324,6 +334,7 @@ impl MatchConfig {
         for prefs in &mut self.team1_warlock_curse_prefs {
             prefs.resize(size, WarlockCurse::default());
         }
+        self.team2_equipment.resize(size, HashMap::new());
     }
 
     /// Check if the match configuration is valid (all slots filled)
