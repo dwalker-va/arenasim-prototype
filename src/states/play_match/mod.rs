@@ -71,6 +71,7 @@ use bevy::prelude::*;
 use super::match_config::{self, MatchConfig};
 use super::GameState;
 use crate::combat::log::{CombatLog, CombatLogEventType};
+use equipment::{ItemDefinitions, DefaultLoadouts, ItemSlot, ItemId, resolve_loadout};
 
 // ============================================================================
 // Helper Functions
@@ -146,6 +147,8 @@ pub fn setup_play_match(
     mut combat_log: ResMut<CombatLog>,
     config: Res<MatchConfig>,
     game_settings: Res<crate::settings::GameSettings>,
+    item_defs: Res<ItemDefinitions>,
+    default_loadouts: Res<DefaultLoadouts>,
 ) {
     info!("Setting up Play Match scene with config: {:?}", *config);
 
@@ -342,6 +345,10 @@ pub fn setup_play_match(
             // Get warlock curse preferences for this slot (empty vec if none configured)
             let warlock_curse_prefs = config.team1_warlock_curse_prefs.get(i).cloned().unwrap_or_default();
 
+            // Resolve equipment loadout (defaults + overrides)
+            let equipment_overrides = config.team1_equipment.get(i).cloned().unwrap_or_default();
+            let loadout = resolve_loadout(*character, &default_loadouts, &equipment_overrides);
+
             let position = Vec3::new(team1_spawn_x, 1.0, (i as f32 - 1.0) * 3.0);
             let (entity, combatant) = spawn_combatant(
                 &mut commands,
@@ -354,6 +361,8 @@ pub fn setup_play_match(
                 count,
                 rogue_opener,
                 warlock_curse_prefs,
+                &loadout,
+                &item_defs,
             );
 
             // Spawn Felhunter pet for Warlocks
@@ -410,6 +419,10 @@ pub fn setup_play_match(
             // Get warlock curse preferences for this slot (empty vec if none configured)
             let warlock_curse_prefs = config.team2_warlock_curse_prefs.get(i).cloned().unwrap_or_default();
 
+            // Resolve equipment loadout (defaults + overrides)
+            let equipment_overrides = config.team2_equipment.get(i).cloned().unwrap_or_default();
+            let loadout = resolve_loadout(*character, &default_loadouts, &equipment_overrides);
+
             let position = Vec3::new(team2_spawn_x, 1.0, (i as f32 - 1.0) * 3.0);
             let (entity, combatant) = spawn_combatant(
                 &mut commands,
@@ -422,6 +435,8 @@ pub fn setup_play_match(
                 count,
                 rogue_opener,
                 warlock_curse_prefs,
+                &loadout,
+                &item_defs,
             );
 
             // Spawn Felhunter pet for Warlocks
@@ -534,6 +549,8 @@ fn spawn_combatant(
     duplicate_index: usize,
     rogue_opener: match_config::RogueOpener,
     warlock_curse_prefs: Vec<match_config::WarlockCurse>,
+    equipment_loadout: &std::collections::HashMap<ItemSlot, ItemId>,
+    item_defs: &ItemDefinitions,
 ) -> (Entity, Combatant) {
     // Get vibrant class colors for 3D visibility
     let base_color = match class {
@@ -565,7 +582,8 @@ fn spawn_combatant(
         ..default()
     });
 
-    let combatant = Combatant::new_with_curse_prefs(team, slot, class, rogue_opener, warlock_curse_prefs);
+    let mut combatant = Combatant::new_with_curse_prefs(team, slot, class, rogue_opener, warlock_curse_prefs);
+    combatant.apply_equipment(equipment_loadout, item_defs);
     let combatant_clone = combatant.clone();
 
     let entity = commands.spawn((
