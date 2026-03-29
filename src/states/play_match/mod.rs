@@ -71,7 +71,7 @@ use bevy::prelude::*;
 use super::match_config::{self, MatchConfig};
 use super::GameState;
 use crate::combat::log::{CombatLog, CombatLogEventType};
-use equipment::{ItemDefinitions, DefaultLoadouts, ItemSlot, ItemId, resolve_loadout};
+use equipment::{ItemDefinitions, DefaultLoadouts, ItemSlot, ItemId, resolve_loadout, format_loadout};
 
 // ============================================================================
 // Helper Functions
@@ -365,6 +365,12 @@ pub fn setup_play_match(
                 &item_defs,
             );
 
+            // Log equipment loadout
+            combat_log.log(
+                CombatLogEventType::MatchEvent,
+                format!("[EQUIPMENT] {}: {}", combatant_id(1, *character), format_loadout(&loadout, &item_defs)),
+            );
+
             // Spawn Felhunter pet for Warlocks
             if *character == match_config::CharacterClass::Warlock {
                 spawn_pet(
@@ -437,6 +443,12 @@ pub fn setup_play_match(
                 warlock_curse_prefs,
                 &loadout,
                 &item_defs,
+            );
+
+            // Log equipment loadout
+            combat_log.log(
+                CombatLogEventType::MatchEvent,
+                format!("[EQUIPMENT] {}: {}", combatant_id(2, *character), format_loadout(&loadout, &item_defs)),
             );
 
             // Spawn Felhunter pet for Warlocks

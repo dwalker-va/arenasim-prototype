@@ -9,7 +9,7 @@ use std::time::Duration;
 use crate::combat::log::{CombatLog, CombatLogEventType, CombatantMetadata, MatchMetadata};
 use crate::states::match_config::MatchConfig;
 use crate::states::play_match::AbilityConfigPlugin;
-use crate::states::play_match::equipment::{EquipmentPlugin, ItemDefinitions, DefaultLoadouts, resolve_loadout};
+use crate::states::play_match::equipment::{EquipmentPlugin, ItemDefinitions, DefaultLoadouts, resolve_loadout, format_loadout};
 // Use the stable systems API instead of importing internal functions directly
 use crate::states::play_match::systems::{
     self, combatant_id, Combatant, FloatingTextState, GameRng, MatchCountdown, ShadowSightState,
@@ -169,6 +169,12 @@ fn headless_setup_match(
                 },
             )).id();
 
+            // Log equipment loadout
+            combat_log.log(
+                CombatLogEventType::MatchEvent,
+                format!("[EQUIPMENT] {}: {}", combatant_id(1, *character), format_loadout(&loadout, &item_defs)),
+            );
+
             // Spawn Felhunter pet for Warlocks
             if *character == CharacterClass::Warlock {
                 let pet_slot = PET_SLOT_BASE + i as u8;
@@ -231,6 +237,12 @@ fn headless_setup_match(
                     next_pattern_index: 0,
                 },
             )).id();
+
+            // Log equipment loadout
+            combat_log.log(
+                CombatLogEventType::MatchEvent,
+                format!("[EQUIPMENT] {}: {}", combatant_id(2, *character), format_loadout(&loadout, &item_defs)),
+            );
 
             // Spawn Felhunter pet for Warlocks
             if *character == CharacterClass::Warlock {
