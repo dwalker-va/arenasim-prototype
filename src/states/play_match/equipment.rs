@@ -500,3 +500,312 @@ pub fn format_loadout(
         parts.join(", ")
     }
 }
+
+// ============================================================================
+// TESTS
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::states::match_config::CharacterClass;
+
+    /// Build a minimal ItemDefinitions from a list of (ItemId, ItemConfig) pairs
+    fn make_item_defs(items: Vec<(ItemId, ItemConfig)>) -> ItemDefinitions {
+        let map: HashMap<ItemId, ItemConfig> = items.into_iter().collect();
+        ItemDefinitions {
+            definitions: map,
+        }
+    }
+
+    /// Build a minimal ItemConfig for a non-weapon armor piece
+    fn armor_item(name: &str, slot: ItemSlot, armor_type: ArmorType) -> ItemConfig {
+        ItemConfig {
+            name: name.to_string(),
+            item_level: 60,
+            slot,
+            armor_type,
+            weapon_type: WeaponType::None,
+            allowed_classes: None,
+            is_weapon: false,
+            max_health: 50.0,
+            max_mana: 20.0,
+            mana_regen: 1.0,
+            attack_power: 10.0,
+            spell_power: 5.0,
+            crit_chance: 0.01,
+            movement_speed: 0.0,
+            attack_damage_min: 0.0,
+            attack_damage_max: 0.0,
+            attack_speed: 0.0,
+        }
+    }
+
+    /// Build a minimal weapon ItemConfig
+    fn weapon_item(name: &str, slot: ItemSlot, dmg_min: f32, dmg_max: f32, speed: f32) -> ItemConfig {
+        ItemConfig {
+            name: name.to_string(),
+            item_level: 60,
+            slot,
+            armor_type: ArmorType::None,
+            weapon_type: WeaponType::Sword,
+            allowed_classes: None,
+            is_weapon: true,
+            max_health: 0.0,
+            max_mana: 0.0,
+            mana_regen: 0.0,
+            attack_power: 5.0,
+            spell_power: 0.0,
+            crit_chance: 0.0,
+            movement_speed: 0.0,
+            attack_damage_min: dmg_min,
+            attack_damage_max: dmg_max,
+            attack_speed: speed,
+        }
+    }
+
+    // ---- apply_equipment tests ----
+
+    #[test]
+    fn apply_equipment_adds_armor_stats() {
+        let items = make_item_defs(vec![
+            (ItemId::LionheartHelm, armor_item("Helm", ItemSlot::Head, ArmorType::Plate)),
+        ]);
+        let mut combatant = super::super::components::combatant::Combatant::new(1, 0, CharacterClass::Warrior);
+        let base_health = combatant.max_health;
+        let base_ap = combatant.attack_power;
+
+        let mut loadout = HashMap::new();
+        loadout.insert(ItemSlot::Head, ItemId::LionheartHelm);
+        combatant.apply_equipment(&loadout, &items);
+
+        assert_eq!(combatant.max_health, base_health + 50.0);
+        assert_eq!(combatant.attack_power, base_ap + 10.0);
+        // current_health should be synced to new max
+        assert_eq!(combatant.current_health, combatant.max_health);
+    }
+
+    #[test]
+    fn apply_equipment_empty_loadout_unchanged() {
+        let items = make_item_defs(vec![]);
+        let mut combatant = super::super::components::combatant::Combatant::new(1, 0, CharacterClass::Warrior);
+        let base_health = combatant.max_health;
+        let base_damage = combatant.attack_damage;
+
+        let loadout = HashMap::new();
+        combatant.apply_equipment(&loadout, &items);
+
+        assert_eq!(combatant.max_health, base_health);
+        assert_eq!(combatant.attack_damage, base_damage);
+    }
+
+    #[test]
+    fn apply_equipment_weapon_replaces_damage_for_melee() {
+        let items = make_item_defs(vec![
+            (ItemId::ArcaniteReaper, weapon_item("Reaper", ItemSlot::MainHand, 20.0, 30.0, 0.5)),
+        ]);
+        let mut combatant = super::super::components::combatant::Combatant::new(1, 0, CharacterClass::Warrior);
+
+        let mut loadout = HashMap::new();
+        loadout.insert(ItemSlot::MainHand, ItemId::ArcaniteReaper);
+        combatant.apply_equipment(&loadout, &items);
+
+        // Weapon should replace attack_damage with average
+        assert_eq!(combatant.attack_damage, 25.0); // (20+30)/2
+        assert_eq!(combatant.attack_speed, 0.5);
+        // attack_power from weapon should still be added
+        assert_eq!(combatant.attack_power, 30.0 + 5.0); // base 30 + weapon 5
+    }
+
+    #[test]
+    fn apply_equipment_weapon_replaces_damage_for_ranged() {
+        let items = make_item_defs(vec![
+            (ItemId::WandOfShadows, weapon_item("Wand", ItemSlot::Ranged, 10.0, 14.0, 0.8)),
+        ]);
+        // Mage is ranged, so Ranged slot is primary weapon slot
+        let mut combatant = super::super::components::combatant::Combatant::new(1, 0, CharacterClass::Mage);
+
+        let mut loadout = HashMap::new();
+        loadout.insert(ItemSlot::Ranged, ItemId::WandOfShadows);
+        combatant.apply_equipment(&loadout, &items);
+
+        assert_eq!(combatant.attack_damage, 12.0); // (10+14)/2
+        assert_eq!(combatant.attack_speed, 0.8);
+    }
+
+    #[test]
+    fn apply_equipment_offhand_weapon_does_not_replace_damage() {
+        let items = make_item_defs(vec![
+            (ItemId::WallOfTheDeadShield, weapon_item("Shield", ItemSlot::OffHand, 100.0, 200.0, 2.0)),
+        ]);
+        let mut combatant = super::super::components::combatant::Combatant::new(1, 0, CharacterClass::Warrior);
+        let base_damage = combatant.attack_damage;
+        let base_speed = combatant.attack_speed;
+
+        let mut loadout = HashMap::new();
+        loadout.insert(ItemSlot::OffHand, ItemId::WallOfTheDeadShield);
+        combatant.apply_equipment(&loadout, &items);
+
+        // Off hand weapon should NOT replace attack damage/speed
+        assert_eq!(combatant.attack_damage, base_damage);
+        assert_eq!(combatant.attack_speed, base_speed);
+        // But attack_power from the off-hand should still be added
+        assert_eq!(combatant.attack_power, 30.0 + 5.0);
+    }
+
+    // ---- resolve_loadout tests ----
+
+    #[test]
+    fn resolve_loadout_uses_defaults_when_no_overrides() {
+        let mut loadout_map = HashMap::new();
+        let mut warrior_loadout = HashMap::new();
+        warrior_loadout.insert(ItemSlot::Head, ItemId::LionheartHelm);
+        warrior_loadout.insert(ItemSlot::MainHand, ItemId::ArcaniteReaper);
+        loadout_map.insert(CharacterClass::Warrior, warrior_loadout);
+
+        let defaults = DefaultLoadouts { loadouts: loadout_map };
+        let overrides = HashMap::new();
+
+        let result = resolve_loadout(CharacterClass::Warrior, &defaults, &overrides);
+        assert_eq!(result.get(&ItemSlot::Head), Some(&ItemId::LionheartHelm));
+        assert_eq!(result.get(&ItemSlot::MainHand), Some(&ItemId::ArcaniteReaper));
+    }
+
+    #[test]
+    fn resolve_loadout_overrides_replace_defaults() {
+        let mut loadout_map = HashMap::new();
+        let mut warrior_loadout = HashMap::new();
+        warrior_loadout.insert(ItemSlot::MainHand, ItemId::ArcaniteReaper);
+        loadout_map.insert(CharacterClass::Warrior, warrior_loadout);
+
+        let defaults = DefaultLoadouts { loadouts: loadout_map };
+        let mut overrides = HashMap::new();
+        overrides.insert(ItemSlot::MainHand, ItemId::FrostbiteBlade);
+
+        let result = resolve_loadout(CharacterClass::Warrior, &defaults, &overrides);
+        assert_eq!(result.get(&ItemSlot::MainHand), Some(&ItemId::FrostbiteBlade));
+    }
+
+    #[test]
+    fn resolve_loadout_missing_class_returns_only_overrides() {
+        let defaults = DefaultLoadouts { loadouts: HashMap::new() };
+        let mut overrides = HashMap::new();
+        overrides.insert(ItemSlot::Head, ItemId::LionheartHelm);
+
+        let result = resolve_loadout(CharacterClass::Warrior, &defaults, &overrides);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result.get(&ItemSlot::Head), Some(&ItemId::LionheartHelm));
+    }
+
+    // ---- can_equip tests ----
+
+    #[test]
+    fn can_equip_plate_on_warrior() {
+        let item = armor_item("Plate Helm", ItemSlot::Head, ArmorType::Plate);
+        assert!(can_equip(CharacterClass::Warrior, &item));
+    }
+
+    #[test]
+    fn can_equip_plate_on_mage_fails() {
+        let item = armor_item("Plate Helm", ItemSlot::Head, ArmorType::Plate);
+        assert!(!can_equip(CharacterClass::Mage, &item));
+    }
+
+    #[test]
+    fn can_equip_cloth_on_warrior() {
+        let item = armor_item("Cloth Robe", ItemSlot::Chest, ArmorType::Cloth);
+        assert!(can_equip(CharacterClass::Warrior, &item));
+    }
+
+    #[test]
+    fn can_equip_class_restricted_item() {
+        let mut item = armor_item("Warrior Only Helm", ItemSlot::Head, ArmorType::Plate);
+        item.allowed_classes = Some(vec![CharacterClass::Warrior]);
+        assert!(can_equip(CharacterClass::Warrior, &item));
+        assert!(!can_equip(CharacterClass::Paladin, &item));
+    }
+
+    #[test]
+    fn can_equip_accessory_on_any_class() {
+        let item = armor_item("Ring", ItemSlot::Ring1, ArmorType::None);
+        assert!(can_equip(CharacterClass::Mage, &item));
+        assert!(can_equip(CharacterClass::Warrior, &item));
+        assert!(can_equip(CharacterClass::Rogue, &item));
+    }
+
+    // ---- format_loadout tests ----
+
+    #[test]
+    fn format_loadout_empty() {
+        let items = make_item_defs(vec![]);
+        let loadout = HashMap::new();
+        assert_eq!(format_loadout(&loadout, &items), "No equipment");
+    }
+
+    #[test]
+    fn format_loadout_single_item() {
+        let items = make_item_defs(vec![
+            (ItemId::LionheartHelm, armor_item("Lionheart Helm", ItemSlot::Head, ArmorType::Plate)),
+        ]);
+        let mut loadout = HashMap::new();
+        loadout.insert(ItemSlot::Head, ItemId::LionheartHelm);
+        let result = format_loadout(&loadout, &items);
+        assert_eq!(result, "Head=Lionheart Helm");
+    }
+
+    #[test]
+    fn format_loadout_respects_slot_order() {
+        let items = make_item_defs(vec![
+            (ItemId::ArcaniteReaper, weapon_item("Arcanite Reaper", ItemSlot::MainHand, 20.0, 30.0, 0.5)),
+            (ItemId::LionheartHelm, armor_item("Lionheart Helm", ItemSlot::Head, ArmorType::Plate)),
+        ]);
+        let mut loadout = HashMap::new();
+        loadout.insert(ItemSlot::MainHand, ItemId::ArcaniteReaper);
+        loadout.insert(ItemSlot::Head, ItemId::LionheartHelm);
+        let result = format_loadout(&loadout, &items);
+        // Head comes before MainHand in ItemSlot::all() ordering
+        assert!(result.starts_with("Head="));
+        assert!(result.contains("Main Hand=Arcanite Reaper"));
+    }
+
+    // ---- validate_class_restrictions tests ----
+
+    #[test]
+    fn validate_class_restrictions_passes_for_valid_loadout() {
+        let items = make_item_defs(vec![
+            (ItemId::LionheartHelm, armor_item("Helm", ItemSlot::Head, ArmorType::Plate)),
+        ]);
+        let mut loadout = HashMap::new();
+        loadout.insert(ItemSlot::Head, ItemId::LionheartHelm);
+        assert!(validate_class_restrictions(CharacterClass::Warrior, &loadout, &items).is_ok());
+    }
+
+    #[test]
+    fn validate_class_restrictions_fails_wrong_armor_type() {
+        let items = make_item_defs(vec![
+            (ItemId::LionheartHelm, armor_item("Helm", ItemSlot::Head, ArmorType::Plate)),
+        ]);
+        let mut loadout = HashMap::new();
+        loadout.insert(ItemSlot::Head, ItemId::LionheartHelm);
+        assert!(validate_class_restrictions(CharacterClass::Mage, &loadout, &items).is_err());
+    }
+
+    #[test]
+    fn validate_class_restrictions_fails_wrong_slot() {
+        let items = make_item_defs(vec![
+            (ItemId::LionheartHelm, armor_item("Helm", ItemSlot::Head, ArmorType::Plate)),
+        ]);
+        let mut loadout = HashMap::new();
+        // Place a Head item in the Chest slot
+        loadout.insert(ItemSlot::Chest, ItemId::LionheartHelm);
+        assert!(validate_class_restrictions(CharacterClass::Warrior, &loadout, &items).is_err());
+    }
+
+    #[test]
+    fn validate_class_restrictions_fails_unknown_item() {
+        let items = make_item_defs(vec![]); // empty
+        let mut loadout = HashMap::new();
+        loadout.insert(ItemSlot::Head, ItemId::LionheartHelm);
+        assert!(validate_class_restrictions(CharacterClass::Warrior, &loadout, &items).is_err());
+    }
+}
