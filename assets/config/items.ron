@@ -1,0 +1,574 @@
+// Item Definitions for ArenaSim Equipment System
+//
+// Each item has a unique ItemId key and provides stat bonuses.
+// Weapons (is_weapon: true) replace attack_damage/attack_speed on the primary weapon slot.
+// Non-weapon items add their stats to the combatant's base stats.
+//
+// Changes here take effect on restart without recompiling.
+
+(
+    items: {
+        // ====================================================================
+        // PLATE ARMOR (Warrior, Paladin)
+        // ====================================================================
+
+        LionheartHelm: (
+            name: "Lionheart Helm",
+            item_level: 60,
+            slot: Head,
+            armor_type: Plate,
+            max_health: 15.0,
+            attack_power: 8.0,
+            crit_chance: 0.02,
+        ),
+
+        OnslaughtHeadGuard: (
+            name: "Onslaught Head Guard",
+            item_level: 58,
+            slot: Head,
+            armor_type: Plate,
+            max_health: 20.0,
+            spell_power: 6.0,
+        ),
+
+        ConquerorsChestplate: (
+            name: "Conqueror's Chestplate",
+            item_level: 60,
+            slot: Chest,
+            armor_type: Plate,
+            max_health: 20.0,
+            attack_power: 6.0,
+        ),
+
+        LegplatesOfWrath: (
+            name: "Legplates of Wrath",
+            item_level: 60,
+            slot: Legs,
+            armor_type: Plate,
+            max_health: 18.0,
+            attack_power: 5.0,
+            crit_chance: 0.01,
+        ),
+
+        GauntletsOfMight: (
+            name: "Gauntlets of Might",
+            item_level: 58,
+            slot: Hands,
+            armor_type: Plate,
+            max_health: 10.0,
+            attack_power: 4.0,
+        ),
+
+        SabatonsBattleBorn: (
+            name: "Sabatons of Battle",
+            item_level: 56,
+            slot: Feet,
+            armor_type: Plate,
+            max_health: 10.0,
+            attack_power: 3.0,
+            movement_speed: 0.1,
+        ),
+
+        WaistguardOfHeroism: (
+            name: "Waistguard of Heroism",
+            item_level: 55,
+            slot: Waist,
+            armor_type: Plate,
+            max_health: 8.0,
+            attack_power: 4.0,
+        ),
+
+        WristguardsOfStability: (
+            name: "Wristguards of Stability",
+            item_level: 54,
+            slot: Wrists,
+            armor_type: Plate,
+            max_health: 6.0,
+            attack_power: 3.0,
+        ),
+
+        ShoulderplatesOfValor: (
+            name: "Shoulderplates of Valor",
+            item_level: 56,
+            slot: Shoulders,
+            armor_type: Plate,
+            max_health: 12.0,
+            attack_power: 4.0,
+        ),
+
+        // ====================================================================
+        // MAIL ARMOR (Hunter, Warrior, Paladin)
+        // ====================================================================
+
+        BeaststalkerHelm: (
+            name: "Beaststalker Helm",
+            item_level: 58,
+            slot: Head,
+            armor_type: Mail,
+            max_health: 12.0,
+            attack_power: 6.0,
+            crit_chance: 0.01,
+        ),
+
+        BeaststalkerTunic: (
+            name: "Beaststalker Tunic",
+            item_level: 58,
+            slot: Chest,
+            armor_type: Mail,
+            max_health: 15.0,
+            attack_power: 5.0,
+        ),
+
+        BeaststalkerLegs: (
+            name: "Beaststalker Legs",
+            item_level: 58,
+            slot: Legs,
+            armor_type: Mail,
+            max_health: 14.0,
+            attack_power: 4.0,
+            crit_chance: 0.01,
+        ),
+
+        BeaststalkerGloves: (
+            name: "Beaststalker Gloves",
+            item_level: 56,
+            slot: Hands,
+            armor_type: Mail,
+            max_health: 8.0,
+            attack_power: 3.0,
+        ),
+
+        BeaststalkerBoots: (
+            name: "Beaststalker Boots",
+            item_level: 56,
+            slot: Feet,
+            armor_type: Mail,
+            max_health: 8.0,
+            attack_power: 3.0,
+            movement_speed: 0.1,
+        ),
+
+        BeaststalkerBelt: (
+            name: "Beaststalker Belt",
+            item_level: 54,
+            slot: Waist,
+            armor_type: Mail,
+            max_health: 6.0,
+            attack_power: 3.0,
+        ),
+
+        BeaststalkerBracers: (
+            name: "Beaststalker Bracers",
+            item_level: 54,
+            slot: Wrists,
+            armor_type: Mail,
+            max_health: 5.0,
+            attack_power: 2.0,
+        ),
+
+        BeaststalkerMantle: (
+            name: "Beaststalker Mantle",
+            item_level: 56,
+            slot: Shoulders,
+            armor_type: Mail,
+            max_health: 10.0,
+            attack_power: 3.0,
+        ),
+
+        // ====================================================================
+        // LEATHER ARMOR (Rogue, Hunter)
+        // ====================================================================
+
+        NightstalkerCowl: (
+            name: "Nightstalker Cowl",
+            item_level: 58,
+            slot: Head,
+            armor_type: Leather,
+            max_health: 10.0,
+            attack_power: 7.0,
+            crit_chance: 0.02,
+        ),
+
+        NightstalkerTunic: (
+            name: "Nightstalker Tunic",
+            item_level: 58,
+            slot: Chest,
+            armor_type: Leather,
+            max_health: 12.0,
+            attack_power: 6.0,
+        ),
+
+        NightstalkerLegs: (
+            name: "Nightstalker Legs",
+            item_level: 58,
+            slot: Legs,
+            armor_type: Leather,
+            max_health: 10.0,
+            attack_power: 5.0,
+            crit_chance: 0.01,
+        ),
+
+        NightstalkerGloves: (
+            name: "Nightstalker Gloves",
+            item_level: 56,
+            slot: Hands,
+            armor_type: Leather,
+            max_health: 6.0,
+            attack_power: 4.0,
+        ),
+
+        NightstalkerBoots: (
+            name: "Nightstalker Boots",
+            item_level: 56,
+            slot: Feet,
+            armor_type: Leather,
+            max_health: 6.0,
+            attack_power: 3.0,
+            movement_speed: 0.15,
+        ),
+
+        NightstalkerBelt: (
+            name: "Nightstalker Belt",
+            item_level: 54,
+            slot: Waist,
+            armor_type: Leather,
+            max_health: 5.0,
+            attack_power: 3.0,
+        ),
+
+        NightstalkerBracers: (
+            name: "Nightstalker Bracers",
+            item_level: 54,
+            slot: Wrists,
+            armor_type: Leather,
+            max_health: 4.0,
+            attack_power: 2.0,
+        ),
+
+        NightstalkerMantle: (
+            name: "Nightstalker Mantle",
+            item_level: 56,
+            slot: Shoulders,
+            armor_type: Leather,
+            max_health: 8.0,
+            attack_power: 4.0,
+        ),
+
+        // ====================================================================
+        // CLOTH ARMOR (Mage, Priest, Warlock)
+        // ====================================================================
+
+        MagistersCrown: (
+            name: "Magister's Crown",
+            item_level: 58,
+            slot: Head,
+            armor_type: Cloth,
+            max_health: 8.0,
+            max_mana: 15.0,
+            spell_power: 8.0,
+            crit_chance: 0.01,
+        ),
+
+        MagistersRobes: (
+            name: "Magister's Robes",
+            item_level: 58,
+            slot: Chest,
+            armor_type: Cloth,
+            max_health: 10.0,
+            max_mana: 20.0,
+            spell_power: 10.0,
+        ),
+
+        MagistersLeggings: (
+            name: "Magister's Leggings",
+            item_level: 58,
+            slot: Legs,
+            armor_type: Cloth,
+            max_health: 8.0,
+            max_mana: 15.0,
+            spell_power: 7.0,
+        ),
+
+        MagistersGloves: (
+            name: "Magister's Gloves",
+            item_level: 56,
+            slot: Hands,
+            armor_type: Cloth,
+            max_health: 5.0,
+            max_mana: 10.0,
+            spell_power: 5.0,
+        ),
+
+        MagistersBoots: (
+            name: "Magister's Boots",
+            item_level: 56,
+            slot: Feet,
+            armor_type: Cloth,
+            max_health: 5.0,
+            max_mana: 8.0,
+            spell_power: 4.0,
+            movement_speed: 0.1,
+        ),
+
+        MagistersBelt: (
+            name: "Magister's Belt",
+            item_level: 54,
+            slot: Waist,
+            armor_type: Cloth,
+            max_health: 4.0,
+            max_mana: 8.0,
+            spell_power: 4.0,
+        ),
+
+        MagistersBracers: (
+            name: "Magister's Bracers",
+            item_level: 54,
+            slot: Wrists,
+            armor_type: Cloth,
+            max_health: 3.0,
+            max_mana: 6.0,
+            spell_power: 3.0,
+        ),
+
+        MagistersMantle: (
+            name: "Magister's Mantle",
+            item_level: 56,
+            slot: Shoulders,
+            armor_type: Cloth,
+            max_health: 6.0,
+            max_mana: 10.0,
+            spell_power: 6.0,
+        ),
+
+        // ====================================================================
+        // CLOAKS (all classes)
+        // ====================================================================
+
+        CloakOfTheShieldWall: (
+            name: "Cloak of the Shield Wall",
+            item_level: 55,
+            slot: Back,
+            max_health: 10.0,
+            attack_power: 2.0,
+        ),
+
+        CloakOfConcentration: (
+            name: "Cloak of Concentration",
+            item_level: 55,
+            slot: Back,
+            max_health: 6.0,
+            max_mana: 8.0,
+            spell_power: 4.0,
+        ),
+
+        // ====================================================================
+        // NECKLACES (all classes)
+        // ====================================================================
+
+        AmuletOfPower: (
+            name: "Amulet of Power",
+            item_level: 55,
+            slot: Neck,
+            attack_power: 5.0,
+            crit_chance: 0.01,
+        ),
+
+        AmuletOfResilience: (
+            name: "Amulet of Resilience",
+            item_level: 55,
+            slot: Neck,
+            max_health: 12.0,
+            spell_power: 4.0,
+        ),
+
+        // ====================================================================
+        // RINGS (all classes)
+        // ====================================================================
+
+        BandOfAccuria: (
+            name: "Band of Accuria",
+            item_level: 55,
+            slot: Ring1,
+            attack_power: 4.0,
+            crit_chance: 0.01,
+        ),
+
+        SignetOfFocus: (
+            name: "Signet of Focus",
+            item_level: 55,
+            slot: Ring1,
+            spell_power: 5.0,
+            max_mana: 8.0,
+        ),
+
+        RingOfProtection: (
+            name: "Ring of Protection",
+            item_level: 55,
+            slot: Ring2,
+            max_health: 10.0,
+        ),
+
+        // ====================================================================
+        // TRINKETS (all classes)
+        // ====================================================================
+
+        MarkOfTheChampion: (
+            name: "Mark of the Champion",
+            item_level: 55,
+            slot: Trinket1,
+            attack_power: 6.0,
+            spell_power: 4.0,
+        ),
+
+        EssenceOfEternalLife: (
+            name: "Essence of Eternal Life",
+            item_level: 55,
+            slot: Trinket1,
+            max_health: 15.0,
+            mana_regen: 1.0,
+        ),
+
+        // ====================================================================
+        // MELEE WEAPONS
+        // ====================================================================
+
+        ArcaniteReaper: (
+            name: "Arcanite Reaper",
+            item_level: 60,
+            slot: MainHand,
+            weapon_type: Axe,
+            is_weapon: true,
+            attack_damage_min: 14.0,
+            attack_damage_max: 18.0,
+            attack_speed: 0.9,
+            attack_power: 4.0,
+        ),
+
+        FrostbiteBlade: (
+            name: "Frostbite Blade",
+            item_level: 58,
+            slot: MainHand,
+            weapon_type: Sword,
+            is_weapon: true,
+            attack_damage_min: 10.0,
+            attack_damage_max: 14.0,
+            attack_speed: 1.1,
+            attack_power: 3.0,
+            crit_chance: 0.01,
+        ),
+
+        SerpentFangDagger: (
+            name: "Serpent Fang Dagger",
+            item_level: 58,
+            slot: MainHand,
+            weapon_type: Dagger,
+            is_weapon: true,
+            attack_damage_min: 8.0,
+            attack_damage_max: 12.0,
+            attack_speed: 1.5,
+            attack_power: 4.0,
+            crit_chance: 0.02,
+        ),
+
+        HammerOfTheRighteous: (
+            name: "Hammer of the Righteous",
+            item_level: 58,
+            slot: MainHand,
+            weapon_type: Mace,
+            is_weapon: true,
+            attack_damage_min: 10.0,
+            attack_damage_max: 15.0,
+            attack_speed: 1.0,
+            spell_power: 6.0,
+        ),
+
+        CrescentStaff: (
+            name: "Crescent Staff",
+            item_level: 58,
+            slot: MainHand,
+            weapon_type: Staff,
+            is_weapon: true,
+            attack_damage_min: 6.0,
+            attack_damage_max: 10.0,
+            attack_speed: 0.7,
+            spell_power: 10.0,
+            max_mana: 10.0,
+        ),
+
+        // ====================================================================
+        // RANGED WEAPONS
+        // ====================================================================
+
+        WandOfShadows: (
+            name: "Wand of Shadows",
+            item_level: 56,
+            slot: Ranged,
+            weapon_type: Wand,
+            is_weapon: true,
+            attack_damage_min: 8.0,
+            attack_damage_max: 12.0,
+            attack_speed: 0.7,
+            spell_power: 4.0,
+        ),
+
+        StaffOfDominance: (
+            name: "Staff of Dominance",
+            item_level: 58,
+            slot: Ranged,
+            weapon_type: Wand,
+            is_weapon: true,
+            attack_damage_min: 9.0,
+            attack_damage_max: 13.0,
+            attack_speed: 0.8,
+            spell_power: 6.0,
+            max_mana: 8.0,
+        ),
+
+        AshwoodBow: (
+            name: "Ashwood Bow",
+            item_level: 58,
+            slot: Ranged,
+            weapon_type: Bow,
+            is_weapon: true,
+            attack_damage_min: 20.0,
+            attack_damage_max: 26.0,
+            attack_speed: 0.4,
+            attack_power: 4.0,
+        ),
+
+        SniperScope: (
+            name: "Sniper Scope Crossbow",
+            item_level: 60,
+            slot: Ranged,
+            weapon_type: Crossbow,
+            is_weapon: true,
+            attack_damage_min: 22.0,
+            attack_damage_max: 28.0,
+            attack_speed: 0.35,
+            attack_power: 3.0,
+            crit_chance: 0.02,
+        ),
+
+        // ====================================================================
+        // OFF HAND
+        // ====================================================================
+
+        TomeOfKnowledge: (
+            name: "Tome of Knowledge",
+            item_level: 55,
+            slot: OffHand,
+            weapon_type: OffhandFrill,
+            spell_power: 6.0,
+            max_mana: 10.0,
+        ),
+
+        WallOfTheDeadShield: (
+            name: "Wall of the Dead",
+            item_level: 56,
+            slot: OffHand,
+            weapon_type: Shield,
+            max_health: 15.0,
+            attack_power: 2.0,
+        ),
+    }
+)

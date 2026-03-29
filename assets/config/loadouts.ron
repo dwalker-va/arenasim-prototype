@@ -1,0 +1,154 @@
+// Default Equipment Loadouts per Class
+//
+// Maps each class to their default equipped items per slot.
+// Slots not listed are empty (no item equipped).
+//
+// Changes here take effect on restart without recompiling.
+
+(
+    loadouts: {
+        // ====================================================================
+        // WARRIOR — Plate armor, two-handed axe
+        // ====================================================================
+        Warrior: {
+            Head: LionheartHelm,
+            Shoulders: ShoulderplatesOfValor,
+            Chest: ConquerorsChestplate,
+            Wrists: WristguardsOfStability,
+            Hands: GauntletsOfMight,
+            Waist: WaistguardOfHeroism,
+            Legs: LegplatesOfWrath,
+            Feet: SabatonsBattleBorn,
+            Back: CloakOfTheShieldWall,
+            Neck: AmuletOfPower,
+            Ring1: BandOfAccuria,
+            Ring2: RingOfProtection,
+            Trinket1: MarkOfTheChampion,
+            MainHand: ArcaniteReaper,
+        },
+
+        // ====================================================================
+        // MAGE — Cloth armor, wand + off-hand
+        // ====================================================================
+        Mage: {
+            Head: MagistersCrown,
+            Shoulders: MagistersMantle,
+            Chest: MagistersRobes,
+            Wrists: MagistersBracers,
+            Hands: MagistersGloves,
+            Waist: MagistersBelt,
+            Legs: MagistersLeggings,
+            Feet: MagistersBoots,
+            Back: CloakOfConcentration,
+            Neck: AmuletOfResilience,
+            Ring1: SignetOfFocus,
+            Ring2: RingOfProtection,
+            Trinket1: EssenceOfEternalLife,
+            Ranged: WandOfShadows,
+            OffHand: TomeOfKnowledge,
+        },
+
+        // ====================================================================
+        // ROGUE — Leather armor, dagger
+        // ====================================================================
+        Rogue: {
+            Head: NightstalkerCowl,
+            Shoulders: NightstalkerMantle,
+            Chest: NightstalkerTunic,
+            Wrists: NightstalkerBracers,
+            Hands: NightstalkerGloves,
+            Waist: NightstalkerBelt,
+            Legs: NightstalkerLegs,
+            Feet: NightstalkerBoots,
+            Back: CloakOfTheShieldWall,
+            Neck: AmuletOfPower,
+            Ring1: BandOfAccuria,
+            Ring2: RingOfProtection,
+            Trinket1: MarkOfTheChampion,
+            MainHand: SerpentFangDagger,
+        },
+
+        // ====================================================================
+        // PRIEST — Cloth armor, wand + off-hand
+        // ====================================================================
+        Priest: {
+            Head: MagistersCrown,
+            Shoulders: MagistersMantle,
+            Chest: MagistersRobes,
+            Wrists: MagistersBracers,
+            Hands: MagistersGloves,
+            Waist: MagistersBelt,
+            Legs: MagistersLeggings,
+            Feet: MagistersBoots,
+            Back: CloakOfConcentration,
+            Neck: AmuletOfResilience,
+            Ring1: SignetOfFocus,
+            Ring2: RingOfProtection,
+            Trinket1: EssenceOfEternalLife,
+            Ranged: StaffOfDominance,
+            OffHand: TomeOfKnowledge,
+        },
+
+        // ====================================================================
+        // WARLOCK — Cloth armor, wand + off-hand
+        // ====================================================================
+        Warlock: {
+            Head: MagistersCrown,
+            Shoulders: MagistersMantle,
+            Chest: MagistersRobes,
+            Wrists: MagistersBracers,
+            Hands: MagistersGloves,
+            Waist: MagistersBelt,
+            Legs: MagistersLeggings,
+            Feet: MagistersBoots,
+            Back: CloakOfConcentration,
+            Neck: AmuletOfResilience,
+            Ring1: SignetOfFocus,
+            Ring2: RingOfProtection,
+            Trinket1: EssenceOfEternalLife,
+            Ranged: WandOfShadows,
+            OffHand: TomeOfKnowledge,
+        },
+
+        // ====================================================================
+        // PALADIN — Plate armor, mace + shield
+        // ====================================================================
+        Paladin: {
+            Head: OnslaughtHeadGuard,
+            Shoulders: ShoulderplatesOfValor,
+            Chest: ConquerorsChestplate,
+            Wrists: WristguardsOfStability,
+            Hands: GauntletsOfMight,
+            Waist: WaistguardOfHeroism,
+            Legs: LegplatesOfWrath,
+            Feet: SabatonsBattleBorn,
+            Back: CloakOfConcentration,
+            Neck: AmuletOfResilience,
+            Ring1: SignetOfFocus,
+            Ring2: RingOfProtection,
+            Trinket1: EssenceOfEternalLife,
+            MainHand: HammerOfTheRighteous,
+            OffHand: WallOfTheDeadShield,
+        },
+
+        // ====================================================================
+        // HUNTER — Mail armor, bow
+        // ====================================================================
+        Hunter: {
+            Head: BeaststalkerHelm,
+            Shoulders: BeaststalkerMantle,
+            Chest: BeaststalkerTunic,
+            Wrists: BeaststalkerBracers,
+            Hands: BeaststalkerGloves,
+            Waist: BeaststalkerBelt,
+            Legs: BeaststalkerLegs,
+            Feet: BeaststalkerBoots,
+            Back: CloakOfTheShieldWall,
+            Neck: AmuletOfPower,
+            Ring1: BandOfAccuria,
+            Ring2: RingOfProtection,
+            Trinket1: MarkOfTheChampion,
+            Ranged: AshwoodBow,
+        },
+    }
+)

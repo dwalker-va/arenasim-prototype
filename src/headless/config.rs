@@ -3,9 +3,11 @@
 //! Parses JSON match configurations and converts them to the game's MatchConfig format.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::Path;
 
 use crate::states::match_config::{ArenaMap, CharacterClass, HunterPetType, MatchConfig, RogueOpener, WarlockCurse};
+use crate::states::play_match::equipment::{ItemId, ItemSlot};
 
 /// Headless match configuration loaded from JSON
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,6 +60,12 @@ pub struct HeadlessMatchConfig {
     /// Team 2's hunter pet type preferences (one per slot: "Spider", "Boar", "Bird")
     #[serde(default)]
     pub team2_hunter_pet_types: Vec<String>,
+    /// Team 1's equipment overrides: outer vec indexed by slot, inner map is slot_name -> item_name
+    #[serde(default)]
+    pub team1_equipment: Vec<HashMap<String, String>>,
+    /// Team 2's equipment overrides: outer vec indexed by slot, inner map is slot_name -> item_name
+    #[serde(default)]
+    pub team2_equipment: Vec<HashMap<String, String>>,
 }
 
 fn default_map() -> String {
@@ -202,6 +210,135 @@ impl HeadlessMatchConfig {
         }
     }
 
+    /// Parse an item slot name string into ItemSlot
+    fn parse_item_slot(name: &str) -> Result<ItemSlot, String> {
+        match name {
+            "Head" => Ok(ItemSlot::Head),
+            "Neck" => Ok(ItemSlot::Neck),
+            "Shoulders" => Ok(ItemSlot::Shoulders),
+            "Back" => Ok(ItemSlot::Back),
+            "Chest" => Ok(ItemSlot::Chest),
+            "Wrists" => Ok(ItemSlot::Wrists),
+            "Hands" => Ok(ItemSlot::Hands),
+            "Waist" => Ok(ItemSlot::Waist),
+            "Legs" => Ok(ItemSlot::Legs),
+            "Feet" => Ok(ItemSlot::Feet),
+            "Ring1" => Ok(ItemSlot::Ring1),
+            "Ring2" => Ok(ItemSlot::Ring2),
+            "Trinket1" => Ok(ItemSlot::Trinket1),
+            "Trinket2" => Ok(ItemSlot::Trinket2),
+            "MainHand" => Ok(ItemSlot::MainHand),
+            "OffHand" => Ok(ItemSlot::OffHand),
+            "Ranged" => Ok(ItemSlot::Ranged),
+            _ => Err(format!(
+                "Unknown item slot: '{}'. Valid slots: Head, Neck, Shoulders, Back, Chest, Wrists, Hands, Waist, Legs, Feet, Ring1, Ring2, Trinket1, Trinket2, MainHand, OffHand, Ranged",
+                name
+            )),
+        }
+    }
+
+    /// Parse an item ID name string into ItemId
+    fn parse_item_id(name: &str) -> Result<ItemId, String> {
+        match name {
+            // Plate Armor
+            "LionheartHelm" => Ok(ItemId::LionheartHelm),
+            "OnslaughtHeadGuard" => Ok(ItemId::OnslaughtHeadGuard),
+            "ConquerorsChestplate" => Ok(ItemId::ConquerorsChestplate),
+            "LegplatesOfWrath" => Ok(ItemId::LegplatesOfWrath),
+            "GauntletsOfMight" => Ok(ItemId::GauntletsOfMight),
+            "SabatonsBattleBorn" => Ok(ItemId::SabatonsBattleBorn),
+            "WaistguardOfHeroism" => Ok(ItemId::WaistguardOfHeroism),
+            "WristguardsOfStability" => Ok(ItemId::WristguardsOfStability),
+            "ShoulderplatesOfValor" => Ok(ItemId::ShoulderplatesOfValor),
+            // Mail Armor
+            "BeaststalkerHelm" => Ok(ItemId::BeaststalkerHelm),
+            "BeaststalkerTunic" => Ok(ItemId::BeaststalkerTunic),
+            "BeaststalkerLegs" => Ok(ItemId::BeaststalkerLegs),
+            "BeaststalkerGloves" => Ok(ItemId::BeaststalkerGloves),
+            "BeaststalkerBoots" => Ok(ItemId::BeaststalkerBoots),
+            "BeaststalkerBelt" => Ok(ItemId::BeaststalkerBelt),
+            "BeaststalkerBracers" => Ok(ItemId::BeaststalkerBracers),
+            "BeaststalkerMantle" => Ok(ItemId::BeaststalkerMantle),
+            // Leather Armor
+            "NightstalkerCowl" => Ok(ItemId::NightstalkerCowl),
+            "NightstalkerTunic" => Ok(ItemId::NightstalkerTunic),
+            "NightstalkerLegs" => Ok(ItemId::NightstalkerLegs),
+            "NightstalkerGloves" => Ok(ItemId::NightstalkerGloves),
+            "NightstalkerBoots" => Ok(ItemId::NightstalkerBoots),
+            "NightstalkerBelt" => Ok(ItemId::NightstalkerBelt),
+            "NightstalkerBracers" => Ok(ItemId::NightstalkerBracers),
+            "NightstalkerMantle" => Ok(ItemId::NightstalkerMantle),
+            // Cloth Armor
+            "MagistersCrown" => Ok(ItemId::MagistersCrown),
+            "MagistersRobes" => Ok(ItemId::MagistersRobes),
+            "MagistersLeggings" => Ok(ItemId::MagistersLeggings),
+            "MagistersGloves" => Ok(ItemId::MagistersGloves),
+            "MagistersBoots" => Ok(ItemId::MagistersBoots),
+            "MagistersBelt" => Ok(ItemId::MagistersBelt),
+            "MagistersBracers" => Ok(ItemId::MagistersBracers),
+            "MagistersMantle" => Ok(ItemId::MagistersMantle),
+            // Cloaks
+            "CloakOfTheShieldWall" => Ok(ItemId::CloakOfTheShieldWall),
+            "CloakOfConcentration" => Ok(ItemId::CloakOfConcentration),
+            // Necklaces
+            "AmuletOfPower" => Ok(ItemId::AmuletOfPower),
+            "AmuletOfResilience" => Ok(ItemId::AmuletOfResilience),
+            // Rings
+            "BandOfAccuria" => Ok(ItemId::BandOfAccuria),
+            "SignetOfFocus" => Ok(ItemId::SignetOfFocus),
+            "RingOfProtection" => Ok(ItemId::RingOfProtection),
+            // Trinkets
+            "MarkOfTheChampion" => Ok(ItemId::MarkOfTheChampion),
+            "EssenceOfEternalLife" => Ok(ItemId::EssenceOfEternalLife),
+            // Melee Weapons
+            "ArcaniteReaper" => Ok(ItemId::ArcaniteReaper),
+            "FrostbiteBlade" => Ok(ItemId::FrostbiteBlade),
+            "SerpentFangDagger" => Ok(ItemId::SerpentFangDagger),
+            "HammerOfTheRighteous" => Ok(ItemId::HammerOfTheRighteous),
+            "CrescentStaff" => Ok(ItemId::CrescentStaff),
+            // Ranged Weapons
+            "WandOfShadows" => Ok(ItemId::WandOfShadows),
+            "StaffOfDominance" => Ok(ItemId::StaffOfDominance),
+            "AshwoodBow" => Ok(ItemId::AshwoodBow),
+            "SniperScope" => Ok(ItemId::SniperScope),
+            // Off Hand
+            "TomeOfKnowledge" => Ok(ItemId::TomeOfKnowledge),
+            "WallOfTheDeadShield" => Ok(ItemId::WallOfTheDeadShield),
+            _ => Err(format!(
+                "Unknown item: '{}'. Valid items: LionheartHelm, OnslaughtHeadGuard, ConquerorsChestplate, LegplatesOfWrath, GauntletsOfMight, SabatonsBattleBorn, WaistguardOfHeroism, WristguardsOfStability, ShoulderplatesOfValor, BeaststalkerHelm, BeaststalkerTunic, BeaststalkerLegs, BeaststalkerGloves, BeaststalkerBoots, BeaststalkerBelt, BeaststalkerBracers, BeaststalkerMantle, NightstalkerCowl, NightstalkerTunic, NightstalkerLegs, NightstalkerGloves, NightstalkerBoots, NightstalkerBelt, NightstalkerBracers, NightstalkerMantle, MagistersCrown, MagistersRobes, MagistersLeggings, MagistersGloves, MagistersBoots, MagistersBelt, MagistersBracers, MagistersMantle, CloakOfTheShieldWall, CloakOfConcentration, AmuletOfPower, AmuletOfResilience, BandOfAccuria, SignetOfFocus, RingOfProtection, MarkOfTheChampion, EssenceOfEternalLife, ArcaniteReaper, FrostbiteBlade, SerpentFangDagger, HammerOfTheRighteous, CrescentStaff, WandOfShadows, StaffOfDominance, AshwoodBow, SniperScope, TomeOfKnowledge, WallOfTheDeadShield",
+                name
+            )),
+        }
+    }
+
+    /// Parse a string-keyed equipment map into typed ItemSlot/ItemId map
+    fn parse_equipment_map(map: &HashMap<String, String>) -> Result<HashMap<ItemSlot, ItemId>, String> {
+        let mut result = HashMap::new();
+        for (slot_str, item_str) in map {
+            let slot = Self::parse_item_slot(slot_str)?;
+            let item = Self::parse_item_id(item_str)?;
+            result.insert(slot, item);
+        }
+        Ok(result)
+    }
+
+    /// Parse equipment overrides from JSON, resizing to team size with empty defaults
+    fn parse_equipment_overrides(
+        raw: &[HashMap<String, String>],
+        team_size: usize,
+    ) -> Result<Vec<HashMap<ItemSlot, ItemId>>, String> {
+        let mut result = Vec::with_capacity(team_size);
+        for (i, map) in raw.iter().enumerate() {
+            if i >= team_size {
+                break;
+            }
+            result.push(Self::parse_equipment_map(map)?);
+        }
+        // Pad remaining slots with empty maps
+        result.resize(team_size, HashMap::new());
+        Ok(result)
+    }
+
     /// Parse warlock curse preferences from JSON format
     /// Outer vec indexed by slot, inner vec indexed by enemy target
     fn parse_warlock_curse_prefs(
@@ -286,6 +423,10 @@ impl HeadlessMatchConfig {
             .collect();
         team2_hunter_pet_types.resize(team2.len(), HunterPetType::default());
 
+        // Parse equipment overrides, defaulting to empty maps for missing entries
+        let team1_equipment = Self::parse_equipment_overrides(&self.team1_equipment, team1.len())?;
+        let team2_equipment = Self::parse_equipment_overrides(&self.team2_equipment, team2.len())?;
+
         Ok(MatchConfig {
             team1_size: team1.len(),
             team2_size: team2.len(),
@@ -302,6 +443,8 @@ impl HeadlessMatchConfig {
             team2_warlock_curse_prefs,
             team1_hunter_pet_types,
             team2_hunter_pet_types,
+            team1_equipment,
+            team2_equipment,
         })
     }
 }
