@@ -1159,6 +1159,7 @@ fn render_equipment_panel(
             .resizable(false)
             .min_width(300.0)
             .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .open(&mut keep_open)
             .show(ui.ctx(), |ui| {
                 // "Reset to Default" option — only when slot has override
                 if overrides.contains_key(&open_slot) {
