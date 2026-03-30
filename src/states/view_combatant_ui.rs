@@ -3,7 +3,7 @@
 //! This module displays detailed information about a combatant:
 //! - Base stats (health, resource, attack/spell power, attack/move speed)
 //! - List of abilities with icons
-//! - Placeholder sections for Gear and Talents (Coming Soon)
+//! - Equipment loadout editor (view/change gear per slot)
 //!
 //! Accessed by clicking a filled character slot in Configure Match.
 
@@ -1003,7 +1003,6 @@ fn build_aura_description(aura: &super::play_match::ability_config::AuraEffect) 
     }
 }
 
-/// Render a "Coming Soon" panel
 /// Equipment slot groups for the panel layout
 const ARMOR_SLOTS: &[ItemSlot] = &[
     ItemSlot::Head, ItemSlot::Shoulders, ItemSlot::Chest, ItemSlot::Wrists,
@@ -1057,7 +1056,7 @@ fn render_equipment_panel(
                 .strong(),
         );
 
-        ui.add_space(8.0);
+        ui.add_space(12.0);
 
         // Render slot groups
         let slot_groups: &[(&str, &[ItemSlot])] = &[
@@ -1274,9 +1273,9 @@ fn set_equipment_override(
     }
 }
 
-/// Format stat bonuses for an item in the picker.
+/// Build a list of formatted stat strings for an item.
 /// Armor stats use "+X" format; weapons show absolute damage range and speed.
-fn format_item_stats(item: &ItemConfig) -> String {
+fn item_stat_parts(item: &ItemConfig) -> Vec<String> {
     let mut parts = Vec::new();
 
     if item.is_weapon {
@@ -1296,40 +1295,43 @@ fn format_item_stats(item: &ItemConfig) -> String {
     if item.crit_chance != 0.0 { parts.push(format!("+{:.1}% Crit", item.crit_chance * 100.0)); }
     if item.movement_speed != 0.0 { parts.push(format!("+{:.0}% Speed", item.movement_speed * 100.0)); }
 
-    parts.join(", ")
+    parts
+}
+
+/// Format stat bonuses as a comma-separated string for inline display.
+fn format_item_stats(item: &ItemConfig) -> String {
+    item_stat_parts(item).join(", ")
 }
 
 /// Render aggregate stat totals from all equipped items.
 fn render_stat_totals(ui: &mut egui::Ui, loadout: &HashMap<ItemSlot, ItemId>, items: &Res<ItemDefinitions>) {
-    let mut hp = 0.0_f32;
-    let mut mana = 0.0_f32;
-    let mut mana_regen = 0.0_f32;
-    let mut ap = 0.0_f32;
-    let mut sp = 0.0_f32;
-    let mut crit = 0.0_f32;
-    let mut move_speed = 0.0_f32;
+    // Build a synthetic ItemConfig with summed stats for the format helper
+    let mut totals = ItemConfig {
+        name: String::new(),
+        item_level: 0,
+        slot: ItemSlot::Head,
+        armor_type: super::play_match::equipment::ArmorType::None,
+        weapon_type: super::play_match::equipment::WeaponType::None,
+        allowed_classes: None,
+        is_weapon: false,
+        max_health: 0.0, max_mana: 0.0, mana_regen: 0.0,
+        attack_power: 0.0, spell_power: 0.0, crit_chance: 0.0, movement_speed: 0.0,
+        attack_damage_min: 0.0, attack_damage_max: 0.0, attack_speed: 0.0,
+    };
 
     for (_, item_id) in loadout {
         if let Some(item) = items.get(item_id) {
-            hp += item.max_health;
-            mana += item.max_mana;
-            mana_regen += item.mana_regen;
-            ap += item.attack_power;
-            sp += item.spell_power;
-            crit += item.crit_chance;
-            move_speed += item.movement_speed;
+            totals.max_health += item.max_health;
+            totals.max_mana += item.max_mana;
+            totals.mana_regen += item.mana_regen;
+            totals.attack_power += item.attack_power;
+            totals.spell_power += item.spell_power;
+            totals.crit_chance += item.crit_chance;
+            totals.movement_speed += item.movement_speed;
         }
     }
 
-    let mut parts = Vec::new();
-    if hp != 0.0 { parts.push(format!("+{:.0} HP", hp)); }
-    if mana != 0.0 { parts.push(format!("+{:.0} Mana", mana)); }
-    if mana_regen != 0.0 { parts.push(format!("+{:.1} MP5", mana_regen)); }
-    if ap != 0.0 { parts.push(format!("+{:.0} AP", ap)); }
-    if sp != 0.0 { parts.push(format!("+{:.0} SP", sp)); }
-    if crit != 0.0 { parts.push(format!("+{:.1}% Crit", crit * 100.0)); }
-    if move_speed != 0.0 { parts.push(format!("+{:.0}% Speed", move_speed * 100.0)); }
-
+    let parts = item_stat_parts(&totals);
     if parts.is_empty() {
         ui.label(
             egui::RichText::new("No stat bonuses")
@@ -1371,11 +1373,10 @@ fn render_item_tooltip(ui: &mut egui::Ui, item: &ItemConfig) {
         );
     }
 
-    let stat_text = format_item_stats(item);
-    if !stat_text.is_empty() {
+    let stat_parts = item_stat_parts(item);
+    if !stat_parts.is_empty() {
         ui.add_space(4.0);
-        // Show each stat on its own line in the tooltip
-        for part in stat_text.split(", ") {
+        for part in &stat_parts {
             ui.label(
                 egui::RichText::new(part)
                     .size(12.0)
