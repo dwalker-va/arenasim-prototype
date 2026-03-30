@@ -1089,39 +1089,16 @@ fn render_equipment_panel(
                     ("— Empty —".to_string(), muted_color)
                 };
 
-                let response = ui.horizontal(|ui| {
-                    ui.set_min_width(width - 40.0);
+                // Compact row: "Slot: Item Name" as a selectable label for clear hover/click
+                let label_text = format!("{}: {}", slot.name(), item_name);
+                let response = ui.selectable_label(false,
+                    egui::RichText::new(&label_text)
+                        .size(13.0)
+                        .color(name_color),
+                );
 
-                    // Slot name (left)
-                    ui.label(
-                        egui::RichText::new(slot.name())
-                            .size(13.0)
-                            .color(subtitle_color),
-                    );
-
-                    // Push item name to the right
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(
-                            egui::RichText::new(&item_name)
-                                .size(13.0)
-                                .color(name_color),
-                        );
-                    });
-                }).response;
-
-                // Make the row clickable
-                let response = response.interact(egui::Sense::click());
                 if response.clicked() {
                     clicked_slot = Some(*slot);
-                }
-
-                // Hover highlight
-                if response.hovered() {
-                    ui.painter().rect_filled(
-                        response.rect,
-                        2.0,
-                        egui::Color32::from_rgba_premultiplied(255, 215, 0, 15),
-                    );
                 }
 
                 // Tooltip on hover (R8 — nice-to-have)
@@ -1181,44 +1158,24 @@ fn render_equipment_panel(
                     for (item_id, item) in &valid_items {
                         let is_equipped = current_item == Some(item_id);
 
-                        ui.group(|ui| {
-                            let bg = if is_equipped {
-                                egui::Color32::from_rgb(40, 50, 40)
-                            } else {
-                                egui::Color32::from_rgb(30, 30, 40)
-                            };
-                            ui.painter().rect_filled(ui.max_rect(), 2.0, bg);
+                        // Build display text: item name + stats on same line
+                        let stat_text = format_item_stats(item);
+                        let display = if stat_text.is_empty() {
+                            item.name.clone()
+                        } else {
+                            format!("{}  —  {}", item.name, stat_text)
+                        };
 
-                            let response = ui.vertical(|ui| {
-                                ui.set_min_width(280.0);
+                        let name_color = if is_equipped { gold } else { egui::Color32::from_rgb(220, 220, 220) };
+                        let response = ui.selectable_label(is_equipped,
+                            egui::RichText::new(&display)
+                                .size(13.0)
+                                .color(name_color),
+                        );
 
-                                // Item name
-                                let name_color = if is_equipped { gold } else { egui::Color32::from_rgb(220, 220, 220) };
-                                ui.label(
-                                    egui::RichText::new(&item.name)
-                                        .size(14.0)
-                                        .color(name_color)
-                                        .strong(),
-                                );
-
-                                // Stat summary
-                                let stat_text = format_item_stats(item);
-                                if !stat_text.is_empty() {
-                                    ui.label(
-                                        egui::RichText::new(&stat_text)
-                                            .size(12.0)
-                                            .color(subtitle_color),
-                                    );
-                                }
-                            }).response;
-
-                            let response = response.interact(egui::Sense::click());
-                            if response.clicked() {
-                                selection = Some(PickerAction::SelectItem(open_slot, *item_id));
-                            }
-                        });
-
-                        ui.add_space(2.0);
+                        if response.clicked() {
+                            selection = Some(PickerAction::SelectItem(open_slot, *item_id));
+                        }
                     }
                 });
             });
