@@ -80,6 +80,19 @@ impl ItemSlot {
     pub fn is_weapon_slot(&self) -> bool {
         matches!(self, ItemSlot::MainHand | ItemSlot::OffHand | ItemSlot::Ranged)
     }
+
+    /// Whether two slots accept the same item pool.
+    /// Ring1/Ring2 are interchangeable, Trinket1/Trinket2 are interchangeable,
+    /// all other slots must match exactly.
+    pub fn is_same_slot_type(&self, other: &ItemSlot) -> bool {
+        match (self, other) {
+            (ItemSlot::Ring1, ItemSlot::Ring1 | ItemSlot::Ring2) => true,
+            (ItemSlot::Ring2, ItemSlot::Ring1 | ItemSlot::Ring2) => true,
+            (ItemSlot::Trinket1, ItemSlot::Trinket1 | ItemSlot::Trinket2) => true,
+            (ItemSlot::Trinket2, ItemSlot::Trinket1 | ItemSlot::Trinket2) => true,
+            _ => self == other,
+        }
+    }
 }
 
 /// Armor type restriction
@@ -364,6 +377,17 @@ impl ItemDefinitions {
 
     pub fn item_count(&self) -> usize {
         self.definitions.len()
+    }
+
+    /// Return all items valid for a given slot and class, sorted by name.
+    /// Ring1/Ring2 and Trinket1/Trinket2 share item pools.
+    pub fn items_for_slot(&self, slot: ItemSlot, class: CharacterClass) -> Vec<(ItemId, &ItemConfig)> {
+        let mut items: Vec<(ItemId, &ItemConfig)> = self.definitions.iter()
+            .filter(|(_, item)| slot.is_same_slot_type(&item.slot) && can_equip(class, item))
+            .map(|(id, item)| (*id, item))
+            .collect();
+        items.sort_by(|a, b| a.1.name.cmp(&b.1.name));
+        items
     }
 }
 
@@ -807,5 +831,94 @@ mod tests {
         let mut loadout = HashMap::new();
         loadout.insert(ItemSlot::Head, ItemId::LionheartHelm);
         assert!(validate_class_restrictions(CharacterClass::Warrior, &loadout, &items).is_err());
+    }
+
+    // ---- is_same_slot_type tests ----
+
+    #[test]
+    fn is_same_slot_type_exact_match() {
+        assert!(ItemSlot::Head.is_same_slot_type(&ItemSlot::Head));
+        assert!(ItemSlot::MainHand.is_same_slot_type(&ItemSlot::MainHand));
+    }
+
+    #[test]
+    fn is_same_slot_type_ring_interchangeable() {
+        assert!(ItemSlot::Ring1.is_same_slot_type(&ItemSlot::Ring2));
+        assert!(ItemSlot::Ring2.is_same_slot_type(&ItemSlot::Ring1));
+        assert!(ItemSlot::Ring1.is_same_slot_type(&ItemSlot::Ring1));
+    }
+
+    #[test]
+    fn is_same_slot_type_trinket_interchangeable() {
+        assert!(ItemSlot::Trinket1.is_same_slot_type(&ItemSlot::Trinket2));
+        assert!(ItemSlot::Trinket2.is_same_slot_type(&ItemSlot::Trinket1));
+    }
+
+    #[test]
+    fn is_same_slot_type_different_slots() {
+        assert!(!ItemSlot::Ring1.is_same_slot_type(&ItemSlot::Neck));
+        assert!(!ItemSlot::Head.is_same_slot_type(&ItemSlot::Chest));
+        assert!(!ItemSlot::Trinket1.is_same_slot_type(&ItemSlot::Ring1));
+    }
+
+    // ---- items_for_slot tests ----
+
+    #[test]
+    fn items_for_slot_filters_by_armor_type() {
+        let items = make_item_defs(vec![
+            (ItemId::LionheartHelm, armor_item("Plate Helm", ItemSlot::Head, ArmorType::Plate)),
+            (ItemId::MagistersCrown, armor_item("Cloth Crown", ItemSlot::Head, ArmorType::Cloth)),
+        ]);
+        // Warrior can wear plate; Mage cannot
+        let warrior_head = items.items_for_slot(ItemSlot::Head, CharacterClass::Warrior);
+        assert_eq!(warrior_head.len(), 2); // warrior can wear both plate and cloth
+        let mage_head = items.items_for_slot(ItemSlot::Head, CharacterClass::Mage);
+        assert_eq!(mage_head.len(), 1); // mage can only wear cloth
+        assert_eq!(mage_head[0].0, ItemId::MagistersCrown);
+    }
+
+    #[test]
+    fn items_for_slot_ring2_shows_all_rings() {
+        let items = make_item_defs(vec![
+            (ItemId::BandOfAccuria, armor_item("Band of Accuria", ItemSlot::Ring1, ArmorType::None)),
+            (ItemId::RingOfProtection, armor_item("Ring of Protection", ItemSlot::Ring2, ArmorType::None)),
+            (ItemId::SignetOfFocus, armor_item("Signet of Focus", ItemSlot::Ring1, ArmorType::None)),
+        ]);
+        let ring2_items = items.items_for_slot(ItemSlot::Ring2, CharacterClass::Mage);
+        assert_eq!(ring2_items.len(), 3); // all ring items available for Ring2
+    }
+
+    #[test]
+    fn items_for_slot_trinket_shows_all_trinkets() {
+        let items = make_item_defs(vec![
+            (ItemId::MarkOfTheChampion, armor_item("Mark of Champion", ItemSlot::Trinket1, ArmorType::None)),
+            (ItemId::EssenceOfEternalLife, armor_item("Essence of Life", ItemSlot::Trinket1, ArmorType::None)),
+        ]);
+        let trinket2_items = items.items_for_slot(ItemSlot::Trinket2, CharacterClass::Warrior);
+        assert_eq!(trinket2_items.len(), 2); // both trinkets available for Trinket2
+    }
+
+    #[test]
+    fn items_for_slot_respects_class_restrictions() {
+        let mut warrior_only = armor_item("Warrior Helm", ItemSlot::Head, ArmorType::Plate);
+        warrior_only.allowed_classes = Some(vec![CharacterClass::Warrior]);
+        let items = make_item_defs(vec![
+            (ItemId::LionheartHelm, warrior_only),
+        ]);
+        let warrior_items = items.items_for_slot(ItemSlot::Head, CharacterClass::Warrior);
+        assert_eq!(warrior_items.len(), 1);
+        let paladin_items = items.items_for_slot(ItemSlot::Head, CharacterClass::Paladin);
+        assert_eq!(paladin_items.len(), 0);
+    }
+
+    #[test]
+    fn items_for_slot_sorted_by_name() {
+        let items = make_item_defs(vec![
+            (ItemId::BandOfAccuria, armor_item("Zebra Ring", ItemSlot::Ring1, ArmorType::None)),
+            (ItemId::SignetOfFocus, armor_item("Alpha Ring", ItemSlot::Ring1, ArmorType::None)),
+        ]);
+        let ring_items = items.items_for_slot(ItemSlot::Ring1, CharacterClass::Warrior);
+        assert_eq!(ring_items[0].1.name, "Alpha Ring");
+        assert_eq!(ring_items[1].1.name, "Zebra Ring");
     }
 }

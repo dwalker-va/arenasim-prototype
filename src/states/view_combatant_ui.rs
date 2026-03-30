@@ -17,6 +17,13 @@ use super::play_match::abilities::{ScalingStat, SpellSchool};
 use super::play_match::ability_config::{AbilityDefinitions, AbilityConfig};
 use super::play_match::components::AuraType;
 use super::play_match::rendering::get_ability_icon_path;
+use super::play_match::equipment::{ItemSlot, ItemId, ItemConfig, ItemDefinitions, DefaultLoadouts, resolve_loadout};
+
+/// Tracks which equipment slot has its picker open (if any)
+#[derive(Default)]
+pub struct EquipmentPickerState {
+    open_slot: Option<ItemSlot>,
+}
 
 /// Resource to track which combatant is being viewed.
 /// Inserted when navigating from Configure Match to this screen.
@@ -319,6 +326,9 @@ pub fn view_combatant_ui(
     ability_icons: Option<Res<AbilityIcons>>,
     ability_definitions: Res<AbilityDefinitions>,
     mut match_config: ResMut<MatchConfig>,
+    item_definitions: Res<ItemDefinitions>,
+    default_loadouts: Res<DefaultLoadouts>,
+    mut picker_state: Local<EquipmentPickerState>,
 ) {
     use crate::keybindings::GameAction;
 
@@ -382,7 +392,6 @@ pub fn view_combatant_ui(
 
     // Fixed heights for consistency
     let main_panel_height = 220.0;
-    let bottom_panel_height = 100.0;
 
     egui::CentralPanel::default()
         .frame(
@@ -573,31 +582,16 @@ pub fn view_combatant_ui(
 
                 ui.add_space(15.0);
 
-                // Two-column layout for Gear and Talents (Coming Soon)
-                ui.allocate_ui_with_layout(
-                    egui::vec2(content_width, bottom_panel_height),
-                    egui::Layout::left_to_right(egui::Align::TOP),
-                    |ui| {
-                        // Gear panel
-                        ui.allocate_ui_with_layout(
-                            egui::vec2(panel_width, bottom_panel_height),
-                            egui::Layout::top_down(egui::Align::LEFT),
-                            |ui| {
-                                render_coming_soon_panel(ui, "GEAR", panel_width, bottom_panel_height);
-                            },
-                        );
-
-                        ui.add_space(spacing);
-
-                        // Talents panel
-                        ui.allocate_ui_with_layout(
-                            egui::vec2(panel_width, bottom_panel_height),
-                            egui::Layout::top_down(egui::Align::LEFT),
-                            |ui| {
-                                render_coming_soon_panel(ui, "TALENTS", panel_width, bottom_panel_height);
-                            },
-                        );
-                    },
+                // Equipment panel (full width, replaces Gear + Talents placeholders)
+                render_equipment_panel(
+                    ui,
+                    content_width,
+                    &view_state,
+                    &mut match_config,
+                    &item_definitions,
+                    &default_loadouts,
+                    &mut picker_state,
+                    class,
                 );
             });
         });
@@ -1010,29 +1004,384 @@ fn build_aura_description(aura: &super::play_match::ability_config::AuraEffect) 
 }
 
 /// Render a "Coming Soon" panel
-fn render_coming_soon_panel(ui: &mut egui::Ui, title: &str, width: f32, height: f32) {
+/// Equipment slot groups for the panel layout
+const ARMOR_SLOTS: &[ItemSlot] = &[
+    ItemSlot::Head, ItemSlot::Shoulders, ItemSlot::Chest, ItemSlot::Wrists,
+    ItemSlot::Hands, ItemSlot::Waist, ItemSlot::Legs, ItemSlot::Feet,
+];
+const ACCESSORY_SLOTS: &[ItemSlot] = &[
+    ItemSlot::Neck, ItemSlot::Back, ItemSlot::Ring1, ItemSlot::Ring2,
+    ItemSlot::Trinket1, ItemSlot::Trinket2,
+];
+const WEAPON_SLOTS: &[ItemSlot] = &[
+    ItemSlot::MainHand, ItemSlot::OffHand, ItemSlot::Ranged,
+];
+
+/// Render the equipment loadout panel — slot list, picker, and stat totals.
+fn render_equipment_panel(
+    ui: &mut egui::Ui,
+    width: f32,
+    view_state: &Res<ViewCombatantState>,
+    match_config: &mut ResMut<MatchConfig>,
+    items: &Res<ItemDefinitions>,
+    defaults: &Res<DefaultLoadouts>,
+    picker_state: &mut EquipmentPickerState,
+    class: CharacterClass,
+) {
+    let gold = egui::Color32::from_rgb(255, 215, 0);
+    let title_color = egui::Color32::from_rgb(230, 204, 153);
+    let subtitle_color = egui::Color32::from_rgb(170, 170, 170);
+    let muted_color = egui::Color32::from_rgb(90, 90, 90);
+    let override_color = egui::Color32::from_rgb(100, 255, 100); // green for overrides
+
+    // Get current overrides for this combatant
+    let overrides = if view_state.team == 1 {
+        match_config.team1_equipment.get(view_state.slot).cloned().unwrap_or_default()
+    } else {
+        match_config.team2_equipment.get(view_state.slot).cloned().unwrap_or_default()
+    };
+
+    // Resolve the full loadout (defaults + overrides)
+    let resolved = resolve_loadout(class, defaults, &overrides);
+
+    // Track which slot was clicked to open picker
+    let mut clicked_slot: Option<ItemSlot> = None;
+
     ui.group(|ui| {
         ui.set_min_width(width - 20.0);
-        ui.set_min_height(height - 20.0);
 
         ui.label(
-            egui::RichText::new(title)
+            egui::RichText::new("EQUIPMENT")
                 .size(18.0)
-                .color(egui::Color32::from_rgb(120, 115, 105))
+                .color(title_color)
                 .strong(),
         );
 
-        ui.add_space(15.0);
+        ui.add_space(8.0);
 
-        ui.vertical_centered(|ui| {
+        // Render slot groups
+        let slot_groups: &[(&str, &[ItemSlot])] = &[
+            ("Armor", ARMOR_SLOTS),
+            ("Accessories", ACCESSORY_SLOTS),
+            ("Weapons", WEAPON_SLOTS),
+        ];
+
+        for (group_name, slots) in slot_groups {
             ui.label(
-                egui::RichText::new("Coming Soon")
-                    .size(16.0)
-                    .color(egui::Color32::from_rgb(90, 90, 90))
-                    .italics(),
+                egui::RichText::new(*group_name)
+                    .size(13.0)
+                    .color(subtitle_color)
+                    .strong(),
             );
-        });
+            ui.add_space(2.0);
+
+            for slot in *slots {
+                let item_id = resolved.get(slot);
+                let is_override = overrides.contains_key(slot);
+
+                let (item_name, name_color) = if let Some(id) = item_id {
+                    if let Some(item) = items.get(id) {
+                        let color = if is_override { override_color } else { egui::Color32::from_rgb(220, 220, 220) };
+                        (item.name.as_str().to_string(), color)
+                    } else {
+                        ("— Unknown —".to_string(), muted_color)
+                    }
+                } else {
+                    ("— Empty —".to_string(), muted_color)
+                };
+
+                let response = ui.horizontal(|ui| {
+                    ui.set_min_width(width - 40.0);
+
+                    // Slot name (left)
+                    ui.label(
+                        egui::RichText::new(slot.name())
+                            .size(13.0)
+                            .color(subtitle_color),
+                    );
+
+                    // Push item name to the right
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(
+                            egui::RichText::new(&item_name)
+                                .size(13.0)
+                                .color(name_color),
+                        );
+                    });
+                }).response;
+
+                // Make the row clickable
+                let response = response.interact(egui::Sense::click());
+                if response.clicked() {
+                    clicked_slot = Some(*slot);
+                }
+
+                // Hover highlight
+                if response.hovered() {
+                    ui.painter().rect_filled(
+                        response.rect,
+                        2.0,
+                        egui::Color32::from_rgba_premultiplied(255, 215, 0, 15),
+                    );
+                }
+
+                // Tooltip on hover (R8 — nice-to-have)
+                if let Some(id) = item_id {
+                    if let Some(item) = items.get(id) {
+                        response.on_hover_ui(|ui| {
+                            render_item_tooltip(ui, item);
+                        });
+                    }
+                }
+            }
+
+            ui.add_space(6.0);
+        }
+
+        // Stat totals summary (R3)
+        ui.separator();
+        ui.add_space(4.0);
+        render_stat_totals(ui, &resolved, items);
     });
+
+    // Open picker if a slot was clicked
+    if let Some(slot) = clicked_slot {
+        picker_state.open_slot = Some(slot);
+    }
+
+    // Render the picker window if open
+    if let Some(open_slot) = picker_state.open_slot {
+        let mut keep_open = true;
+        let mut selection: Option<PickerAction> = None;
+
+        egui::Window::new(format!("Select: {}", open_slot.name()))
+            .collapsible(false)
+            .resizable(false)
+            .min_width(300.0)
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .show(ui.ctx(), |ui| {
+                // "Reset to Default" option — only when slot has override
+                if overrides.contains_key(&open_slot) {
+                    let reset_response = ui.selectable_label(false,
+                        egui::RichText::new("↩ Reset to Default")
+                            .size(14.0)
+                            .color(egui::Color32::from_rgb(255, 180, 100)),
+                    );
+                    if reset_response.clicked() {
+                        selection = Some(PickerAction::ResetToDefault(open_slot));
+                    }
+                    ui.separator();
+                }
+
+                // List valid items for this slot and class
+                let valid_items = items.items_for_slot(open_slot, class);
+                let current_item = resolved.get(&open_slot);
+
+                egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
+                    for (item_id, item) in &valid_items {
+                        let is_equipped = current_item == Some(item_id);
+
+                        ui.group(|ui| {
+                            let bg = if is_equipped {
+                                egui::Color32::from_rgb(40, 50, 40)
+                            } else {
+                                egui::Color32::from_rgb(30, 30, 40)
+                            };
+                            ui.painter().rect_filled(ui.max_rect(), 2.0, bg);
+
+                            let response = ui.vertical(|ui| {
+                                ui.set_min_width(280.0);
+
+                                // Item name
+                                let name_color = if is_equipped { gold } else { egui::Color32::from_rgb(220, 220, 220) };
+                                ui.label(
+                                    egui::RichText::new(&item.name)
+                                        .size(14.0)
+                                        .color(name_color)
+                                        .strong(),
+                                );
+
+                                // Stat summary
+                                let stat_text = format_item_stats(item);
+                                if !stat_text.is_empty() {
+                                    ui.label(
+                                        egui::RichText::new(&stat_text)
+                                            .size(12.0)
+                                            .color(subtitle_color),
+                                    );
+                                }
+                            }).response;
+
+                            let response = response.interact(egui::Sense::click());
+                            if response.clicked() {
+                                selection = Some(PickerAction::SelectItem(open_slot, *item_id));
+                            }
+                        });
+
+                        ui.add_space(2.0);
+                    }
+                });
+            });
+
+        // Handle Escape to close
+        if ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
+            keep_open = false;
+        }
+
+        // Apply selection
+        match selection {
+            Some(PickerAction::SelectItem(slot, item_id)) => {
+                set_equipment_override(match_config, view_state, slot, Some(item_id));
+                keep_open = false;
+            }
+            Some(PickerAction::ResetToDefault(slot)) => {
+                set_equipment_override(match_config, view_state, slot, None);
+                keep_open = false;
+            }
+            None => {}
+        }
+
+        if !keep_open {
+            picker_state.open_slot = None;
+        }
+    }
+}
+
+enum PickerAction {
+    SelectItem(ItemSlot, ItemId),
+    ResetToDefault(ItemSlot),
+}
+
+/// Apply or remove an equipment override for the viewed combatant.
+fn set_equipment_override(
+    match_config: &mut ResMut<MatchConfig>,
+    view_state: &Res<ViewCombatantState>,
+    slot: ItemSlot,
+    item: Option<ItemId>,
+) {
+    let equipment = if view_state.team == 1 {
+        match_config.team1_equipment.get_mut(view_state.slot)
+    } else {
+        match_config.team2_equipment.get_mut(view_state.slot)
+    };
+
+    if let Some(equip_map) = equipment {
+        match item {
+            Some(id) => { equip_map.insert(slot, id); }
+            None => { equip_map.remove(&slot); }
+        }
+    }
+}
+
+/// Format stat bonuses for an item in the picker.
+/// Armor stats use "+X" format; weapons show absolute damage range and speed.
+fn format_item_stats(item: &ItemConfig) -> String {
+    let mut parts = Vec::new();
+
+    if item.is_weapon {
+        if item.attack_damage_min > 0.0 || item.attack_damage_max > 0.0 {
+            parts.push(format!("{:.0}-{:.0} Damage", item.attack_damage_min, item.attack_damage_max));
+        }
+        if item.attack_speed > 0.0 {
+            parts.push(format!("{:.1} Speed", item.attack_speed));
+        }
+    }
+
+    if item.max_health != 0.0 { parts.push(format!("+{:.0} HP", item.max_health)); }
+    if item.max_mana != 0.0 { parts.push(format!("+{:.0} Mana", item.max_mana)); }
+    if item.mana_regen != 0.0 { parts.push(format!("+{:.1} MP5", item.mana_regen)); }
+    if item.attack_power != 0.0 { parts.push(format!("+{:.0} AP", item.attack_power)); }
+    if item.spell_power != 0.0 { parts.push(format!("+{:.0} SP", item.spell_power)); }
+    if item.crit_chance != 0.0 { parts.push(format!("+{:.1}% Crit", item.crit_chance * 100.0)); }
+    if item.movement_speed != 0.0 { parts.push(format!("+{:.0}% Speed", item.movement_speed * 100.0)); }
+
+    parts.join(", ")
+}
+
+/// Render aggregate stat totals from all equipped items.
+fn render_stat_totals(ui: &mut egui::Ui, loadout: &HashMap<ItemSlot, ItemId>, items: &Res<ItemDefinitions>) {
+    let mut hp = 0.0_f32;
+    let mut mana = 0.0_f32;
+    let mut mana_regen = 0.0_f32;
+    let mut ap = 0.0_f32;
+    let mut sp = 0.0_f32;
+    let mut crit = 0.0_f32;
+    let mut move_speed = 0.0_f32;
+
+    for (_, item_id) in loadout {
+        if let Some(item) = items.get(item_id) {
+            hp += item.max_health;
+            mana += item.max_mana;
+            mana_regen += item.mana_regen;
+            ap += item.attack_power;
+            sp += item.spell_power;
+            crit += item.crit_chance;
+            move_speed += item.movement_speed;
+        }
+    }
+
+    let mut parts = Vec::new();
+    if hp != 0.0 { parts.push(format!("+{:.0} HP", hp)); }
+    if mana != 0.0 { parts.push(format!("+{:.0} Mana", mana)); }
+    if mana_regen != 0.0 { parts.push(format!("+{:.1} MP5", mana_regen)); }
+    if ap != 0.0 { parts.push(format!("+{:.0} AP", ap)); }
+    if sp != 0.0 { parts.push(format!("+{:.0} SP", sp)); }
+    if crit != 0.0 { parts.push(format!("+{:.1}% Crit", crit * 100.0)); }
+    if move_speed != 0.0 { parts.push(format!("+{:.0}% Speed", move_speed * 100.0)); }
+
+    if parts.is_empty() {
+        ui.label(
+            egui::RichText::new("No stat bonuses")
+                .size(12.0)
+                .color(egui::Color32::from_rgb(90, 90, 90))
+                .italics(),
+        );
+    } else {
+        ui.label(
+            egui::RichText::new(parts.join("  "))
+                .size(13.0)
+                .color(egui::Color32::from_rgb(200, 200, 160)),
+        );
+    }
+}
+
+/// Render a tooltip showing an item's full stat breakdown.
+fn render_item_tooltip(ui: &mut egui::Ui, item: &ItemConfig) {
+    ui.label(
+        egui::RichText::new(&item.name)
+            .size(14.0)
+            .color(egui::Color32::from_rgb(255, 215, 0))
+            .strong(),
+    );
+
+    if item.item_level > 0 {
+        ui.label(
+            egui::RichText::new(format!("Item Level {}", item.item_level))
+                .size(12.0)
+                .color(egui::Color32::from_rgb(170, 170, 170)),
+        );
+    }
+
+    if item.armor_type != super::play_match::equipment::ArmorType::None {
+        ui.label(
+            egui::RichText::new(format!("{:?}", item.armor_type))
+                .size(12.0)
+                .color(egui::Color32::from_rgb(170, 170, 170)),
+        );
+    }
+
+    let stat_text = format_item_stats(item);
+    if !stat_text.is_empty() {
+        ui.add_space(4.0);
+        // Show each stat on its own line in the tooltip
+        for part in stat_text.split(", ") {
+            ui.label(
+                egui::RichText::new(part)
+                    .size(12.0)
+                    .color(egui::Color32::from_rgb(100, 255, 100)),
+            );
+        }
+    }
 }
 
 /// Render the Rogue Stealth Opener selection panel with ability icons
