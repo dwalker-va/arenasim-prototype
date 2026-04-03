@@ -63,6 +63,34 @@ struct ClassStats {
     move_speed: f32,
 }
 
+/// Equipment stat contributions for the stats panel
+#[derive(Default)]
+struct EquipmentBonuses {
+    health: f32,
+    mana: f32,
+    attack_power: f32,
+    spell_power: f32,
+    crit_chance: f32,
+    move_speed: f32,
+}
+
+impl EquipmentBonuses {
+    fn from_loadout(loadout: &HashMap<ItemSlot, ItemId>, items: &ItemDefinitions) -> Self {
+        let mut bonuses = Self::default();
+        for (_, item_id) in loadout {
+            if let Some(item) = items.get(item_id) {
+                bonuses.health += item.max_health;
+                bonuses.mana += item.max_mana;
+                bonuses.attack_power += item.attack_power;
+                bonuses.spell_power += item.spell_power;
+                bonuses.crit_chance += item.crit_chance;
+                bonuses.move_speed += item.movement_speed;
+            }
+        }
+        bonuses
+    }
+}
+
 /// Get the base stats for a class
 fn get_class_stats(class: CharacterClass) -> ClassStats {
     match class {
@@ -341,6 +369,7 @@ pub fn view_combatant_ui(
     let mut style = (*ctx.style()).clone();
     style.visuals.window_fill = egui::Color32::from_rgb(20, 20, 30);
     style.visuals.panel_fill = egui::Color32::from_rgb(20, 20, 30);
+    style.interaction.tooltip_delay = 0.0;
     ctx.set_style(style);
 
     // Handle Back key
@@ -372,6 +401,15 @@ pub fn view_combatant_ui(
     let class = view_state.class;
     let stats = get_class_stats(class);
     let abilities = get_class_abilities(class);
+
+    // Compute equipment bonuses for the stats panel
+    let equip_overrides = if view_state.team == 1 {
+        match_config.team1_equipment.get(view_state.slot).cloned().unwrap_or_default()
+    } else {
+        match_config.team2_equipment.get(view_state.slot).cloned().unwrap_or_default()
+    };
+    let resolved_loadout = resolve_loadout(class, &default_loadouts, &equip_overrides);
+    let equip_bonuses = EquipmentBonuses::from_loadout(&resolved_loadout, &item_definitions);
 
     // Get class color
     let class_color = class.color();
@@ -414,6 +452,8 @@ pub fn view_combatant_ui(
                     next_state.set(GameState::ConfigureMatch);
                 }
             });
+
+            egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
 
             // Title - centered
             ui.vertical_centered(|ui| {
@@ -499,7 +539,7 @@ pub fn view_combatant_ui(
                             egui::vec2(panel_width, main_panel_height),
                             egui::Layout::top_down(egui::Align::LEFT),
                             |ui| {
-                                render_stats_panel(ui, &stats, panel_width, main_panel_height);
+                                render_stats_panel(ui, &stats, &equip_bonuses, panel_width, main_panel_height);
                             },
                         );
 
@@ -594,11 +634,57 @@ pub fn view_combatant_ui(
                     class,
                 );
             });
+            }); // ScrollArea
         });
 }
 
-/// Render the Stats panel
-fn render_stats_panel(ui: &mut egui::Ui, stats: &ClassStats, width: f32, height: f32) {
+/// Render a stat row with integer values and instant tooltip.
+fn stat_row_int(
+    ui: &mut egui::Ui, label: &str, base: i32, bonus: i32, suffix: &str,
+    neutral: egui::Color32, green: egui::Color32, red: egui::Color32, label_color: egui::Color32,
+) {
+    let effective = base + bonus;
+    let color = if bonus > 0 { green } else if bonus < 0 { red } else { neutral };
+
+    ui.label(egui::RichText::new(label).size(14.0).color(label_color));
+    let response = ui.label(egui::RichText::new(format!("{}{}", effective, suffix)).size(14.0).color(color));
+
+    if bonus != 0 && response.hovered() {
+        egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), ui.id().with(label), |ui| {
+            ui.label(format!("{} + {} from equipment", base, bonus));
+        });
+    }
+    ui.end_row();
+}
+
+/// Render a stat row with float values and instant tooltip.
+fn stat_row_float(
+    ui: &mut egui::Ui, label: &str, base: f32, bonus: f32, suffix: &str,
+    neutral: egui::Color32, green: egui::Color32, red: egui::Color32, label_color: egui::Color32,
+) {
+    let effective = base + bonus;
+    let color = if bonus > 0.0 { green } else if bonus < 0.0 { red } else { neutral };
+
+    ui.label(egui::RichText::new(label).size(14.0).color(label_color));
+    let response = ui.label(egui::RichText::new(format!("{:.1}{}", effective, suffix)).size(14.0).color(color));
+
+    if bonus != 0.0 && response.hovered() {
+        egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), ui.id().with(label), |ui| {
+            ui.label(format!("{:.1} base + {:.1} from equipment", base, bonus));
+        });
+    }
+    ui.end_row();
+}
+
+/// Render the Stats panel with effective totals (base + equipment).
+/// Stats boosted by equipment are green; negative would be red.
+/// Hover tooltip shows the breakdown.
+fn render_stats_panel(ui: &mut egui::Ui, stats: &ClassStats, equip: &EquipmentBonuses, width: f32, height: f32) {
+    let neutral = egui::Color32::from_rgb(230, 230, 230);
+    let green = egui::Color32::from_rgb(100, 255, 100);
+    let red = egui::Color32::from_rgb(255, 100, 100);
+    let label_color = egui::Color32::from_rgb(170, 170, 170);
+
     ui.group(|ui| {
         ui.set_min_width(width - 20.0);
         ui.set_min_height(height - 20.0);
@@ -616,29 +702,39 @@ fn render_stats_panel(ui: &mut egui::Ui, stats: &ClassStats, width: f32, height:
             .num_columns(2)
             .spacing([40.0, 8.0])
             .show(ui, |ui| {
-                ui.label(egui::RichText::new("Health:").size(14.0).color(egui::Color32::from_rgb(170, 170, 170)));
-                ui.label(egui::RichText::new(format!("{}", stats.health)).size(14.0).color(egui::Color32::from_rgb(230, 230, 230)));
+                stat_row_int(ui, "Health:", stats.health as i32, equip.health as i32, "", neutral, green, red, label_color);
+
+                // Resource: show mana bonus if applicable
+                let mana_bonus = if stats.resource_name == "Mana" { equip.mana as i32 } else { 0 };
+                let resource_effective = stats.resource_max as i32 + mana_bonus;
+                let resource_color = if mana_bonus > 0 { green } else if mana_bonus < 0 { red } else { neutral };
+                ui.label(egui::RichText::new("Resource:").size(14.0).color(label_color));
+                let res_response = ui.label(egui::RichText::new(format!("{} {}", stats.resource_name, resource_effective)).size(14.0).color(resource_color));
+                if mana_bonus != 0 && res_response.hovered() {
+                    egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), ui.id().with("resource_tooltip"), |ui| {
+                        ui.label(format!("{} + {} from equipment", stats.resource_max, mana_bonus));
+                    });
+                }
                 ui.end_row();
 
-                ui.label(egui::RichText::new("Resource:").size(14.0).color(egui::Color32::from_rgb(170, 170, 170)));
-                ui.label(egui::RichText::new(format!("{} {}", stats.resource_name, stats.resource_max)).size(14.0).color(egui::Color32::from_rgb(230, 230, 230)));
-                ui.end_row();
+                stat_row_int(ui, "Attack Power:", stats.attack_power as i32, equip.attack_power as i32, "", neutral, green, red, label_color);
+                stat_row_int(ui, "Spell Power:", stats.spell_power as i32, equip.spell_power as i32, "", neutral, green, red, label_color);
 
-                ui.label(egui::RichText::new("Attack Power:").size(14.0).color(egui::Color32::from_rgb(170, 170, 170)));
-                ui.label(egui::RichText::new(format!("{}", stats.attack_power)).size(14.0).color(egui::Color32::from_rgb(230, 230, 230)));
-                ui.end_row();
+                // Crit chance (only show if equipment provides it)
+                if equip.crit_chance > 0.0 {
+                    ui.label(egui::RichText::new("Crit Chance:").size(14.0).color(label_color));
+                    let crit_text = format!("{:.1}%", equip.crit_chance * 100.0);
+                    let crit_response = ui.label(egui::RichText::new(&crit_text).size(14.0).color(green));
+                    if crit_response.hovered() {
+                        egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), ui.id().with("crit_tooltip"), |ui| {
+                            ui.label(format!("0% base + {:.1}% from equipment", equip.crit_chance * 100.0));
+                        });
+                    }
+                    ui.end_row();
+                }
 
-                ui.label(egui::RichText::new("Spell Power:").size(14.0).color(egui::Color32::from_rgb(170, 170, 170)));
-                ui.label(egui::RichText::new(format!("{}", stats.spell_power)).size(14.0).color(egui::Color32::from_rgb(230, 230, 230)));
-                ui.end_row();
-
-                ui.label(egui::RichText::new("Attack Speed:").size(14.0).color(egui::Color32::from_rgb(170, 170, 170)));
-                ui.label(egui::RichText::new(format!("{:.1}/s", stats.attack_speed)).size(14.0).color(egui::Color32::from_rgb(230, 230, 230)));
-                ui.end_row();
-
-                ui.label(egui::RichText::new("Move Speed:").size(14.0).color(egui::Color32::from_rgb(170, 170, 170)));
-                ui.label(egui::RichText::new(format!("{:.1}/s", stats.move_speed)).size(14.0).color(egui::Color32::from_rgb(230, 230, 230)));
-                ui.end_row();
+                stat_row_float(ui, "Attack Speed:", stats.attack_speed, 0.0, "/s", neutral, green, red, label_color);
+                stat_row_float(ui, "Move Speed:", stats.move_speed, equip.move_speed, "/s", neutral, green, red, label_color);
             });
     });
 }
@@ -1113,11 +1209,6 @@ fn render_equipment_panel(
 
             ui.add_space(6.0);
         }
-
-        // Stat totals summary (R3)
-        ui.separator();
-        ui.add_space(4.0);
-        render_stat_totals(ui, &resolved, items);
     });
 
     // Open picker if a slot was clicked
@@ -1188,11 +1279,11 @@ fn render_equipment_panel(
         // Apply selection
         match selection {
             Some(PickerAction::SelectItem(slot, item_id)) => {
-                set_equipment_override(match_config, view_state, slot, Some(item_id));
+                set_equipment_override(match_config, view_state, slot, Some(item_id), items, defaults, class);
                 keep_open = false;
             }
             Some(PickerAction::ResetToDefault(slot)) => {
-                set_equipment_override(match_config, view_state, slot, None);
+                set_equipment_override(match_config, view_state, slot, None, items, defaults, class);
                 keep_open = false;
             }
             None => {}
@@ -1210,11 +1301,16 @@ enum PickerAction {
 }
 
 /// Apply or remove an equipment override for the viewed combatant.
+/// Handles 2H/OH conflicts: equipping a 2H weapon clears off-hand,
+/// equipping an off-hand clears any 2H main-hand weapon.
 fn set_equipment_override(
     match_config: &mut ResMut<MatchConfig>,
     view_state: &Res<ViewCombatantState>,
     slot: ItemSlot,
     item: Option<ItemId>,
+    items: &ItemDefinitions,
+    defaults: &DefaultLoadouts,
+    class: CharacterClass,
 ) {
     let equipment = if view_state.team == 1 {
         match_config.team1_equipment.get_mut(view_state.slot)
@@ -1224,8 +1320,66 @@ fn set_equipment_override(
 
     if let Some(equip_map) = equipment {
         match item {
-            Some(id) => { equip_map.insert(slot, id); }
-            None => { equip_map.remove(&slot); }
+            Some(id) => {
+                equip_map.insert(slot, id);
+
+                if let Some(new_item) = items.get(&id) {
+                    // Equipping a 2H main-hand → clear off-hand
+                    if slot == ItemSlot::MainHand && new_item.two_handed {
+                        equip_map.remove(&ItemSlot::OffHand);
+                    }
+
+                    // Equipping an off-hand → replace 2H main-hand with a 1H weapon
+                    if slot == ItemSlot::OffHand {
+                        let resolved = resolve_loadout(class, defaults, equip_map);
+                        if let Some(mh_id) = resolved.get(&ItemSlot::MainHand) {
+                            if let Some(mh_item) = items.get(mh_id) {
+                                if mh_item.two_handed {
+                                    // Find the first 1H main-hand weapon this class can use
+                                    let one_hand = items.items_for_slot(ItemSlot::MainHand, class)
+                                        .into_iter()
+                                        .find(|(_, item)| !item.two_handed);
+                                    if let Some((replacement_id, _)) = one_hand {
+                                        equip_map.insert(ItemSlot::MainHand, replacement_id);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            None => {
+                equip_map.remove(&slot);
+
+                // After resetting, check if the default creates a 2H conflict
+                let resolved = resolve_loadout(class, defaults, equip_map);
+                if slot == ItemSlot::MainHand {
+                    // Reset main-hand to default — if default is 2H, clear off-hand
+                    if let Some(mh_id) = resolved.get(&ItemSlot::MainHand) {
+                        if let Some(mh_item) = items.get(mh_id) {
+                            if mh_item.two_handed {
+                                equip_map.remove(&ItemSlot::OffHand);
+                            }
+                        }
+                    }
+                } else if slot == ItemSlot::OffHand {
+                    // Reset off-hand to default — if default off-hand exists and main-hand is 2H, swap main-hand
+                    if resolved.contains_key(&ItemSlot::OffHand) {
+                        if let Some(mh_id) = resolved.get(&ItemSlot::MainHand) {
+                            if let Some(mh_item) = items.get(mh_id) {
+                                if mh_item.two_handed {
+                                    let one_hand = items.items_for_slot(ItemSlot::MainHand, class)
+                                        .into_iter()
+                                        .find(|(_, item)| !item.two_handed);
+                                    if let Some((replacement_id, _)) = one_hand {
+                                        equip_map.insert(ItemSlot::MainHand, replacement_id);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -1258,51 +1412,6 @@ fn item_stat_parts(item: &ItemConfig) -> Vec<String> {
 /// Format stat bonuses as a comma-separated string for inline display.
 fn format_item_stats(item: &ItemConfig) -> String {
     item_stat_parts(item).join(", ")
-}
-
-/// Render aggregate stat totals from all equipped items.
-fn render_stat_totals(ui: &mut egui::Ui, loadout: &HashMap<ItemSlot, ItemId>, items: &Res<ItemDefinitions>) {
-    // Build a synthetic ItemConfig with summed stats for the format helper
-    let mut totals = ItemConfig {
-        name: String::new(),
-        item_level: 0,
-        slot: ItemSlot::Head,
-        armor_type: super::play_match::equipment::ArmorType::None,
-        weapon_type: super::play_match::equipment::WeaponType::None,
-        allowed_classes: None,
-        is_weapon: false,
-        max_health: 0.0, max_mana: 0.0, mana_regen: 0.0,
-        attack_power: 0.0, spell_power: 0.0, crit_chance: 0.0, movement_speed: 0.0,
-        attack_damage_min: 0.0, attack_damage_max: 0.0, attack_speed: 0.0,
-    };
-
-    for (_, item_id) in loadout {
-        if let Some(item) = items.get(item_id) {
-            totals.max_health += item.max_health;
-            totals.max_mana += item.max_mana;
-            totals.mana_regen += item.mana_regen;
-            totals.attack_power += item.attack_power;
-            totals.spell_power += item.spell_power;
-            totals.crit_chance += item.crit_chance;
-            totals.movement_speed += item.movement_speed;
-        }
-    }
-
-    let parts = item_stat_parts(&totals);
-    if parts.is_empty() {
-        ui.label(
-            egui::RichText::new("No stat bonuses")
-                .size(12.0)
-                .color(egui::Color32::from_rgb(90, 90, 90))
-                .italics(),
-        );
-    } else {
-        ui.label(
-            egui::RichText::new(parts.join("  "))
-                .size(13.0)
-                .color(egui::Color32::from_rgb(200, 200, 160)),
-        );
-    }
 }
 
 /// Render a tooltip showing an item's full stat breakdown.

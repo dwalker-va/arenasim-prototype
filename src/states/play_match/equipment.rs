@@ -231,6 +231,9 @@ pub struct ItemConfig {
     /// Whether this item is a weapon (replaces attack_damage/attack_speed instead of adding)
     #[serde(default)]
     pub is_weapon: bool,
+    /// Whether this is a two-handed weapon (prevents off-hand equip)
+    #[serde(default)]
+    pub two_handed: bool,
 
     // === Stat Bonuses ===
     #[serde(default)]
@@ -552,6 +555,7 @@ mod tests {
             weapon_type: WeaponType::None,
             allowed_classes: None,
             is_weapon: false,
+            two_handed: false,
             max_health: 50.0,
             max_mana: 20.0,
             mana_regen: 1.0,
@@ -575,6 +579,7 @@ mod tests {
             weapon_type: WeaponType::Sword,
             allowed_classes: None,
             is_weapon: true,
+            two_handed: false,
             max_health: 0.0,
             max_mana: 0.0,
             mana_regen: 0.0,
