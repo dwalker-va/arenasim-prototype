@@ -1,7 +1,7 @@
 {
   "name": "wowhead-classic-mcp",
   "version": "1.0.0",
-  "description": "MCP server for looking up WoW Classic spell data from Wowhead",
+  "description": "MCP server for looking up WoW Classic spell and item data from Wowhead",
   "type": "module",
   "main": "dist/index.js",
   "bin": {

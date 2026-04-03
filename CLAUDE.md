@@ -32,18 +32,29 @@ Use this to verify combat changes without manual testing.
 
 ### 2. Wowhead Classic MCP
 
-Look up WoW Classic spell data for ability implementation reference.
+Look up WoW Classic spell and item data for implementation reference.
 
+**Spell Tools** — use when implementing new abilities:
 ```
 mcp__wowhead-classic__lookup_spell("Frostbolt")
 mcp__wowhead-classic__lookup_spell_by_id(116)
 mcp__wowhead-classic__get_spell_icon("Mortal Strike")
 mcp__wowhead-classic__list_known_spells(classFilter: "Mage")
 ```
-
 Returns: cast time, mana cost, range, cooldown, damage/healing values, spell school, icon URL.
 
-Use this when implementing new abilities to get accurate Classic-era values.
+**Item Tools** — use when adding equipment or verifying item stats:
+```
+mcp__wowhead-classic__lookup_item("Arcanite Reaper")
+mcp__wowhead-classic__lookup_item_by_id(12784)
+mcp__wowhead-classic__get_item_icon("Lionheart Helm")
+mcp__wowhead-classic__list_known_items(typeFilter: "Plate")
+mcp__wowhead-classic__list_known_items(slotFilter: "Head")
+```
+Returns: item level, slot, armor type, armor value, damage/speed, bonus stats (stamina, intellect, etc.), equip effects, quality, icon URL.
+
+Use spell tools when implementing new abilities to get accurate Classic-era values.
+Use item tools when adding items to `items.ron` or downloading equipment icons.
 
 ## Project Structure
 
@@ -199,6 +210,11 @@ cat match_logs/$(ls -t match_logs | head -1)
 ### Look up spell data for implementation
 ```
 mcp__wowhead-classic__lookup_spell("Pyroblast")
+```
+
+### Look up item data for equipment
+```
+mcp__wowhead-classic__lookup_item("Arcanite Reaper")
 ```
 
 ### Run the graphical client

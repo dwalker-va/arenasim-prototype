@@ -2,8 +2,9 @@
 /**
  * Wowhead Classic MCP Server
  *
- * Provides tools for looking up WoW Classic spell data from Wowhead.
- * Returns structured data matching our AbilityDefinition format.
+ * Provides tools for looking up WoW Classic spell and item data from Wowhead.
+ * Returns structured data for spells (matching our AbilityDefinition format)
+ * and equipment items (stats, icons, slot info for our equipment system).
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -11,9 +12,11 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 
 // Wowhead API endpoints
-const TOOLTIP_API = "https://nether.wowhead.com/classic/tooltip/spell";
+const SPELL_TOOLTIP_API = "https://nether.wowhead.com/classic/tooltip/spell";
+const ITEM_TOOLTIP_API = "https://nether.wowhead.com/classic/tooltip/item";
 const ICON_BASE_URL = "https://wow.zamimg.com/images/wow/icons/large";
 const WOWHEAD_SPELL_URL = "https://www.wowhead.com/classic/spell";
+const WOWHEAD_ITEM_URL = "https://www.wowhead.com/classic/item";
 
 // Common spell ID mappings for quick lookup
 const KNOWN_SPELLS: Record<string, number> = {
@@ -279,7 +282,7 @@ async function fetchSpellById(spellId: number): Promise<{
   rawTooltip: string;
 } | null> {
   try {
-    const response = await fetch(`${TOOLTIP_API}/${spellId}`);
+    const response = await fetch(`${SPELL_TOOLTIP_API}/${spellId}`);
     if (!response.ok) {
       return null;
     }
@@ -338,6 +341,382 @@ function findSpellId(name: string): number | null {
 
   return null;
 }
+
+// Known item ID mappings for quick lookup
+const KNOWN_ITEMS: Record<string, number> = {
+  // Plate Armor
+  "lionheart helm": 12640,
+  "helm of wrath": 16963,
+  "conqueror's breastplate": 21331,
+  "breastplate of wrath": 16966,
+  "legplates of wrath": 16962,
+  "gauntlets of might": 16863,
+  "sabatons of might": 16862,
+  "belt of might": 16864,
+  "bracers of might": 16861,
+  "shoulderguards of might": 16868,
+  "lawbringer chestguard": 16958,
+  "lawbringer helm": 16955,
+  "lawbringer legplates": 16959,
+  "lawbringer gauntlets": 16956,
+  "lawbringer boots": 16954,
+
+  // Mail Armor
+  "beaststalker's cap": 16677,
+  "beaststalker's tunic": 16674,
+  "beaststalker's pants": 16676,
+  "beaststalker's gloves": 16675,
+  "beaststalker's boots": 16672,
+  "beaststalker's belt": 16673,
+  "beaststalker's bindings": 16671,
+  "beaststalker's mantle": 16678,
+  "giantstalker's helmet": 16846,
+  "giantstalker's breastplate": 16845,
+
+  // Leather Armor
+  "nightslayer cover": 16821,
+  "nightslayer chestpiece": 16820,
+  "nightslayer pants": 16822,
+  "nightslayer gloves": 16826,
+  "nightslayer boots": 16824,
+  "nightslayer belt": 16827,
+  "nightslayer bracelets": 16825,
+  "nightslayer shoulder pads": 16823,
+  "shadowcraft cap": 16707,
+  "shadowcraft tunic": 16721,
+
+  // Cloth Armor
+  "magister's crown": 16686,
+  "magister's robes": 16688,
+  "magister's leggings": 16687,
+  "magister's gloves": 16684,
+  "magister's boots": 16682,
+  "magister's belt": 16683,
+  "magister's bindings": 16685,
+  "magister's mantle": 16689,
+  "devout crown": 16693,
+  "devout robe": 16690,
+  "dreadmist mask": 16698,
+  "dreadmist robe": 16700,
+
+  // Cloaks
+  "cloak of the shrouded mists": 17102,
+  "cape of the black baron": 13340,
+  "cloak of firemaw": 19398,
+
+  // Necklaces
+  "onyxia tooth pendant": 18404,
+  "mark of fordring": 15411,
+  "choker of the fire lord": 18814,
+
+  // Rings
+  "band of accuria": 17063,
+  "signet ring of the bronze dragonflight": 21205,
+  "ring of protection": 11669,
+  "don julio's band": 19325,
+
+  // Trinkets
+  "mark of the champion": 23206,
+  "blackhand's breadth": 13965,
+  "briarwood reed": 12930,
+  "royal seal of eldre'thalas": 18473,
+
+  // Two-Handed Weapons
+  "arcanite reaper": 12784,
+  "sulfuras, hand of ragnaros": 17182,
+  "ashkandi, greatsword of the brotherhood": 19364,
+  "barb of the sand reaver": 21126,
+  "the untamed blade": 19334,
+
+  // One-Handed Weapons
+  "dal'rend's sacred charge": 12940,
+  "dal'rend's tribal guardian": 12939,
+  "chromatically tempered sword": 19352,
+  "brutality blade": 18832,
+  "perdition's blade": 18816,
+  "fang of the mystics": 19354,
+  "deathbringer": 17068,
+  "gutgutter": 17071,
+
+  // Staves
+  "staff of dominance": 18842,
+  "benediction": 18608,
+  "anathema": 18609,
+  "staff of the shadow flame": 19356,
+
+  // Wands
+  "wand of biting cold": 22820,
+  "touch of chaos": 18482,
+  "skul's ghastly touch": 13396,
+
+  // Ranged Weapons
+  "rhok'delar, longbow of the ancient keepers": 18713,
+  "crossbow of imminent doom": 18836,
+  "striker's mark": 17069,
+  "ancient bone bow": 21459,
+
+  // Off-Hand / Shields
+  "tome of the ice lord": 19358,
+  "drillborer disk": 19353,
+  "elementium reinforced bulwark": 19349,
+};
+
+// Item quality names
+const QUALITY_NAMES: Record<number, string> = {
+  0: "Poor",
+  1: "Common",
+  2: "Uncommon",
+  3: "Rare",
+  4: "Epic",
+  5: "Legendary",
+};
+
+// Parse armor value from item tooltip HTML
+function parseArmor(tooltip: string): number | null {
+  const match = tooltip.match(/<!--amr-->(\d+) Armor/);
+  return match ? parseInt(match[1]) : null;
+}
+
+// Parse weapon damage range from item tooltip HTML
+function parseItemDamage(tooltip: string): { min: number; max: number } | null {
+  const match = tooltip.match(/<!--dmg-->(\d+)\s*-\s*(\d+)\s*Damage/);
+  return match ? { min: parseInt(match[1]), max: parseInt(match[2]) } : null;
+}
+
+// Parse weapon speed from item tooltip HTML
+function parseItemSpeed(tooltip: string): number | null {
+  const match = tooltip.match(/Speed\s*<!--spd-->([\d.]+)/);
+  return match ? parseFloat(match[1]) : null;
+}
+
+// Parse DPS from item tooltip HTML
+function parseItemDps(tooltip: string): number | null {
+  const match = tooltip.match(/\(([\d.]+)\s*damage per second\)/);
+  return match ? parseFloat(match[1]) : null;
+}
+
+// Parse bonus stats from item tooltip HTML (Stamina, Intellect, Strength, etc.)
+function parseBonusStats(tooltip: string): Record<string, number> {
+  const stats: Record<string, number> = {};
+  // Pattern: <!--statN-->+X Stat Name (supports multi-word stats like "Fire Resistance")
+  const statRegex = /<!--stat\d+-->\+(\d+)\s+([\w\s]+?)(?=<|$)/g;
+  let match;
+  while ((match = statRegex.exec(tooltip)) !== null) {
+    stats[match[2].trim()] = parseInt(match[1]);
+  }
+  return stats;
+}
+
+// Parse equip effects from item tooltip HTML (Attack Power, Spell Power, etc.)
+function parseEquipEffects(tooltip: string): string[] {
+  const effects: string[] = [];
+  const effectRegex = /Equip:\s*<!--useEffect:\d+:\d+--><a[^>]*>(.*?)<\/a>/g;
+  let match;
+  while ((match = effectRegex.exec(tooltip)) !== null) {
+    effects.push(stripHtml(match[1]));
+  }
+  return effects;
+}
+
+// Parse item level from tooltip HTML
+function parseItemLevel(tooltip: string): number | null {
+  const match = tooltip.match(/Item Level\s*<!--ilvl-->(\d+)/);
+  return match ? parseInt(match[1]) : null;
+}
+
+// Parse slot type from tooltip HTML
+function parseItemSlot(tooltip: string): string | null {
+  // Slot appears in a table cell: <td>Two-Hand</td> or <td>Head</td> etc.
+  const slotMatch = tooltip.match(/<td>(Head|Chest|Legs|Hands|Feet|Waist|Wrist|Shoulder|Back|Finger|Neck|Trinket|One-Hand|Two-Hand|Main Hand|Off Hand|Ranged|Held In Off-hand|Relic)<\/td>/);
+  return slotMatch ? slotMatch[1] : null;
+}
+
+// Parse armor type from tooltip HTML
+function parseArmorType(tooltip: string): string | null {
+  const match = tooltip.match(/<span class="q1">(Plate|Mail|Leather|Cloth|Shield|Axe|Sword|Mace|Dagger|Staff|Polearm|Fist Weapon|Wand|Bow|Crossbow|Gun)<\/span>/);
+  return match ? match[1] : null;
+}
+
+// Parse required level from tooltip HTML
+function parseRequiredLevel(tooltip: string): number | null {
+  const match = tooltip.match(/Requires Level\s*<!--rlvl-->(\d+)/);
+  return match ? parseInt(match[1]) : null;
+}
+
+// Fetch item data from Wowhead tooltip API
+async function fetchItemById(itemId: number): Promise<{
+  name: string;
+  quality: string;
+  qualityNum: number;
+  icon: string;
+  iconUrl: string;
+  wowheadUrl: string;
+  itemLevel: number | null;
+  requiredLevel: number | null;
+  slot: string | null;
+  armorType: string | null;
+  armor: number | null;
+  damage: { min: number; max: number } | null;
+  speed: number | null;
+  dps: number | null;
+  bonusStats: Record<string, number>;
+  equipEffects: string[];
+  tooltip: string;
+} | null> {
+  try {
+    const response = await fetch(`${ITEM_TOOLTIP_API}/${itemId}`);
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = await response.json() as {
+      name?: string;
+      quality?: number;
+      icon?: string;
+      tooltip?: string;
+    };
+
+    if (!data.name) {
+      return null;
+    }
+
+    const tooltip = data.tooltip || "";
+    const qualityNum = data.quality ?? 1;
+
+    return {
+      name: data.name,
+      quality: QUALITY_NAMES[qualityNum] || "Unknown",
+      qualityNum,
+      icon: data.icon || "inv_misc_questionmark",
+      iconUrl: `${ICON_BASE_URL}/${data.icon || "inv_misc_questionmark"}.jpg`,
+      wowheadUrl: `${WOWHEAD_ITEM_URL}=${itemId}`,
+      itemLevel: parseItemLevel(tooltip),
+      requiredLevel: parseRequiredLevel(tooltip),
+      slot: parseItemSlot(tooltip),
+      armorType: parseArmorType(tooltip),
+      armor: parseArmor(tooltip),
+      damage: parseItemDamage(tooltip),
+      speed: parseItemSpeed(tooltip),
+      dps: parseItemDps(tooltip),
+      bonusStats: parseBonusStats(tooltip),
+      equipEffects: parseEquipEffects(tooltip),
+      tooltip: stripHtml(tooltip),
+    };
+  } catch (error) {
+    console.error(`Error fetching item ${itemId}:`, error);
+    return null;
+  }
+}
+
+// Search for item ID by name
+function findItemId(name: string): number | null {
+  const normalized = name.toLowerCase().trim();
+
+  // Direct match
+  if (KNOWN_ITEMS[normalized]) {
+    return KNOWN_ITEMS[normalized];
+  }
+
+  // Partial match
+  for (const [itemName, itemId] of Object.entries(KNOWN_ITEMS)) {
+    if (itemName.includes(normalized) || normalized.includes(itemName)) {
+      return itemId;
+    }
+  }
+
+  return null;
+}
+
+// Format item data into markdown output
+function formatItemOutput(itemData: NonNullable<Awaited<ReturnType<typeof fetchItemById>>>, itemId?: number): string {
+  const statsLines = Object.entries(itemData.bonusStats)
+    .map(([stat, value]) => `  - +${value} ${stat}`)
+    .join("\n");
+
+  const heading = itemId
+    ? `## ${itemData.name} (ID: ${itemId}, ${itemData.quality})`
+    : `## ${itemData.name} (${itemData.quality})`;
+
+  return `${heading}
+
+**Wowhead URL:** ${itemData.wowheadUrl}
+**Icon URL:** ${itemData.iconUrl}
+**Icon Name:** ${itemData.icon}
+
+### Item Info
+- **Item Level:** ${itemData.itemLevel ?? "Unknown"}
+- **Required Level:** ${itemData.requiredLevel ?? "Unknown"}
+- **Slot:** ${itemData.slot ?? "Unknown"}
+- **Type:** ${itemData.armorType ?? "Unknown"}
+${itemData.armor ? `- **Armor:** ${itemData.armor}` : ""}
+${itemData.damage ? `- **Damage:** ${itemData.damage.min} - ${itemData.damage.max}` : ""}
+${itemData.speed ? `- **Speed:** ${itemData.speed}` : ""}
+${itemData.dps ? `- **DPS:** ${itemData.dps}` : ""}
+
+${statsLines ? `### Bonus Stats\n${statsLines}` : ""}
+${itemData.equipEffects.length > 0 ? `\n### Equip Effects\n${itemData.equipEffects.map(e => `- ${e}`).join("\n")}` : ""}
+
+### Tooltip
+${itemData.tooltip}`;
+}
+
+// Item groups for list_known_items
+const ITEM_GROUPS: Record<string, Record<string, string[]>> = {
+  "Plate": {
+    "Head": ["lionheart helm", "helm of wrath", "lawbringer helm"],
+    "Chest": ["conqueror's breastplate", "breastplate of wrath", "lawbringer chestguard"],
+    "Legs": ["legplates of wrath", "lawbringer legplates"],
+    "Hands": ["gauntlets of might", "lawbringer gauntlets"],
+    "Feet": ["sabatons of might", "lawbringer boots"],
+    "Waist": ["belt of might"],
+    "Wrists": ["bracers of might"],
+    "Shoulders": ["shoulderguards of might"],
+  },
+  "Mail": {
+    "Head": ["beaststalker's cap", "giantstalker's helmet"],
+    "Chest": ["beaststalker's tunic", "giantstalker's breastplate"],
+    "Legs": ["beaststalker's pants"],
+    "Hands": ["beaststalker's gloves"],
+    "Feet": ["beaststalker's boots"],
+    "Waist": ["beaststalker's belt"],
+    "Wrists": ["beaststalker's bindings"],
+    "Shoulders": ["beaststalker's mantle"],
+  },
+  "Leather": {
+    "Head": ["nightslayer cover", "shadowcraft cap"],
+    "Chest": ["nightslayer chestpiece", "shadowcraft tunic"],
+    "Legs": ["nightslayer pants"],
+    "Hands": ["nightslayer gloves"],
+    "Feet": ["nightslayer boots"],
+    "Waist": ["nightslayer belt"],
+    "Wrists": ["nightslayer bracelets"],
+    "Shoulders": ["nightslayer shoulder pads"],
+  },
+  "Cloth": {
+    "Head": ["magister's crown", "devout crown", "dreadmist mask"],
+    "Chest": ["magister's robes", "devout robe", "dreadmist robe"],
+    "Legs": ["magister's leggings"],
+    "Hands": ["magister's gloves"],
+    "Feet": ["magister's boots"],
+    "Waist": ["magister's belt"],
+    "Wrists": ["magister's bindings"],
+    "Shoulders": ["magister's mantle"],
+  },
+  "Weapons": {
+    "Two-Hand": ["arcanite reaper", "sulfuras, hand of ragnaros", "ashkandi, greatsword of the brotherhood", "barb of the sand reaver", "the untamed blade"],
+    "One-Hand": ["dal'rend's sacred charge", "dal'rend's tribal guardian", "chromatically tempered sword", "brutality blade", "perdition's blade", "fang of the mystics", "deathbringer", "gutgutter"],
+    "Staff": ["staff of dominance", "benediction", "anathema", "staff of the shadow flame"],
+    "Wand": ["wand of biting cold", "touch of chaos", "skul's ghastly touch"],
+    "Ranged": ["rhok'delar, longbow of the ancient keepers", "crossbow of imminent doom", "striker's mark", "ancient bone bow"],
+    "Off-Hand": ["tome of the ice lord", "drillborer disk", "elementium reinforced bulwark"],
+  },
+  "Accessories": {
+    "Cloak": ["cloak of the shrouded mists", "cape of the black baron", "cloak of firemaw"],
+    "Neck": ["onyxia tooth pendant", "mark of fordring", "choker of the fire lord"],
+    "Ring": ["band of accuria", "signet ring of the bronze dragonflight", "ring of protection", "don julio's band"],
+    "Trinket": ["mark of the champion", "blackhand's breadth", "briarwood reed", "royal seal of eldre'thalas"],
+  },
+};
 
 // Initialize MCP server
 const server = new McpServer({
@@ -548,6 +927,174 @@ server.tool(
         output += `- ${spell} (ID: ${id})\n`;
       }
       output += "\n";
+    }
+
+    return {
+      content: [{
+        type: "text" as const,
+        text: output,
+      }],
+    };
+  }
+);
+
+// ============================================================================
+// Item Tools
+// ============================================================================
+
+server.tool(
+  "lookup_item_by_id",
+  "Look up detailed WoW Classic item data by Wowhead item ID. Returns stats, slot, armor type, damage, speed, bonus stats, equip effects, icon URL, and quality.",
+  {
+    itemId: z.number().describe("The Wowhead item ID"),
+  },
+  async (args) => {
+    const itemData = await fetchItemById(args.itemId);
+
+    if (!itemData) {
+      return {
+        content: [{
+          type: "text" as const,
+          text: `Item with ID ${args.itemId} not found.`,
+        }],
+      };
+    }
+
+    return {
+      content: [{
+        type: "text" as const,
+        text: formatItemOutput(itemData),
+      }],
+    };
+  }
+);
+
+server.tool(
+  "lookup_item",
+  "Look up WoW Classic item data by name. Returns stats, slot, armor type, damage, speed, bonus stats, equip effects, icon URL, and quality.",
+  {
+    itemName: z.string().describe("The item name to search for"),
+  },
+  async (args) => {
+    const itemId = findItemId(args.itemName);
+
+    if (!itemId) {
+      const suggestions = Object.keys(KNOWN_ITEMS)
+        .filter(name => name.includes(args.itemName.toLowerCase()))
+        .slice(0, 5);
+
+      return {
+        content: [{
+          type: "text" as const,
+          text: `Item "${args.itemName}" not found in known items database.${
+            suggestions.length > 0
+              ? `\n\nDid you mean: ${suggestions.join(", ")}?`
+              : ""
+          }\n\nYou can also use lookup_item_by_id with a Wowhead item ID directly.`,
+        }],
+      };
+    }
+
+    const itemData = await fetchItemById(itemId);
+
+    if (!itemData) {
+      return {
+        content: [{
+          type: "text" as const,
+          text: `Found item ID ${itemId} for "${args.itemName}" but failed to fetch data from Wowhead.`,
+        }],
+      };
+    }
+
+    return {
+      content: [{
+        type: "text" as const,
+        text: formatItemOutput(itemData, itemId),
+      }],
+    };
+  }
+);
+
+server.tool(
+  "get_item_icon",
+  "Get the icon URL and icon name for a WoW Classic item. Useful for downloading equipment icons. Pass item name or numeric ID as string.",
+  {
+    itemIdOrName: z.string().describe("Item ID (number) or name (string)"),
+  },
+  async (args) => {
+    let itemId: number;
+
+    const numericId = parseInt(args.itemIdOrName, 10);
+    if (!isNaN(numericId) && numericId > 0) {
+      itemId = numericId;
+    } else {
+      const foundId = findItemId(args.itemIdOrName);
+      if (!foundId) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Item "${args.itemIdOrName}" not found.`,
+          }],
+        };
+      }
+      itemId = foundId;
+    }
+
+    const itemData = await fetchItemById(itemId);
+
+    if (!itemData) {
+      return {
+        content: [{
+          type: "text" as const,
+          text: `Failed to fetch item with ID ${itemId}.`,
+        }],
+      };
+    }
+
+    return {
+      content: [{
+        type: "text" as const,
+        text: `**${itemData.name}** (${itemData.quality})
+- Icon Name: ${itemData.icon}
+- Icon URL: ${itemData.iconUrl}
+- Wowhead URL: ${itemData.wowheadUrl}`,
+      }],
+    };
+  }
+);
+
+server.tool(
+  "list_known_items",
+  "List all items in the known items database, optionally filtered by armor type or slot.",
+  {
+    typeFilter: z.string().optional().describe("Filter by category (e.g., 'Plate', 'Mail', 'Leather', 'Cloth', 'Weapons', 'Accessories')"),
+    slotFilter: z.string().optional().describe("Filter by slot (e.g., 'Head', 'Chest', 'Two-Hand', 'Ring')"),
+  },
+  async (args) => {
+    let output = "# Known Items Database\n\n";
+
+    for (const [category, slots] of Object.entries(ITEM_GROUPS)) {
+      if (args.typeFilter && !category.toLowerCase().includes(args.typeFilter.toLowerCase())) {
+        continue;
+      }
+
+      let categoryOutput = "";
+      for (const [slot, items] of Object.entries(slots)) {
+        if (args.slotFilter && !slot.toLowerCase().includes(args.slotFilter.toLowerCase())) {
+          continue;
+        }
+
+        categoryOutput += `### ${slot}\n`;
+        for (const item of items) {
+          const id = KNOWN_ITEMS[item];
+          categoryOutput += `- ${item} (ID: ${id})\n`;
+        }
+        categoryOutput += "\n";
+      }
+
+      if (categoryOutput) {
+        output += `## ${category}\n${categoryOutput}`;
+      }
     }
 
     return {
