@@ -3,7 +3,7 @@
 //! This module displays detailed information about a combatant:
 //! - Base stats (health, resource, attack/spell power, attack/move speed)
 //! - List of abilities with icons
-//! - Placeholder sections for Gear and Talents (Coming Soon)
+//! - Equipment loadout editor (view/change gear per slot)
 //!
 //! Accessed by clicking a filled character slot in Configure Match.
 
@@ -17,6 +17,13 @@ use super::play_match::abilities::{ScalingStat, SpellSchool};
 use super::play_match::ability_config::{AbilityDefinitions, AbilityConfig};
 use super::play_match::components::AuraType;
 use super::play_match::rendering::get_ability_icon_path;
+use super::play_match::equipment::{ItemSlot, ItemId, ItemConfig, ItemDefinitions, DefaultLoadouts, resolve_loadout, enforce_two_hand_conflicts, find_one_handed_mainhand};
+
+/// Tracks which equipment slot has its picker open (if any)
+#[derive(Default)]
+pub struct EquipmentPickerState {
+    open_slot: Option<ItemSlot>,
+}
 
 /// Resource to track which combatant is being viewed.
 /// Inserted when navigating from Configure Match to this screen.
@@ -54,6 +61,45 @@ struct ClassStats {
     spell_power: u32,
     attack_speed: f32,
     move_speed: f32,
+}
+
+/// Equipment stat contributions for the stats panel
+#[derive(Default)]
+struct EquipmentBonuses {
+    health: f32,
+    mana: f32,
+    mana_regen: f32,
+    attack_power: f32,
+    spell_power: f32,
+    crit_chance: f32,
+    move_speed: f32,
+    /// If a primary weapon is equipped, its attack speed replaces the base.
+    /// None means no weapon replacement (use base attack speed).
+    weapon_attack_speed: Option<f32>,
+}
+
+impl EquipmentBonuses {
+    fn from_loadout(loadout: &HashMap<ItemSlot, ItemId>, items: &ItemDefinitions, class: CharacterClass) -> Self {
+        let mut bonuses = Self::default();
+        // Determine which weapon slot is primary (melee classes use MainHand, ranged use Ranged)
+        let primary_weapon_slot = if class.is_melee() { ItemSlot::MainHand } else { ItemSlot::Ranged };
+        for (slot, item_id) in loadout {
+            if let Some(item) = items.get(item_id) {
+                bonuses.health += item.max_health;
+                bonuses.mana += item.max_mana;
+                bonuses.mana_regen += item.mana_regen;
+                bonuses.attack_power += item.attack_power;
+                bonuses.spell_power += item.spell_power;
+                bonuses.crit_chance += item.crit_chance;
+                bonuses.move_speed += item.movement_speed;
+                // Track weapon attack speed replacement for primary slot
+                if *slot == primary_weapon_slot && item.is_weapon && item.attack_speed > 0.0 {
+                    bonuses.weapon_attack_speed = Some(item.attack_speed);
+                }
+            }
+        }
+        bonuses
+    }
 }
 
 /// Get the base stats for a class
@@ -319,6 +365,9 @@ pub fn view_combatant_ui(
     ability_icons: Option<Res<AbilityIcons>>,
     ability_definitions: Res<AbilityDefinitions>,
     mut match_config: ResMut<MatchConfig>,
+    item_definitions: Res<ItemDefinitions>,
+    default_loadouts: Res<DefaultLoadouts>,
+    mut picker_state: Local<EquipmentPickerState>,
 ) {
     use crate::keybindings::GameAction;
 
@@ -331,6 +380,7 @@ pub fn view_combatant_ui(
     let mut style = (*ctx.style()).clone();
     style.visuals.window_fill = egui::Color32::from_rgb(20, 20, 30);
     style.visuals.panel_fill = egui::Color32::from_rgb(20, 20, 30);
+    style.interaction.tooltip_delay = 0.0;
     ctx.set_style(style);
 
     // Handle Back key
@@ -363,6 +413,16 @@ pub fn view_combatant_ui(
     let stats = get_class_stats(class);
     let abilities = get_class_abilities(class);
 
+    // Compute equipment bonuses for the stats panel
+    let equip_overrides = if view_state.team == 1 {
+        match_config.team1_equipment.get(view_state.slot).cloned().unwrap_or_default()
+    } else {
+        match_config.team2_equipment.get(view_state.slot).cloned().unwrap_or_default()
+    };
+    let mut resolved_loadout = resolve_loadout(class, &default_loadouts, &equip_overrides);
+    enforce_two_hand_conflicts(&mut resolved_loadout, &item_definitions);
+    let equip_bonuses = EquipmentBonuses::from_loadout(&resolved_loadout, &item_definitions, class);
+
     // Get class color
     let class_color = class.color();
     let class_color32 = egui::Color32::from_rgb(
@@ -382,7 +442,6 @@ pub fn view_combatant_ui(
 
     // Fixed heights for consistency
     let main_panel_height = 220.0;
-    let bottom_panel_height = 100.0;
 
     egui::CentralPanel::default()
         .frame(
@@ -405,6 +464,8 @@ pub fn view_combatant_ui(
                     next_state.set(GameState::ConfigureMatch);
                 }
             });
+
+            egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
 
             // Title - centered
             ui.vertical_centered(|ui| {
@@ -490,7 +551,7 @@ pub fn view_combatant_ui(
                             egui::vec2(panel_width, main_panel_height),
                             egui::Layout::top_down(egui::Align::LEFT),
                             |ui| {
-                                render_stats_panel(ui, &stats, panel_width, main_panel_height);
+                                render_stats_panel(ui, &stats, &equip_bonuses, panel_width, main_panel_height);
                             },
                         );
 
@@ -573,38 +634,71 @@ pub fn view_combatant_ui(
 
                 ui.add_space(15.0);
 
-                // Two-column layout for Gear and Talents (Coming Soon)
-                ui.allocate_ui_with_layout(
-                    egui::vec2(content_width, bottom_panel_height),
-                    egui::Layout::left_to_right(egui::Align::TOP),
-                    |ui| {
-                        // Gear panel
-                        ui.allocate_ui_with_layout(
-                            egui::vec2(panel_width, bottom_panel_height),
-                            egui::Layout::top_down(egui::Align::LEFT),
-                            |ui| {
-                                render_coming_soon_panel(ui, "GEAR", panel_width, bottom_panel_height);
-                            },
-                        );
-
-                        ui.add_space(spacing);
-
-                        // Talents panel
-                        ui.allocate_ui_with_layout(
-                            egui::vec2(panel_width, bottom_panel_height),
-                            egui::Layout::top_down(egui::Align::LEFT),
-                            |ui| {
-                                render_coming_soon_panel(ui, "TALENTS", panel_width, bottom_panel_height);
-                            },
-                        );
-                    },
+                // Equipment panel (full width, replaces Gear + Talents placeholders)
+                render_equipment_panel(
+                    ui,
+                    content_width,
+                    &view_state,
+                    &mut match_config,
+                    &item_definitions,
+                    &default_loadouts,
+                    &mut picker_state,
+                    class,
+                    &resolved_loadout,
+                    &equip_overrides,
                 );
             });
+            }); // ScrollArea
         });
 }
 
-/// Render the Stats panel
-fn render_stats_panel(ui: &mut egui::Ui, stats: &ClassStats, width: f32, height: f32) {
+/// Render a stat row with integer values and instant tooltip.
+fn stat_row_int(
+    ui: &mut egui::Ui, label: &str, base: i32, bonus: i32, suffix: &str,
+    neutral: egui::Color32, green: egui::Color32, red: egui::Color32, label_color: egui::Color32,
+) {
+    let effective = base + bonus;
+    let color = if bonus > 0 { green } else if bonus < 0 { red } else { neutral };
+
+    ui.label(egui::RichText::new(label).size(14.0).color(label_color));
+    let response = ui.label(egui::RichText::new(format!("{}{}", effective, suffix)).size(14.0).color(color));
+
+    if bonus != 0 && response.hovered() {
+        egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), ui.id().with(label), |ui| {
+            ui.label(format!("{} + {} from equipment", base, bonus));
+        });
+    }
+    ui.end_row();
+}
+
+/// Render a stat row with float values and instant tooltip.
+fn stat_row_float(
+    ui: &mut egui::Ui, label: &str, base: f32, bonus: f32, suffix: &str,
+    neutral: egui::Color32, green: egui::Color32, red: egui::Color32, label_color: egui::Color32,
+) {
+    let effective = base + bonus;
+    let color = if bonus > 0.0 { green } else if bonus < 0.0 { red } else { neutral };
+
+    ui.label(egui::RichText::new(label).size(14.0).color(label_color));
+    let response = ui.label(egui::RichText::new(format!("{:.1}{}", effective, suffix)).size(14.0).color(color));
+
+    if bonus != 0.0 && response.hovered() {
+        egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), ui.id().with(label), |ui| {
+            ui.label(format!("{:.1} base + {:.1} from equipment", base, bonus));
+        });
+    }
+    ui.end_row();
+}
+
+/// Render the Stats panel with effective totals (base + equipment).
+/// Stats boosted by equipment are green; negative would be red.
+/// Hover tooltip shows the breakdown.
+fn render_stats_panel(ui: &mut egui::Ui, stats: &ClassStats, equip: &EquipmentBonuses, width: f32, height: f32) {
+    let neutral = egui::Color32::from_rgb(230, 230, 230);
+    let green = egui::Color32::from_rgb(100, 255, 100);
+    let red = egui::Color32::from_rgb(255, 100, 100);
+    let label_color = egui::Color32::from_rgb(170, 170, 170);
+
     ui.group(|ui| {
         ui.set_min_width(width - 20.0);
         ui.set_min_height(height - 20.0);
@@ -622,29 +716,67 @@ fn render_stats_panel(ui: &mut egui::Ui, stats: &ClassStats, width: f32, height:
             .num_columns(2)
             .spacing([40.0, 8.0])
             .show(ui, |ui| {
-                ui.label(egui::RichText::new("Health:").size(14.0).color(egui::Color32::from_rgb(170, 170, 170)));
-                ui.label(egui::RichText::new(format!("{}", stats.health)).size(14.0).color(egui::Color32::from_rgb(230, 230, 230)));
+                stat_row_int(ui, "Health:", stats.health as i32, equip.health as i32, "", neutral, green, red, label_color);
+
+                // Resource: show mana bonus if applicable
+                let mana_bonus = if stats.resource_name == "Mana" { equip.mana as i32 } else { 0 };
+                let resource_effective = stats.resource_max as i32 + mana_bonus;
+                let resource_color = if mana_bonus > 0 { green } else if mana_bonus < 0 { red } else { neutral };
+                ui.label(egui::RichText::new("Resource:").size(14.0).color(label_color));
+                let res_response = ui.label(egui::RichText::new(format!("{} {}", stats.resource_name, resource_effective)).size(14.0).color(resource_color));
+                if mana_bonus != 0 && res_response.hovered() {
+                    egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), ui.id().with("resource_tooltip"), |ui| {
+                        ui.label(format!("{} + {} from equipment", stats.resource_max, mana_bonus));
+                    });
+                }
                 ui.end_row();
 
-                ui.label(egui::RichText::new("Resource:").size(14.0).color(egui::Color32::from_rgb(170, 170, 170)));
-                ui.label(egui::RichText::new(format!("{} {}", stats.resource_name, stats.resource_max)).size(14.0).color(egui::Color32::from_rgb(230, 230, 230)));
-                ui.end_row();
+                stat_row_int(ui, "Attack Power:", stats.attack_power as i32, equip.attack_power as i32, "", neutral, green, red, label_color);
+                stat_row_int(ui, "Spell Power:", stats.spell_power as i32, equip.spell_power as i32, "", neutral, green, red, label_color);
 
-                ui.label(egui::RichText::new("Attack Power:").size(14.0).color(egui::Color32::from_rgb(170, 170, 170)));
-                ui.label(egui::RichText::new(format!("{}", stats.attack_power)).size(14.0).color(egui::Color32::from_rgb(230, 230, 230)));
-                ui.end_row();
+                // Crit chance (only show if equipment provides it)
+                if equip.crit_chance > 0.0 {
+                    ui.label(egui::RichText::new("Crit Chance:").size(14.0).color(label_color));
+                    let crit_text = format!("{:.1}%", equip.crit_chance * 100.0);
+                    let crit_response = ui.label(egui::RichText::new(&crit_text).size(14.0).color(green));
+                    if crit_response.hovered() {
+                        egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), ui.id().with("crit_tooltip"), |ui| {
+                            ui.label(format!("0% base + {:.1}% from equipment", equip.crit_chance * 100.0));
+                        });
+                    }
+                    ui.end_row();
+                }
 
-                ui.label(egui::RichText::new("Spell Power:").size(14.0).color(egui::Color32::from_rgb(170, 170, 170)));
-                ui.label(egui::RichText::new(format!("{}", stats.spell_power)).size(14.0).color(egui::Color32::from_rgb(230, 230, 230)));
-                ui.end_row();
+                // Mana regen (only show if equipment provides it)
+                if equip.mana_regen > 0.0 {
+                    ui.label(egui::RichText::new("Mana Regen:").size(14.0).color(label_color));
+                    let regen_text = format!("+{:.1} MP5", equip.mana_regen);
+                    let regen_response = ui.label(egui::RichText::new(&regen_text).size(14.0).color(green));
+                    if regen_response.hovered() {
+                        egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), ui.id().with("regen_tooltip"), |ui| {
+                            ui.label(format!("{:.1} from equipment", equip.mana_regen));
+                        });
+                    }
+                    ui.end_row();
+                }
 
-                ui.label(egui::RichText::new("Attack Speed:").size(14.0).color(egui::Color32::from_rgb(170, 170, 170)));
-                ui.label(egui::RichText::new(format!("{:.1}/s", stats.attack_speed)).size(14.0).color(egui::Color32::from_rgb(230, 230, 230)));
-                ui.end_row();
+                // Attack speed: show weapon replacement if a weapon overrides it
+                if let Some(weapon_speed) = equip.weapon_attack_speed {
+                    ui.label(egui::RichText::new("Attack Speed:").size(14.0).color(label_color));
+                    let speed_text = format!("{:.1}/s", weapon_speed);
+                    let speed_color = if (weapon_speed - stats.attack_speed).abs() > 0.01 { green } else { neutral };
+                    let speed_response = ui.label(egui::RichText::new(&speed_text).size(14.0).color(speed_color));
+                    if (weapon_speed - stats.attack_speed).abs() > 0.01 && speed_response.hovered() {
+                        egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), ui.id().with("speed_tooltip"), |ui| {
+                            ui.label(format!("{:.1} base → {:.1} from weapon", stats.attack_speed, weapon_speed));
+                        });
+                    }
+                    ui.end_row();
+                } else {
+                    stat_row_float(ui, "Attack Speed:", stats.attack_speed, 0.0, "/s", neutral, green, red, label_color);
+                }
 
-                ui.label(egui::RichText::new("Move Speed:").size(14.0).color(egui::Color32::from_rgb(170, 170, 170)));
-                ui.label(egui::RichText::new(format!("{:.1}/s", stats.move_speed)).size(14.0).color(egui::Color32::from_rgb(230, 230, 230)));
-                ui.end_row();
+                stat_row_float(ui, "Move Speed:", stats.move_speed, equip.move_speed, "/s", neutral, green, red, label_color);
             });
     });
 }
@@ -1009,30 +1141,347 @@ fn build_aura_description(aura: &super::play_match::ability_config::AuraEffect) 
     }
 }
 
-/// Render a "Coming Soon" panel
-fn render_coming_soon_panel(ui: &mut egui::Ui, title: &str, width: f32, height: f32) {
+/// Equipment slot groups for the panel layout
+const ARMOR_SLOTS: &[ItemSlot] = &[
+    ItemSlot::Head, ItemSlot::Shoulders, ItemSlot::Chest, ItemSlot::Wrists,
+    ItemSlot::Hands, ItemSlot::Waist, ItemSlot::Legs, ItemSlot::Feet,
+];
+const ACCESSORY_SLOTS: &[ItemSlot] = &[
+    ItemSlot::Neck, ItemSlot::Back, ItemSlot::Ring1, ItemSlot::Ring2,
+    ItemSlot::Trinket1, ItemSlot::Trinket2,
+];
+const WEAPON_SLOTS: &[ItemSlot] = &[
+    ItemSlot::MainHand, ItemSlot::OffHand, ItemSlot::Ranged,
+];
+
+/// Render the equipment loadout panel — slot list and picker.
+fn render_equipment_panel(
+    ui: &mut egui::Ui,
+    width: f32,
+    view_state: &Res<ViewCombatantState>,
+    match_config: &mut ResMut<MatchConfig>,
+    items: &Res<ItemDefinitions>,
+    defaults: &Res<DefaultLoadouts>,
+    picker_state: &mut EquipmentPickerState,
+    class: CharacterClass,
+    resolved: &HashMap<ItemSlot, ItemId>,
+    overrides: &HashMap<ItemSlot, ItemId>,
+) {
+    let gold = egui::Color32::from_rgb(255, 215, 0);
+    let title_color = egui::Color32::from_rgb(230, 204, 153);
+    let subtitle_color = egui::Color32::from_rgb(170, 170, 170);
+    let muted_color = egui::Color32::from_rgb(90, 90, 90);
+    let override_color = egui::Color32::from_rgb(100, 255, 100); // green for overrides
+
+    // Track which slot was clicked to open picker
+    let mut clicked_slot: Option<ItemSlot> = None;
+
     ui.group(|ui| {
         ui.set_min_width(width - 20.0);
-        ui.set_min_height(height - 20.0);
 
         ui.label(
-            egui::RichText::new(title)
+            egui::RichText::new("EQUIPMENT")
                 .size(18.0)
-                .color(egui::Color32::from_rgb(120, 115, 105))
+                .color(title_color)
                 .strong(),
         );
 
-        ui.add_space(15.0);
+        ui.add_space(12.0);
 
-        ui.vertical_centered(|ui| {
+        // Render slot groups
+        let slot_groups: &[(&str, &[ItemSlot])] = &[
+            ("Armor", ARMOR_SLOTS),
+            ("Accessories", ACCESSORY_SLOTS),
+            ("Weapons", WEAPON_SLOTS),
+        ];
+
+        for (group_name, slots) in slot_groups {
             ui.label(
-                egui::RichText::new("Coming Soon")
-                    .size(16.0)
-                    .color(egui::Color32::from_rgb(90, 90, 90))
-                    .italics(),
+                egui::RichText::new(*group_name)
+                    .size(13.0)
+                    .color(subtitle_color)
+                    .strong(),
             );
-        });
+            ui.add_space(2.0);
+
+            for slot in *slots {
+                let item_id = resolved.get(slot);
+                let is_override = overrides.contains_key(slot);
+
+                let (item_name, name_color) = if let Some(id) = item_id {
+                    if let Some(item) = items.get(id) {
+                        let color = if is_override { override_color } else { egui::Color32::from_rgb(220, 220, 220) };
+                        (item.name.as_str().to_string(), color)
+                    } else {
+                        ("— Unknown —".to_string(), muted_color)
+                    }
+                } else {
+                    ("— Empty —".to_string(), muted_color)
+                };
+
+                // Compact row: "Slot: Item Name" as a selectable label for clear hover/click
+                let label_text = format!("{}: {}", slot.name(), item_name);
+                let response = ui.selectable_label(false,
+                    egui::RichText::new(&label_text)
+                        .size(13.0)
+                        .color(name_color),
+                );
+
+                if response.clicked() {
+                    clicked_slot = Some(*slot);
+                }
+
+                // Tooltip on hover (R8 — nice-to-have)
+                if let Some(id) = item_id {
+                    if let Some(item) = items.get(id) {
+                        response.on_hover_ui(|ui| {
+                            render_item_tooltip(ui, item);
+                        });
+                    }
+                }
+            }
+
+            ui.add_space(6.0);
+        }
     });
+
+    // Open picker if a slot was clicked
+    if let Some(slot) = clicked_slot {
+        picker_state.open_slot = Some(slot);
+    }
+
+    // Render the picker window if open
+    if let Some(open_slot) = picker_state.open_slot {
+        let mut keep_open = true;
+        let mut selection: Option<PickerAction> = None;
+
+        egui::Window::new(format!("Select: {}", open_slot.name()))
+            .collapsible(false)
+            .resizable(false)
+            .min_width(300.0)
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .open(&mut keep_open)
+            .show(ui.ctx(), |ui| {
+                // "Reset to Default" option — only when slot has override
+                if overrides.contains_key(&open_slot) {
+                    let reset_response = ui.selectable_label(false,
+                        egui::RichText::new("↩ Reset to Default")
+                            .size(14.0)
+                            .color(egui::Color32::from_rgb(255, 180, 100)),
+                    );
+                    if reset_response.clicked() {
+                        selection = Some(PickerAction::ResetToDefault(open_slot));
+                    }
+                    ui.separator();
+                }
+
+                // List valid items for this slot and class
+                let valid_items = items.items_for_slot(open_slot, class);
+                let current_item = resolved.get(&open_slot);
+
+                egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
+                    for (item_id, item) in &valid_items {
+                        let is_equipped = current_item == Some(item_id);
+
+                        // Build display text: item name + stats on same line
+                        let stat_text = format_item_stats(item);
+                        let display = if stat_text.is_empty() {
+                            item.name.clone()
+                        } else {
+                            format!("{}  —  {}", item.name, stat_text)
+                        };
+
+                        let name_color = if is_equipped { gold } else { egui::Color32::from_rgb(220, 220, 220) };
+                        let response = ui.selectable_label(is_equipped,
+                            egui::RichText::new(&display)
+                                .size(13.0)
+                                .color(name_color),
+                        );
+
+                        if response.clicked() {
+                            selection = Some(PickerAction::SelectItem(open_slot, *item_id));
+                        }
+                    }
+                });
+            });
+
+        // Handle Escape to close
+        if ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
+            keep_open = false;
+        }
+
+        // Apply selection
+        match selection {
+            Some(PickerAction::SelectItem(slot, item_id)) => {
+                set_equipment_override(match_config, view_state, slot, Some(item_id), items, defaults, class);
+                keep_open = false;
+            }
+            Some(PickerAction::ResetToDefault(slot)) => {
+                set_equipment_override(match_config, view_state, slot, None, items, defaults, class);
+                keep_open = false;
+            }
+            None => {}
+        }
+
+        if !keep_open {
+            picker_state.open_slot = None;
+        }
+    }
+}
+
+enum PickerAction {
+    SelectItem(ItemSlot, ItemId),
+    ResetToDefault(ItemSlot),
+}
+
+/// Apply or remove an equipment override for the viewed combatant.
+/// Handles 2H/OH conflicts using shared helpers from equipment.rs.
+fn set_equipment_override(
+    match_config: &mut ResMut<MatchConfig>,
+    view_state: &Res<ViewCombatantState>,
+    slot: ItemSlot,
+    item: Option<ItemId>,
+    items: &ItemDefinitions,
+    defaults: &DefaultLoadouts,
+    class: CharacterClass,
+) {
+    let equipment = if view_state.team == 1 {
+        match_config.team1_equipment.get_mut(view_state.slot)
+    } else {
+        match_config.team2_equipment.get_mut(view_state.slot)
+    };
+
+    if let Some(equip_map) = equipment {
+        match item {
+            Some(id) => {
+                // Equipping an off-hand while a 2H is in main-hand → swap MH to 1H first
+                if slot == ItemSlot::OffHand {
+                    let mut resolved = resolve_loadout(class, defaults, equip_map);
+                    enforce_two_hand_conflicts(&mut resolved, items);
+                    // Check if *after* enforcement the MH is still 2H (shouldn't be, but check the
+                    // pre-enforcement state to decide whether to swap)
+                    let pre_resolved = resolve_loadout(class, defaults, equip_map);
+                    let mh_is_2h = pre_resolved.get(&ItemSlot::MainHand)
+                        .and_then(|id| items.get(id))
+                        .map_or(false, |item| item.two_handed);
+                    if mh_is_2h {
+                        if let Some(replacement) = find_one_handed_mainhand(items, class) {
+                            equip_map.insert(ItemSlot::MainHand, replacement);
+                        } else {
+                            return; // No 1H exists — prevent the off-hand equip
+                        }
+                    }
+                }
+
+                equip_map.insert(slot, id);
+
+                // Equipping a 2H main-hand → clear off-hand override
+                // (enforce_two_hand_conflicts handles the default off-hand at resolve time)
+                if slot == ItemSlot::MainHand {
+                    if let Some(new_item) = items.get(&id) {
+                        if new_item.two_handed {
+                            equip_map.remove(&ItemSlot::OffHand);
+                        }
+                    }
+                }
+            }
+            None => {
+                equip_map.remove(&slot);
+
+                // After resetting, check if the default creates a 2H conflict
+                let resolved = resolve_loadout(class, defaults, equip_map);
+                if slot == ItemSlot::MainHand {
+                    // Reset main-hand to default — if default is 2H, clear off-hand override
+                    let mh_is_2h = resolved.get(&ItemSlot::MainHand)
+                        .and_then(|id| items.get(id))
+                        .map_or(false, |item| item.two_handed);
+                    if mh_is_2h {
+                        equip_map.remove(&ItemSlot::OffHand);
+                    }
+                } else if slot == ItemSlot::OffHand {
+                    // Reset off-hand to default — if default OH exists and MH is 2H, swap MH
+                    if resolved.contains_key(&ItemSlot::OffHand) {
+                        let mh_is_2h = resolved.get(&ItemSlot::MainHand)
+                            .and_then(|id| items.get(id))
+                            .map_or(false, |item| item.two_handed);
+                        if mh_is_2h {
+                            if let Some(replacement) = find_one_handed_mainhand(items, class) {
+                                equip_map.insert(ItemSlot::MainHand, replacement);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Build a list of formatted stat strings for an item.
+/// Armor stats use "+X" format; weapons show absolute damage range and speed.
+fn item_stat_parts(item: &ItemConfig) -> Vec<String> {
+    let mut parts = Vec::new();
+
+    if item.is_weapon {
+        if item.attack_damage_min > 0.0 || item.attack_damage_max > 0.0 {
+            parts.push(format!("{:.0}-{:.0} Damage", item.attack_damage_min, item.attack_damage_max));
+        }
+        if item.attack_speed > 0.0 {
+            parts.push(format!("{:.1} Speed", item.attack_speed));
+        }
+    }
+
+    if item.max_health != 0.0 { parts.push(format!("+{:.0} HP", item.max_health)); }
+    if item.max_mana != 0.0 { parts.push(format!("+{:.0} Mana", item.max_mana)); }
+    if item.mana_regen != 0.0 { parts.push(format!("+{:.1} MP5", item.mana_regen)); }
+    if item.attack_power != 0.0 { parts.push(format!("+{:.0} AP", item.attack_power)); }
+    if item.spell_power != 0.0 { parts.push(format!("+{:.0} SP", item.spell_power)); }
+    if item.crit_chance != 0.0 { parts.push(format!("+{:.1}% Crit", item.crit_chance * 100.0)); }
+    if item.movement_speed != 0.0 { parts.push(format!("+{:.0}% Speed", item.movement_speed * 100.0)); }
+
+    parts
+}
+
+/// Format stat bonuses as a comma-separated string for inline display.
+fn format_item_stats(item: &ItemConfig) -> String {
+    item_stat_parts(item).join(", ")
+}
+
+/// Render a tooltip showing an item's full stat breakdown.
+fn render_item_tooltip(ui: &mut egui::Ui, item: &ItemConfig) {
+    ui.label(
+        egui::RichText::new(&item.name)
+            .size(14.0)
+            .color(egui::Color32::from_rgb(255, 215, 0))
+            .strong(),
+    );
+
+    if item.item_level > 0 {
+        ui.label(
+            egui::RichText::new(format!("Item Level {}", item.item_level))
+                .size(12.0)
+                .color(egui::Color32::from_rgb(170, 170, 170)),
+        );
+    }
+
+    if item.armor_type != super::play_match::equipment::ArmorType::None {
+        ui.label(
+            egui::RichText::new(format!("{:?}", item.armor_type))
+                .size(12.0)
+                .color(egui::Color32::from_rgb(170, 170, 170)),
+        );
+    }
+
+    let stat_parts = item_stat_parts(item);
+    if !stat_parts.is_empty() {
+        ui.add_space(4.0);
+        for part in &stat_parts {
+            ui.label(
+                egui::RichText::new(part)
+                    .size(12.0)
+                    .color(egui::Color32::from_rgb(100, 255, 100)),
+            );
+        }
+    }
 }
 
 /// Render the Rogue Stealth Opener selection panel with ability icons

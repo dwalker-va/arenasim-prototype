@@ -80,6 +80,19 @@ impl ItemSlot {
     pub fn is_weapon_slot(&self) -> bool {
         matches!(self, ItemSlot::MainHand | ItemSlot::OffHand | ItemSlot::Ranged)
     }
+
+    /// Whether two slots accept the same item pool.
+    /// Ring1/Ring2 are interchangeable, Trinket1/Trinket2 are interchangeable,
+    /// all other slots must match exactly.
+    pub fn is_same_slot_type(&self, other: &ItemSlot) -> bool {
+        match (self, other) {
+            (ItemSlot::Ring1, ItemSlot::Ring1 | ItemSlot::Ring2) => true,
+            (ItemSlot::Ring2, ItemSlot::Ring1 | ItemSlot::Ring2) => true,
+            (ItemSlot::Trinket1, ItemSlot::Trinket1 | ItemSlot::Trinket2) => true,
+            (ItemSlot::Trinket2, ItemSlot::Trinket1 | ItemSlot::Trinket2) => true,
+            _ => self == other,
+        }
+    }
 }
 
 /// Armor type restriction
@@ -218,6 +231,9 @@ pub struct ItemConfig {
     /// Whether this item is a weapon (replaces attack_damage/attack_speed instead of adding)
     #[serde(default)]
     pub is_weapon: bool,
+    /// Whether this is a two-handed weapon (prevents off-hand equip)
+    #[serde(default)]
+    pub two_handed: bool,
 
     // === Stat Bonuses ===
     #[serde(default)]
@@ -330,6 +346,26 @@ pub fn resolve_loadout(
     loadout
 }
 
+/// Strip off-hand from a resolved loadout when the main-hand is a two-handed weapon.
+/// Call this after `resolve_loadout` to enforce the 2H constraint.
+pub fn enforce_two_hand_conflicts(loadout: &mut HashMap<ItemSlot, ItemId>, items: &ItemDefinitions) {
+    let has_2h = loadout.get(&ItemSlot::MainHand)
+        .and_then(|id| items.get(id))
+        .map_or(false, |item| item.two_handed);
+    if has_2h {
+        loadout.remove(&ItemSlot::OffHand);
+    }
+}
+
+/// Find the first available one-handed main-hand weapon for a class, sorted by name.
+/// Returns None if only two-handed weapons exist.
+pub fn find_one_handed_mainhand(items: &ItemDefinitions, class: CharacterClass) -> Option<ItemId> {
+    items.items_for_slot(ItemSlot::MainHand, class)
+        .into_iter()
+        .find(|(_, item)| !item.two_handed)
+        .map(|(id, _)| id)
+}
+
 // ============================================================================
 // RESOURCES
 // ============================================================================
@@ -364,6 +400,17 @@ impl ItemDefinitions {
 
     pub fn item_count(&self) -> usize {
         self.definitions.len()
+    }
+
+    /// Return all items valid for a given slot and class, sorted by name.
+    /// Ring1/Ring2 and Trinket1/Trinket2 share item pools.
+    pub fn items_for_slot(&self, slot: ItemSlot, class: CharacterClass) -> Vec<(ItemId, &ItemConfig)> {
+        let mut items: Vec<(ItemId, &ItemConfig)> = self.definitions.iter()
+            .filter(|(_, item)| slot.is_same_slot_type(&item.slot) && can_equip(class, item))
+            .map(|(id, item)| (*id, item))
+            .collect();
+        items.sort_by(|a, b| a.1.name.cmp(&b.1.name));
+        items
     }
 }
 
@@ -528,6 +575,7 @@ mod tests {
             weapon_type: WeaponType::None,
             allowed_classes: None,
             is_weapon: false,
+            two_handed: false,
             max_health: 50.0,
             max_mana: 20.0,
             mana_regen: 1.0,
@@ -551,6 +599,7 @@ mod tests {
             weapon_type: WeaponType::Sword,
             allowed_classes: None,
             is_weapon: true,
+            two_handed: false,
             max_health: 0.0,
             max_mana: 0.0,
             mana_regen: 0.0,
@@ -807,5 +856,168 @@ mod tests {
         let mut loadout = HashMap::new();
         loadout.insert(ItemSlot::Head, ItemId::LionheartHelm);
         assert!(validate_class_restrictions(CharacterClass::Warrior, &loadout, &items).is_err());
+    }
+
+    // ---- is_same_slot_type tests ----
+
+    #[test]
+    fn is_same_slot_type_exact_match() {
+        assert!(ItemSlot::Head.is_same_slot_type(&ItemSlot::Head));
+        assert!(ItemSlot::MainHand.is_same_slot_type(&ItemSlot::MainHand));
+    }
+
+    #[test]
+    fn is_same_slot_type_ring_interchangeable() {
+        assert!(ItemSlot::Ring1.is_same_slot_type(&ItemSlot::Ring2));
+        assert!(ItemSlot::Ring2.is_same_slot_type(&ItemSlot::Ring1));
+        assert!(ItemSlot::Ring1.is_same_slot_type(&ItemSlot::Ring1));
+    }
+
+    #[test]
+    fn is_same_slot_type_trinket_interchangeable() {
+        assert!(ItemSlot::Trinket1.is_same_slot_type(&ItemSlot::Trinket2));
+        assert!(ItemSlot::Trinket2.is_same_slot_type(&ItemSlot::Trinket1));
+    }
+
+    #[test]
+    fn is_same_slot_type_different_slots() {
+        assert!(!ItemSlot::Ring1.is_same_slot_type(&ItemSlot::Neck));
+        assert!(!ItemSlot::Head.is_same_slot_type(&ItemSlot::Chest));
+        assert!(!ItemSlot::Trinket1.is_same_slot_type(&ItemSlot::Ring1));
+    }
+
+    // ---- items_for_slot tests ----
+
+    #[test]
+    fn items_for_slot_filters_by_armor_type() {
+        let items = make_item_defs(vec![
+            (ItemId::LionheartHelm, armor_item("Plate Helm", ItemSlot::Head, ArmorType::Plate)),
+            (ItemId::MagistersCrown, armor_item("Cloth Crown", ItemSlot::Head, ArmorType::Cloth)),
+        ]);
+        // Warrior can wear plate; Mage cannot
+        let warrior_head = items.items_for_slot(ItemSlot::Head, CharacterClass::Warrior);
+        assert_eq!(warrior_head.len(), 2); // warrior can wear both plate and cloth
+        let mage_head = items.items_for_slot(ItemSlot::Head, CharacterClass::Mage);
+        assert_eq!(mage_head.len(), 1); // mage can only wear cloth
+        assert_eq!(mage_head[0].0, ItemId::MagistersCrown);
+    }
+
+    #[test]
+    fn items_for_slot_ring2_shows_all_rings() {
+        let items = make_item_defs(vec![
+            (ItemId::BandOfAccuria, armor_item("Band of Accuria", ItemSlot::Ring1, ArmorType::None)),
+            (ItemId::RingOfProtection, armor_item("Ring of Protection", ItemSlot::Ring2, ArmorType::None)),
+            (ItemId::SignetOfFocus, armor_item("Signet of Focus", ItemSlot::Ring1, ArmorType::None)),
+        ]);
+        let ring2_items = items.items_for_slot(ItemSlot::Ring2, CharacterClass::Mage);
+        assert_eq!(ring2_items.len(), 3); // all ring items available for Ring2
+    }
+
+    #[test]
+    fn items_for_slot_trinket_shows_all_trinkets() {
+        let items = make_item_defs(vec![
+            (ItemId::MarkOfTheChampion, armor_item("Mark of Champion", ItemSlot::Trinket1, ArmorType::None)),
+            (ItemId::EssenceOfEternalLife, armor_item("Essence of Life", ItemSlot::Trinket1, ArmorType::None)),
+        ]);
+        let trinket2_items = items.items_for_slot(ItemSlot::Trinket2, CharacterClass::Warrior);
+        assert_eq!(trinket2_items.len(), 2); // both trinkets available for Trinket2
+    }
+
+    #[test]
+    fn items_for_slot_respects_class_restrictions() {
+        let mut warrior_only = armor_item("Warrior Helm", ItemSlot::Head, ArmorType::Plate);
+        warrior_only.allowed_classes = Some(vec![CharacterClass::Warrior]);
+        let items = make_item_defs(vec![
+            (ItemId::LionheartHelm, warrior_only),
+        ]);
+        let warrior_items = items.items_for_slot(ItemSlot::Head, CharacterClass::Warrior);
+        assert_eq!(warrior_items.len(), 1);
+        let paladin_items = items.items_for_slot(ItemSlot::Head, CharacterClass::Paladin);
+        assert_eq!(paladin_items.len(), 0);
+    }
+
+    #[test]
+    fn items_for_slot_sorted_by_name() {
+        let items = make_item_defs(vec![
+            (ItemId::BandOfAccuria, armor_item("Zebra Ring", ItemSlot::Ring1, ArmorType::None)),
+            (ItemId::SignetOfFocus, armor_item("Alpha Ring", ItemSlot::Ring1, ArmorType::None)),
+        ]);
+        let ring_items = items.items_for_slot(ItemSlot::Ring1, CharacterClass::Warrior);
+        assert_eq!(ring_items[0].1.name, "Alpha Ring");
+        assert_eq!(ring_items[1].1.name, "Zebra Ring");
+    }
+
+    // ---- enforce_two_hand_conflicts tests ----
+
+    fn two_handed_weapon(name: &str) -> ItemConfig {
+        let mut item = weapon_item(name, ItemSlot::MainHand, 20.0, 30.0, 0.9);
+        item.two_handed = true;
+        item
+    }
+
+    #[test]
+    fn enforce_2h_strips_offhand_when_mainhand_is_2h() {
+        let items = make_item_defs(vec![
+            (ItemId::ArcaniteReaper, two_handed_weapon("Arcanite Reaper")),
+            (ItemId::WallOfTheDeadShield, armor_item("Shield", ItemSlot::OffHand, ArmorType::None)),
+        ]);
+        let mut loadout = HashMap::new();
+        loadout.insert(ItemSlot::MainHand, ItemId::ArcaniteReaper);
+        loadout.insert(ItemSlot::OffHand, ItemId::WallOfTheDeadShield);
+
+        enforce_two_hand_conflicts(&mut loadout, &items);
+
+        assert_eq!(loadout.get(&ItemSlot::MainHand), Some(&ItemId::ArcaniteReaper));
+        assert!(!loadout.contains_key(&ItemSlot::OffHand), "Off-hand should be stripped when 2H is equipped");
+    }
+
+    #[test]
+    fn enforce_2h_keeps_offhand_when_mainhand_is_1h() {
+        let items = make_item_defs(vec![
+            (ItemId::FrostbiteBlade, weapon_item("Frostbite", ItemSlot::MainHand, 10.0, 14.0, 1.1)),
+            (ItemId::WallOfTheDeadShield, armor_item("Shield", ItemSlot::OffHand, ArmorType::None)),
+        ]);
+        let mut loadout = HashMap::new();
+        loadout.insert(ItemSlot::MainHand, ItemId::FrostbiteBlade);
+        loadout.insert(ItemSlot::OffHand, ItemId::WallOfTheDeadShield);
+
+        enforce_two_hand_conflicts(&mut loadout, &items);
+
+        assert!(loadout.contains_key(&ItemSlot::OffHand), "Off-hand should remain with 1H weapon");
+    }
+
+    #[test]
+    fn enforce_2h_no_mainhand_is_noop() {
+        let items = make_item_defs(vec![
+            (ItemId::WallOfTheDeadShield, armor_item("Shield", ItemSlot::OffHand, ArmorType::None)),
+        ]);
+        let mut loadout = HashMap::new();
+        loadout.insert(ItemSlot::OffHand, ItemId::WallOfTheDeadShield);
+
+        enforce_two_hand_conflicts(&mut loadout, &items);
+
+        assert!(loadout.contains_key(&ItemSlot::OffHand), "Off-hand should remain when no main-hand");
+    }
+
+    // ---- find_one_handed_mainhand tests ----
+
+    #[test]
+    fn find_1h_returns_first_non_2h_weapon() {
+        let items = make_item_defs(vec![
+            (ItemId::ArcaniteReaper, two_handed_weapon("Arcanite Reaper")),
+            (ItemId::FrostbiteBlade, weapon_item("Frostbite Blade", ItemSlot::MainHand, 10.0, 14.0, 1.1)),
+        ]);
+        let result = find_one_handed_mainhand(&items, CharacterClass::Warrior);
+        assert_eq!(result, Some(ItemId::FrostbiteBlade));
+    }
+
+    #[test]
+    fn find_1h_returns_none_when_only_2h_exist() {
+        let items = make_item_defs(vec![
+            (ItemId::ArcaniteReaper, two_handed_weapon("Arcanite Reaper")),
+            (ItemId::CrescentStaff, two_handed_weapon("Crescent Staff")),
+        ]);
+        let result = find_one_handed_mainhand(&items, CharacterClass::Warrior);
+        assert_eq!(result, None);
     }
 }
