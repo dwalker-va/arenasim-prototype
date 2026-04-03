@@ -52,6 +52,113 @@ pub struct AbilityIconHandles {
     pub handles: Vec<(String, Handle<Image>)>,
 }
 
+/// Resource storing loaded item icon textures for the view combatant screen.
+#[derive(Resource, Default)]
+pub struct ItemIcons {
+    pub textures: HashMap<String, egui::TextureId>,
+    pub loaded: bool,
+}
+
+/// Resource storing the Bevy image handles for item icons.
+#[derive(Resource, Default)]
+pub struct ItemIconHandles {
+    pub handles: Vec<(String, Handle<Image>)>,
+}
+
+/// Maps ItemId variants to their icon file paths under assets/icons/items/
+fn get_item_icon_path(item_id: &ItemId) -> Option<&'static str> {
+    match item_id {
+        // Plate Armor
+        ItemId::LionheartHelm => Some("icons/items/inv_helmet_36.jpg"),
+        ItemId::OnslaughtHeadGuard => Some("icons/items/inv_helmet_71.jpg"),
+        ItemId::ConquerorsChestplate => Some("icons/items/inv_chest_plate12.jpg"),
+        ItemId::LegplatesOfWrath => Some("icons/items/inv_pants_04.jpg"),
+        ItemId::GauntletsOfMight => Some("icons/items/inv_gauntlets_10.jpg"),
+        ItemId::SabatonsBattleBorn => Some("icons/items/inv_boots_plate_04.jpg"),
+        ItemId::WaistguardOfHeroism => Some("icons/items/inv_belt_09.jpg"),
+        ItemId::WristguardsOfStability => Some("icons/items/inv_bracer_19.jpg"),
+        ItemId::ShoulderplatesOfValor => Some("icons/items/inv_shoulder_15.jpg"),
+        // Mail Armor (Beaststalker)
+        ItemId::BeaststalkerHelm => Some("icons/items/inv_helmet_24.jpg"),
+        ItemId::BeaststalkerTunic => Some("icons/items/inv_chest_chain_03.jpg"),
+        ItemId::BeaststalkerLegs => Some("icons/items/inv_pants_03.jpg"),
+        ItemId::BeaststalkerGloves => Some("icons/items/inv_gauntlets_10.jpg"),
+        ItemId::BeaststalkerBoots => Some("icons/items/inv_boots_plate_07.jpg"),
+        ItemId::BeaststalkerBelt => Some("icons/items/inv_belt_16.jpg"),
+        ItemId::BeaststalkerBracers => Some("icons/items/inv_bracer_02.jpg"),
+        ItemId::BeaststalkerMantle => Some("icons/items/inv_shoulder_25.jpg"),
+        // Leather Armor (Nightstalker/Nightslayer)
+        ItemId::NightstalkerCowl => Some("icons/items/inv_helmet_41.jpg"),
+        ItemId::NightstalkerTunic => Some("icons/items/inv_chest_cloth_07.jpg"),
+        ItemId::NightstalkerLegs => Some("icons/items/inv_pants_06.jpg"),
+        ItemId::NightstalkerGloves => Some("icons/items/inv_gauntlets_21.jpg"),
+        ItemId::NightstalkerBoots => Some("icons/items/inv_boots_08.jpg"),
+        ItemId::NightstalkerBelt => Some("icons/items/inv_belt_23.jpg"),
+        ItemId::NightstalkerBracers => Some("icons/items/inv_bracer_02.jpg"),
+        ItemId::NightstalkerMantle => Some("icons/items/inv_shoulder_25.jpg"),
+        // Cloth Armor (Magister's)
+        ItemId::MagistersCrown => Some("icons/items/inv_crown_02.jpg"),
+        ItemId::MagistersRobes => Some("icons/items/inv_chest_cloth_25.jpg"),
+        ItemId::MagistersLeggings => Some("icons/items/inv_pants_06.jpg"),
+        ItemId::MagistersGloves => Some("icons/items/inv_gauntlets_17.jpg"),
+        ItemId::MagistersBoots => Some("icons/items/inv_boots_02.jpg"),
+        ItemId::MagistersBelt => Some("icons/items/inv_belt_08.jpg"),
+        ItemId::MagistersBracers => Some("icons/items/inv_jewelry_ring_23.jpg"),
+        ItemId::MagistersMantle => Some("icons/items/inv_shoulder_23.jpg"),
+        // Cloaks
+        ItemId::CloakOfTheShieldWall => Some("icons/items/inv_misc_cape_17.jpg"),
+        ItemId::CloakOfConcentration => Some("icons/items/inv_misc_cape_18.jpg"),
+        // Necklaces
+        ItemId::AmuletOfPower => Some("icons/items/inv_jewelry_necklace_09.jpg"),
+        ItemId::AmuletOfResilience => Some("icons/items/inv_jewelry_talisman_07.jpg"),
+        // Rings
+        ItemId::BandOfAccuria => Some("icons/items/inv_jewelry_ring_15.jpg"),
+        ItemId::SignetOfFocus => Some("icons/items/inv_jewelry_ring_40.jpg"),
+        ItemId::RingOfProtection => Some("icons/items/inv_jewelry_ring_05.jpg"),
+        // Trinkets
+        ItemId::MarkOfTheChampion => Some("icons/items/inv_misc_token_argentdawn2.jpg"),
+        ItemId::EssenceOfEternalLife => Some("icons/items/inv_misc_root_02.jpg"),
+        // Melee Weapons
+        ItemId::ArcaniteReaper => Some("icons/items/inv_axe_09.jpg"),
+        ItemId::FrostbiteBlade => Some("icons/items/inv_sword_51.jpg"),
+        ItemId::SerpentFangDagger => Some("icons/items/inv_sword_48.jpg"),
+        ItemId::HammerOfTheRighteous => Some("icons/items/inv_mace_05.jpg"),
+        ItemId::CrescentStaff => Some("icons/items/inv_staff_30.jpg"),
+        // Ranged Weapons
+        ItemId::WandOfShadows => Some("icons/items/inv_wand_1h_stratholme_d_01.jpg"),
+        ItemId::StaffOfDominance => Some("icons/items/inv_staff_13.jpg"),
+        ItemId::AshwoodBow => Some("icons/items/inv_weapon_bow_01.jpg"),
+        ItemId::SniperScope => Some("icons/items/inv_weapon_crossbow_04.jpg"),
+        // Off Hand
+        ItemId::TomeOfKnowledge => Some("icons/items/inv_misc_armorkit_09.jpg"),
+        ItemId::WallOfTheDeadShield => Some("icons/items/inv_shield_17.jpg"),
+    }
+}
+
+/// All ItemId variants for icon loading
+const ALL_ITEM_IDS: &[ItemId] = &[
+    ItemId::LionheartHelm, ItemId::OnslaughtHeadGuard, ItemId::ConquerorsChestplate,
+    ItemId::LegplatesOfWrath, ItemId::GauntletsOfMight, ItemId::SabatonsBattleBorn,
+    ItemId::WaistguardOfHeroism, ItemId::WristguardsOfStability, ItemId::ShoulderplatesOfValor,
+    ItemId::BeaststalkerHelm, ItemId::BeaststalkerTunic, ItemId::BeaststalkerLegs,
+    ItemId::BeaststalkerGloves, ItemId::BeaststalkerBoots, ItemId::BeaststalkerBelt,
+    ItemId::BeaststalkerBracers, ItemId::BeaststalkerMantle,
+    ItemId::NightstalkerCowl, ItemId::NightstalkerTunic, ItemId::NightstalkerLegs,
+    ItemId::NightstalkerGloves, ItemId::NightstalkerBoots, ItemId::NightstalkerBelt,
+    ItemId::NightstalkerBracers, ItemId::NightstalkerMantle,
+    ItemId::MagistersCrown, ItemId::MagistersRobes, ItemId::MagistersLeggings,
+    ItemId::MagistersGloves, ItemId::MagistersBoots, ItemId::MagistersBelt,
+    ItemId::MagistersBracers, ItemId::MagistersMantle,
+    ItemId::CloakOfTheShieldWall, ItemId::CloakOfConcentration,
+    ItemId::AmuletOfPower, ItemId::AmuletOfResilience,
+    ItemId::BandOfAccuria, ItemId::SignetOfFocus, ItemId::RingOfProtection,
+    ItemId::MarkOfTheChampion, ItemId::EssenceOfEternalLife,
+    ItemId::ArcaniteReaper, ItemId::FrostbiteBlade, ItemId::SerpentFangDagger,
+    ItemId::HammerOfTheRighteous, ItemId::CrescentStaff,
+    ItemId::WandOfShadows, ItemId::StaffOfDominance, ItemId::AshwoodBow, ItemId::SniperScope,
+    ItemId::TomeOfKnowledge, ItemId::WallOfTheDeadShield,
+];
+
 /// Base stats for a class (used for display)
 struct ClassStats {
     health: u32,
@@ -353,6 +460,46 @@ pub fn load_ability_icons(
     info!("Ability icons loaded for view combatant screen");
 }
 
+/// System to load item icons and register them with egui.
+/// Follows the same 3-phase pattern as load_ability_icons.
+pub fn load_item_icons(
+    mut contexts: EguiContexts,
+    asset_server: Res<AssetServer>,
+    mut item_icons: ResMut<ItemIcons>,
+    mut icon_handles: ResMut<ItemIconHandles>,
+    images: Res<Assets<Image>>,
+) {
+    if item_icons.loaded {
+        return;
+    }
+
+    // Load handles if not already loaded
+    if icon_handles.handles.is_empty() {
+        for item_id in ALL_ITEM_IDS {
+            if let Some(path) = get_item_icon_path(item_id) {
+                let handle: Handle<Image> = asset_server.load(path);
+                icon_handles.handles.push((format!("{:?}", item_id), handle));
+            }
+        }
+        return;
+    }
+
+    // Check if all images are loaded
+    let all_loaded = icon_handles.handles.iter().all(|(_, h)| images.contains(h));
+    if !all_loaded {
+        return;
+    }
+
+    // Register textures with egui
+    for (item_key, handle) in &icon_handles.handles {
+        let texture_id = contexts.add_image(handle.clone());
+        item_icons.textures.insert(item_key.clone(), texture_id);
+    }
+
+    item_icons.loaded = true;
+    info!("Item icons loaded for view combatant screen ({} icons)", item_icons.textures.len());
+}
+
 /// Main UI system for the View Combatant screen.
 pub fn view_combatant_ui(
     mut contexts: EguiContexts,
@@ -363,6 +510,7 @@ pub fn view_combatant_ui(
     keyboard: Res<ButtonInput<KeyCode>>,
     class_icons: Res<ClassIcons>,
     ability_icons: Option<Res<AbilityIcons>>,
+    item_icons: Option<Res<ItemIcons>>,
     ability_definitions: Res<AbilityDefinitions>,
     mut match_config: ResMut<MatchConfig>,
     item_definitions: Res<ItemDefinitions>,
@@ -646,6 +794,7 @@ pub fn view_combatant_ui(
                     class,
                     &resolved_loadout,
                     &equip_overrides,
+                    &item_icons,
                 );
             });
             }); // ScrollArea
@@ -1166,6 +1315,7 @@ fn render_equipment_panel(
     class: CharacterClass,
     resolved: &HashMap<ItemSlot, ItemId>,
     overrides: &HashMap<ItemSlot, ItemId>,
+    item_icons: &Option<Res<ItemIcons>>,
 ) {
     let gold = egui::Color32::from_rgb(255, 215, 0);
     let title_color = egui::Color32::from_rgb(230, 204, 153);
@@ -1219,19 +1369,55 @@ fn render_equipment_panel(
                     ("— Empty —".to_string(), muted_color)
                 };
 
-                // Compact row: "Slot: Item Name" as a selectable label for clear hover/click
+                let icon_size = 22.0;
+                let row_height = 22.0;
+                let total_width = width - 30.0;
+
+                // Allocate a row for icon + text as a single clickable area
+                let (rect, response) = ui.allocate_exact_size(
+                    egui::vec2(total_width, row_height),
+                    egui::Sense::click(),
+                );
+
+                // Highlight on hover
+                if response.hovered() {
+                    ui.painter().rect_filled(rect, 2.0, egui::Color32::from_rgba_premultiplied(255, 255, 255, 15));
+                }
+
+                let painter = ui.painter();
+
+                // Draw item icon if available
+                let mut text_offset_x = 0.0;
+                if let Some(id) = item_id {
+                    if let Some(icons) = item_icons {
+                        let icon_key = format!("{:?}", id);
+                        if let Some(&texture_id) = icons.textures.get(&icon_key) {
+                            let icon_rect = egui::Rect::from_min_size(
+                                rect.min,
+                                egui::vec2(icon_size, icon_size),
+                            );
+                            painter.image(texture_id, icon_rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                            text_offset_x = icon_size + 4.0;
+                        }
+                    }
+                }
+
+                // Draw text: "Slot: Item Name"
                 let label_text = format!("{}: {}", slot.name(), item_name);
-                let response = ui.selectable_label(false,
-                    egui::RichText::new(&label_text)
-                        .size(13.0)
-                        .color(name_color),
+                let text_pos = rect.min + egui::vec2(text_offset_x, (row_height - 13.0) / 2.0);
+                painter.text(
+                    text_pos,
+                    egui::Align2::LEFT_TOP,
+                    &label_text,
+                    egui::FontId::proportional(13.0),
+                    name_color,
                 );
 
                 if response.clicked() {
                     clicked_slot = Some(*slot);
                 }
 
-                // Tooltip on hover (R8 — nice-to-have)
+                // Tooltip on hover
                 if let Some(id) = item_id {
                     if let Some(item) = items.get(id) {
                         response.on_hover_ui(|ui| {
@@ -1280,10 +1466,11 @@ fn render_equipment_panel(
                 let current_item = resolved.get(&open_slot);
 
                 egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
+                    let picker_icon_size = 22.0;
+
                     for (item_id, item) in &valid_items {
                         let is_equipped = current_item == Some(item_id);
 
-                        // Build display text: item name + stats on same line
                         let stat_text = format_item_stats(item);
                         let display = if stat_text.is_empty() {
                             item.name.clone()
@@ -1292,11 +1479,27 @@ fn render_equipment_panel(
                         };
 
                         let name_color = if is_equipped { gold } else { egui::Color32::from_rgb(220, 220, 220) };
-                        let response = ui.selectable_label(is_equipped,
-                            egui::RichText::new(&display)
-                                .size(13.0)
-                                .color(name_color),
-                        );
+
+                        // Row with icon + text
+                        let response = ui.horizontal(|ui| {
+                            // Draw item icon if available
+                            if let Some(icons) = item_icons {
+                                let icon_key = format!("{:?}", item_id);
+                                if let Some(&texture_id) = icons.textures.get(&icon_key) {
+                                    let (icon_rect, _) = ui.allocate_exact_size(
+                                        egui::vec2(picker_icon_size, picker_icon_size),
+                                        egui::Sense::hover(),
+                                    );
+                                    ui.painter().image(texture_id, icon_rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                                }
+                            }
+
+                            ui.selectable_label(is_equipped,
+                                egui::RichText::new(&display)
+                                    .size(13.0)
+                                    .color(name_color),
+                            )
+                        }).inner;
 
                         if response.clicked() {
                             selection = Some(PickerAction::SelectItem(open_slot, *item_id));

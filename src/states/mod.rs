@@ -49,6 +49,9 @@ impl Plugin for StatesPlugin {
             // Initialize ability icon resources for view combatant screen
             .init_resource::<view_combatant_ui::AbilityIcons>()
             .init_resource::<view_combatant_ui::AbilityIconHandles>()
+            // Initialize item icon resources for view combatant screen
+            .init_resource::<view_combatant_ui::ItemIcons>()
+            .init_resource::<view_combatant_ui::ItemIconHandles>()
             // Main menu systems (now using egui)
             .add_systems(
                 Update,
@@ -78,6 +81,7 @@ impl Plugin for StatesPlugin {
                 Update,
                 (
                     view_combatant_ui::load_ability_icons,
+                    view_combatant_ui::load_item_icons,
                     view_combatant_ui::view_combatant_ui,
                 )
                     .chain()
