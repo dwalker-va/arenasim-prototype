@@ -498,11 +498,11 @@ function parseItemDps(tooltip: string): number | null {
 // Parse bonus stats from item tooltip HTML (Stamina, Intellect, Strength, etc.)
 function parseBonusStats(tooltip: string): Record<string, number> {
   const stats: Record<string, number> = {};
-  // Pattern: <!--statN-->+X StatName
-  const statRegex = /<!--stat\d+-->\+(\d+)\s+(\w+)/g;
+  // Pattern: <!--statN-->+X Stat Name (supports multi-word stats like "Fire Resistance")
+  const statRegex = /<!--stat\d+-->\+(\d+)\s+([\w\s]+?)(?=<|$)/g;
   let match;
   while ((match = statRegex.exec(tooltip)) !== null) {
-    stats[match[2]] = parseInt(match[1]);
+    stats[match[2].trim()] = parseInt(match[1]);
   }
   return stats;
 }
@@ -574,7 +574,6 @@ async function fetchItemById(itemId: number): Promise<{
       quality?: number;
       icon?: string;
       tooltip?: string;
-      spells?: unknown[];
     };
 
     if (!data.name) {
@@ -628,14 +627,47 @@ function findItemId(name: string): number | null {
   return null;
 }
 
+// Format item data into markdown output
+function formatItemOutput(itemData: NonNullable<Awaited<ReturnType<typeof fetchItemById>>>, itemId?: number): string {
+  const statsLines = Object.entries(itemData.bonusStats)
+    .map(([stat, value]) => `  - +${value} ${stat}`)
+    .join("\n");
+
+  const heading = itemId
+    ? `## ${itemData.name} (ID: ${itemId}, ${itemData.quality})`
+    : `## ${itemData.name} (${itemData.quality})`;
+
+  return `${heading}
+
+**Wowhead URL:** ${itemData.wowheadUrl}
+**Icon URL:** ${itemData.iconUrl}
+**Icon Name:** ${itemData.icon}
+
+### Item Info
+- **Item Level:** ${itemData.itemLevel ?? "Unknown"}
+- **Required Level:** ${itemData.requiredLevel ?? "Unknown"}
+- **Slot:** ${itemData.slot ?? "Unknown"}
+- **Type:** ${itemData.armorType ?? "Unknown"}
+${itemData.armor ? `- **Armor:** ${itemData.armor}` : ""}
+${itemData.damage ? `- **Damage:** ${itemData.damage.min} - ${itemData.damage.max}` : ""}
+${itemData.speed ? `- **Speed:** ${itemData.speed}` : ""}
+${itemData.dps ? `- **DPS:** ${itemData.dps}` : ""}
+
+${statsLines ? `### Bonus Stats\n${statsLines}` : ""}
+${itemData.equipEffects.length > 0 ? `\n### Equip Effects\n${itemData.equipEffects.map(e => `- ${e}`).join("\n")}` : ""}
+
+### Tooltip
+${itemData.tooltip}`;
+}
+
 // Item groups for list_known_items
 const ITEM_GROUPS: Record<string, Record<string, string[]>> = {
   "Plate": {
-    "Head": ["lionheart helm", "helm of wrath"],
-    "Chest": ["conqueror's breastplate", "breastplate of wrath"],
-    "Legs": ["legplates of wrath"],
-    "Hands": ["gauntlets of might"],
-    "Feet": ["sabatons of might"],
+    "Head": ["lionheart helm", "helm of wrath", "lawbringer helm"],
+    "Chest": ["conqueror's breastplate", "breastplate of wrath", "lawbringer chestguard"],
+    "Legs": ["legplates of wrath", "lawbringer legplates"],
+    "Hands": ["gauntlets of might", "lawbringer gauntlets"],
+    "Feet": ["sabatons of might", "lawbringer boots"],
     "Waist": ["belt of might"],
     "Wrists": ["bracers of might"],
     "Shoulders": ["shoulderguards of might"],
@@ -928,36 +960,10 @@ server.tool(
       };
     }
 
-    const statsLines = Object.entries(itemData.bonusStats)
-      .map(([stat, value]) => `  - +${value} ${stat}`)
-      .join("\n");
-
-    const output = `## ${itemData.name} (${itemData.quality})
-
-**Wowhead URL:** ${itemData.wowheadUrl}
-**Icon URL:** ${itemData.iconUrl}
-**Icon Name:** ${itemData.icon}
-
-### Item Info
-- **Item Level:** ${itemData.itemLevel ?? "Unknown"}
-- **Required Level:** ${itemData.requiredLevel ?? "Unknown"}
-- **Slot:** ${itemData.slot ?? "Unknown"}
-- **Type:** ${itemData.armorType ?? "Unknown"}
-${itemData.armor ? `- **Armor:** ${itemData.armor}` : ""}
-${itemData.damage ? `- **Damage:** ${itemData.damage.min} - ${itemData.damage.max}` : ""}
-${itemData.speed ? `- **Speed:** ${itemData.speed}` : ""}
-${itemData.dps ? `- **DPS:** ${itemData.dps}` : ""}
-
-${statsLines ? `### Bonus Stats\n${statsLines}` : ""}
-${itemData.equipEffects.length > 0 ? `\n### Equip Effects\n${itemData.equipEffects.map(e => `- ${e}`).join("\n")}` : ""}
-
-### Tooltip
-${itemData.tooltip}`;
-
     return {
       content: [{
         type: "text" as const,
-        text: output,
+        text: formatItemOutput(itemData),
       }],
     };
   }
@@ -1000,36 +1006,10 @@ server.tool(
       };
     }
 
-    const statsLines = Object.entries(itemData.bonusStats)
-      .map(([stat, value]) => `  - +${value} ${stat}`)
-      .join("\n");
-
-    const output = `## ${itemData.name} (ID: ${itemId}, ${itemData.quality})
-
-**Wowhead URL:** ${itemData.wowheadUrl}
-**Icon URL:** ${itemData.iconUrl}
-**Icon Name:** ${itemData.icon}
-
-### Item Info
-- **Item Level:** ${itemData.itemLevel ?? "Unknown"}
-- **Required Level:** ${itemData.requiredLevel ?? "Unknown"}
-- **Slot:** ${itemData.slot ?? "Unknown"}
-- **Type:** ${itemData.armorType ?? "Unknown"}
-${itemData.armor ? `- **Armor:** ${itemData.armor}` : ""}
-${itemData.damage ? `- **Damage:** ${itemData.damage.min} - ${itemData.damage.max}` : ""}
-${itemData.speed ? `- **Speed:** ${itemData.speed}` : ""}
-${itemData.dps ? `- **DPS:** ${itemData.dps}` : ""}
-
-${statsLines ? `### Bonus Stats\n${statsLines}` : ""}
-${itemData.equipEffects.length > 0 ? `\n### Equip Effects\n${itemData.equipEffects.map(e => `- ${e}`).join("\n")}` : ""}
-
-### Tooltip
-${itemData.tooltip}`;
-
     return {
       content: [{
         type: "text" as const,
-        text: output,
+        text: formatItemOutput(itemData, itemId),
       }],
     };
   }
