@@ -55,108 +55,83 @@ pub struct AbilityIconHandles {
 /// Resource storing loaded item icon textures for the view combatant screen.
 #[derive(Resource, Default)]
 pub struct ItemIcons {
-    pub textures: HashMap<String, egui::TextureId>,
+    pub textures: HashMap<ItemId, egui::TextureId>,
     pub loaded: bool,
 }
 
 /// Resource storing the Bevy image handles for item icons.
 #[derive(Resource, Default)]
 pub struct ItemIconHandles {
-    pub handles: Vec<(String, Handle<Image>)>,
+    pub handles: Vec<(ItemId, Handle<Image>)>,
 }
 
-/// Maps ItemId variants to their icon file paths under assets/icons/items/
-fn get_item_icon_path(item_id: &ItemId) -> Option<&'static str> {
-    match item_id {
-        // Plate Armor
-        ItemId::LionheartHelm => Some("icons/items/inv_helmet_36.jpg"),
-        ItemId::OnslaughtHeadGuard => Some("icons/items/inv_helmet_71.jpg"),
-        ItemId::ConquerorsChestplate => Some("icons/items/inv_chest_plate12.jpg"),
-        ItemId::LegplatesOfWrath => Some("icons/items/inv_pants_04.jpg"),
-        ItemId::GauntletsOfMight => Some("icons/items/inv_gauntlets_10.jpg"),
-        ItemId::SabatonsBattleBorn => Some("icons/items/inv_boots_plate_04.jpg"),
-        ItemId::WaistguardOfHeroism => Some("icons/items/inv_belt_09.jpg"),
-        ItemId::WristguardsOfStability => Some("icons/items/inv_bracer_19.jpg"),
-        ItemId::ShoulderplatesOfValor => Some("icons/items/inv_shoulder_15.jpg"),
-        // Mail Armor (Beaststalker)
-        ItemId::BeaststalkerHelm => Some("icons/items/inv_helmet_24.jpg"),
-        ItemId::BeaststalkerTunic => Some("icons/items/inv_chest_chain_03.jpg"),
-        ItemId::BeaststalkerLegs => Some("icons/items/inv_pants_03.jpg"),
-        ItemId::BeaststalkerGloves => Some("icons/items/inv_gauntlets_10.jpg"),
-        ItemId::BeaststalkerBoots => Some("icons/items/inv_boots_plate_07.jpg"),
-        ItemId::BeaststalkerBelt => Some("icons/items/inv_belt_16.jpg"),
-        ItemId::BeaststalkerBracers => Some("icons/items/inv_bracer_02.jpg"),
-        ItemId::BeaststalkerMantle => Some("icons/items/inv_shoulder_25.jpg"),
-        // Leather Armor (Nightstalker/Nightslayer)
-        ItemId::NightstalkerCowl => Some("icons/items/inv_helmet_41.jpg"),
-        ItemId::NightstalkerTunic => Some("icons/items/inv_chest_cloth_07.jpg"),
-        ItemId::NightstalkerLegs => Some("icons/items/inv_pants_06.jpg"),
-        ItemId::NightstalkerGloves => Some("icons/items/inv_gauntlets_21.jpg"),
-        ItemId::NightstalkerBoots => Some("icons/items/inv_boots_08.jpg"),
-        ItemId::NightstalkerBelt => Some("icons/items/inv_belt_23.jpg"),
-        ItemId::NightstalkerBracers => Some("icons/items/inv_bracer_02.jpg"),
-        ItemId::NightstalkerMantle => Some("icons/items/inv_shoulder_25.jpg"),
-        // Cloth Armor (Magister's)
-        ItemId::MagistersCrown => Some("icons/items/inv_crown_02.jpg"),
-        ItemId::MagistersRobes => Some("icons/items/inv_chest_cloth_25.jpg"),
-        ItemId::MagistersLeggings => Some("icons/items/inv_pants_06.jpg"),
-        ItemId::MagistersGloves => Some("icons/items/inv_gauntlets_17.jpg"),
-        ItemId::MagistersBoots => Some("icons/items/inv_boots_02.jpg"),
-        ItemId::MagistersBelt => Some("icons/items/inv_belt_08.jpg"),
-        ItemId::MagistersBracers => Some("icons/items/inv_jewelry_ring_23.jpg"),
-        ItemId::MagistersMantle => Some("icons/items/inv_shoulder_23.jpg"),
-        // Cloaks
-        ItemId::CloakOfTheShieldWall => Some("icons/items/inv_misc_cape_17.jpg"),
-        ItemId::CloakOfConcentration => Some("icons/items/inv_misc_cape_18.jpg"),
-        // Necklaces
-        ItemId::AmuletOfPower => Some("icons/items/inv_jewelry_necklace_09.jpg"),
-        ItemId::AmuletOfResilience => Some("icons/items/inv_jewelry_talisman_07.jpg"),
-        // Rings
-        ItemId::BandOfAccuria => Some("icons/items/inv_jewelry_ring_15.jpg"),
-        ItemId::SignetOfFocus => Some("icons/items/inv_jewelry_ring_40.jpg"),
-        ItemId::RingOfProtection => Some("icons/items/inv_jewelry_ring_05.jpg"),
-        // Trinkets
-        ItemId::MarkOfTheChampion => Some("icons/items/inv_misc_token_argentdawn2.jpg"),
-        ItemId::EssenceOfEternalLife => Some("icons/items/inv_misc_root_02.jpg"),
-        // Melee Weapons
-        ItemId::ArcaniteReaper => Some("icons/items/inv_axe_09.jpg"),
-        ItemId::FrostbiteBlade => Some("icons/items/inv_sword_51.jpg"),
-        ItemId::SerpentFangDagger => Some("icons/items/inv_sword_48.jpg"),
-        ItemId::HammerOfTheRighteous => Some("icons/items/inv_mace_05.jpg"),
-        ItemId::CrescentStaff => Some("icons/items/inv_staff_30.jpg"),
-        // Ranged Weapons
-        ItemId::WandOfShadows => Some("icons/items/inv_wand_1h_stratholme_d_01.jpg"),
-        ItemId::StaffOfDominance => Some("icons/items/inv_staff_13.jpg"),
-        ItemId::AshwoodBow => Some("icons/items/inv_weapon_bow_01.jpg"),
-        ItemId::SniperScope => Some("icons/items/inv_weapon_crossbow_04.jpg"),
-        // Off Hand
-        ItemId::TomeOfKnowledge => Some("icons/items/inv_misc_armorkit_09.jpg"),
-        ItemId::WallOfTheDeadShield => Some("icons/items/inv_shield_17.jpg"),
-    }
-}
-
-/// All ItemId variants for icon loading
-const ALL_ITEM_IDS: &[ItemId] = &[
-    ItemId::LionheartHelm, ItemId::OnslaughtHeadGuard, ItemId::ConquerorsChestplate,
-    ItemId::LegplatesOfWrath, ItemId::GauntletsOfMight, ItemId::SabatonsBattleBorn,
-    ItemId::WaistguardOfHeroism, ItemId::WristguardsOfStability, ItemId::ShoulderplatesOfValor,
-    ItemId::BeaststalkerHelm, ItemId::BeaststalkerTunic, ItemId::BeaststalkerLegs,
-    ItemId::BeaststalkerGloves, ItemId::BeaststalkerBoots, ItemId::BeaststalkerBelt,
-    ItemId::BeaststalkerBracers, ItemId::BeaststalkerMantle,
-    ItemId::NightstalkerCowl, ItemId::NightstalkerTunic, ItemId::NightstalkerLegs,
-    ItemId::NightstalkerGloves, ItemId::NightstalkerBoots, ItemId::NightstalkerBelt,
-    ItemId::NightstalkerBracers, ItemId::NightstalkerMantle,
-    ItemId::MagistersCrown, ItemId::MagistersRobes, ItemId::MagistersLeggings,
-    ItemId::MagistersGloves, ItemId::MagistersBoots, ItemId::MagistersBelt,
-    ItemId::MagistersBracers, ItemId::MagistersMantle,
-    ItemId::CloakOfTheShieldWall, ItemId::CloakOfConcentration,
-    ItemId::AmuletOfPower, ItemId::AmuletOfResilience,
-    ItemId::BandOfAccuria, ItemId::SignetOfFocus, ItemId::RingOfProtection,
-    ItemId::MarkOfTheChampion, ItemId::EssenceOfEternalLife,
-    ItemId::ArcaniteReaper, ItemId::FrostbiteBlade, ItemId::SerpentFangDagger,
-    ItemId::HammerOfTheRighteous, ItemId::CrescentStaff,
-    ItemId::WandOfShadows, ItemId::StaffOfDominance, ItemId::AshwoodBow, ItemId::SniperScope,
-    ItemId::TomeOfKnowledge, ItemId::WallOfTheDeadShield,
+/// Single source of truth: maps each ItemId to its icon asset path.
+/// Adding a new ItemId variant requires adding it here (and downloading the icon).
+const ITEM_ICON_PATHS: &[(ItemId, &str)] = &[
+    // Plate Armor
+    (ItemId::LionheartHelm, "icons/items/inv_helmet_36.jpg"),
+    (ItemId::OnslaughtHeadGuard, "icons/items/inv_helmet_71.jpg"),
+    (ItemId::ConquerorsChestplate, "icons/items/inv_chest_plate12.jpg"),
+    (ItemId::LegplatesOfWrath, "icons/items/inv_pants_04.jpg"),
+    (ItemId::GauntletsOfMight, "icons/items/inv_gauntlets_10.jpg"),
+    (ItemId::SabatonsBattleBorn, "icons/items/inv_boots_plate_04.jpg"),
+    (ItemId::WaistguardOfHeroism, "icons/items/inv_belt_09.jpg"),
+    (ItemId::WristguardsOfStability, "icons/items/inv_bracer_19.jpg"),
+    (ItemId::ShoulderplatesOfValor, "icons/items/inv_shoulder_15.jpg"),
+    // Mail Armor (Beaststalker)
+    (ItemId::BeaststalkerHelm, "icons/items/inv_helmet_24.jpg"),
+    (ItemId::BeaststalkerTunic, "icons/items/inv_chest_chain_03.jpg"),
+    (ItemId::BeaststalkerLegs, "icons/items/inv_pants_03.jpg"),
+    (ItemId::BeaststalkerGloves, "icons/items/inv_gauntlets_10.jpg"),
+    (ItemId::BeaststalkerBoots, "icons/items/inv_boots_plate_07.jpg"),
+    (ItemId::BeaststalkerBelt, "icons/items/inv_belt_16.jpg"),
+    (ItemId::BeaststalkerBracers, "icons/items/inv_bracer_02.jpg"),
+    (ItemId::BeaststalkerMantle, "icons/items/inv_shoulder_25.jpg"),
+    // Leather Armor (Nightstalker/Nightslayer)
+    (ItemId::NightstalkerCowl, "icons/items/inv_helmet_41.jpg"),
+    (ItemId::NightstalkerTunic, "icons/items/inv_chest_cloth_07.jpg"),
+    (ItemId::NightstalkerLegs, "icons/items/inv_pants_06.jpg"),
+    (ItemId::NightstalkerGloves, "icons/items/inv_gauntlets_21.jpg"),
+    (ItemId::NightstalkerBoots, "icons/items/inv_boots_08.jpg"),
+    (ItemId::NightstalkerBelt, "icons/items/inv_belt_23.jpg"),
+    (ItemId::NightstalkerBracers, "icons/items/inv_bracer_02.jpg"),
+    (ItemId::NightstalkerMantle, "icons/items/inv_shoulder_25.jpg"),
+    // Cloth Armor (Magister's)
+    (ItemId::MagistersCrown, "icons/items/inv_crown_02.jpg"),
+    (ItemId::MagistersRobes, "icons/items/inv_chest_cloth_25.jpg"),
+    (ItemId::MagistersLeggings, "icons/items/inv_pants_06.jpg"),
+    (ItemId::MagistersGloves, "icons/items/inv_gauntlets_17.jpg"),
+    (ItemId::MagistersBoots, "icons/items/inv_boots_02.jpg"),
+    (ItemId::MagistersBelt, "icons/items/inv_belt_08.jpg"),
+    (ItemId::MagistersBracers, "icons/items/inv_jewelry_ring_23.jpg"),
+    (ItemId::MagistersMantle, "icons/items/inv_shoulder_23.jpg"),
+    // Cloaks
+    (ItemId::CloakOfTheShieldWall, "icons/items/inv_misc_cape_17.jpg"),
+    (ItemId::CloakOfConcentration, "icons/items/inv_misc_cape_18.jpg"),
+    // Necklaces
+    (ItemId::AmuletOfPower, "icons/items/inv_jewelry_necklace_09.jpg"),
+    (ItemId::AmuletOfResilience, "icons/items/inv_jewelry_talisman_07.jpg"),
+    // Rings
+    (ItemId::BandOfAccuria, "icons/items/inv_jewelry_ring_15.jpg"),
+    (ItemId::SignetOfFocus, "icons/items/inv_jewelry_ring_40.jpg"),
+    (ItemId::RingOfProtection, "icons/items/inv_jewelry_ring_05.jpg"),
+    // Trinkets
+    (ItemId::MarkOfTheChampion, "icons/items/inv_misc_token_argentdawn2.jpg"),
+    (ItemId::EssenceOfEternalLife, "icons/items/inv_misc_root_02.jpg"),
+    // Melee Weapons
+    (ItemId::ArcaniteReaper, "icons/items/inv_axe_09.jpg"),
+    (ItemId::FrostbiteBlade, "icons/items/inv_sword_51.jpg"),
+    (ItemId::SerpentFangDagger, "icons/items/inv_sword_48.jpg"),
+    (ItemId::HammerOfTheRighteous, "icons/items/inv_mace_05.jpg"),
+    (ItemId::CrescentStaff, "icons/items/inv_staff_30.jpg"),
+    // Ranged Weapons
+    (ItemId::WandOfShadows, "icons/items/inv_wand_1h_stratholme_d_01.jpg"),
+    (ItemId::StaffOfDominance, "icons/items/inv_staff_13.jpg"),
+    (ItemId::AshwoodBow, "icons/items/inv_weapon_bow_01.jpg"),
+    (ItemId::SniperScope, "icons/items/inv_weapon_crossbow_04.jpg"),
+    // Off Hand
+    (ItemId::TomeOfKnowledge, "icons/items/inv_misc_armorkit_09.jpg"),
+    (ItemId::WallOfTheDeadShield, "icons/items/inv_shield_17.jpg"),
 ];
 
 /// Base stats for a class (used for display)
@@ -475,11 +450,9 @@ pub fn load_item_icons(
 
     // Load handles if not already loaded
     if icon_handles.handles.is_empty() {
-        for item_id in ALL_ITEM_IDS {
-            if let Some(path) = get_item_icon_path(item_id) {
-                let handle: Handle<Image> = asset_server.load(path);
-                icon_handles.handles.push((format!("{:?}", item_id), handle));
-            }
+        for (item_id, path) in ITEM_ICON_PATHS {
+            let handle: Handle<Image> = asset_server.load(*path);
+            icon_handles.handles.push((*item_id, handle));
         }
         return;
     }
@@ -491,9 +464,9 @@ pub fn load_item_icons(
     }
 
     // Register textures with egui
-    for (item_key, handle) in &icon_handles.handles {
+    for (item_id, handle) in &icon_handles.handles {
         let texture_id = contexts.add_image(handle.clone());
-        item_icons.textures.insert(item_key.clone(), texture_id);
+        item_icons.textures.insert(*item_id, texture_id);
     }
 
     item_icons.loaded = true;
@@ -1390,8 +1363,7 @@ fn render_equipment_panel(
                 let mut text_offset_x = 0.0;
                 if let Some(id) = item_id {
                     if let Some(icons) = item_icons {
-                        let icon_key = format!("{:?}", id);
-                        if let Some(&texture_id) = icons.textures.get(&icon_key) {
+                        if let Some(&texture_id) = icons.textures.get(id) {
                             let icon_rect = egui::Rect::from_min_size(
                                 rect.min,
                                 egui::vec2(icon_size, icon_size),
@@ -1484,8 +1456,7 @@ fn render_equipment_panel(
                         let response = ui.horizontal(|ui| {
                             // Draw item icon if available
                             if let Some(icons) = item_icons {
-                                let icon_key = format!("{:?}", item_id);
-                                if let Some(&texture_id) = icons.textures.get(&icon_key) {
+                                if let Some(&texture_id) = icons.textures.get(item_id) {
                                     let (icon_rect, _) = ui.allocate_exact_size(
                                         egui::vec2(picker_icon_size, picker_icon_size),
                                         egui::Sense::hover(),
