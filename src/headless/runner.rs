@@ -9,7 +9,7 @@ use std::time::Duration;
 use crate::combat::log::{CombatLog, CombatLogEventType, CombatantMetadata, MatchMetadata};
 use crate::states::match_config::MatchConfig;
 use crate::states::play_match::AbilityConfigPlugin;
-use crate::states::play_match::equipment::{EquipmentPlugin, ItemDefinitions, DefaultLoadouts, resolve_loadout, format_loadout};
+use crate::states::play_match::equipment::{EquipmentPlugin, ItemDefinitions, DefaultLoadouts, resolve_loadout, enforce_two_hand_conflicts, format_loadout};
 // Use the stable systems API instead of importing internal functions directly
 use crate::states::play_match::systems::{
     self, combatant_id, Combatant, FloatingTextState, GameRng, MatchCountdown, ShadowSightState,
@@ -155,7 +155,8 @@ fn headless_setup_match(
             let rogue_opener = config.team1_rogue_openers.get(i).copied().unwrap_or_default();
             let warlock_curse_prefs = config.team1_warlock_curse_prefs.get(i).cloned().unwrap_or_default();
             let equipment_overrides = config.team1_equipment.get(i).cloned().unwrap_or_default();
-            let loadout = resolve_loadout(*character, &default_loadouts, &equipment_overrides);
+            let mut loadout = resolve_loadout(*character, &default_loadouts, &equipment_overrides);
+            enforce_two_hand_conflicts(&mut loadout, &item_defs);
             let position = Vec3::new(team1_spawn_x, 1.0, (i as f32 - 1.0) * 3.0);
             let mut combatant = Combatant::new_with_curse_prefs(1, i as u8, *character, rogue_opener, warlock_curse_prefs);
             combatant.apply_equipment(&loadout, &item_defs);
@@ -224,7 +225,8 @@ fn headless_setup_match(
             let rogue_opener = config.team2_rogue_openers.get(i).copied().unwrap_or_default();
             let warlock_curse_prefs = config.team2_warlock_curse_prefs.get(i).cloned().unwrap_or_default();
             let equipment_overrides = config.team2_equipment.get(i).cloned().unwrap_or_default();
-            let loadout = resolve_loadout(*character, &default_loadouts, &equipment_overrides);
+            let mut loadout = resolve_loadout(*character, &default_loadouts, &equipment_overrides);
+            enforce_two_hand_conflicts(&mut loadout, &item_defs);
             let position = Vec3::new(team2_spawn_x, 1.0, (i as f32 - 1.0) * 3.0);
             let mut combatant = Combatant::new_with_curse_prefs(2, i as u8, *character, rogue_opener, warlock_curse_prefs);
             combatant.apply_equipment(&loadout, &item_defs);

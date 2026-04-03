@@ -71,7 +71,7 @@ use bevy::prelude::*;
 use super::match_config::{self, MatchConfig};
 use super::GameState;
 use crate::combat::log::{CombatLog, CombatLogEventType};
-use equipment::{ItemDefinitions, DefaultLoadouts, ItemSlot, ItemId, resolve_loadout, format_loadout};
+use equipment::{ItemDefinitions, DefaultLoadouts, ItemSlot, ItemId, resolve_loadout, enforce_two_hand_conflicts, format_loadout};
 
 // ============================================================================
 // Helper Functions
@@ -345,9 +345,10 @@ pub fn setup_play_match(
             // Get warlock curse preferences for this slot (empty vec if none configured)
             let warlock_curse_prefs = config.team1_warlock_curse_prefs.get(i).cloned().unwrap_or_default();
 
-            // Resolve equipment loadout (defaults + overrides)
+            // Resolve equipment loadout (defaults + overrides), enforcing 2H constraints
             let equipment_overrides = config.team1_equipment.get(i).cloned().unwrap_or_default();
-            let loadout = resolve_loadout(*character, &default_loadouts, &equipment_overrides);
+            let mut loadout = resolve_loadout(*character, &default_loadouts, &equipment_overrides);
+            enforce_two_hand_conflicts(&mut loadout, &item_defs);
 
             let position = Vec3::new(team1_spawn_x, 1.0, (i as f32 - 1.0) * 3.0);
             let (entity, combatant) = spawn_combatant(
@@ -425,9 +426,10 @@ pub fn setup_play_match(
             // Get warlock curse preferences for this slot (empty vec if none configured)
             let warlock_curse_prefs = config.team2_warlock_curse_prefs.get(i).cloned().unwrap_or_default();
 
-            // Resolve equipment loadout (defaults + overrides)
+            // Resolve equipment loadout (defaults + overrides), enforcing 2H constraints
             let equipment_overrides = config.team2_equipment.get(i).cloned().unwrap_or_default();
-            let loadout = resolve_loadout(*character, &default_loadouts, &equipment_overrides);
+            let mut loadout = resolve_loadout(*character, &default_loadouts, &equipment_overrides);
+            enforce_two_hand_conflicts(&mut loadout, &item_defs);
 
             let position = Vec3::new(team2_spawn_x, 1.0, (i as f32 - 1.0) * 3.0);
             let (entity, combatant) = spawn_combatant(

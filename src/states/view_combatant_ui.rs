@@ -17,7 +17,7 @@ use super::play_match::abilities::{ScalingStat, SpellSchool};
 use super::play_match::ability_config::{AbilityDefinitions, AbilityConfig};
 use super::play_match::components::AuraType;
 use super::play_match::rendering::get_ability_icon_path;
-use super::play_match::equipment::{ItemSlot, ItemId, ItemConfig, ItemDefinitions, DefaultLoadouts, resolve_loadout};
+use super::play_match::equipment::{ItemSlot, ItemId, ItemConfig, ItemDefinitions, DefaultLoadouts, resolve_loadout, enforce_two_hand_conflicts, find_one_handed_mainhand};
 
 /// Tracks which equipment slot has its picker open (if any)
 #[derive(Default)]
@@ -68,23 +68,34 @@ struct ClassStats {
 struct EquipmentBonuses {
     health: f32,
     mana: f32,
+    mana_regen: f32,
     attack_power: f32,
     spell_power: f32,
     crit_chance: f32,
     move_speed: f32,
+    /// If a primary weapon is equipped, its attack speed replaces the base.
+    /// None means no weapon replacement (use base attack speed).
+    weapon_attack_speed: Option<f32>,
 }
 
 impl EquipmentBonuses {
-    fn from_loadout(loadout: &HashMap<ItemSlot, ItemId>, items: &ItemDefinitions) -> Self {
+    fn from_loadout(loadout: &HashMap<ItemSlot, ItemId>, items: &ItemDefinitions, class: CharacterClass) -> Self {
         let mut bonuses = Self::default();
-        for (_, item_id) in loadout {
+        // Determine which weapon slot is primary (melee classes use MainHand, ranged use Ranged)
+        let primary_weapon_slot = if class.is_melee() { ItemSlot::MainHand } else { ItemSlot::Ranged };
+        for (slot, item_id) in loadout {
             if let Some(item) = items.get(item_id) {
                 bonuses.health += item.max_health;
                 bonuses.mana += item.max_mana;
+                bonuses.mana_regen += item.mana_regen;
                 bonuses.attack_power += item.attack_power;
                 bonuses.spell_power += item.spell_power;
                 bonuses.crit_chance += item.crit_chance;
                 bonuses.move_speed += item.movement_speed;
+                // Track weapon attack speed replacement for primary slot
+                if *slot == primary_weapon_slot && item.is_weapon && item.attack_speed > 0.0 {
+                    bonuses.weapon_attack_speed = Some(item.attack_speed);
+                }
             }
         }
         bonuses
@@ -408,8 +419,9 @@ pub fn view_combatant_ui(
     } else {
         match_config.team2_equipment.get(view_state.slot).cloned().unwrap_or_default()
     };
-    let resolved_loadout = resolve_loadout(class, &default_loadouts, &equip_overrides);
-    let equip_bonuses = EquipmentBonuses::from_loadout(&resolved_loadout, &item_definitions);
+    let mut resolved_loadout = resolve_loadout(class, &default_loadouts, &equip_overrides);
+    enforce_two_hand_conflicts(&mut resolved_loadout, &item_definitions);
+    let equip_bonuses = EquipmentBonuses::from_loadout(&resolved_loadout, &item_definitions, class);
 
     // Get class color
     let class_color = class.color();
@@ -632,6 +644,8 @@ pub fn view_combatant_ui(
                     &default_loadouts,
                     &mut picker_state,
                     class,
+                    &resolved_loadout,
+                    &equip_overrides,
                 );
             });
             }); // ScrollArea
@@ -733,7 +747,35 @@ fn render_stats_panel(ui: &mut egui::Ui, stats: &ClassStats, equip: &EquipmentBo
                     ui.end_row();
                 }
 
-                stat_row_float(ui, "Attack Speed:", stats.attack_speed, 0.0, "/s", neutral, green, red, label_color);
+                // Mana regen (only show if equipment provides it)
+                if equip.mana_regen > 0.0 {
+                    ui.label(egui::RichText::new("Mana Regen:").size(14.0).color(label_color));
+                    let regen_text = format!("+{:.1} MP5", equip.mana_regen);
+                    let regen_response = ui.label(egui::RichText::new(&regen_text).size(14.0).color(green));
+                    if regen_response.hovered() {
+                        egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), ui.id().with("regen_tooltip"), |ui| {
+                            ui.label(format!("{:.1} from equipment", equip.mana_regen));
+                        });
+                    }
+                    ui.end_row();
+                }
+
+                // Attack speed: show weapon replacement if a weapon overrides it
+                if let Some(weapon_speed) = equip.weapon_attack_speed {
+                    ui.label(egui::RichText::new("Attack Speed:").size(14.0).color(label_color));
+                    let speed_text = format!("{:.1}/s", weapon_speed);
+                    let speed_color = if (weapon_speed - stats.attack_speed).abs() > 0.01 { green } else { neutral };
+                    let speed_response = ui.label(egui::RichText::new(&speed_text).size(14.0).color(speed_color));
+                    if (weapon_speed - stats.attack_speed).abs() > 0.01 && speed_response.hovered() {
+                        egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), ui.id().with("speed_tooltip"), |ui| {
+                            ui.label(format!("{:.1} base → {:.1} from weapon", stats.attack_speed, weapon_speed));
+                        });
+                    }
+                    ui.end_row();
+                } else {
+                    stat_row_float(ui, "Attack Speed:", stats.attack_speed, 0.0, "/s", neutral, green, red, label_color);
+                }
+
                 stat_row_float(ui, "Move Speed:", stats.move_speed, equip.move_speed, "/s", neutral, green, red, label_color);
             });
     });
@@ -1112,7 +1154,7 @@ const WEAPON_SLOTS: &[ItemSlot] = &[
     ItemSlot::MainHand, ItemSlot::OffHand, ItemSlot::Ranged,
 ];
 
-/// Render the equipment loadout panel — slot list, picker, and stat totals.
+/// Render the equipment loadout panel — slot list and picker.
 fn render_equipment_panel(
     ui: &mut egui::Ui,
     width: f32,
@@ -1122,22 +1164,14 @@ fn render_equipment_panel(
     defaults: &Res<DefaultLoadouts>,
     picker_state: &mut EquipmentPickerState,
     class: CharacterClass,
+    resolved: &HashMap<ItemSlot, ItemId>,
+    overrides: &HashMap<ItemSlot, ItemId>,
 ) {
     let gold = egui::Color32::from_rgb(255, 215, 0);
     let title_color = egui::Color32::from_rgb(230, 204, 153);
     let subtitle_color = egui::Color32::from_rgb(170, 170, 170);
     let muted_color = egui::Color32::from_rgb(90, 90, 90);
     let override_color = egui::Color32::from_rgb(100, 255, 100); // green for overrides
-
-    // Get current overrides for this combatant
-    let overrides = if view_state.team == 1 {
-        match_config.team1_equipment.get(view_state.slot).cloned().unwrap_or_default()
-    } else {
-        match_config.team2_equipment.get(view_state.slot).cloned().unwrap_or_default()
-    };
-
-    // Resolve the full loadout (defaults + overrides)
-    let resolved = resolve_loadout(class, defaults, &overrides);
 
     // Track which slot was clicked to open picker
     let mut clicked_slot: Option<ItemSlot> = None;
@@ -1301,8 +1335,7 @@ enum PickerAction {
 }
 
 /// Apply or remove an equipment override for the viewed combatant.
-/// Handles 2H/OH conflicts: equipping a 2H weapon clears off-hand,
-/// equipping an off-hand clears any 2H main-hand weapon.
+/// Handles 2H/OH conflicts using shared helpers from equipment.rs.
 fn set_equipment_override(
     match_config: &mut ResMut<MatchConfig>,
     view_state: &Res<ViewCombatantState>,
@@ -1321,29 +1354,33 @@ fn set_equipment_override(
     if let Some(equip_map) = equipment {
         match item {
             Some(id) => {
+                // Equipping an off-hand while a 2H is in main-hand → swap MH to 1H first
+                if slot == ItemSlot::OffHand {
+                    let mut resolved = resolve_loadout(class, defaults, equip_map);
+                    enforce_two_hand_conflicts(&mut resolved, items);
+                    // Check if *after* enforcement the MH is still 2H (shouldn't be, but check the
+                    // pre-enforcement state to decide whether to swap)
+                    let pre_resolved = resolve_loadout(class, defaults, equip_map);
+                    let mh_is_2h = pre_resolved.get(&ItemSlot::MainHand)
+                        .and_then(|id| items.get(id))
+                        .map_or(false, |item| item.two_handed);
+                    if mh_is_2h {
+                        if let Some(replacement) = find_one_handed_mainhand(items, class) {
+                            equip_map.insert(ItemSlot::MainHand, replacement);
+                        } else {
+                            return; // No 1H exists — prevent the off-hand equip
+                        }
+                    }
+                }
+
                 equip_map.insert(slot, id);
 
-                if let Some(new_item) = items.get(&id) {
-                    // Equipping a 2H main-hand → clear off-hand
-                    if slot == ItemSlot::MainHand && new_item.two_handed {
-                        equip_map.remove(&ItemSlot::OffHand);
-                    }
-
-                    // Equipping an off-hand → replace 2H main-hand with a 1H weapon
-                    if slot == ItemSlot::OffHand {
-                        let resolved = resolve_loadout(class, defaults, equip_map);
-                        if let Some(mh_id) = resolved.get(&ItemSlot::MainHand) {
-                            if let Some(mh_item) = items.get(mh_id) {
-                                if mh_item.two_handed {
-                                    // Find the first 1H main-hand weapon this class can use
-                                    let one_hand = items.items_for_slot(ItemSlot::MainHand, class)
-                                        .into_iter()
-                                        .find(|(_, item)| !item.two_handed);
-                                    if let Some((replacement_id, _)) = one_hand {
-                                        equip_map.insert(ItemSlot::MainHand, replacement_id);
-                                    }
-                                }
-                            }
+                // Equipping a 2H main-hand → clear off-hand override
+                // (enforce_two_hand_conflicts handles the default off-hand at resolve time)
+                if slot == ItemSlot::MainHand {
+                    if let Some(new_item) = items.get(&id) {
+                        if new_item.two_handed {
+                            equip_map.remove(&ItemSlot::OffHand);
                         }
                     }
                 }
@@ -1354,27 +1391,22 @@ fn set_equipment_override(
                 // After resetting, check if the default creates a 2H conflict
                 let resolved = resolve_loadout(class, defaults, equip_map);
                 if slot == ItemSlot::MainHand {
-                    // Reset main-hand to default — if default is 2H, clear off-hand
-                    if let Some(mh_id) = resolved.get(&ItemSlot::MainHand) {
-                        if let Some(mh_item) = items.get(mh_id) {
-                            if mh_item.two_handed {
-                                equip_map.remove(&ItemSlot::OffHand);
-                            }
-                        }
+                    // Reset main-hand to default — if default is 2H, clear off-hand override
+                    let mh_is_2h = resolved.get(&ItemSlot::MainHand)
+                        .and_then(|id| items.get(id))
+                        .map_or(false, |item| item.two_handed);
+                    if mh_is_2h {
+                        equip_map.remove(&ItemSlot::OffHand);
                     }
                 } else if slot == ItemSlot::OffHand {
-                    // Reset off-hand to default — if default off-hand exists and main-hand is 2H, swap main-hand
+                    // Reset off-hand to default — if default OH exists and MH is 2H, swap MH
                     if resolved.contains_key(&ItemSlot::OffHand) {
-                        if let Some(mh_id) = resolved.get(&ItemSlot::MainHand) {
-                            if let Some(mh_item) = items.get(mh_id) {
-                                if mh_item.two_handed {
-                                    let one_hand = items.items_for_slot(ItemSlot::MainHand, class)
-                                        .into_iter()
-                                        .find(|(_, item)| !item.two_handed);
-                                    if let Some((replacement_id, _)) = one_hand {
-                                        equip_map.insert(ItemSlot::MainHand, replacement_id);
-                                    }
-                                }
+                        let mh_is_2h = resolved.get(&ItemSlot::MainHand)
+                            .and_then(|id| items.get(id))
+                            .map_or(false, |item| item.two_handed);
+                        if mh_is_2h {
+                            if let Some(replacement) = find_one_handed_mainhand(items, class) {
+                                equip_map.insert(ItemSlot::MainHand, replacement);
                             }
                         }
                     }

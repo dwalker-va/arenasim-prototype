@@ -346,6 +346,26 @@ pub fn resolve_loadout(
     loadout
 }
 
+/// Strip off-hand from a resolved loadout when the main-hand is a two-handed weapon.
+/// Call this after `resolve_loadout` to enforce the 2H constraint.
+pub fn enforce_two_hand_conflicts(loadout: &mut HashMap<ItemSlot, ItemId>, items: &ItemDefinitions) {
+    let has_2h = loadout.get(&ItemSlot::MainHand)
+        .and_then(|id| items.get(id))
+        .map_or(false, |item| item.two_handed);
+    if has_2h {
+        loadout.remove(&ItemSlot::OffHand);
+    }
+}
+
+/// Find the first available one-handed main-hand weapon for a class, sorted by name.
+/// Returns None if only two-handed weapons exist.
+pub fn find_one_handed_mainhand(items: &ItemDefinitions, class: CharacterClass) -> Option<ItemId> {
+    items.items_for_slot(ItemSlot::MainHand, class)
+        .into_iter()
+        .find(|(_, item)| !item.two_handed)
+        .map(|(id, _)| id)
+}
+
 // ============================================================================
 // RESOURCES
 // ============================================================================
@@ -925,5 +945,79 @@ mod tests {
         let ring_items = items.items_for_slot(ItemSlot::Ring1, CharacterClass::Warrior);
         assert_eq!(ring_items[0].1.name, "Alpha Ring");
         assert_eq!(ring_items[1].1.name, "Zebra Ring");
+    }
+
+    // ---- enforce_two_hand_conflicts tests ----
+
+    fn two_handed_weapon(name: &str) -> ItemConfig {
+        let mut item = weapon_item(name, ItemSlot::MainHand, 20.0, 30.0, 0.9);
+        item.two_handed = true;
+        item
+    }
+
+    #[test]
+    fn enforce_2h_strips_offhand_when_mainhand_is_2h() {
+        let items = make_item_defs(vec![
+            (ItemId::ArcaniteReaper, two_handed_weapon("Arcanite Reaper")),
+            (ItemId::WallOfTheDeadShield, armor_item("Shield", ItemSlot::OffHand, ArmorType::None)),
+        ]);
+        let mut loadout = HashMap::new();
+        loadout.insert(ItemSlot::MainHand, ItemId::ArcaniteReaper);
+        loadout.insert(ItemSlot::OffHand, ItemId::WallOfTheDeadShield);
+
+        enforce_two_hand_conflicts(&mut loadout, &items);
+
+        assert_eq!(loadout.get(&ItemSlot::MainHand), Some(&ItemId::ArcaniteReaper));
+        assert!(!loadout.contains_key(&ItemSlot::OffHand), "Off-hand should be stripped when 2H is equipped");
+    }
+
+    #[test]
+    fn enforce_2h_keeps_offhand_when_mainhand_is_1h() {
+        let items = make_item_defs(vec![
+            (ItemId::FrostbiteBlade, weapon_item("Frostbite", ItemSlot::MainHand, 10.0, 14.0, 1.1)),
+            (ItemId::WallOfTheDeadShield, armor_item("Shield", ItemSlot::OffHand, ArmorType::None)),
+        ]);
+        let mut loadout = HashMap::new();
+        loadout.insert(ItemSlot::MainHand, ItemId::FrostbiteBlade);
+        loadout.insert(ItemSlot::OffHand, ItemId::WallOfTheDeadShield);
+
+        enforce_two_hand_conflicts(&mut loadout, &items);
+
+        assert!(loadout.contains_key(&ItemSlot::OffHand), "Off-hand should remain with 1H weapon");
+    }
+
+    #[test]
+    fn enforce_2h_no_mainhand_is_noop() {
+        let items = make_item_defs(vec![
+            (ItemId::WallOfTheDeadShield, armor_item("Shield", ItemSlot::OffHand, ArmorType::None)),
+        ]);
+        let mut loadout = HashMap::new();
+        loadout.insert(ItemSlot::OffHand, ItemId::WallOfTheDeadShield);
+
+        enforce_two_hand_conflicts(&mut loadout, &items);
+
+        assert!(loadout.contains_key(&ItemSlot::OffHand), "Off-hand should remain when no main-hand");
+    }
+
+    // ---- find_one_handed_mainhand tests ----
+
+    #[test]
+    fn find_1h_returns_first_non_2h_weapon() {
+        let items = make_item_defs(vec![
+            (ItemId::ArcaniteReaper, two_handed_weapon("Arcanite Reaper")),
+            (ItemId::FrostbiteBlade, weapon_item("Frostbite Blade", ItemSlot::MainHand, 10.0, 14.0, 1.1)),
+        ]);
+        let result = find_one_handed_mainhand(&items, CharacterClass::Warrior);
+        assert_eq!(result, Some(ItemId::FrostbiteBlade));
+    }
+
+    #[test]
+    fn find_1h_returns_none_when_only_2h_exist() {
+        let items = make_item_defs(vec![
+            (ItemId::ArcaniteReaper, two_handed_weapon("Arcanite Reaper")),
+            (ItemId::CrescentStaff, two_handed_weapon("Crescent Staff")),
+        ]);
+        let result = find_one_handed_mainhand(&items, CharacterClass::Warrior);
+        assert_eq!(result, None);
     }
 }
