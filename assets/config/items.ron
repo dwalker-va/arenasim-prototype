@@ -487,6 +487,14 @@
             spell_power: 4.0,
         ),
 
+        CloakOfFrostWarding: (
+            name: "Cloak of Frost Warding",
+            item_level: 55,
+            slot: Back,
+            max_health: 6.0,
+            frost_resistance: 25.0,
+        ),
+
         // ====================================================================
         // NECKLACES (all classes)
         // ====================================================================
@@ -505,6 +513,14 @@
             slot: Neck,
             max_health: 12.0,
             spell_power: 4.0,
+        ),
+
+        AmuletOfShadowWard: (
+            name: "Amulet of Shadow Ward",
+            item_level: 55,
+            slot: Neck,
+            max_health: 6.0,
+            shadow_resistance: 20.0,
         ),
 
         // ====================================================================
@@ -532,6 +548,16 @@
             item_level: 55,
             slot: Ring2,
             max_health: 10.0,
+        ),
+
+        BandOfElementalResistance: (
+            name: "Band of Elemental Resistance",
+            item_level: 55,
+            slot: Ring2,
+            max_health: 4.0,
+            fire_resistance: 15.0,
+            frost_resistance: 15.0,
+            nature_resistance: 15.0,
         ),
 
         // ====================================================================

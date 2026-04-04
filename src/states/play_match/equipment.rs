@@ -183,15 +183,18 @@ pub enum ItemId {
     // === Cloaks (all classes) ===
     CloakOfTheShieldWall,
     CloakOfConcentration,
+    CloakOfFrostWarding,
 
     // === Necklaces (all classes) ===
     AmuletOfPower,
     AmuletOfResilience,
+    AmuletOfShadowWard,
 
     // === Rings (all classes) ===
     BandOfAccuria,
     SignetOfFocus,
     RingOfProtection,
+    BandOfElementalResistance,
 
     // === Trinkets (all classes) ===
     MarkOfTheChampion,
