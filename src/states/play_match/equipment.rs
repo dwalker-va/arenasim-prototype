@@ -129,7 +129,7 @@ pub enum WeaponType {
 /// Unique item identifier — each named item in the game
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ItemId {
-    // === Plate Armor (Warrior, Paladin) ===
+    // === Plate Armor — DPS (Warrior) ===
     LionheartHelm,
     OnslaughtHeadGuard,
     ConquerorsChestplate,
@@ -139,6 +139,16 @@ pub enum ItemId {
     WaistguardOfHeroism,
     WristguardsOfStability,
     ShoulderplatesOfValor,
+
+    // === Plate Armor — Holy (Paladin) ===
+    LawbringerHelm,
+    LawbringerSpaulders,
+    LawbringerChestguard,
+    LawbringerBracers,
+    LawbringerGauntlets,
+    LawbringerBelt,
+    LawbringerLegplates,
+    LawbringerBoots,
 
     // === Mail Armor (Hunter, Warrior, Paladin) ===
     BeaststalkerHelm,
@@ -203,6 +213,7 @@ pub enum ItemId {
     // === Off Hand ===
     TomeOfKnowledge,
     WallOfTheDeadShield,
+    AegisOfTheBloodGod,
 }
 
 // ============================================================================
