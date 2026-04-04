@@ -167,6 +167,12 @@ struct EquipmentBonuses {
     crit_chance: f32,
     move_speed: f32,
     armor: f32,
+    fire_resistance: f32,
+    frost_resistance: f32,
+    shadow_resistance: f32,
+    arcane_resistance: f32,
+    nature_resistance: f32,
+    holy_resistance: f32,
     /// If a primary weapon is equipped, its attack speed replaces the base.
     /// None means no weapon replacement (use base attack speed).
     weapon_attack_speed: Option<f32>,
@@ -187,6 +193,12 @@ impl EquipmentBonuses {
                 bonuses.crit_chance += item.crit_chance;
                 bonuses.move_speed += item.movement_speed;
                 bonuses.armor += item.armor;
+                bonuses.fire_resistance += item.fire_resistance;
+                bonuses.frost_resistance += item.frost_resistance;
+                bonuses.shadow_resistance += item.shadow_resistance;
+                bonuses.arcane_resistance += item.arcane_resistance;
+                bonuses.nature_resistance += item.nature_resistance;
+                bonuses.holy_resistance += item.holy_resistance;
                 // Track weapon attack speed replacement for primary slot
                 if *slot == primary_weapon_slot && item.is_weapon && item.attack_speed > 0.0 {
                     bonuses.weapon_attack_speed = Some(item.attack_speed);
@@ -934,6 +946,30 @@ fn render_stats_panel(ui: &mut egui::Ui, stats: &ClassStats, equip: &EquipmentBo
                     }
                     ui.end_row();
                 }
+
+                // Spell resistances (only show non-zero values)
+                let resistances: &[(&str, f32, &str)] = &[
+                    ("Fire Resist:", equip.fire_resistance, "fire_res"),
+                    ("Frost Resist:", equip.frost_resistance, "frost_res"),
+                    ("Shadow Resist:", equip.shadow_resistance, "shadow_res"),
+                    ("Arcane Resist:", equip.arcane_resistance, "arcane_res"),
+                    ("Nature Resist:", equip.nature_resistance, "nature_res"),
+                    ("Holy Resist:", equip.holy_resistance, "holy_res"),
+                ];
+                for (label, value, tooltip_id) in resistances {
+                    if *value > 0.0 {
+                        let reduction_pct = value / (value * 5.0 / 3.0 + 300.0) * 100.0;
+                        ui.label(egui::RichText::new(*label).size(14.0).color(label_color));
+                        let res_text = format!("{:.0}", value);
+                        let res_response = ui.label(egui::RichText::new(&res_text).size(14.0).color(green));
+                        if res_response.hovered() {
+                            egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), ui.id().with(*tooltip_id), |ui| {
+                                ui.label(format!("{:.0} from equipment ({:.1}% damage reduction)", value, reduction_pct));
+                            });
+                        }
+                        ui.end_row();
+                    }
+                }
             });
     });
 }
@@ -1649,6 +1685,13 @@ fn item_stat_parts(item: &ItemConfig) -> Vec<String> {
     if item.spell_power != 0.0 { parts.push(format!("+{:.0} SP", item.spell_power)); }
     if item.crit_chance != 0.0 { parts.push(format!("+{:.1}% Crit", item.crit_chance * 100.0)); }
     if item.movement_speed != 0.0 { parts.push(format!("+{:.0}% Speed", item.movement_speed * 100.0)); }
+    if item.armor != 0.0 { parts.push(format!("{:.0} Armor", item.armor)); }
+    if item.fire_resistance != 0.0 { parts.push(format!("+{:.0} Fire Resist", item.fire_resistance)); }
+    if item.frost_resistance != 0.0 { parts.push(format!("+{:.0} Frost Resist", item.frost_resistance)); }
+    if item.shadow_resistance != 0.0 { parts.push(format!("+{:.0} Shadow Resist", item.shadow_resistance)); }
+    if item.arcane_resistance != 0.0 { parts.push(format!("+{:.0} Arcane Resist", item.arcane_resistance)); }
+    if item.nature_resistance != 0.0 { parts.push(format!("+{:.0} Nature Resist", item.nature_resistance)); }
+    if item.holy_resistance != 0.0 { parts.push(format!("+{:.0} Holy Resist", item.holy_resistance)); }
 
     parts
 }
