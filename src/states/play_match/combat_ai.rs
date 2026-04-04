@@ -901,6 +901,11 @@ pub fn check_interrupts(
             continue;
         }
 
+        // WoW Mechanic: Cannot use interrupts while stunned, feared, or polymorphed
+        if super::utils::is_incapacitated(all_auras.get(entity).ok()) {
+            continue;
+        }
+
         // Only Warriors and Rogues have interrupts
         if combatant.class != match_config::CharacterClass::Warrior
             && combatant.class != match_config::CharacterClass::Rogue {
