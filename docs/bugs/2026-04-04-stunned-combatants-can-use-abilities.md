@@ -2,7 +2,7 @@
 date: 2026-04-04
 type: bug
 severity: high
-status: open
+status: fixed
 ---
 
 # Bug: Stunned Combatants Can Use Abilities
@@ -10,6 +10,12 @@ status: open
 ## Summary
 
 Combatants under Stun CC effects (e.g., Hammer of Justice) can still use instant-cast abilities like Kick. Stun should prevent all actions: movement, casting, auto-attacks, and abilities.
+
+## Resolution
+
+**Root cause:** The `check_interrupts` system in `combat_ai.rs` was a separate Bevy system from `decide_abilities` and did not check for incapacitation before allowing Warriors and Rogues to use interrupt abilities (Kick, Pummel). The centralized AI gate in `decide_abilities` correctly blocked all other abilities during stun, but `check_interrupts` bypassed it entirely.
+
+**Fix:** Added an `is_incapacitated()` guard at the top of the `check_interrupts` combatant loop, matching the existing pattern used in `combat_auto_attack` and `decide_abilities`.
 
 ## Reproduction
 
