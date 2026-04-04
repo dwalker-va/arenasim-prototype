@@ -158,6 +158,7 @@ pub fn get_aura_icon_key(aura: &Aura) -> String {
         AuraType::DamageTakenReduction => "aura_max_health".to_string(), // Devotion Aura buff, reuse buff icon
         AuraType::DamageImmunity => "aura_absorb".to_string(), // Divine Shield, reuse absorb icon as fallback
         AuraType::Incapacitate => "aura_stun".to_string(), // Reuse stun icon (frozen in place)
+        AuraType::SpellResistanceBuff => "aura_max_health".to_string(), // Resistance buff, reuse buff icon
     }
 }
 

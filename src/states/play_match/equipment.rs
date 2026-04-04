@@ -261,6 +261,27 @@ pub struct ItemConfig {
     pub crit_chance: f32,
     #[serde(default)]
     pub movement_speed: f32,
+    /// Armor rating (reduces incoming Physical damage)
+    #[serde(default)]
+    pub armor: f32,
+    /// Fire spell resistance
+    #[serde(default)]
+    pub fire_resistance: f32,
+    /// Frost spell resistance
+    #[serde(default)]
+    pub frost_resistance: f32,
+    /// Shadow spell resistance
+    #[serde(default)]
+    pub shadow_resistance: f32,
+    /// Arcane spell resistance
+    #[serde(default)]
+    pub arcane_resistance: f32,
+    /// Nature spell resistance
+    #[serde(default)]
+    pub nature_resistance: f32,
+    /// Holy spell resistance
+    #[serde(default)]
+    pub holy_resistance: f32,
 
     // === Weapon Stats (only for is_weapon: true) ===
     /// Weapon minimum damage (replaces combatant attack_damage for primary weapon slot)
@@ -594,6 +615,13 @@ mod tests {
             spell_power: 5.0,
             crit_chance: 0.01,
             movement_speed: 0.0,
+            armor: 0.0,
+            fire_resistance: 0.0,
+            frost_resistance: 0.0,
+            shadow_resistance: 0.0,
+            arcane_resistance: 0.0,
+            nature_resistance: 0.0,
+            holy_resistance: 0.0,
             attack_damage_min: 0.0,
             attack_damage_max: 0.0,
             attack_speed: 0.0,
@@ -618,6 +646,13 @@ mod tests {
             spell_power: 0.0,
             crit_chance: 0.0,
             movement_speed: 0.0,
+            armor: 0.0,
+            fire_resistance: 0.0,
+            frost_resistance: 0.0,
+            shadow_resistance: 0.0,
+            arcane_resistance: 0.0,
+            nature_resistance: 0.0,
+            holy_resistance: 0.0,
             attack_damage_min: dmg_min,
             attack_damage_max: dmg_max,
             attack_speed: speed,

@@ -6,6 +6,7 @@ use bevy_egui::egui;
 use crate::combat::log::CombatLog;
 use super::super::match_config;
 use super::super::components::*;
+use super::super::abilities::SpellSchool;
 use super::super::constants::CRIT_DAMAGE_MULTIPLIER;
 use super::super::utils::get_next_fct_offset;
 use super::super::{MELEE_RANGE, WAND_RANGE, HUNTER_DEAD_ZONE, AUTO_SHOT_RANGE, FCT_HEIGHT};
@@ -235,6 +236,7 @@ pub fn combat_auto_attack(
                     damage,
                     &mut target,
                     target_auras.as_deref_mut(),
+                    SpellSchool::Physical,
                 );
 
                 // Warriors generate Rage from taking damage (only on actual health damage)

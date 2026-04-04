@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 use super::super::match_config::{self, RogueOpener, WarlockCurse};
-use super::super::abilities::{AbilityType, ScalingStat};
+use super::super::abilities::{AbilityType, ScalingStat, SpellSchool};
 use super::super::ability_config::AbilityConfig;
 use super::super::equipment::{ItemSlot, ItemId, ItemDefinitions};
 use super::auras::AuraType;
@@ -129,6 +129,21 @@ pub struct Combatant {
     /// Critical strike chance (0.0 = 0%, 1.0 = 100%). Determines probability of
     /// dealing bonus damage/healing on direct abilities and auto-attacks.
     pub crit_chance: f32,
+    /// Armor rating - reduces incoming Physical spell school damage.
+    /// Formula: Reduction % = armor / (armor + 5500)
+    pub armor: f32,
+    /// Fire spell resistance
+    pub fire_resistance: f32,
+    /// Frost spell resistance
+    pub frost_resistance: f32,
+    /// Shadow spell resistance
+    pub shadow_resistance: f32,
+    /// Arcane spell resistance
+    pub arcane_resistance: f32,
+    /// Nature spell resistance
+    pub nature_resistance: f32,
+    /// Holy spell resistance
+    pub holy_resistance: f32,
     /// Base movement speed in units per second (modified by auras/debuffs)
     pub base_movement_speed: f32,
     /// Current target entity for damage (None if no valid target)
@@ -203,6 +218,13 @@ impl Combatant {
             attack_power,
             spell_power,
             crit_chance,
+            armor: 0.0,
+            fire_resistance: 0.0,
+            frost_resistance: 0.0,
+            shadow_resistance: 0.0,
+            arcane_resistance: 0.0,
+            nature_resistance: 0.0,
+            holy_resistance: 0.0,
             base_movement_speed: movement_speed,
             target: None,
             cc_target: None,
@@ -281,6 +303,19 @@ impl Combatant {
     /// Check if this combatant is alive (health > 0 and not marked dead).
     pub fn is_alive(&self) -> bool {
         self.current_health > 0.0 && !self.is_dead
+    }
+
+    /// Get the resistance value for a given spell school.
+    pub fn get_resistance(&self, school: SpellSchool) -> f32 {
+        match school {
+            SpellSchool::Fire => self.fire_resistance,
+            SpellSchool::Frost => self.frost_resistance,
+            SpellSchool::Shadow => self.shadow_resistance,
+            SpellSchool::Arcane => self.arcane_resistance,
+            SpellSchool::Nature => self.nature_resistance,
+            SpellSchool::Holy => self.holy_resistance,
+            SpellSchool::Physical | SpellSchool::None => 0.0,
+        }
     }
 
     /// Validate that all combatant invariants hold.
@@ -380,6 +415,13 @@ impl Combatant {
             self.spell_power += item.spell_power;
             self.crit_chance += item.crit_chance;
             self.base_movement_speed += item.movement_speed;
+            self.armor += item.armor;
+            self.fire_resistance += item.fire_resistance;
+            self.frost_resistance += item.frost_resistance;
+            self.shadow_resistance += item.shadow_resistance;
+            self.arcane_resistance += item.arcane_resistance;
+            self.nature_resistance += item.nature_resistance;
+            self.holy_resistance += item.holy_resistance;
 
             // For the primary weapon slot, replace attack_damage and attack_speed
             if item.is_weapon && *slot == primary_weapon_slot {

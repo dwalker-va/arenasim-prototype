@@ -24,6 +24,7 @@ pub fn apply_damage_with_absorb(
     damage: f32,
     target: &mut Combatant,
     active_auras: Option<&mut ActiveAuras>,
+    spell_school: SpellSchool,
 ) -> (f32, f32) {
     // Invariant: damage should never be negative
     debug_assert!(
@@ -49,7 +50,34 @@ pub fn apply_damage_with_absorb(
     let mut remaining_damage = damage;
     let mut total_absorbed = 0.0;
 
-    // First, apply damage taken reduction (e.g., Devotion Aura)
+    // Apply armor reduction for Physical damage
+    if spell_school == SpellSchool::Physical && target.armor > 0.0 {
+        let reduction = target.armor / (target.armor + 5500.0);
+        remaining_damage *= 1.0 - reduction;
+    }
+
+    // Apply spell resistance for magical damage
+    if spell_school != SpellSchool::Physical && spell_school != SpellSchool::None {
+        let mut resistance = target.get_resistance(spell_school);
+
+        // Sum SpellResistanceBuff auras matching this school
+        if let Some(ref auras) = active_auras {
+            for aura in auras.auras.iter() {
+                if aura.effect_type == AuraType::SpellResistanceBuff
+                    && aura.spell_school == Some(spell_school)
+                {
+                    resistance += aura.magnitude;
+                }
+            }
+        }
+
+        if resistance > 0.0 {
+            let reduction = resistance / (resistance * 5.0 / 3.0 + 300.0);
+            remaining_damage *= 1.0 - reduction;
+        }
+    }
+
+    // Apply damage taken reduction (e.g., Devotion Aura)
     // Multiple reductions stack multiplicatively (two 10% reductions = 19% total)
     if let Some(ref auras) = active_auras {
         for aura in auras.auras.iter() {
