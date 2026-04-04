@@ -59,6 +59,10 @@ pub enum AuraType {
     /// Shares DRCategory::Incapacitates with Polymorph.
     /// Used by Freezing Trap.
     Incapacitate,
+    /// Increases spell resistance for a specific school.
+    /// The spell_school field on the Aura identifies which school, magnitude = resistance amount.
+    /// Stacks additively with equipment resistance.
+    SpellResistanceBuff,
 }
 
 impl AuraType {

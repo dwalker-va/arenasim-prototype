@@ -607,8 +607,8 @@ pub fn process_dot_ticks(
         .collect();
     
     // Track DoT damage to apply (to avoid borrow issues)
-    // Format: (target_entity, caster_entity, damage, target_pos, caster_team, caster_class, ability_name)
-    let mut dot_damage_to_apply: Vec<(Entity, Entity, f32, Vec3, u8, match_config::CharacterClass, String)> = Vec::new();
+    // Format: (target_entity, caster_entity, damage, target_pos, caster_team, caster_class, ability_name, spell_school)
+    let mut dot_damage_to_apply: Vec<(Entity, Entity, f32, Vec3, u8, match_config::CharacterClass, String, super::abilities::SpellSchool)> = Vec::new();
     
     // First pass: tick down DoT timers and queue damage
     for (entity, combatant, _transform, mut active_auras) in combatants_with_auras.iter_mut() {
@@ -648,6 +648,7 @@ pub fn process_dot_ticks(
                             caster_team,
                             caster_class,
                             aura.ability_name.clone(),
+                            aura.spell_school.unwrap_or(super::abilities::SpellSchool::None),
                         ));
                     }
                 }
@@ -664,7 +665,7 @@ pub fn process_dot_ticks(
     let mut caster_damage_updates: Vec<(Entity, f32)> = Vec::new();
     
     // Second pass: apply queued DoT damage to targets
-    for (target_entity, caster_entity, damage, target_pos, caster_team, caster_class, ability_name) in dot_damage_to_apply {
+    for (target_entity, caster_entity, damage, target_pos, caster_team, caster_class, ability_name, spell_school) in dot_damage_to_apply {
         // Get target combatant
         let Ok((_, mut target, _, mut target_auras)) = combatants_with_auras.get_mut(target_entity) else {
             continue;
@@ -682,6 +683,7 @@ pub fn process_dot_ticks(
             damage,
             &mut target,
             Some(&mut target_auras),
+            spell_school,
         );
 
         // Track damage for aura breaking (only actual damage, not absorbed)

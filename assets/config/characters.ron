@@ -14,8 +14,7 @@
                 health: 1200.0,
                 attack_power: 120.0,
                 spell_power: 0.0,
-                armor: 50.0,
-                magic_resistance: 20.0,
+
                 attack_speed: 0.8,
                 movement_speed: 5.0,
             ),
@@ -31,8 +30,7 @@
                 health: 900.0,
                 attack_power: 30.0,
                 spell_power: 150.0,
-                armor: 0.0,
-                magic_resistance: 30.0,
+
                 attack_speed: 0.5,
                 movement_speed: 4.5,
             ),
@@ -48,8 +46,7 @@
                 health: 1000.0,
                 attack_power: 100.0,
                 spell_power: 0.0,
-                armor: 20.0,
-                magic_resistance: 10.0,
+
                 attack_speed: 1.5,
                 movement_speed: 6.0,
             ),
@@ -65,8 +62,7 @@
                 health: 950.0,
                 attack_power: 20.0,
                 spell_power: 120.0,
-                armor: 0.0,
-                magic_resistance: 40.0,
+
                 attack_speed: 0.4,
                 movement_speed: 4.0,
             ),

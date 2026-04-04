@@ -153,6 +153,7 @@ struct ClassStats {
     spell_power: u32,
     attack_speed: f32,
     move_speed: f32,
+    armor: f32,
 }
 
 /// Equipment stat contributions for the stats panel
@@ -165,6 +166,7 @@ struct EquipmentBonuses {
     spell_power: f32,
     crit_chance: f32,
     move_speed: f32,
+    armor: f32,
     /// If a primary weapon is equipped, its attack speed replaces the base.
     /// None means no weapon replacement (use base attack speed).
     weapon_attack_speed: Option<f32>,
@@ -184,6 +186,7 @@ impl EquipmentBonuses {
                 bonuses.spell_power += item.spell_power;
                 bonuses.crit_chance += item.crit_chance;
                 bonuses.move_speed += item.movement_speed;
+                bonuses.armor += item.armor;
                 // Track weapon attack speed replacement for primary slot
                 if *slot == primary_weapon_slot && item.is_weapon && item.attack_speed > 0.0 {
                     bonuses.weapon_attack_speed = Some(item.attack_speed);
@@ -205,6 +208,7 @@ fn get_class_stats(class: CharacterClass) -> ClassStats {
             spell_power: 0,
             attack_speed: 1.0,
             move_speed: 5.0,
+            armor: 0.0,
         },
         CharacterClass::Mage => ClassStats {
             health: 150,
@@ -214,6 +218,7 @@ fn get_class_stats(class: CharacterClass) -> ClassStats {
             spell_power: 50,
             attack_speed: 0.7,
             move_speed: 4.5,
+            armor: 0.0,
         },
         CharacterClass::Rogue => ClassStats {
             health: 175,
@@ -223,6 +228,7 @@ fn get_class_stats(class: CharacterClass) -> ClassStats {
             spell_power: 0,
             attack_speed: 1.3,
             move_speed: 6.0,
+            armor: 0.0,
         },
         CharacterClass::Priest => ClassStats {
             health: 150,
@@ -232,6 +238,7 @@ fn get_class_stats(class: CharacterClass) -> ClassStats {
             spell_power: 40,
             attack_speed: 0.8,
             move_speed: 5.0,
+            armor: 0.0,
         },
         CharacterClass::Warlock => ClassStats {
             health: 160,
@@ -241,6 +248,7 @@ fn get_class_stats(class: CharacterClass) -> ClassStats {
             spell_power: 45,
             attack_speed: 0.7,
             move_speed: 4.5,
+            armor: 0.0,
         },
         CharacterClass::Paladin => ClassStats {
             health: 175,
@@ -250,6 +258,7 @@ fn get_class_stats(class: CharacterClass) -> ClassStats {
             spell_power: 35,
             attack_speed: 0.9,
             move_speed: 5.0,
+            armor: 0.0,
         },
         CharacterClass::Hunter => ClassStats {
             health: 165,
@@ -259,6 +268,7 @@ fn get_class_stats(class: CharacterClass) -> ClassStats {
             spell_power: 0,
             attack_speed: 0.4,
             move_speed: 5.0,
+            armor: 0.0,
         },
     }
 }
@@ -909,6 +919,21 @@ fn render_stats_panel(ui: &mut egui::Ui, stats: &ClassStats, equip: &EquipmentBo
                 }
 
                 stat_row_float(ui, "Move Speed:", stats.move_speed, equip.move_speed, "/s", neutral, green, red, label_color);
+
+                // Armor (only show if equipment provides it, since base is 0)
+                if equip.armor > 0.0 {
+                    let effective_armor = stats.armor + equip.armor;
+                    let reduction_pct = effective_armor / (effective_armor + 5500.0) * 100.0;
+                    ui.label(egui::RichText::new("Armor:").size(14.0).color(label_color));
+                    let armor_text = format!("{:.0}", effective_armor);
+                    let armor_response = ui.label(egui::RichText::new(&armor_text).size(14.0).color(green));
+                    if armor_response.hovered() {
+                        egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), ui.id().with("armor_tooltip"), |ui| {
+                            ui.label(format!("{:.0} from equipment ({:.1}% physical reduction)", equip.armor, reduction_pct));
+                        });
+                    }
+                    ui.end_row();
+                }
             });
     });
 }
@@ -1269,6 +1294,9 @@ fn build_aura_description(aura: &super::play_match::ability_config::AuraEffect) 
             } else {
                 format!("Incapacitates the target for {:.0} sec.", aura.duration)
             }
+        }
+        AuraType::SpellResistanceBuff => {
+            format!("Increases spell resistance by {:.0} for {:.0} sec.", aura.magnitude, aura.duration)
         }
     }
 }

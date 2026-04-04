@@ -151,6 +151,7 @@ pub fn process_holy_shock_damage(
                 raw_damage,
                 &mut target,
                 target_auras.as_deref_mut(),
+                crate::states::play_match::abilities::SpellSchool::Holy,
             );
 
             let target_team = target.team;

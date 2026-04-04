@@ -81,6 +81,7 @@ pub fn calculate_cast_time(base_cast_time: f32, auras: Option<&ActiveAuras>) -> 
 mod tests {
     use super::*;
     use super::super::match_config;
+    use super::super::abilities::SpellSchool;
 
     /// Helper to create a test combatant
     fn create_test_combatant(health: f32) -> Combatant {
@@ -117,7 +118,7 @@ mod tests {
     fn test_damage_with_no_shields() {
         let mut target = create_test_combatant(100.0);
 
-        let (actual_damage, absorbed) = apply_damage_with_absorb(30.0, &mut target, None);
+        let (actual_damage, absorbed) = apply_damage_with_absorb(30.0, &mut target, None, SpellSchool::None);
 
         assert_eq!(actual_damage, 30.0, "All damage should hit health");
         assert_eq!(absorbed, 0.0, "No damage should be absorbed");
@@ -132,7 +133,7 @@ mod tests {
             auras: vec![create_absorb_aura(50.0, "Power Word: Shield")],
         };
 
-        let (actual_damage, absorbed) = apply_damage_with_absorb(30.0, &mut target, Some(&mut auras));
+        let (actual_damage, absorbed) = apply_damage_with_absorb(30.0, &mut target, Some(&mut auras), SpellSchool::None);
 
         assert_eq!(actual_damage, 0.0, "No damage should hit health");
         assert_eq!(absorbed, 30.0, "All damage should be absorbed");
@@ -147,7 +148,7 @@ mod tests {
             auras: vec![create_absorb_aura(20.0, "Power Word: Shield")],
         };
 
-        let (actual_damage, absorbed) = apply_damage_with_absorb(50.0, &mut target, Some(&mut auras));
+        let (actual_damage, absorbed) = apply_damage_with_absorb(50.0, &mut target, Some(&mut auras), SpellSchool::None);
 
         assert_eq!(absorbed, 20.0, "Shield should absorb its full amount");
         assert_eq!(actual_damage, 30.0, "Remaining damage should hit health");
@@ -165,7 +166,7 @@ mod tests {
             ],
         };
 
-        let (actual_damage, absorbed) = apply_damage_with_absorb(50.0, &mut target, Some(&mut auras));
+        let (actual_damage, absorbed) = apply_damage_with_absorb(50.0, &mut target, Some(&mut auras), SpellSchool::None);
 
         assert_eq!(absorbed, 50.0, "All damage should be absorbed by combined shields");
         assert_eq!(actual_damage, 0.0, "No damage should hit health");
@@ -180,7 +181,7 @@ mod tests {
     fn test_damage_exceeds_health() {
         let mut target = create_test_combatant(50.0);
 
-        let (actual_damage, absorbed) = apply_damage_with_absorb(100.0, &mut target, None);
+        let (actual_damage, absorbed) = apply_damage_with_absorb(100.0, &mut target, None, SpellSchool::None);
 
         assert_eq!(actual_damage, 50.0, "Actual damage should be limited by remaining health");
         assert_eq!(absorbed, 0.0, "No damage absorbed");
@@ -191,7 +192,7 @@ mod tests {
     fn test_zero_damage() {
         let mut target = create_test_combatant(100.0);
 
-        let (actual_damage, absorbed) = apply_damage_with_absorb(0.0, &mut target, None);
+        let (actual_damage, absorbed) = apply_damage_with_absorb(0.0, &mut target, None, SpellSchool::None);
 
         assert_eq!(actual_damage, 0.0, "No damage dealt");
         assert_eq!(absorbed, 0.0, "No damage absorbed");
@@ -205,7 +206,7 @@ mod tests {
             auras: vec![create_absorb_aura(25.0, "Power Word: Shield")],
         };
 
-        let (actual_damage, absorbed) = apply_damage_with_absorb(25.0, &mut target, Some(&mut auras));
+        let (actual_damage, absorbed) = apply_damage_with_absorb(25.0, &mut target, Some(&mut auras), SpellSchool::None);
 
         assert_eq!(absorbed, 25.0);
         assert_eq!(actual_damage, 0.0);

@@ -580,7 +580,9 @@ pub fn decide_abilities(
             ability,
             is_crit,
         } = atk;
-        let ability_name = abilities.get_unchecked(&ability).name.clone();
+        let ability_def = abilities.get_unchecked(&ability);
+        let ability_name = ability_def.name.clone();
+        let ability_spell_school = ability_def.spell_school;
         let mut actual_damage = 0.0;
 
         // Apply Divine Shield outgoing damage penalty (50%) if attacker has DamageImmunity
@@ -602,6 +604,7 @@ pub fn decide_abilities(
                     damage,
                     &mut target,
                     target_auras.as_deref_mut(),
+                    ability_spell_school,
                 );
                 actual_damage = dmg;
                 let target_team = target.team;
@@ -750,11 +753,12 @@ pub fn decide_abilities(
 
         if let Ok((_, mut target, target_transform, mut target_auras)) = combatants.get_mut(target_entity) {
             if target.is_alive() {
-                // Apply damage with absorb shield consideration
+                // Apply damage with absorb shield consideration (Frost Nova is always Frost school)
                 let (dmg, absorbed) = super::combat_core::apply_damage_with_absorb(
                     damage,
                     &mut target,
                     target_auras.as_deref_mut(),
+                    super::abilities::SpellSchool::Frost,
                 );
                 actual_damage = dmg;
                 let target_team = target.team;

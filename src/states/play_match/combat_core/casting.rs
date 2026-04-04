@@ -301,6 +301,7 @@ pub fn process_casting(
                 damage,
                 &mut target,
                 target_auras.as_deref_mut(),
+                def.spell_school,
             );
 
             // Warriors generate Rage from taking damage (only on actual health damage)
@@ -732,8 +733,8 @@ pub fn process_channeling(
     // Track updates to apply after the loop
     let mut remove_channel: Vec<Entity> = Vec::new();
     let mut caster_healing_updates: Vec<(Entity, f32)> = Vec::new();
-    // (caster_entity, target_entity, damage, caster_team, caster_class)
-    let mut damage_to_apply: Vec<(Entity, Entity, f32, u8, match_config::CharacterClass)> = Vec::new();
+    // (caster_entity, target_entity, damage, caster_team, caster_class, spell_school)
+    let mut damage_to_apply: Vec<(Entity, Entity, f32, u8, match_config::CharacterClass, SpellSchool)> = Vec::new();
 
     // Build a snapshot of positions and health for lookups
     let positions: std::collections::HashMap<Entity, Vec3> = combatants
@@ -810,7 +811,7 @@ pub fn process_channeling(
             let damage = ability_def.damage_base_min;
 
             // Track damage to apply later (includes target entity and caster info for death logging)
-            damage_to_apply.push((caster_entity, channeling.target, damage, caster.team, caster.class));
+            damage_to_apply.push((caster_entity, channeling.target, damage, caster.team, caster.class, ability_def.spell_school));
 
             // Track healing for caster (Drain Life heals 0 if target has DamageImmunity)
             let healing = ability_def.channel_healing_per_tick;
@@ -900,7 +901,7 @@ pub fn process_channeling(
     }
 
     // Apply damage to targets and update caster stats
-    for (caster_entity, target_entity, damage, caster_team, caster_class) in damage_to_apply {
+    for (caster_entity, target_entity, damage, caster_team, caster_class, spell_school) in damage_to_apply {
         // Apply damage to target
         if let Ok((_, target_transform, mut target, _, mut target_auras)) = combatants.get_mut(target_entity) {
             if target.is_alive() {
@@ -908,6 +909,7 @@ pub fn process_channeling(
                     damage,
                     &mut target,
                     target_auras.as_deref_mut(),
+                    spell_school,
                 );
 
                 // Track damage for aura breaking
