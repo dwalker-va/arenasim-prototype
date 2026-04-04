@@ -117,13 +117,16 @@ const ITEM_ICON_PATHS: &[(ItemId, &str)] = &[
     // Cloaks
     (ItemId::CloakOfTheShieldWall, "icons/items/inv_misc_cape_17.jpg"),
     (ItemId::CloakOfConcentration, "icons/items/inv_misc_cape_18.jpg"),
+    (ItemId::CloakOfFrostWarding, "icons/items/inv_misc_cape_20.jpg"),
     // Necklaces
     (ItemId::AmuletOfPower, "icons/items/inv_jewelry_necklace_09.jpg"),
     (ItemId::AmuletOfResilience, "icons/items/inv_jewelry_talisman_07.jpg"),
+    (ItemId::AmuletOfShadowWard, "icons/items/inv_jewelry_amulet_04.jpg"),
     // Rings
     (ItemId::BandOfAccuria, "icons/items/inv_jewelry_ring_15.jpg"),
     (ItemId::SignetOfFocus, "icons/items/inv_jewelry_ring_40.jpg"),
     (ItemId::RingOfProtection, "icons/items/inv_jewelry_ring_05.jpg"),
+    (ItemId::BandOfElementalResistance, "icons/items/inv_jewelry_ring_38.jpg"),
     // Trinkets
     (ItemId::MarkOfTheChampion, "icons/items/inv_misc_token_argentdawn2.jpg"),
     (ItemId::EssenceOfEternalLife, "icons/items/inv_misc_root_02.jpg"),
