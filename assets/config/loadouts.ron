@@ -111,24 +111,24 @@
         },
 
         // ====================================================================
-        // PALADIN — Plate armor, mace + shield
+        // PALADIN — Holy plate, mace + shield
         // ====================================================================
         Paladin: {
-            Head: OnslaughtHeadGuard,
-            Shoulders: ShoulderplatesOfValor,
-            Chest: ConquerorsChestplate,
-            Wrists: WristguardsOfStability,
-            Hands: GauntletsOfMight,
-            Waist: WaistguardOfHeroism,
-            Legs: LegplatesOfWrath,
-            Feet: SabatonsBattleBorn,
+            Head: LawbringerHelm,
+            Shoulders: LawbringerSpaulders,
+            Chest: LawbringerChestguard,
+            Wrists: LawbringerBracers,
+            Hands: LawbringerGauntlets,
+            Waist: LawbringerBelt,
+            Legs: LawbringerLegplates,
+            Feet: LawbringerBoots,
             Back: CloakOfConcentration,
             Neck: AmuletOfResilience,
             Ring1: SignetOfFocus,
             Ring2: RingOfProtection,
             Trinket1: EssenceOfEternalLife,
             MainHand: HammerOfTheRighteous,
-            OffHand: WallOfTheDeadShield,
+            OffHand: AegisOfTheBloodGod,
         },
 
         // ====================================================================

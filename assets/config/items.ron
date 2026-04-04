@@ -97,6 +97,91 @@
         ),
 
         // ====================================================================
+        // PLATE ARMOR — HOLY (Paladin)
+        // ====================================================================
+
+        LawbringerHelm: (
+            name: "Lawbringer Helm",
+            item_level: 60,
+            slot: Head,
+            armor_type: Plate,
+            max_health: 15.0,
+            max_mana: 12.0,
+            spell_power: 8.0,
+        ),
+
+        LawbringerSpaulders: (
+            name: "Lawbringer Spaulders",
+            item_level: 56,
+            slot: Shoulders,
+            armor_type: Plate,
+            max_health: 12.0,
+            max_mana: 8.0,
+            spell_power: 5.0,
+        ),
+
+        LawbringerChestguard: (
+            name: "Lawbringer Chestguard",
+            item_level: 60,
+            slot: Chest,
+            armor_type: Plate,
+            max_health: 18.0,
+            max_mana: 15.0,
+            spell_power: 8.0,
+        ),
+
+        LawbringerBracers: (
+            name: "Lawbringer Bracers",
+            item_level: 54,
+            slot: Wrists,
+            armor_type: Plate,
+            max_health: 8.0,
+            max_mana: 6.0,
+            spell_power: 3.0,
+        ),
+
+        LawbringerGauntlets: (
+            name: "Lawbringer Gauntlets",
+            item_level: 58,
+            slot: Hands,
+            armor_type: Plate,
+            max_health: 10.0,
+            max_mana: 8.0,
+            spell_power: 5.0,
+        ),
+
+        LawbringerBelt: (
+            name: "Lawbringer Belt",
+            item_level: 55,
+            slot: Waist,
+            armor_type: Plate,
+            max_health: 8.0,
+            max_mana: 6.0,
+            spell_power: 4.0,
+        ),
+
+        LawbringerLegplates: (
+            name: "Lawbringer Legplates",
+            item_level: 60,
+            slot: Legs,
+            armor_type: Plate,
+            max_health: 15.0,
+            max_mana: 12.0,
+            spell_power: 7.0,
+        ),
+
+        LawbringerBoots: (
+            name: "Lawbringer Boots",
+            item_level: 56,
+            slot: Feet,
+            armor_type: Plate,
+            max_health: 10.0,
+            max_mana: 6.0,
+            spell_power: 4.0,
+            movement_speed: 0.1,
+        ),
+
+        // ====================================================================
         // MAIL ARMOR (Hunter, Warrior, Paladin)
         // ====================================================================
 
@@ -571,6 +656,16 @@
             weapon_type: Shield,
             max_health: 15.0,
             attack_power: 2.0,
+        ),
+
+        AegisOfTheBloodGod: (
+            name: "Aegis of the Blood God",
+            item_level: 58,
+            slot: OffHand,
+            weapon_type: Shield,
+            max_health: 12.0,
+            spell_power: 5.0,
+            max_mana: 6.0,
         ),
     }
 )

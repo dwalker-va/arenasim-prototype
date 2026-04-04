@@ -78,6 +78,15 @@ const ITEM_ICON_PATHS: &[(ItemId, &str)] = &[
     (ItemId::WaistguardOfHeroism, "icons/items/inv_belt_09.jpg"),
     (ItemId::WristguardsOfStability, "icons/items/inv_bracer_19.jpg"),
     (ItemId::ShoulderplatesOfValor, "icons/items/inv_shoulder_15.jpg"),
+    // Plate Armor — Holy (Lawbringer)
+    (ItemId::LawbringerHelm, "icons/items/inv_helmet_05.jpg"),
+    (ItemId::LawbringerSpaulders, "icons/items/inv_shoulder_20.jpg"),
+    (ItemId::LawbringerChestguard, "icons/items/inv_chest_plate03.jpg"),
+    (ItemId::LawbringerBracers, "icons/items/inv_bracer_18.jpg"),
+    (ItemId::LawbringerGauntlets, "icons/items/inv_gauntlets_29.jpg"),
+    (ItemId::LawbringerBelt, "icons/items/inv_belt_27.jpg"),
+    (ItemId::LawbringerLegplates, "icons/items/inv_pants_04.jpg"),
+    (ItemId::LawbringerBoots, "icons/items/inv_boots_plate_09.jpg"),
     // Mail Armor (Beaststalker)
     (ItemId::BeaststalkerHelm, "icons/items/inv_helmet_24.jpg"),
     (ItemId::BeaststalkerTunic, "icons/items/inv_chest_chain_03.jpg"),
@@ -132,6 +141,7 @@ const ITEM_ICON_PATHS: &[(ItemId, &str)] = &[
     // Off Hand
     (ItemId::TomeOfKnowledge, "icons/items/inv_misc_armorkit_09.jpg"),
     (ItemId::WallOfTheDeadShield, "icons/items/inv_shield_17.jpg"),
+    (ItemId::AegisOfTheBloodGod, "icons/items/inv_shield_12.jpg"),
 ];
 
 /// Base stats for a class (used for display)
