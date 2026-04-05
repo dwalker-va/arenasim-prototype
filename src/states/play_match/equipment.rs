@@ -1181,16 +1181,16 @@ mod tests {
     #[test]
     fn budget_item_within_tolerance_passes() {
         let mut item = budget_test_item(ItemSlot::Head, 60);
-        // budget = 45.0, max_allowed = 45 * 1.1 = 49.5
-        item.max_health = 49.0; // 108.9% of budget, within 10% tolerance
+        // budget = 45.0, max_allowed = 45 * 1.05 = 47.25
+        item.max_health = 47.0; // 104.4% of budget, within 5% tolerance
         assert!(validate_item_budget("Test Helm", &item).is_ok());
     }
 
     #[test]
     fn budget_item_over_tolerance_fails() {
         let mut item = budget_test_item(ItemSlot::Head, 60);
-        // budget = 45.0, max_allowed = 49.5
-        item.max_health = 50.0; // 111.1% of budget, exceeds tolerance
+        // budget = 45.0, max_allowed = 47.25
+        item.max_health = 48.0; // 106.7% of budget, exceeds 5% tolerance
         let result = validate_item_budget("Over Budget Helm", &item);
         assert!(result.is_err());
         let msg = result.unwrap_err();

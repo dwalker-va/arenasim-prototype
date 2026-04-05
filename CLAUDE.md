@@ -101,6 +101,8 @@ src/
 assets/
   config/
     abilities.ron         # Data-driven ability definitions
+    items.ron             # Equipment item definitions (stats, slots, armor)
+    loadouts.ron          # Default per-class equipment loadouts
 ```
 
 ## Documentation Index
@@ -186,6 +188,48 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
 **Tip**: Use the Wowhead MCP to look up accurate WoW Classic values:
 ```
 mcp__wowhead-classic__lookup_spell("Pyroblast")
+```
+
+### Adding a New Item
+
+Items are data-driven via `assets/config/items.ron`. Every item must stay within its **item level budget** — enforced by `cargo test`.
+
+1. **Add entry to `items.ron`**:
+   ```ron
+   NewItem: (
+       name: "New Item",
+       item_level: 58,
+       slot: Head,
+       armor_type: Plate,        // Plate, Mail, Leather, Cloth, or omit for accessories
+       armor: 290.0,             // Free stat — does not consume budget
+       max_health: 12.0,
+       attack_power: 6.0,
+       crit_chance: 0.01,
+   )
+   ```
+
+2. **Check the item level budget** before finalizing stats:
+   - Effective budget = `item_level × 0.75 × slot_multiplier`
+   - Slot multipliers: Head/Chest = 1.0, Legs = 0.875, Shoulders/Hands/Feet = 0.75, Waist = 0.625, Wrists = 0.5, accessories/weapons = 0.5625
+   - Stat costs: max_health/max_mana = 1.0/pt, attack_power/spell_power = 1.5/pt, crit_chance = 300.0/pt (0.01 = 3.0), movement_speed = 30.0/pt (0.1 = 3.0), resistances = 0.4/pt, mana_regen = 5.0/pt
+   - **Free stats** (excluded from budget): `armor`, `attack_damage_min`, `attack_damage_max`, `attack_speed`
+   - Budget usage = sum of (stat_value × weight) across all non-free stats
+   - Items may exceed the budget by up to 5% tolerance
+
+3. **Add to a class loadout** in `loadouts.ron` if it should be default equipment
+
+4. **Add `ItemId` variant** in `equipment.rs` to the `ItemId` enum
+
+5. **Add item icon** (optional, for UI):
+   - Download: `mcp__wowhead-classic__get_item_icon("New Item")`
+   - Save to `assets/icons/items/<icon_name>.jpg`
+   - Add mapping to `ITEM_ICON_PATHS` in `rendering/mod.rs`
+
+6. **Run `cargo test`** to verify the item passes budget validation
+
+**Tip**: Use the Wowhead MCP to look up WoW Classic item stats as a reference:
+```
+mcp__wowhead-classic__lookup_item("Lionheart Helm")
 ```
 
 ### Class Design
