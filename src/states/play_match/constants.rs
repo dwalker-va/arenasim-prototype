@@ -194,8 +194,8 @@ use super::equipment::ItemSlot;
 pub const BUDGET_PER_ILVL: f32 = 0.75;
 
 /// Tolerance for over-budget items. Items may exceed their computed budget by this fraction
-/// before being flagged (0.10 = 10% over-budget allowed).
-pub const BUDGET_TOLERANCE: f32 = 0.10;
+/// before being flagged (0.05 = 5% over-budget allowed for minor rounding variance).
+pub const BUDGET_TOLERANCE: f32 = 0.05;
 
 /// Cost weight per point of max_health in the item budget.
 pub const WEIGHT_MAX_HEALTH: f32 = 1.0;

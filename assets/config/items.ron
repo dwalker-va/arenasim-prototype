@@ -395,7 +395,7 @@
             armor_type: Cloth,
             armor: 46.0,
             max_health: 10.0,
-            max_mana: 20.0,
+            max_mana: 18.0,
             spell_power: 10.0,
         ),
 
@@ -646,7 +646,7 @@
             attack_damage_max: 10.0,
             attack_speed: 0.7,
             spell_power: 10.0,
-            max_mana: 10.0,
+            max_mana: 9.0,
         ),
 
         // ====================================================================
@@ -732,7 +732,7 @@
             slot: OffHand,
             weapon_type: Shield,
             armor: 464.0,
-            max_health: 12.0,
+            max_health: 11.0,
             spell_power: 5.0,
             max_mana: 6.0,
         ),
