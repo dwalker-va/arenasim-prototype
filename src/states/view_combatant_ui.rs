@@ -319,6 +319,14 @@ fn get_ability_name(ability: AbilityType) -> &'static str {
         AbilityType::SpiderWeb => "Web",
         AbilityType::BoarCharge => "Boar Charge",
         AbilityType::MastersCall => "Master's Call",
+        // Strategic option abilities
+        AbilityType::DemoralizingShout => "Demoralizing Shout",
+        AbilityType::CommandingShout => "Commanding Shout",
+        AbilityType::FrostArmor => "Frost Armor",
+        AbilityType::MageArmorSpell => "Mage Armor",
+        AbilityType::MoltenArmor => "Molten Armor",
+        AbilityType::ShadowResistanceAura => "Shadow Resistance Aura",
+        AbilityType::ConcentrationAura => "Concentration Aura",
     }
 }
 
@@ -1233,6 +1241,27 @@ fn build_aura_description(aura: &super::play_match::ability_config::AuraEffect) 
         }
         AuraType::SpellResistanceBuff => {
             format!("Increases spell resistance by {:.0} for {:.0} sec.", aura.magnitude, aura.duration)
+        }
+        AuraType::AttackPowerReduction => {
+            format!("Reduces attack power by {:.0} for {:.0} sec.", aura.magnitude, aura.duration)
+        }
+        AuraType::CritChanceIncrease => {
+            let crit_pct = (aura.magnitude * 100.0) as i32;
+            format!("Increases critical strike chance by {}% for {:.0} sec.", crit_pct, aura.duration)
+        }
+        AuraType::ManaRegenIncrease => {
+            format!("Increases mana regeneration by {:.0}/sec for {:.0} sec.", aura.magnitude, aura.duration)
+        }
+        AuraType::AttackSpeedSlow => {
+            let slow_pct = (aura.magnitude * 100.0) as i32;
+            format!("Reduces attack speed by {}% for {:.0} sec.", slow_pct, aura.duration)
+        }
+        AuraType::CastTimeReduction => {
+            let reduction_pct = (aura.magnitude * 100.0) as i32;
+            format!("Reduces cast time by {}% for {:.0} sec.", reduction_pct, aura.duration)
+        }
+        AuraType::FrostArmorBuff => {
+            format!("Frost Armor active for {:.0} sec. Slows melee attackers.", aura.duration)
         }
     }
 }

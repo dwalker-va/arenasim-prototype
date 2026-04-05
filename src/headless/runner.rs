@@ -154,11 +154,17 @@ fn headless_setup_match(
             combat_log.register_combatant(combatant_id(1, *character));
             let rogue_opener = config.team1_rogue_openers.get(i).copied().unwrap_or_default();
             let warlock_curse_prefs = config.team1_warlock_curse_prefs.get(i).cloned().unwrap_or_default();
+            let warrior_shout = config.team1_warrior_shouts.get(i).copied().unwrap_or_default();
+            let mage_armor = config.team1_mage_armors.get(i).copied().unwrap_or_default();
+            let paladin_aura = config.team1_paladin_auras.get(i).copied().unwrap_or_default();
             let equipment_overrides = config.team1_equipment.get(i).cloned().unwrap_or_default();
             let mut loadout = resolve_loadout(*character, &default_loadouts, &equipment_overrides);
             enforce_two_hand_conflicts(&mut loadout, &item_defs);
             let position = Vec3::new(team1_spawn_x, 1.0, (i as f32 - 1.0) * 3.0);
             let mut combatant = Combatant::new_with_curse_prefs(1, i as u8, *character, rogue_opener, warlock_curse_prefs);
+            combatant.warrior_shout = warrior_shout;
+            combatant.mage_armor = mage_armor;
+            combatant.paladin_aura = paladin_aura;
             combatant.apply_equipment(&loadout, &item_defs);
             let combatant_clone = combatant.clone();
             let entity = commands.spawn((
@@ -224,11 +230,17 @@ fn headless_setup_match(
             combat_log.register_combatant(combatant_id(2, *character));
             let rogue_opener = config.team2_rogue_openers.get(i).copied().unwrap_or_default();
             let warlock_curse_prefs = config.team2_warlock_curse_prefs.get(i).cloned().unwrap_or_default();
+            let warrior_shout = config.team2_warrior_shouts.get(i).copied().unwrap_or_default();
+            let mage_armor = config.team2_mage_armors.get(i).copied().unwrap_or_default();
+            let paladin_aura = config.team2_paladin_auras.get(i).copied().unwrap_or_default();
             let equipment_overrides = config.team2_equipment.get(i).cloned().unwrap_or_default();
             let mut loadout = resolve_loadout(*character, &default_loadouts, &equipment_overrides);
             enforce_two_hand_conflicts(&mut loadout, &item_defs);
             let position = Vec3::new(team2_spawn_x, 1.0, (i as f32 - 1.0) * 3.0);
             let mut combatant = Combatant::new_with_curse_prefs(2, i as u8, *character, rogue_opener, warlock_curse_prefs);
+            combatant.warrior_shout = warrior_shout;
+            combatant.mage_armor = mage_armor;
+            combatant.paladin_aura = paladin_aura;
             combatant.apply_equipment(&loadout, &item_defs);
             let combatant_clone = combatant.clone();
             let entity = commands.spawn((

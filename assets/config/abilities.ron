@@ -826,5 +826,128 @@
             spell_school: Nature,
             is_dispel: true,  // Functions as a movement-impairment dispel
         ),
+
+        // ============================================================================
+        // STRATEGIC OPTION ABILITIES
+        // ============================================================================
+
+        // Demoralizing Shout: Warrior debuff — reduces enemy attack power
+        // WoW Classic: Instant, no rage cost in our system, 30yd range, 2 min duration
+        DemoralizingShout: (
+            name: "Demoralizing Shout",
+            icon: "icons/abilities/demoralizing_shout.jpg",
+            cast_time: 0.0,
+            range: 30.0,
+            mana_cost: 0.0,
+            cooldown: 0.0,
+            applies_aura: Some((
+                aura_type: AttackPowerReduction,
+                duration: 120.0,
+                magnitude: 15.0,
+            )),
+            spell_school: None,
+        ),
+
+        // Commanding Shout: Warrior buff — increases team max health
+        // WoW Classic: Instant, no rage cost in our system, 30yd range, 2 min duration
+        CommandingShout: (
+            name: "Commanding Shout",
+            icon: "icons/abilities/commanding_shout.jpg",
+            cast_time: 0.0,
+            range: 30.0,
+            mana_cost: 0.0,
+            cooldown: 0.0,
+            applies_aura: Some((
+                aura_type: MaxHealthIncrease,
+                duration: 120.0,
+                magnitude: 40.0,
+            )),
+            spell_school: None,
+        ),
+
+        // Frost Armor: Mage self-buff — marks Mage for proc behavior
+        // When a melee attacker hits, they receive MovementSpeedSlow + AttackSpeedSlow (Unit 3)
+        FrostArmor: (
+            name: "Frost Armor",
+            icon: "icons/abilities/frost_armor.jpg",
+            cast_time: 0.0,
+            range: 0.0,
+            mana_cost: 0.0,
+            cooldown: 0.0,
+            applies_aura: Some((
+                aura_type: FrostArmorBuff,
+                duration: 600.0,
+                magnitude: 1.0,
+            )),
+            spell_school: Frost,
+        ),
+
+        // Mage Armor: Mage self-buff — increases mana regeneration
+        // WoW Classic: Instant, no cost, 30 min duration
+        MageArmorSpell: (
+            name: "Mage Armor",
+            icon: "icons/abilities/mage_armor.jpg",
+            cast_time: 0.0,
+            range: 0.0,
+            mana_cost: 0.0,
+            cooldown: 0.0,
+            applies_aura: Some((
+                aura_type: ManaRegenIncrease,
+                duration: 600.0,
+                magnitude: 8.0,
+            )),
+            spell_school: Arcane,
+        ),
+
+        // Molten Armor: Mage self-buff — increases critical strike chance
+        // WoW Classic (TBC): Instant, no cost, 30 min duration, +5% crit
+        MoltenArmor: (
+            name: "Molten Armor",
+            icon: "icons/abilities/molten_armor.jpg",
+            cast_time: 0.0,
+            range: 0.0,
+            mana_cost: 0.0,
+            cooldown: 0.0,
+            applies_aura: Some((
+                aura_type: CritChanceIncrease,
+                duration: 600.0,
+                magnitude: 0.05,
+            )),
+            spell_school: Fire,
+        ),
+
+        // Shadow Resistance Aura: Paladin team aura — shadow resistance
+        // WoW Classic: Instant, no cost, party-wide aura, +30 shadow resistance
+        ShadowResistanceAura: (
+            name: "Shadow Resistance Aura",
+            icon: "icons/abilities/shadow_resistance_aura.jpg",
+            cast_time: 0.0,
+            range: 100.0,
+            mana_cost: 0.0,
+            cooldown: 0.0,
+            applies_aura: Some((
+                aura_type: SpellResistanceBuff,
+                duration: 600.0,
+                magnitude: 30.0,
+            )),
+            spell_school: Shadow,
+        ),
+
+        // Concentration Aura: Paladin team aura — reduces cast time by 15%
+        // WoW Classic: Instant, no cost, party-wide aura
+        ConcentrationAura: (
+            name: "Concentration Aura",
+            icon: "icons/abilities/concentration_aura.jpg",
+            cast_time: 0.0,
+            range: 100.0,
+            mana_cost: 0.0,
+            cooldown: 0.0,
+            applies_aura: Some((
+                aura_type: CastTimeReduction,
+                duration: 600.0,
+                magnitude: 0.15,
+            )),
+            spell_school: Holy,
+        ),
     }
 )

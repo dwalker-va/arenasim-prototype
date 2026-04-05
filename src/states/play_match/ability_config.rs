@@ -298,6 +298,14 @@ impl AbilityDefinitions {
             AbilityType::SpiderWeb,
             AbilityType::BoarCharge,
             AbilityType::MastersCall,
+            // Strategic option abilities
+            AbilityType::DemoralizingShout,
+            AbilityType::CommandingShout,
+            AbilityType::FrostArmor,
+            AbilityType::MageArmorSpell,
+            AbilityType::MoltenArmor,
+            AbilityType::ShadowResistanceAura,
+            AbilityType::ConcentrationAura,
         ];
 
         let missing: Vec<AbilityType> = expected_abilities

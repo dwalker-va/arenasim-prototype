@@ -99,6 +99,14 @@ pub enum AbilityType {
     SpiderWeb,        // Spider ranged root on target (45s CD)
     BoarCharge,       // Boar gap closer + short stun (45s CD)
     MastersCall,      // Bird removes movement impairments from friendly (45s CD)
+    // Strategic option abilities
+    DemoralizingShout,  // Warrior debuff - reduces enemy attack power
+    CommandingShout,    // Warrior buff - increases team max health
+    FrostArmor,         // Mage self-buff - procs slow on melee attackers
+    MageArmorSpell,     // Mage self-buff - increases mana regen
+    MoltenArmor,        // Mage self-buff - increases crit chance
+    ShadowResistanceAura, // Paladin team aura - shadow resistance
+    ConcentrationAura,  // Paladin team aura - reduces cast time
 }
 
 impl AbilityType {

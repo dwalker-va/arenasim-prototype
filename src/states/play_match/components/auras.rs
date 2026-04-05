@@ -63,6 +63,25 @@ pub enum AuraType {
     /// The spell_school field on the Aura identifies which school, magnitude = resistance amount.
     /// Stacks additively with equipment resistance.
     SpellResistanceBuff,
+    /// Reduces attack power by a flat amount (magnitude = AP reduction)
+    /// Used by Demoralizing Shout to weaken enemies.
+    AttackPowerReduction,
+    /// Increases critical strike chance by a percentage (magnitude = crit bonus, e.g. 0.05 = 5%)
+    /// Used by Molten Armor.
+    CritChanceIncrease,
+    /// Increases mana regeneration by a flat amount per second (magnitude = mana/sec bonus)
+    /// Used by Mage Armor.
+    ManaRegenIncrease,
+    /// Reduces attack speed by a percentage (magnitude = slow amount, e.g. 0.25 = 25% slower)
+    /// Used by Frost Armor proc on melee attackers.
+    AttackSpeedSlow,
+    /// Reduces cast time by a percentage (magnitude = reduction, e.g. 0.15 = 15% faster casts)
+    /// Used by Concentration Aura.
+    CastTimeReduction,
+    /// Marks a combatant as having Frost Armor active.
+    /// When a melee attacker hits this combatant, they receive MovementSpeedSlow + AttackSpeedSlow.
+    /// Magnitude unused (always 1.0 by convention).
+    FrostArmorBuff,
 }
 
 impl AuraType {
