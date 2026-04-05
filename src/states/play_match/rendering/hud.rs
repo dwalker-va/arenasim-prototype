@@ -612,6 +612,7 @@ pub fn render_health_bars(
                                     next_bar_y_offset,
                                     auras,
                                     &spell_icons,
+                                    &abilities,
                                     ui_scale,
                                     pulse_intensity,
                                 );
@@ -695,6 +696,7 @@ fn render_aura_icons(
     y_offset: f32,
     auras: &ActiveAuras,
     spell_icons: &SpellIcons,
+    ability_definitions: &AbilityDefinitions,
     ui_scale: f32,
     pulse_intensity: f32,
 ) {
@@ -746,7 +748,7 @@ fn render_aura_icons(
         );
 
         // Try to draw the icon texture
-        let icon_key = get_aura_icon_key(aura);
+        let icon_key = get_aura_icon_key(aura, ability_definitions);
         if let Some(texture_id) = spell_icons.textures.get(&icon_key) {
             // Draw the icon texture
             painter.image(

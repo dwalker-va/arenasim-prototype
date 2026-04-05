@@ -20,91 +20,8 @@ pub use overlays::*;
 
 use bevy::prelude::*;
 use bevy_egui::egui;
+use super::ability_config::AbilityDefinitions;
 use super::components::{SpellIcons, SpellIconHandles, Aura, AuraType};
-
-// ==============================================================================
-// Spell Icon Loading (shared by multiple modules)
-// ==============================================================================
-
-/// Maps ability names to their icon file paths
-pub fn get_ability_icon_path(ability: &str) -> Option<&'static str> {
-    match ability {
-        "Frostbolt" => Some("icons/abilities/spell_frost_frostbolt02.jpg"),
-        "Frost Nova" => Some("icons/abilities/spell_frost_frostnova.jpg"),
-        "Flash Heal" => Some("icons/abilities/spell_holy_flashheal.jpg"),
-        "Mind Blast" => Some("icons/abilities/spell_shadow_unholyfrenzy.jpg"),
-        "Power Word: Fortitude" => Some("icons/abilities/spell_holy_wordfortitude.jpg"),
-        "Charge" => Some("icons/abilities/ability_warrior_charge.jpg"),
-        "Rend" => Some("icons/abilities/ability_gouge.jpg"),
-        "Mortal Strike" => Some("icons/abilities/ability_warrior_savageblow.jpg"),
-        "Heroic Strike" => Some("icons/abilities/ability_rogue_ambush.jpg"),
-        "Ambush" => Some("icons/abilities/ability_rogue_ambush.jpg"),
-        "Cheap Shot" => Some("icons/abilities/ability_cheapshot.jpg"),
-        "Sinister Strike" => Some("icons/abilities/spell_shadow_ritualofsacrifice.jpg"),
-        "Kidney Shot" => Some("icons/abilities/ability_rogue_kidneyshot.jpg"),
-        "Corruption" => Some("icons/abilities/spell_shadow_abominationexplosion.jpg"),
-        "Shadowbolt" | "Shadow Bolt" => Some("icons/abilities/spell_shadow_shadowbolt.jpg"),
-        "Fear" => Some("icons/abilities/spell_shadow_possession.jpg"),
-        "Immolate" => Some("icons/abilities/spell_fire_immolation.jpg"),
-        "Drain Life" => Some("icons/abilities/spell_shadow_lifedrain02.jpg"),
-        "Pummel" => Some("icons/abilities/inv_gauntlets_04.jpg"),
-        "Kick" => Some("icons/abilities/ability_kick.jpg"),
-        "Arcane Intellect" => Some("icons/abilities/spell_holy_magicalsentry.jpg"),
-        "Battle Shout" => Some("icons/abilities/ability_warrior_battleshout.jpg"),
-        "Ice Barrier" => Some("icons/abilities/spell_ice_lament.jpg"),
-        "Power Word: Shield" => Some("icons/abilities/spell_holy_powerwordshield.jpg"),
-        "Polymorph" => Some("icons/abilities/spell_nature_polymorph.jpg"),
-        "Dispel Magic" => Some("icons/abilities/spell_holy_dispelmagic.jpg"),
-        "Curse of Agony" => Some("icons/abilities/spell_shadow_curseofsargeras.jpg"),
-        "Curse of Weakness" => Some("icons/abilities/spell_shadow_curseofmannoroth.jpg"),
-        "Curse of Tongues" => Some("icons/abilities/spell_shadow_curseoftounges.jpg"),
-        // Paladin abilities
-        "Flash of Light" => Some("icons/abilities/spell_holy_flashheal.jpg"),
-        "Holy Light" => Some("icons/abilities/spell_holy_holybolt.jpg"),
-        "Holy Shock" => Some("icons/abilities/spell_holy_searinglight.jpg"),
-        "Holy Shock (Heal)" => Some("icons/abilities/spell_holy_searinglight.jpg"),
-        "Holy Shock (Damage)" => Some("icons/abilities/spell_holy_searinglight.jpg"),
-        "Hammer of Justice" => Some("icons/abilities/spell_holy_sealofmight.jpg"),
-        "Cleanse" => Some("icons/abilities/spell_holy_renew.jpg"),
-        "Devotion Aura" => Some("icons/abilities/spell_holy_devotionaura.jpg"),
-        "Divine Shield" => Some("icons/abilities/spell_holy_divineintervention.jpg"),
-        // Felhunter abilities
-        "Spell Lock" => Some("icons/abilities/spell_shadow_mindrot.jpg"),
-        "Devour Magic" => Some("icons/abilities/spell_nature_purge.jpg"),
-        // Hunter abilities
-        "Aimed Shot" => Some("icons/abilities/inv_spear_07.jpg"),
-        "Arcane Shot" => Some("icons/abilities/ability_impalingbolt.jpg"),
-        "Concussive Shot" => Some("icons/abilities/spell_frost_stun.jpg"),
-        "Disengage" => Some("icons/abilities/ability_rogue_feint.jpg"),
-        "Freezing Trap" => Some("icons/abilities/spell_frost_chainsofice.jpg"),
-        "Frost Trap" => Some("icons/abilities/spell_frost_freezingbreath.jpg"),
-        // Hunter pet abilities
-        "Web" | "Spider Web" => Some("icons/abilities/spell_nature_web.jpg"),
-        "Boar Charge" => Some("icons/abilities/ability_golemstormbolt.jpg"),
-        "Master's Call" => Some("icons/abilities/ability_hunter_masterscall.jpg"),
-        _ => None,
-    }
-}
-
-/// All abilities that have icons
-pub const SPELL_ICON_ABILITIES: &[&str] = &[
-    "Frostbolt", "Frost Nova", "Flash Heal", "Mind Blast", "Power Word: Fortitude",
-    "Charge", "Rend", "Mortal Strike", "Heroic Strike", "Ambush", "Cheap Shot",
-    "Sinister Strike", "Kidney Shot", "Corruption", "Shadowbolt", "Fear", "Immolate",
-    "Drain Life", "Pummel", "Kick", "Arcane Intellect", "Battle Shout",
-    "Ice Barrier", "Power Word: Shield", "Polymorph", "Dispel Magic",
-    "Curse of Agony", "Curse of Weakness", "Curse of Tongues",
-    // Paladin abilities
-    "Flash of Light", "Holy Light", "Holy Shock", "Holy Shock (Heal)", "Holy Shock (Damage)",
-    "Hammer of Justice", "Cleanse", "Devotion Aura", "Divine Shield",
-    // Felhunter abilities
-    "Spell Lock", "Devour Magic",
-    // Hunter abilities
-    "Aimed Shot", "Arcane Shot", "Concussive Shot", "Disengage",
-    "Freezing Trap", "Frost Trap",
-    // Hunter pet abilities
-    "Web", "Spider Web", "Boar Charge", "Master's Call",
-];
 
 // ==============================================================================
 // Aura Icon Constants and Helpers
@@ -131,9 +48,12 @@ pub const GENERIC_AURA_ICONS: &[(&str, &str)] = &[
 
 /// Get the icon key for an aura.
 /// Returns the ability name if it has a specific icon, otherwise returns a generic key.
-pub fn get_aura_icon_key(aura: &Aura) -> String {
+pub fn get_aura_icon_key(aura: &Aura, ability_definitions: &AbilityDefinitions) -> String {
     // Check if the ability that created this aura has a specific icon
-    if get_ability_icon_path(&aura.ability_name).is_some() {
+    let has_icon = ability_definitions.iter().any(|(_, config)| {
+        config.name == aura.ability_name && !config.icon.is_empty()
+    });
+    if has_icon {
         return aura.ability_name.clone();
     }
 
@@ -185,6 +105,7 @@ pub fn load_spell_icons(
     mut spell_icons: ResMut<SpellIcons>,
     mut icon_handles: ResMut<SpellIconHandles>,
     images: Res<Assets<Image>>,
+    ability_definitions: Res<AbilityDefinitions>,
 ) {
     // Only load once
     if spell_icons.loaded {
@@ -193,11 +114,11 @@ pub fn load_spell_icons(
 
     // Load handles if not already loaded
     if icon_handles.handles.is_empty() {
-        // Load ability icons
-        for ability in SPELL_ICON_ABILITIES {
-            if let Some(path) = get_ability_icon_path(ability) {
-                let handle: Handle<Image> = asset_server.load(path);
-                icon_handles.handles.push((ability.to_string(), handle));
+        // Load ability icons from data-driven definitions
+        for (_ability_type, config) in ability_definitions.iter() {
+            if !config.icon.is_empty() {
+                let handle: Handle<Image> = asset_server.load(&config.icon);
+                icon_handles.handles.push((config.name.clone(), handle));
             }
         }
         // Load generic aura icons
@@ -218,6 +139,13 @@ pub fn load_spell_icons(
     for (ability_name, handle) in &icon_handles.handles {
         let texture_id = contexts.add_image(handle.clone());
         spell_icons.textures.insert(ability_name.clone(), texture_id);
+    }
+
+    // Register variant keys for abilities logged with suffixed names (e.g., Paladin AI
+    // logs "Holy Shock (Heal)" and "Holy Shock (Damage)" but the canonical name is "Holy Shock")
+    if let Some(texture_id) = spell_icons.textures.get("Holy Shock").copied() {
+        spell_icons.textures.insert("Holy Shock (Heal)".to_string(), texture_id);
+        spell_icons.textures.insert("Holy Shock (Damage)".to_string(), texture_id);
     }
 
     spell_icons.loaded = true;

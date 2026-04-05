@@ -436,7 +436,7 @@ fn get_ability_abbreviation(ability: &str) -> &'static str {
         "Sinister Strike" => "SS",
         "Kidney Shot" => "KS",
         "Corruption" => "CO",
-        "Shadowbolt" => "SB",
+        "Shadow Bolt" => "SB",
         "Fear" => "FE",
         "Pummel" => "PM",
         "Kick" => "KI",
@@ -455,7 +455,7 @@ fn get_ability_icon_color(ability: &str) -> egui::Color32 {
         // Holy (yellow/gold)
         "Flash Heal" | "Power Word: Fortitude" => egui::Color32::from_rgb(200, 180, 80),
         // Shadow (purple)
-        "Mind Blast" | "Shadowbolt" | "Corruption" | "Fear" => egui::Color32::from_rgb(120, 80, 160),
+        "Mind Blast" | "Shadow Bolt" | "Corruption" | "Fear" => egui::Color32::from_rgb(120, 80, 160),
         // Physical (brown/orange)
         "Charge" | "Rend" | "Mortal Strike" | "Heroic Strike" | "Pummel" => egui::Color32::from_rgb(160, 100, 60),
         // Rogue (yellow)

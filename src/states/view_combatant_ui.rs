@@ -16,7 +16,6 @@ use super::play_match::AbilityType;
 use super::play_match::abilities::{ScalingStat, SpellSchool};
 use super::play_match::ability_config::{AbilityDefinitions, AbilityConfig};
 use super::play_match::components::AuraType;
-use super::play_match::rendering::get_ability_icon_path;
 use super::play_match::equipment::{ItemSlot, ItemId, ItemConfig, ItemDefinitions, DefaultLoadouts, resolve_loadout, enforce_two_hand_conflicts, find_one_handed_mainhand};
 
 /// Tracks which equipment slot has its picker open (if any)
@@ -330,44 +329,20 @@ pub fn load_ability_icons(
     mut ability_icons: ResMut<AbilityIcons>,
     mut icon_handles: ResMut<AbilityIconHandles>,
     images: Res<Assets<Image>>,
+    ability_definitions: Res<AbilityDefinitions>,
 ) {
     // Only load once
     if ability_icons.loaded {
         return;
     }
 
-    // Dynamically collect all ability names from all classes
-    let all_classes = [
-        CharacterClass::Warrior,
-        CharacterClass::Mage,
-        CharacterClass::Rogue,
-        CharacterClass::Priest,
-        CharacterClass::Warlock,
-        CharacterClass::Paladin,
-        CharacterClass::Hunter,
-    ];
-    let mut ability_names: Vec<&'static str> = Vec::new();
-    for class in &all_classes {
-        for ability in get_class_abilities(*class) {
-            let name = get_ability_name(ability);
-            if !ability_names.contains(&name) {
-                ability_names.push(name);
-            }
-        }
-    }
-    // Add curse variants (not in class abilities list but used in UI)
-    for extra in ["Curse of Agony", "Curse of Weakness", "Curse of Tongues"] {
-        if !ability_names.contains(&extra) {
-            ability_names.push(extra);
-        }
-    }
-
     // Load handles if not already loaded
     if icon_handles.handles.is_empty() {
-        for ability in &ability_names {
-            if let Some(path) = get_ability_icon_path(ability) {
-                let handle: Handle<Image> = asset_server.load(path);
-                icon_handles.handles.push((ability.to_string(), handle));
+        // Load ability icons from data-driven definitions
+        for (_ability_type, config) in ability_definitions.iter() {
+            if !config.icon.is_empty() {
+                let handle: Handle<Image> = asset_server.load(&config.icon);
+                icon_handles.handles.push((config.name.clone(), handle));
             }
         }
         return; // Wait for next frame to check if loaded

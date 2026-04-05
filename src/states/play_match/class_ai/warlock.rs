@@ -451,7 +451,7 @@ fn try_shadowbolt(
     let target_tuple = ctx.combatants
         .get(&target_entity)
         .map(|info| (info.team, info.class));
-    log_ability_use(combat_log, combatant.team, combatant.class, "Shadowbolt", target_tuple, "begins casting");
+    log_ability_use(combat_log, combatant.team, combatant.class, "Shadow Bolt", target_tuple, "begins casting");
 
     info!(
         "Team {} {} starts casting {} on enemy",
