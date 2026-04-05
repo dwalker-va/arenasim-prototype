@@ -1,7 +1,7 @@
 ---
 title: "feat: Add strategic option layers to Warrior, Mage, and Paladin"
 type: feat
-status: active
+status: completed
 date: 2026-04-05
 origin: docs/brainstorms/2026-04-05-class-strategic-options-requirements.md
 ---
@@ -122,7 +122,7 @@ New Aura Effects (in combat systems):
 
 ## Implementation Units
 
-- [ ] **Unit 1: Define strategic option enums and config plumbing**
+- [x] **Unit 1: Define strategic option enums and config plumbing**
 
   **Goal:** Add `WarriorShout`, `MageArmor`, `PaladinAura` enums and wire them through MatchConfig, Combatant, headless config, and combatant initialization.
 
@@ -162,7 +162,7 @@ New Aura Effects (in combat systems):
   - `cargo test` passes
   - Headless config with new fields parses without error
 
-- [ ] **Unit 2: Add new AuraTypes and AbilityType variants**
+- [x] **Unit 2: Add new AuraTypes and AbilityType variants**
 
   **Goal:** Add the new aura types and ability variants needed by all three class strategic options, plus ability definitions in abilities.ron.
 
@@ -204,7 +204,7 @@ New Aura Effects (in combat systems):
   - `cargo test` passes, especially ability config validation
   - `cargo build` compiles with new variants
 
-- [ ] **Unit 3: Implement new aura effects in combat systems**
+- [x] **Unit 3: Implement new aura effects in combat systems**
 
   **Goal:** Make the 5 new AuraType variants actually affect combat — damage reduction from AP debuff, crit increase, mana regen, attack speed slow, and cast time reduction. Plus the Frost Armor on-hit proc.
 
@@ -247,7 +247,7 @@ New Aura Effects (in combat systems):
   - Headless match with Warrior (Demoralizing Shout) vs melee shows reduced damage in logs
   - Headless match with Mage (Frost Armor) vs Warrior shows slow applied in logs
 
-- [ ] **Unit 4: Update Warrior AI for shout choice**
+- [x] **Unit 4: Update Warrior AI for shout choice**
 
   **Goal:** Warrior AI reads `combatant.warrior_shout` preference and casts the chosen shout during pre-match instead of always casting Battle Shout.
 
@@ -283,7 +283,7 @@ New Aura Effects (in combat systems):
   - Headless match: Warrior with each shout choice produces different combat log entries
   - Default config produces identical behavior to current
 
-- [ ] **Unit 5: Update Mage AI for armor choice**
+- [x] **Unit 5: Update Mage AI for armor choice**
 
   **Goal:** Mage AI reads `combatant.mage_armor` preference and self-casts the chosen armor during pre-match, in addition to Ice Barrier.
 
@@ -318,7 +318,7 @@ New Aura Effects (in combat systems):
   - Headless match: Each armor choice visible in combat log
   - Mage with Molten Armor has visibly higher crit rate in extended matches
 
-- [ ] **Unit 6: Update Paladin AI for aura choice**
+- [x] **Unit 6: Update Paladin AI for aura choice**
 
   **Goal:** Paladin AI reads `combatant.paladin_aura` preference and applies the chosen aura instead of always applying Devotion Aura.
 
