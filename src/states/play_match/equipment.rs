@@ -365,6 +365,57 @@ pub fn validate_class_restrictions(
 }
 
 // ============================================================================
+// ITEM BUDGET VALIDATION
+// ============================================================================
+
+use super::constants::{
+    BUDGET_PER_ILVL, BUDGET_TOLERANCE, WEIGHT_ATTACK_POWER, WEIGHT_CRIT_CHANCE,
+    WEIGHT_MAX_HEALTH, WEIGHT_MAX_MANA, WEIGHT_MANA_REGEN, WEIGHT_MOVEMENT_SPEED,
+    WEIGHT_RESISTANCE, WEIGHT_SPELL_POWER, slot_budget_multiplier,
+};
+
+/// Calculate the total budget usage for an item based on its budgeted stats.
+/// Free stats (armor, attack_damage_min/max, attack_speed) are excluded.
+pub fn calculate_budget_usage(item: &ItemConfig) -> f32 {
+    item.max_health * WEIGHT_MAX_HEALTH
+        + item.max_mana * WEIGHT_MAX_MANA
+        + item.mana_regen * WEIGHT_MANA_REGEN
+        + item.attack_power * WEIGHT_ATTACK_POWER
+        + item.spell_power * WEIGHT_SPELL_POWER
+        + item.crit_chance * WEIGHT_CRIT_CHANCE
+        + item.movement_speed * WEIGHT_MOVEMENT_SPEED
+        + item.fire_resistance * WEIGHT_RESISTANCE
+        + item.frost_resistance * WEIGHT_RESISTANCE
+        + item.shadow_resistance * WEIGHT_RESISTANCE
+        + item.arcane_resistance * WEIGHT_RESISTANCE
+        + item.nature_resistance * WEIGHT_RESISTANCE
+        + item.holy_resistance * WEIGHT_RESISTANCE
+}
+
+/// Calculate the effective budget cap for an item based on its level and slot.
+pub fn calculate_effective_budget(item: &ItemConfig) -> f32 {
+    item.item_level as f32 * BUDGET_PER_ILVL * slot_budget_multiplier(item.slot)
+}
+
+/// Validate that an item's stat budget usage does not exceed its effective budget
+/// (with tolerance). Returns Ok(()) if within budget, or Err with a diagnostic message.
+pub fn validate_item_budget(name: &str, item: &ItemConfig) -> Result<(), String> {
+    let usage = calculate_budget_usage(item);
+    let budget = calculate_effective_budget(item);
+    let max_allowed = budget * (1.0 + BUDGET_TOLERANCE);
+
+    if usage > max_allowed {
+        let overage_pct = ((usage / budget) - 1.0) * 100.0;
+        Err(format!(
+            "{} (ilvl {}, {:?}): budget usage {:.1} exceeds cap {:.1} (budget {:.1} + {:.0}% tolerance) — {:.1}% over budget",
+            name, item.item_level, item.slot, usage, max_allowed, budget, BUDGET_TOLERANCE * 100.0, overage_pct
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+// ============================================================================
 // LOADOUT RESOLUTION
 // ============================================================================
 
@@ -1068,5 +1119,135 @@ mod tests {
         ]);
         let result = find_one_handed_mainhand(&items, CharacterClass::Warrior);
         assert_eq!(result, None);
+    }
+
+    // ---- budget validation tests ----
+
+    /// Build a minimal item for budget testing with specific stats
+    fn budget_test_item(slot: ItemSlot, item_level: u32) -> ItemConfig {
+        ItemConfig {
+            name: "Test Item".to_string(),
+            item_level,
+            slot,
+            armor_type: ArmorType::None,
+            weapon_type: WeaponType::None,
+            allowed_classes: None,
+            is_weapon: false,
+            two_handed: false,
+            max_health: 0.0,
+            max_mana: 0.0,
+            mana_regen: 0.0,
+            attack_power: 0.0,
+            spell_power: 0.0,
+            crit_chance: 0.0,
+            movement_speed: 0.0,
+            armor: 0.0,
+            fire_resistance: 0.0,
+            frost_resistance: 0.0,
+            shadow_resistance: 0.0,
+            arcane_resistance: 0.0,
+            nature_resistance: 0.0,
+            holy_resistance: 0.0,
+            attack_damage_min: 0.0,
+            attack_damage_max: 0.0,
+            attack_speed: 0.0,
+        }
+    }
+
+    #[test]
+    fn budget_item_within_budget_passes() {
+        let mut item = budget_test_item(ItemSlot::Head, 60);
+        item.max_health = 10.0;
+        item.attack_power = 5.0;
+        // usage = 10*1.0 + 5*1.5 = 17.5, budget = 60*0.75*1.0 = 45
+        assert!(validate_item_budget("Test Helm", &item).is_ok());
+    }
+
+    #[test]
+    fn budget_item_exactly_at_budget_passes() {
+        let mut item = budget_test_item(ItemSlot::Head, 60);
+        // budget = 60 * 0.75 * 1.0 = 45.0
+        item.max_health = 45.0; // usage = 45.0, exactly at budget
+        assert!(validate_item_budget("Test Helm", &item).is_ok());
+    }
+
+    #[test]
+    fn budget_item_within_tolerance_passes() {
+        let mut item = budget_test_item(ItemSlot::Head, 60);
+        // budget = 45.0, max_allowed = 45 * 1.1 = 49.5
+        item.max_health = 49.0; // 108.9% of budget, within 10% tolerance
+        assert!(validate_item_budget("Test Helm", &item).is_ok());
+    }
+
+    #[test]
+    fn budget_item_over_tolerance_fails() {
+        let mut item = budget_test_item(ItemSlot::Head, 60);
+        // budget = 45.0, max_allowed = 49.5
+        item.max_health = 50.0; // 111.1% of budget, exceeds tolerance
+        let result = validate_item_budget("Over Budget Helm", &item);
+        assert!(result.is_err());
+        let msg = result.unwrap_err();
+        assert!(msg.contains("Over Budget Helm"));
+        assert!(msg.contains("over budget"));
+    }
+
+    #[test]
+    fn budget_armor_excluded_from_usage() {
+        let mut item = budget_test_item(ItemSlot::Head, 60);
+        item.armor = 500.0; // high armor, but free
+        item.max_health = 10.0;
+        // usage = only 10.0 (armor excluded), budget = 45.0
+        assert!(validate_item_budget("Armor Test", &item).is_ok());
+        assert_eq!(calculate_budget_usage(&item), 10.0);
+    }
+
+    #[test]
+    fn budget_weapon_dps_excluded_from_usage() {
+        let mut item = budget_test_item(ItemSlot::MainHand, 60);
+        item.is_weapon = true;
+        item.attack_damage_min = 100.0;
+        item.attack_damage_max = 200.0;
+        item.attack_speed = 2.0;
+        item.attack_power = 3.0;
+        // usage = only 3*1.5 = 4.5 (weapon DPS excluded), budget = 60*0.75*0.5625 = 25.3125
+        assert!(validate_item_budget("Weapon Test", &item).is_ok());
+        assert_eq!(calculate_budget_usage(&item), 4.5);
+    }
+
+    #[test]
+    fn budget_zero_stats_passes() {
+        let item = budget_test_item(ItemSlot::Head, 60);
+        // zero budgeted stats, budget > 0
+        assert!(validate_item_budget("Empty Item", &item).is_ok());
+        assert_eq!(calculate_budget_usage(&item), 0.0);
+    }
+
+    #[test]
+    fn budget_ilvl_zero_fails_with_any_stats() {
+        let mut item = budget_test_item(ItemSlot::Head, 0);
+        item.max_health = 1.0;
+        // usage = 1.0, budget = 0 * 0.75 * 1.0 = 0.0, max_allowed = 0.0
+        assert!(validate_item_budget("Zero iLvl", &item).is_err());
+    }
+
+    // ---- full item pool validation ----
+
+    #[test]
+    fn all_items_within_budget() {
+        let item_defs = load_item_definitions().expect("items.ron must load");
+        let mut violations: Vec<String> = Vec::new();
+
+        for (item_id, item) in &item_defs.definitions {
+            if let Err(msg) = validate_item_budget(&format!("{:?}", item_id), item) {
+                violations.push(msg);
+            }
+        }
+
+        assert!(
+            violations.is_empty(),
+            "Found {} item(s) over budget:\n{}",
+            violations.len(),
+            violations.join("\n")
+        );
     }
 }

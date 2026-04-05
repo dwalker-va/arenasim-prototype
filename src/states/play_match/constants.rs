@@ -183,6 +183,75 @@ pub const DR_IMMUNE_LEVEL: u8 = 3;
 /// Duration multipliers indexed by DR level: 100% → 50% → 25% → Immune.
 pub const DR_MULTIPLIERS: [f32; 4] = [1.0, 0.5, 0.25, 0.0];
 
+// ============================================================================
+// Item Budget Validation
+// ============================================================================
+
+use super::equipment::ItemSlot;
+
+/// Budget points granted per item level. Effective budget = item_level * BUDGET_PER_ILVL * slot_multiplier.
+/// Calibrated against the current item pool (ilvl 54-60 range).
+pub const BUDGET_PER_ILVL: f32 = 0.75;
+
+/// Tolerance for over-budget items. Items may exceed their computed budget by this fraction
+/// before being flagged (0.10 = 10% over-budget allowed).
+pub const BUDGET_TOLERANCE: f32 = 0.10;
+
+/// Cost weight per point of max_health in the item budget.
+pub const WEIGHT_MAX_HEALTH: f32 = 1.0;
+
+/// Cost weight per point of max_mana in the item budget.
+pub const WEIGHT_MAX_MANA: f32 = 1.0;
+
+/// Cost weight per point of mana_regen (MP5) in the item budget.
+pub const WEIGHT_MANA_REGEN: f32 = 5.0;
+
+/// Cost weight per point of attack_power in the item budget.
+pub const WEIGHT_ATTACK_POWER: f32 = 1.5;
+
+/// Cost weight per point of spell_power in the item budget.
+pub const WEIGHT_SPELL_POWER: f32 = 1.5;
+
+/// Cost weight per fraction-point of crit_chance in the item budget.
+/// Since crit is stored as a fraction (0.01 = 1%), this weight is large
+/// so that 0.02 crit (2%) costs 6.0 budget points.
+pub const WEIGHT_CRIT_CHANCE: f32 = 300.0;
+
+/// Cost weight per fraction-point of movement_speed in the item budget.
+/// Since movement_speed is stored as a fraction (0.1 = 10% speed),
+/// this weight is large so that 0.1 speed costs 3.0 budget points.
+pub const WEIGHT_MOVEMENT_SPEED: f32 = 30.0;
+
+/// Cost weight per point of elemental resistance in the item budget.
+/// Applied equally to all six resistance types (fire, frost, shadow, arcane, nature, holy).
+/// Lower than core stats since resist gear trades stat efficiency for specialized protection.
+pub const WEIGHT_RESISTANCE: f32 = 0.4;
+
+/// Returns the WoW Classic-accurate slot budget multiplier for the given item slot.
+/// Higher multiplier = more stat budget available. Head/Chest get the full budget,
+/// while accessories like rings and trinkets get roughly half.
+pub fn slot_budget_multiplier(slot: ItemSlot) -> f32 {
+    match slot {
+        ItemSlot::Head => 1.0,
+        ItemSlot::Chest => 1.0,
+        ItemSlot::Legs => 0.875,
+        ItemSlot::Shoulders => 0.75,
+        ItemSlot::Hands => 0.75,
+        ItemSlot::Feet => 0.75,
+        ItemSlot::Waist => 0.625,
+        ItemSlot::Wrists => 0.5,
+        ItemSlot::Neck => 0.5625,
+        ItemSlot::Back => 0.5625,
+        ItemSlot::Ring1 => 0.5625,
+        ItemSlot::Ring2 => 0.5625,
+        ItemSlot::Trinket1 => 0.5625,
+        ItemSlot::Trinket2 => 0.5625,
+        ItemSlot::MainHand => 0.5625,
+        ItemSlot::OffHand => 0.5625,
+        ItemSlot::Ranged => 0.5625,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -206,5 +275,43 @@ mod tests {
     #[test]
     fn test_gcd_is_standard_wow_value() {
         assert_eq!(GCD, 1.5);
+    }
+
+    #[test]
+    fn test_slot_budget_multiplier_head_is_full() {
+        assert_eq!(slot_budget_multiplier(ItemSlot::Head), 1.0);
+    }
+
+    #[test]
+    fn test_slot_budget_multiplier_wrists_is_half() {
+        assert_eq!(slot_budget_multiplier(ItemSlot::Wrists), 0.5);
+    }
+
+    #[test]
+    fn test_slot_budget_multiplier_rings_match() {
+        assert_eq!(
+            slot_budget_multiplier(ItemSlot::Ring1),
+            slot_budget_multiplier(ItemSlot::Ring2)
+        );
+    }
+
+    #[test]
+    fn test_slot_budget_multiplier_trinkets_match() {
+        assert_eq!(
+            slot_budget_multiplier(ItemSlot::Trinket1),
+            slot_budget_multiplier(ItemSlot::Trinket2)
+        );
+    }
+
+    #[test]
+    fn test_stat_weights_are_positive() {
+        assert!(WEIGHT_MAX_HEALTH > 0.0);
+        assert!(WEIGHT_MAX_MANA > 0.0);
+        assert!(WEIGHT_MANA_REGEN > 0.0);
+        assert!(WEIGHT_ATTACK_POWER > 0.0);
+        assert!(WEIGHT_SPELL_POWER > 0.0);
+        assert!(WEIGHT_CRIT_CHANCE > 0.0);
+        assert!(WEIGHT_MOVEMENT_SPEED > 0.0);
+        assert!(WEIGHT_RESISTANCE > 0.0);
     }
 }
