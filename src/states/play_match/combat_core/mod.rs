@@ -63,14 +63,29 @@ pub fn get_cast_time_increase(auras: Option<&ActiveAuras>) -> f32 {
     })
 }
 
-/// Calculate the modified cast time accounting for CastTimeIncrease auras.
+/// Get the total cast time reduction from CastTimeReduction auras on a combatant.
+/// Used by Concentration Aura to speed up casting.
+/// Returns the percentage reduction (0.15 = 15% faster, so multiply cast time by 0.85).
+pub fn get_cast_time_reduction(auras: Option<&ActiveAuras>) -> f32 {
+    auras.map_or(0.0, |a| {
+        a.auras
+            .iter()
+            .filter(|aura| aura.effect_type == AuraType::CastTimeReduction)
+            .map(|aura| aura.magnitude)
+            .sum()
+    })
+}
+
+/// Calculate the modified cast time accounting for CastTimeIncrease and CastTimeReduction auras.
 /// This should be called when starting a cast to get the actual cast duration.
 pub fn calculate_cast_time(base_cast_time: f32, auras: Option<&ActiveAuras>) -> f32 {
     if base_cast_time <= 0.0 {
         return 0.0; // Instant casts aren't affected
     }
     let cast_time_increase = get_cast_time_increase(auras);
-    base_cast_time * (1.0 + cast_time_increase)
+    let cast_time_reduction = get_cast_time_reduction(auras);
+    // Apply increase first, then reduction (multiplicative)
+    (base_cast_time * (1.0 + cast_time_increase) * (1.0 - cast_time_reduction)).max(0.0)
 }
 
 // =============================================================================

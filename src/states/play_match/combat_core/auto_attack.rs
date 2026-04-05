@@ -106,7 +106,16 @@ pub fn combat_auto_attack(
         combatant.attack_timer += dt;
 
         // Check if ready to attack and has a target
-        let attack_interval = 1.0 / combatant.attack_speed;
+        // Apply AttackSpeedSlow auras to increase the interval
+        let mut attack_interval = 1.0 / combatant.attack_speed;
+        if let Some(ref auras) = auras {
+            for aura in auras.auras.iter() {
+                if aura.effect_type == AuraType::AttackSpeedSlow {
+                    // magnitude = slow amount (e.g., 0.25 = 25% slower → 1.33x interval)
+                    attack_interval *= 1.0 / (1.0 - aura.magnitude);
+                }
+            }
+        }
         if combatant.attack_timer >= attack_interval {
             if let Some(target_entity) = combatant.target {
                 // Skip if target is dead (will be retargeted next frame)
@@ -184,6 +193,9 @@ pub fn combat_auto_attack(
     // Track crit status per target for FCT display (auto-attacks batch into damage_per_target)
     let mut crit_per_target: HashMap<Entity, bool> = HashMap::new();
 
+    // Track Frost Armor procs: (attacker_entity) to apply slows to after the loop
+    let mut frost_armor_procs: Vec<Entity> = Vec::new();
+
     // Build a map of targets with breakable CC from friendly casters.
     // Key: target entity, Value: team of the CC caster.
     // This prevents friendly auto-attacks from breaking their own team's Polymorph/Fear.
@@ -243,6 +255,17 @@ pub fn combat_auto_attack(
                 if actual_damage > 0.0 && target.resource_type == ResourceType::Rage {
                     let rage_gain = actual_damage * 0.15; // Gain 15% of damage taken as Rage
                     target.current_mana = (target.current_mana + rage_gain).min(target.max_mana);
+                }
+
+                // Check for Frost Armor proc: if target has FrostArmorBuff and attacker is melee
+                if let Some(&(_, _, _, attacker_is_melee, _)) = combatant_info.get(&attacker_entity) {
+                    if attacker_is_melee {
+                        if let Some(ref target_auras_ref) = target_auras {
+                            if target_auras_ref.auras.iter().any(|a| a.effect_type == AuraType::FrostArmorBuff) {
+                                frost_armor_procs.push(attacker_entity);
+                            }
+                        }
+                    }
                 }
 
                 // Track damage for aura breaking (only actual damage, not absorbed)
@@ -344,6 +367,46 @@ pub fn combat_auto_attack(
                 }
             }
         }
+    }
+
+    // Apply Frost Armor procs: slow melee attackers who hit a target with FrostArmorBuff
+    for attacker_entity in frost_armor_procs {
+        // Apply MovementSpeedSlow (30% slow = magnitude 0.7) for 5 seconds
+        commands.spawn(AuraPending {
+            target: attacker_entity,
+            aura: Aura {
+                effect_type: AuraType::MovementSpeedSlow,
+                duration: 5.0,
+                magnitude: 0.7, // 30% slow (0.7 = 70% speed)
+                break_on_damage_threshold: -1.0,
+                accumulated_damage: 0.0,
+                tick_interval: 0.0,
+                time_until_next_tick: 0.0,
+                caster: None,
+                ability_name: "Frost Armor".to_string(),
+                fear_direction: (0.0, 0.0),
+                fear_direction_timer: 0.0,
+                spell_school: Some(SpellSchool::Frost),
+            },
+        });
+        // Apply AttackSpeedSlow (25% slower attacks) for 5 seconds
+        commands.spawn(AuraPending {
+            target: attacker_entity,
+            aura: Aura {
+                effect_type: AuraType::AttackSpeedSlow,
+                duration: 5.0,
+                magnitude: 0.25,
+                break_on_damage_threshold: -1.0,
+                accumulated_damage: 0.0,
+                tick_interval: 0.0,
+                time_until_next_tick: 0.0,
+                caster: None,
+                ability_name: "Frost Armor".to_string(),
+                fear_direction: (0.0, 0.0),
+                fear_direction_timer: 0.0,
+                spell_school: Some(SpellSchool::Frost),
+            },
+        });
     }
 
     // Spawn floating combat text for each target that took damage (batched)
