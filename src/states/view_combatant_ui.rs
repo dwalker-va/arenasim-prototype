@@ -65,162 +65,6 @@ pub struct ItemIconHandles {
     pub handles: Vec<(ItemId, Handle<Image>)>,
 }
 
-/// Single source of truth: maps each ItemId to its icon asset path.
-/// Adding a new ItemId variant requires adding it here (and downloading the icon).
-const ITEM_ICON_PATHS: &[(ItemId, &str)] = &[
-    // Plate Armor
-    (ItemId::LionheartHelm, "icons/items/inv_helmet_36.jpg"),
-    (ItemId::OnslaughtHeadGuard, "icons/items/inv_helmet_71.jpg"),
-    (ItemId::ConquerorsChestplate, "icons/items/inv_chest_plate12.jpg"),
-    (ItemId::LegplatesOfWrath, "icons/items/inv_pants_04.jpg"),
-    (ItemId::GauntletsOfMight, "icons/items/inv_gauntlets_10.jpg"),
-    (ItemId::SabatonsBattleBorn, "icons/items/inv_boots_plate_04.jpg"),
-    (ItemId::WaistguardOfHeroism, "icons/items/inv_belt_09.jpg"),
-    (ItemId::WristguardsOfStability, "icons/items/inv_bracer_19.jpg"),
-    (ItemId::ShoulderplatesOfValor, "icons/items/inv_shoulder_15.jpg"),
-    // Plate Armor — Holy (Lawbringer)
-    (ItemId::LawbringerHelm, "icons/items/inv_helmet_05.jpg"),
-    (ItemId::LawbringerSpaulders, "icons/items/inv_shoulder_20.jpg"),
-    (ItemId::LawbringerChestguard, "icons/items/inv_chest_plate03.jpg"),
-    (ItemId::LawbringerBracers, "icons/items/inv_bracer_18.jpg"),
-    (ItemId::LawbringerGauntlets, "icons/items/inv_gauntlets_29.jpg"),
-    (ItemId::LawbringerBelt, "icons/items/inv_belt_27.jpg"),
-    (ItemId::LawbringerLegplates, "icons/items/inv_pants_04.jpg"),
-    (ItemId::LawbringerBoots, "icons/items/inv_boots_plate_09.jpg"),
-    // Mail Armor (Beaststalker)
-    (ItemId::BeaststalkerHelm, "icons/items/inv_helmet_24.jpg"),
-    (ItemId::BeaststalkerTunic, "icons/items/inv_chest_chain_03.jpg"),
-    (ItemId::BeaststalkerLegs, "icons/items/inv_pants_03.jpg"),
-    (ItemId::BeaststalkerGloves, "icons/items/inv_gauntlets_10.jpg"),
-    (ItemId::BeaststalkerBoots, "icons/items/inv_boots_plate_07.jpg"),
-    (ItemId::BeaststalkerBelt, "icons/items/inv_belt_16.jpg"),
-    (ItemId::BeaststalkerBracers, "icons/items/inv_bracer_02.jpg"),
-    (ItemId::BeaststalkerMantle, "icons/items/inv_shoulder_25.jpg"),
-    // Leather Armor (Nightstalker/Nightslayer)
-    (ItemId::NightstalkerCowl, "icons/items/inv_helmet_41.jpg"),
-    (ItemId::NightstalkerTunic, "icons/items/inv_chest_cloth_07.jpg"),
-    (ItemId::NightstalkerLegs, "icons/items/inv_pants_06.jpg"),
-    (ItemId::NightstalkerGloves, "icons/items/inv_gauntlets_21.jpg"),
-    (ItemId::NightstalkerBoots, "icons/items/inv_boots_08.jpg"),
-    (ItemId::NightstalkerBelt, "icons/items/inv_belt_23.jpg"),
-    (ItemId::NightstalkerBracers, "icons/items/inv_bracer_02.jpg"),
-    (ItemId::NightstalkerMantle, "icons/items/inv_shoulder_25.jpg"),
-    // Cloth Armor (Magister's)
-    (ItemId::MagistersCrown, "icons/items/inv_crown_02.jpg"),
-    (ItemId::MagistersRobes, "icons/items/inv_chest_cloth_25.jpg"),
-    (ItemId::MagistersLeggings, "icons/items/inv_pants_06.jpg"),
-    (ItemId::MagistersGloves, "icons/items/inv_gauntlets_17.jpg"),
-    (ItemId::MagistersBoots, "icons/items/inv_boots_02.jpg"),
-    (ItemId::MagistersBelt, "icons/items/inv_belt_08.jpg"),
-    (ItemId::MagistersBracers, "icons/items/inv_jewelry_ring_23.jpg"),
-    (ItemId::MagistersMantle, "icons/items/inv_shoulder_23.jpg"),
-    // Cloaks
-    (ItemId::CloakOfTheShieldWall, "icons/items/inv_misc_cape_17.jpg"),
-    (ItemId::CloakOfConcentration, "icons/items/inv_misc_cape_18.jpg"),
-    (ItemId::CloakOfFrostWarding, "icons/items/inv_misc_cape_20.jpg"),
-    // Necklaces
-    (ItemId::AmuletOfPower, "icons/items/inv_jewelry_necklace_09.jpg"),
-    (ItemId::AmuletOfResilience, "icons/items/inv_jewelry_talisman_07.jpg"),
-    (ItemId::AmuletOfShadowWard, "icons/items/inv_jewelry_amulet_04.jpg"),
-    // Rings
-    (ItemId::BandOfAccuria, "icons/items/inv_jewelry_ring_15.jpg"),
-    (ItemId::SignetOfFocus, "icons/items/inv_jewelry_ring_40.jpg"),
-    (ItemId::RingOfProtection, "icons/items/inv_jewelry_ring_05.jpg"),
-    (ItemId::BandOfElementalResistance, "icons/items/inv_jewelry_ring_38.jpg"),
-    // Trinkets
-    (ItemId::MarkOfTheChampion, "icons/items/inv_misc_token_argentdawn2.jpg"),
-    (ItemId::EssenceOfEternalLife, "icons/items/inv_misc_root_02.jpg"),
-    // Melee Weapons
-    (ItemId::ArcaniteReaper, "icons/items/inv_axe_09.jpg"),
-    (ItemId::FrostbiteBlade, "icons/items/inv_sword_51.jpg"),
-    (ItemId::SerpentFangDagger, "icons/items/inv_sword_48.jpg"),
-    (ItemId::HammerOfTheRighteous, "icons/items/inv_mace_05.jpg"),
-    (ItemId::CrescentStaff, "icons/items/inv_staff_30.jpg"),
-    // Ranged Weapons
-    (ItemId::WandOfShadows, "icons/items/inv_wand_1h_stratholme_d_01.jpg"),
-    (ItemId::StaffOfDominance, "icons/items/inv_staff_13.jpg"),
-    (ItemId::AshwoodBow, "icons/items/inv_weapon_bow_01.jpg"),
-    (ItemId::SniperScope, "icons/items/inv_weapon_crossbow_04.jpg"),
-    // Off Hand
-    (ItemId::TomeOfKnowledge, "icons/items/inv_misc_armorkit_09.jpg"),
-    (ItemId::WallOfTheDeadShield, "icons/items/inv_shield_17.jpg"),
-    (ItemId::AegisOfTheBloodGod, "icons/items/inv_shield_12.jpg"),
-    // Tier 1: Plate Armor — DPS (Warlord's)
-    (ItemId::WarlordsCrown, "icons/items/inv_helmet_72.jpg"),
-    (ItemId::WarlordsVizard, "icons/items/inv_helmet_06.jpg"),
-    (ItemId::WarlordsBreastplate, "icons/items/inv_chest_plate16.jpg"),
-    (ItemId::WarlordsLegguards, "icons/items/inv_pants_plate_03.jpg"),
-    (ItemId::WarlordsGauntlets, "icons/items/inv_gauntlets_10.jpg"),
-    (ItemId::WarlordsSpaulders, "icons/items/inv_shoulder_34.jpg"),
-    (ItemId::WarlordsGreaves, "icons/items/inv_boots_plate_05.jpg"),
-    (ItemId::WarlordsGirdle, "icons/items/inv_belt_09.jpg"),
-    (ItemId::WarlordsBracers, "icons/items/inv_bracer_19.jpg"),
-    // Tier 1: Plate Armor — Holy (Judgement)
-    (ItemId::JudgementCrown, "icons/items/inv_helmet_05.jpg"),
-    (ItemId::JudgementBreastplate, "icons/items/inv_chest_chain_11.jpg"),
-    (ItemId::JudgementLegguards, "icons/items/inv_pants_04.jpg"),
-    (ItemId::JudgementSpaulders, "icons/items/inv_shoulder_37.jpg"),
-    (ItemId::JudgementGauntlets, "icons/items/inv_gauntlets_29.jpg"),
-    (ItemId::JudgementBelt, "icons/items/inv_belt_27.jpg"),
-    (ItemId::JudgementSabatons, "icons/items/inv_boots_plate_09.jpg"),
-    (ItemId::JudgementBracers, "icons/items/inv_bracer_18.jpg"),
-    // Tier 1: Mail Armor (Giantstalker)
-    (ItemId::GiantstalkerHelm, "icons/items/inv_helmet_05.jpg"),
-    (ItemId::GiantstalkerTunic, "icons/items/inv_chest_chain_11.jpg"),
-    (ItemId::GiantstalkerLegs, "icons/items/inv_pants_mail_03.jpg"),
-    (ItemId::GiantstalkerGloves, "icons/items/inv_gauntlets_10.jpg"),
-    (ItemId::GiantstalkerEpaulets, "icons/items/inv_shoulder_10.jpg"),
-    (ItemId::GiantstalkerBoots, "icons/items/inv_boots_chain_13.jpg"),
-    (ItemId::GiantstalkerBelt, "icons/items/inv_belt_28.jpg"),
-    (ItemId::GiantstalkerBracers, "icons/items/inv_bracer_17.jpg"),
-    // Tier 1: Leather Armor (Deathdealer/Bloodfang)
-    (ItemId::DeathdealerCowl, "icons/items/inv_helmet_41.jpg"),
-    (ItemId::DeathdealerTunic, "icons/items/inv_chest_cloth_07.jpg"),
-    (ItemId::DeathdealerLegs, "icons/items/inv_pants_06.jpg"),
-    (ItemId::DeathdealerGloves, "icons/items/inv_gauntlets_21.jpg"),
-    (ItemId::DeathdealerMantle, "icons/items/inv_shoulder_23.jpg"),
-    (ItemId::DeathdealerBoots, "icons/items/inv_boots_08.jpg"),
-    (ItemId::DeathdealerBelt, "icons/items/inv_belt_23.jpg"),
-    (ItemId::DeathdealerBracers, "icons/items/inv_bracer_02.jpg"),
-    // Tier 1: Cloth Armor (Arcanist)
-    (ItemId::ArcanistCrown, "icons/items/inv_helmet_53.jpg"),
-    (ItemId::ArcanistRobes, "icons/items/inv_chest_cloth_03.jpg"),
-    (ItemId::ArcanistLeggings, "icons/items/inv_pants_08.jpg"),
-    (ItemId::ArcanistGloves, "icons/items/inv_gauntlets_14.jpg"),
-    (ItemId::ArcanistMantle, "icons/items/inv_shoulder_02.jpg"),
-    (ItemId::ArcanistBoots, "icons/items/inv_boots_07.jpg"),
-    (ItemId::ArcanistBelt, "icons/items/inv_belt_30.jpg"),
-    (ItemId::ArcanistBracers, "icons/items/inv_belt_29.jpg"),
-    // Tier 1: Cloaks
-    (ItemId::CloakOfConquest, "icons/items/inv_misc_cape_17.jpg"),
-    (ItemId::CloakOfWisdom, "icons/items/inv_misc_cape_18.jpg"),
-    (ItemId::CloakOfNatureWarding, "icons/items/inv_misc_cape_20.jpg"),
-    // Tier 1: Necklaces
-    (ItemId::PendantOfMight, "icons/items/inv_jewelry_necklace_09.jpg"),
-    (ItemId::PendantOfClarity, "icons/items/inv_jewelry_talisman_07.jpg"),
-    (ItemId::PendantOfArcaneWarding, "icons/items/inv_jewelry_amulet_04.jpg"),
-    // Tier 1: Rings
-    (ItemId::RingOfBruteForce, "icons/items/inv_jewelry_ring_15.jpg"),
-    (ItemId::RingOfArcaneInsight, "icons/items/inv_jewelry_ring_40.jpg"),
-    (ItemId::RingOfFortitude, "icons/items/inv_jewelry_ring_05.jpg"),
-    (ItemId::RingOfElementalMastery, "icons/items/inv_jewelry_ring_38.jpg"),
-    // Tier 1: Trinkets
-    (ItemId::InsigniaOfTheAlliance, "icons/items/inv_misc_token_argentdawn2.jpg"),
-    (ItemId::TalismanOfEphemeralPower, "icons/items/inv_misc_root_02.jpg"),
-    // Tier 1: Melee Weapons
-    (ItemId::BloodlordsBattleaxe, "icons/items/inv_axe_09.jpg"),
-    (ItemId::StormbladeEdge, "icons/items/inv_sword_15.jpg"),
-    (ItemId::FangOfTheViper, "icons/items/inv_sword_48.jpg"),
-    (ItemId::MaceOfTheRedeemer, "icons/items/inv_mace_05.jpg"),
-    (ItemId::RunestaffOfElements, "icons/items/inv_staff_06.jpg"),
-    // Tier 1: Ranged Weapons
-    (ItemId::WandOfTheInvoker, "icons/items/inv_wand_1h_stratholme_d_01.jpg"),
-    (ItemId::EaglestrikeBow, "icons/items/inv_weapon_bow_01.jpg"),
-    (ItemId::DeadeyeCrossbow, "icons/items/inv_weapon_crossbow_04.jpg"),
-    // Tier 1: Off Hand
-    (ItemId::GrimoireOfShadows, "icons/items/inv_misc_armorkit_09.jpg"),
-    (ItemId::BulwarkOfTheGuardian, "icons/items/inv_shield_17.jpg"),
-];
 
 /// Base stats for a class (used for display)
 struct ClassStats {
@@ -553,6 +397,7 @@ pub fn load_item_icons(
     mut item_icons: ResMut<ItemIcons>,
     mut icon_handles: ResMut<ItemIconHandles>,
     images: Res<Assets<Image>>,
+    item_definitions: Res<ItemDefinitions>,
 ) {
     if item_icons.loaded {
         return;
@@ -560,9 +405,11 @@ pub fn load_item_icons(
 
     // Load handles if not already loaded
     if icon_handles.handles.is_empty() {
-        for (item_id, path) in ITEM_ICON_PATHS {
-            let handle: Handle<Image> = asset_server.load(*path);
-            icon_handles.handles.push((*item_id, handle));
+        for (item_id, item) in item_definitions.iter() {
+            if !item.icon.is_empty() {
+                let handle: Handle<Image> = asset_server.load(item.icon.as_str());
+                icon_handles.handles.push((*item_id, handle));
+            }
         }
         return;
     }
