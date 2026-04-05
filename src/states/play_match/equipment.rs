@@ -217,6 +217,97 @@ pub enum ItemId {
     TomeOfKnowledge,
     WallOfTheDeadShield,
     AegisOfTheBloodGod,
+
+    // ====================================================================
+    // TIER 1 ITEMS (Item Level 69-75)
+    // ====================================================================
+
+    // === Tier 1: Plate Armor — DPS (Warrior) ===
+    WarlordsCrown,
+    WarlordsVizard,
+    WarlordsBreastplate,
+    WarlordsLegguards,
+    WarlordsGauntlets,
+    WarlordsSpaulders,
+    WarlordsGreaves,
+    WarlordsGirdle,
+    WarlordsBracers,
+
+    // === Tier 1: Plate Armor — Holy (Paladin) ===
+    JudgementCrown,
+    JudgementBreastplate,
+    JudgementLegguards,
+    JudgementSpaulders,
+    JudgementGauntlets,
+    JudgementBelt,
+    JudgementSabatons,
+    JudgementBracers,
+
+    // === Tier 1: Mail Armor (Hunter) ===
+    GiantstalkerHelm,
+    GiantstalkerTunic,
+    GiantstalkerLegs,
+    GiantstalkerGloves,
+    GiantstalkerEpaulets,
+    GiantstalkerBoots,
+    GiantstalkerBelt,
+    GiantstalkerBracers,
+
+    // === Tier 1: Leather Armor (Rogue) ===
+    DeathdealerCowl,
+    DeathdealerTunic,
+    DeathdealerLegs,
+    DeathdealerGloves,
+    DeathdealerMantle,
+    DeathdealerBoots,
+    DeathdealerBelt,
+    DeathdealerBracers,
+
+    // === Tier 1: Cloth Armor (Mage, Priest, Warlock) ===
+    ArcanistCrown,
+    ArcanistRobes,
+    ArcanistLeggings,
+    ArcanistGloves,
+    ArcanistMantle,
+    ArcanistBoots,
+    ArcanistBelt,
+    ArcanistBracers,
+
+    // === Tier 1: Cloaks (all classes) ===
+    CloakOfConquest,
+    CloakOfWisdom,
+    CloakOfNatureWarding,
+
+    // === Tier 1: Necklaces (all classes) ===
+    PendantOfMight,
+    PendantOfClarity,
+    PendantOfArcaneWarding,
+
+    // === Tier 1: Rings (all classes) ===
+    RingOfBruteForce,
+    RingOfArcaneInsight,
+    RingOfFortitude,
+    RingOfElementalMastery,
+
+    // === Tier 1: Trinkets (all classes) ===
+    InsigniaOfTheAlliance,
+    TalismanOfEphemeralPower,
+
+    // === Tier 1: Melee Weapons ===
+    BloodlordsBattleaxe,
+    StormbladeEdge,
+    FangOfTheViper,
+    MaceOfTheRedeemer,
+    RunestaffOfElements,
+
+    // === Tier 1: Ranged Weapons ===
+    WandOfTheInvoker,
+    EaglestrikeBow,
+    DeadeyeCrossbow,
+
+    // === Tier 1: Off Hand ===
+    GrimoireOfShadows,
+    BulwarkOfTheGuardian,
 }
 
 // ============================================================================
@@ -231,6 +322,12 @@ pub struct ItemConfig {
     /// Item level (informational, determines stat budget)
     #[serde(default)]
     pub item_level: u32,
+    /// Item tier (0 = base, 1 = first upgrade tier, etc.)
+    #[serde(default)]
+    pub item_tier: u32,
+    /// Icon asset path (e.g. "icons/items/inv_helmet_36.jpg")
+    #[serde(default)]
+    pub icon: String,
     /// Which slot this item equips to
     pub slot: ItemSlot,
     /// Armor type restriction
@@ -495,6 +592,10 @@ impl ItemDefinitions {
         self.definitions.len()
     }
 
+    pub fn iter(&self) -> impl Iterator<Item = (&ItemId, &ItemConfig)> {
+        self.definitions.iter()
+    }
+
     /// Return all items valid for a given slot and class, sorted by name.
     /// Ring1/Ring2 and Trinket1/Trinket2 share item pools.
     pub fn items_for_slot(&self, slot: ItemSlot, class: CharacterClass) -> Vec<(ItemId, &ItemConfig)> {
@@ -663,6 +764,8 @@ mod tests {
         ItemConfig {
             name: name.to_string(),
             item_level: 60,
+            item_tier: 0,
+            icon: String::new(),
             slot,
             armor_type,
             weapon_type: WeaponType::None,
@@ -694,6 +797,8 @@ mod tests {
         ItemConfig {
             name: name.to_string(),
             item_level: 60,
+            item_tier: 0,
+            icon: String::new(),
             slot,
             armor_type: ArmorType::None,
             weapon_type: WeaponType::Sword,
@@ -1135,6 +1240,8 @@ mod tests {
         ItemConfig {
             name: "Test Item".to_string(),
             item_level,
+            item_tier: 0,
+            icon: String::new(),
             slot,
             armor_type: ArmorType::None,
             weapon_type: WeaponType::None,
@@ -1269,6 +1376,25 @@ mod tests {
             "Found {} item(s) over budget:\n{}",
             violations.len(),
             violations.join("\n")
+        );
+    }
+
+    #[test]
+    fn all_items_have_icons() {
+        let item_defs = load_item_definitions().expect("items.ron must load");
+        let mut missing: Vec<String> = Vec::new();
+
+        for (item_id, item) in &item_defs.definitions {
+            if item.icon.is_empty() {
+                missing.push(format!("{:?} ({}) has no icon", item_id, item.name));
+            }
+        }
+
+        assert!(
+            missing.is_empty(),
+            "Found {} item(s) without icons:\n{}",
+            missing.len(),
+            missing.join("\n")
         );
     }
 }
