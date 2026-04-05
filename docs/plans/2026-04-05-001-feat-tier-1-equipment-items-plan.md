@@ -1,7 +1,7 @@
 ---
 title: "feat: Add Tier 1 equipment items (ilvl 75)"
 type: feat
-status: active
+status: completed
 date: 2026-04-05
 origin: docs/brainstorms/2026-04-05-tier-1-items-requirements.md
 ---
@@ -119,7 +119,7 @@ budget_usage = sum(stat_value × stat_weight)
 
 ## Implementation Units
 
-- [ ] **Unit 1: Add item_tier field to ItemConfig**
+- [x] **Unit 1: Add item_tier field to ItemConfig**
 
 **Goal:** Add a tier identifier to items so future systems can filter by tier.
 
@@ -146,7 +146,7 @@ budget_usage = sum(stat_value × stat_weight)
 - `cargo test` passes — existing items still load and validate
 - `cargo build` succeeds
 
-- [ ] **Unit 2: Add Tier 1 ItemId enum variants**
+- [x] **Unit 2: Add Tier 1 ItemId enum variants**
 
 **Goal:** Register all ~61 new item identifiers in the ItemId enum.
 
@@ -175,7 +175,7 @@ budget_usage = sum(stat_value × stat_weight)
 - `cargo build` succeeds
 - Note: `cargo test` will fail until matching items.ron entries are added (expected)
 
-- [ ] **Unit 3: Add Tier 1 plate DPS armor (9 items)**
+- [x] **Unit 3: Add Tier 1 plate DPS armor (9 items)**
 
 **Goal:** Create 9 plate DPS items with aggressive AP/crit stat profiles.
 
@@ -207,7 +207,7 @@ budget_usage = sum(stat_value × stat_weight)
 **Verification:**
 - `cargo test` budget validation passes for all 9 items
 
-- [ ] **Unit 4: Add Tier 1 plate holy armor (8 items)**
+- [x] **Unit 4: Add Tier 1 plate holy armor (8 items)**
 
 **Goal:** Create 8 plate holy items with SP/mana stat profiles.
 
@@ -237,7 +237,7 @@ budget_usage = sum(stat_value × stat_weight)
 **Verification:**
 - `cargo test` budget validation passes for all 8 items
 
-- [ ] **Unit 5: Add Tier 1 mail armor (8 items)**
+- [x] **Unit 5: Add Tier 1 mail armor (8 items)**
 
 **Goal:** Create 8 mail items with balanced AP/crit profiles.
 
@@ -267,7 +267,7 @@ budget_usage = sum(stat_value × stat_weight)
 **Verification:**
 - `cargo test` budget validation passes
 
-- [ ] **Unit 6: Add Tier 1 leather armor (8 items)**
+- [x] **Unit 6: Add Tier 1 leather armor (8 items)**
 
 **Goal:** Create 8 leather items with aggressive AP/crit profiles.
 
@@ -298,7 +298,7 @@ budget_usage = sum(stat_value × stat_weight)
 **Verification:**
 - `cargo test` budget validation passes
 
-- [ ] **Unit 7: Add Tier 1 cloth armor (8 items)**
+- [x] **Unit 7: Add Tier 1 cloth armor (8 items)**
 
 **Goal:** Create 8 cloth items with SP/mana caster profiles.
 
@@ -328,7 +328,7 @@ budget_usage = sum(stat_value × stat_weight)
 **Verification:**
 - `cargo test` budget validation passes
 
-- [ ] **Unit 8: Add Tier 1 shared slot items (10 items)**
+- [x] **Unit 8: Add Tier 1 shared slot items (10 items)**
 
 **Goal:** Create 3 cloaks, 3 necklaces, 2 rings (Ring1), and 2 trinkets (Trinket1).
 
@@ -359,7 +359,7 @@ budget_usage = sum(stat_value × stat_weight)
 **Verification:**
 - `cargo test` budget validation passes
 
-- [ ] **Unit 9: Add Tier 1 weapons (10 items)**
+- [x] **Unit 9: Add Tier 1 weapons (10 items)**
 
 **Goal:** Create 10 weapons, one per weapon_type.
 
@@ -396,7 +396,7 @@ budget_usage = sum(stat_value × stat_weight)
 - `cargo test` budget validation passes
 - `cargo build` succeeds
 
-- [ ] **Unit 10: Validate and test with headless simulation**
+- [x] **Unit 10: Validate and test with headless simulation**
 
 **Goal:** Verify all items pass validation and run Tier 1 vs Tier 0 comparison.
 
