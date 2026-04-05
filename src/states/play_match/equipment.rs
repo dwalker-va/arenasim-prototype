@@ -400,6 +400,13 @@ pub fn calculate_effective_budget(item: &ItemConfig) -> f32 {
 /// Validate that an item's stat budget usage does not exceed its effective budget
 /// (with tolerance). Returns Ok(()) if within budget, or Err with a diagnostic message.
 pub fn validate_item_budget(name: &str, item: &ItemConfig) -> Result<(), String> {
+    if item.item_level == 0 {
+        return Err(format!(
+            "{} ({:?}): item_level is 0 — set a valid item_level for budget validation",
+            name, item.slot
+        ));
+    }
+
     let usage = calculate_budget_usage(item);
     let budget = calculate_effective_budget(item);
     let max_allowed = budget * (1.0 + BUDGET_TOLERANCE);
@@ -1188,6 +1195,8 @@ mod tests {
         assert!(result.is_err());
         let msg = result.unwrap_err();
         assert!(msg.contains("Over Budget Helm"));
+        assert!(msg.contains("ilvl 60"));
+        assert!(msg.contains("Head"));
         assert!(msg.contains("over budget"));
     }
 
@@ -1223,11 +1232,23 @@ mod tests {
     }
 
     #[test]
-    fn budget_ilvl_zero_fails_with_any_stats() {
+    fn budget_ilvl_zero_fails_with_stats() {
         let mut item = budget_test_item(ItemSlot::Head, 0);
         item.max_health = 1.0;
-        // usage = 1.0, budget = 0 * 0.75 * 1.0 = 0.0, max_allowed = 0.0
-        assert!(validate_item_budget("Zero iLvl", &item).is_err());
+        let result = validate_item_budget("Zero iLvl", &item);
+        assert!(result.is_err());
+        let msg = result.unwrap_err();
+        assert!(msg.contains("item_level is 0"));
+        assert!(!msg.contains("inf"));
+    }
+
+    #[test]
+    fn budget_ilvl_zero_fails_even_with_zero_stats() {
+        let item = budget_test_item(ItemSlot::Head, 0);
+        let result = validate_item_budget("Zero iLvl Empty", &item);
+        assert!(result.is_err());
+        let msg = result.unwrap_err();
+        assert!(msg.contains("item_level is 0"));
     }
 
     // ---- full item pool validation ----

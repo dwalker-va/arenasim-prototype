@@ -278,29 +278,24 @@ mod tests {
     }
 
     #[test]
-    fn test_slot_budget_multiplier_head_is_full() {
+    fn test_slot_budget_multiplier_all_values() {
         assert_eq!(slot_budget_multiplier(ItemSlot::Head), 1.0);
-    }
-
-    #[test]
-    fn test_slot_budget_multiplier_wrists_is_half() {
+        assert_eq!(slot_budget_multiplier(ItemSlot::Chest), 1.0);
+        assert_eq!(slot_budget_multiplier(ItemSlot::Legs), 0.875);
+        assert_eq!(slot_budget_multiplier(ItemSlot::Shoulders), 0.75);
+        assert_eq!(slot_budget_multiplier(ItemSlot::Hands), 0.75);
+        assert_eq!(slot_budget_multiplier(ItemSlot::Feet), 0.75);
+        assert_eq!(slot_budget_multiplier(ItemSlot::Waist), 0.625);
         assert_eq!(slot_budget_multiplier(ItemSlot::Wrists), 0.5);
-    }
-
-    #[test]
-    fn test_slot_budget_multiplier_rings_match() {
-        assert_eq!(
-            slot_budget_multiplier(ItemSlot::Ring1),
-            slot_budget_multiplier(ItemSlot::Ring2)
-        );
-    }
-
-    #[test]
-    fn test_slot_budget_multiplier_trinkets_match() {
-        assert_eq!(
-            slot_budget_multiplier(ItemSlot::Trinket1),
-            slot_budget_multiplier(ItemSlot::Trinket2)
-        );
+        assert_eq!(slot_budget_multiplier(ItemSlot::Neck), 0.5625);
+        assert_eq!(slot_budget_multiplier(ItemSlot::Back), 0.5625);
+        assert_eq!(slot_budget_multiplier(ItemSlot::Ring1), 0.5625);
+        assert_eq!(slot_budget_multiplier(ItemSlot::Ring2), 0.5625);
+        assert_eq!(slot_budget_multiplier(ItemSlot::Trinket1), 0.5625);
+        assert_eq!(slot_budget_multiplier(ItemSlot::Trinket2), 0.5625);
+        assert_eq!(slot_budget_multiplier(ItemSlot::MainHand), 0.5625);
+        assert_eq!(slot_budget_multiplier(ItemSlot::OffHand), 0.5625);
+        assert_eq!(slot_budget_multiplier(ItemSlot::Ranged), 0.5625);
     }
 
     #[test]
