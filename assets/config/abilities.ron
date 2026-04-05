@@ -13,6 +13,7 @@
 
         Frostbolt: (
             name: "Frostbolt",
+            icon: "icons/abilities/spell_frost_frostbolt02.jpg",
             cast_time: 1.5,
             range: 40.0,
             mana_cost: 20.0,
@@ -37,6 +38,7 @@
 
         FrostNova: (
             name: "Frost Nova",
+            icon: "icons/abilities/spell_frost_frostnova.jpg",
             cast_time: 0.0,
             range: 10.0,
             mana_cost: 30.0,
@@ -56,6 +58,7 @@
 
         ArcaneIntellect: (
             name: "Arcane Intellect",
+            icon: "icons/abilities/spell_holy_magicalsentry.jpg",
             cast_time: 0.0,
             range: 40.0,
             mana_cost: 40.0,
@@ -70,6 +73,7 @@
 
         IceBarrier: (
             name: "Ice Barrier",
+            icon: "icons/abilities/spell_ice_lament.jpg",
             cast_time: 0.0,
             range: 0.0,
             mana_cost: 30.0,
@@ -84,6 +88,7 @@
 
         Polymorph: (
             name: "Polymorph",
+            icon: "icons/abilities/spell_nature_polymorph.jpg",
             cast_time: 1.5,
             range: 30.0,
             mana_cost: 60.0,
@@ -103,6 +108,7 @@
 
         FlashHeal: (
             name: "Flash Heal",
+            icon: "icons/abilities/spell_holy_flashheal.jpg",
             cast_time: 1.5,
             range: 40.0,
             mana_cost: 25.0,
@@ -115,6 +121,7 @@
 
         MindBlast: (
             name: "Mind Blast",
+            icon: "icons/abilities/spell_shadow_unholyfrenzy.jpg",
             cast_time: 1.5,
             range: 30.0,
             mana_cost: 25.0,
@@ -129,6 +136,7 @@
 
         PowerWordFortitude: (
             name: "Power Word: Fortitude",
+            icon: "icons/abilities/spell_holy_wordfortitude.jpg",
             cast_time: 0.0,
             range: 40.0,
             mana_cost: 30.0,
@@ -143,6 +151,7 @@
 
         PowerWordShield: (
             name: "Power Word: Shield",
+            icon: "icons/abilities/spell_holy_powerwordshield.jpg",
             cast_time: 0.0,
             range: 40.0,
             mana_cost: 25.0,
@@ -157,6 +166,7 @@
 
         DispelMagic: (
             name: "Dispel Magic",
+            icon: "icons/abilities/spell_holy_dispelmagic.jpg",
             cast_time: 0.0,
             range: 30.0,
             mana_cost: 18.0,
@@ -171,6 +181,7 @@
 
         HeroicStrike: (
             name: "Heroic Strike",
+            icon: "icons/abilities/ability_rogue_ambush.jpg",
             cast_time: 0.0,
             range: 2.5,
             mana_cost: 15.0,
@@ -180,6 +191,7 @@
 
         Charge: (
             name: "Charge",
+            icon: "icons/abilities/ability_warrior_charge.jpg",
             cast_time: 0.0,
             range: 25.0,
             mana_cost: 0.0,
@@ -190,6 +202,7 @@
 
         Rend: (
             name: "Rend",
+            icon: "icons/abilities/ability_gouge.jpg",
             cast_time: 0.0,
             range: 2.5,
             mana_cost: 10.0,
@@ -205,6 +218,7 @@
 
         MortalStrike: (
             name: "Mortal Strike",
+            icon: "icons/abilities/ability_warrior_savageblow.jpg",
             cast_time: 0.0,
             range: 2.5,
             mana_cost: 30.0,
@@ -223,6 +237,7 @@
 
         Pummel: (
             name: "Pummel",
+            icon: "icons/abilities/inv_gauntlets_04.jpg",
             cast_time: 0.0,
             range: 2.5,
             mana_cost: 10.0,
@@ -234,6 +249,7 @@
 
         BattleShout: (
             name: "Battle Shout",
+            icon: "icons/abilities/ability_warrior_battleshout.jpg",
             cast_time: 0.0,
             range: 0.0,
             mana_cost: 0.0,
@@ -252,6 +268,7 @@
 
         Ambush: (
             name: "Ambush",
+            icon: "icons/abilities/ability_rogue_ambush.jpg",
             cast_time: 0.0,
             range: 2.5,
             mana_cost: 60.0,
@@ -266,6 +283,7 @@
 
         CheapShot: (
             name: "Cheap Shot",
+            icon: "icons/abilities/ability_cheapshot.jpg",
             cast_time: 0.0,
             range: 2.5,
             mana_cost: 60.0,
@@ -281,6 +299,7 @@
 
         SinisterStrike: (
             name: "Sinister Strike",
+            icon: "icons/abilities/spell_shadow_ritualofsacrifice.jpg",
             cast_time: 0.0,
             range: 2.5,
             mana_cost: 40.0,
@@ -294,6 +313,7 @@
 
         KidneyShot: (
             name: "Kidney Shot",
+            icon: "icons/abilities/ability_rogue_kidneyshot.jpg",
             cast_time: 0.0,
             range: 2.5,
             mana_cost: 60.0,
@@ -308,6 +328,7 @@
 
         Kick: (
             name: "Kick",
+            icon: "icons/abilities/ability_kick.jpg",
             cast_time: 0.0,
             range: 2.5,
             mana_cost: 25.0,
@@ -323,6 +344,7 @@
 
         Corruption: (
             name: "Corruption",
+            icon: "icons/abilities/spell_shadow_abominationexplosion.jpg",
             cast_time: 0.0,
             range: 30.0,
             mana_cost: 25.0,
@@ -337,7 +359,8 @@
         ),
 
         Shadowbolt: (
-            name: "Shadowbolt",
+            name: "Shadow Bolt",
+            icon: "icons/abilities/spell_shadow_shadowbolt.jpg",
             cast_time: 2.0,
             range: 30.0,
             mana_cost: 25.0,
@@ -356,6 +379,7 @@
 
         Fear: (
             name: "Fear",
+            icon: "icons/abilities/spell_shadow_possession.jpg",
             cast_time: 1.5,
             range: 30.0,
             mana_cost: 30.0,
@@ -373,6 +397,7 @@
 
         Immolate: (
             name: "Immolate",
+            icon: "icons/abilities/spell_fire_immolation.jpg",
             cast_time: 2.0,
             range: 30.0,
             mana_cost: 25.0,
@@ -392,6 +417,7 @@
 
         DrainLife: (
             name: "Drain Life",
+            icon: "icons/abilities/spell_shadow_lifedrain02.jpg",
             cast_time: 0.0,
             range: 20.0,
             mana_cost: 55.0,
@@ -412,6 +438,7 @@
         // 6 ticks (every 4 seconds), 14 damage per tick = 84 total
         CurseOfAgony: (
             name: "Curse of Agony",
+            icon: "icons/abilities/spell_shadow_curseofsargeras.jpg",
             cast_time: 0.0,
             range: 30.0,
             mana_cost: 25.0,
@@ -429,6 +456,7 @@
         // WoW Classic: 20 mana, 30yd range, instant, 2 min duration
         CurseOfWeakness: (
             name: "Curse of Weakness",
+            icon: "icons/abilities/spell_shadow_curseofmannoroth.jpg",
             cast_time: 0.0,
             range: 30.0,
             mana_cost: 20.0,
@@ -445,6 +473,7 @@
         // WoW Classic: 80 mana, 30yd range, instant, 30s duration
         CurseOfTongues: (
             name: "Curse of Tongues",
+            icon: "icons/abilities/spell_shadow_curseoftounges.jpg",
             cast_time: 0.0,
             range: 30.0,
             mana_cost: 80.0,
@@ -466,6 +495,7 @@
         // Scaled for our stat system
         FlashOfLight: (
             name: "Flash of Light",
+            icon: "icons/abilities/spell_holy_flashheal.jpg",
             cast_time: 1.5,
             range: 40.0,
             mana_cost: 20.0,
@@ -481,6 +511,7 @@
         // Scaled for our stat system
         HolyLight: (
             name: "Holy Light",
+            icon: "icons/abilities/spell_holy_holybolt.jpg",
             cast_time: 2.5,
             range: 40.0,
             mana_cost: 35.0,
@@ -500,6 +531,7 @@
         // Range is set to 40 for ally healing; AI checks 20yd for enemy targeting
         HolyShock: (
             name: "Holy Shock",
+            icon: "icons/abilities/spell_holy_searinglight.jpg",
             cast_time: 0.0,
             range: 40.0,
             mana_cost: 30.0,
@@ -521,6 +553,7 @@
         // Using 6s stun for maximum rank feel
         HammerOfJustice: (
             name: "Hammer of Justice",
+            icon: "icons/abilities/spell_holy_sealofmight.jpg",
             cast_time: 0.0,
             range: 10.0,
             mana_cost: 25.0,
@@ -538,6 +571,7 @@
         // Our system only has magic debuffs, so it works like Dispel Magic
         PaladinCleanse: (
             name: "Cleanse",
+            icon: "icons/abilities/spell_holy_renew.jpg",
             cast_time: 0.0,
             range: 30.0,
             mana_cost: 15.0,
@@ -551,6 +585,7 @@
         // Lasts entire match (600s duration to cover any match length)
         DevotionAura: (
             name: "Devotion Aura",
+            icon: "icons/abilities/spell_holy_devotionaura.jpg",
             cast_time: 0.0,
             range: 100.0,  // Unlimited range for team buff
             mana_cost: 0.0,
@@ -570,6 +605,7 @@
         // Debuff purge is handled by process_divine_shield() system
         DivineShield: (
             name: "Divine Shield",
+            icon: "icons/abilities/spell_holy_divineintervention.jpg",
             cast_time: 0.0,
             range: 0.0,  // Self-cast
             mana_cost: 0.0,
@@ -590,6 +626,7 @@
         // Silences target for 3 seconds, locks out school for 8 seconds on interrupt
         SpellLock: (
             name: "Spell Lock",
+            icon: "icons/abilities/spell_shadow_mindrot.jpg",
             cast_time: 0.0,
             range: 30.0,
             mana_cost: 0.0,
@@ -604,6 +641,7 @@
         // Heals Felhunter for 30 on successful devour (scaled from WoW's 619)
         DevourMagic: (
             name: "Devour Magic",
+            icon: "icons/abilities/spell_nature_purge.jpg",
             cast_time: 0.0,
             range: 30.0,
             mana_cost: 0.0,
@@ -620,6 +658,7 @@
         // Scaled for our stat system — reduced cast time to 2.5s for flow
         AimedShot: (
             name: "Aimed Shot",
+            icon: "icons/abilities/inv_spear_07.jpg",
             cast_time: 2.5,
             range: 35.0,
             min_range: Some(8.0),
@@ -646,6 +685,7 @@
         // WoW Classic Spell ID 3044: Instant, 25 mana, 35yd, 6s CD, Arcane school
         ArcaneShot: (
             name: "Arcane Shot",
+            icon: "icons/abilities/ability_impalingbolt.jpg",
             cast_time: 0.0,
             range: 35.0,
             min_range: Some(8.0),
@@ -667,6 +707,7 @@
         // WoW Classic Spell ID 5116: Instant, 35yd, 12s CD, 50% slow for 4s
         ConcussiveShot: (
             name: "Concussive Shot",
+            icon: "icons/abilities/spell_frost_stun.jpg",
             cast_time: 0.0,
             range: 35.0,
             min_range: Some(8.0),
@@ -689,6 +730,7 @@
         // TBC ability adapted for Classic — instant, 25s CD, no range requirement
         Disengage: (
             name: "Disengage",
+            icon: "icons/abilities/ability_rogue_feint.jpg",
             cast_time: 0.0,
             range: 0.0,  // Self-cast, no target needed
             mana_cost: 20.0,
@@ -700,6 +742,7 @@
         // WoW Classic Spell ID 1499: Instant, 50 mana, 25s CD, 10s freeze
         FreezingTrap: (
             name: "Freezing Trap",
+            icon: "icons/abilities/spell_frost_chainsofice.jpg",
             cast_time: 0.0,
             range: 30.0,  // Placement range
             mana_cost: 50.0,
@@ -718,6 +761,7 @@
         // Scaled: 10s zone duration for faster ArenaSim gameplay
         FrostTrap: (
             name: "Frost Trap",
+            icon: "icons/abilities/spell_frost_freezingbreath.jpg",
             cast_time: 0.0,
             range: 30.0,  // Placement range
             mana_cost: 30.0,
@@ -733,6 +777,7 @@
         // Gives Hunter breathing room to re-establish range
         SpiderWeb: (
             name: "Web",
+            icon: "icons/abilities/spell_nature_web.jpg",
             cast_time: 0.0,
             range: 20.0,
             mana_cost: 0.0,
@@ -755,6 +800,7 @@
         // Disrupts enemy casters, creates burst windows
         BoarCharge: (
             name: "Boar Charge",
+            icon: "icons/abilities/ability_golemstormbolt.jpg",
             cast_time: 0.0,
             range: 25.0,
             mana_cost: 0.0,
@@ -772,6 +818,7 @@
         // Counter to slows/roots — used on Hunter or teammate
         MastersCall: (
             name: "Master's Call",
+            icon: "icons/abilities/ability_hunter_masterscall.jpg",
             cast_time: 0.0,
             range: 40.0,  // Can target allies at range
             mana_cost: 0.0,

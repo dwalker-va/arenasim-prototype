@@ -39,43 +39,24 @@ The Paladin implementation involved:
 
 ## Key Solutions
 
-### 1. Dynamic Ability Icon Loading
+### 1. Data-Driven Ability Icons
 
-**Problem**: The `load_ability_icons` function used a hardcoded `SPELL_ICON_ABILITIES` list that required manual updates for every new ability.
+**Problem**: Ability icons were split across three places: `get_ability_icon_path()` match, `SPELL_ICON_ABILITIES` constant, and `abilities.ron` definitions.
 
-**Solution**: Dynamically collect abilities from all classes:
+**Solution**: Icon paths are defined directly in `abilities.ron` alongside each ability definition:
 
-```rust
-// src/states/view_combatant_ui.rs
-let all_classes = [
-    CharacterClass::Warrior, CharacterClass::Mage, CharacterClass::Rogue,
-    CharacterClass::Priest, CharacterClass::Warlock, CharacterClass::Paladin,
-];
-let mut ability_names: Vec<&'static str> = Vec::new();
-for class in &all_classes {
-    for ability in get_class_abilities(*class) {
-        let name = get_ability_name(ability);
-        if !ability_names.contains(&name) {
-            ability_names.push(name);
-        }
-    }
-}
+```ron
+// assets/config/abilities.ron
+Frostbolt: (
+    name: "Frostbolt",
+    icon: "icons/abilities/spell_frost_frostbolt02.jpg",
+    // ... other fields
+),
 ```
 
-**Pattern**: Single Source of Truth - derive data from canonical definitions rather than maintaining parallel lists.
+Both icon loading systems (`load_spell_icons`, `load_ability_icons`) iterate `AbilityDefinitions` to load icons. An `all_abilities_have_icons` test enforces that every ability has an icon path.
 
-### 2. Icon Path Aliases
-
-**Problem**: "Shadow Bolt" icon not loading due to naming inconsistency ("Shadowbolt" vs "Shadow Bolt").
-
-**Solution**: Add alias mapping in `get_ability_icon_path()`:
-
-```rust
-// src/states/play_match/rendering/mod.rs
-"Shadowbolt" | "Shadow Bolt" => Some("icons/abilities/spell_shadow_shadowbolt.jpg"),
-```
-
-**Pattern**: Use `|` in match arms to handle multiple name variants gracefully.
+**Pattern**: Single Source of Truth - icon paths live next to the ability definition, eliminating name aliasing issues and parallel list maintenance.
 
 ### 3. Combat Log Attribution
 
@@ -202,7 +183,7 @@ pub fn is_team_healthy(
 - [ ] Ability added to `AbilityType` enum in `abilities.rs`
 - [ ] Ability added to validation list in `ability_config.rs`
 - [ ] Ability defined in `abilities.ron`
-- [ ] Icon path added to `get_ability_icon_path()` in `rendering/mod.rs`
+- [ ] Icon path added to ability entry in `abilities.ron`
 - [ ] Icon file downloaded to `assets/icons/abilities/`
 
 ### System Registration

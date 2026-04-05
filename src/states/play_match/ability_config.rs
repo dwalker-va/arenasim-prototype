@@ -76,6 +76,9 @@ pub struct ProjectileVisuals {
 pub struct AbilityConfig {
     /// Display name of the ability
     pub name: String,
+    /// Icon asset path (e.g. "icons/abilities/spell_frost_frostbolt02.jpg")
+    #[serde(default)]
+    pub icon: String,
 
     // === Casting ===
     /// Cast time in seconds (0.0 = instant)
@@ -313,6 +316,11 @@ impl AbilityDefinitions {
     pub fn ability_types(&self) -> impl Iterator<Item = &AbilityType> {
         self.definitions.keys()
     }
+
+    /// Iterate over all ability definitions
+    pub fn iter(&self) -> impl Iterator<Item = (&AbilityType, &AbilityConfig)> {
+        self.definitions.iter()
+    }
 }
 
 /// Load ability definitions from assets/config/abilities.ron
@@ -366,6 +374,7 @@ mod tests {
     fn test_ability_config_is_damage() {
         let config = AbilityConfig {
             name: "Test".to_string(),
+            icon: String::new(),
             cast_time: 0.0,
             range: 40.0,
             min_range: None,
@@ -401,6 +410,7 @@ mod tests {
     fn test_ability_config_is_heal() {
         let config = AbilityConfig {
             name: "Test Heal".to_string(),
+            icon: String::new(),
             cast_time: 1.5,
             range: 40.0,
             min_range: None,
@@ -430,5 +440,24 @@ mod tests {
 
         assert!(!config.is_damage());
         assert!(config.is_heal());
+    }
+
+    #[test]
+    fn all_abilities_have_icons() {
+        let ability_defs = load_ability_definitions().expect("abilities.ron must load");
+        let mut missing: Vec<String> = Vec::new();
+
+        for (ability_type, config) in ability_defs.iter() {
+            if config.icon.is_empty() {
+                missing.push(format!("{:?} ({}) has no icon", ability_type, config.name));
+            }
+        }
+
+        assert!(
+            missing.is_empty(),
+            "Found {} ability(ies) without icons:\n{}",
+            missing.len(),
+            missing.join("\n")
+        );
     }
 }

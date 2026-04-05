@@ -143,6 +143,7 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
    ```ron
    NewAbility: (
        name: "New Ability",
+       icon: "icons/abilities/<icon_name>.jpg",
        cast_time: 1.5,        // 0.0 for instant
        range: 40.0,           // Use MELEE_RANGE (2.5) for melee
        mana_cost: 25.0,
@@ -171,9 +172,7 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
 5. **Add spell icon** for the ability timeline UI:
    - Download icon: `mcp__wowhead-classic__get_spell_icon("New Ability")` to get the URL
    - Save to `assets/icons/abilities/<icon_name>.jpg`
-   - Add mapping in `rendering/mod.rs`:
-     - Add entry to `get_ability_icon_path()` match
-     - Add ability name to `SPELL_ICON_ABILITIES` array
+   - Add `icon: "icons/abilities/<icon_name>.jpg"` to the ability entry in `abilities.ron`
 
 6. **Add special handling** in `combat_core.rs` if the ability has unique mechanics
    (most abilities work automatically via the config)
