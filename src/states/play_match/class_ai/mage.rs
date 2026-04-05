@@ -4,15 +4,16 @@
 //!
 //! ## Priority Order
 //! 1. Ice Barrier (self-shield when no shield or HP < 80%)
-//! 2. Arcane Intellect (buff mana-using allies pre-combat)
-//! 3. Frost Nova (defensive AoE when enemies in melee)
-//! 4. Polymorph (CC non-kill target to create outnumbering situation)
-//! 5. Frostbolt (main damage spell with kiting behavior)
+//! 2. Mage Armor (self-buff based on preference: Frost Armor / Mage Armor / Molten Armor)
+//! 3. Arcane Intellect (buff mana-using allies pre-combat)
+//! 4. Frost Nova (defensive AoE when enemies in melee)
+//! 5. Polymorph (CC non-kill target to create outnumbering situation)
+//! 6. Frostbolt (main damage spell with kiting behavior)
 #![allow(clippy::too_many_arguments)]
 
 use bevy::prelude::*;
 use crate::combat::log::CombatLog;
-use crate::states::match_config::CharacterClass;
+use crate::states::match_config::{CharacterClass, MageArmor};
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
@@ -50,7 +51,12 @@ pub fn decide_mage_action(
         return true;
     }
 
-    // Priority 2: Arcane Intellect (buff mana-using allies)
+    // Priority 2: Mage Armor (self-buff based on preference)
+    if try_mage_armor(commands, combat_log, abilities, entity, combatant, ctx) {
+        return true;
+    }
+
+    // Priority 3: Arcane Intellect (buff mana-using allies)
     if try_arcane_intellect(
         commands,
         combat_log,
@@ -64,7 +70,7 @@ pub fn decide_mage_action(
         return true;
     }
 
-    // Priority 3: Frost Nova (defensive AoE)
+    // Priority 4: Frost Nova (defensive AoE)
     if try_frost_nova(
         commands,
         combat_log,
@@ -80,7 +86,7 @@ pub fn decide_mage_action(
         return true;
     }
 
-    // Priority 4: Polymorph (CC non-kill target)
+    // Priority 5: Polymorph (CC non-kill target)
     if try_polymorph(
         commands,
         combat_log,
@@ -94,7 +100,7 @@ pub fn decide_mage_action(
         return true;
     }
 
-    // Priority 5: Frostbolt (main damage spell)
+    // Priority 6: Frostbolt (main damage spell)
     if try_frostbolt(
         commands,
         combat_log,
@@ -164,6 +170,62 @@ fn try_ice_barrier(
         "Team {} {} casts Ice Barrier",
         combatant.team,
         combatant.class.name()
+    );
+
+    true
+}
+
+/// Try to cast the chosen Mage Armor on self (Frost Armor, Mage Armor, or Molten Armor).
+/// Returns true if the ability was used.
+fn try_mage_armor(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    ctx: &CombatContext,
+) -> bool {
+    // Determine which ability and aura type to check based on preference
+    let (ability, aura_check) = match combatant.mage_armor {
+        MageArmor::FrostArmor => (AbilityType::FrostArmor, AuraType::FrostArmorBuff),
+        MageArmor::MageArmor => (AbilityType::MageArmorSpell, AuraType::ManaRegenIncrease),
+        MageArmor::MoltenArmor => (AbilityType::MoltenArmor, AuraType::CritChanceIncrease),
+    };
+
+    // Check if the armor buff is already active
+    let already_buffed = ctx.active_auras
+        .get(&entity)
+        .map(|auras| auras.iter().any(|a| a.effect_type == aura_check))
+        .unwrap_or(false);
+
+    if already_buffed {
+        return false;
+    }
+
+    let def = abilities.get_unchecked(&ability);
+
+    if combatant.current_mana < def.mana_cost {
+        return false;
+    }
+
+    // Execute the ability
+    spawn_speech_bubble(commands, entity, &def.name);
+    combatant.current_mana -= def.mana_cost;
+    combatant.global_cooldown = GCD;
+
+    // Log
+    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, None, "casts");
+
+    // Apply armor buff aura
+    if let Some(aura_pending) = AuraPending::from_ability(entity, entity, def) {
+        commands.spawn(aura_pending);
+    }
+
+    info!(
+        "Team {} {} casts {}",
+        combatant.team,
+        combatant.class.name(),
+        def.name
     );
 
     true
