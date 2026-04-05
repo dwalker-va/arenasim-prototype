@@ -222,9 +222,9 @@ impl HeadlessMatchConfig {
     /// Parse a warrior shout name string into WarriorShout
     fn parse_warrior_shout(name: &str) -> WarriorShout {
         match name.to_lowercase().as_str() {
-            "battle" | "battleshout" | "battle_shout" | "Battle Shout" => WarriorShout::BattleShout,
-            "demoralizing" | "demoralizingshout" | "demoralizing_shout" | "Demoralizing Shout" => WarriorShout::DemoralizingShout,
-            "commanding" | "commandingshout" | "commanding_shout" | "Commanding Shout" => WarriorShout::CommandingShout,
+            "battle" | "battleshout" | "battle_shout" | "battle shout" => WarriorShout::BattleShout,
+            "demoralizing" | "demoralizingshout" | "demoralizing_shout" | "demoralizing shout" => WarriorShout::DemoralizingShout,
+            "commanding" | "commandingshout" | "commanding_shout" | "commanding shout" => WarriorShout::CommandingShout,
             _ => WarriorShout::default(),
         }
     }
@@ -232,9 +232,9 @@ impl HeadlessMatchConfig {
     /// Parse a mage armor name string into MageArmor
     fn parse_mage_armor(name: &str) -> MageArmor {
         match name.to_lowercase().as_str() {
-            "frost" | "frostarmor" | "frost_armor" | "Frost Armor" => MageArmor::FrostArmor,
-            "mage" | "magearmor" | "mage_armor" | "Mage Armor" => MageArmor::MageArmor,
-            "molten" | "moltenarmor" | "molten_armor" | "Molten Armor" => MageArmor::MoltenArmor,
+            "frost" | "frostarmor" | "frost_armor" | "frost armor" => MageArmor::FrostArmor,
+            "mage" | "magearmor" | "mage_armor" | "mage armor" => MageArmor::MageArmor,
+            "molten" | "moltenarmor" | "molten_armor" | "molten armor" => MageArmor::MoltenArmor,
             _ => MageArmor::default(),
         }
     }
@@ -242,9 +242,9 @@ impl HeadlessMatchConfig {
     /// Parse a paladin aura name string into PaladinAura
     fn parse_paladin_aura(name: &str) -> PaladinAura {
         match name.to_lowercase().as_str() {
-            "devotion" | "devotionaura" | "devotion_aura" | "Devotion Aura" => PaladinAura::DevotionAura,
-            "shadow" | "shadowresistance" | "shadow_resistance" | "Shadow Resistance Aura" => PaladinAura::ShadowResistanceAura,
-            "concentration" | "concentrationaura" | "concentration_aura" | "Concentration Aura" => PaladinAura::ConcentrationAura,
+            "devotion" | "devotionaura" | "devotion_aura" | "devotion aura" => PaladinAura::DevotionAura,
+            "shadow" | "shadowresistance" | "shadow_resistance" | "shadow resistance aura" | "shadowresistanceaura" => PaladinAura::ShadowResistanceAura,
+            "concentration" | "concentrationaura" | "concentration_aura" | "concentration aura" => PaladinAura::ConcentrationAura,
             _ => PaladinAura::default(),
         }
     }

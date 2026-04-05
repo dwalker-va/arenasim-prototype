@@ -112,7 +112,9 @@ pub fn combat_auto_attack(
             for aura in auras.auras.iter() {
                 if aura.effect_type == AuraType::AttackSpeedSlow {
                     // magnitude = slow amount (e.g., 0.25 = 25% slower → 1.33x interval)
-                    attack_interval *= 1.0 / (1.0 - aura.magnitude);
+                    // Clamp to 0.75 max to prevent division by near-zero or negative
+                    let clamped = aura.magnitude.min(0.75);
+                    attack_interval *= 1.0 / (1.0 - clamped);
                 }
             }
         }
@@ -193,8 +195,9 @@ pub fn combat_auto_attack(
     // Track crit status per target for FCT display (auto-attacks batch into damage_per_target)
     let mut crit_per_target: HashMap<Entity, bool> = HashMap::new();
 
-    // Track Frost Armor procs: (attacker_entity) to apply slows to after the loop
-    let mut frost_armor_procs: Vec<Entity> = Vec::new();
+    // Track Frost Armor procs: attacker entities to apply slows to after the loop
+    // Use a HashSet to deduplicate (one proc per attacker per frame)
+    let mut frost_armor_procs: std::collections::HashSet<Entity> = std::collections::HashSet::new();
 
     // Build a map of targets with breakable CC from friendly casters.
     // Key: target entity, Value: team of the CC caster.
@@ -262,7 +265,7 @@ pub fn combat_auto_attack(
                     if attacker_is_melee {
                         if let Some(ref target_auras_ref) = target_auras {
                             if target_auras_ref.auras.iter().any(|a| a.effect_type == AuraType::FrostArmorBuff) {
-                                frost_armor_procs.push(attacker_entity);
+                                frost_armor_procs.insert(attacker_entity);
                             }
                         }
                     }
@@ -370,7 +373,19 @@ pub fn combat_auto_attack(
     }
 
     // Apply Frost Armor procs: slow melee attackers who hit a target with FrostArmorBuff
+    // Only apply if the attacker doesn't already have a Frost Armor slow (prevents DR escalation)
     for attacker_entity in frost_armor_procs {
+        // Check if attacker already has the Frost Armor slow active
+        let already_has_frost_slow = if let Ok((_, _, _, _, _, Some(ref attacker_auras))) = combatants.get(attacker_entity) {
+            attacker_auras.auras.iter().any(|a| {
+                a.effect_type == AuraType::MovementSpeedSlow && a.ability_name == "Frost Armor"
+            })
+        } else {
+            false
+        };
+        if already_has_frost_slow {
+            continue;
+        }
         // Apply MovementSpeedSlow (30% slow = magnitude 0.7) for 5 seconds
         commands.spawn(AuraPending {
             target: attacker_entity,
