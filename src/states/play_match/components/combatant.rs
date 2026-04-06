@@ -378,8 +378,9 @@ impl Combatant {
         let base_damage = ability_config.damage_base_min + (rng.random_f32() * damage_range);
 
         // Add stat scaling (with dynamic AP bonus for attack power scaling abilities)
+        // Floor effective AP at 0 to match old behavior where AP was clamped on mutation
         let stat_value = match ability_config.damage_scales_with {
-            ScalingStat::AttackPower => self.attack_power + ap_bonus,
+            ScalingStat::AttackPower => (self.attack_power + ap_bonus).max(0.0),
             ScalingStat::SpellPower => self.spell_power,
             ScalingStat::None => 0.0,
         };
