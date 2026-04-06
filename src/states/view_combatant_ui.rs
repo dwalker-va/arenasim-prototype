@@ -211,6 +211,8 @@ fn get_class_abilities(class: CharacterClass) -> Vec<AbilityType> {
     match class {
         CharacterClass::Warrior => vec![
             AbilityType::BattleShout,
+            AbilityType::DemoralizingShout,
+            AbilityType::CommandingShout,
             AbilityType::Charge,
             AbilityType::Rend,
             AbilityType::MortalStrike,
@@ -222,6 +224,9 @@ fn get_class_abilities(class: CharacterClass) -> Vec<AbilityType> {
             AbilityType::FrostNova,
             AbilityType::ArcaneIntellect,
             AbilityType::IceBarrier,
+            AbilityType::FrostArmor,
+            AbilityType::MageArmorSpell,
+            AbilityType::MoltenArmor,
             AbilityType::Polymorph,
         ],
         CharacterClass::Rogue => vec![
@@ -244,9 +249,14 @@ fn get_class_abilities(class: CharacterClass) -> Vec<AbilityType> {
             AbilityType::Fear,
             AbilityType::Immolate,
             AbilityType::DrainLife,
+            AbilityType::CurseOfAgony,
+            AbilityType::CurseOfWeakness,
+            AbilityType::CurseOfTongues,
         ],
         CharacterClass::Paladin => vec![
             AbilityType::DevotionAura,
+            AbilityType::ShadowResistanceAura,
+            AbilityType::ConcentrationAura,
             AbilityType::DivineShield,
             AbilityType::FlashOfLight,
             AbilityType::HolyLight,
