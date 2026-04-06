@@ -17,7 +17,7 @@ use crate::states::match_config::WarriorShout;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
-use crate::states::play_match::combat_core::roll_crit;
+use crate::states::play_match::combat_core::{roll_crit, get_attack_power_bonus_from_slice, get_crit_chance_bonus_from_slice};
 use crate::states::play_match::constants::{CHARGE_MIN_RANGE, CRIT_DAMAGE_MULTIPLIER, GCD};
 
 use crate::states::play_match::utils::log_ability_use;
@@ -528,9 +528,12 @@ fn try_mortal_strike(
     // Log
     log_ability_use(combat_log, combatant.team, combatant.class, "Mortal Strike", Some((target_info.team, target_info.class)), "uses");
 
-    // Calculate and queue damage
-    let mut damage = combatant.calculate_ability_damage_config(ms_def, game_rng);
-    let is_crit = roll_crit(combatant.crit_chance, game_rng);
+    // Calculate and queue damage (with dynamic aura bonuses)
+    let self_auras = ctx.active_auras.get(&entity).map(|v| v.as_slice()).unwrap_or(&[]);
+    let ap_bonus = get_attack_power_bonus_from_slice(self_auras);
+    let crit_bonus = get_crit_chance_bonus_from_slice(self_auras);
+    let mut damage = combatant.calculate_ability_damage_config(ms_def, game_rng, ap_bonus);
+    let is_crit = roll_crit(combatant.crit_chance + crit_bonus, game_rng);
     if is_crit { damage *= CRIT_DAMAGE_MULTIPLIER; }
     instant_attacks.push(super::QueuedInstantAttack {
         attacker: entity,

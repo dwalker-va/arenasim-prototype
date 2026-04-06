@@ -77,6 +77,54 @@ pub fn get_lockout_duration_reduction(auras: Option<&ActiveAuras>) -> f32 {
     total.min(1.0)
 }
 
+/// Get the net attack power bonus from active auras.
+/// Sums AttackPowerIncrease magnitudes and subtracts AttackPowerReduction magnitudes.
+/// Can return negative (e.g., Demoralizing Shout with no Battle Shout).
+pub fn get_attack_power_bonus(auras: Option<&ActiveAuras>) -> f32 {
+    auras.map_or(0.0, |a| get_attack_power_bonus_from_slice(&a.auras))
+}
+
+/// Get the net attack power bonus from a slice of auras.
+/// Used by class AI which stores auras as Vec<Aura> in CombatContext.
+pub fn get_attack_power_bonus_from_slice(auras: &[Aura]) -> f32 {
+    auras
+        .iter()
+        .map(|aura| match aura.effect_type {
+            AuraType::AttackPowerIncrease => aura.magnitude,
+            AuraType::AttackPowerReduction => -aura.magnitude,
+            _ => 0.0,
+        })
+        .sum()
+}
+
+/// Get the total crit chance bonus from CritChanceIncrease auras.
+/// Used by Molten Armor to increase crit chance dynamically.
+pub fn get_crit_chance_bonus(auras: Option<&ActiveAuras>) -> f32 {
+    auras.map_or(0.0, |a| get_crit_chance_bonus_from_slice(&a.auras))
+}
+
+/// Get the total crit chance bonus from a slice of auras.
+/// Used by class AI which stores auras as Vec<Aura> in CombatContext.
+pub fn get_crit_chance_bonus_from_slice(auras: &[Aura]) -> f32 {
+    auras
+        .iter()
+        .filter(|aura| aura.effect_type == AuraType::CritChanceIncrease)
+        .map(|aura| aura.magnitude)
+        .sum()
+}
+
+/// Get the total mana regen bonus from ManaRegenIncrease auras.
+/// Used by Mage Armor to increase mana regeneration dynamically.
+pub fn get_mana_regen_bonus(auras: Option<&ActiveAuras>) -> f32 {
+    auras.map_or(0.0, |a| {
+        a.auras
+            .iter()
+            .filter(|aura| aura.effect_type == AuraType::ManaRegenIncrease)
+            .map(|aura| aura.magnitude)
+            .sum()
+    })
+}
+
 /// Calculate the modified cast time accounting for CastTimeIncrease auras.
 /// This should be called when starting a cast to get the actual cast duration.
 pub fn calculate_cast_time(base_cast_time: f32, auras: Option<&ActiveAuras>) -> f32 {
@@ -401,5 +449,102 @@ mod tests {
         let once = clamp_to_arena(pos);
         let twice = clamp_to_arena(once);
         assert_eq!(once, twice, "Clamping twice should give the same result");
+    }
+
+    // =========================================================================
+    // Dynamic Stat Bonus Helper Tests
+    // =========================================================================
+
+    fn create_aura(effect_type: AuraType, magnitude: f32) -> Aura {
+        Aura {
+            effect_type,
+            duration: 30.0,
+            magnitude,
+            break_on_damage_threshold: 0.0,
+            accumulated_damage: 0.0,
+            tick_interval: 0.0,
+            time_until_next_tick: 0.0,
+            caster: None,
+            ability_name: "Test".to_string(),
+            fear_direction: (0.0, 0.0),
+            fear_direction_timer: 0.0,
+            spell_school: None,
+        }
+    }
+
+    #[test]
+    fn test_get_attack_power_bonus_increase() {
+        let auras = ActiveAuras {
+            auras: vec![create_aura(AuraType::AttackPowerIncrease, 20.0)],
+        };
+        assert_eq!(get_attack_power_bonus(Some(&auras)), 20.0);
+    }
+
+    #[test]
+    fn test_get_attack_power_bonus_reduction() {
+        let auras = ActiveAuras {
+            auras: vec![create_aura(AuraType::AttackPowerReduction, 15.0)],
+        };
+        assert_eq!(get_attack_power_bonus(Some(&auras)), -15.0);
+    }
+
+    #[test]
+    fn test_get_attack_power_bonus_mixed() {
+        let auras = ActiveAuras {
+            auras: vec![
+                create_aura(AuraType::AttackPowerIncrease, 20.0),
+                create_aura(AuraType::AttackPowerReduction, 15.0),
+            ],
+        };
+        assert_eq!(get_attack_power_bonus(Some(&auras)), 5.0);
+    }
+
+    #[test]
+    fn test_get_attack_power_bonus_none() {
+        assert_eq!(get_attack_power_bonus(None), 0.0);
+    }
+
+    #[test]
+    fn test_get_attack_power_bonus_empty() {
+        let auras = ActiveAuras { auras: vec![] };
+        assert_eq!(get_attack_power_bonus(Some(&auras)), 0.0);
+    }
+
+    #[test]
+    fn test_get_crit_chance_bonus() {
+        let auras = ActiveAuras {
+            auras: vec![create_aura(AuraType::CritChanceIncrease, 0.05)],
+        };
+        assert_eq!(get_crit_chance_bonus(Some(&auras)), 0.05);
+    }
+
+    #[test]
+    fn test_get_crit_chance_bonus_none() {
+        assert_eq!(get_crit_chance_bonus(None), 0.0);
+    }
+
+    #[test]
+    fn test_get_crit_chance_bonus_empty() {
+        let auras = ActiveAuras { auras: vec![] };
+        assert_eq!(get_crit_chance_bonus(Some(&auras)), 0.0);
+    }
+
+    #[test]
+    fn test_get_mana_regen_bonus() {
+        let auras = ActiveAuras {
+            auras: vec![create_aura(AuraType::ManaRegenIncrease, 8.0)],
+        };
+        assert_eq!(get_mana_regen_bonus(Some(&auras)), 8.0);
+    }
+
+    #[test]
+    fn test_get_mana_regen_bonus_none() {
+        assert_eq!(get_mana_regen_bonus(None), 0.0);
+    }
+
+    #[test]
+    fn test_get_mana_regen_bonus_empty() {
+        let auras = ActiveAuras { auras: vec![] };
+        assert_eq!(get_mana_regen_bonus(Some(&auras)), 0.0);
     }
 }

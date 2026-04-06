@@ -184,11 +184,13 @@ pub fn process_projectile_hits(
             let target_world_pos = target_transform.translation;
 
             let def = abilities.get_unchecked(&projectile.ability);
-            let mut ability_damage = caster_combatant.calculate_ability_damage_config(def, &mut game_rng);
+            let ap_bonus = super::combat_core::get_attack_power_bonus(caster_auras.as_deref());
+            let crit_bonus = super::combat_core::get_crit_chance_bonus(caster_auras.as_deref());
+            let mut ability_damage = caster_combatant.calculate_ability_damage_config(def, &mut game_rng, ap_bonus);
             let ability_healing = caster_combatant.calculate_ability_healing_config(def, &mut game_rng);
 
-            // Roll crit at impact time using caster's live crit_chance
-            let is_crit = super::combat_core::roll_crit(caster_combatant.crit_chance, &mut game_rng);
+            // Roll crit at impact time using caster's live crit_chance + dynamic aura bonus
+            let is_crit = super::combat_core::roll_crit(caster_combatant.crit_chance + crit_bonus, &mut game_rng);
             if is_crit {
                 ability_damage *= CRIT_DAMAGE_MULTIPLIER;
             }

@@ -17,7 +17,7 @@ use crate::states::match_config::RogueOpener;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
-use crate::states::play_match::combat_core::roll_crit;
+use crate::states::play_match::combat_core::{roll_crit, get_attack_power_bonus_from_slice, get_crit_chance_bonus_from_slice};
 use crate::states::play_match::constants::{CRIT_DAMAGE_MULTIPLIER, GCD, MELEE_RANGE};
 use crate::states::play_match::utils::{combatant_id, log_ability_use, spawn_speech_bubble};
 
@@ -162,9 +162,12 @@ fn try_ambush(
     combatant.stealthed = false;
     combatant.global_cooldown = GCD;
 
-    // Calculate and queue damage
-    let mut damage = combatant.calculate_ability_damage_config(def, game_rng);
-    let is_crit = roll_crit(combatant.crit_chance, game_rng);
+    // Calculate and queue damage (with dynamic aura bonuses)
+    let self_auras = ctx.active_auras.get(&entity).map(|v| v.as_slice()).unwrap_or(&[]);
+    let ap_bonus = get_attack_power_bonus_from_slice(self_auras);
+    let crit_bonus = get_crit_chance_bonus_from_slice(self_auras);
+    let mut damage = combatant.calculate_ability_damage_config(def, game_rng, ap_bonus);
+    let is_crit = roll_crit(combatant.crit_chance + crit_bonus, game_rng);
     if is_crit { damage *= CRIT_DAMAGE_MULTIPLIER; }
     instant_attacks.push(super::QueuedInstantAttack {
         attacker: entity,
@@ -361,9 +364,12 @@ fn try_sinister_strike(
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
 
-    // Calculate and queue damage
-    let mut damage = combatant.calculate_ability_damage_config(def, game_rng);
-    let is_crit = roll_crit(combatant.crit_chance, game_rng);
+    // Calculate and queue damage (with dynamic aura bonuses)
+    let self_auras = ctx.active_auras.get(&entity).map(|v| v.as_slice()).unwrap_or(&[]);
+    let ap_bonus = get_attack_power_bonus_from_slice(self_auras);
+    let crit_bonus = get_crit_chance_bonus_from_slice(self_auras);
+    let mut damage = combatant.calculate_ability_damage_config(def, game_rng, ap_bonus);
+    let is_crit = roll_crit(combatant.crit_chance + crit_bonus, game_rng);
     if is_crit { damage *= CRIT_DAMAGE_MULTIPLIER; }
     instant_attacks.push(super::QueuedInstantAttack {
         attacker: entity,

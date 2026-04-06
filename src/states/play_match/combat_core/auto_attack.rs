@@ -146,8 +146,9 @@ pub fn combat_auto_attack(
                     if distance <= attack_range {
                         // Calculate total damage (base + bonus from Heroic Strike, etc.)
                         let base_damage = combatant.attack_damage + combatant.next_attack_bonus_damage;
-                        // Roll crit before damage reduction
-                        let is_crit = roll_crit(combatant.crit_chance, &mut game_rng);
+                        // Roll crit before damage reduction (include dynamic crit bonus from auras)
+                        let crit_bonus = super::get_crit_chance_bonus(auras.as_deref());
+                        let is_crit = roll_crit(combatant.crit_chance + crit_bonus, &mut game_rng);
                         let crit_damage = if is_crit { base_damage * CRIT_DAMAGE_MULTIPLIER } else { base_damage };
                         // Apply physical damage reduction from curses (Curse of Weakness: -20%)
                         let damage_reduction = get_physical_damage_reduction(auras.as_deref());

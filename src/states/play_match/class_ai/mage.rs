@@ -20,7 +20,7 @@ use crate::states::play_match::components::*;
 use crate::states::play_match::constants::{
     CRIT_DAMAGE_MULTIPLIER, DEFENSIVE_HP_THRESHOLD, GCD, MELEE_RANGE, SAFE_KITING_DISTANCE,
 };
-use crate::states::play_match::combat_core::{calculate_cast_time, roll_crit};
+use crate::states::play_match::combat_core::{calculate_cast_time, roll_crit, get_attack_power_bonus_from_slice, get_crit_chance_bonus_from_slice};
 use crate::states::play_match::is_spell_school_locked;
 use crate::states::play_match::utils::{combatant_id, log_ability_use, spawn_speech_bubble};
 
@@ -371,10 +371,13 @@ fn try_frost_nova(
         }
     }
 
-    // Queue damage and apply root to all targets
+    // Queue damage and apply root to all targets (with dynamic aura bonuses)
+    let self_auras = ctx.active_auras.get(&entity).map(|v| v.as_slice()).unwrap_or(&[]);
+    let ap_bonus = get_attack_power_bonus_from_slice(self_auras);
+    let crit_bonus = get_crit_chance_bonus_from_slice(self_auras);
     for (target_entity, target_pos, target_team, target_class) in &frost_nova_targets {
-        let mut damage = combatant.calculate_ability_damage_config(nova_def, game_rng);
-        let is_crit = roll_crit(combatant.crit_chance, game_rng);
+        let mut damage = combatant.calculate_ability_damage_config(nova_def, game_rng, ap_bonus);
+        let is_crit = roll_crit(combatant.crit_chance + crit_bonus, game_rng);
         if is_crit { damage *= CRIT_DAMAGE_MULTIPLIER; }
         frost_nova_damage.push(super::QueuedAoeDamage {
             caster: entity,

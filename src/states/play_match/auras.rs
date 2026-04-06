@@ -27,11 +27,11 @@ pub fn update_auras(
     time: Res<Time>,
     mut commands: Commands,
     mut game_rng: ResMut<GameRng>,
-    mut combatants: Query<(Entity, &mut ActiveAuras, Option<&mut DRTracker>)>,
+    mut combatants: Query<(Entity, &mut ActiveAuras, &mut Combatant, Option<&mut DRTracker>)>,
 ) {
     let dt = time.delta_secs();
 
-    for (entity, mut auras, dr_tracker) in combatants.iter_mut() {
+    for (entity, mut auras, mut combatant, dr_tracker) in combatants.iter_mut() {
         // Tick DR timers (resets DR level when 15s expires)
         if let Some(mut tracker) = dr_tracker {
             tracker.tick_timers(dt);
@@ -54,6 +54,23 @@ pub fn update_auras(
                     // Polymorph changes direction slightly less frequently (sheep wander lazily)
                     let base_timer = if aura.effect_type == AuraType::Polymorph { 1.5 } else { 1.0 };
                     aura.fear_direction_timer = base_timer + game_rng.random_f32();
+                }
+            }
+        }
+
+        // Reverse MaxHealth/MaxMana stat mutations for expiring auras before removal
+        for aura in auras.auras.iter() {
+            if aura.duration <= 0.0 {
+                match aura.effect_type {
+                    AuraType::MaxHealthIncrease => {
+                        combatant.max_health -= aura.magnitude;
+                        combatant.current_health = combatant.current_health.min(combatant.max_health);
+                    }
+                    AuraType::MaxManaIncrease => {
+                        combatant.max_mana -= aura.magnitude;
+                        combatant.current_mana = combatant.current_mana.min(combatant.max_mana);
+                    }
+                    _ => {}
                 }
             }
         }
@@ -394,20 +411,17 @@ pub fn apply_pending_auras(
             );
         }
 
-        // Handle AttackPowerIncrease aura (Battle Shout) - apply AP buff immediately
+        // Handle AttackPowerIncrease aura (Battle Shout) - dynamic, no stat mutation
         if pending.aura.effect_type == AuraType::AttackPowerIncrease {
             let ap_bonus = pending.aura.magnitude;
-            target_combatant.attack_power += ap_bonus;
 
             info!(
-                "Team {} {} receives Battle Shout (+{:.0} attack power, now {:.0})",
+                "Team {} {} receives Battle Shout (+{:.0} attack power)",
                 target_combatant.team,
                 target_combatant.class.name(),
                 ap_bonus,
-                target_combatant.attack_power
             );
 
-            // Log to combat log
             combat_log.log(
                 CombatLogEventType::Buff,
                 format!(
@@ -419,10 +433,9 @@ pub fn apply_pending_auras(
             );
         }
 
-        // Handle AttackPowerReduction aura (Demoralizing Shout) - reduce AP immediately
+        // Handle AttackPowerReduction aura (Demoralizing Shout) - dynamic, no stat mutation
         if pending.aura.effect_type == AuraType::AttackPowerReduction {
             let ap_reduction = pending.aura.magnitude;
-            target_combatant.attack_power = (target_combatant.attack_power - ap_reduction).max(0.0);
 
             combat_log.log(
                 CombatLogEventType::Buff,
@@ -436,10 +449,8 @@ pub fn apply_pending_auras(
             );
         }
 
-        // Handle CritChanceIncrease aura (Molten Armor) - increase crit immediately
+        // Handle CritChanceIncrease aura (Molten Armor) - dynamic, no stat mutation
         if pending.aura.effect_type == AuraType::CritChanceIncrease {
-            target_combatant.crit_chance += pending.aura.magnitude;
-
             combat_log.log(
                 CombatLogEventType::Buff,
                 format!(
@@ -452,10 +463,8 @@ pub fn apply_pending_auras(
             );
         }
 
-        // Handle ManaRegenIncrease aura (Mage Armor) - increase mana regen immediately
+        // Handle ManaRegenIncrease aura (Mage Armor) - dynamic, no stat mutation
         if pending.aura.effect_type == AuraType::ManaRegenIncrease {
-            target_combatant.mana_regen += pending.aura.magnitude;
-
             combat_log.log(
                 CombatLogEventType::Buff,
                 format!(

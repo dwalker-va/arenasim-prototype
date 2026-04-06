@@ -367,15 +367,19 @@ impl Combatant {
     /// Calculate damage for an ability based on character stats.
     /// Formula: Base Damage + (Scaling Stat × Coefficient)
     ///
+    /// The `ap_bonus` parameter adds a dynamic attack power bonus from auras
+    /// (e.g., Battle Shout +AP, Demoralizing Shout -AP) that is not baked into
+    /// `self.attack_power`. Pass 0.0 when no aura bonus applies.
+    ///
     /// Uses the provided GameRng for deterministic results when seeded.
-    pub fn calculate_ability_damage_config(&self, ability_config: &AbilityConfig, rng: &mut GameRng) -> f32 {
+    pub fn calculate_ability_damage_config(&self, ability_config: &AbilityConfig, rng: &mut GameRng, ap_bonus: f32) -> f32 {
         // Calculate base damage (random between min and max)
         let damage_range = ability_config.damage_base_max - ability_config.damage_base_min;
         let base_damage = ability_config.damage_base_min + (rng.random_f32() * damage_range);
 
-        // Add stat scaling
+        // Add stat scaling (with dynamic AP bonus for attack power scaling abilities)
         let stat_value = match ability_config.damage_scales_with {
-            ScalingStat::AttackPower => self.attack_power,
+            ScalingStat::AttackPower => self.attack_power + ap_bonus,
             ScalingStat::SpellPower => self.spell_power,
             ScalingStat::None => 0.0,
         };

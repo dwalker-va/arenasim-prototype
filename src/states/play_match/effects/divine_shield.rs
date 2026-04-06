@@ -45,12 +45,16 @@ pub fn process_divine_shield(
 
             let debuffs_removed = if let Some(mut active_auras) = active_auras_opt {
                 // Purge all debuffs and count how many were removed
+                // Note: No stat reversal needed here — AP/crit/mana-regen debuffs are dynamic
+                // (removing the aura is sufficient), and MaxHealth/MaxMana are always friendly buffs
+                // that won't be purged.
                 let before = active_auras.auras.len();
                 active_auras.auras.retain(|a| !matches!(a.effect_type,
                     AuraType::MovementSpeedSlow | AuraType::Root | AuraType::Stun |
                     AuraType::DamageOverTime | AuraType::SpellSchoolLockout |
                     AuraType::HealingReduction | AuraType::Fear | AuraType::Polymorph |
-                    AuraType::DamageReduction | AuraType::CastTimeIncrease
+                    AuraType::DamageReduction | AuraType::CastTimeIncrease |
+                    AuraType::AttackPowerReduction | AuraType::AttackSpeedSlow
                 ));
                 let removed = before - active_auras.auras.len();
                 active_auras.auras.push(immunity_aura);
