@@ -19,18 +19,20 @@ use super::damage::{roll_crit, apply_damage_with_absorb, get_physical_damage_red
 /// Also ticks down ability cooldowns over time.
 pub fn regenerate_resources(
     time: Res<Time>,
-    mut combatants: Query<&mut Combatant>,
+    mut combatants: Query<(&mut Combatant, Option<&ActiveAuras>)>,
 ) {
     let dt = time.delta_secs();
 
-    for mut combatant in combatants.iter_mut() {
+    for (mut combatant, active_auras) in combatants.iter_mut() {
         if !combatant.is_alive() {
             continue;
         }
 
-        // Regenerate mana/resources
-        if combatant.mana_regen > 0.0 {
-            combatant.current_mana = (combatant.current_mana + combatant.mana_regen * dt).min(combatant.max_mana);
+        // Regenerate mana/resources (base + dynamic aura bonus)
+        let mana_regen_bonus = super::get_mana_regen_bonus(active_auras);
+        let effective_mana_regen = combatant.mana_regen + mana_regen_bonus;
+        if effective_mana_regen > 0.0 {
+            combatant.current_mana = (combatant.current_mana + effective_mana_regen * dt).min(combatant.max_mana);
         }
 
         // Tick down ability cooldowns
@@ -186,12 +188,14 @@ pub fn process_casting(
             // Consume mana
             caster.current_mana -= def.mana_cost;
 
-            // Pre-calculate damage/healing (using caster's stats)
-            let mut ability_damage = caster.calculate_ability_damage_config(def, &mut game_rng);
+            // Pre-calculate damage/healing (using caster's stats + dynamic aura bonuses)
+            let ap_bonus = super::get_attack_power_bonus(caster_auras.as_deref());
+            let crit_bonus = super::get_crit_chance_bonus(caster_auras.as_deref());
+            let mut ability_damage = caster.calculate_ability_damage_config(def, &mut game_rng, ap_bonus);
 
             // Roll crit for damage (before physical damage reduction)
             let is_crit_damage = if def.is_damage() {
-                let crit = roll_crit(caster.crit_chance, &mut game_rng);
+                let crit = roll_crit(caster.crit_chance + crit_bonus, &mut game_rng);
                 if crit { ability_damage *= CRIT_DAMAGE_MULTIPLIER; }
                 crit
             } else {
@@ -212,7 +216,7 @@ pub fn process_casting(
 
             // Roll crit for healing (before healing reduction)
             let is_crit_heal = if def.is_heal() {
-                let crit = roll_crit(caster.crit_chance, &mut game_rng);
+                let crit = roll_crit(caster.crit_chance + crit_bonus, &mut game_rng);
                 if crit { ability_healing *= CRIT_HEALING_MULTIPLIER; }
                 crit
             } else {

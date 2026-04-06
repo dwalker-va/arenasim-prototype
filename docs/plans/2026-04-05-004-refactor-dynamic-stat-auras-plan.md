@@ -1,7 +1,7 @@
 ---
 title: "refactor: Convert stat-modifying auras to dynamic checking with expiry reversal"
 type: refactor
-status: active
+status: completed
 date: 2026-04-05
 ---
 
@@ -101,7 +101,7 @@ AFTER (refactored):
 
 ## Implementation Units
 
-- [ ] **Unit 1: Add dynamic stat bonus helper functions**
+- [x] **Unit 1: Add dynamic stat bonus helper functions**
 
   **Goal:** Create helper functions for querying AP, crit, and mana regen bonuses from active auras, following the established pattern.
 
@@ -135,7 +135,7 @@ AFTER (refactored):
   - Unit tests pass for all helpers
   - `cargo test` passes
 
-- [ ] **Unit 2: Wire dynamic AP/crit/mana-regen checks into consumption points**
+- [x] **Unit 2: Wire dynamic AP/crit/mana-regen checks into consumption points**
 
   **Goal:** Replace direct stat reads with base stat + dynamic bonus at every point where AP, crit, and mana regen are consumed.
 
@@ -169,7 +169,7 @@ AFTER (refactored):
   - Headless match with default config produces identical combat log output
   - `cargo test` passes
 
-- [ ] **Unit 3: Remove stat mutations from apply_pending_auras**
+- [x] **Unit 3: Remove stat mutations from apply_pending_auras**
 
   **Goal:** Stop mutating combatant.attack_power, crit_chance, and mana_regen when AP/crit/mana-regen auras are applied. Keep the combat log messages.
 
@@ -196,7 +196,7 @@ AFTER (refactored):
   - Headless match: Warrior with Battle Shout deals same damage as before (dynamic bonus compensates)
   - Headless match: Demoralizing Shout after 120s+ re-applies without double-dip
 
-- [ ] **Unit 4: Add MaxHealth/MaxMana reversal on aura expiry and purge**
+- [x] **Unit 4: Add MaxHealth/MaxMana reversal on aura expiry and purge**
 
   **Goal:** When MaxHealthIncrease or MaxManaIncrease auras expire or are purged, reverse the stat mutation and clamp current health/mana.
 
@@ -227,7 +227,7 @@ AFTER (refactored):
   - Headless match 300s+: Commanding Shout expires at 120s, max_health returns to base value
   - `cargo test` passes
 
-- [ ] **Unit 5: Update Divine Shield purge list**
+- [x] **Unit 5: Update Divine Shield purge list**
 
   **Goal:** Add new debuff types to Divine Shield's purge list so they are properly removed.
 
