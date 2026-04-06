@@ -3,7 +3,7 @@
 //! Holy warrior and healer - combines healing with melee utility.
 //!
 //! ## Priority Order
-//! 1. Devotion Aura (buff all allies pre-combat)
+//! 1. Paladin Aura (buff all allies pre-combat — Devotion/Shadow Resistance/Concentration)
 //! 1.5. Divine Shield (emergency: self < 30% HP, or CC break for teammate)
 //! 2. Cleanse - Urgent (Polymorph, Fear on allies)
 //! 3. Emergency healing (ally < 40% HP) - Holy Shock (heal)
@@ -18,7 +18,7 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 use crate::combat::log::CombatLog;
-use crate::states::match_config::CharacterClass;
+use crate::states::match_config::{CharacterClass, PaladinAura};
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::combat_core::calculate_cast_time;
@@ -44,15 +44,15 @@ pub fn decide_paladin_action(
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
-    devotion_aura_this_frame: &mut std::collections::HashSet<Entity>,
+    paladin_aura_this_frame: &mut std::collections::HashSet<Entity>,
 ) -> bool {
     // Check if global cooldown is active
     if combatant.global_cooldown > 0.0 {
         return false;
     }
 
-    // Priority 1: Devotion Aura (buff all allies pre-combat)
-    if try_devotion_aura(
+    // Priority 1: Paladin Aura (buff all allies — chosen via combatant.paladin_aura preference)
+    if try_paladin_aura(
         commands,
         combat_log,
         abilities,
@@ -61,7 +61,7 @@ pub fn decide_paladin_action(
         my_pos,
         auras,
         ctx,
-        devotion_aura_this_frame,
+        paladin_aura_this_frame,
     ) {
         return true;
     }
@@ -700,9 +700,15 @@ fn try_cleanse(
     )
 }
 
-/// Try to cast Devotion Aura to buff all allies with damage reduction.
-/// Buffs all allies in range at once (unlike per-GCD pre-combat buffs).
-fn try_devotion_aura(
+/// Try to apply the Paladin's chosen aura to all allies.
+///
+/// Dispatches based on `combatant.paladin_aura` preference:
+/// - DevotionAura: DamageTakenReduction buff
+/// - ShadowResistanceAura: SpellResistanceBuff
+/// - ConcentrationAura: LockoutDurationReduction (shorter lockouts)
+///
+/// All three use the same team-wide application pattern (100yd range, passive, no mana cost).
+fn try_paladin_aura(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     abilities: &AbilityDefinitions,
@@ -711,9 +717,27 @@ fn try_devotion_aura(
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
-    devotion_aura_this_frame: &mut std::collections::HashSet<Entity>,
+    paladin_aura_this_frame: &mut std::collections::HashSet<Entity>,
 ) -> bool {
-    let ability = AbilityType::DevotionAura;
+    // Determine which ability and aura type to use based on preference
+    let (ability, aura_check_type, aura_name) = match combatant.paladin_aura {
+        PaladinAura::DevotionAura => (
+            AbilityType::DevotionAura,
+            AuraType::DamageTakenReduction,
+            "Devotion Aura",
+        ),
+        PaladinAura::ShadowResistanceAura => (
+            AbilityType::ShadowResistanceAura,
+            AuraType::SpellResistanceBuff,
+            "Shadow Resistance Aura",
+        ),
+        PaladinAura::ConcentrationAura => (
+            AbilityType::ConcentrationAura,
+            AuraType::LockoutDurationReduction,
+            "Concentration Aura",
+        ),
+    };
+
     let def = abilities.get_unchecked(&ability);
 
     // Check if spell school is locked out
@@ -721,33 +745,33 @@ fn try_devotion_aura(
         return false;
     }
 
-    // Check mana (for consistency, even though Devotion Aura costs 0)
+    // Check mana (for consistency, even though auras cost 0)
     if combatant.current_mana < def.mana_cost {
         return false;
     }
 
-    // Helper to check if an entity has Devotion Aura
-    let has_devotion_aura = |e: &Entity| -> bool {
+    // Helper to check if an entity already has this aura active
+    let has_aura = |e: &Entity| -> bool {
         ctx.active_auras
             .get(e)
-            .map(|auras| {
-                auras.iter().any(|a| {
-                    a.effect_type == AuraType::DamageTakenReduction
-                        && a.ability_name == "Devotion Aura"
+            .map(|active| {
+                active.iter().any(|a| {
+                    a.effect_type == aura_check_type
+                        && a.ability_name == aura_name
                 })
             })
             .unwrap_or(false)
     };
 
-    // Gather allies (exclude pets — Devotion Aura is for primary combatants)
+    // Gather allies (exclude pets — auras are for primary combatants)
     let allies: Vec<(&Entity, CharacterClass)> = ctx.combatants
         .iter()
         .filter(|(_, info)| info.team == combatant.team && info.current_health > 0.0 && !info.is_pet)
         .map(|(e, info)| (e, info.class))
         .collect();
 
-    // If ANY ally already has Devotion Aura (or was buffed this frame), skip
-    if allies.iter().any(|(e, _)| has_devotion_aura(e) || devotion_aura_this_frame.contains(*e)) {
+    // If ANY ally already has this aura (or was buffed this frame), skip
+    if allies.iter().any(|(e, _)| has_aura(e) || paladin_aura_this_frame.contains(*e)) {
         return false;
     }
 
@@ -756,7 +780,7 @@ fn try_devotion_aura(
         .iter()
         .filter(|(_, info)| info.team == combatant.team && info.current_health > 0.0 && !info.is_pet)
         .filter_map(|(e, info)| {
-            if my_pos.distance(info.position) <= def.range && !devotion_aura_this_frame.contains(e) {
+            if my_pos.distance(info.position) <= def.range && !paladin_aura_this_frame.contains(e) {
                 Some(e)
             } else {
                 None
@@ -768,15 +792,15 @@ fn try_devotion_aura(
         return false;
     }
 
-    // Apply Devotion Aura to ALL allies at once (matches WoW behavior)
+    // Apply aura to ALL allies at once (matches WoW behavior)
     combatant.global_cooldown = GCD;
 
     // Log the cast once
-    log_ability_use(combat_log, combatant.team, combatant.class, "Devotion Aura", None, "casts");
+    log_ability_use(combat_log, combatant.team, combatant.class, aura_name, None, "casts");
 
     // Apply the aura to each ally
     for ally_entity in allies_to_buff {
-        devotion_aura_this_frame.insert(*ally_entity);
+        paladin_aura_this_frame.insert(*ally_entity);
         if let Some(pending) = AuraPending::from_ability(*ally_entity, entity, def) {
             commands.spawn(pending);
         }

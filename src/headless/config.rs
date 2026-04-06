@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::states::match_config::{ArenaMap, CharacterClass, HunterPetType, MatchConfig, RogueOpener, WarlockCurse};
+use crate::states::match_config::{ArenaMap, CharacterClass, HunterPetType, MageArmor, MatchConfig, PaladinAura, RogueOpener, WarlockCurse, WarriorShout};
 use crate::states::play_match::equipment::{ItemId, ItemSlot};
 
 /// Headless match configuration loaded from JSON
@@ -66,6 +66,24 @@ pub struct HeadlessMatchConfig {
     /// Team 2's equipment overrides: outer vec indexed by slot, inner map is slot_name -> item_name
     #[serde(default)]
     pub team2_equipment: Vec<HashMap<String, String>>,
+    /// Team 1's warrior shout preferences (one per slot)
+    #[serde(default)]
+    pub team1_warrior_shouts: Vec<String>,
+    /// Team 2's warrior shout preferences (one per slot)
+    #[serde(default)]
+    pub team2_warrior_shouts: Vec<String>,
+    /// Team 1's mage armor preferences (one per slot)
+    #[serde(default)]
+    pub team1_mage_armors: Vec<String>,
+    /// Team 2's mage armor preferences (one per slot)
+    #[serde(default)]
+    pub team2_mage_armors: Vec<String>,
+    /// Team 1's paladin aura preferences (one per slot)
+    #[serde(default)]
+    pub team1_paladin_auras: Vec<String>,
+    /// Team 2's paladin aura preferences (one per slot)
+    #[serde(default)]
+    pub team2_paladin_auras: Vec<String>,
 }
 
 fn default_map() -> String {
@@ -198,6 +216,36 @@ impl HeadlessMatchConfig {
             "Boar" => HunterPetType::Boar,
             "Bird" => HunterPetType::Bird,
             _ => HunterPetType::Spider, // Default to Spider for unknown values
+        }
+    }
+
+    /// Parse a warrior shout name string into WarriorShout
+    fn parse_warrior_shout(name: &str) -> WarriorShout {
+        match name.to_lowercase().as_str() {
+            "battle" | "battleshout" | "battle_shout" | "battle shout" => WarriorShout::BattleShout,
+            "demoralizing" | "demoralizingshout" | "demoralizing_shout" | "demoralizing shout" => WarriorShout::DemoralizingShout,
+            "commanding" | "commandingshout" | "commanding_shout" | "commanding shout" => WarriorShout::CommandingShout,
+            _ => WarriorShout::default(),
+        }
+    }
+
+    /// Parse a mage armor name string into MageArmor
+    fn parse_mage_armor(name: &str) -> MageArmor {
+        match name.to_lowercase().as_str() {
+            "frost" | "frostarmor" | "frost_armor" | "frost armor" => MageArmor::FrostArmor,
+            "mage" | "magearmor" | "mage_armor" | "mage armor" => MageArmor::MageArmor,
+            "molten" | "moltenarmor" | "molten_armor" | "molten armor" => MageArmor::MoltenArmor,
+            _ => MageArmor::default(),
+        }
+    }
+
+    /// Parse a paladin aura name string into PaladinAura
+    fn parse_paladin_aura(name: &str) -> PaladinAura {
+        match name.to_lowercase().as_str() {
+            "devotion" | "devotionaura" | "devotion_aura" | "devotion aura" => PaladinAura::DevotionAura,
+            "shadow" | "shadowresistance" | "shadow_resistance" | "shadow resistance" | "shadow resistance aura" | "shadowresistanceaura" => PaladinAura::ShadowResistanceAura,
+            "concentration" | "concentrationaura" | "concentration_aura" | "concentration aura" => PaladinAura::ConcentrationAura,
+            _ => PaladinAura::default(),
         }
     }
 
@@ -423,6 +471,51 @@ impl HeadlessMatchConfig {
             .collect();
         team2_hunter_pet_types.resize(team2.len(), HunterPetType::default());
 
+        // Parse warrior shout preferences, defaulting to BattleShout for missing entries
+        let mut team1_warrior_shouts: Vec<WarriorShout> = self
+            .team1_warrior_shouts
+            .iter()
+            .map(|s| Self::parse_warrior_shout(s))
+            .collect();
+        team1_warrior_shouts.resize(team1.len(), WarriorShout::default());
+
+        let mut team2_warrior_shouts: Vec<WarriorShout> = self
+            .team2_warrior_shouts
+            .iter()
+            .map(|s| Self::parse_warrior_shout(s))
+            .collect();
+        team2_warrior_shouts.resize(team2.len(), WarriorShout::default());
+
+        // Parse mage armor preferences, defaulting to FrostArmor for missing entries
+        let mut team1_mage_armors: Vec<MageArmor> = self
+            .team1_mage_armors
+            .iter()
+            .map(|s| Self::parse_mage_armor(s))
+            .collect();
+        team1_mage_armors.resize(team1.len(), MageArmor::default());
+
+        let mut team2_mage_armors: Vec<MageArmor> = self
+            .team2_mage_armors
+            .iter()
+            .map(|s| Self::parse_mage_armor(s))
+            .collect();
+        team2_mage_armors.resize(team2.len(), MageArmor::default());
+
+        // Parse paladin aura preferences, defaulting to DevotionAura for missing entries
+        let mut team1_paladin_auras: Vec<PaladinAura> = self
+            .team1_paladin_auras
+            .iter()
+            .map(|s| Self::parse_paladin_aura(s))
+            .collect();
+        team1_paladin_auras.resize(team1.len(), PaladinAura::default());
+
+        let mut team2_paladin_auras: Vec<PaladinAura> = self
+            .team2_paladin_auras
+            .iter()
+            .map(|s| Self::parse_paladin_aura(s))
+            .collect();
+        team2_paladin_auras.resize(team2.len(), PaladinAura::default());
+
         // Parse equipment overrides, defaulting to empty maps for missing entries
         let team1_equipment = Self::parse_equipment_overrides(&self.team1_equipment, team1.len())?;
         let team2_equipment = Self::parse_equipment_overrides(&self.team2_equipment, team2.len())?;
@@ -443,6 +536,12 @@ impl HeadlessMatchConfig {
             team2_warlock_curse_prefs,
             team1_hunter_pet_types,
             team2_hunter_pet_types,
+            team1_warrior_shouts,
+            team2_warrior_shouts,
+            team1_mage_armors,
+            team2_mage_armors,
+            team1_paladin_auras,
+            team2_paladin_auras,
             team1_equipment,
             team2_equipment,
         })

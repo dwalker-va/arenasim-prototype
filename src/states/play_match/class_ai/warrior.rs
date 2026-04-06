@@ -3,7 +3,7 @@
 //! Handles AI decision-making for the Warrior class.
 //!
 //! ## Priority Order
-//! 1. Battle Shout (buff self and allies pre-combat)
+//! 1. Shout (buff allies or debuff enemies based on warrior_shout preference)
 //! 2. Charge (gap closer when out of melee range)
 //! 3. Rend (bleed DoT on target)
 //! 4. Mortal Strike (main damage, healing reduction)
@@ -13,6 +13,7 @@
 use bevy::prelude::*;
 
 use crate::combat::log::{CombatLog, CombatLogEventType};
+use crate::states::match_config::WarriorShout;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
@@ -23,8 +24,8 @@ use crate::states::play_match::utils::log_ability_use;
 
 use super::CombatContext;
 
-/// Battle Shout range constant
-const BATTLE_SHOUT_RANGE: f32 = 30.0;
+/// Shout range constant (applies to all shout variants)
+const SHOUT_RANGE: f32 = 30.0;
 
 /// Rage reserve for essential abilities
 const RAGE_RESERVE: f32 = 50.0;
@@ -50,8 +51,8 @@ pub fn decide_warrior_action(
         return false;
     }
 
-    // Priority 1: Battle Shout (buff allies)
-    if try_battle_shout(
+    // Priority 1: Shout (buff allies or debuff enemies based on preference)
+    if try_shout(
         commands,
         combat_log,
         abilities,
@@ -133,7 +134,33 @@ pub fn decide_warrior_action(
     false
 }
 
-/// Try to cast Battle Shout to buff nearby allies.
+/// Try to cast the warrior's chosen shout (Battle Shout, Demoralizing Shout, or Commanding Shout).
+/// Dispatches based on `combatant.warrior_shout` preference.
+/// Returns true if the ability was used.
+fn try_shout(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    ctx: &CombatContext,
+    shouted_this_frame: &mut std::collections::HashSet<Entity>,
+) -> bool {
+    match combatant.warrior_shout {
+        WarriorShout::BattleShout => try_battle_shout(
+            commands, combat_log, abilities, entity, combatant, my_pos, ctx, shouted_this_frame,
+        ),
+        WarriorShout::DemoralizingShout => try_demoralizing_shout(
+            commands, combat_log, abilities, entity, combatant, my_pos, ctx, shouted_this_frame,
+        ),
+        WarriorShout::CommandingShout => try_commanding_shout(
+            commands, combat_log, abilities, entity, combatant, my_pos, ctx, shouted_this_frame,
+        ),
+    }
+}
+
+/// Try to cast Battle Shout to buff nearby allies with AttackPowerIncrease.
 /// Returns true if the ability was used.
 fn try_battle_shout(
     commands: &mut Commands,
@@ -143,35 +170,29 @@ fn try_battle_shout(
     combatant: &mut Combatant,
     my_pos: Vec3,
     ctx: &CombatContext,
-    battle_shouted_this_frame: &mut std::collections::HashSet<Entity>,
+    shouted_this_frame: &mut std::collections::HashSet<Entity>,
 ) -> bool {
-    // Check if any nearby ally needs the buff
-    let mut allies_to_buff: Vec<Entity> = Vec::new();
+    let mut targets: Vec<Entity> = Vec::new();
 
     for (ally_entity, info) in ctx.combatants.iter() {
-        // Must be same team and alive
         if info.team != combatant.team || info.current_health <= 0.0 {
             continue;
         }
-
-        let distance_to_ally = my_pos.distance(info.position);
-        if distance_to_ally > BATTLE_SHOUT_RANGE {
+        if my_pos.distance(info.position) > SHOUT_RANGE {
             continue;
         }
 
-        // Check if ally already has AttackPowerIncrease buff
-        let has_battle_shout = ctx.active_auras
+        let already_has = ctx.active_auras
             .get(ally_entity)
             .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::AttackPowerIncrease))
             .unwrap_or(false);
 
-        // Also check if another Warrior already buffed this ally this frame
-        if !has_battle_shout && !battle_shouted_this_frame.contains(ally_entity) {
-            allies_to_buff.push(*ally_entity);
+        if !already_has && !shouted_this_frame.contains(ally_entity) {
+            targets.push(*ally_entity);
         }
     }
 
-    if allies_to_buff.is_empty() {
+    if targets.is_empty() {
         return false;
     }
 
@@ -182,23 +203,149 @@ fn try_battle_shout(
         return false;
     }
 
-    // Execute the ability
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
 
-    // Log
     log_ability_use(combat_log, combatant.team, combatant.class, "Battle Shout", None, "uses");
 
-    // Apply buff to all nearby allies
-    for ally_entity in allies_to_buff {
-        battle_shouted_this_frame.insert(ally_entity);
-        if let Some(aura_pending) = AuraPending::from_ability(ally_entity, entity, def) {
+    for target in targets {
+        shouted_this_frame.insert(target);
+        if let Some(aura_pending) = AuraPending::from_ability(target, entity, def) {
             commands.spawn(aura_pending);
         }
     }
 
     info!(
         "Team {} {} uses Battle Shout",
+        combatant.team,
+        combatant.class.name()
+    );
+
+    true
+}
+
+/// Try to cast Demoralizing Shout to debuff nearby enemies with AttackPowerReduction.
+/// Returns true if the ability was used.
+fn try_demoralizing_shout(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    ctx: &CombatContext,
+    shouted_this_frame: &mut std::collections::HashSet<Entity>,
+) -> bool {
+    let mut targets: Vec<Entity> = Vec::new();
+
+    for (enemy_entity, info) in ctx.combatants.iter() {
+        // Must be opposite team, alive, and visible (not stealthed)
+        if info.team == combatant.team || info.current_health <= 0.0 || info.stealthed {
+            continue;
+        }
+        if my_pos.distance(info.position) > SHOUT_RANGE {
+            continue;
+        }
+
+        let already_has = ctx.active_auras
+            .get(enemy_entity)
+            .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::AttackPowerReduction))
+            .unwrap_or(false);
+
+        if !already_has && !shouted_this_frame.contains(enemy_entity) {
+            targets.push(*enemy_entity);
+        }
+    }
+
+    if targets.is_empty() {
+        return false;
+    }
+
+    let ability = AbilityType::DemoralizingShout;
+    let def = abilities.get_unchecked(&ability);
+
+    if combatant.current_mana < def.mana_cost && def.mana_cost > 0.0 {
+        return false;
+    }
+
+    combatant.current_mana -= def.mana_cost;
+    combatant.global_cooldown = GCD;
+
+    log_ability_use(combat_log, combatant.team, combatant.class, "Demoralizing Shout", None, "uses");
+
+    for target in targets {
+        shouted_this_frame.insert(target);
+        if let Some(aura_pending) = AuraPending::from_ability(target, entity, def) {
+            commands.spawn(aura_pending);
+        }
+    }
+
+    info!(
+        "Team {} {} uses Demoralizing Shout",
+        combatant.team,
+        combatant.class.name()
+    );
+
+    true
+}
+
+/// Try to cast Commanding Shout to buff nearby allies with MaxHealthIncrease.
+/// Returns true if the ability was used.
+fn try_commanding_shout(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    ctx: &CombatContext,
+    shouted_this_frame: &mut std::collections::HashSet<Entity>,
+) -> bool {
+    let mut targets: Vec<Entity> = Vec::new();
+
+    for (ally_entity, info) in ctx.combatants.iter() {
+        if info.team != combatant.team || info.current_health <= 0.0 {
+            continue;
+        }
+        if my_pos.distance(info.position) > SHOUT_RANGE {
+            continue;
+        }
+
+        let already_has = ctx.active_auras
+            .get(ally_entity)
+            .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::MaxHealthIncrease))
+            .unwrap_or(false);
+
+        if !already_has && !shouted_this_frame.contains(ally_entity) {
+            targets.push(*ally_entity);
+        }
+    }
+
+    if targets.is_empty() {
+        return false;
+    }
+
+    let ability = AbilityType::CommandingShout;
+    let def = abilities.get_unchecked(&ability);
+
+    if combatant.current_mana < def.mana_cost && def.mana_cost > 0.0 {
+        return false;
+    }
+
+    combatant.current_mana -= def.mana_cost;
+    combatant.global_cooldown = GCD;
+
+    log_ability_use(combat_log, combatant.team, combatant.class, "Commanding Shout", None, "uses");
+
+    for target in targets {
+        shouted_this_frame.insert(target);
+        if let Some(aura_pending) = AuraPending::from_ability(target, entity, def) {
+            commands.spawn(aura_pending);
+        }
+    }
+
+    info!(
+        "Team {} {} uses Commanding Shout",
         combatant.team,
         combatant.class.name()
     );

@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
-use super::super::match_config::{self, RogueOpener, WarlockCurse};
+use super::super::match_config::{self, RogueOpener, WarlockCurse, WarriorShout, MageArmor, PaladinAura};
 use super::super::abilities::{AbilityType, ScalingStat, SpellSchool};
 use super::super::ability_config::AbilityConfig;
 use super::super::equipment::{ItemSlot, ItemId, ItemDefinitions};
@@ -174,6 +174,12 @@ pub struct Combatant {
     pub rogue_opener: RogueOpener,
     /// Warlock-specific: which curse to apply to each enemy target (indexed by enemy slot)
     pub warlock_curse_prefs: Vec<WarlockCurse>,
+    /// Warrior-specific: which shout to use (Battle Shout, Demoralizing Shout, or Commanding Shout)
+    pub warrior_shout: WarriorShout,
+    /// Mage-specific: which armor to self-cast (Frost Armor, Mage Armor, or Molten Armor)
+    pub mage_armor: MageArmor,
+    /// Paladin-specific: which aura to apply (Devotion Aura, Shadow Resistance Aura, or Concentration Aura)
+    pub paladin_aura: PaladinAura,
 }
 
 impl Combatant {
@@ -240,6 +246,9 @@ impl Combatant {
             kiting_timer: 0.0,
             rogue_opener: RogueOpener::default(),
             warlock_curse_prefs: Vec::new(),
+            warrior_shout: WarriorShout::default(),
+            mage_armor: MageArmor::default(),
+            paladin_aura: PaladinAura::default(),
         }
     }
 

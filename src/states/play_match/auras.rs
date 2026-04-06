@@ -276,7 +276,10 @@ pub fn apply_pending_auras(
             pending.aura.effect_type,
             AuraType::MaxHealthIncrease | AuraType::MaxManaIncrease | AuraType::AttackPowerIncrease
             | AuraType::Absorb | AuraType::WeakenedSoul | AuraType::DamageTakenReduction
-            | AuraType::DamageImmunity
+            | AuraType::DamageImmunity | AuraType::AttackPowerReduction
+            | AuraType::CritChanceIncrease | AuraType::ManaRegenIncrease
+            | AuraType::FrostArmorBuff | AuraType::LockoutDurationReduction
+            | AuraType::SpellResistanceBuff | AuraType::AttackSpeedSlow
         );
         if is_buff_aura {
             // For Absorb shields, use ability_name as the key to allow different absorbs to coexist
@@ -412,6 +415,83 @@ pub fn apply_pending_auras(
                     target_combatant.team,
                     target_combatant.class.name(),
                     ap_bonus
+                )
+            );
+        }
+
+        // Handle AttackPowerReduction aura (Demoralizing Shout) - reduce AP immediately
+        if pending.aura.effect_type == AuraType::AttackPowerReduction {
+            let ap_reduction = pending.aura.magnitude;
+            target_combatant.attack_power = (target_combatant.attack_power - ap_reduction).max(0.0);
+
+            combat_log.log(
+                CombatLogEventType::Buff,
+                format!(
+                    "Team {} {} suffers {} (-{:.0} attack power)",
+                    target_combatant.team,
+                    target_combatant.class.name(),
+                    pending.aura.ability_name,
+                    ap_reduction
+                )
+            );
+        }
+
+        // Handle CritChanceIncrease aura (Molten Armor) - increase crit immediately
+        if pending.aura.effect_type == AuraType::CritChanceIncrease {
+            target_combatant.crit_chance += pending.aura.magnitude;
+
+            combat_log.log(
+                CombatLogEventType::Buff,
+                format!(
+                    "Team {} {} gains {} (+{:.0}% crit chance)",
+                    target_combatant.team,
+                    target_combatant.class.name(),
+                    pending.aura.ability_name,
+                    pending.aura.magnitude * 100.0
+                )
+            );
+        }
+
+        // Handle ManaRegenIncrease aura (Mage Armor) - increase mana regen immediately
+        if pending.aura.effect_type == AuraType::ManaRegenIncrease {
+            target_combatant.mana_regen += pending.aura.magnitude;
+
+            combat_log.log(
+                CombatLogEventType::Buff,
+                format!(
+                    "Team {} {} gains {} (+{:.0} mana/s)",
+                    target_combatant.team,
+                    target_combatant.class.name(),
+                    pending.aura.ability_name,
+                    pending.aura.magnitude
+                )
+            );
+        }
+
+        // Handle FrostArmorBuff - log application
+        if pending.aura.effect_type == AuraType::FrostArmorBuff {
+            combat_log.log(
+                CombatLogEventType::Buff,
+                format!(
+                    "Team {} {} gains {}",
+                    target_combatant.team,
+                    target_combatant.class.name(),
+                    pending.aura.ability_name,
+                )
+            );
+        }
+
+        // Handle LockoutDurationReduction aura (Concentration Aura) - log application
+        if pending.aura.effect_type == AuraType::LockoutDurationReduction {
+            let reduction_pct = (pending.aura.magnitude * 100.0) as i32;
+            combat_log.log(
+                CombatLogEventType::Buff,
+                format!(
+                    "Team {} {} gains {} ({}% shorter interrupt lockouts)",
+                    target_combatant.team,
+                    target_combatant.class.name(),
+                    pending.aura.ability_name,
+                    reduction_pct
                 )
             );
         }

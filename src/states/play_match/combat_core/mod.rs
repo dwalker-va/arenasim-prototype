@@ -63,6 +63,20 @@ pub fn get_cast_time_increase(auras: Option<&ActiveAuras>) -> f32 {
     })
 }
 
+/// Get the total lockout duration reduction from LockoutDurationReduction auras on a combatant.
+/// Used by Concentration Aura to reduce interrupt lockout duration.
+/// Returns the percentage reduction clamped to [0.0, 1.0] (0.50 = 50% shorter lockouts).
+pub fn get_lockout_duration_reduction(auras: Option<&ActiveAuras>) -> f32 {
+    let total: f32 = auras.map_or(0.0, |a| {
+        a.auras
+            .iter()
+            .filter(|aura| aura.effect_type == AuraType::LockoutDurationReduction)
+            .map(|aura| aura.magnitude)
+            .sum()
+    });
+    total.min(1.0)
+}
+
 /// Calculate the modified cast time accounting for CastTimeIncrease auras.
 /// This should be called when starting a cast to get the actual cast duration.
 pub fn calculate_cast_time(base_cast_time: f32, auras: Option<&ActiveAuras>) -> f32 {

@@ -858,5 +858,11 @@ fn get_aura_fallback_color(aura_type: &AuraType) -> egui::Color32 {
         AuraType::DamageImmunity => egui::Color32::from_rgb(255, 215, 0), // Gold (Divine Shield)
         AuraType::Incapacitate => egui::Color32::from_rgb(135, 206, 250), // Light sky blue (frozen)
         AuraType::SpellResistanceBuff => egui::Color32::from_rgb(100, 200, 100), // Green (resistance buff)
+        AuraType::AttackPowerReduction => egui::Color32::from_rgb(178, 34, 34), // Firebrick (debuff)
+        AuraType::CritChanceIncrease => egui::Color32::from_rgb(255, 140, 0), // Dark orange (buff)
+        AuraType::ManaRegenIncrease => egui::Color32::from_rgb(65, 105, 225), // Royal blue (buff)
+        AuraType::AttackSpeedSlow => egui::Color32::from_rgb(100, 149, 237), // Cornflower blue (debuff)
+        AuraType::LockoutDurationReduction => egui::Color32::from_rgb(255, 215, 0), // Gold (buff)
+        AuraType::FrostArmorBuff => egui::Color32::from_rgb(100, 149, 237), // Cornflower blue (self-buff)
     }
 }

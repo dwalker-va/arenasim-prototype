@@ -391,9 +391,9 @@ pub fn decide_abilities(
     // when multiple Warriors cast Battle Shout before AuraPending is processed
     let mut battle_shouted_this_frame: std::collections::HashSet<Entity> = std::collections::HashSet::new();
 
-    // Track targets that have received Devotion Aura THIS FRAME to prevent duplicate buffs
-    // when multiple Paladins cast Devotion Aura before AuraPending is processed
-    let mut devotion_aura_this_frame: std::collections::HashSet<Entity> = std::collections::HashSet::new();
+    // Track targets that have received a Paladin aura THIS FRAME to prevent duplicate buffs
+    // when multiple Paladins cast their aura before AuraPending is processed
+    let mut paladin_aura_this_frame: std::collections::HashSet<Entity> = std::collections::HashSet::new();
 
     // Queue for Frost Nova damage
     let mut frost_nova_damage: Vec<class_ai::QueuedAoeDamage> = Vec::new();
@@ -544,7 +544,7 @@ pub fn decide_abilities(
                 my_pos,
                 auras.as_deref(),
                 &ctx,
-                &mut devotion_aura_this_frame,
+                &mut paladin_aura_this_frame,
             ) {
                 continue;
             }

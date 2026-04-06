@@ -92,6 +92,102 @@ impl HunterPetType {
     }
 }
 
+/// Warrior shout choice — which shout to maintain
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum WarriorShout {
+    /// Battle Shout — increases attack power of nearby allies
+    #[default]
+    BattleShout,
+    /// Demoralizing Shout — reduces attack power of nearby enemies
+    DemoralizingShout,
+    /// Commanding Shout — increases maximum health of nearby allies
+    CommandingShout,
+}
+
+impl WarriorShout {
+    /// Get the display name
+    pub fn name(&self) -> &'static str {
+        match self {
+            WarriorShout::BattleShout => "Battle Shout",
+            WarriorShout::DemoralizingShout => "Demoralizing Shout",
+            WarriorShout::CommandingShout => "Commanding Shout",
+        }
+    }
+
+    /// Get a short description
+    pub fn description(&self) -> &'static str {
+        match self {
+            WarriorShout::BattleShout => "Increases attack power of nearby allies",
+            WarriorShout::DemoralizingShout => "Reduces attack power of nearby enemies",
+            WarriorShout::CommandingShout => "Increases maximum health of nearby allies",
+        }
+    }
+}
+
+/// Mage armor choice — which armor to self-cast
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum MageArmor {
+    /// Frost Armor — slows melee attackers who strike you
+    #[default]
+    FrostArmor,
+    /// Mage Armor — increases mana regeneration
+    MageArmor,
+    /// Molten Armor — increases spell critical strike chance
+    MoltenArmor,
+}
+
+impl MageArmor {
+    /// Get the display name
+    pub fn name(&self) -> &'static str {
+        match self {
+            MageArmor::FrostArmor => "Frost Armor",
+            MageArmor::MageArmor => "Mage Armor",
+            MageArmor::MoltenArmor => "Molten Armor",
+        }
+    }
+
+    /// Get a short description
+    pub fn description(&self) -> &'static str {
+        match self {
+            MageArmor::FrostArmor => "Slows melee attackers who strike you",
+            MageArmor::MageArmor => "Increases mana regeneration",
+            MageArmor::MoltenArmor => "Increases spell critical strike chance",
+        }
+    }
+}
+
+/// Paladin aura choice — which aura to apply
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum PaladinAura {
+    /// Devotion Aura — reduces damage taken by nearby allies
+    #[default]
+    DevotionAura,
+    /// Shadow Resistance Aura — increases shadow resistance of nearby allies
+    ShadowResistanceAura,
+    /// Concentration Aura — reduces cast time of nearby allies
+    ConcentrationAura,
+}
+
+impl PaladinAura {
+    /// Get the display name
+    pub fn name(&self) -> &'static str {
+        match self {
+            PaladinAura::DevotionAura => "Devotion Aura",
+            PaladinAura::ShadowResistanceAura => "Shadow Resistance Aura",
+            PaladinAura::ConcentrationAura => "Concentration Aura",
+        }
+    }
+
+    /// Get a short description
+    pub fn description(&self) -> &'static str {
+        match self {
+            PaladinAura::DevotionAura => "Reduces damage taken by nearby allies",
+            PaladinAura::ShadowResistanceAura => "Increases shadow resistance of nearby allies",
+            PaladinAura::ConcentrationAura => "Reduces interrupt lockout duration for nearby allies",
+        }
+    }
+}
+
 /// Available character classes
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CharacterClass {
@@ -271,6 +367,18 @@ pub struct MatchConfig {
     pub team1_hunter_pet_types: Vec<HunterPetType>,
     /// Team 2's hunter pet type preferences (one per slot, defaults to Spider)
     pub team2_hunter_pet_types: Vec<HunterPetType>,
+    /// Team 1's warrior shout preferences (one per slot, defaults to BattleShout)
+    pub team1_warrior_shouts: Vec<WarriorShout>,
+    /// Team 2's warrior shout preferences (one per slot, defaults to BattleShout)
+    pub team2_warrior_shouts: Vec<WarriorShout>,
+    /// Team 1's mage armor preferences (one per slot, defaults to FrostArmor)
+    pub team1_mage_armors: Vec<MageArmor>,
+    /// Team 2's mage armor preferences (one per slot, defaults to FrostArmor)
+    pub team2_mage_armors: Vec<MageArmor>,
+    /// Team 1's paladin aura preferences (one per slot, defaults to DevotionAura)
+    pub team1_paladin_auras: Vec<PaladinAura>,
+    /// Team 2's paladin aura preferences (one per slot, defaults to DevotionAura)
+    pub team2_paladin_auras: Vec<PaladinAura>,
     /// Team 1's equipment overrides per slot (one HashMap per team slot)
     pub team1_equipment: Vec<HashMap<ItemSlot, ItemId>>,
     /// Team 2's equipment overrides per slot (one HashMap per team slot)
@@ -296,6 +404,12 @@ impl Default for MatchConfig {
             team2_warlock_curse_prefs: vec![vec![WarlockCurse::default()]],
             team1_hunter_pet_types: vec![HunterPetType::default()],
             team2_hunter_pet_types: vec![HunterPetType::default()],
+            team1_warrior_shouts: vec![WarriorShout::default()],
+            team2_warrior_shouts: vec![WarriorShout::default()],
+            team1_mage_armors: vec![MageArmor::default()],
+            team2_mage_armors: vec![MageArmor::default()],
+            team1_paladin_auras: vec![PaladinAura::default()],
+            team2_paladin_auras: vec![PaladinAura::default()],
             team1_equipment: vec![HashMap::new()],
             team2_equipment: vec![HashMap::new()],
         }
@@ -315,6 +429,9 @@ impl MatchConfig {
         for prefs in &mut self.team1_warlock_curse_prefs {
             prefs.resize(enemy_size, WarlockCurse::default());
         }
+        self.team1_warrior_shouts.resize(size, WarriorShout::default());
+        self.team1_mage_armors.resize(size, MageArmor::default());
+        self.team1_paladin_auras.resize(size, PaladinAura::default());
         self.team1_equipment.resize(size, HashMap::new());
     }
 
@@ -334,6 +451,9 @@ impl MatchConfig {
         for prefs in &mut self.team1_warlock_curse_prefs {
             prefs.resize(size, WarlockCurse::default());
         }
+        self.team2_warrior_shouts.resize(size, WarriorShout::default());
+        self.team2_mage_armors.resize(size, MageArmor::default());
+        self.team2_paladin_auras.resize(size, PaladinAura::default());
         self.team2_equipment.resize(size, HashMap::new());
     }
 
