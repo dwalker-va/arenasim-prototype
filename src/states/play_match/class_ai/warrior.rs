@@ -239,8 +239,8 @@ fn try_demoralizing_shout(
     let mut targets: Vec<Entity> = Vec::new();
 
     for (enemy_entity, info) in ctx.combatants.iter() {
-        // Must be opposite team and alive
-        if info.team == combatant.team || info.current_health <= 0.0 {
+        // Must be opposite team, alive, and visible (not stealthed)
+        if info.team == combatant.team || info.current_health <= 0.0 || info.stealthed {
             continue;
         }
         if my_pos.distance(info.position) > SHOUT_RANGE {

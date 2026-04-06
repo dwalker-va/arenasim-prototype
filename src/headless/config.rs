@@ -243,7 +243,7 @@ impl HeadlessMatchConfig {
     fn parse_paladin_aura(name: &str) -> PaladinAura {
         match name.to_lowercase().as_str() {
             "devotion" | "devotionaura" | "devotion_aura" | "devotion aura" => PaladinAura::DevotionAura,
-            "shadow" | "shadowresistance" | "shadow_resistance" | "shadow resistance aura" | "shadowresistanceaura" => PaladinAura::ShadowResistanceAura,
+            "shadow" | "shadowresistance" | "shadow_resistance" | "shadow resistance" | "shadow resistance aura" | "shadowresistanceaura" => PaladinAura::ShadowResistanceAura,
             "concentration" | "concentrationaura" | "concentration_aura" | "concentration aura" => PaladinAura::ConcentrationAura,
             _ => PaladinAura::default(),
         }
