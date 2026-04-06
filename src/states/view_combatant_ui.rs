@@ -10,7 +10,7 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use std::collections::HashMap;
-use super::{GameState, match_config::{CharacterClass, HunterPetType, MatchConfig, RogueOpener, WarlockCurse}};
+use super::{GameState, match_config::{CharacterClass, HunterPetType, MatchConfig, MageArmor, PaladinAura, RogueOpener, WarriorShout, WarlockCurse}};
 use super::configure_match_ui::ClassIcons;
 use super::play_match::AbilityType;
 use super::play_match::abilities::{ScalingStat, SpellSchool};
@@ -645,6 +645,120 @@ pub fn view_combatant_ui(
                                 &view_state,
                                 &mut match_config,
                                 &ability_icons,
+                            );
+                        },
+                    );
+                }
+
+                // Warrior-specific: Shout Choice panel
+                if class == CharacterClass::Warrior {
+                    ui.add_space(15.0);
+
+                    let panel_height = 120.0;
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(content_width, panel_height),
+                        egui::Layout::left_to_right(egui::Align::TOP),
+                        |ui| {
+                            render_strategic_option_panel(
+                                ui,
+                                content_width,
+                                panel_height,
+                                "BATTLE SHOUT",
+                                &view_state,
+                                &ability_icons,
+                                &[
+                                    ("Battle Shout", WarriorShout::BattleShout),
+                                    ("Demoralizing Shout", WarriorShout::DemoralizingShout),
+                                    ("Commanding Shout", WarriorShout::CommandingShout),
+                                ],
+                                |mc, team, slot| {
+                                    if team == 1 {
+                                        mc.team1_warrior_shouts.get(slot).copied().unwrap_or_default()
+                                    } else {
+                                        mc.team2_warrior_shouts.get(slot).copied().unwrap_or_default()
+                                    }
+                                },
+                                |mc, team, slot, val| {
+                                    let vec = if team == 1 { &mut mc.team1_warrior_shouts } else { &mut mc.team2_warrior_shouts };
+                                    if let Some(v) = vec.get_mut(slot) { *v = val; }
+                                },
+                                &mut match_config,
+                            );
+                        },
+                    );
+                }
+
+                // Mage-specific: Armor Choice panel
+                if class == CharacterClass::Mage {
+                    ui.add_space(15.0);
+
+                    let panel_height = 120.0;
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(content_width, panel_height),
+                        egui::Layout::left_to_right(egui::Align::TOP),
+                        |ui| {
+                            render_strategic_option_panel(
+                                ui,
+                                content_width,
+                                panel_height,
+                                "MAGE ARMOR",
+                                &view_state,
+                                &ability_icons,
+                                &[
+                                    ("Frost Armor", MageArmor::FrostArmor),
+                                    ("Mage Armor", MageArmor::MageArmor),
+                                    ("Molten Armor", MageArmor::MoltenArmor),
+                                ],
+                                |mc, team, slot| {
+                                    if team == 1 {
+                                        mc.team1_mage_armors.get(slot).copied().unwrap_or_default()
+                                    } else {
+                                        mc.team2_mage_armors.get(slot).copied().unwrap_or_default()
+                                    }
+                                },
+                                |mc, team, slot, val| {
+                                    let vec = if team == 1 { &mut mc.team1_mage_armors } else { &mut mc.team2_mage_armors };
+                                    if let Some(v) = vec.get_mut(slot) { *v = val; }
+                                },
+                                &mut match_config,
+                            );
+                        },
+                    );
+                }
+
+                // Paladin-specific: Aura Choice panel
+                if class == CharacterClass::Paladin {
+                    ui.add_space(15.0);
+
+                    let panel_height = 120.0;
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(content_width, panel_height),
+                        egui::Layout::left_to_right(egui::Align::TOP),
+                        |ui| {
+                            render_strategic_option_panel(
+                                ui,
+                                content_width,
+                                panel_height,
+                                "PALADIN AURA",
+                                &view_state,
+                                &ability_icons,
+                                &[
+                                    ("Devotion Aura", PaladinAura::DevotionAura),
+                                    ("Shadow Resistance Aura", PaladinAura::ShadowResistanceAura),
+                                    ("Concentration Aura", PaladinAura::ConcentrationAura),
+                                ],
+                                |mc, team, slot| {
+                                    if team == 1 {
+                                        mc.team1_paladin_auras.get(slot).copied().unwrap_or_default()
+                                    } else {
+                                        mc.team2_paladin_auras.get(slot).copied().unwrap_or_default()
+                                    }
+                                },
+                                |mc, team, slot, val| {
+                                    let vec = if team == 1 { &mut mc.team1_paladin_auras } else { &mut mc.team2_paladin_auras };
+                                    if let Some(v) = vec.get_mut(slot) { *v = val; }
+                                },
+                                &mut match_config,
                             );
                         },
                     );
@@ -1794,6 +1908,131 @@ fn render_rogue_opener_panel(
                 .italics(),
         );
     });
+}
+
+/// Generic strategic option selection panel for Warrior Shout, Mage Armor, Paladin Aura.
+/// Follows the same visual pattern as the Rogue Opener panel.
+fn render_strategic_option_panel<T: Copy + PartialEq>(
+    ui: &mut egui::Ui,
+    width: f32,
+    height: f32,
+    title: &str,
+    view_state: &Res<ViewCombatantState>,
+    ability_icons: &Option<Res<AbilityIcons>>,
+    options: &[(&str, T)],  // (icon_key/ability_name, enum value)
+    get_current: impl Fn(&MatchConfig, u8, usize) -> T,
+    set_value: impl Fn(&mut MatchConfig, u8, usize, T),
+    match_config: &mut ResMut<MatchConfig>,
+) where T: HasNameDescription {
+    let current = get_current(match_config, view_state.team, view_state.slot);
+
+    ui.group(|ui| {
+        ui.set_min_width(width - 20.0);
+        ui.set_min_height(height - 20.0);
+
+        ui.label(
+            egui::RichText::new(title)
+                .size(18.0)
+                .color(egui::Color32::from_rgb(230, 204, 153))
+                .strong(),
+        );
+
+        ui.add_space(12.0);
+
+        let icon_size = 48.0;
+        let gold = egui::Color32::from_rgb(255, 215, 0);
+        let gray = egui::Color32::from_rgb(80, 80, 90);
+
+        let mut clicked_index: Option<usize> = None;
+
+        ui.horizontal(|ui| {
+            for (i, (icon_key, option)) in options.iter().enumerate() {
+                if i > 0 {
+                    ui.add_space(20.0);
+                }
+
+                let is_selected = current == *option;
+                let border_color = if is_selected { gold } else { gray };
+                let border_width = if is_selected { 3.0 } else { 2.0 };
+
+                ui.vertical(|ui| {
+                    let icon_texture = ability_icons.as_ref().and_then(|icons| {
+                        icons.textures.get(*icon_key).copied()
+                    });
+
+                    let (rect, response) = ui.allocate_exact_size(
+                        egui::vec2(icon_size, icon_size),
+                        egui::Sense::click(),
+                    );
+
+                    let painter = ui.painter();
+                    if let Some(texture_id) = icon_texture {
+                        painter.image(
+                            texture_id,
+                            rect,
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
+                    } else {
+                        painter.rect_filled(rect, 4.0, egui::Color32::from_rgb(50, 50, 65));
+                    }
+
+                    painter.rect_stroke(rect, 4.0, egui::Stroke::new(border_width, border_color));
+
+                    if response.clicked() && !is_selected {
+                        clicked_index = Some(i);
+                    }
+
+                    ui.add_space(4.0);
+                    let label_color = if is_selected {
+                        gold
+                    } else {
+                        egui::Color32::from_rgb(180, 180, 180)
+                    };
+                    ui.label(
+                        egui::RichText::new(option.name())
+                            .size(13.0)
+                            .color(label_color),
+                    );
+                });
+            }
+        });
+
+        if let Some(idx) = clicked_index {
+            set_value(match_config, view_state.team, view_state.slot, options[idx].1);
+        }
+
+        ui.add_space(8.0);
+
+        let description = current.description();
+        ui.label(
+            egui::RichText::new(description)
+                .size(13.0)
+                .color(egui::Color32::from_rgb(170, 170, 170))
+                .italics(),
+        );
+    });
+}
+
+/// Trait for strategic option enums that have name() and description() methods.
+trait HasNameDescription {
+    fn name(&self) -> &str;
+    fn description(&self) -> &str;
+}
+
+impl HasNameDescription for WarriorShout {
+    fn name(&self) -> &str { self.name() }
+    fn description(&self) -> &str { self.description() }
+}
+
+impl HasNameDescription for MageArmor {
+    fn name(&self) -> &str { self.name() }
+    fn description(&self) -> &str { self.description() }
+}
+
+impl HasNameDescription for PaladinAura {
+    fn name(&self) -> &str { self.name() }
+    fn description(&self) -> &str { self.description() }
 }
 
 /// Render the Hunter Pet Type selection panel
