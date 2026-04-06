@@ -75,9 +75,10 @@ pub enum AuraType {
     /// Reduces attack speed by a percentage (magnitude = slow amount, e.g. 0.25 = 25% slower)
     /// Used by Frost Armor proc on melee attackers.
     AttackSpeedSlow,
-    /// Reduces cast time by a percentage (magnitude = reduction, e.g. 0.15 = 15% faster casts)
+    /// Reduces spell school lockout duration from interrupts by a percentage
+    /// (magnitude = reduction, e.g. 0.50 = 50% shorter lockouts).
     /// Used by Concentration Aura.
-    CastTimeReduction,
+    LockoutDurationReduction,
     /// Marks a combatant as having Frost Armor active.
     /// When a melee attacker hits this combatant, they receive MovementSpeedSlow + AttackSpeedSlow.
     /// Magnitude unused (always 1.0 by convention).

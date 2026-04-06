@@ -83,7 +83,7 @@ pub fn get_aura_icon_key(aura: &Aura, ability_definitions: &AbilityDefinitions) 
         AuraType::CritChanceIncrease => "aura_max_health".to_string(), // Buff, reuse buff icon
         AuraType::ManaRegenIncrease => "aura_max_health".to_string(), // Buff, reuse buff icon
         AuraType::AttackSpeedSlow => "aura_slow".to_string(), // Slow debuff
-        AuraType::CastTimeReduction => "aura_max_health".to_string(), // Buff, reuse buff icon
+        AuraType::LockoutDurationReduction => "aura_max_health".to_string(), // Buff, reuse buff icon
         AuraType::FrostArmorBuff => "aura_absorb".to_string(), // Self-buff, reuse absorb icon
     }
 }
@@ -101,7 +101,7 @@ pub fn is_buff_aura(aura_type: &AuraType) -> bool {
         AuraType::DamageImmunity |
         AuraType::CritChanceIncrease |
         AuraType::ManaRegenIncrease |
-        AuraType::CastTimeReduction |
+        AuraType::LockoutDurationReduction |
         AuraType::FrostArmorBuff |
         AuraType::SpellResistanceBuff
     )

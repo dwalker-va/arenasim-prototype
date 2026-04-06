@@ -1256,9 +1256,9 @@ fn build_aura_description(aura: &super::play_match::ability_config::AuraEffect) 
             let slow_pct = (aura.magnitude * 100.0) as i32;
             format!("Reduces attack speed by {}% for {:.0} sec.", slow_pct, aura.duration)
         }
-        AuraType::CastTimeReduction => {
+        AuraType::LockoutDurationReduction => {
             let reduction_pct = (aura.magnitude * 100.0) as i32;
-            format!("Reduces cast time by {}% for {:.0} sec.", reduction_pct, aura.duration)
+            format!("Reduces interrupt lockout duration by {}% for {:.0} sec.", reduction_pct, aura.duration)
         }
         AuraType::FrostArmorBuff => {
             format!("Frost Armor active for {:.0} sec. Slows melee attackers.", aura.duration)

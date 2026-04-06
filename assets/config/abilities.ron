@@ -933,7 +933,7 @@
             spell_school: Shadow,
         ),
 
-        // Concentration Aura: Paladin team aura — reduces cast time by 15%
+        // Concentration Aura: Paladin team aura — reduces interrupt lockout duration by 50%
         // WoW Classic: Instant, no cost, party-wide aura
         ConcentrationAura: (
             name: "Concentration Aura",
@@ -943,9 +943,9 @@
             mana_cost: 0.0,
             cooldown: 0.0,
             applies_aura: Some((
-                aura_type: CastTimeReduction,
+                aura_type: LockoutDurationReduction,
                 duration: 600.0,
-                magnitude: 0.15,
+                magnitude: 0.50,
             )),
             spell_school: Holy,
         ),

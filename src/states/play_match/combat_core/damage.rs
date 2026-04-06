@@ -6,6 +6,7 @@ use super::super::components::*;
 use super::super::abilities::SpellSchool;
 use super::super::ability_config::AbilityDefinitions;
 use super::super::constants::DIVINE_SHIELD_DAMAGE_PENALTY;
+use super::get_lockout_duration_reduction;
 
 /// Roll a critical strike check. Returns true if the roll is a crit.
 pub fn roll_crit(crit_chance: f32, rng: &mut GameRng) -> bool {
@@ -173,6 +174,7 @@ pub fn process_interrupts(
     combatants: Query<&Combatant>,
     pet_query: Query<&Pet>,
     celebration: Option<Res<VictoryCelebration>>,
+    auras_query: Query<&ActiveAuras>,
 ) {
     // Don't process interrupts during victory celebration
     if celebration.is_some() {
@@ -199,6 +201,9 @@ pub fn process_interrupts(
                 let interrupted_caster_id = format!("Team {} {}", target_combatant.team, target_combatant.class.name());
                 combat_log.mark_cast_interrupted(&interrupted_caster_id, interrupted_spell_name);
 
+                // Check for lockout duration reduction (Concentration Aura)
+                let lockout_reduction = get_lockout_duration_reduction(auras_query.get(interrupt.target).ok());
+
                 // Apply lockout and log
                 apply_interrupt_lockout(
                     &mut commands,
@@ -210,6 +215,7 @@ pub fn process_interrupts(
                     target_combatant,
                     interrupted_school,
                     interrupted_spell_name,
+                    lockout_reduction,
                 );
 
                 interrupted = true;
@@ -234,6 +240,9 @@ pub fn process_interrupts(
                     let interrupted_caster_id = format!("Team {} {}", target_combatant.team, target_combatant.class.name());
                     combat_log.mark_cast_interrupted(&interrupted_caster_id, interrupted_spell_name);
 
+                    // Check for lockout duration reduction (Concentration Aura)
+                    let lockout_reduction = get_lockout_duration_reduction(auras_query.get(interrupt.target).ok());
+
                     // Apply lockout and log
                     apply_interrupt_lockout(
                         &mut commands,
@@ -245,6 +254,7 @@ pub fn process_interrupts(
                         target_combatant,
                         interrupted_school,
                         interrupted_spell_name,
+                        lockout_reduction,
                     );
                 }
             }
@@ -266,6 +276,7 @@ fn apply_interrupt_lockout(
     target_combatant: &Combatant,
     interrupted_school: SpellSchool,
     interrupted_spell_name: &str,
+    lockout_reduction: f32,
 ) {
     // Get caster info for logging
     let caster_info = if let Ok(caster) = combatants.get(interrupt.caster) {
@@ -292,11 +303,14 @@ fn apply_interrupt_lockout(
         SpellSchool::None => 7.0,
     };
 
+    // Apply lockout duration reduction (e.g., Concentration Aura reduces by 50%)
+    let effective_lockout = interrupt.lockout_duration * (1.0 - lockout_reduction);
+
     commands.spawn(AuraPending {
         target: interrupt.target,
         aura: Aura {
             effect_type: AuraType::SpellSchoolLockout,
-            duration: interrupt.lockout_duration,
+            duration: effective_lockout,
             magnitude: locked_school_value,
             break_on_damage_threshold: -1.0, // Never breaks on damage
             accumulated_damage: 0.0,
@@ -330,7 +344,7 @@ fn apply_interrupt_lockout(
         target_combatant.class.name(),
         interrupted_spell_name,
         school_name,
-        interrupt.lockout_duration
+        effective_lockout
     );
     combat_log.log(CombatLogEventType::AbilityUsed, message);
 
@@ -339,6 +353,6 @@ fn apply_interrupt_lockout(
         target_combatant.team,
         target_combatant.class.name(),
         school_name,
-        interrupt.lockout_duration
+        effective_lockout
     );
 }

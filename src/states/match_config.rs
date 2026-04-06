@@ -183,7 +183,7 @@ impl PaladinAura {
         match self {
             PaladinAura::DevotionAura => "Reduces damage taken by nearby allies",
             PaladinAura::ShadowResistanceAura => "Increases shadow resistance of nearby allies",
-            PaladinAura::ConcentrationAura => "Reduces cast time of nearby allies",
+            PaladinAura::ConcentrationAura => "Reduces interrupt lockout duration for nearby allies",
         }
     }
 }

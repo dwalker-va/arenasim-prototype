@@ -106,7 +106,7 @@ pub enum AbilityType {
     MageArmorSpell,     // Mage self-buff - increases mana regen
     MoltenArmor,        // Mage self-buff - increases crit chance
     ShadowResistanceAura, // Paladin team aura - shadow resistance
-    ConcentrationAura,  // Paladin team aura - reduces cast time
+    ConcentrationAura,  // Paladin team aura - reduces interrupt lockout duration
 }
 
 impl AbilityType {

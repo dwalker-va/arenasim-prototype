@@ -862,7 +862,7 @@ fn get_aura_fallback_color(aura_type: &AuraType) -> egui::Color32 {
         AuraType::CritChanceIncrease => egui::Color32::from_rgb(255, 140, 0), // Dark orange (buff)
         AuraType::ManaRegenIncrease => egui::Color32::from_rgb(65, 105, 225), // Royal blue (buff)
         AuraType::AttackSpeedSlow => egui::Color32::from_rgb(100, 149, 237), // Cornflower blue (debuff)
-        AuraType::CastTimeReduction => egui::Color32::from_rgb(255, 215, 0), // Gold (buff)
+        AuraType::LockoutDurationReduction => egui::Color32::from_rgb(255, 215, 0), // Gold (buff)
         AuraType::FrostArmorBuff => egui::Color32::from_rgb(100, 149, 237), // Cornflower blue (self-buff)
     }
 }

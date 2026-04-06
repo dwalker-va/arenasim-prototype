@@ -278,7 +278,7 @@ pub fn apply_pending_auras(
             | AuraType::Absorb | AuraType::WeakenedSoul | AuraType::DamageTakenReduction
             | AuraType::DamageImmunity | AuraType::AttackPowerReduction
             | AuraType::CritChanceIncrease | AuraType::ManaRegenIncrease
-            | AuraType::FrostArmorBuff | AuraType::CastTimeReduction
+            | AuraType::FrostArmorBuff | AuraType::LockoutDurationReduction
             | AuraType::SpellResistanceBuff | AuraType::AttackSpeedSlow
         );
         if is_buff_aura {
@@ -481,13 +481,13 @@ pub fn apply_pending_auras(
             );
         }
 
-        // Handle CastTimeReduction aura (Concentration Aura) - log application
-        if pending.aura.effect_type == AuraType::CastTimeReduction {
+        // Handle LockoutDurationReduction aura (Concentration Aura) - log application
+        if pending.aura.effect_type == AuraType::LockoutDurationReduction {
             let reduction_pct = (pending.aura.magnitude * 100.0) as i32;
             combat_log.log(
                 CombatLogEventType::Buff,
                 format!(
-                    "Team {} {} gains {} ({}% faster casting)",
+                    "Team {} {} gains {} ({}% shorter interrupt lockouts)",
                     target_combatant.team,
                     target_combatant.class.name(),
                     pending.aura.ability_name,

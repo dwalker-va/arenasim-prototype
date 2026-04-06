@@ -705,7 +705,7 @@ fn try_cleanse(
 /// Dispatches based on `combatant.paladin_aura` preference:
 /// - DevotionAura: DamageTakenReduction buff
 /// - ShadowResistanceAura: SpellResistanceBuff
-/// - ConcentrationAura: CastTimeReduction buff
+/// - ConcentrationAura: LockoutDurationReduction (shorter lockouts)
 ///
 /// All three use the same team-wide application pattern (100yd range, passive, no mana cost).
 fn try_paladin_aura(
@@ -733,7 +733,7 @@ fn try_paladin_aura(
         ),
         PaladinAura::ConcentrationAura => (
             AbilityType::ConcentrationAura,
-            AuraType::CastTimeReduction,
+            AuraType::LockoutDurationReduction,
             "Concentration Aura",
         ),
     };
