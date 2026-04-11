@@ -85,6 +85,87 @@ pub fn update_auras(
     }
 }
 
+/// Reflect an instant-CC aura into the per-frame snapshot maps used by `CombatContext`
+/// and the class-AI dispatch loop.
+///
+/// Instant CC openers (Cheap Shot, Kidney Shot, Hammer of Justice, Frost Nova) still
+/// spawn an `AuraPending` for real live-ECS application via `apply_pending_auras` next
+/// frame — that path owns combat log, FCT, DR tracker mutation, and CC replacement in
+/// the real component. This helper is the same-frame visibility shim: it updates the
+/// snapshot copies of `ActiveAuras` and `DRTracker` that `decide_abilities` hands out
+/// via `CombatContext`, so that any class AI running later in the same frame sees the
+/// target as crowd-controlled and does not start a cast or burn an interrupt that the
+/// CC would have prevented.
+///
+/// Mirrors the CC-subset semantics of `apply_pending_auras`:
+/// - Respects `DamageImmunity` (Divine Shield) — if present, the snapshot is not updated
+/// - Respects DR immunity — if the target is already DR-immune in the relevant category,
+///   the snapshot is not updated (the real `apply_pending_auras` will also reject it)
+/// - Applies DR duration scaling and advances the snapshot DR tracker so subsequent
+///   same-frame CCs from other AIs observe the advanced DR level
+/// - Performs CC replacement: existing same-DR-category aura is removed before the new
+///   one is pushed
+///
+/// Does NOT handle: charging/disengaging immunity (those class AIs are already
+/// unlikely to CC a charging enemy, and the real application path will reject it
+/// correctly next frame), combat log, FCT, or buff/DoT auras.
+pub fn reflect_instant_cc_in_snapshot(
+    target: Entity,
+    aura: &Aura,
+    active_auras_map: &mut std::collections::HashMap<Entity, Vec<Aura>>,
+    dr_trackers_map: &mut std::collections::HashMap<Entity, DRTracker>,
+) {
+    debug_assert!(
+        matches!(
+            aura.effect_type,
+            AuraType::Stun | AuraType::Fear | AuraType::Root | AuraType::Polymorph | AuraType::Incapacitate
+        ),
+        "reflect_instant_cc_in_snapshot called with non-CC aura type {:?}",
+        aura.effect_type
+    );
+
+    // Divine Shield blocks all hostile auras in the real path — mirror that here.
+    let has_damage_immunity = active_auras_map
+        .get(&target)
+        .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::DamageImmunity))
+        .unwrap_or(false);
+    if has_damage_immunity {
+        return;
+    }
+
+    let dr_category = DRCategory::from_aura_type(&aura.effect_type);
+
+    // DR immunity rejects the CC entirely.
+    if let Some(category) = dr_category {
+        if let Some(tracker) = dr_trackers_map.get(&target) {
+            if tracker.is_immune(category) {
+                return;
+            }
+        }
+    }
+
+    // Apply DR duration scaling and advance the snapshot DR tracker.
+    let mut aura_to_add = aura.clone();
+    if let Some(category) = dr_category {
+        if let Some(tracker) = dr_trackers_map.get_mut(&target) {
+            let multiplier = tracker.apply(category);
+            aura_to_add.duration *= multiplier;
+        }
+    }
+
+    // CC replacement + push into snapshot auras.
+    let entry = active_auras_map.entry(target).or_default();
+    if let Some(category) = dr_category {
+        if let Some(pos) = entry
+            .iter()
+            .position(|a| DRCategory::from_aura_type(&a.effect_type) == Some(category))
+        {
+            entry.swap_remove(pos);
+        }
+    }
+    entry.push(aura_to_add);
+}
+
 /// Apply pending auras to targets.
 ///
 /// This system runs after casting completes and applies any queued auras
@@ -890,6 +971,147 @@ pub fn process_dot_ticks(
         if let Ok((_, mut caster, _, _)) = combatants_with_auras.get_mut(caster_entity) {
             caster.damage_dealt += damage_dealt;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::components::auras::{Aura, AuraType, DRCategory, DRTracker};
+    use super::super::abilities::SpellSchool;
+    use bevy::prelude::Entity;
+    use std::collections::HashMap;
+
+    fn make_cc_aura(effect_type: AuraType, duration: f32) -> Aura {
+        Aura {
+            effect_type,
+            duration,
+            magnitude: 0.0,
+            break_on_damage_threshold: -1.0,
+            accumulated_damage: 0.0,
+            tick_interval: 0.0,
+            time_until_next_tick: 0.0,
+            caster: None,
+            ability_name: "TestCC".to_string(),
+            fear_direction: (0.0, 0.0),
+            fear_direction_timer: 0.0,
+            spell_school: None,
+        }
+    }
+
+    fn target_entity() -> Entity {
+        Entity::from_raw(42)
+    }
+
+    #[test]
+    fn test_reflect_stun_happy_path() {
+        let target = target_entity();
+        let mut auras_map: HashMap<Entity, Vec<Aura>> = HashMap::new();
+        let mut dr_map: HashMap<Entity, DRTracker> = HashMap::new();
+        dr_map.insert(target, DRTracker::default());
+
+        let aura = make_cc_aura(AuraType::Stun, 4.0);
+        reflect_instant_cc_in_snapshot(target, &aura, &mut auras_map, &mut dr_map);
+
+        let target_auras = auras_map.get(&target).unwrap();
+        assert_eq!(target_auras.len(), 1);
+        assert_eq!(target_auras[0].effect_type, AuraType::Stun);
+        assert_eq!(target_auras[0].duration, 4.0);
+    }
+
+    #[test]
+    fn test_reflect_blocked_by_divine_shield() {
+        let target = target_entity();
+        let mut auras_map: HashMap<Entity, Vec<Aura>> = HashMap::new();
+        let mut dr_map: HashMap<Entity, DRTracker> = HashMap::new();
+        dr_map.insert(target, DRTracker::default());
+
+        // Give target DamageImmunity (Divine Shield)
+        auras_map.insert(target, vec![make_cc_aura(AuraType::DamageImmunity, 10.0)]);
+
+        let aura = make_cc_aura(AuraType::Stun, 4.0);
+        reflect_instant_cc_in_snapshot(target, &aura, &mut auras_map, &mut dr_map);
+
+        // Should still have only the DamageImmunity aura — stun was blocked
+        let target_auras = auras_map.get(&target).unwrap();
+        assert_eq!(target_auras.len(), 1);
+        assert_eq!(target_auras[0].effect_type, AuraType::DamageImmunity);
+    }
+
+    #[test]
+    fn test_reflect_blocked_by_dr_immunity() {
+        let target = target_entity();
+        let mut auras_map: HashMap<Entity, Vec<Aura>> = HashMap::new();
+        let mut dr_map: HashMap<Entity, DRTracker> = HashMap::new();
+
+        // Advance DR to immune level (apply 3 times: 100% -> 50% -> 25% -> immune)
+        let mut tracker = DRTracker::default();
+        tracker.apply(DRCategory::Stuns);
+        tracker.apply(DRCategory::Stuns);
+        tracker.apply(DRCategory::Stuns);
+        assert!(tracker.is_immune(DRCategory::Stuns));
+        dr_map.insert(target, tracker);
+
+        let aura = make_cc_aura(AuraType::Stun, 4.0);
+        reflect_instant_cc_in_snapshot(target, &aura, &mut auras_map, &mut dr_map);
+
+        // Target should have no auras — DR immune
+        assert!(auras_map.get(&target).is_none());
+    }
+
+    #[test]
+    fn test_reflect_dr_duration_scaling() {
+        let target = target_entity();
+        let mut auras_map: HashMap<Entity, Vec<Aura>> = HashMap::new();
+        let mut dr_map: HashMap<Entity, DRTracker> = HashMap::new();
+
+        // Advance DR to level 1 (next application gets 50% duration)
+        let mut tracker = DRTracker::default();
+        tracker.apply(DRCategory::Stuns); // level 0 -> 1
+        dr_map.insert(target, tracker);
+
+        let aura = make_cc_aura(AuraType::Stun, 4.0);
+        reflect_instant_cc_in_snapshot(target, &aura, &mut auras_map, &mut dr_map);
+
+        let target_auras = auras_map.get(&target).unwrap();
+        assert_eq!(target_auras.len(), 1);
+        assert_eq!(target_auras[0].duration, 2.0); // 4.0 * 0.5
+    }
+
+    #[test]
+    fn test_reflect_cc_replacement() {
+        let target = target_entity();
+        let mut auras_map: HashMap<Entity, Vec<Aura>> = HashMap::new();
+        let mut dr_map: HashMap<Entity, DRTracker> = HashMap::new();
+        dr_map.insert(target, DRTracker::default());
+
+        // Give target an existing stun
+        let old_stun = make_cc_aura(AuraType::Stun, 2.0);
+        auras_map.insert(target, vec![old_stun]);
+
+        // Apply a new stun — should replace the old one
+        let new_stun = make_cc_aura(AuraType::Stun, 6.0);
+        reflect_instant_cc_in_snapshot(target, &new_stun, &mut auras_map, &mut dr_map);
+
+        let target_auras = auras_map.get(&target).unwrap();
+        assert_eq!(target_auras.len(), 1);
+        assert_eq!(target_auras[0].duration, 6.0);
+    }
+
+    #[test]
+    fn test_reflect_no_existing_entry_creates_one() {
+        let target = target_entity();
+        let mut auras_map: HashMap<Entity, Vec<Aura>> = HashMap::new();
+        let mut dr_map: HashMap<Entity, DRTracker> = HashMap::new();
+        // No DRTracker entry for target either — should handle gracefully (no DR applied)
+
+        let aura = make_cc_aura(AuraType::Root, 8.0);
+        reflect_instant_cc_in_snapshot(target, &aura, &mut auras_map, &mut dr_map);
+
+        let target_auras = auras_map.get(&target).unwrap();
+        assert_eq!(target_auras.len(), 1);
+        assert_eq!(target_auras[0].effect_type, AuraType::Root);
+        assert_eq!(target_auras[0].duration, 8.0);
     }
 }
 

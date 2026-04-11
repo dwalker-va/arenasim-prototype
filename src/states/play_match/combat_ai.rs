@@ -371,7 +371,7 @@ pub fn decide_abilities(
     }
 
     // Build DR tracker map for AI immunity queries
-    let dr_trackers: std::collections::HashMap<Entity, DRTracker> = dr_tracker_query
+    let mut dr_trackers: std::collections::HashMap<Entity, DRTracker> = dr_tracker_query
         .iter()
         .map(|(entity, tracker)| (entity, tracker.clone()))
         .collect();
@@ -397,8 +397,29 @@ pub fn decide_abilities(
 
     // Queue for Frost Nova damage
     let mut frost_nova_damage: Vec<class_ai::QueuedAoeDamage> = Vec::new();
-    
+
+    // Queue for instant-CC auras applied by earlier combatants this frame.
+    // Each class AI that lands an instant CC (Cheap Shot, Kidney Shot, Hammer of Justice,
+    // Frost Nova root) pushes the target + aura onto this queue. Before the next combatant's
+    // turn, we drain the queue into `active_auras_map` / `dr_trackers` via
+    // `auras::reflect_instant_cc_in_snapshot` so that the target's own self-check and
+    // any downstream `CombatContext::is_ccd` lookup see the CC in the same frame — closing
+    // the "Cheap Shot then Kick on same target same frame" wasted-interrupt gap.
+    let mut same_frame_cc_queue: Vec<(Entity, Aura)> = Vec::new();
+
     for (entity, mut combatant, transform, auras) in combatants.iter_mut() {
+        // Flush pending same-frame CCs into the per-frame snapshot BEFORE any checks
+        // or decisions for this combatant, so that stuns/roots landed earlier this frame
+        // are visible to this combatant's incapacitation check and its CombatContext.
+        for (cc_target, cc_aura) in same_frame_cc_queue.drain(..) {
+            super::auras::reflect_instant_cc_in_snapshot(
+                cc_target,
+                &cc_aura,
+                &mut active_auras_map,
+                &mut dr_trackers,
+            );
+        }
+
         if !combatant.is_alive() {
             continue;
         }
@@ -408,8 +429,15 @@ pub fn decide_abilities(
             continue;
         }
 
-        // WoW Mechanic: Cannot use abilities while stunned, feared, or polymorphed
-        let is_incapacitated = super::utils::is_incapacitated(auras.as_deref());
+        // WoW Mechanic: Cannot use abilities while stunned, feared, or polymorphed.
+        // Read from the per-frame snapshot (not live `auras`) so that instant CCs
+        // landed earlier this frame by other class AIs are observed here.
+        let is_incapacitated = active_auras_map
+            .get(&entity)
+            .map(|auras_slice| {
+                auras_slice.iter().any(|a| super::utils::is_incapacitating(&a.effect_type))
+            })
+            .unwrap_or(false);
 
         // Paladin-specific: Divine Shield can be used while incapacitated
         if is_incapacitated && combatant.class == match_config::CharacterClass::Paladin {
@@ -459,6 +487,7 @@ pub fn decide_abilities(
                 auras.as_deref(),
                 &ctx,
                 &mut frost_nova_damage,
+                &mut same_frame_cc_queue,
             ) {
                 continue;
             }
@@ -512,6 +541,7 @@ pub fn decide_abilities(
                 my_pos,
                 &ctx,
                 &mut instant_attacks,
+                &mut same_frame_cc_queue,
             ) {
                 continue;
             }
@@ -545,6 +575,7 @@ pub fn decide_abilities(
                 auras.as_deref(),
                 &ctx,
                 &mut paladin_aura_this_frame,
+                &mut same_frame_cc_queue,
             ) {
                 continue;
             }
