@@ -4,6 +4,7 @@ type: fix
 date: 2026-02-20
 deepened: 2026-02-20
 source: docs/reports/2026-02-20-headless-match-bug-report.md
+status: completed
 ---
 
 # fix: Critical Combat Bugs — CC Bypass, 3v3 Spawn Drop, Double Kill

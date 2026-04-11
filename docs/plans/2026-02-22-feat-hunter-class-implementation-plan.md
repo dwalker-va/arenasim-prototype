@@ -3,6 +3,7 @@ title: "feat: Implement Hunter Class"
 type: feat
 date: 2026-02-22
 deepened: 2026-02-22
+status: completed
 ---
 
 # feat: Implement Hunter Class

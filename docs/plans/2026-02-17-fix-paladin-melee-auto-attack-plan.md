@@ -2,6 +2,7 @@
 title: "fix: Paladin auto attack should be melee, not ranged"
 type: fix
 date: 2026-02-17
+status: completed
 ---
 
 # fix: Paladin auto attack should be melee, not ranged

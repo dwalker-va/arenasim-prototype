@@ -2,6 +2,7 @@
 title: "feat: Add Paladin Healing Class"
 type: feat
 date: 2026-01-31
+status: completed
 ---
 
 # Add Paladin Healing Class

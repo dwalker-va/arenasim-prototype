@@ -2,6 +2,7 @@
 title: "Fix Felhunter Melee Auto Attack"
 type: fix
 date: 2026-02-22
+status: completed
 ---
 
 # Fix: Felhunter Melee Auto Attack

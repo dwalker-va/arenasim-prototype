@@ -3,6 +3,7 @@ title: "fix: Resolve P2 combat bugs (duplicate buffs, CC on dead, friendly poly 
 type: fix
 date: 2026-02-20
 deepened: 2026-02-20
+status: completed
 ---
 
 # Fix P2 Combat Bugs (BUG-4, BUG-5, BUG-7, BUG-8, BUG-10)

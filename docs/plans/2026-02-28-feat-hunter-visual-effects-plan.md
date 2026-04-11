@@ -4,6 +4,7 @@ type: feat
 date: 2026-02-28
 brainstorm: docs/brainstorms/2026-02-24-hunter-visual-effects-brainstorm.md
 deepened: 2026-02-28
+status: completed
 ---
 
 # feat: Add Hunter Visual Effects

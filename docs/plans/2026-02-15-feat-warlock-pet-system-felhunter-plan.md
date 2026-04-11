@@ -4,6 +4,7 @@ type: feat
 date: 2026-02-15
 brainstorm: docs/brainstorms/2026-02-15-warlock-pet-system-brainstorm.md
 deepened: 2026-02-15
+status: completed
 ---
 
 # feat: Add Warlock Pet System (Felhunter)

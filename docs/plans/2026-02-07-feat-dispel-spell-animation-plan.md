@@ -2,6 +2,7 @@
 title: "feat: Add dispel spell animation for Priest and Paladin"
 type: feat
 date: 2026-02-07
+status: completed
 ---
 
 # feat: Add Dispel Spell Animation

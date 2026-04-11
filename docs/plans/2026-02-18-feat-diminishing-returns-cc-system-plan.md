@@ -4,6 +4,7 @@ type: feat
 date: 2026-02-18
 brainstorm: docs/brainstorms/2026-02-18-diminishing-returns-cc-system-brainstorm.md
 deepened: 2026-02-18
+status: completed
 ---
 
 # feat: Add Diminishing Returns System for Crowd Control

@@ -2,6 +2,7 @@
 title: Fix Rogue Kill Target Priority After Stealth Break
 type: fix
 date: 2026-02-12
+status: completed
 ---
 
 # Fix Rogue Kill Target Priority After Stealth Break

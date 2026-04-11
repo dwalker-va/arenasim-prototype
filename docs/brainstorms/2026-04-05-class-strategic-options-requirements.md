@@ -1,6 +1,7 @@
 ---
 date: 2026-04-05
 topic: class-strategic-options
+status: implemented
 ---
 
 # Class Strategic Option Layers

@@ -1,6 +1,7 @@
 ---
 date: 2026-04-03
 topic: equipment-icons-ui
+status: implemented
 ---
 
 # Equipment Icons in View Combatant UI

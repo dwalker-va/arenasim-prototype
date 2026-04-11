@@ -1,6 +1,7 @@
 ---
 date: 2026-04-05
 topic: tier-1-items
+status: implemented
 ---
 
 # Tier 1 Equipment Items (Item Level 75)

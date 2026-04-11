@@ -3,6 +3,7 @@ title: "Hunter Trap Launch Arc"
 type: feat
 date: 2026-03-04
 deepened: 2026-03-04
+status: completed
 ---
 
 # Hunter Trap Launch Arc

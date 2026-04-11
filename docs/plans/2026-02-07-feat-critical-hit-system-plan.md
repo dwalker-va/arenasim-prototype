@@ -2,6 +2,7 @@
 title: "feat: Add Critical Hit System"
 type: feat
 date: 2026-02-07
+status: completed
 ---
 
 # feat: Add Critical Hit System

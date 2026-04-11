@@ -2,6 +2,7 @@
 title: "feat: Add Divine Shield ability to Paladin"
 type: feat
 date: 2026-02-09
+status: completed
 ---
 
 ## Enhancement Summary

@@ -1,6 +1,7 @@
 ---
 date: 2026-04-04
 topic: item-level-budget-validation
+status: implemented
 ---
 
 # Item Level Budget Validation

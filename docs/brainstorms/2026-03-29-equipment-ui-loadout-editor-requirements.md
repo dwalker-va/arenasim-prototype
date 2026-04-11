@@ -1,6 +1,7 @@
 ---
 date: 2026-03-29
 topic: equipment-ui-loadout-editor
+status: implemented
 ---
 
 # Equipment UI: Pre-Match Loadout Editor

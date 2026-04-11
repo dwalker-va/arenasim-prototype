@@ -2,6 +2,7 @@
 title: "feat: Add Warlock Curses with Per-Target Selection"
 type: feat
 date: 2026-01-28
+status: completed
 ---
 
 # feat: Add Warlock Curses with Per-Target Selection
