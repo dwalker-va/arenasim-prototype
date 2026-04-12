@@ -40,6 +40,7 @@ pub fn decide_mage_action(
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
     frost_nova_damage: &mut Vec<super::QueuedAoeDamage>,
+    same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
 ) -> bool {
     // Check if global cooldown is active
     if combatant.global_cooldown > 0.0 {
@@ -82,6 +83,7 @@ pub fn decide_mage_action(
         auras,
         ctx,
         frost_nova_damage,
+        same_frame_cc_queue,
     ) {
         return true;
     }
@@ -323,6 +325,7 @@ fn try_frost_nova(
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
     frost_nova_damage: &mut Vec<super::QueuedAoeDamage>,
+    same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
 ) -> bool {
     let frost_nova = AbilityType::FrostNova;
     let nova_def = abilities.get_unchecked(&frost_nova);
@@ -393,6 +396,11 @@ fn try_frost_nova(
         if let Some(aura) = nova_def.applies_aura.as_ref() {
             if !ctx.entity_is_immune(*target_entity) {
                 if let Some(aura_pending) = AuraPending::from_ability(*target_entity, entity, nova_def) {
+                    // Reflect same-frame for any other class AI running later this frame
+                    // that might consider CCing or casting at a target that is about to be
+                    // rooted. Root does not gate casting, but is_ccd() checks use this
+                    // snapshot for target selection.
+                    same_frame_cc_queue.push((*target_entity, aura_pending.aura.clone()));
                     commands.spawn(aura_pending);
                 }
 

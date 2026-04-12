@@ -36,6 +36,7 @@ pub fn decide_rogue_action(
     my_pos: Vec3,
     ctx: &CombatContext,
     instant_attacks: &mut Vec<super::QueuedInstantAttack>,
+    same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
 ) -> bool {
     // Get target
     let Some(target_entity) = combatant.target else {
@@ -76,6 +77,7 @@ pub fn decide_rogue_action(
                 target_entity,
                 target_pos,
                 ctx,
+                same_frame_cc_queue,
             ),
         };
     }
@@ -115,6 +117,7 @@ pub fn decide_rogue_action(
                 ks_target_entity,
                 ks_target_pos,
                 ctx,
+                same_frame_cc_queue,
             ) {
                 return true;
             }
@@ -207,6 +210,7 @@ fn try_cheap_shot(
     target_entity: Entity,
     target_pos: Vec3,
     ctx: &CombatContext,
+    same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
 ) -> bool {
     let ability = AbilityType::CheapShot;
     let def = abilities.get_unchecked(&ability);
@@ -230,6 +234,10 @@ fn try_cheap_shot(
     // Apply stun aura
     if let Some(aura) = def.applies_aura.as_ref() {
         if let Some(aura_pending) = AuraPending::from_ability(target_entity, entity, def) {
+            // Reflect the stun in this frame's snapshot so class AIs running later in the
+            // same `decide_abilities` loop see the target as stunned and do not waste a
+            // cast or interrupt on a target that is about to be CC'd anyway.
+            same_frame_cc_queue.push((target_entity, aura_pending.aura.clone()));
             commands.spawn(aura_pending);
         }
 
@@ -276,6 +284,7 @@ fn try_kidney_shot(
     target_entity: Entity,
     target_pos: Vec3,
     ctx: &CombatContext,
+    same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
 ) -> bool {
     let kidney_shot = AbilityType::KidneyShot;
     let ks_on_cooldown = combatant.ability_cooldowns.contains_key(&kidney_shot);
@@ -305,6 +314,8 @@ fn try_kidney_shot(
     // Apply stun aura
     if let Some(aura) = def.applies_aura.as_ref() {
         if let Some(aura_pending) = AuraPending::from_ability(target_entity, entity, def) {
+            // Reflect same-frame — see try_cheap_shot for rationale.
+            same_frame_cc_queue.push((target_entity, aura_pending.aura.clone()));
             commands.spawn(aura_pending);
         }
 

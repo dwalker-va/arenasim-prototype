@@ -45,6 +45,7 @@ pub fn decide_paladin_action(
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
     paladin_aura_this_frame: &mut std::collections::HashSet<Entity>,
+    same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
 ) -> bool {
     // Check if global cooldown is active
     if combatant.global_cooldown > 0.0 {
@@ -117,6 +118,7 @@ pub fn decide_paladin_action(
         my_pos,
         auras,
         ctx,
+        same_frame_cc_queue,
     ) {
         return true;
     }
@@ -572,6 +574,7 @@ fn try_hammer_of_justice(
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
+    same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
 ) -> bool {
     let ability = AbilityType::HammerOfJustice;
     let def = abilities.get_unchecked(&ability);
@@ -649,22 +652,26 @@ fn try_hammer_of_justice(
                 aura_def.duration
             ),
         );
+        let hoj_aura = Aura {
+            effect_type: aura_def.aura_type,
+            duration: aura_def.duration,
+            magnitude: aura_def.magnitude,
+            break_on_damage_threshold: aura_def.break_on_damage,
+            accumulated_damage: 0.0,
+            tick_interval: 0.0,
+            time_until_next_tick: 0.0,
+            caster: None,
+            ability_name: def.name.to_string(),
+            fear_direction: (0.0, 0.0),
+            fear_direction_timer: 0.0,
+            spell_school: Some(def.spell_school),
+        };
+        // Reflect same-frame so other class AIs running later this frame see the stun —
+        // see `auras::reflect_instant_cc_in_snapshot` for details.
+        same_frame_cc_queue.push((*target_entity, hoj_aura.clone()));
         commands.spawn(AuraPending {
             target: *target_entity,
-            aura: Aura {
-                effect_type: aura_def.aura_type,
-                duration: aura_def.duration,
-                magnitude: aura_def.magnitude,
-                break_on_damage_threshold: aura_def.break_on_damage,
-                accumulated_damage: 0.0,
-                tick_interval: 0.0,
-                time_until_next_tick: 0.0,
-                caster: None,
-                ability_name: def.name.to_string(),
-                fear_direction: (0.0, 0.0),
-                fear_direction_timer: 0.0,
-                spell_school: Some(def.spell_school),
-            },
+            aura: hoj_aura,
         });
     }
 

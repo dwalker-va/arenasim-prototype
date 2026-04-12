@@ -1,7 +1,7 @@
 ---
 title: "fix: Apply instant CC auras synchronously to close same-frame visibility gap"
 type: fix
-status: active
+status: completed
 date: 2026-04-06
 ---
 
