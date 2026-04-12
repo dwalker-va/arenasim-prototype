@@ -552,46 +552,14 @@ impl CombatLog {
         writeln!(file, "TEAM 1 COMPOSITION")?;
         writeln!(file, "{}", "-".repeat(80))?;
         for (i, combatant) in match_metadata.team1.iter().enumerate() {
-            writeln!(file, "  Slot {}: {} (HP: {:.0}/{:.0}, Mana: {:.0}/{:.0})",
-                i + 1,
-                combatant.class_name,
-                combatant.final_health,
-                combatant.max_health,
-                combatant.final_mana,
-                combatant.max_mana,
-            )?;
-            writeln!(file, "    Position: ({:.2}, {:.2}, {:.2})",
-                combatant.final_position.0,
-                combatant.final_position.1,
-                combatant.final_position.2,
-            )?;
-            writeln!(file, "    Damage Dealt: {:.0}, Damage Taken: {:.0}",
-                combatant.damage_dealt,
-                combatant.damage_taken,
-            )?;
+            write_combatant_block(&mut file, i + 1, combatant)?;
         }
         writeln!(file)?;
-        
+
         writeln!(file, "TEAM 2 COMPOSITION")?;
         writeln!(file, "{}", "-".repeat(80))?;
         for (i, combatant) in match_metadata.team2.iter().enumerate() {
-            writeln!(file, "  Slot {}: {} (HP: {:.0}/{:.0}, Mana: {:.0}/{:.0})",
-                i + 1,
-                combatant.class_name,
-                combatant.final_health,
-                combatant.max_health,
-                combatant.final_mana,
-                combatant.max_mana,
-            )?;
-            writeln!(file, "    Position: ({:.2}, {:.2}, {:.2})",
-                combatant.final_position.0,
-                combatant.final_position.1,
-                combatant.final_position.2,
-            )?;
-            writeln!(file, "    Damage Dealt: {:.0}, Damage Taken: {:.0}",
-                combatant.damage_dealt,
-                combatant.damage_taken,
-            )?;
+            write_combatant_block(&mut file, i + 1, combatant)?;
         }
         writeln!(file)?;
         
@@ -653,6 +621,57 @@ pub struct MatchMetadata {
     pub team2: Vec<CombatantMetadata>,
 }
 
+/// Write a single combatant's stat block (HP/mana, position, damage, mitigation) to the report.
+fn write_combatant_block(
+    file: &mut std::fs::File,
+    slot_number: usize,
+    combatant: &CombatantMetadata,
+) -> std::io::Result<()> {
+    use std::io::Write;
+
+    writeln!(
+        file,
+        "  Slot {}: {} (HP: {:.0}/{:.0}, Mana: {:.0}/{:.0})",
+        slot_number,
+        combatant.class_name,
+        combatant.final_health,
+        combatant.max_health,
+        combatant.final_mana,
+        combatant.max_mana,
+    )?;
+    writeln!(
+        file,
+        "    Position: ({:.2}, {:.2}, {:.2})",
+        combatant.final_position.0,
+        combatant.final_position.1,
+        combatant.final_position.2,
+    )?;
+    writeln!(
+        file,
+        "    Damage Dealt: {:.0}, Damage Taken: {:.0}",
+        combatant.damage_dealt, combatant.damage_taken,
+    )?;
+
+    // Mitigated line: omit zero schools, skip line entirely if everything is zero.
+    let school_labels = ["frost", "holy", "shadow", "arcane", "fire", "nature"];
+    let any_resistance = combatant.damage_mitigated_by_resistance.iter().any(|v| *v > 0.0);
+    if combatant.damage_mitigated_by_armor > 0.0 || any_resistance {
+        let mut parts: Vec<String> = Vec::new();
+        if combatant.damage_mitigated_by_armor > 0.0 {
+            parts.push(format!("armor={:.0}", combatant.damage_mitigated_by_armor));
+        }
+        for (idx, label) in school_labels.iter().enumerate() {
+            let value = combatant.damage_mitigated_by_resistance[idx];
+            if value > 0.0 {
+                parts.push(format!("{}={:.0}", label, value));
+            }
+        }
+        writeln!(file, "    Mitigated: {}", parts.join(" "))?;
+    }
+
+    Ok(())
+}
+
 /// Combatant metadata for match logs
 #[derive(Debug, Clone)]
 pub struct CombatantMetadata {
@@ -663,6 +682,11 @@ pub struct CombatantMetadata {
     pub final_mana: f32,
     pub damage_dealt: f32,
     pub damage_taken: f32,
+    /// Total physical damage prevented by armor over the match.
+    pub damage_mitigated_by_armor: f32,
+    /// Total magical damage prevented by spell resistance per school.
+    /// Index mapping: Frost=0, Holy=1, Shadow=2, Arcane=3, Fire=4, Nature=5.
+    pub damage_mitigated_by_resistance: [f32; 6],
     pub final_position: (f32, f32, f32),
 }
 

@@ -13,6 +13,20 @@ pub fn roll_crit(crit_chance: f32, rng: &mut GameRng) -> bool {
     rng.random_f32() < crit_chance
 }
 
+/// Map a magical `SpellSchool` to its slot in `Combatant::damage_mitigated_by_resistance`.
+/// Returns `None` for `SpellSchool::Physical` and `SpellSchool::None`, which have no resistance slot.
+pub(crate) fn resistance_school_index(school: SpellSchool) -> Option<usize> {
+    match school {
+        SpellSchool::Frost => Some(0),
+        SpellSchool::Holy => Some(1),
+        SpellSchool::Shadow => Some(2),
+        SpellSchool::Arcane => Some(3),
+        SpellSchool::Fire => Some(4),
+        SpellSchool::Nature => Some(5),
+        SpellSchool::Physical | SpellSchool::None => None,
+    }
+}
+
 /// Apply damage to a combatant, accounting for absorb shields.
 /// Returns (actual_damage_to_health, damage_absorbed).
 ///
@@ -53,8 +67,10 @@ pub fn apply_damage_with_absorb(
 
     // Apply armor reduction for Physical damage
     if spell_school == SpellSchool::Physical && target.armor > 0.0 {
+        let pre_armor = remaining_damage;
         let reduction = target.armor / (target.armor + 5500.0);
         remaining_damage *= 1.0 - reduction;
+        target.damage_mitigated_by_armor += pre_armor - remaining_damage;
     }
 
     // Apply spell resistance for magical damage
@@ -73,8 +89,12 @@ pub fn apply_damage_with_absorb(
         }
 
         if resistance > 0.0 {
+            let pre_resist = remaining_damage;
             let reduction = resistance / (resistance * 5.0 / 3.0 + 300.0);
             remaining_damage *= 1.0 - reduction;
+            if let Some(slot) = resistance_school_index(spell_school) {
+                target.damage_mitigated_by_resistance[slot] += pre_resist - remaining_damage;
+            }
         }
     }
 

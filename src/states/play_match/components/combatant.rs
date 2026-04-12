@@ -156,6 +156,14 @@ pub struct Combatant {
     pub damage_taken: f32,
     /// Total healing this combatant has done
     pub healing_done: f32,
+    /// Total physical damage prevented by this combatant's armor stat.
+    /// Tracks reduction from `self.armor` only — does not include `DamageTakenReduction`
+    /// auras (Devotion Aura) or absorb shields (Power Word: Shield, Ice Barrier).
+    pub damage_mitigated_by_armor: f32,
+    /// Total magical damage prevented by this combatant's spell resistance, indexed by school.
+    /// Index mapping: Frost=0, Holy=1, Shadow=2, Arcane=3, Fire=4, Nature=5.
+    /// Use `combat_core::damage::resistance_school_index` to map a `SpellSchool` to a slot.
+    pub damage_mitigated_by_resistance: [f32; 6],
     /// Bonus damage for the next auto-attack (from abilities like Heroic Strike)
     pub next_attack_bonus_damage: f32,
     /// Whether this combatant has died (prevents duplicate death processing)
@@ -237,6 +245,8 @@ impl Combatant {
             damage_dealt: 0.0,
             damage_taken: 0.0,
             healing_done: 0.0,
+            damage_mitigated_by_armor: 0.0,
+            damage_mitigated_by_resistance: [0.0; 6],
             next_attack_bonus_damage: 0.0,
             is_dead: false,
             stealthed,

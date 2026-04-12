@@ -427,6 +427,8 @@ fn save_headless_match_log(
             final_mana: combatant.current_mana,
             damage_dealt: combatant.damage_dealt,
             damage_taken: combatant.damage_taken,
+            damage_mitigated_by_armor: combatant.damage_mitigated_by_armor,
+            damage_mitigated_by_resistance: combatant.damage_mitigated_by_resistance,
             final_position: (
                 transform.translation.x,
                 transform.translation.y,

@@ -276,6 +276,243 @@ mod tests {
     }
 
     // =========================================================================
+    // Mitigation Tracking Tests
+    // =========================================================================
+
+    /// Resistance index mapping (mirrors `resistance_school_index` in damage.rs)
+    const FROST_IDX: usize = 0;
+    const HOLY_IDX: usize = 1;
+    const SHADOW_IDX: usize = 2;
+    const ARCANE_IDX: usize = 3;
+    const FIRE_IDX: usize = 4;
+    const NATURE_IDX: usize = 5;
+
+    #[test]
+    fn test_combatant_mitigation_defaults_zero() {
+        let combatant = Combatant::new(1, 0, match_config::CharacterClass::Warrior);
+        assert_eq!(combatant.damage_mitigated_by_armor, 0.0);
+        assert_eq!(combatant.damage_mitigated_by_resistance, [0.0; 6]);
+    }
+
+    #[test]
+    fn test_armor_mitigation_tracked() {
+        // armor=5500 → reduction = 5500 / 11000 = 0.5 → 50% mitigation
+        let mut target = create_test_combatant(200.0);
+        target.armor = 5500.0;
+
+        let (actual, _) = apply_damage_with_absorb(100.0, &mut target, None, SpellSchool::Physical);
+
+        assert_eq!(actual, 50.0, "Half should hit health");
+        assert_eq!(target.damage_mitigated_by_armor, 50.0, "Half should be tracked as mitigated by armor");
+        assert_eq!(target.damage_mitigated_by_resistance, [0.0; 6], "Resistance untouched for physical");
+    }
+
+    #[test]
+    fn test_armor_zero_records_no_mitigation() {
+        let mut target = create_test_combatant(200.0);
+        target.armor = 0.0;
+
+        let (actual, _) = apply_damage_with_absorb(100.0, &mut target, None, SpellSchool::Physical);
+
+        assert_eq!(actual, 100.0);
+        assert_eq!(target.damage_mitigated_by_armor, 0.0);
+    }
+
+    #[test]
+    fn test_resistance_mitigation_tracked_per_school() {
+        // resistance=60 → reduction = 60 / (60*5/3 + 300) = 60 / 400 = 0.15 → 15% mitigation
+        let mut target = create_test_combatant(200.0);
+        target.frost_resistance = 60.0;
+
+        let (actual, _) = apply_damage_with_absorb(100.0, &mut target, None, SpellSchool::Frost);
+
+        assert!((actual - 85.0).abs() < 0.001, "85 damage should hit, got {}", actual);
+        assert!(
+            (target.damage_mitigated_by_resistance[FROST_IDX] - 15.0).abs() < 0.001,
+            "Frost slot should record 15.0, got {}",
+            target.damage_mitigated_by_resistance[FROST_IDX]
+        );
+        assert_eq!(target.damage_mitigated_by_armor, 0.0, "Armor untouched for magical");
+    }
+
+    #[test]
+    fn test_resistance_per_school_isolation() {
+        // Fire resistance only — Frost damage should not write to Fire slot
+        let mut target = create_test_combatant(200.0);
+        target.fire_resistance = 60.0;
+
+        let (_, _) = apply_damage_with_absorb(100.0, &mut target, None, SpellSchool::Frost);
+
+        assert_eq!(target.damage_mitigated_by_resistance[FIRE_IDX], 0.0, "Fire slot must not record Frost damage");
+        assert_eq!(target.damage_mitigated_by_resistance[FROST_IDX], 0.0, "Frost slot zero — no frost resist");
+    }
+
+    #[test]
+    fn test_each_school_writes_correct_slot() {
+        // Run six identical hits through six schools and verify each writes only its own slot.
+        let cases = [
+            (SpellSchool::Frost, FROST_IDX),
+            (SpellSchool::Holy, HOLY_IDX),
+            (SpellSchool::Shadow, SHADOW_IDX),
+            (SpellSchool::Arcane, ARCANE_IDX),
+            (SpellSchool::Fire, FIRE_IDX),
+            (SpellSchool::Nature, NATURE_IDX),
+        ];
+
+        for (school, expected_idx) in cases {
+            let mut target = create_test_combatant(200.0);
+            // Set the matching resistance to 60 (15% reduction)
+            match school {
+                SpellSchool::Frost => target.frost_resistance = 60.0,
+                SpellSchool::Holy => target.holy_resistance = 60.0,
+                SpellSchool::Shadow => target.shadow_resistance = 60.0,
+                SpellSchool::Arcane => target.arcane_resistance = 60.0,
+                SpellSchool::Fire => target.fire_resistance = 60.0,
+                SpellSchool::Nature => target.nature_resistance = 60.0,
+                _ => unreachable!(),
+            }
+
+            let (_, _) = apply_damage_with_absorb(100.0, &mut target, None, school);
+
+            for idx in 0..6 {
+                if idx == expected_idx {
+                    assert!(
+                        (target.damage_mitigated_by_resistance[idx] - 15.0).abs() < 0.001,
+                        "School {:?} should write 15.0 to slot {}, got {}",
+                        school, idx, target.damage_mitigated_by_resistance[idx]
+                    );
+                } else {
+                    assert_eq!(
+                        target.damage_mitigated_by_resistance[idx], 0.0,
+                        "School {:?} must not touch slot {}", school, idx
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_school_none_records_no_mitigation() {
+        let mut target = create_test_combatant(200.0);
+        target.armor = 5500.0;
+        target.frost_resistance = 60.0;
+
+        // SpellSchool::None bypasses both armor and resistance branches
+        let (actual, _) = apply_damage_with_absorb(100.0, &mut target, None, SpellSchool::None);
+
+        assert_eq!(actual, 100.0, "None damage takes full hit");
+        assert_eq!(target.damage_mitigated_by_armor, 0.0);
+        assert_eq!(target.damage_mitigated_by_resistance, [0.0; 6]);
+    }
+
+    #[test]
+    fn test_immunity_records_no_mitigation() {
+        // Divine Shield: damage immunity returns early before any mitigation runs
+        let mut target = create_test_combatant(200.0);
+        target.armor = 5500.0;
+        let mut auras = ActiveAuras {
+            auras: vec![Aura {
+                effect_type: AuraType::DamageImmunity,
+                duration: 8.0,
+                magnitude: 0.0,
+                break_on_damage_threshold: -1.0,
+                accumulated_damage: 0.0,
+                tick_interval: 0.0,
+                time_until_next_tick: 0.0,
+                caster: None,
+                ability_name: "Divine Shield".to_string(),
+                fear_direction: (0.0, 0.0),
+                fear_direction_timer: 0.0,
+                spell_school: None,
+            }],
+        };
+
+        let (actual, absorbed) = apply_damage_with_absorb(100.0, &mut target, Some(&mut auras), SpellSchool::Physical);
+
+        assert_eq!(actual, 0.0);
+        assert_eq!(absorbed, 0.0);
+        assert_eq!(target.damage_mitigated_by_armor, 0.0, "Immunity is not mitigation");
+    }
+
+    #[test]
+    fn test_mitigation_recorded_before_absorb_consumption() {
+        // Order: armor → resistance → reduction → absorb
+        // A frost shield + frost resistance: resistance fires first, then absorb
+        let mut target = create_test_combatant(200.0);
+        target.frost_resistance = 60.0; // 15% reduction
+        let mut auras = ActiveAuras {
+            auras: vec![create_absorb_aura(1000.0, "Ice Barrier")], // soak everything
+        };
+
+        let (actual, absorbed) = apply_damage_with_absorb(100.0, &mut target, Some(&mut auras), SpellSchool::Frost);
+
+        assert_eq!(actual, 0.0, "All post-resist damage absorbed");
+        assert!((absorbed - 85.0).abs() < 0.001, "85 damage absorbed, got {}", absorbed);
+        assert!(
+            (target.damage_mitigated_by_resistance[FROST_IDX] - 15.0).abs() < 0.001,
+            "Resistance mitigation tracked even when remainder is absorbed"
+        );
+    }
+
+    #[test]
+    fn test_resistance_from_buff_aura_tracks_mitigation() {
+        // Combatant has 0 base frost resistance but a SpellResistanceBuff aura with magnitude 60
+        let mut target = create_test_combatant(200.0);
+        let mut auras = ActiveAuras {
+            auras: vec![Aura {
+                effect_type: AuraType::SpellResistanceBuff,
+                duration: 300.0,
+                magnitude: 60.0,
+                break_on_damage_threshold: -1.0,
+                accumulated_damage: 0.0,
+                tick_interval: 0.0,
+                time_until_next_tick: 0.0,
+                caster: None,
+                ability_name: "Shadow Resistance Aura".to_string(),
+                fear_direction: (0.0, 0.0),
+                fear_direction_timer: 0.0,
+                spell_school: Some(SpellSchool::Shadow),
+            }],
+        };
+
+        let (actual, _) = apply_damage_with_absorb(100.0, &mut target, Some(&mut auras), SpellSchool::Shadow);
+
+        // effective resistance = 0 base + 60 aura = 60 → 15% reduction
+        assert!((actual - 85.0).abs() < 0.001, "85 damage should hit, got {}", actual);
+        assert!(
+            (target.damage_mitigated_by_resistance[SHADOW_IDX] - 15.0).abs() < 0.001,
+            "Shadow slot should record 15.0 from buff-only resistance, got {}",
+            target.damage_mitigated_by_resistance[SHADOW_IDX]
+        );
+    }
+
+    #[test]
+    fn test_lethal_damage_records_full_armor_mitigation() {
+        // Target has only 10 HP but armor mitigates 50% → mitigation is 50, not clamped to HP
+        let mut target = create_test_combatant(10.0);
+        target.armor = 5500.0;
+
+        let (actual, _) = apply_damage_with_absorb(100.0, &mut target, None, SpellSchool::Physical);
+
+        assert_eq!(actual, 10.0, "Only 10 HP was available");
+        assert_eq!(target.damage_mitigated_by_armor, 50.0, "Full 50% mitigation recorded even on lethal hit");
+        assert_eq!(target.current_health, 0.0);
+    }
+
+    #[test]
+    fn test_mitigation_accumulates_across_hits() {
+        let mut target = create_test_combatant(500.0);
+        target.armor = 5500.0;
+
+        // Three identical 100-physical hits → 50 mitigated each → 150 total
+        for _ in 0..3 {
+            apply_damage_with_absorb(100.0, &mut target, None, SpellSchool::Physical);
+        }
+
+        assert_eq!(target.damage_mitigated_by_armor, 150.0, "Mitigation accumulates");
+    }
+
+    // =========================================================================
     // has_absorb_shield Tests
     // =========================================================================
 
