@@ -675,6 +675,7 @@ pub fn process_aura_breaks(
 
         // Skip dead combatants — they may have DamageTakenThisFrame from the killing blow
         if !combatant.is_alive() {
+            commands.entity(entity).remove::<DamageTakenThisFrame>();
             continue;
         }
 
