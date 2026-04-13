@@ -3,7 +3,7 @@
 ## Current Status
 
 - **Core gameplay loop**: COMPLETE
-- **Classes**: Warrior, Mage, Rogue, Priest, Warlock, Paladin (6)
+- **Classes**: Warrior, Mage, Rogue, Priest, Warlock, Paladin, Hunter (7)
 - **Abilities**: 28 across all classes
 - **Headless testing**: COMPLETE
 - **Results screen**: Enhanced with WoW Details-style breakdown

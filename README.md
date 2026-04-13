@@ -19,7 +19,7 @@ cargo run --release -- --headless /tmp/match.json
 
 ## Features
 
-- **6 Classes**: Warrior, Mage, Rogue, Priest, Warlock, Paladin
+- **7 Classes**: Warrior, Mage, Rogue, Priest, Warlock, Paladin, Hunter
 - **28 Abilities**: Spells, heals, interrupts, crowd control, absorb shields
 - **WoW Mechanics**: Mana/Energy/Rage, cooldowns, spell schools, cast times
 - **Smart AI**: Target priority, ability rotation, interrupts, kiting
