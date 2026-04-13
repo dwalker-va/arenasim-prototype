@@ -341,6 +341,7 @@ fn apply_interrupt_lockout(
             fear_direction: (0.0, 0.0),
             fear_direction_timer: 0.0,
             spell_school: None, // Lockouts are not dispellable
+            applied_this_frame: false,
         },
     });
 

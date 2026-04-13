@@ -132,6 +132,9 @@ pub struct Aura {
     /// Spell school of the ability that created this aura (None = physical)
     /// Used to determine if DoTs can be dispelled (only magic DoTs are dispellable)
     pub spell_school: Option<SpellSchool>,
+    /// True on the frame the aura was applied — prevents the applying ability's own damage
+    /// from counting toward the break threshold
+    pub applied_this_frame: bool,
 }
 
 impl Aura {
@@ -214,6 +217,7 @@ impl AuraPending {
                 fear_direction: (0.0, 0.0),
                 fear_direction_timer: 0.0,
                 spell_school,
+                applied_this_frame: false,
             },
         })
     }
@@ -250,6 +254,7 @@ impl AuraPending {
                 fear_direction: (0.0, 0.0),
                 fear_direction_timer: 0.0,
                 spell_school,
+                applied_this_frame: false,
             },
         })
     }
@@ -286,6 +291,7 @@ impl AuraPending {
                 fear_direction: (0.0, 0.0),
                 fear_direction_timer: 0.0,
                 spell_school,
+                applied_this_frame: false,
             },
         })
     }
