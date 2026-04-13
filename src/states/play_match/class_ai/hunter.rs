@@ -184,7 +184,7 @@ pub fn decide_hunter_action(
 
     // Priority 3: Aimed Shot (safe to hardcast at 20+ yards — ~2.4s before Warrior reaches dead zone)
     if distance_to_target >= 20.0 {
-        if try_aimed_shot(commands, combat_log, abilities, entity, combatant, my_pos, target_entity, target_info, auras) {
+        if try_aimed_shot(commands, combat_log, abilities, entity, combatant, my_pos, target_entity, target_info, auras, ctx) {
             return true;
         }
     }
@@ -327,6 +327,10 @@ fn try_concussive_shot(
     target_entity: Entity,
     ctx: &CombatContext,
 ) -> bool {
+    if ctx.has_friendly_breakable_cc(target_entity) {
+        return false;
+    }
+
     let ability = AbilityType::ConcussiveShot;
     let Some(def) = abilities.get(&ability) else { return false };
     if combatant.ability_cooldowns.contains_key(&ability) { return false }
@@ -379,7 +383,12 @@ fn try_aimed_shot(
     target_entity: Entity,
     target_info: &super::CombatantInfo,
     auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
 ) -> bool {
+    if ctx.has_friendly_breakable_cc(target_entity) {
+        return false;
+    }
+
     let ability = AbilityType::AimedShot;
     let Some(def) = abilities.get(&ability) else { return false };
     if combatant.ability_cooldowns.contains_key(&ability) { return false }
@@ -415,10 +424,14 @@ fn try_arcane_shot(
     my_pos: Vec3,
     target_entity: Entity,
     target_info: &super::CombatantInfo,
-    _ctx: &CombatContext,
+    ctx: &CombatContext,
     _instant_attacks: &mut Vec<super::QueuedInstantAttack>,
     auras: Option<&ActiveAuras>,
 ) -> bool {
+    if ctx.has_friendly_breakable_cc(target_entity) {
+        return false;
+    }
+
     let ability = AbilityType::ArcaneShot;
     let Some(def) = abilities.get(&ability) else { return false };
     if combatant.ability_cooldowns.contains_key(&ability) { return false }

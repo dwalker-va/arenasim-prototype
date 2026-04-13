@@ -440,6 +440,10 @@ fn try_mind_blast(
         return false;
     };
 
+    if ctx.has_friendly_breakable_cc(target_entity) {
+        return false;
+    }
+
     // Don't waste Mind Blast on immune targets (Divine Shield)
     if ctx.entity_is_immune(target_entity) {
         return false;

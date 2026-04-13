@@ -153,6 +153,10 @@ fn try_ambush(
     ctx: &CombatContext,
     instant_attacks: &mut Vec<super::QueuedInstantAttack>,
 ) -> bool {
+    if ctx.has_friendly_breakable_cc(target_entity) {
+        return false;
+    }
+
     let ability = AbilityType::Ambush;
     let def = abilities.get_unchecked(&ability);
 
@@ -364,6 +368,10 @@ fn try_sinister_strike(
     ctx: &CombatContext,
     instant_attacks: &mut Vec<super::QueuedInstantAttack>,
 ) -> bool {
+    if ctx.has_friendly_breakable_cc(target_entity) {
+        return false;
+    }
+
     let ability = AbilityType::SinisterStrike;
     let def = abilities.get_unchecked(&ability);
 

@@ -367,6 +367,10 @@ fn try_charge(
     target_pos: Vec3,
     ctx: &CombatContext,
 ) -> bool {
+    if ctx.has_friendly_breakable_cc(target_entity) {
+        return false;
+    }
+
     let charge = AbilityType::Charge;
     let charge_def = abilities.get_unchecked(&charge);
     let charge_on_cooldown = combatant.ability_cooldowns.contains_key(&charge);
@@ -498,6 +502,10 @@ fn try_mortal_strike(
     ctx: &CombatContext,
     instant_attacks: &mut Vec<super::QueuedInstantAttack>,
 ) -> bool {
+    if ctx.has_friendly_breakable_cc(target_entity) {
+        return false;
+    }
+
     let mortal_strike = AbilityType::MortalStrike;
     let ms_def = abilities.get_unchecked(&mortal_strike);
     let ms_on_cooldown = combatant.ability_cooldowns.contains_key(&mortal_strike);

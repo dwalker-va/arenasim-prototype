@@ -429,6 +429,10 @@ fn try_shadowbolt(
     target_pos: Vec3,
     ctx: &CombatContext,
 ) -> bool {
+    if ctx.has_friendly_breakable_cc(target_entity) {
+        return false;
+    }
+
     let shadowbolt = AbilityType::Shadowbolt;
     let shadowbolt_def = abilities.get_unchecked(&shadowbolt);
 
@@ -478,6 +482,10 @@ fn try_drain_life(
     target_pos: Vec3,
     ctx: &CombatContext,
 ) -> bool {
+    if ctx.has_friendly_breakable_cc(target_entity) {
+        return false;
+    }
+
     // Only use Drain Life when we need healing (HP < 80%)
     let hp_percent = combatant.current_health / combatant.max_health;
     if hp_percent >= 0.8 {
