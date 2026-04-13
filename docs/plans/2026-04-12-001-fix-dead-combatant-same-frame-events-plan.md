@@ -1,7 +1,7 @@
 ---
 title: "fix: Prevent dead combatant events from firing in same frame"
 type: fix
-status: active
+status: completed
 date: 2026-04-12
 origin: docs/reports/2026-04-12-bug-hunt-2v2-3v3.md
 ---
@@ -77,7 +77,7 @@ This was observed in 3/24 matches during the 2026-04-12 bug hunt (m17, m19, m20)
 
 ## Implementation Units
 
-- [ ] **Unit 1: Add caster-alive guard to Frost Nova damage processing**
+- [x] **Unit 1: Add caster-alive guard to Frost Nova damage processing**
 
   **Goal:** Prevent dead Mages from dealing Frost Nova damage after being killed by instant attacks earlier in the same frame.
 
@@ -106,7 +106,7 @@ This was observed in 3/24 matches during the 2026-04-12 bug hunt (m17, m19, m20)
   **Verification:**
   - Run m17 config (seed 6024, `{"team1":["Warrior","Rogue","Mage"],"team2":["Warlock","Mage","Rogue"]}`). In the original run, `[DMG] Team 1 Mage's Frost Nova hits Team 2 Rogue for 32 damage` appeared after `[DEATH] Team 1 Mage`. After the fix, no Frost Nova damage should appear after the Mage's death entry.
 
-- [ ] **Unit 2: Add `is_alive()` guard to `process_aura_breaks`**
+- [x] **Unit 2: Add `is_alive()` guard to `process_aura_breaks`**
 
   **Goal:** Prevent aura break events from firing on dead combatants.
 
@@ -133,7 +133,7 @@ This was observed in 3/24 matches during the 2026-04-12 bug hunt (m17, m19, m20)
   **Verification:**
   - Grep match logs for `[EVENT].*broke from damage` entries and confirm none appear after a `[DEATH]` entry for the same combatant in the same timestamp
 
-- [ ] **Unit 3: Validate and regression test**
+- [x] **Unit 3: Validate and regression test**
 
   **Goal:** Confirm the fix resolves the bug across the originally-affected matches and doesn't regress existing behavior.
 
