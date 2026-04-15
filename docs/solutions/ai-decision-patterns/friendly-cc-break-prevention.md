@@ -9,7 +9,7 @@ tags:
   - polymorph
   - freezing-trap
 module: src/states/play_match/class_ai
-symptom: "Warlock/Warrior/Mage apply DoTs or direct damage to targets under friendly Polymorph or Freezing Trap, immediately breaking the CC"
+symptom: "All DPS classes apply DoTs or direct damage to targets under friendly breakable CC, immediately breaking the CC"
 root_cause: "Class AI try_*() functions lacked awareness of friendly breakable CC on targets; no guard checks before applying damage abilities to CC'd enemies"
 ---
 
@@ -33,15 +33,16 @@ No check existed to determine whether a target was under a break-on-damage CC ca
 ### 1. Helper Methods on `CombatContext` (class_ai/mod.rs)
 
 ```rust
-/// Check if target has a break-on-any-damage CC (Polymorph, Freezing Trap)
-/// from a friendly caster.
+/// Check if target has a break-on-any-damage CC from a friendly caster.
+/// Uses threshold-based detection: any aura with break_on_damage_threshold == 0.0
+/// from a same-team caster is protected.
 pub fn has_friendly_breakable_cc(&self, target: Entity) -> bool {
     let my_team = self.self_info().map(|i| i.team).unwrap_or(0);
     self.active_auras
         .get(&target)
         .map(|auras| {
             auras.iter().any(|a| {
-                matches!(a.effect_type, AuraType::Polymorph | AuraType::Incapacitate)
+                a.break_on_damage_threshold == 0.0
                     && a.caster
                         .and_then(|c| self.combatants.get(&c).map(|info| info.team))
                         == Some(my_team)
@@ -83,7 +84,14 @@ if ctx.has_friendly_breakable_cc(target_entity) {
 }
 ```
 
-**Applied to:** `try_corruption()`, `try_immolate()`, `try_cast_curse()` (Warlock), `try_rend()` (Warrior), `try_frostbolt()` (Mage)
+**Applied to:**
+- **Warrior:** `try_mortal_strike()`, `try_charge()`, `try_rend()`
+- **Rogue:** `try_ambush()`, `try_sinister_strike()`
+- **Mage:** `try_frostbolt()`
+- **Warlock:** `try_corruption()`, `try_immolate()`, `try_cast_curse()`, `try_shadowbolt()`, `try_drain_life()`
+- **Priest:** `try_mind_blast()`
+- **Paladin:** `try_holy_shock_damage()`
+- **Hunter:** `try_aimed_shot()`, `try_arcane_shot()`, `try_concussive_shot()`
 
 ### 3. Reverse Guard on CC Application
 
@@ -99,8 +107,8 @@ if ctx.has_friendly_dots_on_target(cc_target) {
 
 **When adding a CC with `break_on_damage_threshold: 0.0`** (Blind, Sap, Gouge, Intimidating Shout, Repentance, Hibernate, Scatter Shot, etc.):
 
-- [ ] Add the new `AuraType` variant to the `matches!()` pattern in `has_friendly_breakable_cc()` in `class_ai/mod.rs`
-- [ ] Verify all existing damage/DoT `try_*()` functions already call `has_friendly_breakable_cc()` (they should — the check is CC-type-agnostic once the AuraType is registered)
+- [ ] No code changes needed — `has_friendly_breakable_cc()` is threshold-based and automatically detects any aura with `break_on_damage_threshold == 0.0` from a friendly caster
+- [ ] Verify all existing damage/DoT `try_*()` functions already call `has_friendly_breakable_cc()` (see Applied To list above)
 - [ ] Test with headless matches using a team comp that has both the new CC class and a DoT class
 
 **When adding a new damage or DoT ability:**
@@ -109,7 +117,7 @@ if ctx.has_friendly_dots_on_target(cc_target) {
 - [ ] For AoE abilities, filter CC'd targets from the target list
 - [ ] For pet abilities, ensure pet AI also respects the check
 
-**Rule of thumb:** Every `try_<damage_ability>()` function should ask "Is a teammate's CC on this target?" before doing anything. Every new break-on-any-damage CC must register itself in `has_friendly_breakable_cc()` so that question can be answered.
+**Rule of thumb:** Every `try_<damage_ability>()` function should ask "Is a teammate's CC on this target?" before doing anything. The helper is threshold-based — any new CC with `break_on_damage_threshold: 0.0` in `abilities.ron` is automatically protected.
 
 ## Currently Covered CC Types
 

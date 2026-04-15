@@ -543,6 +543,10 @@ fn try_holy_shock_damage(
         return false;
     };
 
+    if ctx.has_friendly_breakable_cc(*target_entity) {
+        return false;
+    }
+
     // Execute instant damage
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;

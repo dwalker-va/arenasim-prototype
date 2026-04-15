@@ -232,7 +232,9 @@ impl<'a> CombatContext<'a> {
         self.lowest_health_ally_below(threshold, f32::MAX, my_pos).is_none()
     }
 
-    /// Check if target has a break-on-any-damage CC (Polymorph, Freezing Trap) from a friendly caster.
+    /// Check if target has a break-on-any-damage CC from a friendly caster.
+    /// Uses threshold-based detection: any aura with `break_on_damage_threshold == 0.0`
+    /// (breaks on ANY damage) from a same-team caster is protected.
     /// Used to prevent AI from breaking own team's CC with damage/DoTs.
     pub fn has_friendly_breakable_cc(&self, target: Entity) -> bool {
         let my_team = self.self_info().map(|i| i.team).unwrap_or(0);
@@ -240,7 +242,7 @@ impl<'a> CombatContext<'a> {
             .get(&target)
             .map(|auras| {
                 auras.iter().any(|a| {
-                    matches!(a.effect_type, AuraType::Polymorph | AuraType::Incapacitate)
+                    a.break_on_damage_threshold == 0.0
                         && a.caster
                             .and_then(|c| self.combatants.get(&c).map(|info| info.team))
                             == Some(my_team)
