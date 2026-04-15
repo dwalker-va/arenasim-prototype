@@ -38,6 +38,9 @@ pub fn update_auras(
         }
         // Tick down all aura durations and update fear timers
         for aura in auras.auras.iter_mut() {
+            // Belt-and-suspenders: clear the application-frame flag so it never persists
+            // past one frame, even if process_aura_breaks didn't run (no damage taken)
+            aura.applied_this_frame = false;
             aura.duration -= dt;
 
             // For Fear and Polymorph auras, tick down direction timer and pick new random direction
@@ -603,6 +606,7 @@ pub fn apply_pending_auras(
 
         // Apply DR duration scaling to CC auras
         let mut aura_to_add = pending.aura.clone();
+        aura_to_add.applied_this_frame = true;
         if dr_category.is_some() && dr_multiplier < 1.0 {
             aura_to_add.duration *= dr_multiplier;
         }
@@ -685,6 +689,12 @@ pub fn process_aura_breaks(
         // threshold of -1.0 or negative means "never break on damage"
         for (index, aura) in active_auras.auras.iter_mut().enumerate() {
             if aura.break_on_damage_threshold >= 0.0 {
+                // Skip damage accumulation on the aura's application frame —
+                // the applying ability's own damage shouldn't count against its threshold.
+                // The flag is cleared by update_auras at the start of the next frame.
+                if aura.applied_this_frame {
+                    continue;
+                }
                 aura.accumulated_damage += damage_taken.amount;
 
                 // Check if aura should break (threshold 0 = break on any damage)
@@ -996,6 +1006,7 @@ mod tests {
             fear_direction: (0.0, 0.0),
             fear_direction_timer: 0.0,
             spell_school: None,
+            applied_this_frame: false,
         }
     }
 

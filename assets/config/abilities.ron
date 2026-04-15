@@ -51,7 +51,7 @@
                 aura_type: Root,
                 duration: 6.0,
                 magnitude: 1.0,
-                break_on_damage: 35.0,
+                break_on_damage: 80.0,
             )),
             spell_school: Frost,
         ),
@@ -786,7 +786,7 @@
                 aura_type: Root,
                 duration: 4.0,
                 magnitude: 1.0,
-                break_on_damage: 35.0,  // Same as Frost Nova
+                break_on_damage: 80.0,  // Same as Frost Nova
             )),
             spell_school: Nature,
             projectile_speed: Some(50.0),

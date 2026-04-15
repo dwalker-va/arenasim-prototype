@@ -403,6 +403,7 @@ pub fn combat_auto_attack(
                 fear_direction: (0.0, 0.0),
                 fear_direction_timer: 0.0,
                 spell_school: Some(SpellSchool::Frost),
+                applied_this_frame: false,
             },
         });
         // Apply AttackSpeedSlow (25% slower attacks) for 5 seconds
@@ -421,6 +422,7 @@ pub fn combat_auto_attack(
                 fear_direction: (0.0, 0.0),
                 fear_direction_timer: 0.0,
                 spell_school: Some(SpellSchool::Frost),
+                applied_this_frame: false,
             },
         });
     }

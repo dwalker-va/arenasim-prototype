@@ -1,7 +1,7 @@
 ---
 title: "fix: Exclude application-frame damage from aura break threshold and raise Frost Nova threshold"
 type: fix
-status: active
+status: completed
 date: 2026-04-12
 origin: docs/reports/2026-04-12-bug-hunt-2v2-3v3.md
 ---
