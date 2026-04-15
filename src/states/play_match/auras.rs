@@ -676,7 +676,13 @@ pub fn process_aura_breaks(
         let Some(damage_taken) = damage_taken else {
             continue; // No damage this frame
         };
-        
+
+        // Skip dead combatants — they may have DamageTakenThisFrame from the killing blow
+        if !combatant.is_alive() {
+            commands.entity(entity).remove::<DamageTakenThisFrame>();
+            continue;
+        }
+
         if damage_taken.amount <= 0.0 {
             continue;
         }

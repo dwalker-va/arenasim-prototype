@@ -782,6 +782,12 @@ pub fn decide_abilities(
         } = aoe;
         let mut actual_damage = 0.0;
 
+        // Skip if caster died from an instant attack earlier this frame (or entity is gone)
+        match combatants.get(caster_entity) {
+            Ok((_, caster, _, _)) if caster.is_alive() => {}
+            _ => continue,
+        }
+
         if let Ok((_, mut target, target_transform, mut target_auras)) = combatants.get_mut(target_entity) {
             if target.is_alive() {
                 // Apply damage with absorb shield consideration (Frost Nova is always Frost school)
