@@ -1,7 +1,7 @@
 ---
 title: "feat: Add Unstable Affliction ability to Warlock"
 type: feat
-status: active
+status: completed
 date: 2026-04-18
 origin: docs/brainstorms/2026-04-18-unstable-affliction-warlock-requirements.md
 ---

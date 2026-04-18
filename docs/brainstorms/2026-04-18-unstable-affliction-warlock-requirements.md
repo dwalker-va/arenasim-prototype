@@ -1,7 +1,7 @@
 ---
 date: 2026-04-18
 topic: unstable-affliction-warlock
-status: planned
+status: implemented
 ---
 
 # Unstable Affliction — New Warlock Ability
