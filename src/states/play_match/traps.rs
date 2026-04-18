@@ -118,6 +118,7 @@ pub fn trap_system(
                                 fear_direction_timer: 0.0,
                                 spell_school: Some(SpellSchool::Frost),
                                 applied_this_frame: false,
+                                backlash_damage: None,
                             },
                         },
                         PlayMatchEntity,
@@ -244,6 +245,7 @@ pub fn slow_zone_system(
                             fear_direction_timer: 0.0,
                             spell_school: Some(SpellSchool::Frost),
                             applied_this_frame: false,
+                            backlash_damage: None,
                         });
                     }
                 } else {
@@ -263,6 +265,7 @@ pub fn slow_zone_system(
                             fear_direction_timer: 0.0,
                             spell_school: Some(SpellSchool::Frost),
                             applied_this_frame: false,
+                            backlash_damage: None,
                         }],
                     });
                 }

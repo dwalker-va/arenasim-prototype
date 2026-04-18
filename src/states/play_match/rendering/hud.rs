@@ -864,5 +864,6 @@ fn get_aura_fallback_color(aura_type: &AuraType) -> egui::Color32 {
         AuraType::AttackSpeedSlow => egui::Color32::from_rgb(100, 149, 237), // Cornflower blue (debuff)
         AuraType::LockoutDurationReduction => egui::Color32::from_rgb(255, 215, 0), // Gold (buff)
         AuraType::FrostArmorBuff => egui::Color32::from_rgb(100, 149, 237), // Cornflower blue (self-buff)
+        AuraType::Silence => egui::Color32::from_rgb(75, 0, 130), // Indigo (silence debuff)
     }
 }

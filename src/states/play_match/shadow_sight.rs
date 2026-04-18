@@ -181,6 +181,7 @@ pub fn check_orb_pickups(
                         fear_direction_timer: 0.0,
                         spell_school: None, // Shadow Sight is not dispellable
                         applied_this_frame: false,
+                        backlash_damage: None,
                     },
                 });
 

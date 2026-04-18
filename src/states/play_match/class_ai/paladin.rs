@@ -670,6 +670,7 @@ fn try_hammer_of_justice(
             fear_direction_timer: 0.0,
             spell_school: Some(def.spell_school),
             applied_this_frame: false,
+            backlash_damage: None,
         };
         // Reflect same-frame so other class AIs running later this frame see the stun —
         // see `auras::reflect_instant_cc_in_snapshot` for details.

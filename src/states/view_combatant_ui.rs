@@ -1387,6 +1387,9 @@ fn build_aura_description(aura: &super::play_match::ability_config::AuraEffect) 
         AuraType::FrostArmorBuff => {
             format!("Frost Armor active for {:.0} sec. Slows melee attackers.", aura.duration)
         }
+        AuraType::Silence => {
+            format!("Silenced for {:.0} sec. Cannot cast mana-cost abilities.", aura.duration)
+        }
     }
 }
 

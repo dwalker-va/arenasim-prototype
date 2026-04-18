@@ -9,9 +9,10 @@ use super::super::constants::{DR_RESET_TIMER, DR_IMMUNE_LEVEL, DR_MULTIPLIERS};
 // ============================================================================
 
 /// Types of aura effects.
-#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize, Default)]
 pub enum AuraType {
     /// Reduces movement speed by a percentage (magnitude = multiplier, e.g., 0.7 = 30% slow)
+    #[default]
     MovementSpeedSlow,
     /// Prevents movement (rooted in place) - magnitude unused
     Root,
@@ -83,11 +84,18 @@ pub enum AuraType {
     /// When a melee attacker hits this combatant, they receive MovementSpeedSlow + AttackSpeedSlow.
     /// Magnitude unused (always 1.0 by convention).
     FrostArmorBuff,
+    /// Blanket silence — prevents the affected combatant from using any ability that has
+    /// a mana cost > 0, but only if the caster's resource type is Mana. Does not affect
+    /// rage, energy, or zero-cost abilities (auto-attacks, Divine Shield if zero-cost, etc.).
+    /// Applied by Unstable Affliction dispel backlash. Has its own DR category.
+    /// Magnitude unused (always 1.0 by convention).
+    Silence,
 }
 
 impl AuraType {
     /// Returns true if this aura type is inherently magic-dispellable.
-    /// This covers CC effects that are always magical in WoW.
+    /// This covers CC effects that are always magical in WoW, plus Silence (which is
+    /// removable by Dispel Magic / Cleanse).
     pub fn is_magic_dispellable(&self) -> bool {
         matches!(
             self,
@@ -96,6 +104,7 @@ impl AuraType {
                 | AuraType::Fear
                 | AuraType::Polymorph
                 | AuraType::Incapacitate
+                | AuraType::Silence
         )
     }
 }
@@ -105,7 +114,7 @@ impl AuraType {
 // ============================================================================
 
 /// An active aura/debuff effect on a combatant.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Aura {
     /// Type of aura effect
     pub effect_type: AuraType,
@@ -135,6 +144,12 @@ pub struct Aura {
     /// True on the frame the aura was applied — prevents the applying ability's own damage
     /// from counting toward the break threshold
     pub applied_this_frame: bool,
+    /// Snapshot of dispel-backlash damage, populated at cast time for abilities that carry
+    /// a `DispelBacklashConfig` (currently only Unstable Affliction). If the aura is dispelled
+    /// by an opposing-team combatant, this value is applied as direct damage to the dispeller.
+    /// Stored on the aura (rather than recomputed at dispel time) so caster death or stat
+    /// changes after application do not change the backlash amount. None for all non-UA auras.
+    pub backlash_damage: Option<f32>,
 }
 
 impl Aura {
@@ -218,6 +233,7 @@ impl AuraPending {
                 fear_direction_timer: 0.0,
                 spell_school,
                 applied_this_frame: false,
+                backlash_damage: None,
             },
         })
     }
@@ -255,6 +271,7 @@ impl AuraPending {
                 fear_direction_timer: 0.0,
                 spell_school,
                 applied_this_frame: false,
+                backlash_damage: None,
             },
         })
     }
@@ -292,6 +309,7 @@ impl AuraPending {
                 fear_direction_timer: 0.0,
                 spell_school,
                 applied_this_frame: false,
+                backlash_damage: None,
             },
         })
     }
@@ -310,10 +328,11 @@ pub enum DRCategory {
     Incapacitates = 2,
     Roots = 3,
     Slows = 4,
+    Silence = 5,
 }
 
 impl DRCategory {
-    pub const COUNT: usize = 5;
+    pub const COUNT: usize = 6;
 
     #[inline]
     pub fn index(self) -> usize {
@@ -328,6 +347,7 @@ impl DRCategory {
             AuraType::Polymorph | AuraType::Incapacitate => Some(DRCategory::Incapacitates),
             AuraType::Root => Some(DRCategory::Roots),
             AuraType::MovementSpeedSlow => Some(DRCategory::Slows),
+            AuraType::Silence => Some(DRCategory::Silence),
             _ => None,
         }
     }
