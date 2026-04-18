@@ -491,7 +491,7 @@
         // via simulation in Unit 8.
         UnstableAffliction: (
             name: "Unstable Affliction",
-            icon: "icons/abilities/spell_shadow_unstableaffliction_1.jpg",
+            icon: "icons/abilities/spell_shadow_unstableaffliction_3.jpg",
             cast_time: 1.5,
             range: 30.0,
             mana_cost: 30.0,
