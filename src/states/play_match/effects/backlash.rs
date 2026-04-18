@@ -110,6 +110,18 @@ pub fn process_backlash(
             dispeller_team, dispeller_class_name, actual_damage
         );
 
+        // Spawn the BacklashBurst visual at the dispeller (graphical mode only —
+        // the spawn/update/cleanup systems live in rendering/effects.rs and are
+        // registered exclusively in src/states/mod.rs).
+        commands.spawn((
+            BacklashBurst {
+                target: event.dispeller,
+                lifetime: 0.3,
+                initial_lifetime: 0.3,
+            },
+            PlayMatchEntity,
+        ));
+
         // ----- Step 2: Apply Silence aura (only if dispeller survived) -----
         // This is the damage-before-silence invariant — we never attach a Silence
         // aura to a dead entity.

@@ -152,3 +152,27 @@ pub struct DispelBurst {
     /// Initial lifetime for fade calculation
     pub initial_lifetime: f32,
 }
+
+/// Visual effect indicating a combatant has Unstable Affliction active.
+/// Pulses at ~0.5Hz (every 2s) in deep violet so it reads independently from
+/// Corruption's faster green tendrils when both DoTs are stacked on the target.
+#[derive(Component)]
+pub struct UnstableAfflictionGlow {
+    /// The afflicted target — glow follows this entity until UA expires/dispels.
+    pub target: Entity,
+    /// Phase accumulator (seconds) used to drive the pulse.
+    pub phase: f32,
+}
+
+/// Visual effect spawned on the dispeller the frame UA backlash fires.
+/// Distinct from `DispelBurst`: ~2x particle count, dark-violet shadow color,
+/// snappier 0.3s lifetime — reads as "impact" rather than "sparkle".
+#[derive(Component)]
+pub struct BacklashBurst {
+    /// The dispeller entity that took the backlash.
+    pub target: Entity,
+    /// Time remaining before despawn (seconds).
+    pub lifetime: f32,
+    /// Initial lifetime for fade calculation.
+    pub initial_lifetime: f32,
+}
