@@ -27,7 +27,7 @@ use crate::states::play_match::components::{
 };
 use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::constants::GCD;
-use crate::states::play_match::is_spell_school_locked;
+use crate::states::play_match::{is_spell_school_locked, is_silenced};
 
 use crate::states::play_match::utils::log_ability_use;
 
@@ -247,6 +247,9 @@ fn try_corruption(
     if is_spell_school_locked(corruption_def.spell_school, auras) {
         return false;
     }
+    if is_silenced(combatant, auras) && corruption_def.mana_cost > 0.0 {
+        return false;
+    }
 
     if !corruption.can_cast_config(combatant, target_pos, my_pos, corruption_def) {
         return false;
@@ -323,6 +326,9 @@ fn try_immolate(
     if is_spell_school_locked(immolate_def.spell_school, auras) {
         return false;
     }
+    if is_silenced(combatant, auras) && immolate_def.mana_cost > 0.0 {
+        return false;
+    }
 
     if !immolate.can_cast_config(combatant, target_pos, my_pos, immolate_def) {
         return false;
@@ -389,6 +395,9 @@ fn try_fear(
     if is_spell_school_locked(fear_def.spell_school, auras) {
         return false;
     }
+    if is_silenced(combatant, auras) && fear_def.mana_cost > 0.0 {
+        return false;
+    }
 
     if !fear.can_cast_config(combatant, target_pos, my_pos, fear_def) {
         return false;
@@ -438,6 +447,9 @@ fn try_shadowbolt(
 
     // Check if Shadow school is locked out
     if is_spell_school_locked(shadowbolt_def.spell_school, auras) {
+        return false;
+    }
+    if is_silenced(combatant, auras) && shadowbolt_def.mana_cost > 0.0 {
         return false;
     }
 
@@ -507,6 +519,9 @@ fn try_drain_life(
 
     // Check if Shadow school is locked out
     if is_spell_school_locked(drain_life_def.spell_school, auras) {
+        return false;
+    }
+    if is_silenced(combatant, auras) && drain_life_def.mana_cost > 0.0 {
         return false;
     }
 
@@ -669,6 +684,9 @@ fn try_cast_curse(
 
     // Check if Shadow school is locked out
     if is_spell_school_locked(ability_def.spell_school, auras) {
+        return false;
+    }
+    if is_silenced(combatant, auras) && ability_def.mana_cost > 0.0 {
         return false;
     }
 

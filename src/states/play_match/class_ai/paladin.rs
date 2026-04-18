@@ -27,7 +27,7 @@ use crate::states::play_match::constants::{
     CRITICAL_HP_THRESHOLD, DIVINE_SHIELD_HP_THRESHOLD, GCD, HEALTHY_HP_THRESHOLD,
     HOLY_SHOCK_DAMAGE_RANGE, LOW_HP_THRESHOLD, SAFE_HEAL_MAX_THRESHOLD,
 };
-use crate::states::play_match::is_spell_school_locked;
+use crate::states::play_match::{is_spell_school_locked, is_silenced};
 use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
 use super::{CombatContext, CombatantInfo};
@@ -358,6 +358,9 @@ fn try_flash_of_light(
     if is_spell_school_locked(def.spell_school, auras) {
         return false;
     }
+    if is_silenced(combatant, auras) && def.mana_cost > 0.0 {
+        return false;
+    }
 
     if combatant.current_mana < def.mana_cost {
         return false;
@@ -401,6 +404,9 @@ fn try_holy_light(
     let def = abilities.get_unchecked(&ability);
 
     if is_spell_school_locked(def.spell_school, auras) {
+        return false;
+    }
+    if is_silenced(combatant, auras) && def.mana_cost > 0.0 {
         return false;
     }
 
@@ -449,6 +455,9 @@ fn try_holy_shock_heal(
     let def = abilities.get_unchecked(&ability);
 
     if is_spell_school_locked(def.spell_school, auras) {
+        return false;
+    }
+    if is_silenced(combatant, auras) && def.mana_cost > 0.0 {
         return false;
     }
 
@@ -508,6 +517,9 @@ fn try_holy_shock_damage(
     let def = abilities.get_unchecked(&ability);
 
     if is_spell_school_locked(def.spell_school, auras) {
+        return false;
+    }
+    if is_silenced(combatant, auras) && def.mana_cost > 0.0 {
         return false;
     }
 
@@ -586,6 +598,9 @@ fn try_hammer_of_justice(
     let def = abilities.get_unchecked(&ability);
 
     if is_spell_school_locked(def.spell_school, auras) {
+        return false;
+    }
+    if is_silenced(combatant, auras) && def.mana_cost > 0.0 {
         return false;
     }
 
@@ -759,6 +774,9 @@ fn try_paladin_aura(
 
     // Check if spell school is locked out
     if is_spell_school_locked(def.spell_school, auras) {
+        return false;
+    }
+    if is_silenced(combatant, auras) && def.mana_cost > 0.0 {
         return false;
     }
 

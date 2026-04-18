@@ -21,7 +21,7 @@ use crate::states::play_match::constants::{
     CRIT_DAMAGE_MULTIPLIER, DEFENSIVE_HP_THRESHOLD, GCD, MELEE_RANGE, SAFE_KITING_DISTANCE,
 };
 use crate::states::play_match::combat_core::{calculate_cast_time, roll_crit, get_attack_power_bonus_from_slice, get_crit_chance_bonus_from_slice};
-use crate::states::play_match::is_spell_school_locked;
+use crate::states::play_match::{is_spell_school_locked, is_silenced};
 use crate::states::play_match::utils::{combatant_id, log_ability_use, spawn_speech_bubble};
 
 use super::CombatContext;
@@ -283,6 +283,9 @@ fn try_arcane_intellect(
     if is_spell_school_locked(def.spell_school, auras) {
         return false;
     }
+    if is_silenced(combatant, auras) && def.mana_cost > 0.0 {
+        return false;
+    }
 
     // Check range and mana
     let distance = my_pos.distance(target_pos);
@@ -337,6 +340,9 @@ fn try_frost_nova(
 
     // Check if Frost school is locked out
     if is_spell_school_locked(nova_def.spell_school, auras) {
+        return false;
+    }
+    if is_silenced(combatant, auras) && nova_def.mana_cost > 0.0 {
         return false;
     }
 
@@ -508,6 +514,9 @@ fn try_polymorph(
     if is_spell_school_locked(def.spell_school, auras) {
         return false;
     }
+    if is_silenced(combatant, auras) && def.mana_cost > 0.0 {
+        return false;
+    }
 
     // Check range and mana
     let distance_to_target = my_pos.distance(target_pos);
@@ -585,6 +594,9 @@ fn try_frostbolt(
 
     // Check if spell school is locked out
     if is_spell_school_locked(def.spell_school, auras) {
+        return false;
+    }
+    if is_silenced(combatant, auras) && def.mana_cost > 0.0 {
         return false;
     }
 

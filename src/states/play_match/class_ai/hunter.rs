@@ -18,7 +18,7 @@ use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
 use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::constants::*;
-use crate::states::play_match::is_spell_school_locked;
+use crate::states::play_match::{is_spell_school_locked, is_silenced};
 
 use super::CombatContext;
 use super::super::utils::log_ability_use;
@@ -437,6 +437,7 @@ fn try_arcane_shot(
     if combatant.ability_cooldowns.contains_key(&ability) { return false }
     if combatant.current_mana < def.mana_cost { return false }
     if is_spell_school_locked(def.spell_school, auras) { return false }
+    if is_silenced(combatant, auras) && def.mana_cost > 0.0 { return false }
 
     let distance = my_pos.distance(target_info.position);
     if let Some(min_range) = def.min_range {

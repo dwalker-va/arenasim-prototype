@@ -21,7 +21,7 @@ use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
 use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::constants::GCD;
-use crate::states::play_match::is_spell_school_locked;
+use crate::states::play_match::{is_spell_school_locked, is_silenced};
 use crate::states::play_match::utils::log_ability_use;
 
 use super::CombatContext;
@@ -193,6 +193,9 @@ fn try_fortitude(
     if is_spell_school_locked(def.spell_school, auras) {
         return false;
     }
+    if is_silenced(combatant, auras) && def.mana_cost > 0.0 {
+        return false;
+    }
 
     // Check range and mana
     let distance = my_pos.distance(target_pos);
@@ -242,6 +245,9 @@ fn try_power_word_shield(
     let pw_shield_def = abilities.get_unchecked(&pw_shield);
 
     if is_spell_school_locked(pw_shield_def.spell_school, auras) {
+        return false;
+    }
+    if is_silenced(combatant, auras) && pw_shield_def.mana_cost > 0.0 {
         return false;
     }
 
@@ -399,6 +405,9 @@ fn try_flash_heal(
     if is_spell_school_locked(def.spell_school, auras) {
         return false;
     }
+    if is_silenced(combatant, auras) && def.mana_cost > 0.0 {
+        return false;
+    }
 
     if !ability.can_cast_config(combatant, target_pos, my_pos, def) {
         return false;
@@ -467,6 +476,9 @@ fn try_mind_blast(
 
     // Check if spell school is locked out
     if is_spell_school_locked(def.spell_school, auras) {
+        return false;
+    }
+    if is_silenced(combatant, auras) && def.mana_cost > 0.0 {
         return false;
     }
 

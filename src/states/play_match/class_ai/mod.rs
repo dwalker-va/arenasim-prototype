@@ -32,7 +32,7 @@ use super::abilities::AbilityType;
 use super::ability_config::AbilityDefinitions;
 use super::components::{Aura, ActiveAuras, Combatant, AuraType, DispelPending, PetType, DRCategory, DRTracker};
 use super::constants::GCD;
-use super::is_spell_school_locked;
+use super::{is_spell_school_locked, is_silenced};
 use super::utils::log_ability_use;
 
 /// Per-frame snapshot of a single combatant, used for AI decision making.
@@ -334,6 +334,12 @@ pub fn try_dispel_ally(
 
     // Check if spell school is locked out
     if is_spell_school_locked(def.spell_school, auras) {
+        return false;
+    }
+    // Silence gate (UA backlash). The dispel helper bypasses can_cast_config and
+    // deducts mana directly, so this check must live here — otherwise a silenced
+    // healer would still successfully dispel.
+    if is_silenced(combatant, auras) && def.mana_cost > 0.0 {
         return false;
     }
 
