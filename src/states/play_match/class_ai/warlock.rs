@@ -18,7 +18,7 @@
 use bevy::prelude::*;
 
 use crate::combat::log::{CombatLog, CombatLogEventType};
-use crate::states::match_config::WarlockCurse;
+use crate::states::match_config::{CharacterClass, WarlockCurse};
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::{
@@ -91,6 +91,25 @@ pub fn decide_warlock_action(
     // When kited, prioritize instant-cast abilities over cast-time spells
     let being_kited = is_being_kited(combatant, my_pos, target_pos, auras);
 
+    // Detect dispel-class enemies. When the enemy team can dispel, UA goes FIRST
+    // so an early dispel pays the silence-tax window — otherwise a Priest can
+    // chain-dispel Corruption without ever triggering the backlash.
+    let enemy_has_dispeller = ctx.alive_enemies().iter().any(|e| matches!(
+        e.class,
+        CharacterClass::Priest | CharacterClass::Paladin
+    ));
+
+    // Try UA first vs dispel-class enemies; otherwise Corruption first (UA's
+    // 1.5s cast time is wasted ramp against a non-dispelling team).
+    if enemy_has_dispeller && !target_immune {
+        if try_unstable_affliction(
+            commands, combat_log, abilities, entity, combatant, my_pos, auras,
+            target_entity, target_pos, ctx,
+        ) {
+            return true;
+        }
+    }
+
     // Priority 1: Corruption (instant Shadow DoT) - skip if target immune
     if !target_immune {
         if try_corruption(
@@ -109,7 +128,7 @@ pub fn decide_warlock_action(
         }
     }
 
-    // Priority 1.5: Unstable Affliction (instant Shadow DoT with dispel-backlash)
+    // Priority 1.5: Unstable Affliction (fallback when no dispeller-priority gate fired)
     // Stacks with Corruption — both DoTs load on the kill target so dispels face a real
     // coin-flip. UA's dispel triggers Shadow damage + 5s Silence on the dispeller.
     if !target_immune {
