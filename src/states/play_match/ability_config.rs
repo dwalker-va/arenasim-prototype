@@ -169,6 +169,35 @@ pub struct AbilityConfig {
     /// Whether this ability removes magic debuffs from the target
     #[serde(default)]
     pub is_dispel: bool,
+
+    // === Dispel Backlash ===
+    /// Configuration for the dispel-backlash mechanic (currently only Unstable Affliction).
+    /// When this ability's aura is removed by an enemy dispel, the dispeller takes direct
+    /// Shadow damage and receives a Silence aura. See `DispelBacklashConfig`.
+    #[serde(default)]
+    pub dispel_backlash: Option<DispelBacklashConfig>,
+}
+
+/// Dispel-backlash configuration for abilities whose aura punishes the enemy dispeller.
+///
+/// Snapshot semantics: at cast time, the caster's spell power is combined with
+/// `damage_base` and `damage_sp_coefficient` to produce the backlash damage, which is
+/// stored on the resulting `Aura.backlash_damage`. If the aura is later dispelled by an
+/// opposing-team combatant, that snapshotted damage is applied to the dispeller along
+/// with a `Silence` aura of `silence_duration` seconds.
+///
+/// Currently only populated for Unstable Affliction.
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct DispelBacklashConfig {
+    /// Duration of the Silence aura applied to the dispeller (seconds). Subject to DR.
+    #[serde(default)]
+    pub silence_duration: f32,
+    /// Flat base damage before spell-power scaling.
+    #[serde(default)]
+    pub damage_base: f32,
+    /// Coefficient applied to the caster's spell power at cast time.
+    #[serde(default)]
+    pub damage_sp_coefficient: f32,
 }
 
 fn default_scaling_none() -> ScalingStat {
@@ -270,6 +299,7 @@ impl AbilityDefinitions {
             AbilityType::CurseOfAgony,
             AbilityType::CurseOfWeakness,
             AbilityType::CurseOfTongues,
+            AbilityType::UnstableAffliction,
             AbilityType::ArcaneIntellect,
             AbilityType::BattleShout,
             AbilityType::IceBarrier,
@@ -408,6 +438,7 @@ mod tests {
             channel_tick_interval: 1.0,
             channel_healing_per_tick: 0.0,
             is_dispel: false,
+            dispel_backlash: None,
         };
 
         assert!(config.is_damage());
@@ -444,6 +475,7 @@ mod tests {
             channel_tick_interval: 1.0,
             channel_healing_per_tick: 0.0,
             is_dispel: false,
+            dispel_backlash: None,
         };
 
         assert!(!config.is_damage());

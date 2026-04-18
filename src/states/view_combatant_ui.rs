@@ -245,6 +245,7 @@ fn get_class_abilities(class: CharacterClass) -> Vec<AbilityType> {
         ],
         CharacterClass::Warlock => vec![
             AbilityType::Corruption,
+            AbilityType::UnstableAffliction,
             AbilityType::Shadowbolt,
             AbilityType::Fear,
             AbilityType::Immolate,
@@ -307,6 +308,7 @@ fn get_ability_name(ability: AbilityType) -> &'static str {
         AbilityType::CurseOfAgony => "Curse of Agony",
         AbilityType::CurseOfWeakness => "Curse of Weakness",
         AbilityType::CurseOfTongues => "Curse of Tongues",
+        AbilityType::UnstableAffliction => "Unstable Affliction",
         // Paladin abilities
         AbilityType::FlashOfLight => "Flash of Light",
         AbilityType::HolyLight => "Holy Light",

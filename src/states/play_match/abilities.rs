@@ -67,6 +67,7 @@ pub enum AbilityType {
     CurseOfAgony,   // Shadow DoT - 84 damage over 24s
     CurseOfWeakness, // Shadow debuff - reduces target damage dealt
     CurseOfTongues, // Shadow debuff - increases target cast time
+    UnstableAffliction, // Shadow DoT - dispel backlash applies Silence + Shadow damage
     // Buff abilities
     ArcaneIntellect, // Mage buff - increases max mana
     BattleShout,     // Warrior buff - increases attack power
