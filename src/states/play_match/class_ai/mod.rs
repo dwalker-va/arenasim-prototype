@@ -319,6 +319,7 @@ pub fn try_dispel_ally(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     abilities: &AbilityDefinitions,
+    entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
@@ -401,6 +402,7 @@ pub fn try_dispel_ally(
     // Spawn pending dispel
     commands.spawn(DispelPending {
         target: dispel_target,
+        dispeller: entity,
         log_prefix,
         caster_class,
         heal_on_success: None,

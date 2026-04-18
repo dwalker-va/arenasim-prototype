@@ -603,6 +603,10 @@ pub struct DivineShieldPending {
 pub struct DispelPending {
     /// Target entity to dispel
     pub target: Entity,
+    /// Entity that initiated the dispel (Priest, Paladin, Felhunter, or Hunter Bird).
+    /// Needed by downstream systems like Unstable Affliction backlash to identify
+    /// the dispeller for damage and silence application.
+    pub dispeller: Entity,
     /// Log prefix for combat log (e.g., "[DISPEL]" for Priest, "[CLEANSE]" for Paladin)
     pub log_prefix: &'static str,
     /// Caster's class for visual effect coloring

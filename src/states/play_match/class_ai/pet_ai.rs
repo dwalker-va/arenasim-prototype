@@ -363,6 +363,7 @@ fn try_devour_magic(
 
     commands.spawn(DispelPending {
         target: target_entity,
+        dispeller: entity,
         log_prefix: "[DEVOUR]",
         caster_class: CharacterClass::Warlock,
         heal_on_success: Some((entity, heal_amount)),
@@ -599,8 +600,11 @@ fn bird_ai(
     let Some(target) = cleanse_target else { return };
 
     // Master's Call: only removes movement impairments (Root, MovementSpeedSlow)
+    // Note: The filter excludes DoTs so UA can never be removed via this path; backlash
+    // will never fire for Master's Call. The dispeller field is populated for consistency.
     commands.spawn(DispelPending {
         target,
+        dispeller: entity,
         log_prefix: "[MASTERS_CALL]",
         caster_class: CharacterClass::Hunter,
         heal_on_success: None,
