@@ -468,18 +468,23 @@ process_backlash (new system in effects/backlash.rs):
 - Modify: `assets/config/abilities.ron` (UA tuning values — iterative)
 - Create: `docs/reports/2026-04-18-ua-simulation-tuning.md` (summary of tuning iterations + final numbers)
 
-**Approach:**
+**Approach (measure-and-recommend, no autonomous tuning):**
 - Run the 24-seed bug-hunt configuration used by `docs/reports/2026-04-12-bug-hunt-2v2-3v3.md` (seeds 6001–6031) with the current UA tuning.
 - Compare Warlock 2v2 and 3v3 win rates to SC1 thresholds.
 - Measure SC2: count matches where a dispeller was silenced during a kill window and a heal was denied.
-- If SC1 or SC2 fall short, iterate: raise DoT damage slightly, lengthen duration, or raise backlash damage. If tuning reveals any match where Silence uptime feels oppressive (subjective log review), tighten DR directly rather than against a fixed uptime threshold.
-- **Iteration cap: 3 full bug-hunt cycles.** After 3 iterations, stop tuning regardless of outcome and move to the exit criteria below.
-- **Exit criteria (after \u22643 iterations):**
+- Inspect a handful of matches qualitatively for "silence chains feel oppressive" or "UA never matters because Warlock dies before landing it".
+- **Produce a recommendation, do NOT mutate `abilities.ron` autonomously.** The tuning report includes:
+    - Current numbers vs measured outcomes.
+    - Specific proposed changes (e.g., "raise DoT magnitude 8 → 10", "lower backlash damage_base 40 → 30", "tighten DR second-application from 50% to 25%").
+    - One-line rationale per change tied to a measured signal.
+    - User reviews and approves before any RON change lands.
+- **Iteration cap: 3 full bug-hunt cycles**, each gated by user approval of the proposed changes.
+- **Exit criteria (after \u22643 iterations, evaluated by the user with the report in hand):**
     - 3v3 WR \u2265 50% \u2192 success, ship.
-    - 3v3 WR in [45%, 50%) \u2192 partial-pass, ship with a note in the tuning report describing the gap and what would close it (likely survivability work from the separate Warlock workstream).
-    - 3v3 WR < 45% \u2192 tuning failure; do NOT keep raising damage numbers. Revisit the mechanism design \u2014 this is a signal that UA alone isn't the right buff, not that it needs more power. Escalate to a new brainstorm before continuing.
+    - 3v3 WR in [45%, 50%) \u2192 partial-pass, ship with a note describing the gap (likely survivability from the separate Warlock workstream).
+    - 3v3 WR < 45% \u2192 tuning failure; do NOT keep raising damage numbers. Revisit the mechanism design \u2014 escalate to a new brainstorm.
     - 2v2 WR: any value \u2265 20% is acceptable; 35% target is aspirational per the risk-accepted note in Problem Frame.
-- Final numbers land in `abilities.ron`.
+- Final numbers, when approved, land in `abilities.ron` as a separate small commit per iteration so each tuning step is reviewable in isolation.
 
 **Patterns to follow:**
 - Bug-hunt workflow (`/bug-hunt` skill) for running 24-seed matrices in parallel.
