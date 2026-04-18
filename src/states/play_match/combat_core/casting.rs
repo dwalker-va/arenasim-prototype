@@ -252,6 +252,7 @@ pub fn process_casting(
                 target_entity,
                 is_crit_damage,
                 is_crit_heal,
+                caster.spell_power,
             ));
 
             // Remove casting state
@@ -270,7 +271,7 @@ pub fn process_casting(
     let mut break_stealth: Vec<Entity> = Vec::new();
 
     // Process completed casts
-    for (caster_entity, caster_team, caster_class, caster_pos, ability_damage, ability_healing, ability, target_entity, is_crit_damage, is_crit_heal) in completed_casts {
+    for (caster_entity, caster_team, caster_class, caster_pos, ability_damage, ability_healing, ability, target_entity, is_crit_damage, is_crit_heal, caster_spell_power) in completed_casts {
         let def = abilities.get_unchecked(&ability);
 
         // Get target
@@ -571,7 +572,16 @@ pub fn process_casting(
 
         // Apply aura if applicable (store for later application)
         if let Some(aura) = def.applies_aura.as_ref() {
-            if let Some(aura_pending) = AuraPending::from_ability(target_entity, caster_entity, def) {
+            if let Some(mut aura_pending) = AuraPending::from_ability(target_entity, caster_entity, def) {
+                // For abilities with a dispel-backlash config (e.g., Unstable Affliction),
+                // snapshot the backlash damage from the caster's spell power at cast
+                // completion. SP doesn't change mid-cast in this codebase, so this is
+                // equivalent to "snapshot at cast start" for all current cases.
+                if let Some(backlash_cfg) = def.dispel_backlash.as_ref() {
+                    aura_pending.aura.backlash_damage = Some(
+                        backlash_cfg.damage_base + backlash_cfg.damage_sp_coefficient * caster_spell_power,
+                    );
+                }
                 commands.spawn((aura_pending, PlayMatchEntity));
             }
 

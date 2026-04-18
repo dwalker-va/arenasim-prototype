@@ -492,7 +492,7 @@
         UnstableAffliction: (
             name: "Unstable Affliction",
             icon: "icons/abilities/spell_shadow_unstableaffliction_1.jpg",
-            cast_time: 0.0,
+            cast_time: 1.5,
             range: 30.0,
             mana_cost: 30.0,
             cooldown: 0.0,

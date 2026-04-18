@@ -362,42 +362,23 @@ fn try_unstable_affliction(
         return false;
     }
 
-    // Compute backlash snapshot from current spell power. The DispelBacklashConfig
-    // sub-struct holds the formula coefficients; if it's missing for some reason
-    // (shouldn't happen for UA), default to 0 damage so the silence still lands.
-    let backlash_damage = ua_def.dispel_backlash.as_ref().map(|cfg| {
-        cfg.damage_base + cfg.damage_sp_coefficient * combatant.spell_power
-    });
-
-    // Execute UA
-    combatant.current_mana -= ua_def.mana_cost;
+    // Begin casting UA. Mana is deducted on cast completion (process_casting:189);
+    // the backlash damage snapshot is computed at completion in process_casting using
+    // the caster's spell power at that moment. SP doesn't change mid-cast in this
+    // codebase, so this is equivalent to "snapshot at cast start".
     combatant.global_cooldown = GCD;
+    let cast_time = calculate_cast_time(ua_def.cast_time, auras);
 
-    // Log
+    commands.entity(entity).insert(CastingState::new(ua, target_entity, cast_time));
+
+    // Log cast start
     let target_tuple = ctx.combatants
         .get(&target_entity)
         .map(|info| (info.team, info.class));
-    log_ability_use(combat_log, combatant.team, combatant.class, "Unstable Affliction", target_tuple, "casts");
-
-    // Apply DoT aura with the snapshotted backlash damage
-    if let Some(mut aura_pending) = AuraPending::from_ability(target_entity, entity, ua_def) {
-        aura_pending.aura.backlash_damage = backlash_damage;
-        commands.spawn(aura_pending);
-    }
-
-    combat_log.log(
-        CombatLogEventType::Buff,
-        format!(
-            "Team {} {} applies Unstable Affliction to enemy ({:.0} dmg/3s for 18s; backlash {:.0} on dispel)",
-            combatant.team,
-            combatant.class.name(),
-            ua_def.applies_aura.as_ref().map(|a| a.magnitude).unwrap_or(0.0),
-            backlash_damage.unwrap_or(0.0),
-        ),
-    );
+    log_ability_use(combat_log, combatant.team, combatant.class, "Unstable Affliction", target_tuple, "begins casting");
 
     info!(
-        "Team {} {} applies Unstable Affliction to enemy",
+        "Team {} {} begins casting Unstable Affliction on enemy",
         combatant.team,
         combatant.class.name()
     );
