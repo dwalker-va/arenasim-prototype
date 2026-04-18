@@ -499,15 +499,15 @@
             applies_aura: Some((
                 aura_type: DamageOverTime,
                 duration: 18.0,
-                magnitude: 8.0,
+                magnitude: 16.0, // Iter 2: 8 -> 16; UA now hits harder per-tick than Corruption (10) or Curse of Agony (14)
                 tick_interval: 3.0,
                 break_on_damage: -1.0, // Never breaks on damage (standard DoT)
             )),
             spell_school: Shadow,
             dispel_backlash: Some((
                 silence_duration: 5.0,
-                damage_base: 40.0,
-                damage_sp_coefficient: 0.3,
+                damage_base: 80.0,             // Iter 2: 40 -> 80 — backlash should be a real punishment
+                damage_sp_coefficient: 0.5,    // Iter 2: 0.3 -> 0.5
             )),
         ),
 
