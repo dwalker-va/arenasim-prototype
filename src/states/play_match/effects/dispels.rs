@@ -19,6 +19,12 @@ pub fn process_dispels(
     mut combat_log: ResMut<CombatLog>,
     pending_dispels: Query<(Entity, &DispelPending)>,
     mut combatants: Query<(&mut Combatant, &mut ActiveAuras)>,
+    // Separate read-only Combatant query for the backlash team-comparison guard.
+    // The mutable `combatants` query requires `&mut ActiveAuras`, which excludes
+    // any combatant without an ActiveAuras component (e.g., a Warlock UA-caster
+    // with no debuffs on themselves). The Without<ActiveAuras> filter makes this
+    // disjoint from the mutable query, satisfying Bevy's borrow checker.
+    teams_no_auras: Query<&Combatant, Without<ActiveAuras>>,
     mut game_rng: ResMut<GameRng>,
 ) {
     // Deferred heals to apply after aura processing (avoids borrow conflicts)
@@ -143,16 +149,21 @@ pub fn process_dispels(
     // DIFFERENT team than the original UA caster. If a Warlock's own team
     // dispels their UA (e.g., a friendly Priest cleanses to remove a misclick),
     // backlash should NOT fire — UA's penalty exists to deter ENEMY dispels.
+    // Helper: read team from either query. The mutable `combatants` query covers
+    // entities WITH ActiveAuras; the disjoint `teams_no_auras` query covers
+    // entities WITHOUT ActiveAuras. Together they cover every combatant.
+    let team_of = |entity: Entity| -> Option<u8> {
+        combatants
+            .get(entity)
+            .map(|(c, _)| c.team)
+            .ok()
+            .or_else(|| teams_no_auras.get(entity).map(|c| c.team).ok())
+    };
+
     for (dispeller, caster, damage) in deferred_backlashes {
-        let Ok((dispeller_combatant, _)) = combatants.get(dispeller) else {
-            continue;
-        };
-        let Ok((caster_combatant, _)) = combatants.get(caster) else {
-            // Caster despawned; treat as no-op rather than firing backlash with
-            // ambiguous attribution.
-            continue;
-        };
-        if dispeller_combatant.team == caster_combatant.team {
+        let Some(dispeller_team) = team_of(dispeller) else { continue };
+        let Some(caster_team) = team_of(caster) else { continue };
+        if dispeller_team == caster_team {
             continue;
         }
 

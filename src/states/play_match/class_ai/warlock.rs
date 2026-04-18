@@ -109,6 +109,26 @@ pub fn decide_warlock_action(
         }
     }
 
+    // Priority 1.5: Unstable Affliction (instant Shadow DoT with dispel-backlash)
+    // Stacks with Corruption — both DoTs load on the kill target so dispels face a real
+    // coin-flip. UA's dispel triggers Shadow damage + 5s Silence on the dispeller.
+    if !target_immune {
+        if try_unstable_affliction(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            target_entity,
+            target_pos,
+            ctx,
+        ) {
+            return true;
+        }
+    }
+
     // Priority 2: Spread curses to all enemies (instant) - per-enemy immunity filtering inside
     if try_spread_curses(
         commands,
@@ -281,6 +301,103 @@ fn try_corruption(
 
     info!(
         "Team {} {} applies Corruption to enemy (10 damage per 3s for 18s)",
+        combatant.team,
+        combatant.class.name()
+    );
+
+    true
+}
+
+/// Try to cast Unstable Affliction on target.
+///
+/// UA is an instant Shadow DoT that coexists with Corruption. Its dispel triggers
+/// a backlash on the dispeller (Shadow damage + 5s Silence). The backlash damage is
+/// snapshotted from the caster's spell power at cast time and stored on the aura,
+/// so caster death after application does not change the backlash amount.
+///
+/// Returns true if UA was applied.
+fn try_unstable_affliction(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    target_entity: Entity,
+    target_pos: Vec3,
+    ctx: &CombatContext,
+) -> bool {
+    // Don't apply UA to a target CC'd by our own team — would break friendly CC
+    // (this is the explicit per-ability opt-in to the friendly-CC-break guard;
+    // the protection is NOT automatic for new DoTs.)
+    if ctx.has_friendly_breakable_cc(target_entity) {
+        return false;
+    }
+
+    // Check if target already has UA (by ability name — allows coexistence with Corruption)
+    let target_has_ua = ctx.active_auras
+        .get(&target_entity)
+        .map(|auras| auras.iter().any(|a|
+            a.effect_type == AuraType::DamageOverTime && a.ability_name == "Unstable Affliction"
+        ))
+        .unwrap_or(false);
+
+    if target_has_ua {
+        return false;
+    }
+
+    let ua = AbilityType::UnstableAffliction;
+    let ua_def = abilities.get_unchecked(&ua);
+
+    // Check if Shadow school is locked out
+    if is_spell_school_locked(ua_def.spell_school, auras) {
+        return false;
+    }
+    if is_silenced(combatant, auras) && ua_def.mana_cost > 0.0 {
+        return false;
+    }
+
+    if !ua.can_cast_config(combatant, target_pos, my_pos, ua_def) {
+        return false;
+    }
+
+    // Compute backlash snapshot from current spell power. The DispelBacklashConfig
+    // sub-struct holds the formula coefficients; if it's missing for some reason
+    // (shouldn't happen for UA), default to 0 damage so the silence still lands.
+    let backlash_damage = ua_def.dispel_backlash.as_ref().map(|cfg| {
+        cfg.damage_base + cfg.damage_sp_coefficient * combatant.spell_power
+    });
+
+    // Execute UA
+    combatant.current_mana -= ua_def.mana_cost;
+    combatant.global_cooldown = GCD;
+
+    // Log
+    let target_tuple = ctx.combatants
+        .get(&target_entity)
+        .map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, "Unstable Affliction", target_tuple, "casts");
+
+    // Apply DoT aura with the snapshotted backlash damage
+    if let Some(mut aura_pending) = AuraPending::from_ability(target_entity, entity, ua_def) {
+        aura_pending.aura.backlash_damage = backlash_damage;
+        commands.spawn(aura_pending);
+    }
+
+    combat_log.log(
+        CombatLogEventType::Buff,
+        format!(
+            "Team {} {} applies Unstable Affliction to enemy ({:.0} dmg/3s for 18s; backlash {:.0} on dispel)",
+            combatant.team,
+            combatant.class.name(),
+            ua_def.applies_aura.as_ref().map(|a| a.magnitude).unwrap_or(0.0),
+            backlash_damage.unwrap_or(0.0),
+        ),
+    );
+
+    info!(
+        "Team {} {} applies Unstable Affliction to enemy",
         combatant.team,
         combatant.class.name()
     );
