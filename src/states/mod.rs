@@ -187,7 +187,8 @@ impl Plugin for StatesPlugin {
                     play_match::spawn_backlash_burst_visuals,  // Build mesh for new bursts
                     play_match::update_backlash_bursts,        // Expand and fade
                     play_match::cleanup_expired_backlash_bursts, // Remove expired bursts
-                    play_match::spawn_silenced_floating_text,  // "Silenced" text on apply
+                    // Silence visibility uses the standard CC pattern: [CC] log entry
+                    // plus the HUD aura icon — no bespoke floating text.
                 )
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_state(GameState::PlayMatch)),

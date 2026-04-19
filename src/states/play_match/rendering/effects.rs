@@ -1737,28 +1737,10 @@ pub fn spawn_ua_glow_for_afflicted(
     }
 }
 
-/// When a combatant has a freshly-applied Silence aura (`applied_this_frame == true`),
-/// spawn a "Silenced" floating combat text above them so the lockout is visible to viewers.
-pub fn spawn_silenced_floating_text(
-    mut commands: Commands,
-    combatants: Query<(&Transform, &ActiveAuras)>,
-) {
-    for (transform, auras) in combatants.iter() {
-        for aura in &auras.auras {
-            if aura.effect_type == AuraType::Silence && aura.applied_this_frame {
-                let text_pos = transform.translation + Vec3::new(0.0, 2.2, 0.0);
-                commands.spawn((
-                    FloatingCombatText {
-                        world_position: text_pos,
-                        text: "Silenced".to_string(),
-                        color: egui::Color32::from_rgb(180, 100, 230), // violet
-                        lifetime: 1.5,
-                        vertical_offset: 0.0,
-                        is_crit: false,
-                    },
-                    PlayMatchEntity,
-                ));
-            }
-        }
-    }
-}
+// Silence visibility note: an earlier iteration spawned a dedicated "Silenced"
+// floating combat text on apply, but that diverged from how Stun / Fear / Polymorph
+// surface to viewers. Those CC types use the `[CC]` combat-log entry plus the
+// HUD aura icon (rendered by `render_aura_icons`) and skip floating text entirely.
+// Silence now follows the same pattern — the existing CC log line
+// "[CC] Unstable Affliction on Team X (5.0s, DR: ...)" plus the aura icon over
+// the silenced combatant covers the visibility need without bespoke FCT.
