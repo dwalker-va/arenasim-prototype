@@ -325,7 +325,8 @@ fn headless_track_time(
 
 /// Check if the match has ended (one or both teams eliminated, or timeout)
 fn headless_check_match_end(
-    combatants: Query<(&Combatant, &Transform), Without<Pet>>,
+    combatants: Query<(Entity, &Combatant, &Transform), Without<Pet>>,
+    pets: Query<(&Combatant, &Pet)>,
     config: Res<MatchConfig>,
     combat_log: Res<CombatLog>,
     mut headless_state: ResMut<HeadlessMatchState>,
@@ -341,16 +342,16 @@ fn headless_check_match_end(
             "Match timed out after {:.1}s - declaring DRAW",
             headless_state.elapsed_time
         );
-        let result = build_match_result(&combatants, None, &headless_state);
-        save_headless_match_log(&combatants, &config, &combat_log, None, &headless_state);
+        let result = build_match_result(&combatants, &pets, None, &headless_state);
+        save_headless_match_log(&combatants, &pets, &config, &combat_log, None, &headless_state);
         headless_state.result = Some(result);
         headless_state.match_complete = true;
         return;
     }
 
     // Check team survival
-    let team1_alive = combatants.iter().any(|(c, _)| c.team == 1 && c.is_alive());
-    let team2_alive = combatants.iter().any(|(c, _)| c.team == 2 && c.is_alive());
+    let team1_alive = combatants.iter().any(|(_, c, _)| c.team == 1 && c.is_alive());
+    let team2_alive = combatants.iter().any(|(_, c, _)| c.team == 2 && c.is_alive());
 
     if !team1_alive || !team2_alive {
         let winner = if !team1_alive && !team2_alive {
@@ -364,8 +365,8 @@ fn headless_check_match_end(
             Some(2)
         };
 
-        let result = build_match_result(&combatants, winner, &headless_state);
-        save_headless_match_log(&combatants, &config, &combat_log, winner, &headless_state);
+        let result = build_match_result(&combatants, &pets, winner, &headless_state);
+        save_headless_match_log(&combatants, &pets, &config, &combat_log, winner, &headless_state);
         headless_state.result = Some(result);
         headless_state.match_complete = true;
     }
@@ -373,20 +374,24 @@ fn headless_check_match_end(
 
 /// Build the MatchResult from current combatant state
 fn build_match_result(
-    combatants: &Query<(&Combatant, &Transform), Without<Pet>>,
+    combatants: &Query<(Entity, &Combatant, &Transform), Without<Pet>>,
+    pets: &Query<(&Combatant, &Pet)>,
     winner: Option<u8>,
     headless_state: &HeadlessMatchState,
 ) -> MatchResult {
     let mut team1_combatants = Vec::new();
     let mut team2_combatants = Vec::new();
 
-    for (combatant, _transform) in combatants.iter() {
+    let pet_damage_by_owner = collect_pet_damage_by_owner(pets);
+
+    for (entity, combatant, _transform) in combatants.iter() {
+        let pet_credit = pet_damage_by_owner.get(&entity).copied().unwrap_or(0.0);
         let result = CombatantResult {
             class_name: combatant.class.name().to_string(),
             max_health: combatant.max_health,
             final_health: combatant.current_health,
             survived: combatant.is_alive(),
-            damage_dealt: combatant.damage_dealt,
+            damage_dealt: combatant.damage_dealt + pet_credit,
             damage_taken: combatant.damage_taken,
         };
 
@@ -408,7 +413,8 @@ fn build_match_result(
 
 /// Save the combat log to a file
 fn save_headless_match_log(
-    combatants: &Query<(&Combatant, &Transform), Without<Pet>>,
+    combatants: &Query<(Entity, &Combatant, &Transform), Without<Pet>>,
+    pets: &Query<(&Combatant, &Pet)>,
     config: &Res<MatchConfig>,
     combat_log: &Res<CombatLog>,
     winner: Option<u8>,
@@ -418,14 +424,17 @@ fn save_headless_match_log(
     let mut team1_metadata = Vec::new();
     let mut team2_metadata = Vec::new();
 
-    for (combatant, transform) in combatants.iter() {
+    let pet_damage_by_owner = collect_pet_damage_by_owner(pets);
+
+    for (entity, combatant, transform) in combatants.iter() {
+        let pet_credit = pet_damage_by_owner.get(&entity).copied().unwrap_or(0.0);
         let metadata = CombatantMetadata {
             class_name: combatant.class.name().to_string(),
             max_health: combatant.max_health,
             final_health: combatant.current_health,
             max_mana: combatant.max_mana,
             final_mana: combatant.current_mana,
-            damage_dealt: combatant.damage_dealt,
+            damage_dealt: combatant.damage_dealt + pet_credit,
             damage_taken: combatant.damage_taken,
             damage_mitigated_by_armor: combatant.damage_mitigated_by_armor,
             damage_mitigated_by_resistance: combatant.damage_mitigated_by_resistance,
@@ -504,4 +513,17 @@ pub fn run_headless_match(config: HeadlessMatchConfig) -> Result<(), String> {
         .run();
 
     Ok(())
+}
+
+/// Build a map from owner Entity → sum of pet damage_dealt. Used at match-end
+/// to roll pet contributions into the owner's reported DMG so the post-match
+/// stats reflect the team's full output (Felhunter / Hunter pet auto-attacks).
+fn collect_pet_damage_by_owner(
+    pets: &Query<(&Combatant, &Pet)>,
+) -> std::collections::HashMap<Entity, f32> {
+    let mut map = std::collections::HashMap::new();
+    for (pet_combatant, pet) in pets.iter() {
+        *map.entry(pet.owner).or_insert(0.0) += pet_combatant.damage_dealt;
+    }
+    map
 }

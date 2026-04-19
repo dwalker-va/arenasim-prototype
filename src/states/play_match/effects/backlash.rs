@@ -86,16 +86,30 @@ pub fn process_backlash(
         }
 
         // ----- Step 1: Apply backlash damage -----
-        let (actual_damage, _absorbed) = apply_damage_with_absorb(
-            event.damage,
-            &mut dispeller,
-            dispeller_auras.map(|a| a.into_inner()),
-            SpellSchool::Shadow,
-        );
-
-        let dispeller_team = dispeller.team;
-        let dispeller_class_name = dispeller.class.name();
-        let still_alive = dispeller.is_alive();
+        let (actual_damage, absorbed, dispeller_team, dispeller_class_name, still_alive) = {
+            let (actual_damage, absorbed) = apply_damage_with_absorb(
+                event.damage,
+                &mut dispeller,
+                dispeller_auras.map(|a| a.into_inner()),
+                SpellSchool::Shadow,
+            );
+            (
+                actual_damage,
+                absorbed,
+                dispeller.team,
+                dispeller.class.name(),
+                dispeller.is_alive(),
+            )
+        };
+        // Dispeller borrow ends here so we can credit the caster (different entity)
+        // without aliasing on the `combatants` query.
+        // Credit the caster's damage_dealt the same way casting.rs:344-350 and
+        // auto_attack.rs:283 do: actual_damage + absorbed. Damage that hit absorbs
+        // still counts as "dealt" — only the target's damage_taken intentionally
+        // omits absorbed amounts (see apply_damage_with_absorb).
+        if let Ok((mut caster_combatant, _)) = combatants.get_mut(event.caster) {
+            caster_combatant.damage_dealt += actual_damage + absorbed;
+        }
 
         combat_log.log(
             CombatLogEventType::Damage,
