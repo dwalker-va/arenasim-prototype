@@ -393,8 +393,8 @@ impl Default for MatchConfig {
             team1: vec![None],
             team2: vec![None],
             map: ArenaMap::BasicArena,
-            team1_kill_target: None, // No priority by default
-            team2_kill_target: None, // No priority by default
+            team1_kill_target: Some(0), // Default to enemy slot 0 — opt out by clicking again
+            team2_kill_target: Some(0), // Default to enemy slot 0 — opt out by clicking again
             team1_cc_target: None,   // Use heuristics by default
             team2_cc_target: None,   // Use heuristics by default
             team1_rogue_openers: vec![RogueOpener::default()],
@@ -422,6 +422,12 @@ impl MatchConfig {
         let size = size.clamp(1, 3);
         self.team1_size = size;
         self.team1.resize(size, None);
+        // Clamp opponent's kill_target if the index is now out of bounds for our team.
+        if let Some(idx) = self.team2_kill_target {
+            if idx >= size {
+                self.team2_kill_target = Some(0);
+            }
+        }
         self.team1_rogue_openers.resize(size, RogueOpener::default());
         // Resize curse prefs: one inner vec per slot, each sized to enemy team
         let enemy_size = self.team2_size;
@@ -440,6 +446,12 @@ impl MatchConfig {
         let size = size.clamp(1, 3);
         self.team2_size = size;
         self.team2.resize(size, None);
+        // Clamp opponent's kill_target if the index is now out of bounds for our team.
+        if let Some(idx) = self.team1_kill_target {
+            if idx >= size {
+                self.team1_kill_target = Some(0);
+            }
+        }
         self.team2_rogue_openers.resize(size, RogueOpener::default());
         // Resize curse prefs: one inner vec per slot, each sized to enemy team
         let enemy_size = self.team1_size;

@@ -42,6 +42,7 @@ pub fn process_divine_shield(
                 ability_name: "Divine Shield".to_string(),
                 spell_school: None,
                 applied_this_frame: false,
+                backlash_damage: None,
             };
 
             let debuffs_removed = if let Some(mut active_auras) = active_auras_opt {
@@ -55,7 +56,8 @@ pub fn process_divine_shield(
                     AuraType::DamageOverTime | AuraType::SpellSchoolLockout |
                     AuraType::HealingReduction | AuraType::Fear | AuraType::Polymorph |
                     AuraType::DamageReduction | AuraType::CastTimeIncrease |
-                    AuraType::AttackPowerReduction | AuraType::AttackSpeedSlow
+                    AuraType::AttackPowerReduction | AuraType::AttackSpeedSlow |
+                    AuraType::Silence
                 ));
                 let removed = before - active_auras.auras.len();
                 active_auras.auras.push(immunity_aura);

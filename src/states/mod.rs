@@ -175,6 +175,24 @@ impl Plugin for StatesPlugin {
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_state(GameState::PlayMatch)),
             )
+            // Unstable Affliction visuals: DoT glow, backlash burst, silenced text
+            // (graphical only — never registered in headless systems.rs).
+            .add_systems(
+                Update,
+                (
+                    play_match::spawn_ua_glow_for_afflicted,   // Detect UA aura and spawn glow
+                    play_match::spawn_ua_glow_visuals,         // Build mesh for new glows
+                    play_match::update_ua_glow,                // Pulse and follow target
+                    play_match::cleanup_ua_glow,               // Despawn when UA is gone
+                    play_match::spawn_backlash_burst_visuals,  // Build mesh for new bursts
+                    play_match::update_backlash_bursts,        // Expand and fade
+                    play_match::cleanup_expired_backlash_bursts, // Remove expired bursts
+                    // Silence visibility uses the standard CC pattern: [CC] log entry
+                    // plus the HUD aura icon — no bespoke floating text.
+                )
+                    .after(CombatSystemPhase::CombatResolution)
+                    .run_if(in_state(GameState::PlayMatch)),
+            )
             // Drain Life beam visual effects (separate group to avoid tuple size limits)
             .add_systems(
                 Update,

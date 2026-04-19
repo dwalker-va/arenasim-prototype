@@ -154,6 +154,7 @@ pub fn handle_time_controls(
 /// 5. Start victory celebration (5 second countdown before transitioning)
 pub fn check_match_end(
     combatants: Query<(Entity, &Combatant, &Transform), Without<Pet>>,
+    pets: Query<(&Combatant, &Pet)>,
     config: Res<MatchConfig>,
     combat_log: Res<CombatLog>,
     celebration: Option<Res<VictoryCelebration>>,
@@ -189,27 +190,40 @@ pub fn check_match_end(
         // Collect final stats for all combatants (for Results scene)
         let mut team1_stats = Vec::new();
         let mut team2_stats = Vec::new();
-        
+
         // Collect metadata for combat log saving (with position data)
         let mut team1_metadata = Vec::new();
         let mut team2_metadata = Vec::new();
-        
+
+        // Roll pet damage_dealt into the owner so the post-match DMG stat reflects
+        // the team's full output. Without this, a Warlock's Felhunter auto-attacks
+        // (or a Hunter's pet) leave a gap between the owner's DMG and the enemy's
+        // TAKEN — pets aren't shown as their own card in the report, so their
+        // contribution would otherwise be invisible.
+        let mut pet_damage_by_owner: std::collections::HashMap<Entity, f32> = std::collections::HashMap::new();
+        for (pet_combatant, pet) in pets.iter() {
+            *pet_damage_by_owner.entry(pet.owner).or_insert(0.0) += pet_combatant.damage_dealt;
+        }
+
         for (entity, combatant, transform) in combatants.iter() {
+            let pet_credit = pet_damage_by_owner.get(&entity).copied().unwrap_or(0.0);
+            let damage_dealt = combatant.damage_dealt + pet_credit;
+
             let stats = CombatantStats {
                 class: combatant.class,
-                damage_dealt: combatant.damage_dealt,
+                damage_dealt,
                 damage_taken: combatant.damage_taken,
                 healing_done: combatant.healing_done,
                 survived: combatant.is_alive(),
             };
-            
+
             let metadata = CombatantMetadata {
                 class_name: combatant.class.name().to_string(),
                 max_health: combatant.max_health,
                 final_health: combatant.current_health,
                 max_mana: combatant.max_mana,
                 final_mana: combatant.current_mana,
-                damage_dealt: combatant.damage_dealt,
+                damage_dealt,
                 damage_taken: combatant.damage_taken,
                 damage_mitigated_by_armor: combatant.damage_mitigated_by_armor,
                 damage_mitigated_by_resistance: combatant.damage_mitigated_by_resistance,

@@ -486,6 +486,31 @@
             spell_school: Shadow,
         ),
 
+        // Unstable Affliction: Shadow DoT that punishes enemy dispels with backlash damage
+        // and a 5s blanket silence. Coexists with Corruption. Starting values to be tuned
+        // via simulation in Unit 8.
+        UnstableAffliction: (
+            name: "Unstable Affliction",
+            icon: "icons/abilities/spell_shadow_unstableaffliction_3.jpg",
+            cast_time: 1.5,
+            range: 30.0,
+            mana_cost: 30.0,
+            cooldown: 0.0,
+            applies_aura: Some((
+                aura_type: DamageOverTime,
+                duration: 18.0,
+                magnitude: 16.0, // Iter 2: 8 -> 16; UA now hits harder per-tick than Corruption (10) or Curse of Agony (14)
+                tick_interval: 3.0,
+                break_on_damage: -1.0, // Never breaks on damage (standard DoT)
+            )),
+            spell_school: Shadow,
+            dispel_backlash: Some((
+                silence_duration: 5.0,
+                damage_base: 80.0,             // Iter 2: 40 -> 80 — backlash should be a real punishment
+                damage_sp_coefficient: 0.5,    // Iter 2: 0.3 -> 0.5
+            )),
+        ),
+
         // ============================================================================
         // PALADIN ABILITIES
         // ============================================================================

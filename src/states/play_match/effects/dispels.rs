@@ -8,6 +8,7 @@ use smallvec::SmallVec;
 
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use crate::states::play_match::components::*;
+use crate::states::play_match::effects::backlash::BacklashPending;
 
 /// Process pending dispels from Dispel Magic, Cleanse, or Devour Magic.
 ///
@@ -18,10 +19,21 @@ pub fn process_dispels(
     mut combat_log: ResMut<CombatLog>,
     pending_dispels: Query<(Entity, &DispelPending)>,
     mut combatants: Query<(&mut Combatant, &mut ActiveAuras)>,
+    // Separate read-only Combatant query for the backlash team-comparison guard.
+    // The mutable `combatants` query requires `&mut ActiveAuras`, which excludes
+    // any combatant without an ActiveAuras component (e.g., a Warlock UA-caster
+    // with no debuffs on themselves). The Without<ActiveAuras> filter makes this
+    // disjoint from the mutable query, satisfying Bevy's borrow checker.
+    teams_no_auras: Query<&Combatant, Without<ActiveAuras>>,
     mut game_rng: ResMut<GameRng>,
 ) {
     // Deferred heals to apply after aura processing (avoids borrow conflicts)
     let mut deferred_heals: Vec<(Entity, f32)> = Vec::new();
+    // Deferred UA backlash spawns. We collect (dispeller, caster, damage) from
+    // each removed Unstable Affliction aura inside the dispel-target borrow scope,
+    // then resolve the dispeller's team and spawn `BacklashPending` after the
+    // borrow is released — avoids `&mut Combatant` aliasing on `combatants`.
+    let mut deferred_backlashes: Vec<(Entity, Entity, f32)> = Vec::new();
 
     for (pending_entity, pending) in pending_dispels.iter() {
         // Get target's auras
@@ -84,6 +96,21 @@ pub fn process_dispels(
                 if let Some((heal_entity, heal_amount)) = pending.heal_on_success {
                     deferred_heals.push((heal_entity, heal_amount));
                 }
+
+                // Detect Unstable Affliction backlash. Match by ability name string
+                // to mirror the pattern used elsewhere (e.g., Corruption / try_corruption).
+                // The ability_name field is the canonical source of truth for which
+                // ability spawned the aura, even if the same AuraType is reused.
+                if removed_aura.ability_name == "Unstable Affliction"
+                    && removed_aura.caster.is_some()
+                {
+                    // Snapshot data needed after the borrow is released.
+                    deferred_backlashes.push((
+                        pending.dispeller,
+                        removed_aura.caster.unwrap(),
+                        removed_aura.backlash_damage.unwrap_or(0.0),
+                    ));
+                }
             }
         }
 
@@ -112,5 +139,41 @@ pub fn process_dispels(
                 );
             }
         }
+    }
+
+    // Apply deferred Unstable Affliction backlash spawns. Resolved here (after
+    // the dispel-target borrow scope) so we can read the dispeller and caster
+    // teams via the same `combatants` query without aliasing conflicts.
+    //
+    // Team-comparison guard: only fire backlash when the dispeller is on a
+    // DIFFERENT team than the original UA caster. If a Warlock's own team
+    // dispels their UA (e.g., a friendly Priest cleanses to remove a misclick),
+    // backlash should NOT fire — UA's penalty exists to deter ENEMY dispels.
+    // Helper: read team from either query. The mutable `combatants` query covers
+    // entities WITH ActiveAuras; the disjoint `teams_no_auras` query covers
+    // entities WITHOUT ActiveAuras. Together they cover every combatant.
+    let team_of = |entity: Entity| -> Option<u8> {
+        combatants
+            .get(entity)
+            .map(|(c, _)| c.team)
+            .ok()
+            .or_else(|| teams_no_auras.get(entity).map(|c| c.team).ok())
+    };
+
+    for (dispeller, caster, damage) in deferred_backlashes {
+        let Some(dispeller_team) = team_of(dispeller) else { continue };
+        let Some(caster_team) = team_of(caster) else { continue };
+        if dispeller_team == caster_team {
+            continue;
+        }
+
+        commands.spawn(BacklashPending {
+            dispeller,
+            damage,
+            // Hardcoded MVP value. A future iteration can source this from the
+            // ability's DispelBacklashConfig if per-ability tuning is needed.
+            silence_duration: 5.0,
+            caster,
+        });
     }
 }

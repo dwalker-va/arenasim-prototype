@@ -39,6 +39,7 @@ pub use super::effects::process_dispels;
 pub use super::effects::process_holy_shock_heals;
 pub use super::effects::process_holy_shock_damage;
 pub use super::effects::process_divine_shield;
+pub use super::effects::process_backlash;
 
 // === Phase 2: Combat and Movement ===
 pub use super::auras::process_aura_breaks;
@@ -136,6 +137,10 @@ where
             process_divine_shield,  // Must run BEFORE apply_pending_auras so DamageImmunity blocks CC
             apply_pending_auras,
             process_dispels,
+            // Must run AFTER process_dispels (consumes BacklashPending events that
+            // process_dispels spawns) and in the same Phase 1 chain so backlash
+            // damage + Silence land on the same frame as the dispel.
+            process_backlash,
             process_holy_shock_heals,
             process_holy_shock_damage,
         )

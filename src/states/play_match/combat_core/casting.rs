@@ -162,6 +162,23 @@ pub fn process_casting(
             continue;
         }
 
+        // Silence interrupts in-flight mana-cost casts (UA backlash). Note: Silence is a
+        // separate gate from is_incapacitated — silenced combatants can still move,
+        // auto-attack, and use rage/energy abilities. Only mana casts are interrupted.
+        let ability_def = abilities.get_unchecked(&casting.ability);
+        if super::super::abilities::is_silenced(&caster, caster_auras.as_deref())
+            && ability_def.mana_cost > 0.0
+        {
+            let caster_id = format!("Team {} {}", caster.team, caster.class.name());
+            combat_log.mark_cast_interrupted(&caster_id, &ability_def.name);
+            combat_log.log(
+                CombatLogEventType::CrowdControl,
+                format!("{}'s {} interrupted by Silence", caster_id, ability_def.name),
+            );
+            commands.entity(caster_entity).remove::<CastingState>();
+            continue;
+        }
+
         // Handle interrupted casts
         if casting.interrupted {
             // Tick down the interrupted display timer
@@ -235,6 +252,7 @@ pub fn process_casting(
                 target_entity,
                 is_crit_damage,
                 is_crit_heal,
+                caster.spell_power,
             ));
 
             // Remove casting state
@@ -253,7 +271,7 @@ pub fn process_casting(
     let mut break_stealth: Vec<Entity> = Vec::new();
 
     // Process completed casts
-    for (caster_entity, caster_team, caster_class, caster_pos, ability_damage, ability_healing, ability, target_entity, is_crit_damage, is_crit_heal) in completed_casts {
+    for (caster_entity, caster_team, caster_class, caster_pos, ability_damage, ability_healing, ability, target_entity, is_crit_damage, is_crit_heal, caster_spell_power) in completed_casts {
         let def = abilities.get_unchecked(&ability);
 
         // Get target
@@ -554,7 +572,16 @@ pub fn process_casting(
 
         // Apply aura if applicable (store for later application)
         if let Some(aura) = def.applies_aura.as_ref() {
-            if let Some(aura_pending) = AuraPending::from_ability(target_entity, caster_entity, def) {
+            if let Some(mut aura_pending) = AuraPending::from_ability(target_entity, caster_entity, def) {
+                // For abilities with a dispel-backlash config (e.g., Unstable Affliction),
+                // snapshot the backlash damage from the caster's spell power at cast
+                // completion. SP doesn't change mid-cast in this codebase, so this is
+                // equivalent to "snapshot at cast start" for all current cases.
+                if let Some(backlash_cfg) = def.dispel_backlash.as_ref() {
+                    aura_pending.aura.backlash_damage = Some(
+                        backlash_cfg.damage_base + backlash_cfg.damage_sp_coefficient * caster_spell_power,
+                    );
+                }
                 commands.spawn((aura_pending, PlayMatchEntity));
             }
 
@@ -788,6 +815,22 @@ pub fn process_channeling(
             combat_log.log(
                 CombatLogEventType::CrowdControl,
                 format!("{}'s {} interrupted by crowd control", caster_id, ability_def.name),
+            );
+            remove_channel.push(caster_entity);
+            continue;
+        }
+
+        // Silence interrupts mana-cost channels (UA backlash). Channels like Drain Life
+        // count as mana-cost; rage/energy channels (none today) would not be affected.
+        let channel_def = abilities.get_unchecked(&channeling.ability);
+        if super::super::abilities::is_silenced(&caster, caster_auras.as_deref())
+            && channel_def.mana_cost > 0.0
+        {
+            let caster_id = format!("Team {} {}", caster.team, caster.class.name());
+            combat_log.mark_cast_interrupted(&caster_id, &channel_def.name);
+            combat_log.log(
+                CombatLogEventType::CrowdControl,
+                format!("{}'s {} interrupted by Silence", caster_id, channel_def.name),
             );
             remove_channel.push(caster_entity);
             continue;

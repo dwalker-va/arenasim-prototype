@@ -245,6 +245,7 @@ fn get_class_abilities(class: CharacterClass) -> Vec<AbilityType> {
         ],
         CharacterClass::Warlock => vec![
             AbilityType::Corruption,
+            AbilityType::UnstableAffliction,
             AbilityType::Shadowbolt,
             AbilityType::Fear,
             AbilityType::Immolate,
@@ -307,6 +308,7 @@ fn get_ability_name(ability: AbilityType) -> &'static str {
         AbilityType::CurseOfAgony => "Curse of Agony",
         AbilityType::CurseOfWeakness => "Curse of Weakness",
         AbilityType::CurseOfTongues => "Curse of Tongues",
+        AbilityType::UnstableAffliction => "Unstable Affliction",
         // Paladin abilities
         AbilityType::FlashOfLight => "Flash of Light",
         AbilityType::HolyLight => "Holy Light",
@@ -1386,6 +1388,9 @@ fn build_aura_description(aura: &super::play_match::ability_config::AuraEffect) 
         }
         AuraType::FrostArmorBuff => {
             format!("Frost Armor active for {:.0} sec. Slows melee attackers.", aura.duration)
+        }
+        AuraType::Silence => {
+            format!("Silenced for {:.0} sec. Cannot cast mana-cost abilities.", aura.duration)
         }
     }
 }

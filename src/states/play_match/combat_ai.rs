@@ -74,10 +74,22 @@ pub fn acquire_targets(
         }
     }
 
-    // Sort by entity ID to ensure deterministic ordering matching spawn order
-    // Entity IDs are assigned sequentially at spawn time
-    team1_combatants.sort_by_key(|(entity, _, _, _, _, _, _, _)| entity.index());
-    team2_combatants.sort_by_key(|(entity, _, _, _, _, _, _, _)| entity.index());
+    // Sort by canonical slot index, NOT entity ID. Across multiple matches in a
+    // single process, Bevy reuses despawned entity IDs from the free list — slot 0
+    // can end up with a higher entity index than slot 1. Sorting by entity.index()
+    // would then put slot 1 first, so kill_target=Some(0) would resolve to the
+    // wrong combatant. Pets have slot >= PET_SLOT_BASE (100+), so they sort after
+    // primaries naturally. Look up slot per entity from the live combatants query.
+    let slot_lookup: std::collections::HashMap<Entity, u8> = combatants
+        .iter()
+        .map(|(e, c, _, _)| (e, c.slot))
+        .collect();
+    team1_combatants.sort_by_key(|(entity, _, _, _, _, _, _, _)| {
+        slot_lookup.get(entity).copied().unwrap_or(u8::MAX)
+    });
+    team2_combatants.sort_by_key(|(entity, _, _, _, _, _, _, _)| {
+        slot_lookup.get(entity).copied().unwrap_or(u8::MAX)
+    });
 
     // Build pet-filtered lists for config index lookups (kill_target, cc_target).
     // Config indices are 0-based slot indices into primary combatants only.

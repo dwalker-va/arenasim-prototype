@@ -1013,6 +1013,7 @@ mod tests {
             fear_direction_timer: 0.0,
             spell_school: None,
             applied_this_frame: false,
+            backlash_damage: None,
         }
     }
 

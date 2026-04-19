@@ -272,6 +272,12 @@ pub fn render_health_bars(
                             let poly_text = format!("SHEEPED {:.1}s", poly_aura.duration);
                             render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &poly_text, egui::Color32::from_rgb(255, 105, 180), ui_scale); // Hot pink
                         }
+
+                        // SILENCE indicator with duration countdown
+                        if let Some(silence_aura) = auras.auras.iter().find(|a| a.effect_type == AuraType::Silence) {
+                            let silence_text = format!("SILENCE {:.1}s", silence_aura.duration);
+                            render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &silence_text, egui::Color32::from_rgb(180, 100, 230), ui_scale); // Violet
+                        }
                     }
 
                     // Scaled corner radius
@@ -864,5 +870,6 @@ fn get_aura_fallback_color(aura_type: &AuraType) -> egui::Color32 {
         AuraType::AttackSpeedSlow => egui::Color32::from_rgb(100, 149, 237), // Cornflower blue (debuff)
         AuraType::LockoutDurationReduction => egui::Color32::from_rgb(255, 215, 0), // Gold (buff)
         AuraType::FrostArmorBuff => egui::Color32::from_rgb(100, 149, 237), // Cornflower blue (self-buff)
+        AuraType::Silence => egui::Color32::from_rgb(75, 0, 130), // Indigo (silence debuff)
     }
 }

@@ -67,6 +67,7 @@ pub enum AbilityType {
     CurseOfAgony,   // Shadow DoT - 84 damage over 24s
     CurseOfWeakness, // Shadow debuff - reduces target damage dealt
     CurseOfTongues, // Shadow debuff - increases target cast time
+    UnstableAffliction, // Shadow DoT - dispel backlash applies Silence + Shadow damage
     // Buff abilities
     ArcaneIntellect, // Mage buff - increases max mana
     BattleShout,     // Warrior buff - increases attack power
@@ -142,6 +143,27 @@ impl AbilityType {
         }
 
         true
+    }
+}
+
+/// Helper function to check if a combatant is currently silenced.
+///
+/// Silence prevents the combatant from using any mana-cost ability, but ONLY
+/// applies to combatants whose resource type is Mana. Warriors (Rage) and Rogues
+/// (Energy) are never blocked by this helper, even if they somehow received a
+/// Silence aura. This matches the design intent from the brainstorm: silence is
+/// a caster-class counter, not a universal CC.
+///
+/// Applied by Unstable Affliction dispel backlash.
+pub fn is_silenced(caster: &super::components::Combatant, auras: Option<&ActiveAuras>) -> bool {
+    use super::components::ResourceType;
+    if caster.resource_type != ResourceType::Mana {
+        return false;
+    }
+    if let Some(auras) = auras {
+        auras.auras.iter().any(|aura| aura.effect_type == AuraType::Silence)
+    } else {
+        false
     }
 }
 

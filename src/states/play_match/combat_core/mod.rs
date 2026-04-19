@@ -170,6 +170,7 @@ mod tests {
             fear_direction_timer: 0.0,
             spell_school: None,
             applied_this_frame: false,
+            backlash_damage: None,
         }
     }
 
@@ -426,6 +427,7 @@ mod tests {
                 fear_direction_timer: 0.0,
                 spell_school: None,
                 applied_this_frame: false,
+                backlash_damage: None,
             }],
         };
 
@@ -475,6 +477,7 @@ mod tests {
                 fear_direction_timer: 0.0,
                 spell_school: Some(SpellSchool::Shadow),
                 applied_this_frame: false,
+                backlash_damage: None,
             }],
         };
 
@@ -555,6 +558,7 @@ mod tests {
                 fear_direction_timer: 0.0,
                 spell_school: None,
                 applied_this_frame: false,
+                backlash_damage: None,
             }],
         };
         assert!(!has_absorb_shield(Some(&auras)));
@@ -586,6 +590,7 @@ mod tests {
                 fear_direction_timer: 0.0,
                 spell_school: None,
                 applied_this_frame: false,
+                backlash_damage: None,
             }],
         };
         assert!(has_weakened_soul(Some(&auras)));
@@ -712,6 +717,7 @@ mod tests {
             fear_direction_timer: 0.0,
             spell_school: None,
             applied_this_frame: false,
+            backlash_damage: None,
         }
     }
 

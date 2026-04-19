@@ -18,7 +18,7 @@
 use bevy::prelude::*;
 
 use crate::combat::log::{CombatLog, CombatLogEventType};
-use crate::states::match_config::WarlockCurse;
+use crate::states::match_config::{CharacterClass, WarlockCurse};
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::{
@@ -27,7 +27,7 @@ use crate::states::play_match::components::{
 };
 use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::constants::GCD;
-use crate::states::play_match::is_spell_school_locked;
+use crate::states::play_match::{is_spell_school_locked, is_silenced};
 
 use crate::states::play_match::utils::log_ability_use;
 
@@ -91,9 +91,48 @@ pub fn decide_warlock_action(
     // When kited, prioritize instant-cast abilities over cast-time spells
     let being_kited = is_being_kited(combatant, my_pos, target_pos, auras);
 
+    // Detect dispel-class enemies. When the enemy team can dispel, UA goes FIRST
+    // so an early dispel pays the silence-tax window — otherwise a Priest can
+    // chain-dispel Corruption without ever triggering the backlash.
+    let enemy_has_dispeller = ctx.alive_enemies().iter().any(|e| matches!(
+        e.class,
+        CharacterClass::Priest | CharacterClass::Paladin
+    ));
+
+    // Try UA first vs dispel-class enemies; otherwise Corruption first (UA's
+    // 1.5s cast time is wasted ramp against a non-dispelling team).
+    if enemy_has_dispeller && !target_immune {
+        if try_unstable_affliction(
+            commands, combat_log, abilities, entity, combatant, my_pos, auras,
+            target_entity, target_pos, ctx,
+        ) {
+            return true;
+        }
+    }
+
     // Priority 1: Corruption (instant Shadow DoT) - skip if target immune
     if !target_immune {
         if try_corruption(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            target_entity,
+            target_pos,
+            ctx,
+        ) {
+            return true;
+        }
+    }
+
+    // Priority 1.5: Unstable Affliction (fallback when no dispeller-priority gate fired)
+    // Stacks with Corruption — both DoTs load on the kill target so dispels face a real
+    // coin-flip. UA's dispel triggers Shadow damage + 5s Silence on the dispeller.
+    if !target_immune {
+        if try_unstable_affliction(
             commands,
             combat_log,
             abilities,
@@ -247,6 +286,9 @@ fn try_corruption(
     if is_spell_school_locked(corruption_def.spell_school, auras) {
         return false;
     }
+    if is_silenced(combatant, auras) && corruption_def.mana_cost > 0.0 {
+        return false;
+    }
 
     if !corruption.can_cast_config(combatant, target_pos, my_pos, corruption_def) {
         return false;
@@ -278,6 +320,84 @@ fn try_corruption(
 
     info!(
         "Team {} {} applies Corruption to enemy (10 damage per 3s for 18s)",
+        combatant.team,
+        combatant.class.name()
+    );
+
+    true
+}
+
+/// Try to cast Unstable Affliction on target.
+///
+/// UA is an instant Shadow DoT that coexists with Corruption. Its dispel triggers
+/// a backlash on the dispeller (Shadow damage + 5s Silence). The backlash damage is
+/// snapshotted from the caster's spell power at cast time and stored on the aura,
+/// so caster death after application does not change the backlash amount.
+///
+/// Returns true if UA was applied.
+fn try_unstable_affliction(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    target_entity: Entity,
+    target_pos: Vec3,
+    ctx: &CombatContext,
+) -> bool {
+    // Don't apply UA to a target CC'd by our own team — would break friendly CC
+    // (this is the explicit per-ability opt-in to the friendly-CC-break guard;
+    // the protection is NOT automatic for new DoTs.)
+    if ctx.has_friendly_breakable_cc(target_entity) {
+        return false;
+    }
+
+    // Check if target already has UA (by ability name — allows coexistence with Corruption)
+    let target_has_ua = ctx.active_auras
+        .get(&target_entity)
+        .map(|auras| auras.iter().any(|a|
+            a.effect_type == AuraType::DamageOverTime && a.ability_name == "Unstable Affliction"
+        ))
+        .unwrap_or(false);
+
+    if target_has_ua {
+        return false;
+    }
+
+    let ua = AbilityType::UnstableAffliction;
+    let ua_def = abilities.get_unchecked(&ua);
+
+    // Check if Shadow school is locked out
+    if is_spell_school_locked(ua_def.spell_school, auras) {
+        return false;
+    }
+    if is_silenced(combatant, auras) && ua_def.mana_cost > 0.0 {
+        return false;
+    }
+
+    if !ua.can_cast_config(combatant, target_pos, my_pos, ua_def) {
+        return false;
+    }
+
+    // Begin casting UA. Mana is deducted on cast completion (process_casting:189);
+    // the backlash damage snapshot is computed at completion in process_casting using
+    // the caster's spell power at that moment. SP doesn't change mid-cast in this
+    // codebase, so this is equivalent to "snapshot at cast start".
+    combatant.global_cooldown = GCD;
+    let cast_time = calculate_cast_time(ua_def.cast_time, auras);
+
+    commands.entity(entity).insert(CastingState::new(ua, target_entity, cast_time));
+
+    // Log cast start
+    let target_tuple = ctx.combatants
+        .get(&target_entity)
+        .map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, "Unstable Affliction", target_tuple, "begins casting");
+
+    info!(
+        "Team {} {} begins casting Unstable Affliction on enemy",
         combatant.team,
         combatant.class.name()
     );
@@ -321,6 +441,9 @@ fn try_immolate(
 
     // Check if Fire school is locked out
     if is_spell_school_locked(immolate_def.spell_school, auras) {
+        return false;
+    }
+    if is_silenced(combatant, auras) && immolate_def.mana_cost > 0.0 {
         return false;
     }
 
@@ -389,6 +512,9 @@ fn try_fear(
     if is_spell_school_locked(fear_def.spell_school, auras) {
         return false;
     }
+    if is_silenced(combatant, auras) && fear_def.mana_cost > 0.0 {
+        return false;
+    }
 
     if !fear.can_cast_config(combatant, target_pos, my_pos, fear_def) {
         return false;
@@ -438,6 +564,9 @@ fn try_shadowbolt(
 
     // Check if Shadow school is locked out
     if is_spell_school_locked(shadowbolt_def.spell_school, auras) {
+        return false;
+    }
+    if is_silenced(combatant, auras) && shadowbolt_def.mana_cost > 0.0 {
         return false;
     }
 
@@ -507,6 +636,9 @@ fn try_drain_life(
 
     // Check if Shadow school is locked out
     if is_spell_school_locked(drain_life_def.spell_school, auras) {
+        return false;
+    }
+    if is_silenced(combatant, auras) && drain_life_def.mana_cost > 0.0 {
         return false;
     }
 
@@ -669,6 +801,9 @@ fn try_cast_curse(
 
     // Check if Shadow school is locked out
     if is_spell_school_locked(ability_def.spell_school, auras) {
+        return false;
+    }
+    if is_silenced(combatant, auras) && ability_def.mana_cost > 0.0 {
         return false;
     }
 
