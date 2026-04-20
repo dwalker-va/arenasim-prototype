@@ -64,6 +64,19 @@ pub struct ItemIconHandles {
     pub handles: Vec<(ItemId, Handle<Image>)>,
 }
 
+/// Resource storing loaded hunter pet family icon textures.
+#[derive(Resource, Default)]
+pub struct HunterPetIcons {
+    pub textures: HashMap<HunterPetType, egui::TextureId>,
+    pub loaded: bool,
+}
+
+/// Resource storing the Bevy image handles for hunter pet icons.
+#[derive(Resource, Default)]
+pub struct HunterPetIconHandles {
+    pub handles: Vec<(HunterPetType, Handle<Image>)>,
+}
+
 
 /// Base stats for a class (used for display)
 struct ClassStats {
@@ -425,6 +438,46 @@ pub fn load_item_icons(
     info!("Item icons loaded for view combatant screen ({} icons)", item_icons.textures.len());
 }
 
+/// System to load hunter pet family icons.
+/// Follows the same 3-phase pattern as load_ability_icons.
+pub fn load_hunter_pet_icons(
+    mut contexts: EguiContexts,
+    asset_server: Res<AssetServer>,
+    mut pet_icons: ResMut<HunterPetIcons>,
+    mut icon_handles: ResMut<HunterPetIconHandles>,
+    images: Res<Assets<Image>>,
+) {
+    if pet_icons.loaded {
+        return;
+    }
+
+    if icon_handles.handles.is_empty() {
+        let pets = [
+            (HunterPetType::Spider, "icons/abilities/ability_hunter_pet_spider.jpg"),
+            (HunterPetType::Boar, "icons/abilities/ability_hunter_pet_boar.jpg"),
+            (HunterPetType::Bird, "icons/abilities/ability_hunter_pet_owl.jpg"),
+        ];
+        for (pet, path) in pets {
+            let handle: Handle<Image> = asset_server.load(path);
+            icon_handles.handles.push((pet, handle));
+        }
+        return;
+    }
+
+    let all_loaded = icon_handles.handles.iter().all(|(_, h)| images.contains(h));
+    if !all_loaded {
+        return;
+    }
+
+    for (pet, handle) in &icon_handles.handles {
+        let texture_id = contexts.add_image(handle.clone());
+        pet_icons.textures.insert(*pet, texture_id);
+    }
+
+    pet_icons.loaded = true;
+    info!("Hunter pet icons loaded for view combatant screen");
+}
+
 /// Main UI system for the View Combatant screen.
 pub fn view_combatant_ui(
     mut contexts: EguiContexts,
@@ -436,6 +489,7 @@ pub fn view_combatant_ui(
     class_icons: Res<ClassIcons>,
     ability_icons: Option<Res<AbilityIcons>>,
     item_icons: Option<Res<ItemIcons>>,
+    pet_icons: Option<Res<HunterPetIcons>>,
     ability_definitions: Res<AbilityDefinitions>,
     mut match_config: ResMut<MatchConfig>,
     item_definitions: Res<ItemDefinitions>,
@@ -791,6 +845,7 @@ pub fn view_combatant_ui(
                                 pet_panel_height,
                                 &view_state,
                                 &mut match_config,
+                                &pet_icons,
                             );
                         },
                     );
@@ -2057,6 +2112,7 @@ fn render_hunter_pet_panel(
     height: f32,
     view_state: &Res<ViewCombatantState>,
     match_config: &mut ResMut<MatchConfig>,
+    pet_icons: &Option<Res<HunterPetIcons>>,
 ) {
     let current_pet = if view_state.team == 1 {
         match_config.team1_hunter_pet_types.get(view_state.slot).copied().unwrap_or_default()
@@ -2085,12 +2141,12 @@ fn render_hunter_pet_panel(
 
         ui.horizontal(|ui| {
             let pets = [
-                (HunterPetType::Spider, egui::Color32::from_rgb(128, 102, 77)),  // Brown
-                (HunterPetType::Boar, egui::Color32::from_rgb(153, 102, 77)),    // Dark brown
-                (HunterPetType::Bird, egui::Color32::from_rgb(153, 179, 204)),   // Light grey-blue
+                HunterPetType::Spider,
+                HunterPetType::Boar,
+                HunterPetType::Bird,
             ];
 
-            for (i, (pet, color)) in pets.iter().enumerate() {
+            for (i, pet) in pets.iter().enumerate() {
                 if i > 0 {
                     ui.add_space(20.0);
                 }
@@ -2105,8 +2161,21 @@ fn render_hunter_pet_panel(
                         egui::Sense::click(),
                     );
 
+                    let icon_texture = pet_icons
+                        .as_ref()
+                        .and_then(|icons| icons.textures.get(pet).copied());
+
                     let painter = ui.painter();
-                    painter.rect_filled(rect, 4.0, *color);
+                    if let Some(texture_id) = icon_texture {
+                        painter.image(
+                            texture_id,
+                            rect,
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
+                    } else {
+                        painter.rect_filled(rect, 4.0, egui::Color32::from_rgb(50, 50, 65));
+                    }
                     painter.rect_stroke(rect, 4.0, egui::Stroke::new(border_width, border_color));
 
                     if response.clicked() && !is_selected {
@@ -2168,7 +2237,7 @@ fn render_warlock_curse_panel(
     } else {
         match_config.team1.clone()
     };
-    let enemy_size = enemy_team.iter().filter(|c| c.is_some()).count();
+    let enemy_size = enemy_team.len();
 
     // Get current curse preferences for this combatant
     let current_prefs = if view_state.team == 1 {
