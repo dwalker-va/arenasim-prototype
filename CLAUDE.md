@@ -266,3 +266,17 @@ mcp__wowhead-classic__lookup_item("Arcanite Reaper")
 ```bash
 cargo run --release
 ```
+
+### Adding a New Combat System
+
+`tests/registration_audit.rs` enforces that every Bevy system function (`pub fn` taking SystemParam types) under `src/states/play_match/` is registered in one of three places. When adding a new system, pick the correct registration path:
+
+- **`add_core_combat_systems` in `src/states/play_match/systems.rs`** — for systems that must run in BOTH headless and graphical modes (combat logic, auras, AI, projectiles, damage application). Add the system to the appropriate phase tuple (Phase 1 `ResourcesAndAuras`, Phase 2 `CombatAndMovement`, or Phase 3 `CombatResolution`) and add the matching `pub use` re-export at the top of `systems.rs`. This path is the home for ~30 systems today and is the answer for almost every gameplay-affecting system.
+
+- **`StatesPlugin::build()` in `src/states/mod.rs`** — for systems that run in graphical mode only (visual effects, HUD rendering, camera, animations, UI for non-PlayMatch states). Add to one of the existing `.add_systems()` blocks or create a new one with the appropriate `.run_if(in_state(...))` gate. Visual-effect systems traditionally use `.after(CombatSystemPhase::CombatResolution)`.
+
+- **`ALLOWLIST` in `tests/registration_audit.rs`** — only for `pub fn` items that take a SystemParam type by value (e.g. `Commands` directly, not `&mut Commands`) but are called manually from a system body rather than registered as a system. Each entry must include a one-line justification. Most helpers in this codebase take references and don't need allowlist entries.
+
+If you forget to register a new system, `cargo test` fails with the file path, line number, and the three registration paths to choose from. The audit is name-agnostic — it detects systems by signature, so renaming a registered function without updating its registration is also caught.
+
+The historical bugs this prevents: `process_dispels`, `process_holy_shock_heals`, `process_holy_shock_damage`, and `process_divine_shield` were each registered in only one of the two paths and silently failed in the other mode. See `docs/solutions/implementation-patterns/graphical-mode-missing-system-registration.md` for context.
