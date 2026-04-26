@@ -1,7 +1,7 @@
 ---
 title: Combat Registration Audit Test
 type: refactor
-status: active
+status: completed
 date: 2026-04-26
 origin: docs/brainstorms/2026-04-26-system-registration-architecture-requirements.md
 ---
