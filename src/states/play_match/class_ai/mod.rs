@@ -23,6 +23,7 @@ pub mod paladin;
 pub mod hunter;
 pub mod pet_ai;
 pub mod cast_guard;
+pub mod combat_snapshot;
 
 use bevy::prelude::*;
 use std::collections::HashMap;
