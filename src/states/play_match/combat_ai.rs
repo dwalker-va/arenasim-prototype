@@ -432,9 +432,16 @@ pub fn decide_abilities(
 
         let ctx = snapshot.context_for(entity);
 
-        // Mages cast spells on enemies
-        if combatant.class == match_config::CharacterClass::Mage {
-            if class_ai::mage::decide_mage_action(
+        // Class AI dispatch. Match is exhaustive over `CharacterClass` —
+        // adding a new class fails the build here until a dispatch arm is
+        // added, replacing the previous silent no-op when a class was
+        // missing from the if-chain.
+        //
+        // Each arm names the per-class accumulators it uses (instant_attacks,
+        // shielded_this_frame, etc.) explicitly rather than threading a bag
+        // through every class.
+        let acted = match combatant.class {
+            match_config::CharacterClass::Mage => class_ai::mage::decide_mage_action(
                 &mut commands,
                 &mut combat_log,
                 &mut game_rng,
@@ -446,13 +453,8 @@ pub fn decide_abilities(
                 &ctx,
                 &mut frost_nova_damage,
                 &mut same_frame_cc_queue,
-            ) {
-                continue;
-            }
-        }
-        // Priests cast Flash Heal on injured allies
-        else if combatant.class == match_config::CharacterClass::Priest {
-            if class_ai::priest::decide_priest_action(
+            ),
+            match_config::CharacterClass::Priest => class_ai::priest::decide_priest_action(
                 &mut commands,
                 &mut combat_log,
                 &abilities,
@@ -463,14 +465,8 @@ pub fn decide_abilities(
                 &ctx,
                 &mut shielded_this_frame,
                 &mut fortified_this_frame,
-            ) {
-                continue;
-            }
-        }
-
-        // Warriors use Charge (gap closer), Mortal Strike, Rend, and Heroic Strike
-        if combatant.class == match_config::CharacterClass::Warrior {
-            if class_ai::warrior::decide_warrior_action(
+            ),
+            match_config::CharacterClass::Warrior => class_ai::warrior::decide_warrior_action(
                 &mut commands,
                 &mut combat_log,
                 &mut game_rng,
@@ -482,14 +478,8 @@ pub fn decide_abilities(
                 &ctx,
                 &mut instant_attacks,
                 &mut battle_shouted_this_frame,
-            ) {
-                continue;
-            }
-        }
-
-        // Rogues use Ambush from stealth, Kick, Kidney Shot and Sinister Strike
-        if combatant.class == match_config::CharacterClass::Rogue {
-            if class_ai::rogue::decide_rogue_action(
+            ),
+            match_config::CharacterClass::Rogue => class_ai::rogue::decide_rogue_action(
                 &mut commands,
                 &mut combat_log,
                 &mut game_rng,
@@ -500,14 +490,8 @@ pub fn decide_abilities(
                 &ctx,
                 &mut instant_attacks,
                 &mut same_frame_cc_queue,
-            ) {
-                continue;
-            }
-        }
-
-        // Warlocks use Corruption (instant DoT), Fear, and Shadowbolt
-        if combatant.class == match_config::CharacterClass::Warlock {
-            if class_ai::warlock::decide_warlock_action(
+            ),
+            match_config::CharacterClass::Warlock => class_ai::warlock::decide_warlock_action(
                 &mut commands,
                 &mut combat_log,
                 &abilities,
@@ -516,14 +500,8 @@ pub fn decide_abilities(
                 my_pos,
                 auras.as_deref(),
                 &ctx,
-            ) {
-                continue;
-            }
-        }
-
-        // Paladins use Flash of Light, Holy Light, Holy Shock, Hammer of Justice, and Cleanse
-        if combatant.class == match_config::CharacterClass::Paladin {
-            if class_ai::paladin::decide_paladin_action(
+            ),
+            match_config::CharacterClass::Paladin => class_ai::paladin::decide_paladin_action(
                 &mut commands,
                 &mut combat_log,
                 &abilities,
@@ -534,14 +512,8 @@ pub fn decide_abilities(
                 &ctx,
                 &mut paladin_aura_this_frame,
                 &mut same_frame_cc_queue,
-            ) {
-                continue;
-            }
-        }
-
-        // Hunters use Aimed Shot, Arcane Shot, Concussive Shot, Disengage, and Traps
-        if combatant.class == match_config::CharacterClass::Hunter {
-            if class_ai::hunter::decide_hunter_action(
+            ),
+            match_config::CharacterClass::Hunter => class_ai::hunter::decide_hunter_action(
                 &mut commands,
                 &mut combat_log,
                 &mut game_rng,
@@ -552,9 +524,10 @@ pub fn decide_abilities(
                 auras.as_deref(),
                 &ctx,
                 &mut instant_attacks,
-            ) {
-                continue;
-            }
+            ),
+        };
+        if acted {
+            continue;
         }
     }
 
