@@ -21,8 +21,9 @@ use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
 use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::constants::GCD;
-use crate::states::play_match::{is_spell_school_locked, is_silenced};
 use crate::states::play_match::utils::log_ability_use;
+
+use super::cast_guard::{pre_cast_ok, PreCastOpts};
 
 use super::CombatContext;
 
@@ -189,17 +190,16 @@ fn try_fortitude(
     let ability = AbilityType::PowerWordFortitude;
     let def = abilities.get_unchecked(&ability);
 
-    // Check if spell school is locked out
-    if is_spell_school_locked(def.spell_school, auras) {
-        return false;
-    }
-    if is_silenced(combatant, auras) && def.mana_cost > 0.0 {
-        return false;
-    }
-
-    // Check range and mana
-    let distance = my_pos.distance(target_pos);
-    if distance > def.range || combatant.current_mana < def.mana_cost {
+    if !pre_cast_ok(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((buff_target, target_pos)),
+        ctx,
+        PreCastOpts::default(),
+    ) {
         return false;
     }
 
@@ -244,13 +244,8 @@ fn try_power_word_shield(
     let pw_shield = AbilityType::PowerWordShield;
     let pw_shield_def = abilities.get_unchecked(&pw_shield);
 
-    if is_spell_school_locked(pw_shield_def.spell_school, auras) {
-        return false;
-    }
-    if is_silenced(combatant, auras) && pw_shield_def.mana_cost > 0.0 {
-        return false;
-    }
-
+    // Cheap fail-fast before scanning allies. The full preamble (school lockout,
+    // silence, range) runs in `pre_cast_ok` once a target is chosen.
     if combatant.current_mana < pw_shield_def.mana_cost {
         return false;
     }
@@ -303,7 +298,16 @@ fn try_power_word_shield(
         return false;
     };
 
-    if !pw_shield.can_cast_config(combatant, target_pos, my_pos, pw_shield_def) {
+    if !pre_cast_ok(
+        pw_shield,
+        pw_shield_def,
+        combatant,
+        my_pos,
+        auras,
+        Some((shield_entity, target_pos)),
+        ctx,
+        PreCastOpts::default(),
+    ) {
         return false;
     }
 
@@ -401,15 +405,16 @@ fn try_flash_heal(
     let heal_target = target_info.entity;
     let target_pos = target_info.position;
 
-    // Check if spell school is locked out
-    if is_spell_school_locked(def.spell_school, auras) {
-        return false;
-    }
-    if is_silenced(combatant, auras) && def.mana_cost > 0.0 {
-        return false;
-    }
-
-    if !ability.can_cast_config(combatant, target_pos, my_pos, def) {
+    if !pre_cast_ok(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((heal_target, target_pos)),
+        ctx,
+        PreCastOpts::default(),
+    ) {
         return false;
     }
 
@@ -455,34 +460,25 @@ fn try_mind_blast(
         return false;
     };
 
-    if ctx.has_friendly_breakable_cc(target_entity) {
-        return false;
-    }
-
-    // Don't waste Mind Blast on immune targets (Divine Shield)
-    if ctx.entity_is_immune(target_entity) {
-        return false;
-    }
-
     let target_pos = target_info.position;
 
     let ability = AbilityType::MindBlast;
-    let on_cooldown = combatant.ability_cooldowns.contains_key(&ability);
     let def = abilities.get_unchecked(&ability);
 
-    if on_cooldown {
-        return false;
-    }
-
-    // Check if spell school is locked out
-    if is_spell_school_locked(def.spell_school, auras) {
-        return false;
-    }
-    if is_silenced(combatant, auras) && def.mana_cost > 0.0 {
-        return false;
-    }
-
-    if !ability.can_cast_config(combatant, target_pos, my_pos, def) {
+    if !pre_cast_ok(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_pos)),
+        ctx,
+        PreCastOpts {
+            check_friendly_cc: true,
+            check_target_immune: true,
+            ..Default::default()
+        },
+    ) {
         return false;
     }
 

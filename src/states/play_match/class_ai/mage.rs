@@ -21,8 +21,9 @@ use crate::states::play_match::constants::{
     CRIT_DAMAGE_MULTIPLIER, DEFENSIVE_HP_THRESHOLD, GCD, MELEE_RANGE, SAFE_KITING_DISTANCE,
 };
 use crate::states::play_match::combat_core::{calculate_cast_time, roll_crit, get_attack_power_bonus_from_slice, get_crit_chance_bonus_from_slice};
-use crate::states::play_match::{is_spell_school_locked, is_silenced};
 use crate::states::play_match::utils::{combatant_id, log_ability_use, spawn_speech_bubble};
+
+use super::cast_guard::{pre_cast_ok, PreCastOpts};
 
 use super::CombatContext;
 
@@ -279,17 +280,16 @@ fn try_arcane_intellect(
     let ability = AbilityType::ArcaneIntellect;
     let def = abilities.get_unchecked(&ability);
 
-    // Check if spell school is locked out
-    if is_spell_school_locked(def.spell_school, auras) {
-        return false;
-    }
-    if is_silenced(combatant, auras) && def.mana_cost > 0.0 {
-        return false;
-    }
-
-    // Check range and mana
-    let distance = my_pos.distance(target_pos);
-    if distance > def.range || combatant.current_mana < def.mana_cost {
+    if !pre_cast_ok(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((buff_target, target_pos)),
+        ctx,
+        PreCastOpts::default(),
+    ) {
         return false;
     }
 
@@ -332,21 +332,17 @@ fn try_frost_nova(
 ) -> bool {
     let frost_nova = AbilityType::FrostNova;
     let nova_def = abilities.get_unchecked(&frost_nova);
-    let nova_on_cooldown = combatant.ability_cooldowns.contains_key(&frost_nova);
 
-    if nova_on_cooldown {
-        return false;
-    }
-
-    // Check if Frost school is locked out
-    if is_spell_school_locked(nova_def.spell_school, auras) {
-        return false;
-    }
-    if is_silenced(combatant, auras) && nova_def.mana_cost > 0.0 {
-        return false;
-    }
-
-    if combatant.current_mana < nova_def.mana_cost {
+    if !pre_cast_ok(
+        frost_nova,
+        nova_def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
+        PreCastOpts::default(),
+    ) {
         return false;
     }
 
@@ -475,13 +471,8 @@ fn try_polymorph(
     };
     let target_pos = target_info.position;
 
-    // Don't waste Polymorph on immune targets (Divine Shield or DR immune)
-    if ctx.entity_is_immune(cc_target) || ctx.is_dr_immune(cc_target, DRCategory::Incapacitates) {
-        return false;
-    }
-
-    // Don't Polymorph a target with friendly DoTs — they'll break it immediately
-    if ctx.has_friendly_dots_on_target(cc_target) {
+    // Don't waste Polymorph on DR-immune targets (DamageImmunity is covered by check_target_immune)
+    if ctx.is_dr_immune(cc_target, DRCategory::Incapacitates) {
         return false;
     }
 
@@ -510,17 +501,20 @@ fn try_polymorph(
     let ability = AbilityType::Polymorph;
     let def = abilities.get_unchecked(&ability);
 
-    // Check if Arcane spell school is locked out
-    if is_spell_school_locked(def.spell_school, auras) {
-        return false;
-    }
-    if is_silenced(combatant, auras) && def.mana_cost > 0.0 {
-        return false;
-    }
-
-    // Check range and mana
-    let distance_to_target = my_pos.distance(target_pos);
-    if distance_to_target > def.range || combatant.current_mana < def.mana_cost {
+    if !pre_cast_ok(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((cc_target, target_pos)),
+        ctx,
+        PreCastOpts {
+            check_target_immune: true,
+            check_friendly_dots: true,
+            ..Default::default()
+        },
+    ) {
         return false;
     }
 
@@ -567,16 +561,6 @@ fn try_frostbolt(
     };
     let target_pos = target_info.position;
 
-    // Don't waste Frostbolt on immune targets (Divine Shield)
-    if ctx.entity_is_immune(target_entity) {
-        return false;
-    }
-
-    // Don't Frostbolt a target polymorphed by our own team
-    if ctx.has_friendly_breakable_cc(target_entity) {
-        return false;
-    }
-
     let distance_to_target = my_pos.distance(target_pos);
 
     // While kiting, only cast if at safe distance
@@ -592,16 +576,20 @@ fn try_frostbolt(
     let ability = AbilityType::Frostbolt;
     let def = abilities.get_unchecked(&ability);
 
-    // Check if spell school is locked out
-    if is_spell_school_locked(def.spell_school, auras) {
-        return false;
-    }
-    if is_silenced(combatant, auras) && def.mana_cost > 0.0 {
-        return false;
-    }
-
-    // Check range and mana
-    if distance_to_target > def.range || combatant.current_mana < def.mana_cost {
+    if !pre_cast_ok(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_pos)),
+        ctx,
+        PreCastOpts {
+            check_target_immune: true,
+            check_friendly_cc: true,
+            ..Default::default()
+        },
+    ) {
         return false;
     }
 

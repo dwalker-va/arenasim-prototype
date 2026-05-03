@@ -22,6 +22,7 @@ use crate::states::play_match::constants::{CRIT_DAMAGE_MULTIPLIER, GCD, MELEE_RA
 use crate::states::play_match::utils::{combatant_id, log_ability_use, spawn_speech_bubble};
 
 use super::CombatContext;
+use super::cast_guard::{pre_cast_ok, PreCastOpts};
 
 /// Rogue AI: Decides and executes abilities for a Rogue combatant.
 ///
@@ -153,14 +154,19 @@ fn try_ambush(
     ctx: &CombatContext,
     instant_attacks: &mut Vec<super::QueuedInstantAttack>,
 ) -> bool {
-    if ctx.has_friendly_breakable_cc(target_entity) {
-        return false;
-    }
-
     let ability = AbilityType::Ambush;
     let def = abilities.get_unchecked(&ability);
 
-    if !ability.can_cast_config(combatant, target_pos, my_pos, def) {
+    if !pre_cast_ok(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        None,
+        Some((target_entity, target_pos)),
+        ctx,
+        PreCastOpts { check_friendly_cc: true, ..Default::default() },
+    ) {
         return false;
     }
 
@@ -219,7 +225,16 @@ fn try_cheap_shot(
     let ability = AbilityType::CheapShot;
     let def = abilities.get_unchecked(&ability);
 
-    if !ability.can_cast_config(combatant, target_pos, my_pos, def) {
+    if !pre_cast_ok(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        None,
+        Some((target_entity, target_pos)),
+        ctx,
+        PreCastOpts::default(),
+    ) {
         return false;
     }
 
@@ -291,15 +306,18 @@ fn try_kidney_shot(
     same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
 ) -> bool {
     let kidney_shot = AbilityType::KidneyShot;
-    let ks_on_cooldown = combatant.ability_cooldowns.contains_key(&kidney_shot);
-
-    if ks_on_cooldown {
-        return false;
-    }
-
     let def = abilities.get_unchecked(&kidney_shot);
 
-    if !kidney_shot.can_cast_config(combatant, target_pos, my_pos, def) {
+    if !pre_cast_ok(
+        kidney_shot,
+        def,
+        combatant,
+        my_pos,
+        None,
+        Some((target_entity, target_pos)),
+        ctx,
+        PreCastOpts::default(),
+    ) {
         return false;
     }
 
@@ -368,14 +386,19 @@ fn try_sinister_strike(
     ctx: &CombatContext,
     instant_attacks: &mut Vec<super::QueuedInstantAttack>,
 ) -> bool {
-    if ctx.has_friendly_breakable_cc(target_entity) {
-        return false;
-    }
-
     let ability = AbilityType::SinisterStrike;
     let def = abilities.get_unchecked(&ability);
 
-    if !ability.can_cast_config(combatant, target_pos, my_pos, def) {
+    if !pre_cast_ok(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        None,
+        Some((target_entity, target_pos)),
+        ctx,
+        PreCastOpts { check_friendly_cc: true, ..Default::default() },
+    ) {
         return false;
     }
 

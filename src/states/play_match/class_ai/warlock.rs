@@ -27,7 +27,8 @@ use crate::states::play_match::components::{
 };
 use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::constants::GCD;
-use crate::states::play_match::{is_spell_school_locked, is_silenced};
+
+use super::cast_guard::{pre_cast_ok, PreCastOpts};
 
 use crate::states::play_match::utils::log_ability_use;
 
@@ -262,11 +263,6 @@ fn try_corruption(
     target_pos: Vec3,
     ctx: &CombatContext,
 ) -> bool {
-    // Don't apply Corruption to a target polymorphed by our own team
-    if ctx.has_friendly_breakable_cc(target_entity) {
-        return false;
-    }
-
     // Check if target already has Corruption (check by ability name to allow stacking with Immolate)
     let target_has_corruption = ctx.active_auras
         .get(&target_entity)
@@ -282,15 +278,16 @@ fn try_corruption(
     let corruption = AbilityType::Corruption;
     let corruption_def = abilities.get_unchecked(&corruption);
 
-    // Check if Shadow school is locked out
-    if is_spell_school_locked(corruption_def.spell_school, auras) {
-        return false;
-    }
-    if is_silenced(combatant, auras) && corruption_def.mana_cost > 0.0 {
-        return false;
-    }
-
-    if !corruption.can_cast_config(combatant, target_pos, my_pos, corruption_def) {
+    if !pre_cast_ok(
+        corruption,
+        corruption_def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_pos)),
+        ctx,
+        PreCastOpts { check_friendly_cc: true, ..Default::default() },
+    ) {
         return false;
     }
 
@@ -347,13 +344,6 @@ fn try_unstable_affliction(
     target_pos: Vec3,
     ctx: &CombatContext,
 ) -> bool {
-    // Don't apply UA to a target CC'd by our own team — would break friendly CC
-    // (this is the explicit per-ability opt-in to the friendly-CC-break guard;
-    // the protection is NOT automatic for new DoTs.)
-    if ctx.has_friendly_breakable_cc(target_entity) {
-        return false;
-    }
-
     // Check if target already has UA (by ability name — allows coexistence with Corruption)
     let target_has_ua = ctx.active_auras
         .get(&target_entity)
@@ -369,15 +359,16 @@ fn try_unstable_affliction(
     let ua = AbilityType::UnstableAffliction;
     let ua_def = abilities.get_unchecked(&ua);
 
-    // Check if Shadow school is locked out
-    if is_spell_school_locked(ua_def.spell_school, auras) {
-        return false;
-    }
-    if is_silenced(combatant, auras) && ua_def.mana_cost > 0.0 {
-        return false;
-    }
-
-    if !ua.can_cast_config(combatant, target_pos, my_pos, ua_def) {
+    if !pre_cast_ok(
+        ua,
+        ua_def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_pos)),
+        ctx,
+        PreCastOpts { check_friendly_cc: true, ..Default::default() },
+    ) {
         return false;
     }
 
@@ -419,11 +410,6 @@ fn try_immolate(
     target_pos: Vec3,
     ctx: &CombatContext,
 ) -> bool {
-    // Don't apply Immolate to a target polymorphed by our own team
-    if ctx.has_friendly_breakable_cc(target_entity) {
-        return false;
-    }
-
     // Check if target already has Immolate (check by ability name to allow stacking with Corruption)
     let target_has_immolate = ctx.active_auras
         .get(&target_entity)
@@ -439,15 +425,16 @@ fn try_immolate(
     let immolate = AbilityType::Immolate;
     let immolate_def = abilities.get_unchecked(&immolate);
 
-    // Check if Fire school is locked out
-    if is_spell_school_locked(immolate_def.spell_school, auras) {
-        return false;
-    }
-    if is_silenced(combatant, auras) && immolate_def.mana_cost > 0.0 {
-        return false;
-    }
-
-    if !immolate.can_cast_config(combatant, target_pos, my_pos, immolate_def) {
+    if !pre_cast_ok(
+        immolate,
+        immolate_def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_pos)),
+        ctx,
+        PreCastOpts { check_friendly_cc: true, ..Default::default() },
+    ) {
         return false;
     }
 
@@ -488,11 +475,6 @@ fn try_fear(
 ) -> bool {
     let fear = AbilityType::Fear;
     let fear_def = abilities.get_unchecked(&fear);
-    let fear_cooldown = combatant.ability_cooldowns.get(&fear).copied().unwrap_or(0.0);
-
-    if fear_cooldown > 0.0 {
-        return false;
-    }
 
     // Check if target is already CC'd
     let target_is_ccd = ctx.active_auras
@@ -508,15 +490,16 @@ fn try_fear(
         return false;
     }
 
-    // Check if Shadow school is locked out
-    if is_spell_school_locked(fear_def.spell_school, auras) {
-        return false;
-    }
-    if is_silenced(combatant, auras) && fear_def.mana_cost > 0.0 {
-        return false;
-    }
-
-    if !fear.can_cast_config(combatant, target_pos, my_pos, fear_def) {
+    if !pre_cast_ok(
+        fear,
+        fear_def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_pos)),
+        ctx,
+        PreCastOpts::default(),
+    ) {
         return false;
     }
 
@@ -555,22 +538,19 @@ fn try_shadowbolt(
     target_pos: Vec3,
     ctx: &CombatContext,
 ) -> bool {
-    if ctx.has_friendly_breakable_cc(target_entity) {
-        return false;
-    }
-
     let shadowbolt = AbilityType::Shadowbolt;
     let shadowbolt_def = abilities.get_unchecked(&shadowbolt);
 
-    // Check if Shadow school is locked out
-    if is_spell_school_locked(shadowbolt_def.spell_school, auras) {
-        return false;
-    }
-    if is_silenced(combatant, auras) && shadowbolt_def.mana_cost > 0.0 {
-        return false;
-    }
-
-    if !shadowbolt.can_cast_config(combatant, target_pos, my_pos, shadowbolt_def) {
+    if !pre_cast_ok(
+        shadowbolt,
+        shadowbolt_def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_pos)),
+        ctx,
+        PreCastOpts { check_friendly_cc: true, ..Default::default() },
+    ) {
         return false;
     }
 
@@ -611,10 +591,6 @@ fn try_drain_life(
     target_pos: Vec3,
     ctx: &CombatContext,
 ) -> bool {
-    if ctx.has_friendly_breakable_cc(target_entity) {
-        return false;
-    }
-
     // Only use Drain Life when we need healing (HP < 80%)
     let hp_percent = combatant.current_health / combatant.max_health;
     if hp_percent >= 0.8 {
@@ -634,15 +610,16 @@ fn try_drain_life(
     let drain_life = AbilityType::DrainLife;
     let drain_life_def = abilities.get_unchecked(&drain_life);
 
-    // Check if Shadow school is locked out
-    if is_spell_school_locked(drain_life_def.spell_school, auras) {
-        return false;
-    }
-    if is_silenced(combatant, auras) && drain_life_def.mana_cost > 0.0 {
-        return false;
-    }
-
-    if !drain_life.can_cast_config(combatant, target_pos, my_pos, drain_life_def) {
+    if !pre_cast_ok(
+        drain_life,
+        drain_life_def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_pos)),
+        ctx,
+        PreCastOpts { check_friendly_cc: true, ..Default::default() },
+    ) {
         return false;
     }
 
@@ -794,21 +771,16 @@ fn try_cast_curse(
 ) -> bool {
     let ability_def = abilities.get_unchecked(&ability);
 
-    // Don't apply curses to a target polymorphed by our own team
-    if ctx.has_friendly_breakable_cc(target_entity) {
-        return false;
-    }
-
-    // Check if Shadow school is locked out
-    if is_spell_school_locked(ability_def.spell_school, auras) {
-        return false;
-    }
-    if is_silenced(combatant, auras) && ability_def.mana_cost > 0.0 {
-        return false;
-    }
-
-    // Check if we can cast (range, mana, etc.)
-    if !ability.can_cast_config(combatant, target_pos, my_pos, ability_def) {
+    if !pre_cast_ok(
+        ability,
+        ability_def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_pos)),
+        ctx,
+        PreCastOpts { check_friendly_cc: true, ..Default::default() },
+    ) {
         return false;
     }
 
