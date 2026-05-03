@@ -27,8 +27,9 @@ use crate::states::play_match::constants::{
     CRITICAL_HP_THRESHOLD, DIVINE_SHIELD_HP_THRESHOLD, GCD, HEALTHY_HP_THRESHOLD,
     HOLY_SHOCK_DAMAGE_RANGE, LOW_HP_THRESHOLD, SAFE_HEAL_MAX_THRESHOLD,
 };
-use crate::states::play_match::{is_spell_school_locked, is_silenced};
 use crate::states::play_match::utils::{combatant_id, log_ability_use};
+
+use super::cast_guard::{pre_cast_ok, PreCastOpts};
 
 use super::{CombatContext, CombatantInfo};
 
@@ -355,13 +356,7 @@ fn try_flash_of_light(
     let ability = AbilityType::FlashOfLight;
     let def = abilities.get_unchecked(&ability);
 
-    if is_spell_school_locked(def.spell_school, auras) {
-        return false;
-    }
-    if is_silenced(combatant, auras) && def.mana_cost > 0.0 {
-        return false;
-    }
-
+    // Cheap fail-fast before scanning allies. Full preamble runs in `pre_cast_ok`.
     if combatant.current_mana < def.mana_cost {
         return false;
     }
@@ -374,7 +369,16 @@ fn try_flash_of_light(
     let target_class = target_info.class;
     let target_pos = target_info.position;
 
-    if !ability.can_cast_config(combatant, target_pos, my_pos, def) {
+    if !pre_cast_ok(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((*target_entity, target_pos)),
+        ctx,
+        PreCastOpts::default(),
+    ) {
         return false;
     }
 
@@ -403,13 +407,7 @@ fn try_holy_light(
     let ability = AbilityType::HolyLight;
     let def = abilities.get_unchecked(&ability);
 
-    if is_spell_school_locked(def.spell_school, auras) {
-        return false;
-    }
-    if is_silenced(combatant, auras) && def.mana_cost > 0.0 {
-        return false;
-    }
-
+    // Cheap fail-fast before scanning allies. Full preamble runs in `pre_cast_ok`.
     if combatant.current_mana < def.mana_cost {
         return false;
     }
@@ -426,7 +424,16 @@ fn try_holy_light(
     let target_class = target_info.class;
     let target_pos = target_info.position;
 
-    if !ability.can_cast_config(combatant, target_pos, my_pos, def) {
+    if !pre_cast_ok(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((*target_entity, target_pos)),
+        ctx,
+        PreCastOpts::default(),
+    ) {
         return false;
     }
 
@@ -454,25 +461,18 @@ fn try_holy_shock_heal(
     let ability = AbilityType::HolyShock;
     let def = abilities.get_unchecked(&ability);
 
-    if is_spell_school_locked(def.spell_school, auras) {
-        return false;
-    }
-    if is_silenced(combatant, auras) && def.mana_cost > 0.0 {
-        return false;
-    }
-
-    // Check cooldown
-    if combatant
-        .ability_cooldowns
-        .get(&ability)
-        .copied()
-        .unwrap_or(0.0)
-        > 0.0
-    {
-        return false;
-    }
-
-    if combatant.current_mana < def.mana_cost {
+    // Range is enforced by `lowest_health_ally_below`, so target=None is safe;
+    // pre_cast_ok handles school lockout, silence, cooldown, and mana.
+    if !pre_cast_ok(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
+        PreCastOpts::default(),
+    ) {
         return false;
     }
 
@@ -516,25 +516,18 @@ fn try_holy_shock_damage(
     let ability = AbilityType::HolyShock;
     let def = abilities.get_unchecked(&ability);
 
-    if is_spell_school_locked(def.spell_school, auras) {
-        return false;
-    }
-    if is_silenced(combatant, auras) && def.mana_cost > 0.0 {
-        return false;
-    }
-
-    // Check cooldown
-    if combatant
-        .ability_cooldowns
-        .get(&ability)
-        .copied()
-        .unwrap_or(0.0)
-        > 0.0
-    {
-        return false;
-    }
-
-    if combatant.current_mana < def.mana_cost {
+    // Cheap fail-fast (mana + school + silence + cooldown). Target-side guards
+    // (friendly-CC, immunity) run after target selection.
+    if !pre_cast_ok(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
+        PreCastOpts::default(),
+    ) {
         return false;
     }
 
@@ -547,17 +540,30 @@ fn try_holy_shock_damage(
         .filter(|(e, _)| !ctx.entity_is_immune(**e))
         .find_map(|(e, info)| {
             if my_pos.distance(info.position) <= HOLY_SHOCK_DAMAGE_RANGE {
-                Some((e, info.class))
+                Some((e, info.position, info.class))
             } else {
                 None
             }
         });
 
-    let Some((target_entity, target_class)) = damage_target else {
+    let Some((target_entity, target_pos, target_class)) = damage_target else {
         return false;
     };
 
-    if ctx.has_friendly_breakable_cc(*target_entity) {
+    if !pre_cast_ok(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((*target_entity, target_pos)),
+        ctx,
+        PreCastOpts {
+            check_friendly_cc: true,
+            check_target_immune: true,
+            ..Default::default()
+        },
+    ) {
         return false;
     }
 
@@ -597,25 +603,18 @@ fn try_hammer_of_justice(
     let ability = AbilityType::HammerOfJustice;
     let def = abilities.get_unchecked(&ability);
 
-    if is_spell_school_locked(def.spell_school, auras) {
-        return false;
-    }
-    if is_silenced(combatant, auras) && def.mana_cost > 0.0 {
-        return false;
-    }
-
-    // Check cooldown
-    if combatant
-        .ability_cooldowns
-        .get(&ability)
-        .copied()
-        .unwrap_or(0.0)
-        > 0.0
-    {
-        return false;
-    }
-
-    if combatant.current_mana < def.mana_cost {
+    // Universal preamble (school + silence + cooldown + mana). Per-target guards
+    // (immunity, DR) are applied during target selection below.
+    if !pre_cast_ok(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
+        PreCastOpts::default(),
+    ) {
         return false;
     }
 
@@ -772,16 +771,16 @@ fn try_paladin_aura(
 
     let def = abilities.get_unchecked(&ability);
 
-    // Check if spell school is locked out
-    if is_spell_school_locked(def.spell_school, auras) {
-        return false;
-    }
-    if is_silenced(combatant, auras) && def.mana_cost > 0.0 {
-        return false;
-    }
-
-    // Check mana (for consistency, even though auras cost 0)
-    if combatant.current_mana < def.mana_cost {
+    if !pre_cast_ok(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
+        PreCastOpts::default(),
+    ) {
         return false;
     }
 

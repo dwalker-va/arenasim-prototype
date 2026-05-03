@@ -18,9 +18,8 @@ use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
 use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::constants::*;
-use crate::states::play_match::{is_spell_school_locked, is_silenced};
-
 use super::CombatContext;
+use super::cast_guard::{pre_cast_ok, PreCastOpts};
 use super::super::utils::log_ability_use;
 
 /// Hunter AI: Decides and executes abilities for a Hunter combatant.
@@ -327,23 +326,26 @@ fn try_concussive_shot(
     target_entity: Entity,
     ctx: &CombatContext,
 ) -> bool {
-    if ctx.has_friendly_breakable_cc(target_entity) {
-        return false;
-    }
-
     let ability = AbilityType::ConcussiveShot;
     let Some(def) = abilities.get(&ability) else { return false };
-    if combatant.ability_cooldowns.contains_key(&ability) { return false }
-    if combatant.current_mana < def.mana_cost { return false }
 
     let Some(target_info) = ctx.combatants.get(&target_entity) else { return false };
-    let distance = my_pos.distance(target_info.position);
+    let target_pos = target_info.position;
 
-    // Check min range (dead zone)
-    if let Some(min_range) = def.min_range {
-        if distance < min_range { return false }
+    // No `auras` parameter on this function — pre_cast_ok treats school/silence
+    // as no-ops when auras=None, which matches the original behavior.
+    if !pre_cast_ok(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        None,
+        Some((target_entity, target_pos)),
+        ctx,
+        PreCastOpts { check_friendly_cc: true, ..Default::default() },
+    ) {
+        return false;
     }
-    if distance > def.range { return false }
 
     // Don't use if target already slowed
     if is_target_slowed(target_entity, ctx) { return false }
@@ -385,20 +387,21 @@ fn try_aimed_shot(
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
 ) -> bool {
-    if ctx.has_friendly_breakable_cc(target_entity) {
-        return false;
-    }
-
     let ability = AbilityType::AimedShot;
     let Some(def) = abilities.get(&ability) else { return false };
-    if combatant.ability_cooldowns.contains_key(&ability) { return false }
-    if combatant.current_mana < def.mana_cost { return false }
 
-    let distance = my_pos.distance(target_info.position);
-    if let Some(min_range) = def.min_range {
-        if distance < min_range { return false }
+    if !pre_cast_ok(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_info.position)),
+        ctx,
+        PreCastOpts { check_friendly_cc: true, ..Default::default() },
+    ) {
+        return false;
     }
-    if distance > def.range { return false }
 
     // Start casting
     let cast_time = calculate_cast_time(def.cast_time, auras);
@@ -428,22 +431,21 @@ fn try_arcane_shot(
     _instant_attacks: &mut Vec<super::QueuedInstantAttack>,
     auras: Option<&ActiveAuras>,
 ) -> bool {
-    if ctx.has_friendly_breakable_cc(target_entity) {
-        return false;
-    }
-
     let ability = AbilityType::ArcaneShot;
     let Some(def) = abilities.get(&ability) else { return false };
-    if combatant.ability_cooldowns.contains_key(&ability) { return false }
-    if combatant.current_mana < def.mana_cost { return false }
-    if is_spell_school_locked(def.spell_school, auras) { return false }
-    if is_silenced(combatant, auras) && def.mana_cost > 0.0 { return false }
 
-    let distance = my_pos.distance(target_info.position);
-    if let Some(min_range) = def.min_range {
-        if distance < min_range { return false }
+    if !pre_cast_ok(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_info.position)),
+        ctx,
+        PreCastOpts { check_friendly_cc: true, ..Default::default() },
+    ) {
+        return false;
     }
-    if distance > def.range { return false }
 
     // Spawn projectile — damage is calculated and applied on impact by process_projectile_hits
     let projectile_speed = def.projectile_speed.unwrap_or(45.0);

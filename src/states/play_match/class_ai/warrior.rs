@@ -23,6 +23,7 @@ use crate::states::play_match::constants::{CHARGE_MIN_RANGE, CRIT_DAMAGE_MULTIPL
 use crate::states::play_match::utils::log_ability_use;
 
 use super::CombatContext;
+use super::cast_guard::{pre_cast_ok, PreCastOpts};
 
 /// Shout range constant (applies to all shout variants)
 const SHOUT_RANGE: f32 = 30.0;
@@ -432,11 +433,6 @@ fn try_rend(
     target_pos: Vec3,
     ctx: &CombatContext,
 ) -> bool {
-    // Don't apply Rend to a target polymorphed by our own team
-    if ctx.has_friendly_breakable_cc(target_entity) {
-        return false;
-    }
-
     // Check if target already has Rend (any DoT for now)
     let target_has_rend = ctx.active_auras
         .get(&target_entity)
@@ -450,7 +446,16 @@ fn try_rend(
     let rend = AbilityType::Rend;
     let rend_def = abilities.get_unchecked(&rend);
 
-    if !rend.can_cast_config(combatant, target_pos, my_pos, rend_def) {
+    if !pre_cast_ok(
+        rend,
+        rend_def,
+        combatant,
+        my_pos,
+        None,
+        Some((target_entity, target_pos)),
+        ctx,
+        PreCastOpts { check_friendly_cc: true, ..Default::default() },
+    ) {
         return false;
     }
 
@@ -502,23 +507,19 @@ fn try_mortal_strike(
     ctx: &CombatContext,
     instant_attacks: &mut Vec<super::QueuedInstantAttack>,
 ) -> bool {
-    if ctx.has_friendly_breakable_cc(target_entity) {
-        return false;
-    }
-
     let mortal_strike = AbilityType::MortalStrike;
     let ms_def = abilities.get_unchecked(&mortal_strike);
-    let ms_on_cooldown = combatant.ability_cooldowns.contains_key(&mortal_strike);
 
-    if ms_on_cooldown {
-        return false;
-    }
-
-    if !mortal_strike.can_cast_config(combatant, target_pos, my_pos, ms_def) {
-        return false;
-    }
-
-    if combatant.current_mana < ms_def.mana_cost {
+    if !pre_cast_ok(
+        mortal_strike,
+        ms_def,
+        combatant,
+        my_pos,
+        None,
+        Some((target_entity, target_pos)),
+        ctx,
+        PreCastOpts { check_friendly_cc: true, ..Default::default() },
+    ) {
         return false;
     }
 
