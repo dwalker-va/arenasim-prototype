@@ -337,56 +337,17 @@ pub fn decide_abilities(
     // CombatantInfo is a per-frame snapshot. Mutations to Combatant components
     // during class AI dispatch are not reflected in other entities' views.
     // Safe because each entity is dispatched at most once per frame.
-    let combatant_info: std::collections::HashMap<Entity, class_ai::CombatantInfo> = combatants
-        .iter()
-        .map(|(entity, combatant, transform, _)| {
-            let pet_comp = pet_query.get(entity).ok();
-            (entity, class_ai::CombatantInfo {
-                entity,
-                team: combatant.team,
-                slot: combatant.slot,
-                class: combatant.class,
-                current_health: combatant.current_health,
-                max_health: combatant.max_health,
-                current_mana: combatant.current_mana,
-                max_mana: combatant.max_mana,
-                position: transform.translation,
-                is_alive: combatant.is_alive(),
-                stealthed: combatant.stealthed,
-                target: combatant.target,
-                is_pet: pet_comp.is_some(),
-                pet_type: pet_comp.map(|p| p.pet_type),
-            })
-        })
-        .collect();
-
-    // Map of entities to their active auras (for checking buffs/debuffs)
-    // We need auras from:
-    // 1. Non-casting/non-channeling entities (from main query)
-    // 2. Casting entities (separate query to avoid conflicts)
-    // 3. Channeling entities (separate query to avoid conflicts)
-    let mut active_auras_map: std::collections::HashMap<Entity, Vec<Aura>> = combatants
-        .iter()
-        .filter_map(|(entity, _, _, auras_opt)| {
-            auras_opt.map(|auras| (entity, auras.auras.clone()))
-        })
-        .collect();
-
-    // Add auras from casting entities
-    for (entity, auras) in casting_auras.iter() {
-        active_auras_map.insert(entity, auras.auras.clone());
-    }
-
-    // Add auras from channeling entities
-    for (entity, auras) in channeling_auras.iter() {
-        active_auras_map.insert(entity, auras.auras.clone());
-    }
-
-    // Build DR tracker map for AI immunity queries
-    let mut dr_trackers: std::collections::HashMap<Entity, DRTracker> = dr_tracker_query
-        .iter()
-        .map(|(entity, tracker)| (entity, tracker.clone()))
-        .collect();
+    //
+    // The snapshot's `active_auras` and `dr_trackers` are mutated in-place by
+    // `snapshot.reflect_instant_cc` below as instant-CC abilities land, so
+    // later combatants in this frame's dispatch see those CCs immediately.
+    let mut snapshot = class_ai::combat_snapshot::CombatSnapshot::build(
+        &combatants,
+        &casting_auras,
+        &channeling_auras,
+        &dr_tracker_query,
+        &pet_query,
+    );
 
     // Queue for instant ability attacks (Ambush, Sinister Strike, Mortal Strike)
     let mut instant_attacks: Vec<class_ai::QueuedInstantAttack> = Vec::new();
@@ -424,12 +385,7 @@ pub fn decide_abilities(
         // or decisions for this combatant, so that stuns/roots landed earlier this frame
         // are visible to this combatant's incapacitation check and its CombatContext.
         for (cc_target, cc_aura) in same_frame_cc_queue.drain(..) {
-            super::auras::reflect_instant_cc_in_snapshot(
-                cc_target,
-                &cc_aura,
-                &mut active_auras_map,
-                &mut dr_trackers,
-            );
+            snapshot.reflect_instant_cc(cc_target, &cc_aura);
         }
 
         if !combatant.is_alive() {
@@ -444,7 +400,7 @@ pub fn decide_abilities(
         // WoW Mechanic: Cannot use abilities while stunned, feared, or polymorphed.
         // Read from the per-frame snapshot (not live `auras`) so that instant CCs
         // landed earlier this frame by other class AIs are observed here.
-        let is_incapacitated = active_auras_map
+        let is_incapacitated = snapshot.active_auras
             .get(&entity)
             .map(|auras_slice| {
                 auras_slice.iter().any(|a| super::utils::is_incapacitating(&a.effect_type))
@@ -453,12 +409,7 @@ pub fn decide_abilities(
 
         // Paladin-specific: Divine Shield can be used while incapacitated
         if is_incapacitated && combatant.class == match_config::CharacterClass::Paladin {
-            let cc_ctx = class_ai::CombatContext {
-                combatants: &combatant_info,
-                active_auras: &active_auras_map,
-                dr_trackers: &dr_trackers,
-                self_entity: entity,
-            };
+            let cc_ctx = snapshot.context_for(entity);
             if class_ai::paladin::try_divine_shield_while_cc(
                 &mut commands,
                 &mut combat_log,
@@ -479,12 +430,7 @@ pub fn decide_abilities(
         
         let my_pos = transform.translation;
 
-        let ctx = class_ai::CombatContext {
-            combatants: &combatant_info,
-            active_auras: &active_auras_map,
-            dr_trackers: &dr_trackers,
-            self_entity: entity,
-        };
+        let ctx = snapshot.context_for(entity);
 
         // Mages cast spells on enemies
         if combatant.class == match_config::CharacterClass::Mage {
@@ -629,7 +575,7 @@ pub fn decide_abilities(
         let mut actual_damage = 0.0;
 
         // Apply Divine Shield outgoing damage penalty (50%) if attacker has DamageImmunity
-        let ds_penalty = if let Some(attacker_auras) = active_auras_map.get(&attacker_entity) {
+        let ds_penalty = if let Some(attacker_auras) = snapshot.active_auras.get(&attacker_entity) {
             if attacker_auras.iter().any(|a| a.effect_type == AuraType::DamageImmunity) {
                 super::constants::DIVINE_SHIELD_DAMAGE_PENALTY
             } else {

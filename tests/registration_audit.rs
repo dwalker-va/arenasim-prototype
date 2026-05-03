@@ -32,10 +32,9 @@ const STATES_MOD_FILE_REL: &str = "src/states/mod.rs";
 /// in this codebase take references (`&mut Commands`) and don't reach this
 /// list.
 const ALLOWLIST: &[(&str, &str)] = &[
-    // No entries needed at audit introduction. The current codebase has zero
-    // `pub fn` items that take SystemParam types by value without being
-    // registered as systems. If the audit fails after a refactor, prefer
-    // adjusting the registration over expanding this list.
+    // CombatSnapshot::build takes Bevy queries by reference (not by value) to
+    // construct a per-frame view inside `decide_abilities`. Not a Bevy system.
+    ("build", "CombatSnapshot::build helper called from decide_abilities"),
 ];
 
 #[test]
