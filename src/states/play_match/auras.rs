@@ -115,8 +115,8 @@ pub fn update_auras(
 pub fn reflect_instant_cc_in_snapshot(
     target: Entity,
     aura: &Aura,
-    active_auras_map: &mut std::collections::HashMap<Entity, Vec<Aura>>,
-    dr_trackers_map: &mut std::collections::HashMap<Entity, DRTracker>,
+    active_auras_map: &mut std::collections::BTreeMap<Entity, Vec<Aura>>,
+    dr_trackers_map: &mut std::collections::BTreeMap<Entity, DRTracker>,
 ) {
     debug_assert!(
         matches!(
@@ -996,7 +996,7 @@ mod tests {
     use super::super::components::auras::{Aura, AuraType, DRCategory, DRTracker};
     use super::super::abilities::SpellSchool;
     use bevy::prelude::Entity;
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
 
     fn make_cc_aura(effect_type: AuraType, duration: f32) -> Aura {
         Aura {
@@ -1024,8 +1024,8 @@ mod tests {
     #[test]
     fn test_reflect_stun_happy_path() {
         let target = target_entity();
-        let mut auras_map: HashMap<Entity, Vec<Aura>> = HashMap::new();
-        let mut dr_map: HashMap<Entity, DRTracker> = HashMap::new();
+        let mut auras_map: BTreeMap<Entity, Vec<Aura>> = BTreeMap::new();
+        let mut dr_map: BTreeMap<Entity, DRTracker> = BTreeMap::new();
         dr_map.insert(target, DRTracker::default());
 
         let aura = make_cc_aura(AuraType::Stun, 4.0);
@@ -1040,8 +1040,8 @@ mod tests {
     #[test]
     fn test_reflect_blocked_by_divine_shield() {
         let target = target_entity();
-        let mut auras_map: HashMap<Entity, Vec<Aura>> = HashMap::new();
-        let mut dr_map: HashMap<Entity, DRTracker> = HashMap::new();
+        let mut auras_map: BTreeMap<Entity, Vec<Aura>> = BTreeMap::new();
+        let mut dr_map: BTreeMap<Entity, DRTracker> = BTreeMap::new();
         dr_map.insert(target, DRTracker::default());
 
         // Give target DamageImmunity (Divine Shield)
@@ -1059,8 +1059,8 @@ mod tests {
     #[test]
     fn test_reflect_blocked_by_dr_immunity() {
         let target = target_entity();
-        let mut auras_map: HashMap<Entity, Vec<Aura>> = HashMap::new();
-        let mut dr_map: HashMap<Entity, DRTracker> = HashMap::new();
+        let mut auras_map: BTreeMap<Entity, Vec<Aura>> = BTreeMap::new();
+        let mut dr_map: BTreeMap<Entity, DRTracker> = BTreeMap::new();
 
         // Advance DR to immune level (apply 3 times: 100% -> 50% -> 25% -> immune)
         let mut tracker = DRTracker::default();
@@ -1080,8 +1080,8 @@ mod tests {
     #[test]
     fn test_reflect_dr_duration_scaling() {
         let target = target_entity();
-        let mut auras_map: HashMap<Entity, Vec<Aura>> = HashMap::new();
-        let mut dr_map: HashMap<Entity, DRTracker> = HashMap::new();
+        let mut auras_map: BTreeMap<Entity, Vec<Aura>> = BTreeMap::new();
+        let mut dr_map: BTreeMap<Entity, DRTracker> = BTreeMap::new();
 
         // Advance DR to level 1 (next application gets 50% duration)
         let mut tracker = DRTracker::default();
@@ -1099,8 +1099,8 @@ mod tests {
     #[test]
     fn test_reflect_cc_replacement() {
         let target = target_entity();
-        let mut auras_map: HashMap<Entity, Vec<Aura>> = HashMap::new();
-        let mut dr_map: HashMap<Entity, DRTracker> = HashMap::new();
+        let mut auras_map: BTreeMap<Entity, Vec<Aura>> = BTreeMap::new();
+        let mut dr_map: BTreeMap<Entity, DRTracker> = BTreeMap::new();
         dr_map.insert(target, DRTracker::default());
 
         // Give target an existing stun
@@ -1119,8 +1119,8 @@ mod tests {
     #[test]
     fn test_reflect_no_existing_entry_creates_one() {
         let target = target_entity();
-        let mut auras_map: HashMap<Entity, Vec<Aura>> = HashMap::new();
-        let mut dr_map: HashMap<Entity, DRTracker> = HashMap::new();
+        let mut auras_map: BTreeMap<Entity, Vec<Aura>> = BTreeMap::new();
+        let mut dr_map: BTreeMap<Entity, DRTracker> = BTreeMap::new();
         // No DRTracker entry for target either — should handle gracefully (no DR applied)
 
         let aura = make_cc_aura(AuraType::Root, 8.0);

@@ -15,7 +15,7 @@
 #![allow(clippy::too_many_arguments)]
 
 use bevy::prelude::*;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use crate::combat::log::CombatLog;
 use crate::states::match_config::{CharacterClass, PaladinAura};
@@ -331,7 +331,7 @@ pub fn try_divine_shield_while_cc(
 /// Check if any ally is in an emergency situation (below critical HP threshold)
 fn has_emergency_target(
     team: u8,
-    combatant_info: &HashMap<Entity, CombatantInfo>,
+    combatant_info: &BTreeMap<Entity, CombatantInfo>,
 ) -> bool {
     combatant_info.values().any(|info| {
         info.team == team

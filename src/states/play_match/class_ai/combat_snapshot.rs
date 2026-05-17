@@ -14,7 +14,7 @@
 //! (`shielded_this_frame`, `same_frame_cc_queue`, etc.) are NOT part of the
 //! snapshot — they are dispatch-local accumulators owned by `decide_abilities`.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use bevy::prelude::*;
 
@@ -26,12 +26,17 @@ use crate::states::play_match::components::{
 
 /// Per-frame snapshot of every combatant's stats, auras, and DR state.
 ///
-/// Three maps keyed by `Entity`. Construction is via [`CombatSnapshot::from_queries`];
-/// in tests, the struct can be built directly from `HashMap` literals.
+/// Three maps keyed by `Entity`. Construction is via [`CombatSnapshot::build`];
+/// in tests, the struct can be built directly from `BTreeMap` literals.
+///
+/// `BTreeMap` (rather than `HashMap`) is load-bearing for determinism: AI
+/// modules iterate `combatants` for ties like "lowest-HP ally" or "nearest
+/// enemy in range", and `HashMap` would resolve those ties via per-process
+/// random hasher order — breaking seeded replay reproducibility.
 pub struct CombatSnapshot {
-    pub combatants: HashMap<Entity, CombatantInfo>,
-    pub active_auras: HashMap<Entity, Vec<Aura>>,
-    pub dr_trackers: HashMap<Entity, DRTracker>,
+    pub combatants: BTreeMap<Entity, CombatantInfo>,
+    pub active_auras: BTreeMap<Entity, Vec<Aura>>,
+    pub dr_trackers: BTreeMap<Entity, DRTracker>,
 }
 
 impl CombatSnapshot {
@@ -56,8 +61,8 @@ impl CombatSnapshot {
         dr_tracker_query: &Query<(Entity, &DRTracker)>,
         pet_query: &Query<&Pet>,
     ) -> Self {
-        let mut combatants: HashMap<Entity, CombatantInfo> = HashMap::new();
-        let mut active_auras: HashMap<Entity, Vec<Aura>> = HashMap::new();
+        let mut combatants: BTreeMap<Entity, CombatantInfo> = BTreeMap::new();
+        let mut active_auras: BTreeMap<Entity, Vec<Aura>> = BTreeMap::new();
 
         for (entity, combatant, transform, auras_opt) in aura_query.iter() {
             let pet_comp = pet_query.get(entity).ok();
@@ -89,7 +94,7 @@ impl CombatSnapshot {
             active_auras.insert(entity, auras.auras.clone());
         }
 
-        let dr_trackers: HashMap<Entity, DRTracker> = dr_tracker_query
+        let dr_trackers: BTreeMap<Entity, DRTracker> = dr_tracker_query
             .iter()
             .map(|(entity, tracker)| (entity, tracker.clone()))
             .collect();

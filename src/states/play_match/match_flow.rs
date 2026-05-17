@@ -283,10 +283,14 @@ pub fn check_match_end(
             commands.entity(ice_entity).despawn_recursive();
         }
 
-        // Save combat log to file for debugging
+        // Save combat log to file for debugging.
+        // Graphical mode currently runs unseeded (no CLI flag exposes a seed
+        // here); headless mode writes its own MatchMetadata in runner.rs with
+        // the actual seed.
         let match_metadata = MatchMetadata {
             arena_name: config.map.name().to_string(),
             winner,
+            random_seed: None,
             team1: team1_metadata,
             team2: team2_metadata,
         };

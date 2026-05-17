@@ -5,7 +5,7 @@
 //! checks are evaluated. These tests exercise each opt-in and the
 //! silence-gating-on-mana-cost edge case in isolation.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use bevy::prelude::*;
 
@@ -65,9 +65,9 @@ struct TestWorld {
     caster_pos: Vec3,
     target: Entity,
     target_pos: Vec3,
-    combatants: HashMap<Entity, CombatantInfo>,
-    active_auras: HashMap<Entity, Vec<Aura>>,
-    dr_trackers: HashMap<Entity, DRTracker>,
+    combatants: BTreeMap<Entity, CombatantInfo>,
+    active_auras: BTreeMap<Entity, Vec<Aura>>,
+    dr_trackers: BTreeMap<Entity, DRTracker>,
 }
 
 impl TestWorld {
@@ -77,7 +77,7 @@ impl TestWorld {
         let caster_pos = Vec3::ZERO;
         let target_pos = Vec3::new(5.0, 0.0, 0.0);
 
-        let mut combatants = HashMap::new();
+        let mut combatants = BTreeMap::new();
         combatants.insert(caster, target_info(caster, 1, caster_class));
         combatants.insert(target, target_info(target, 2, CharacterClass::Mage));
 
@@ -87,8 +87,8 @@ impl TestWorld {
             target,
             target_pos,
             combatants,
-            active_auras: HashMap::new(),
-            dr_trackers: HashMap::new(),
+            active_auras: BTreeMap::new(),
+            dr_trackers: BTreeMap::new(),
         }
     }
 

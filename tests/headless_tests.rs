@@ -5,7 +5,7 @@
 //! - Match results are accessible programmatically
 //! - Seeded RNG produces deterministic results
 
-use arenasim::headless::{HeadlessMatchConfig, MatchResult};
+use arenasim::headless::{run_headless_match_with, HeadlessMatchConfig, MatchResult};
 
 /// Helper to create a basic match config
 fn create_config(team1: Vec<&str>, team2: Vec<&str>, seed: Option<u64>) -> HeadlessMatchConfig {
@@ -90,4 +90,64 @@ fn test_combatant_result_fields() {
     assert_eq!(result.class_name, "Warrior");
     assert!(result.survived);
     assert!(result.damage_dealt > 0.0);
+}
+
+/// End-to-end determinism check: the same seed must produce the same match
+/// outcome. This is the canary for any future change that introduces a new
+/// non-determinism source (raw `HashMap` iteration, unseeded `thread_rng`,
+/// wall-clock time leakage). If this fails, replays and matrix runs are
+/// untrustworthy until the regression is found.
+///
+/// We assert on winner + final HP per combatant + damage dealt/taken — strong
+/// enough to catch RNG drift without being as fragile as byte-identical log
+/// comparison.
+#[test]
+fn seeded_matches_are_deterministic() {
+    let seed = 0xCAFE_F00D_u64;
+    let make = || create_config(vec!["Warrior", "Priest"], vec!["Mage", "Rogue"], Some(seed));
+
+    let r1 = run_headless_match_with(make(), true).expect("first run");
+    let r2 = run_headless_match_with(make(), true).expect("second run");
+
+    assert_eq!(r1.winner, r2.winner, "winner differs between seeded runs");
+    assert_eq!(r1.team1_combatants.len(), r2.team1_combatants.len());
+    assert_eq!(r1.team2_combatants.len(), r2.team2_combatants.len());
+
+    for (i, (a, b)) in r1.team1_combatants.iter().zip(r2.team1_combatants.iter()).enumerate() {
+        assert_eq!(a.class_name, b.class_name, "team1 slot {} class drifted", i);
+        assert!((a.final_health - b.final_health).abs() < 0.01,
+            "team1 slot {} final_health drift: {} vs {}", i, a.final_health, b.final_health);
+        assert!((a.damage_dealt - b.damage_dealt).abs() < 0.01,
+            "team1 slot {} damage_dealt drift: {} vs {}", i, a.damage_dealt, b.damage_dealt);
+        assert!((a.damage_taken - b.damage_taken).abs() < 0.01,
+            "team1 slot {} damage_taken drift: {} vs {}", i, a.damage_taken, b.damage_taken);
+    }
+    for (i, (a, b)) in r1.team2_combatants.iter().zip(r2.team2_combatants.iter()).enumerate() {
+        assert_eq!(a.class_name, b.class_name, "team2 slot {} class drifted", i);
+        assert!((a.final_health - b.final_health).abs() < 0.01,
+            "team2 slot {} final_health drift: {} vs {}", i, a.final_health, b.final_health);
+        assert!((a.damage_dealt - b.damage_dealt).abs() < 0.01,
+            "team2 slot {} damage_dealt drift: {} vs {}", i, a.damage_dealt, b.damage_dealt);
+        assert!((a.damage_taken - b.damage_taken).abs() < 0.01,
+            "team2 slot {} damage_taken drift: {} vs {}", i, a.damage_taken, b.damage_taken);
+    }
+}
+
+/// Different seeds should produce different matches (or at least, this seed
+/// pair should — chosen empirically). Guards against accidentally hard-coding
+/// outcomes independent of the seed.
+#[test]
+fn different_seeds_produce_different_matches() {
+    let make = |seed: u64| create_config(vec!["Warrior"], vec!["Mage"], Some(seed));
+
+    let r1 = run_headless_match_with(make(1), true).expect("run 1");
+    let r2 = run_headless_match_with(make(2), true).expect("run 2");
+
+    let differs = r1.winner != r2.winner
+        || r1.match_time != r2.match_time
+        || r1.team1_combatants.iter().zip(r2.team1_combatants.iter())
+            .any(|(a, b)| (a.final_health - b.final_health).abs() > 0.01
+                || (a.damage_dealt - b.damage_dealt).abs() > 0.01);
+
+    assert!(differs, "seeds 1 and 2 produced identical results — RNG may not be wired");
 }

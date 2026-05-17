@@ -39,7 +39,7 @@ pub fn pet_ai_system(
     }
 
     // Build CombatantInfo snapshot (same pattern as decide_abilities)
-    let combatant_info: std::collections::HashMap<Entity, super::CombatantInfo> = all_combatants
+    let combatant_info: std::collections::BTreeMap<Entity, super::CombatantInfo> = all_combatants
         .iter()
         .map(|(entity, combatant, transform, _)| {
             (entity, super::CombatantInfo {
@@ -61,14 +61,14 @@ pub fn pet_ai_system(
         })
         .collect();
 
-    let active_auras_map: std::collections::HashMap<Entity, Vec<Aura>> = all_combatants
+    let active_auras_map: std::collections::BTreeMap<Entity, Vec<Aura>> = all_combatants
         .iter()
         .filter_map(|(entity, _, _, auras_opt)| {
             auras_opt.map(|auras| (entity, auras.auras.clone()))
         })
         .collect();
 
-    let dr_trackers: std::collections::HashMap<Entity, DRTracker> = dr_tracker_query
+    let dr_trackers: std::collections::BTreeMap<Entity, DRTracker> = dr_tracker_query
         .iter()
         .map(|(entity, tracker)| (entity, tracker.clone()))
         .collect();
