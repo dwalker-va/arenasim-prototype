@@ -22,7 +22,9 @@
 //! ```
 
 pub mod config;
+pub mod matrix;
 pub mod runner;
 
 pub use config::HeadlessMatchConfig;
-pub use runner::{run_headless_match, CombatantResult, HeadlessMatchState, MatchResult};
+pub use matrix::run_matrix;
+pub use runner::{run_headless_match, run_headless_match_with, CombatantResult, HeadlessMatchState, MatchResult};

@@ -546,6 +546,10 @@ impl CombatLog {
             Some(2) => "Team 2".to_string(),
             Some(n) => format!("Team {} (invalid)", n),
         })?;
+        writeln!(file, "Seed: {}", match match_metadata.random_seed {
+            Some(seed) => seed.to_string(),
+            None => "<unseeded>".to_string(),
+        })?;
         writeln!(file)?;
         
         // Write team compositions
@@ -617,6 +621,9 @@ impl CombatLog {
 pub struct MatchMetadata {
     pub arena_name: String,
     pub winner: Option<u8>,
+    /// Seed used for deterministic RNG (None = unseeded entropy).
+    /// Embedded in the log header so a saved match can be reproduced.
+    pub random_seed: Option<u64>,
     pub team1: Vec<CombatantMetadata>,
     pub team2: Vec<CombatantMetadata>,
 }

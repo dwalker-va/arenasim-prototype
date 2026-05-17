@@ -6,7 +6,7 @@
 //! `reflect_instant_cc` updating both `active_auras` and `dr_trackers` so
 //! later combatants in the same frame's dispatch loop observe the CC.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use bevy::prelude::*;
 
@@ -54,13 +54,13 @@ fn make_aura(effect_type: AuraType, ability_name: &str) -> Aura {
 }
 
 fn empty_snapshot_with(caster: Entity, target: Entity) -> CombatSnapshot {
-    let mut combatants = HashMap::new();
+    let mut combatants = BTreeMap::new();
     combatants.insert(caster, target_info(caster, 1, CharacterClass::Mage));
     combatants.insert(target, target_info(target, 2, CharacterClass::Warrior));
     CombatSnapshot {
         combatants,
-        active_auras: HashMap::new(),
-        dr_trackers: HashMap::new(),
+        active_auras: BTreeMap::new(),
+        dr_trackers: BTreeMap::new(),
     }
 }
 

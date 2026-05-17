@@ -9,7 +9,7 @@
 //! Construction is cheap because PR #45 made `CombatSnapshot` a plain
 //! struct with public fields; no Bevy world is needed.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use bevy::prelude::*;
 
@@ -71,12 +71,12 @@ fn aura_with(effect_type: AuraType, caster: Option<Entity>, break_on_damage_thre
 /// Empty snapshot with the caster registered as the self-entity. Tests
 /// extend `combatants`, `active_auras`, and `dr_trackers` as they need.
 fn snapshot_for(self_entity: Entity, team: u8, class: CharacterClass) -> CombatSnapshot {
-    let mut combatants = HashMap::new();
+    let mut combatants = BTreeMap::new();
     combatants.insert(self_entity, info(self_entity, team, class));
     CombatSnapshot {
         combatants,
-        active_auras: HashMap::new(),
-        dr_trackers: HashMap::new(),
+        active_auras: BTreeMap::new(),
+        dr_trackers: BTreeMap::new(),
     }
 }
 

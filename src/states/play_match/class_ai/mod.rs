@@ -26,7 +26,7 @@ pub mod cast_guard;
 pub mod combat_snapshot;
 
 use bevy::prelude::*;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use crate::combat::log::CombatLog;
 use super::match_config::CharacterClass;
@@ -116,12 +116,14 @@ impl CombatantInfo {
 /// When iterating `combatants` directly, filter with `!info.is_pet`
 /// unless the ability should affect pets (e.g., AoE damage, auto-attacks).
 pub struct CombatContext<'a> {
-    /// Map of entity to combatant info (per-frame snapshot)
-    pub combatants: &'a HashMap<Entity, CombatantInfo>,
+    /// Map of entity to combatant info (per-frame snapshot).
+    /// `BTreeMap` is used (not `HashMap`) so iteration order is deterministic
+    /// across runs — required for seeded replays. See `CombatSnapshot` docs.
+    pub combatants: &'a BTreeMap<Entity, CombatantInfo>,
     /// Map of entity to their active auras
-    pub active_auras: &'a HashMap<Entity, Vec<Aura>>,
+    pub active_auras: &'a BTreeMap<Entity, Vec<Aura>>,
     /// Map of entity to their DR tracker (for immunity queries)
-    pub dr_trackers: &'a HashMap<Entity, DRTracker>,
+    pub dr_trackers: &'a BTreeMap<Entity, DRTracker>,
     /// The combatant making the decision
     pub self_entity: Entity,
 }

@@ -20,8 +20,14 @@ use arenasim::ui::UiPlugin;
 fn main() {
     let args = cli::parse_args();
 
-    if let Some(config_path) = args.headless {
-        // Headless mode
+    if let Some(n) = args.matrix {
+        // 7×7 matchup matrix mode
+        if let Err(e) = headless::run_matrix(n, args.seed_base, args.save_logs) {
+            eprintln!("Matrix run failed: {}", e);
+            std::process::exit(1);
+        }
+    } else if let Some(config_path) = args.headless {
+        // Single headless match
         run_headless_mode(config_path, args.output, args.max_duration);
     } else {
         // Normal graphical mode
@@ -52,9 +58,19 @@ fn run_headless_mode(
         config.max_duration_secs = duration;
     }
 
-    if let Err(e) = headless::run_headless_match(config) {
-        eprintln!("Error running match: {}", e);
-        std::process::exit(1);
+    match headless::run_headless_match(config) {
+        Ok(result) => {
+            // Brief stdout summary; full details live in the saved log file.
+            let winner = match result.winner {
+                None => "DRAW".to_string(),
+                Some(t) => format!("Team {}", t),
+            };
+            println!("Result: {} ({:.2}s)", winner, result.match_time);
+        }
+        Err(e) => {
+            eprintln!("Error running match: {}", e);
+            std::process::exit(1);
+        }
     }
 }
 

@@ -2,8 +2,8 @@
 //!
 //! Runs arena matches without any graphical output, suitable for automated testing.
 
-use bevy::app::ScheduleRunnerPlugin;
 use bevy::prelude::*;
+use bevy::time::TimeUpdateStrategy;
 use std::time::Duration;
 
 use crate::combat::log::{CombatLog, CombatLogEventType, CombatantMetadata, MatchMetadata};
@@ -68,6 +68,9 @@ pub struct HeadlessMatchState {
     pub match_complete: bool,
     /// Random seed for deterministic simulation (if provided)
     pub random_seed: Option<u64>,
+    /// If true, the per-match `.txt` log file is NOT written. Set by the
+    /// matrix runner where 4,900+ logs would just clutter `match_logs/`.
+    pub suppress_log: bool,
     /// Match result (populated when match completes)
     pub result: Option<MatchResult>,
 }
@@ -75,6 +78,9 @@ pub struct HeadlessMatchState {
 /// Plugin for headless match execution
 pub struct HeadlessPlugin {
     pub config: HeadlessMatchConfig,
+    /// If true, suppress writing the per-match `.txt` log file. Used by the
+    /// matrix runner; the regular `--headless` path leaves this false.
+    pub suppress_log: bool,
 }
 
 impl Plugin for HeadlessPlugin {
@@ -91,6 +97,7 @@ impl Plugin for HeadlessPlugin {
                 output_path: self.config.output_path.clone(),
                 match_complete: false,
                 random_seed: self.config.random_seed,
+                suppress_log: self.suppress_log,
                 result: None,
             })
             .init_resource::<CombatLog>();
@@ -343,7 +350,9 @@ fn headless_check_match_end(
             headless_state.elapsed_time
         );
         let result = build_match_result(&combatants, &pets, None, &headless_state);
-        save_headless_match_log(&combatants, &pets, &config, &combat_log, None, &headless_state);
+        if !headless_state.suppress_log {
+            save_headless_match_log(&combatants, &pets, &config, &combat_log, None, &headless_state);
+        }
         headless_state.result = Some(result);
         headless_state.match_complete = true;
         return;
@@ -366,7 +375,9 @@ fn headless_check_match_end(
         };
 
         let result = build_match_result(&combatants, &pets, winner, &headless_state);
-        save_headless_match_log(&combatants, &pets, &config, &combat_log, winner, &headless_state);
+        if !headless_state.suppress_log {
+            save_headless_match_log(&combatants, &pets, &config, &combat_log, winner, &headless_state);
+        }
         headless_state.result = Some(result);
         headless_state.match_complete = true;
     }
@@ -456,6 +467,7 @@ fn save_headless_match_log(
     let match_metadata = MatchMetadata {
         arena_name: config.map.name().to_string(),
         winner,
+        random_seed: headless_state.random_seed,
         team1: team1_metadata,
         team2: team2_metadata,
     };
@@ -478,41 +490,69 @@ fn headless_exit_on_complete(headless_state: Res<HeadlessMatchState>, mut exit: 
     }
 }
 
-/// Run a headless match with the given configuration
-pub fn run_headless_match(config: HeadlessMatchConfig) -> Result<(), String> {
-    println!("Starting headless match simulation...");
-    println!(
-        "  Team 1: {:?}",
-        config.team1
-    );
-    println!(
-        "  Team 2: {:?}",
-        config.team2
-    );
-    println!("  Map: {}", config.map);
-    println!(
-        "  Max duration: {:.0}s",
-        config.max_duration_secs
-    );
+/// Run a headless match with the given configuration.
+///
+/// Returns the structured `MatchResult` (winner, duration, per-combatant
+/// stats) so callers like the matrix runner can aggregate outcomes without
+/// parsing the human-readable log.
+pub fn run_headless_match(config: HeadlessMatchConfig) -> Result<MatchResult, String> {
+    run_headless_match_with(config, false)
+}
 
-    App::new()
-        // Minimal plugins - no window, no rendering
-        .add_plugins(
-            MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(Duration::from_secs_f64(
-                1.0 / 60.0,
-            ))),
-        )
-        // Transform and hierarchy plugins needed for entity positions
+/// Lower-level entry point used by the matrix runner. When `suppress_log` is
+/// true the per-match `.txt` file is not written.
+pub fn run_headless_match_with(
+    config: HeadlessMatchConfig,
+    suppress_log: bool,
+) -> Result<MatchResult, String> {
+    if !suppress_log {
+        println!("Starting headless match simulation...");
+        println!("  Team 1: {:?}", config.team1);
+        println!("  Team 2: {:?}", config.team2);
+        println!("  Map: {}", config.map);
+        println!("  Max duration: {:.0}s", config.max_duration_secs);
+    }
+
+    let mut app = App::new();
+    app
+        // Minimal plugins - no window, no rendering.
+        // We don't use `ScheduleRunnerPlugin::run_loop` here because that path
+        // calls `App::run()` which (in this Bevy version) replaces the app's
+        // world with a default before returning, making post-run resource
+        // access impossible. The manual `update()` loop below preserves the
+        // world so we can pull `MatchResult` out at the end.
+        .add_plugins(MinimalPlugins)
+        // Force `Time` to advance by a fixed 1/60s per `update()` call.
+        // Without this, `Time::delta` reflects wall-clock between updates,
+        // which is ~0µs in a tight loop — no in-game time would pass and the
+        // match would never end.
+        .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(1.0 / 60.0)))
         .add_plugins(TransformPlugin)
         .add_plugins(HierarchyPlugin)
-        // Load ability definitions and equipment from config
         .add_plugins(AbilityConfigPlugin)
         .add_plugins(EquipmentPlugin)
-        // Our headless match plugin
-        .add_plugins(HeadlessPlugin { config })
-        .run();
+        .add_plugins(HeadlessPlugin { config, suppress_log });
 
-    Ok(())
+    // Tick the schedule until either the match completes or we hit a hard cap.
+    // The cap is wall-time independent — it counts simulated frames at 60Hz —
+    // and exists only as a safety net for runaway infinite loops; the in-game
+    // `max_duration_secs` timeout fires earlier in normal operation.
+    const MAX_FRAMES: u32 = 60 * 60 * 30; // 30 simulated minutes — far above any real match.
+    for _ in 0..MAX_FRAMES {
+        app.update();
+        let done = app.world()
+            .get_resource::<HeadlessMatchState>()
+            .map(|s| s.match_complete)
+            .unwrap_or(false);
+        if done {
+            break;
+        }
+    }
+
+    app.world()
+        .get_resource::<HeadlessMatchState>()
+        .and_then(|s| s.result.clone())
+        .ok_or_else(|| "Headless match exited without producing a result (max frames reached?)".to_string())
 }
 
 /// Build a map from owner Entity → sum of pet damage_dealt. Used at match-end
