@@ -29,7 +29,7 @@ A reusable workflow pattern using Claude Code's Task tool to coordinate two spec
 
 Manual testing of combat simulations is insufficient for several reasons:
 
-1. **Combinatorial Complexity**: With 5 classes, multiple team compositions (1v1, 2v2, 3v3), and two arena maps, there are hundreds of possible match configurations
+1. **Combinatorial Complexity**: With 7 classes (Warrior, Mage, Rogue, Priest, Warlock, Paladin, Hunter), multiple team compositions (1v1, 2v2, 3v3), and two arena maps, there are hundreds of possible match configurations
 2. **Rare Edge Cases**: Some bugs only manifest under specific conditions (e.g., simultaneous attacks, CC overlaps, resource edge cases)
 3. **Regression Risk**: Balance changes or new abilities can introduce subtle bugs
 4. **Human Fatigue**: Reading through match logs manually is tedious and error-prone
@@ -126,6 +126,10 @@ To prevent false positives, document intended behaviors in `design-docs/wow-mech
 
 ## Invocation
 
+### Via the `bug-hunt` Skill (Preferred)
+
+A first-class `/bug-hunt` skill now automates this workflow — it launches a swarm of agents to run headless matches concurrently, analyze combat logs, cross-reference against known issues, and produce a consolidated bug report. Use the skill in normal operation; the manual Task-tool flow below remains documented for cases where you want to script a custom variant.
+
 ### Manual via Task Tool
 
 ```
@@ -145,12 +149,18 @@ fix HIGH confidence issues, ask about MEDIUM, report LOW.")
 # Mirror matches (same-frame timing bugs)
 {"team1":["Warrior"],"team2":["Warrior"]}
 {"team1":["Rogue"],"team2":["Rogue"]}
+{"team1":["Paladin"],"team2":["Paladin"]}
 
 # Healer vs DPS (healing/CC interactions)
 {"team1":["Priest"],"team2":["Rogue"]}
+{"team1":["Paladin"],"team2":["Hunter"]}
+
+# Hunter pet + ranged interactions
+{"team1":["Hunter"],"team2":["Mage"]}
 
 # 2v2 with healer (target priority, buff stacking)
 {"team1":["Warrior","Priest"],"team2":["Mage","Warlock"]}
+{"team1":["Hunter","Paladin"],"team2":["Warrior","Priest"]}
 
 # Full 3v3 (maximum complexity)
 {"team1":["Warrior","Mage","Priest"],"team2":["Rogue","Warlock","Priest"]}
