@@ -328,6 +328,7 @@ pub fn decide_abilities(
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
     pet_query: Query<&Pet>,
+    mut decision_trace: ResMut<crate::states::play_match::decision_trace::DecisionTrace>,
 ) {
     // Don't cast abilities during victory celebration
     if celebration.is_some() {
@@ -478,6 +479,7 @@ pub fn decide_abilities(
                 &ctx,
                 &mut instant_attacks,
                 &mut battle_shouted_this_frame,
+                &mut decision_trace,
             ),
             match_config::CharacterClass::Rogue => class_ai::rogue::decide_rogue_action(
                 &mut commands,
