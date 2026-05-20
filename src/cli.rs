@@ -2,8 +2,36 @@
 //!
 //! Supports both graphical (default) and headless modes.
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
+
+/// AI decision trace output mode.
+///
+/// `off` — no trace emitted.
+/// `on` — minimal trace (actor + target + reason codes).
+/// `verbose` — minimal payload plus full aura lists on actor + target
+/// and all visible enemies (larger files; for deep dives).
+///
+/// Default per mode: single-match runs default to `off`; matrix runs default
+/// to `on` so every cell's trace is already on disk when you find an anomaly.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum, Default)]
+#[clap(rename_all = "kebab-case")]
+pub enum TraceMode {
+    #[default]
+    Off,
+    On,
+    Verbose,
+}
+
+impl TraceMode {
+    pub fn is_enabled(self) -> bool {
+        matches!(self, TraceMode::On | TraceMode::Verbose)
+    }
+
+    pub fn is_verbose(self) -> bool {
+        matches!(self, TraceMode::Verbose)
+    }
+}
 
 /// Arena combat autobattler simulator
 #[derive(Parser, Debug)]
@@ -38,6 +66,12 @@ pub struct Args {
     /// Off by default to avoid 49 × N files in match_logs/.
     #[arg(long)]
     pub save_logs: bool,
+
+    /// AI decision trace mode. `off` = no trace; `on` = minimal trace;
+    /// `verbose` = minimal + full aura/enemy state. When omitted, single-match
+    /// runs default to `off` and matrix runs default to `on`.
+    #[arg(long, value_name = "MODE", value_enum)]
+    pub trace_mode: Option<TraceMode>,
 }
 
 pub fn parse_args() -> Args {

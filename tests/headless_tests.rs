@@ -106,8 +106,8 @@ fn seeded_matches_are_deterministic() {
     let seed = 0xCAFE_F00D_u64;
     let make = || create_config(vec!["Warrior", "Priest"], vec!["Mage", "Rogue"], Some(seed));
 
-    let r1 = run_headless_match_with(make(), true).expect("first run");
-    let r2 = run_headless_match_with(make(), true).expect("second run");
+    let r1 = run_headless_match_with(make(), true, None).expect("first run");
+    let r2 = run_headless_match_with(make(), true, None).expect("second run");
 
     assert_eq!(r1.winner, r2.winner, "winner differs between seeded runs");
     assert_eq!(r1.team1_combatants.len(), r2.team1_combatants.len());
@@ -140,8 +140,8 @@ fn seeded_matches_are_deterministic() {
 fn different_seeds_produce_different_matches() {
     let make = |seed: u64| create_config(vec!["Warrior"], vec!["Mage"], Some(seed));
 
-    let r1 = run_headless_match_with(make(1), true).expect("run 1");
-    let r2 = run_headless_match_with(make(2), true).expect("run 2");
+    let r1 = run_headless_match_with(make(1), true, None).expect("run 1");
+    let r2 = run_headless_match_with(make(2), true, None).expect("run 2");
 
     let differs = r1.winner != r2.winner
         || r1.match_time != r2.match_time

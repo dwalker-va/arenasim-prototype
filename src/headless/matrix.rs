@@ -18,7 +18,8 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use crate::states::match_config::CharacterClass;
 
 use super::config::HeadlessMatchConfig;
-use super::runner::run_headless_match_with;
+use super::runner::{run_headless_match_with, TraceConfig};
+use crate::cli::TraceMode;
 
 /// Per-cell stats accumulator. One cell = one (team1_class, team2_class) pair.
 #[derive(Debug, Default, Clone)]
@@ -55,7 +56,11 @@ impl CellStats {
 }
 
 /// Run the 7×7 matchup matrix and write CSV + Markdown reports.
-pub fn run_matrix(n: u32, seed_base: u64, save_logs: bool) -> Result<(), String> {
+///
+/// `trace_mode` defaults to `On` for matrix runs (see CLI resolution in main.rs);
+/// when enabled, each match writes its own JSONL trace to
+/// `match_logs/traces/match_<seed>_<class1>_v_<class2>_trace.jsonl`.
+pub fn run_matrix(n: u32, seed_base: u64, save_logs: bool, trace_mode: TraceMode) -> Result<(), String> {
     if n == 0 {
         return Err("--matrix N requires N >= 1".to_string());
     }
@@ -64,8 +69,12 @@ pub fn run_matrix(n: u32, seed_base: u64, save_logs: bool) -> Result<(), String>
     let cell_count = classes.len() * classes.len();
     let total_matches = cell_count as u32 * n;
 
-    println!("Running matrix: {}×{} matchups × {} runs = {} matches (seed_base={})",
-        classes.len(), classes.len(), n, total_matches, seed_base);
+    println!("Running matrix: {}×{} matchups × {} runs = {} matches (seed_base={}, trace={:?})",
+        classes.len(), classes.len(), n, total_matches, seed_base, trace_mode);
+
+    if trace_mode.is_enabled() {
+        fs::create_dir_all("match_logs/traces").map_err(|e| format!("create match_logs/traces/: {}", e))?;
+    }
 
     let started = Instant::now();
     let mut stats: HashMap<(CharacterClass, CharacterClass), CellStats> = HashMap::new();
@@ -79,7 +88,20 @@ pub fn run_matrix(n: u32, seed_base: u64, save_logs: bool) -> Result<(), String>
                 global_idx += 1;
                 let config = build_config(c1, c2, seed);
 
-                match run_headless_match_with(config, !save_logs) {
+                let trace_config = if trace_mode.is_enabled() {
+                    Some(TraceConfig {
+                        output_path: format!(
+                            "match_logs/traces/match_{}_{}_v_{}_trace.jsonl",
+                            seed, c1.name(), c2.name()
+                        )
+                        .into(),
+                        verbose: trace_mode.is_verbose(),
+                    })
+                } else {
+                    None
+                };
+
+                match run_headless_match_with(config, !save_logs, trace_config) {
                     Ok(result) => cell.record(result.winner, result.match_time),
                     Err(e) => {
                         eprintln!("  Match {} vs {} run {} failed: {}", c1.name(), c2.name(), run, e);
