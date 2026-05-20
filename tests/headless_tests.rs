@@ -6,6 +6,7 @@
 //! - Seeded RNG produces deterministic results
 
 use arenasim::headless::{run_headless_match_with, HeadlessMatchConfig, MatchResult};
+use arenasim::headless::runner::TraceConfig;
 
 /// Helper to create a basic match config
 fn create_config(team1: Vec<&str>, team2: Vec<&str>, seed: Option<u64>) -> HeadlessMatchConfig {
@@ -131,6 +132,137 @@ fn seeded_matches_are_deterministic() {
         assert!((a.damage_taken - b.damage_taken).abs() < 0.01,
             "team2 slot {} damage_taken drift: {} vs {}", i, a.damage_taken, b.damage_taken);
     }
+}
+
+/// U11 safety gate #1: enabling the decision trace must NOT perturb match
+/// outcomes. If the builder calls or writer system introduce any RNG drift,
+/// state mutation, or query-ordering change, this test catches it.
+///
+/// Runs each pairing twice at the same seed — once with TraceConfig::Some,
+/// once with None — and asserts MatchResult byte-equality.
+#[test]
+fn trace_on_matches_trace_off_outcomes() {
+    let pairings: &[(Vec<&str>, Vec<&str>, u64)] = &[
+        (vec!["Warrior"], vec!["Mage"], 42),
+        (vec!["Warrior"], vec!["Mage"], 100),
+        (vec!["Warrior"], vec!["Mage"], 1000),
+    ];
+
+    for (team1, team2, seed) in pairings {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let trace_path = tmp.path().to_path_buf();
+        drop(tmp); // keep path, let writer create the file
+
+        let trace_config = Some(TraceConfig {
+            output_path: trace_path,
+            verbose: false,
+        });
+
+        let cfg = create_config(team1.clone(), team2.clone(), Some(*seed));
+        let with_trace = run_headless_match_with(cfg, true, trace_config).expect("with trace");
+
+        let cfg = create_config(team1.clone(), team2.clone(), Some(*seed));
+        let without_trace = run_headless_match_with(cfg, true, None).expect("without trace");
+
+        assert_eq!(
+            with_trace.winner, without_trace.winner,
+            "{:?} v {:?} seed={}: winner differs trace-on vs trace-off",
+            team1, team2, seed
+        );
+        assert!(
+            (with_trace.match_time - without_trace.match_time).abs() < 0.01,
+            "{:?} v {:?} seed={}: match_time drift {} vs {}",
+            team1, team2, seed, with_trace.match_time, without_trace.match_time
+        );
+
+        for (i, (a, b)) in with_trace
+            .team1_combatants
+            .iter()
+            .zip(without_trace.team1_combatants.iter())
+            .enumerate()
+        {
+            assert!(
+                (a.final_health - b.final_health).abs() < 0.01,
+                "{:?} v {:?} seed={} team1 slot {}: final_health drift {} vs {}",
+                team1, team2, seed, i, a.final_health, b.final_health
+            );
+            assert!(
+                (a.damage_dealt - b.damage_dealt).abs() < 0.01,
+                "{:?} v {:?} seed={} team1 slot {}: damage_dealt drift {} vs {}",
+                team1, team2, seed, i, a.damage_dealt, b.damage_dealt
+            );
+        }
+        for (i, (a, b)) in with_trace
+            .team2_combatants
+            .iter()
+            .zip(without_trace.team2_combatants.iter())
+            .enumerate()
+        {
+            assert!(
+                (a.final_health - b.final_health).abs() < 0.01,
+                "{:?} v {:?} seed={} team2 slot {}: final_health drift {} vs {}",
+                team1, team2, seed, i, a.final_health, b.final_health
+            );
+            assert!(
+                (a.damage_dealt - b.damage_dealt).abs() < 0.01,
+                "{:?} v {:?} seed={} team2 slot {}: damage_dealt drift {} vs {}",
+                team1, team2, seed, i, a.damage_dealt, b.damage_dealt
+            );
+        }
+    }
+}
+
+/// U11 safety gate #2: two trace-on runs at the same seed must produce
+/// byte-identical trace files. The writer canonicalizes event order by
+/// `(frame, actor.entity_id, kind)` before flush, so even if intermediate
+/// query iteration introduces ordering variance, the on-disk output stays
+/// stable.
+#[test]
+fn trace_file_is_deterministic_at_same_seed() {
+    let seed = 7777_u64;
+
+    let tmp1 = tempfile::NamedTempFile::new().unwrap();
+    let path1 = tmp1.path().to_path_buf();
+    drop(tmp1);
+    let tmp2 = tempfile::NamedTempFile::new().unwrap();
+    let path2 = tmp2.path().to_path_buf();
+    drop(tmp2);
+
+    let cfg = create_config(vec!["Warrior"], vec!["Mage"], Some(seed));
+    run_headless_match_with(
+        cfg,
+        true,
+        Some(TraceConfig {
+            output_path: path1.clone(),
+            verbose: false,
+        }),
+    )
+    .expect("first trace run");
+
+    let cfg = create_config(vec!["Warrior"], vec!["Mage"], Some(seed));
+    run_headless_match_with(
+        cfg,
+        true,
+        Some(TraceConfig {
+            output_path: path2.clone(),
+            verbose: false,
+        }),
+    )
+    .expect("second trace run");
+
+    let a = std::fs::read_to_string(&path1).expect("read trace 1");
+    let b = std::fs::read_to_string(&path2).expect("read trace 2");
+    assert_eq!(
+        a.len(),
+        b.len(),
+        "trace files differ in length: {} vs {}",
+        a.len(),
+        b.len()
+    );
+    assert_eq!(a, b, "trace files differ at same seed — non-deterministic event ordering");
+
+    std::fs::remove_file(&path1).ok();
+    std::fs::remove_file(&path2).ok();
 }
 
 /// Different seeds should produce different matches (or at least, this seed
