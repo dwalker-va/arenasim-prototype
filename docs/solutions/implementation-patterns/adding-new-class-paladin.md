@@ -65,19 +65,20 @@ Both icon loading systems (`load_spell_icons`, `load_ability_icons`) iterate `Ab
 **Solution**: Add caster info to pending components:
 
 ```rust
-// src/states/play_match/components/mod.rs
+// src/states/play_match/components/combatant.rs
 pub struct HolyShockHealPending {
     pub caster_spell_power: f32,
+    pub caster_crit_chance: f32,
     pub caster_team: u8,
     pub caster_class: CharacterClass,
     pub target: Entity,
 }
 ```
 
-For dispels, add a log prefix field:
+For dispels, add a log prefix field. `DispelPending` now lives alongside the other pending components in `components/combatant.rs` (it started life in `class_ai/priest.rs` when only the Priest dispelled, then moved out once the Paladin reused it):
 
 ```rust
-// src/states/play_match/class_ai/priest.rs
+// src/states/play_match/components/combatant.rs
 pub struct DispelPending {
     pub target: Entity,
     pub log_prefix: &'static str,  // "[DISPEL]" or "[CLEANSE]"
@@ -90,7 +91,7 @@ pub struct DispelPending {
 
 **Problem**: Separate `process_dispels` (Priest) and `process_paladin_dispels` (Paladin) with duplicate logic.
 
-**Solution**: Merge into single system using shared `DispelPending` component:
+**Solution**: Merge into a single system (`src/states/play_match/effects/dispels.rs::process_dispels`) using a shared `DispelPending` component:
 
 ```rust
 // Both classes spawn the same component with different log_prefix
@@ -106,30 +107,9 @@ commands.spawn(DispelPending {
 
 **Problem**: Paladin AI repeatedly iterated over `combatant_info` HashMap to find allies and enemies.
 
-**Solution**: Define lightweight info structs and pre-compute once:
+**Solution**: Pre-compute once. The original Paladin patch introduced an ad-hoc `AllyInfo` struct inside `class_ai/paladin.rs`; that lookup work has since been hoisted into the shared `CombatSnapshot` (`class_ai/combat_snapshot.rs`), which builds a single typed per-frame view consumed by every class's `decide_action` via `CombatContext`. New classes should read allies and enemies through `ctx`, not by rebuilding the HashMap-of-tuples themselves.
 
-```rust
-// src/states/play_match/class_ai/paladin.rs
-struct AllyInfo {
-    entity: Entity,
-    class: CharacterClass,
-    hp_percent: f32,
-    pos: Vec3,
-}
-
-// Pre-compute at start of AI decision
-let allies: Vec<AllyInfo> = combatant_info
-    .iter()
-    .filter(|(_, (team, _, _, hp, _))| *team == combatant.team && *hp > 0.0)
-    .filter_map(|(e, (_, _, class, hp, max_hp))| {
-        positions.get(e).map(|pos| AllyInfo {
-            entity: *e, class: *class, hp_percent: *hp / *max_hp, pos: *pos,
-        })
-    })
-    .collect();
-```
-
-**Pattern**: Pre-computation - calculate expensive data once, reuse multiple times.
+**Pattern**: Pre-computation - calculate expensive data once per frame, reuse across every class's AI decision.
 
 ### 6. SmallVec for Stack Allocation
 
@@ -138,7 +118,7 @@ let allies: Vec<AllyInfo> = combatant_info
 **Solution**: Use SmallVec with appropriate inline capacity:
 
 ```rust
-// src/states/play_match/auras.rs
+// src/states/play_match/effects/dispels.rs
 use smallvec::SmallVec;
 
 let dispellable_indices: SmallVec<[usize; 8]> = active_auras
@@ -154,29 +134,27 @@ let dispellable_indices: SmallVec<[usize; 8]> = active_auras
 
 **Problem**: Both Priest and Paladin needed identical "is team healthy" check for maintenance tasks.
 
-**Solution**: Extract to shared function in parent module:
+**Solution**: Extract to a shared method on `CombatContext` (it started as a free function in `class_ai/mod.rs`; once `CombatContext` became the canonical per-frame view, it migrated onto the context):
 
 ```rust
 // src/states/play_match/class_ai/mod.rs
-pub fn is_team_healthy(
-    team: u8,
-    combatant_info: &HashMap<Entity, (u8, u8, CharacterClass, f32, f32)>,
-) -> bool {
-    for &(ally_team, _, _, ally_hp, ally_max_hp) in combatant_info.values() {
-        if ally_team != team || ally_hp <= 0.0 { continue; }
-        if ally_hp / ally_max_hp < 0.70 { return false; }
-    }
-    true
+impl<'a> CombatContext<'a> {
+    pub fn is_team_healthy(&self, threshold: f32, my_pos: Vec3) -> bool { /* ... */ }
 }
+
+// Callers:
+if ctx.is_team_healthy(0.70, my_pos) { /* idle */ }
 ```
 
-**Pattern**: Shared Utility - extract common logic to parent module for reuse.
+**Pattern**: Shared Utility - extract common logic to the per-frame context for reuse across class AIs.
 
 ## Code Review Checklist for New Classes
 
 ### Component & Module Placement
-- [ ] Pending components in `components/mod.rs` (NOT in class-specific files)
+- [ ] Gameplay pending components in `components/combatant.rs` (NOT in class-specific files)
 - [ ] Aura types in `components/auras.rs`
+- [ ] Visual marker components in `components/visual.rs`
+- [ ] Pet components in `components/pets.rs`, resource components in `components/resources.rs`
 - [ ] No class-specific component files
 
 ### Ability Implementation
@@ -187,7 +165,9 @@ pub fn is_team_healthy(
 - [ ] Icon file downloaded to `assets/icons/abilities/`
 
 ### System Registration
-- [ ] Systems registered in `play_match/mod.rs`
+- [ ] Core combat systems registered in `add_core_combat_systems()` (`src/states/play_match/systems.rs`) — runs in BOTH headless and graphical modes
+- [ ] Visual-only systems registered in `StatesPlugin::build()` (`src/states/mod.rs`) — graphical only
+- [ ] `cargo test` passes `tests/registration_audit.rs` (this audit catches missing registrations and tells you which path to use; see `CLAUDE.md` "Adding a New Combat System")
 - [ ] No duplicate system logic (search codebase first!)
 - [ ] Proper Bevy scheduling
 
@@ -237,11 +217,10 @@ echo '{"team1":["Warrior","Paladin"],"team2":["Warrior","Priest"]}' > /tmp/2v2.j
 | `abilities.rs` | 6 new `AbilityType` variants |
 | `ability_config.rs` | Validation entries, `get_class_abilities()` |
 | `abilities.ron` | All Paladin ability definitions |
-| `components/mod.rs` | `HolyShockHealPending`, `HolyShockDamagePending` |
-| `class_ai/paladin.rs` | New AI logic with pre-computed lists |
-| `class_ai/mod.rs` | Import, match arm, `is_team_healthy()` |
-| `class_ai/priest.rs` | Added `log_prefix` to `DispelPending` |
-| `auras.rs` | Unified dispel system, SmallVec |
+| `components/combatant.rs` | `HolyShockHealPending`, `HolyShockDamagePending`, `DispelPending` |
+| `class_ai/paladin.rs` | New AI logic; today, allies/enemies come from `CombatContext` / `CombatSnapshot` |
+| `class_ai/mod.rs` | Import, match arm, `is_team_healthy()` method on `CombatContext` |
+| `effects/dispels.rs` | Unified dispel system (`process_dispels`), SmallVec |
 | `rendering/mod.rs` | Icon paths |
 | `view_combatant_ui.rs` | Dynamic icon loading |
 

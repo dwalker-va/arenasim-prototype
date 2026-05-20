@@ -39,7 +39,7 @@ This pattern has been applied to: `SpellImpactEffect`, `ShieldBubble`, `FlamePar
 
 ### Step 1: Define the Component
 
-**File:** `src/states/play_match/components/mod.rs`
+**File:** `src/states/play_match/components/visual.rs` (visual marker components live here; gameplay components live alongside in `combatant.rs`, `auras.rs`, `pets.rs`, `resources.rs`)
 
 ```rust
 #[derive(Component)]
@@ -230,8 +230,8 @@ Bevy has a compile-time tuple size limit for system groups. Each visual effect t
 
 When adding a new visual effect, touch these files:
 
-- [ ] `components/mod.rs` — New component struct
-- [ ] Combat system file — Spawn the component (e.g., `combat_core.rs`, `effects/dispels.rs`)
+- [ ] `components/visual.rs` — New component struct
+- [ ] Combat system file — Spawn the component (e.g., a file under `combat_core/`, `effects/dispels.rs`)
 - [ ] `rendering/effects.rs` — Three systems + color helper
 - [ ] `states/mod.rs` — System registration (new `.add_systems()` group)
 - [ ] Verify build: `cargo build --release`

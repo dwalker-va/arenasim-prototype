@@ -45,7 +45,7 @@ pub struct Combatant {
 }
 ```
 
-**2. Free function** (`combat_core.rs`):
+**2. Free function** (`combat_core/damage.rs`):
 ```rust
 pub fn roll_crit(crit_chance: f32, rng: &mut GameRng) -> bool {
     rng.random_f32() < crit_chance
@@ -62,20 +62,20 @@ pub const CRIT_HEALING_MULTIPLIER: f32 = 1.5;
 
 | # | Site | File | Key Detail |
 |---|------|------|------------|
-| 1 | Auto-attacks | `combat_core.rs` | Crit before physical damage reduction |
-| 2 | Cast completion (damage) | `combat_core.rs` | Crit before absorbs |
-| 3 | Cast completion (healing) | `combat_core.rs` | Crit before healing reduction (Mortal Strike) |
+| 1 | Auto-attacks | `combat_core/auto_attack.rs` | Crit before physical damage reduction |
+| 2 | Cast completion (damage) | `combat_core/casting.rs` | Crit before absorbs |
+| 3 | Cast completion (healing) | `combat_core/casting.rs` | Crit before healing reduction (Mortal Strike) |
 | 4 | Projectile impact | `projectiles.rs` | Crit rolled at **impact time**, not cast time |
 | 5 | Holy Shock damage | `effects/holy_shock.rs` | Uses snapshotted `caster_crit_chance` from pending struct |
 | 6 | Holy Shock healing | `effects/holy_shock.rs` | Same snapshot pattern |
-| 7 | Class AI instant attacks | `warrior.rs`, `rogue.rs`, `mage.rs` | Crit rolled in class AI, passed via tuple |
+| 7 | Class AI instant attacks | `class_ai/warrior.rs`, `rogue.rs`, `mage.rs`, etc. | Crit rolled in class AI, passed via tuple |
 
 ### Explicitly Excluded Sites
 
 | Site | Reason |
 |------|--------|
 | DoT ticks (`auras.rs`) | WoW Classic rules: DoTs never crit |
-| Channel ticks (`combat_core.rs`) | Channels never crit |
+| Channel ticks (`combat_core/casting.rs`) | Channels never crit |
 | Absorb shield FCTs | Informational text, not damage/heal |
 
 Each excluded site passes `is_crit: false` with a comment explaining why.
@@ -149,4 +149,4 @@ Healing crits: replace `"heals"` with `"CRITICALLY heals"` — e.g., `"Flash Hea
 
 - When adding new damage/healing sites, always check the 3-step pattern: roll → multiply → propagate
 - When adding new stats that need snapshotting in pending components, follow the `caster_crit_chance` / `caster_spell_power` pattern
-- Consider migrating the large tuples (`instant_attacks`, `frost_nova_damage`, `hits_to_process`) to named structs to make adding future fields easier (tracked in `todos/005-pending-p2-combatant-info-tuple-creep.md`)
+- Consider migrating the large tuples (`instant_attacks`, `frost_nova_damage`, `hits_to_process`) to named structs to make adding future fields easier. The broader `combatant_info` HashMap-of-tuples concern has since been addressed by `class_ai/combat_snapshot.rs`, which builds a typed per-frame view used by `decide_abilities`.
