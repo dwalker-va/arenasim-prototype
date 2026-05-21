@@ -125,6 +125,14 @@ pub struct CameraController {
     pub is_dragging: bool,       // Mouse drag state
     pub last_mouse_pos: Option<Vec2>,
     pub keyboard_movement: Vec3, // WASD movement delta this frame
+    /// Cursor position at the start of the current left-button press, or
+    /// `None` when the button is not currently pressed (or the press was
+    /// rejected because egui wanted the pointer).
+    pub press_position: Option<Vec2>,
+    /// Set to true on the release frame of a press/release pair whose
+    /// cursor travel was below the click threshold. Consumed by the
+    /// selection picking system, which clears it.
+    pub pending_pick: bool,
 }
 
 impl Default for CameraController {
@@ -138,6 +146,8 @@ impl Default for CameraController {
             is_dragging: false,
             last_mouse_pos: None,
             keyboard_movement: Vec3::ZERO,
+            press_position: None,
+            pending_pick: false,
         }
     }
 }

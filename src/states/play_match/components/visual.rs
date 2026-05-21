@@ -176,3 +176,11 @@ pub struct BacklashBurst {
     /// Initial lifetime for fade calculation.
     pub initial_lifetime: f32,
 }
+
+/// Marker component for the player's selection ring — a translucent torus
+/// laid flat at the selected combatant's feet. One ring exists at most.
+#[derive(Component)]
+pub struct SelectionRing {
+    /// The combatant entity this ring follows.
+    pub target: Entity,
+}
