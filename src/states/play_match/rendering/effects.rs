@@ -1744,3 +1744,59 @@ pub fn spawn_ua_glow_for_afflicted(
 // Silence now follows the same pattern — the existing CC log line
 // "[CC] Unstable Affliction on Team X (5.0s, DR: ...)" plus the aura icon over
 // the silenced combatant covers the visibility need without bespoke FCT.
+
+/// Peak height of the walking bob above `ground_y`, in arena units.
+/// Capsule height is ~2.5, so 0.10 reads as a subtle walk rather than a hop.
+const WALK_BOB_AMPLITUDE: f32 = 0.10;
+
+/// Arena units of horizontal travel per full bob cycle.
+/// At base movement speed this lands near a natural walking cadence.
+const WALK_STEP_LENGTH: f32 = 1.5;
+
+/// Per-frame horizontal travel below this counts as "not moving" — the unit
+/// is held flat at `ground_y` instead of accumulating phase.
+const WALK_IDLE_EPSILON: f32 = 0.001;
+
+/// Maximum phase advance per frame. Caps the cadence during Charge so the bob
+/// reads as a fast walk instead of strobing when the warrior covers a large
+/// XZ delta in a single frame.
+const WALK_MAX_PHASE_STEP: f32 = std::f32::consts::PI;
+
+/// Drive the walking bob on combatant and pet capsules.
+///
+/// Reads each unit's post-movement XZ, advances phase by the horizontal
+/// distance traveled this frame, and writes `translation.y = ground_y +
+/// sin(phase) * amplitude`. Idle units (and any unit whose `Combatant::is_alive()`
+/// returns true but whose XZ delta is below `WALK_IDLE_EPSILON`) snap to
+/// `ground_y` so they stand perfectly still.
+///
+/// `Without<DeathAnimation>` and `Without<Celebrating>` cede the Y axis to
+/// `animate_death` (corpse sink) and `update_victory_celebration` (winner
+/// bounce). Both systems write `translation.y` and run in the same post-
+/// `CombatResolution` window, so excluding their drivers is the cleanest way
+/// to avoid the last-writer-wins race.
+///
+/// Graphical-mode only — registered in `StatesPlugin::build()`, never in
+/// `add_core_combat_systems`. Visual-only; touches no gameplay state.
+pub fn update_walk_animation(
+    mut query: Query<
+        (&mut Transform, &mut WalkAnim, &Combatant),
+        (Without<DeathAnimation>, Without<Celebrating>),
+    >,
+) {
+    for (mut transform, mut walk, combatant) in query.iter_mut() {
+        let current_xz = transform.translation.xz();
+        let distance = (current_xz - walk.previous_xz).length();
+
+        if !combatant.is_alive() || distance < WALK_IDLE_EPSILON {
+            transform.translation.y = walk.ground_y;
+            walk.previous_xz = current_xz;
+            continue;
+        }
+
+        let step = (distance / WALK_STEP_LENGTH * std::f32::consts::TAU).min(WALK_MAX_PHASE_STEP);
+        walk.phase = (walk.phase + step).rem_euclid(std::f32::consts::TAU);
+        transform.translation.y = walk.ground_y + walk.phase.sin() * WALK_BOB_AMPLITUDE;
+        walk.previous_xz = current_xz;
+    }
+}

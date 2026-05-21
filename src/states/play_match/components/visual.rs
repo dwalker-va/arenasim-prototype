@@ -176,3 +176,14 @@ pub struct BacklashBurst {
     /// Initial lifetime for fade calculation.
     pub initial_lifetime: f32,
 }
+
+/// Drives a subtle vertical bob on combatant/pet capsules while they are moving.
+/// `ground_y` is captured at spawn; the bob is applied as an offset above it.
+/// `phase` advances by horizontal distance traveled, so slowed units bob slowly
+/// and stationary units do not bob at all.
+#[derive(Component)]
+pub struct WalkAnim {
+    pub ground_y: f32,
+    pub phase: f32,
+    pub previous_xz: Vec2,
+}
