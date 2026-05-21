@@ -48,6 +48,7 @@ pub mod systems;
 pub mod utils;
 pub mod class_ai;
 pub mod constants;
+pub mod selection;
 
 // Re-exports
 pub use abilities::*;
@@ -66,6 +67,10 @@ pub use constants::*;
 pub use effects::*;
 pub use traps::*;
 pub use class_ai::pet_ai::pet_ai_system;
+pub use selection::{
+    pick_selected_combatant, sync_selection_ring, follow_selection_ring,
+    reset_selection_on_exit, Selection,
+};
 
 use bevy::prelude::*;
 use super::match_config::{self, MatchConfig};
