@@ -23,6 +23,7 @@ pub fn acquire_targets(
     config: Res<match_config::MatchConfig>,
     mut combatants: Query<(Entity, &mut Combatant, &Transform, Option<&ActiveAuras>)>,
     pet_query: Query<&Pet>,
+    mut decision_trace: ResMut<crate::states::play_match::decision_trace::DecisionTrace>,
 ) {
     // Don't acquire targets until gates open
     if !countdown.gates_opened {
@@ -106,6 +107,13 @@ pub fn acquire_targets(
             combatant.cc_target = None;
             continue;
         }
+
+        // Snapshot target state BEFORE acquisition so we can emit a trace event
+        // when either changes. Pet AI doesn't participate in target acquisition,
+        // so skip pet entities entirely.
+        let is_pet_entity = pet_query.get(entity).is_ok();
+        let prev_target = combatant.target;
+        let prev_cc_target = combatant.cc_target;
 
         // Check if this combatant has Shadow Sight
         let i_have_shadow_sight = shadow_sight_holders.contains(&entity);
@@ -228,6 +236,90 @@ pub fn acquire_targets(
                     combatant.cc_target = Some(*cc_entity);
                 }
             }
+        }
+
+        // Emit a target_acquisition trace event when target or cc_target changed.
+        // Pets are not primary actors in target acquisition; skip them entirely
+        // to keep the trace focused on combatant-level decisions.
+        if !is_pet_entity
+            && (combatant.target != prev_target || combatant.cc_target != prev_cc_target)
+        {
+            use crate::states::play_match::decision_trace::{
+                ActorView, CandidateStatus, TargetRejectionReason,
+            };
+            let my_pos = transform.translation;
+            let hp_pct = if combatant.max_health > 0.0 {
+                combatant.current_health / combatant.max_health
+            } else {
+                0.0
+            };
+            let mana_pct = if combatant.max_mana > 0.0 {
+                combatant.current_mana / combatant.max_mana
+            } else {
+                0.0
+            };
+            let actor_view = ActorView::from_raw(
+                entity,
+                combatant.team,
+                combatant.slot,
+                combatant.class,
+                hp_pct,
+                mana_pct,
+                my_pos,
+            );
+            let mut tbuilder = decision_trace.start_target_acquisition(actor_view, prev_target);
+
+            // Populate candidates from the visible enemy set. Chosen = new_target;
+            // all other alive non-pet enemies are Rejected{LowerScoreThanChosen}
+            // using distance as the score proxy (negated, since nearer = higher
+            // priority for primary targeting).
+            let chosen = combatant.target;
+            let chosen_pos = chosen
+                .and_then(|t| enemy_combatants.iter().find(|(e, _, _, _, _, _, _, _)| *e == t))
+                .map(|(_, p, _, _, _, _, _, _)| *p);
+            let chosen_distance = chosen_pos.map(|p| my_pos.distance(p));
+            let chosen_score = chosen_distance.map(|d| -(d as i32)).unwrap_or(0);
+
+            for (enemy_entity, enemy_pos, stealthed, enemy_ss, enemy_class, enemy_hp, enemy_immune, is_pet) in
+                enemy_combatants.iter()
+            {
+                if *is_pet || *enemy_hp <= 0.0 {
+                    continue;
+                }
+                let distance = my_pos.distance(*enemy_pos);
+                let score = -(distance as i32);
+                if Some(*enemy_entity) == chosen {
+                    tbuilder.score(*enemy_entity, *enemy_class, score, CandidateStatus::Chosen, None);
+                } else if *enemy_immune {
+                    tbuilder.score(
+                        *enemy_entity,
+                        *enemy_class,
+                        score,
+                        CandidateStatus::Rejected,
+                        Some(TargetRejectionReason::Immune),
+                    );
+                } else if *stealthed && !i_have_shadow_sight && !enemy_ss {
+                    tbuilder.score(
+                        *enemy_entity,
+                        *enemy_class,
+                        score,
+                        CandidateStatus::Rejected,
+                        Some(TargetRejectionReason::Stealthed),
+                    );
+                } else {
+                    tbuilder.score(
+                        *enemy_entity,
+                        *enemy_class,
+                        score,
+                        CandidateStatus::Rejected,
+                        Some(TargetRejectionReason::LowerScoreThanChosen {
+                            score,
+                            chosen_score,
+                        }),
+                    );
+                }
+            }
+            tbuilder.finish(combatant.target);
         }
     }
 }
