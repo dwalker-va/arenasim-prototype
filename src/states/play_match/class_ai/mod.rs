@@ -318,6 +318,10 @@ pub fn dispel_priority(aura_type: AuraType) -> i32 {
 /// - 90: Only urgent CC (Polymorph, Fear)
 /// - 50: Include roots and DoTs
 /// - 20: Include slows (not recommended)
+///
+/// When `trace` is `Some(_)`, predicate failures emit typed reject events on
+/// the dispel ability; success emits choose. Callers that haven't yet been
+/// converted to the decision-trace flow pass `None`.
 #[allow(clippy::too_many_arguments)]
 pub fn try_dispel_ally(
     commands: &mut Commands,
@@ -333,21 +337,45 @@ pub fn try_dispel_ally(
     log_prefix: &'static str,
     log_name: &str,
     caster_class: CharacterClass,
+    mut trace: Option<&mut crate::states::play_match::decision_trace::DecisionEventBuilder<'_>>,
 ) -> bool {
+    use crate::states::play_match::decision_trace::RejectionReason;
+
     let def = abilities.get_unchecked(&ability_type);
 
     // Check if spell school is locked out
     if is_spell_school_locked(def.spell_school, auras) {
+        if let Some(b) = trace.as_deref_mut() {
+            b.reject(
+                ability_type,
+                RejectionReason::SilencedOrLocked { school: def.spell_school },
+            );
+        }
         return false;
     }
     // Silence gate (UA backlash). The dispel helper bypasses can_cast_config and
     // deducts mana directly, so this check must live here — otherwise a silenced
     // healer would still successfully dispel.
     if is_silenced(combatant, auras) && def.mana_cost > 0.0 {
+        if let Some(b) = trace.as_deref_mut() {
+            b.reject(
+                ability_type,
+                RejectionReason::SilencedOrLocked { school: def.spell_school },
+            );
+        }
         return false;
     }
 
     if combatant.current_mana < def.mana_cost {
+        if let Some(b) = trace.as_deref_mut() {
+            b.reject(
+                ability_type,
+                RejectionReason::InsufficientMana {
+                    have: combatant.current_mana,
+                    need: def.mana_cost,
+                },
+            );
+        }
         return false;
     }
 
@@ -398,8 +426,15 @@ pub fn try_dispel_ally(
     }
 
     let Some((dispel_target, _)) = best_candidate else {
+        if let Some(b) = trace.as_deref_mut() {
+            b.reject(ability_type, RejectionReason::NoValidTarget);
+        }
         return false;
     };
+
+    if let Some(b) = trace.as_deref_mut() {
+        b.choose(ability_type, Some(dispel_target), true);
+    }
 
     // Execute the ability
     combatant.current_mana -= def.mana_cost;

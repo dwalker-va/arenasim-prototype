@@ -467,6 +467,7 @@ pub fn decide_abilities(
                 &ctx,
                 &mut shielded_this_frame,
                 &mut fortified_this_frame,
+                &mut decision_trace,
             ),
             match_config::CharacterClass::Warrior => class_ai::warrior::decide_warrior_action(
                 &mut commands,

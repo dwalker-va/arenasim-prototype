@@ -728,6 +728,7 @@ fn try_cleanse(
         "[CLEANSE]",
         "Cleanse",
         CharacterClass::Paladin,
+        None, // U6 will pass Some(&mut builder) once Paladin is instrumented
     )
 }
 
