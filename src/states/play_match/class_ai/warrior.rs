@@ -27,7 +27,7 @@ use crate::states::play_match::decision_trace::{
 use crate::states::play_match::utils::log_ability_use;
 
 use super::CombatContext;
-use super::cast_guard::{pre_cast_ok, PreCastOpts};
+use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
 
 /// Shout range constant (applies to all shout variants)
 const SHOUT_RANGE: f32 = 30.0;
@@ -541,6 +541,7 @@ fn try_rend(
         return false;
     }
 
+    let rend_opts = PreCastOpts { check_friendly_cc: true, ..Default::default() };
     if !pre_cast_ok(
         rend,
         rend_def,
@@ -549,11 +550,20 @@ fn try_rend(
         auras,
         Some((target_entity, target_pos)),
         ctx,
-        PreCastOpts { check_friendly_cc: true, ..Default::default() },
+        rend_opts,
     ) {
         builder.reject(
             rend,
-            classify_pre_cast_failure(rend, rend_def, combatant, my_pos, auras, target_entity, target_pos, ctx, true),
+            classify_pre_cast_failure(
+                rend,
+                rend_def,
+                combatant,
+                my_pos,
+                auras,
+                Some((target_entity, target_pos)),
+                ctx,
+                rend_opts,
+            ),
         );
         return false;
     }
@@ -613,6 +623,7 @@ fn try_mortal_strike(
     let mortal_strike = AbilityType::MortalStrike;
     let ms_def = abilities.get_unchecked(&mortal_strike);
 
+    let ms_opts = PreCastOpts { check_friendly_cc: true, ..Default::default() };
     if !pre_cast_ok(
         mortal_strike,
         ms_def,
@@ -621,7 +632,7 @@ fn try_mortal_strike(
         auras,
         Some((target_entity, target_pos)),
         ctx,
-        PreCastOpts { check_friendly_cc: true, ..Default::default() },
+        ms_opts,
     ) {
         builder.reject(
             mortal_strike,
@@ -631,10 +642,9 @@ fn try_mortal_strike(
                 combatant,
                 my_pos,
                 auras,
-                target_entity,
-                target_pos,
+                Some((target_entity, target_pos)),
                 ctx,
-                true,
+                ms_opts,
             ),
         );
         return false;
@@ -751,60 +761,3 @@ fn try_heroic_strike(
     );
 }
 
-/// Decompose a `pre_cast_ok` failure into the specific `RejectionReason` that
-/// caused it. Re-runs the same predicate sequence pre_cast_ok uses (in the same
-/// order) so the emitted reason matches the gate that fired.
-///
-/// This is a U1-tier classifier — it covers the common cases. U13's predicate
-/// enumeration pass may refine this further if pre_cast_ok grows new guards.
-#[allow(clippy::too_many_arguments)]
-fn classify_pre_cast_failure(
-    ability: AbilityType,
-    def: &crate::states::play_match::ability_config::AbilityConfig,
-    combatant: &Combatant,
-    my_pos: Vec3,
-    auras: Option<&ActiveAuras>,
-    target_entity: Entity,
-    target_pos: Vec3,
-    ctx: &CombatContext,
-    check_friendly_cc: bool,
-) -> RejectionReason {
-    use crate::states::play_match::abilities::{is_silenced, is_spell_school_locked};
-
-    if check_friendly_cc && ctx.has_friendly_breakable_cc(target_entity) {
-        return RejectionReason::FriendlyBreakableCC;
-    }
-    if is_spell_school_locked(def.spell_school, auras) {
-        return RejectionReason::SilencedOrLocked { school: def.spell_school };
-    }
-    if def.mana_cost > 0.0 && is_silenced(combatant, auras) {
-        return RejectionReason::SilencedOrLocked { school: def.spell_school };
-    }
-    if let Some(remaining) = combatant.ability_cooldowns.get(&ability) {
-        return RejectionReason::OnCooldown { remaining: *remaining };
-    }
-    let distance = my_pos.distance(target_pos);
-    if distance > def.range {
-        return RejectionReason::OutOfRange {
-            distance,
-            max: def.range,
-        };
-    }
-    if let Some(min_range) = def.min_range {
-        if distance < min_range {
-            return RejectionReason::WithinDeadZone {
-                distance,
-                min: min_range,
-            };
-        }
-    }
-    if combatant.current_mana < def.mana_cost {
-        return RejectionReason::InsufficientMana {
-            have: combatant.current_mana,
-            need: def.mana_cost,
-        };
-    }
-    RejectionReason::PreconditionUnmet {
-        note: "can_cast_config failed".into(),
-    }
-}

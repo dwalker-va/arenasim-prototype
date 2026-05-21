@@ -454,6 +454,7 @@ pub fn decide_abilities(
                 &ctx,
                 &mut frost_nova_damage,
                 &mut same_frame_cc_queue,
+                &mut decision_trace,
             ),
             match_config::CharacterClass::Priest => class_ai::priest::decide_priest_action(
                 &mut commands,

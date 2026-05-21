@@ -107,3 +107,74 @@ pub fn pre_cast_ok(
         None => caster.current_mana >= def.mana_cost,
     }
 }
+
+/// Decompose a `pre_cast_ok` failure into the specific `RejectionReason` that
+/// caused it. Re-runs the same predicate sequence pre_cast_ok uses (in the same
+/// order) so the emitted reason matches the gate that fired.
+///
+/// Used by every class AI's traced wrapper around `pre_cast_ok` — when the
+/// guard fails, this turns the bool into a typed reason for the decision-trace
+/// builder.
+#[allow(clippy::too_many_arguments)]
+pub fn classify_pre_cast_failure(
+    ability: AbilityType,
+    def: &AbilityConfig,
+    caster: &Combatant,
+    caster_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    target: Option<(Entity, Vec3)>,
+    ctx: &CombatContext,
+    opts: PreCastOpts,
+) -> crate::states::play_match::decision_trace::RejectionReason {
+    use crate::states::play_match::abilities::{is_silenced, is_spell_school_locked};
+    use crate::states::play_match::decision_trace::RejectionReason;
+
+    if let Some((target_entity, _)) = target {
+        if opts.check_friendly_cc && ctx.has_friendly_breakable_cc(target_entity) {
+            return RejectionReason::FriendlyBreakableCC;
+        }
+        if opts.check_friendly_dots && ctx.has_friendly_dots_on_target(target_entity) {
+            return RejectionReason::FriendlyBreakableCC;
+        }
+        if opts.check_target_immune && ctx.entity_is_immune(target_entity) {
+            return RejectionReason::TargetImmune;
+        }
+    }
+    if is_spell_school_locked(def.spell_school, auras) {
+        return RejectionReason::SilencedOrLocked { school: def.spell_school };
+    }
+    if !opts.bypass_silence && def.mana_cost > 0.0 && is_silenced(caster, auras) {
+        return RejectionReason::SilencedOrLocked { school: def.spell_school };
+    }
+    if let Some(remaining) = caster.ability_cooldowns.get(&ability) {
+        return RejectionReason::OnCooldown { remaining: *remaining };
+    }
+    match target {
+        Some((_, target_pos)) => {
+            let distance = caster_pos.distance(target_pos);
+            if distance > def.range {
+                return RejectionReason::OutOfRange { distance, max: def.range };
+            }
+            if let Some(min_range) = def.min_range {
+                if distance < min_range {
+                    return RejectionReason::WithinDeadZone { distance, min: min_range };
+                }
+            }
+            if caster.current_mana < def.mana_cost {
+                return RejectionReason::InsufficientMana {
+                    have: caster.current_mana,
+                    need: def.mana_cost,
+                };
+            }
+        }
+        None => {
+            if caster.current_mana < def.mana_cost {
+                return RejectionReason::InsufficientMana {
+                    have: caster.current_mana,
+                    need: def.mana_cost,
+                };
+            }
+        }
+    }
+    RejectionReason::PreconditionUnmet { note: "can_cast_config failed".into() }
+}
