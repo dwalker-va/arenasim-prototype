@@ -212,6 +212,183 @@ fn trace_on_matches_trace_off_outcomes() {
     }
 }
 
+/// Broad determinism sweep: every 1v1 class pairing must produce byte-
+/// identical MatchResults with trace-on vs trace-off. The narrower
+/// `trace_on_matches_trace_off_outcomes` (above) only covers Warrior v Mage.
+/// This test catches class-specific RNG drift that would slip past the
+/// narrower gate — e.g., if Hunter pet AI instrumentation perturbs entity
+/// iteration in a way that only matters when a Hunter is in the match.
+///
+/// 49 pairings × 2 runs = 98 matches. Runs at ~60Hz sim time with a 60s
+/// max_duration cap, so wall-clock is a few seconds per match in release
+/// (slower in debug). Marked `#[ignore]` to avoid bloating the default
+/// `cargo test` run; opt in via `cargo test -- --ignored`.
+#[test]
+#[ignore = "expensive — 98 matches; run via `cargo test -- --ignored`"]
+fn trace_on_matches_trace_off_all_class_pairings() {
+    const CLASSES: &[&str] = &[
+        "Warrior", "Mage", "Priest", "Rogue", "Warlock", "Paladin", "Hunter",
+    ];
+    let mut failures: Vec<String> = Vec::new();
+
+    for (i, c1) in CLASSES.iter().enumerate() {
+        for (j, c2) in CLASSES.iter().enumerate() {
+            // Stable per-pair seed so the same pairing is reproducible across runs.
+            let seed = 1_000 + (i as u64) * 100 + (j as u64);
+            let tmp = tempfile::NamedTempFile::new().unwrap();
+            let trace_path = tmp.path().to_path_buf();
+            drop(tmp);
+
+            let trace_config = Some(TraceConfig {
+                output_path: trace_path,
+                verbose: false,
+            });
+
+            let with_trace = run_headless_match_with(
+                create_config(vec![c1], vec![c2], Some(seed)),
+                true,
+                trace_config,
+            );
+            let without_trace = run_headless_match_with(
+                create_config(vec![c1], vec![c2], Some(seed)),
+                true,
+                None,
+            );
+
+            let (with_trace, without_trace) = match (with_trace, without_trace) {
+                (Ok(a), Ok(b)) => (a, b),
+                (Err(e), _) | (_, Err(e)) => {
+                    failures.push(format!("{} v {} seed={}: match failed: {}", c1, c2, seed, e));
+                    continue;
+                }
+            };
+
+            if with_trace.winner != without_trace.winner {
+                failures.push(format!(
+                    "{} v {} seed={}: winner drift trace-on={:?} trace-off={:?}",
+                    c1, c2, seed, with_trace.winner, without_trace.winner
+                ));
+                continue;
+            }
+            if (with_trace.match_time - without_trace.match_time).abs() >= 0.01 {
+                failures.push(format!(
+                    "{} v {} seed={}: match_time drift {} vs {}",
+                    c1, c2, seed, with_trace.match_time, without_trace.match_time
+                ));
+                continue;
+            }
+            for (slot, (a, b)) in with_trace
+                .team1_combatants
+                .iter()
+                .zip(without_trace.team1_combatants.iter())
+                .enumerate()
+            {
+                if (a.final_health - b.final_health).abs() >= 0.01
+                    || (a.damage_dealt - b.damage_dealt).abs() >= 0.01
+                {
+                    failures.push(format!(
+                        "{} v {} seed={} team1 slot {}: hp {} vs {} | dmg {} vs {}",
+                        c1, c2, seed, slot, a.final_health, b.final_health, a.damage_dealt, b.damage_dealt
+                    ));
+                }
+            }
+            for (slot, (a, b)) in with_trace
+                .team2_combatants
+                .iter()
+                .zip(without_trace.team2_combatants.iter())
+                .enumerate()
+            {
+                if (a.final_health - b.final_health).abs() >= 0.01
+                    || (a.damage_dealt - b.damage_dealt).abs() >= 0.01
+                {
+                    failures.push(format!(
+                        "{} v {} seed={} team2 slot {}: hp {} vs {} | dmg {} vs {}",
+                        c1, c2, seed, slot, a.final_health, b.final_health, a.damage_dealt, b.damage_dealt
+                    ));
+                }
+            }
+        }
+    }
+
+    if !failures.is_empty() {
+        panic!(
+            "Trace-induced drift in {} pairing(s) of {} tested:\n{}",
+            failures.len(),
+            CLASSES.len() * CLASSES.len(),
+            failures.join("\n")
+        );
+    }
+}
+
+/// Broad trace-file determinism sweep across all 49 class pairings: two
+/// trace-on runs at the same seed must produce byte-identical trace files
+/// for every pairing. Catches non-deterministic event ordering that would
+/// only surface for specific class combinations.
+#[test]
+#[ignore = "expensive — 98 matches; run via `cargo test -- --ignored`"]
+fn trace_file_deterministic_all_class_pairings() {
+    const CLASSES: &[&str] = &[
+        "Warrior", "Mage", "Priest", "Rogue", "Warlock", "Paladin", "Hunter",
+    ];
+    let mut failures: Vec<String> = Vec::new();
+
+    for (i, c1) in CLASSES.iter().enumerate() {
+        for (j, c2) in CLASSES.iter().enumerate() {
+            let seed = 2_000 + (i as u64) * 100 + (j as u64);
+            let tmp1 = tempfile::NamedTempFile::new().unwrap();
+            let path1 = tmp1.path().to_path_buf();
+            drop(tmp1);
+            let tmp2 = tempfile::NamedTempFile::new().unwrap();
+            let path2 = tmp2.path().to_path_buf();
+            drop(tmp2);
+
+            if let Err(e) = run_headless_match_with(
+                create_config(vec![c1], vec![c2], Some(seed)),
+                true,
+                Some(TraceConfig {
+                    output_path: path1.clone(),
+                    verbose: false,
+                }),
+            ) {
+                failures.push(format!("{} v {} seed={}: first run failed: {}", c1, c2, seed, e));
+                continue;
+            }
+            if let Err(e) = run_headless_match_with(
+                create_config(vec![c1], vec![c2], Some(seed)),
+                true,
+                Some(TraceConfig {
+                    output_path: path2.clone(),
+                    verbose: false,
+                }),
+            ) {
+                failures.push(format!("{} v {} seed={}: second run failed: {}", c1, c2, seed, e));
+                continue;
+            }
+
+            let a = std::fs::read_to_string(&path1).unwrap();
+            let b = std::fs::read_to_string(&path2).unwrap();
+            if a != b {
+                failures.push(format!(
+                    "{} v {} seed={}: trace files differ (len {} vs {})",
+                    c1, c2, seed, a.len(), b.len()
+                ));
+            }
+
+            std::fs::remove_file(&path1).ok();
+            std::fs::remove_file(&path2).ok();
+        }
+    }
+
+    if !failures.is_empty() {
+        panic!(
+            "Non-deterministic trace file in {} pairing(s) of {} tested:\n{}",
+            failures.len(),
+            CLASSES.len() * CLASSES.len(),
+            failures.join("\n")
+        );
+    }
+}
+
 /// U11 safety gate #2: two trace-on runs at the same seed must produce
 /// byte-identical trace files. The writer canonicalizes event order by
 /// `(frame, actor.entity_id, kind)` before flush, so even if intermediate
