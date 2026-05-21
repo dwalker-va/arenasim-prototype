@@ -494,6 +494,7 @@ pub fn decide_abilities(
                 &ctx,
                 &mut instant_attacks,
                 &mut same_frame_cc_queue,
+                &mut decision_trace,
             ),
             match_config::CharacterClass::Warlock => class_ai::warlock::decide_warlock_action(
                 &mut commands,

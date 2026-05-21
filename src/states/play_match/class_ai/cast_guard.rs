@@ -149,6 +149,27 @@ pub fn classify_pre_cast_failure(
     if let Some(remaining) = caster.ability_cooldowns.get(&ability) {
         return RejectionReason::OnCooldown { remaining: *remaining };
     }
+    let resource_shortage = || -> RejectionReason {
+        use crate::states::match_config::CharacterClass;
+        use crate::states::play_match::decision_trace::ResourceKind;
+        match caster.class {
+            CharacterClass::Warrior => RejectionReason::InsufficientResource {
+                resource: ResourceKind::Rage,
+                have: caster.current_mana,
+                need: def.mana_cost,
+            },
+            CharacterClass::Rogue => RejectionReason::InsufficientResource {
+                resource: ResourceKind::Energy,
+                have: caster.current_mana,
+                need: def.mana_cost,
+            },
+            _ => RejectionReason::InsufficientMana {
+                have: caster.current_mana,
+                need: def.mana_cost,
+            },
+        }
+    };
+
     match target {
         Some((_, target_pos)) => {
             let distance = caster_pos.distance(target_pos);
@@ -161,18 +182,12 @@ pub fn classify_pre_cast_failure(
                 }
             }
             if caster.current_mana < def.mana_cost {
-                return RejectionReason::InsufficientMana {
-                    have: caster.current_mana,
-                    need: def.mana_cost,
-                };
+                return resource_shortage();
             }
         }
         None => {
             if caster.current_mana < def.mana_cost {
-                return RejectionReason::InsufficientMana {
-                    have: caster.current_mana,
-                    need: def.mana_cost,
-                };
+                return resource_shortage();
             }
         }
     }
