@@ -18,13 +18,14 @@ use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
 use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::constants::*;
+use crate::states::play_match::decision_trace::{
+    ActorView, DecisionEventBuilder, DecisionTrace, NoActionReason, RejectionReason, TargetView,
+};
 use super::CombatContext;
-use super::cast_guard::{pre_cast_ok, PreCastOpts};
+use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
 use super::super::utils::log_ability_use;
 
 /// Hunter AI: Decides and executes abilities for a Hunter combatant.
-///
-/// Returns `true` if an action was taken this frame.
 pub fn decide_hunter_action(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -36,12 +37,10 @@ pub fn decide_hunter_action(
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
     instant_attacks: &mut Vec<super::QueuedInstantAttack>,
+    decision_trace: &mut DecisionTrace,
 ) -> bool {
-    // Find nearest enemy and distance
     let (nearest_enemy, nearest_distance) = find_nearest_enemy(entity, combatant.team, my_pos, ctx);
 
-    // Kite if a melee enemy is within kite range (regardless of GCD)
-    // Don't kite ranged classes — two Hunters shouldn't flee from each other
     let nearest_dist = nearest_distance.unwrap_or(40.0);
     let nearest_is_melee = nearest_enemy
         .and_then(|(e, _)| ctx.combatants.get(&e))
@@ -50,12 +49,10 @@ pub fn decide_hunter_action(
         combatant.kiting_timer = combatant.kiting_timer.max(0.5);
     }
 
-    // Check if global cooldown is active
     if combatant.global_cooldown > 0.0 {
         return false;
     }
 
-    // Get primary target info
     let Some(target_entity) = combatant.target else {
         return false;
     };
@@ -65,134 +62,187 @@ pub fn decide_hunter_action(
     if !target_info.is_alive {
         return false;
     }
-    // Don't waste abilities on immune targets (Divine Shield)
+
+    let actor_view = match ctx.self_info() {
+        Some(info) => ActorView::from_info(info),
+        None => return false,
+    };
+    let target_view = Some(TargetView::from_info(target_info, my_pos));
+
+    let mut builder = decision_trace.start_ability_decision(actor_view, target_view);
+
     if ctx.entity_is_immune(target_entity) {
+        builder.finish_no_action(NoActionReason::TargetImmune);
         return false;
     }
+
     let distance_to_target = my_pos.distance(target_info.position);
 
     // === DEAD ZONE (<8 yards) — Escape priority ===
     if nearest_dist < HUNTER_DEAD_ZONE {
-        // Check if rooted (can't Disengage while rooted)
         let is_rooted = auras.map_or(false, |a| {
             a.auras.iter().any(|aura| aura.effect_type == AuraType::Root)
         });
 
-        // Priority 1: Disengage (if off cooldown and not rooted)
-        if !is_rooted {
-            if let Some(def) = abilities.get(&AbilityType::Disengage) {
-                if !combatant.ability_cooldowns.contains_key(&AbilityType::Disengage)
-                    && combatant.current_mana >= def.mana_cost
-                {
-                    // Calculate backward direction (away from nearest enemy)
-                    let away_dir = if let Some((enemy_entity, _)) = nearest_enemy {
-                        if let Some(enemy_info) = ctx.combatants.get(&enemy_entity) {
-                            (my_pos - enemy_info.position).normalize_or_zero()
-                        } else {
-                            Vec3::ZERO
-                        }
+        // Priority 1: Disengage (inline because it doesn't use a try_* helper)
+        if let Some(def) = abilities.get(&AbilityType::Disengage) {
+            let disengage = AbilityType::Disengage;
+            if is_rooted {
+                builder.reject(disengage, RejectionReason::Rooted);
+            } else if let Some(remaining) = combatant.ability_cooldowns.get(&disengage) {
+                builder.reject(disengage, RejectionReason::OnCooldown { remaining: *remaining });
+            } else if combatant.current_mana < def.mana_cost {
+                builder.reject(
+                    disengage,
+                    RejectionReason::InsufficientMana {
+                        have: combatant.current_mana,
+                        need: def.mana_cost,
+                    },
+                );
+            } else {
+                builder.choose(disengage, None, true);
+
+                let away_dir = if let Some((enemy_entity, _)) = nearest_enemy {
+                    if let Some(enemy_info) = ctx.combatants.get(&enemy_entity) {
+                        (my_pos - enemy_info.position).normalize_or_zero()
                     } else {
                         Vec3::ZERO
-                    };
+                    }
+                } else {
+                    Vec3::ZERO
+                };
 
-                    let direction = if away_dir == Vec3::ZERO {
-                        // Fallback: move toward own team's side
-                        if combatant.team == 1 { Vec3::new(-1.0, 0.0, 0.0) } else { Vec3::new(1.0, 0.0, 0.0) }
-                    } else {
-                        Vec3::new(away_dir.x, 0.0, away_dir.z).normalize_or_zero()
-                    };
+                let direction = if away_dir == Vec3::ZERO {
+                    if combatant.team == 1 { Vec3::new(-1.0, 0.0, 0.0) } else { Vec3::new(1.0, 0.0, 0.0) }
+                } else {
+                    Vec3::new(away_dir.x, 0.0, away_dir.z).normalize_or_zero()
+                };
 
-                    commands.entity(entity).try_insert(DisengagingState {
-                        direction,
-                        distance_remaining: DISENGAGE_DISTANCE,
-                    });
+                commands.entity(entity).try_insert(DisengagingState {
+                    direction,
+                    distance_remaining: DISENGAGE_DISTANCE,
+                });
 
-                    combatant.current_mana -= def.mana_cost;
-                    combatant.ability_cooldowns.insert(AbilityType::Disengage, def.cooldown);
-                    combatant.global_cooldown = GCD;
+                combatant.current_mana -= def.mana_cost;
+                combatant.ability_cooldowns.insert(disengage, def.cooldown);
+                combatant.global_cooldown = GCD;
 
-                    log_ability_use(combat_log, combatant.team, combatant.class, "Disengage", None, "uses");
-                    return true;
-                }
+                log_ability_use(combat_log, combatant.team, combatant.class, "Disengage", None, "uses");
+                builder.finish();
+                return true;
             }
         }
 
-        // Priority 2: Frost Trap at current position
-        if try_place_trap_at(commands, combat_log, abilities, entity, combatant, my_pos, my_pos, TrapType::Frost) {
+        // Priority 2: Frost Trap at feet
+        if try_place_trap_at(
+            commands, combat_log, abilities, entity, combatant, my_pos, my_pos,
+            TrapType::Frost, &mut builder,
+        ) {
+            builder.finish();
             return true;
         }
 
         // Priority 3: Set kiting timer to flee
         combatant.kiting_timer = 3.0;
-        return false; // Let movement system handle fleeing
+        builder.finish();
+        return false;
     }
 
     // === CLOSING RANGE (8-20 yards) — Kite + instants ===
     if nearest_dist < 20.0 {
-        // Priority 1: Concussive Shot on nearest enemy (if not already slowed)
         if let Some((enemy_entity, _)) = nearest_enemy {
-            if try_concussive_shot(commands, combat_log, abilities, entity, combatant, my_pos, enemy_entity, ctx) {
-                combatant.kiting_timer = 3.0; // Kite after slowing
+            if try_concussive_shot(
+                commands, combat_log, abilities, entity, combatant, my_pos,
+                enemy_entity, ctx, &mut builder,
+            ) {
+                combatant.kiting_timer = 3.0;
+                builder.finish();
                 return true;
             }
         }
 
-        // Priority 2: Frost Trap between self and nearest enemy
         if let Some((enemy_entity, _)) = nearest_enemy {
             if let Some(enemy_info) = ctx.combatants.get(&enemy_entity) {
                 let midpoint = (my_pos + enemy_info.position) / 2.0;
-                if try_place_trap_at(commands, combat_log, abilities, entity, combatant, my_pos, midpoint, TrapType::Frost) {
+                if try_place_trap_at(
+                    commands, combat_log, abilities, entity, combatant, my_pos, midpoint,
+                    TrapType::Frost, &mut builder,
+                ) {
                     combatant.kiting_timer = 3.0;
+                    builder.finish();
                     return true;
                 }
             }
         }
 
-        // Priority 3: Arcane Shot while kiting (instant, decent damage)
-        if try_arcane_shot(commands, combat_log, game_rng, abilities, entity, combatant, my_pos, target_entity, target_info, ctx, instant_attacks, auras) {
+        if try_arcane_shot(
+            commands, combat_log, game_rng, abilities, entity, combatant, my_pos,
+            target_entity, target_info, ctx, instant_attacks, auras, &mut builder,
+        ) {
             combatant.kiting_timer = 3.0;
+            builder.finish();
             return true;
         }
 
-        // Set kiting timer regardless
         combatant.kiting_timer = 3.0;
+        builder.finish();
         return false;
     }
 
     // === SAFE RANGE (20+ yards) — Full rotation ===
 
-    // Priority 1: Concussive Shot (if target not slowed)
-    if try_concussive_shot(commands, combat_log, abilities, entity, combatant, my_pos, target_entity, ctx) {
+    if try_concussive_shot(
+        commands, combat_log, abilities, entity, combatant, my_pos,
+        target_entity, ctx, &mut builder,
+    ) {
+        builder.finish();
         return true;
     }
 
-    // Priority 2: Freezing Trap on healer/CC target (or primary target in 1v1)
     let freezing_trap_target = find_enemy_healer(combatant.team, ctx)
         .or(Some(target_entity));
     if let Some(trap_target) = freezing_trap_target {
         if let Some(trap_target_info) = ctx.combatants.get(&trap_target) {
             if trap_target_info.is_alive {
-                // Place between self and target for interception
                 let midpoint = (my_pos + trap_target_info.position) / 2.0;
-                if try_place_trap_at(commands, combat_log, abilities, entity, combatant, my_pos, midpoint, TrapType::Freezing) {
+                if try_place_trap_at(
+                    commands, combat_log, abilities, entity, combatant, my_pos, midpoint,
+                    TrapType::Freezing, &mut builder,
+                ) {
+                    builder.finish();
                     return true;
                 }
             }
         }
     }
 
-    // Priority 3: Aimed Shot (safe to hardcast at 20+ yards — ~2.4s before Warrior reaches dead zone)
     if distance_to_target >= 20.0 {
-        if try_aimed_shot(commands, combat_log, abilities, entity, combatant, my_pos, target_entity, target_info, auras, ctx) {
+        if try_aimed_shot(
+            commands, combat_log, abilities, entity, combatant, my_pos,
+            target_entity, target_info, auras, ctx, &mut builder,
+        ) {
+            builder.finish();
             return true;
         }
+    } else {
+        builder.reject(
+            AbilityType::AimedShot,
+            RejectionReason::WithinDeadZone {
+                distance: distance_to_target,
+                min: 20.0,
+            },
+        );
     }
 
-    // Priority 4: Arcane Shot (instant filler)
-    if try_arcane_shot(commands, combat_log, game_rng, abilities, entity, combatant, my_pos, target_entity, target_info, ctx, instant_attacks, auras) {
+    if try_arcane_shot(
+        commands, combat_log, game_rng, abilities, entity, combatant, my_pos,
+        target_entity, target_info, ctx, instant_attacks, auras, &mut builder,
+    ) {
+        builder.finish();
         return true;
     }
 
+    builder.finish();
     false
 }
 
@@ -233,8 +283,6 @@ fn is_target_slowed(target: Entity, ctx: &CombatContext) -> bool {
 }
 
 /// Attempt to place a trap at a specific position (or at the Hunter's feet).
-/// If the target position is > TRAP_LAUNCH_MIN_RANGE from the hunter, spawns a
-/// TrapLaunchProjectile that arcs to the target before the trap begins arming.
 fn try_place_trap_at(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -244,6 +292,7 @@ fn try_place_trap_at(
     my_pos: Vec3,
     position: Vec3,
     trap_type: TrapType,
+    builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = match trap_type {
         TrapType::Freezing => AbilityType::FreezingTrap,
@@ -251,24 +300,32 @@ fn try_place_trap_at(
     };
 
     let Some(def) = abilities.get(&ability) else { return false };
-    if combatant.ability_cooldowns.contains_key(&ability) {
+    if let Some(remaining) = combatant.ability_cooldowns.get(&ability) {
+        builder.reject(ability, RejectionReason::OnCooldown { remaining: *remaining });
         return false;
     }
     if combatant.current_mana < def.mana_cost {
+        builder.reject(
+            ability,
+            RejectionReason::InsufficientMana {
+                have: combatant.current_mana,
+                need: def.mana_cost,
+            },
+        );
         return false;
     }
+
+    builder.choose(ability, None, true);
 
     // Clamp to octagonal arena bounds (midpoint can land outside corners)
     let position = crate::states::play_match::combat_core::clamp_to_arena(position);
 
     let trap_name = trap_type.name();
 
-    // Distance check uses XZ plane only (ignore Y)
     let distance = Vec3::new(my_pos.x, 0.0, my_pos.z)
         .distance(Vec3::new(position.x, 0.0, position.z));
 
     if distance > TRAP_LAUNCH_MIN_RANGE {
-        // Launch: spawn arc projectile from Hunter position
         let origin = Vec3::new(my_pos.x, 1.5, my_pos.z);
         let landing = Vec3::new(position.x, 0.0, position.z);
         let direction = (landing - origin).normalize_or_zero();
@@ -292,7 +349,6 @@ fn try_place_trap_at(
         ));
         log_ability_use(combat_log, combatant.team, combatant.class, trap_name, None, "uses");
     } else {
-        // Drop: instant spawn at target position (short range)
         commands.spawn((
             Transform::from_translation(Vec3::new(position.x, 0.0, position.z)),
             Trap {
@@ -325,6 +381,7 @@ fn try_concussive_shot(
     my_pos: Vec3,
     target_entity: Entity,
     ctx: &CombatContext,
+    builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = AbilityType::ConcussiveShot;
     let Some(def) = abilities.get(&ability) else { return false };
@@ -332,25 +389,28 @@ fn try_concussive_shot(
     let Some(target_info) = ctx.combatants.get(&target_entity) else { return false };
     let target_pos = target_info.position;
 
-    // No `auras` parameter on this function — pre_cast_ok treats school/silence
-    // as no-ops when auras=None, which matches the original behavior.
+    let opts = PreCastOpts { check_friendly_cc: true, ..Default::default() };
     if !pre_cast_ok(
-        ability,
-        def,
-        combatant,
-        my_pos,
-        None,
-        Some((target_entity, target_pos)),
-        ctx,
-        PreCastOpts { check_friendly_cc: true, ..Default::default() },
+        ability, def, combatant, my_pos, None,
+        Some((target_entity, target_pos)), ctx, opts,
     ) {
+        builder.reject(
+            ability,
+            classify_pre_cast_failure(
+                ability, def, combatant, my_pos, None,
+                Some((target_entity, target_pos)), ctx, opts,
+            ),
+        );
         return false;
     }
 
-    // Don't use if target already slowed
-    if is_target_slowed(target_entity, ctx) { return false }
+    if is_target_slowed(target_entity, ctx) {
+        builder.reject(ability, RejectionReason::AlreadyApplied);
+        return false;
+    }
 
-    // Spawn projectile — aura applied on impact by process_projectile_hits
+    builder.choose(ability, Some(target_entity), true);
+
     let projectile_speed = def.projectile_speed.unwrap_or(40.0);
     commands.spawn((
         Projectile {
@@ -386,24 +446,28 @@ fn try_aimed_shot(
     target_info: &super::CombatantInfo,
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
+    builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = AbilityType::AimedShot;
     let Some(def) = abilities.get(&ability) else { return false };
 
+    let opts = PreCastOpts { check_friendly_cc: true, ..Default::default() };
     if !pre_cast_ok(
-        ability,
-        def,
-        combatant,
-        my_pos,
-        auras,
-        Some((target_entity, target_info.position)),
-        ctx,
-        PreCastOpts { check_friendly_cc: true, ..Default::default() },
+        ability, def, combatant, my_pos, auras,
+        Some((target_entity, target_info.position)), ctx, opts,
     ) {
+        builder.reject(
+            ability,
+            classify_pre_cast_failure(
+                ability, def, combatant, my_pos, auras,
+                Some((target_entity, target_info.position)), ctx, opts,
+            ),
+        );
         return false;
     }
 
-    // Start casting
+    builder.choose(ability, Some(target_entity), false);
+
     let cast_time = calculate_cast_time(def.cast_time, auras);
     commands.entity(entity).insert(CastingState::new(ability, target_entity, cast_time));
 
@@ -430,24 +494,28 @@ fn try_arcane_shot(
     ctx: &CombatContext,
     _instant_attacks: &mut Vec<super::QueuedInstantAttack>,
     auras: Option<&ActiveAuras>,
+    builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = AbilityType::ArcaneShot;
     let Some(def) = abilities.get(&ability) else { return false };
 
+    let opts = PreCastOpts { check_friendly_cc: true, ..Default::default() };
     if !pre_cast_ok(
-        ability,
-        def,
-        combatant,
-        my_pos,
-        auras,
-        Some((target_entity, target_info.position)),
-        ctx,
-        PreCastOpts { check_friendly_cc: true, ..Default::default() },
+        ability, def, combatant, my_pos, auras,
+        Some((target_entity, target_info.position)), ctx, opts,
     ) {
+        builder.reject(
+            ability,
+            classify_pre_cast_failure(
+                ability, def, combatant, my_pos, auras,
+                Some((target_entity, target_info.position)), ctx, opts,
+            ),
+        );
         return false;
     }
 
-    // Spawn projectile — damage is calculated and applied on impact by process_projectile_hits
+    builder.choose(ability, Some(target_entity), true);
+
     let projectile_speed = def.projectile_speed.unwrap_or(45.0);
     commands.spawn((
         Projectile {
@@ -470,4 +538,3 @@ fn try_arcane_shot(
 
     true
 }
-

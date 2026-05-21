@@ -546,6 +546,7 @@ pub fn decide_abilities(
                 auras.as_deref(),
                 &ctx,
                 &mut instant_attacks,
+                &mut decision_trace,
             ),
         };
         if acted {
