@@ -505,6 +505,7 @@ pub fn decide_abilities(
                 my_pos,
                 auras.as_deref(),
                 &ctx,
+                &mut decision_trace,
             ),
             match_config::CharacterClass::Paladin => class_ai::paladin::decide_paladin_action(
                 &mut commands,
