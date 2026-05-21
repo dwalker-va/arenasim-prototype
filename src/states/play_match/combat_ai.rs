@@ -408,18 +408,33 @@ pub fn decide_abilities(
             })
             .unwrap_or(false);
 
-        // Paladin-specific: Divine Shield can be used while incapacitated
+        // Paladin-specific: Divine Shield can be used while incapacitated.
+        // Because the normal dispatch never runs this frame, we own a builder
+        // here so the Divine-Shield-while-CC decision still produces a trace
+        // event when the predicates fire.
         if is_incapacitated && combatant.class == match_config::CharacterClass::Paladin {
             let cc_ctx = snapshot.context_for(entity);
-            if class_ai::paladin::try_divine_shield_while_cc(
-                &mut commands,
-                &mut combat_log,
-                &abilities,
-                entity,
-                &mut combatant,
-                auras.as_deref(),
-                &cc_ctx,
-            ) {
+            let actor_view = cc_ctx
+                .self_info()
+                .map(crate::states::play_match::decision_trace::ActorView::from_info);
+            let acted = if let Some(av) = actor_view {
+                let mut builder = decision_trace.start_ability_decision(av, None);
+                let result = class_ai::paladin::try_divine_shield_while_cc(
+                    &mut commands,
+                    &mut combat_log,
+                    &abilities,
+                    entity,
+                    &mut combatant,
+                    auras.as_deref(),
+                    &cc_ctx,
+                    &mut builder,
+                );
+                builder.finish();
+                result
+            } else {
+                false
+            };
+            if acted {
                 continue; // DivineShieldPending spawned — CC will be purged next frame
             }
             continue; // Still incapacitated, can't do anything else
@@ -518,6 +533,7 @@ pub fn decide_abilities(
                 &ctx,
                 &mut paladin_aura_this_frame,
                 &mut same_frame_cc_queue,
+                &mut decision_trace,
             ),
             match_config::CharacterClass::Hunter => class_ai::hunter::decide_hunter_action(
                 &mut commands,
