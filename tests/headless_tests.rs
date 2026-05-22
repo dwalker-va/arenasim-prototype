@@ -212,6 +212,53 @@ fn trace_on_matches_trace_off_outcomes() {
     }
 }
 
+/// Probe: is the self-mirror determinism failure pre-existing, or caused by
+/// the trace instrumentation? Runs each self-mirror twice with trace OFF and
+/// asserts MatchResult equality between the two runs. If this test fails too,
+/// the bug pre-dates the trace work.
+#[test]
+#[ignore = "diagnostic probe — run via `cargo test -- --ignored`"]
+fn self_mirror_determinism_without_trace() {
+    const CLASSES: &[&str] = &[
+        "Warrior", "Mage", "Priest", "Rogue", "Warlock", "Paladin", "Hunter",
+    ];
+    let mut failures: Vec<String> = Vec::new();
+    for c in CLASSES {
+        let seed = 12_345;
+        let a = run_headless_match_with(create_config(vec![c], vec![c], Some(seed)), true, None).unwrap();
+        let b = run_headless_match_with(create_config(vec![c], vec![c], Some(seed)), true, None).unwrap();
+        let mut diffs: Vec<String> = Vec::new();
+        if a.winner != b.winner {
+            diffs.push(format!("winner {:?} vs {:?}", a.winner, b.winner));
+        }
+        if (a.match_time - b.match_time).abs() >= 0.01 {
+            diffs.push(format!("time {} vs {}", a.match_time, b.match_time));
+        }
+        for (i, (x, y)) in a.team1_combatants.iter().zip(b.team1_combatants.iter()).enumerate() {
+            if (x.final_health - y.final_health).abs() >= 0.01 {
+                diffs.push(format!("t1[{}].hp {} vs {}", i, x.final_health, y.final_health));
+            }
+            if (x.damage_dealt - y.damage_dealt).abs() >= 0.01 {
+                diffs.push(format!("t1[{}].dmg {} vs {}", i, x.damage_dealt, y.damage_dealt));
+            }
+        }
+        for (i, (x, y)) in a.team2_combatants.iter().zip(b.team2_combatants.iter()).enumerate() {
+            if (x.final_health - y.final_health).abs() >= 0.01 {
+                diffs.push(format!("t2[{}].hp {} vs {}", i, x.final_health, y.final_health));
+            }
+            if (x.damage_dealt - y.damage_dealt).abs() >= 0.01 {
+                diffs.push(format!("t2[{}].dmg {} vs {}", i, x.damage_dealt, y.damage_dealt));
+            }
+        }
+        if !diffs.is_empty() {
+            failures.push(format!("{} v {}: {}", c, c, diffs.join(", ")));
+        }
+    }
+    if !failures.is_empty() {
+        panic!("Self-mirror non-determinism (trace OFF on both runs):\n{}", failures.join("\n"));
+    }
+}
+
 /// Broad determinism sweep: every 1v1 class pairing must produce byte-
 /// identical MatchResults with trace-on vs trace-off. The narrower
 /// `trace_on_matches_trace_off_outcomes` (above) only covers Warrior v Mage.
