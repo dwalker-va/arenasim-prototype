@@ -10,6 +10,8 @@ date: 2026-02-09
 
 # Graphical Mode Missing System Registration
 
+> **Modern prevention:** `tests/registration_audit.rs` now enforces this. It walks every `pub fn` under `src/states/play_match/` that takes Bevy SystemParam types, then fails `cargo test` unless the function is registered in `add_core_combat_systems()` (headless+graphical core combat), `StatesPlugin::build()` (graphical-only visual systems), or the explicit `ALLOWLIST` in the audit. The bug class described below is now caught at test time. This doc remains useful for understanding *why* the dual paths exist and where to register a new system. See `CLAUDE.md` → "Adding a New Combat System" for the current convention.
+
 ## Problem Statement
 
 When adding new combat systems (like `process_divine_shield`, `process_holy_shock_heals`, `process_holy_shock_damage`, `process_dispels`) to the ArenaSim Bevy ECS game, the systems were registered ONLY in the headless mode's `add_core_combat_systems()` function in `src/states/play_match/systems.rs`, but NOT in the graphical mode's separate system registration in `src/states/mod.rs`.
@@ -76,10 +78,12 @@ When new effect processing systems were added to `systems.rs` (headless), they w
 
 ## Why This Happens Silently
 
-1. **Casting system runs independently**: The casting system (`process_cast_completion`) is registered in both modes, so it logs the cast and puts the ability on cooldown
-2. **Effect system never runs**: The effect processing system (e.g., `process_divine_shield`) is only registered in headless mode
-3. **No Bevy error**: Bevy doesn't error when a system isn't registered — it simply never runs
+1. **Casting system runs independently**: The casting system (`process_casting` in `combat_core/casting.rs`) is registered in both modes, so it logs the cast and puts the ability on cooldown
+2. **Effect system never runs**: The effect processing system (e.g., `process_divine_shield`) was only registered in headless mode
+3. **No Bevy error**: Bevy doesn't error when a system isn't registered — it simply never runs at runtime
 4. **AI continues normally**: The AI sees the cast succeeded (cooldown started) and continues making decisions
+
+The historical fix was manual diligence. The current fix is `tests/registration_audit.rs`, which fails `cargo test` with the file path, line number, and the three registration paths to choose from — so the silent failure becomes a noisy test failure.
 
 ## Export Chain Requirement
 
@@ -202,9 +206,11 @@ break_on_damage_threshold: -1.0,  // ✅ CORRECT for Divine Shield
 
 When adding ANY new combat system:
 
-- [ ] Add system to `src/states/play_match/systems.rs` → `add_core_combat_systems()`
-- [ ] Add system to `src/states/mod.rs` → `StatesPlugin` in the correct phase
-- [ ] Verify `pub use effects::*;` exists in `play_match/mod.rs`
+- [ ] Run `cargo test` — `tests/registration_audit.rs` will tell you exactly which of the three registration paths (`add_core_combat_systems`, `StatesPlugin::build()`, or `ALLOWLIST`) the new function needs
+- [ ] For core combat (runs in BOTH modes): add to `add_core_combat_systems()` in `src/states/play_match/systems.rs` (pick the right phase tuple — `ResourcesAndAuras`, `CombatAndMovement`, or `CombatResolution`) and add the matching `pub use` re-export at the top of `systems.rs`
+- [ ] For graphical-only visual / HUD systems: add to `StatesPlugin::build()` in `src/states/mod.rs` with the appropriate `.run_if(in_state(...))` gate
+- [ ] For helpers that take a SystemParam by value but are called manually: add to `ALLOWLIST` in `tests/registration_audit.rs` with a one-line justification
+- [ ] Verify the `pub use` chain exposes the system through `play_match::*` (the audit will fail to even find the function otherwise)
 - [ ] Test in **headless mode**: `cargo run --release -- --headless /tmp/test.json`
 - [ ] Test in **graphical mode**: `cargo run --release`
 - [ ] Verify BOTH cast logs AND effect logs appear in combat log

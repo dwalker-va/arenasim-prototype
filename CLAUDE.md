@@ -116,6 +116,7 @@ For deeper context, see these focused references:
 - **[Roadmap](design-docs/roadmap.md)** - Long-term TODOs and milestones
 - **[Stat Scaling](design-docs/stat-scaling-system.md)** - Damage/healing formulas and coefficients
 - **[Game Design](design-docs/game-design-doc.md)** - High-level game vision
+- **[Documented Solutions](docs/solutions/)** - Documented solutions to past problems (bugs, implementation patterns, workflows) organized by category, with YAML frontmatter (`module`, `tags`, `category`). Relevant when implementing or debugging in documented areas.
 
 ## Key Concepts
 

@@ -17,6 +17,7 @@ pub fn handle_camera_input(
     mut cursor_moved: EventReader<bevy::window::CursorMoved>,
     time: Res<Time<Real>>,
     combatants: Query<Entity, With<Combatant>>,
+    windows: Query<&bevy::window::Window>,
     mut contexts: EguiContexts,
 ) {
     use crate::keybindings::GameAction;
@@ -113,9 +114,18 @@ pub fn handle_camera_input(
         mouse_wheel.clear();
     }
 
+    // Read the live cursor position from the window. last_mouse_pos is an
+    // event-cache (filled by cursor_moved events) and stays None until the
+    // first cursor movement after a match enters, so the first click of a
+    // match would silently never fire. The window's cursor_position() is
+    // always current.
+    let cursor_now = windows.get_single().ok().and_then(|w| w.cursor_position());
+
     // Handle mouse drag for rotation (left mouse button, only if not over UI)
     if mouse_button.just_pressed(MouseButton::Left) && !egui_wants_pointer {
         camera_controller.is_dragging = true;
+        // Record live cursor position for click vs. drag detection.
+        camera_controller.press_position = cursor_now;
 
         // When starting manual mode, we need to preserve the current target
         // We'll update manual_target in the update_camera_position system
@@ -123,6 +133,24 @@ pub fn handle_camera_input(
 
     if mouse_button.just_released(MouseButton::Left) {
         camera_controller.is_dragging = false;
+        // Decide click vs. drag using press and release cursor positions.
+        // Only fire when the press was accepted (press_position set, i.e.,
+        // not started over an egui panel) and the cursor is currently in
+        // the window.
+        if let (Some(press), Some(release)) = (
+            camera_controller.press_position,
+            cursor_now,
+        ) {
+            if super::selection::is_click_gesture(
+                press,
+                release,
+                super::selection::SELECTION_CLICK_THRESHOLD_PX,
+            ) && !egui_wants_pointer
+            {
+                camera_controller.pending_pick = true;
+            }
+        }
+        camera_controller.press_position = None;
         camera_controller.last_mouse_pos = None;
     }
 
