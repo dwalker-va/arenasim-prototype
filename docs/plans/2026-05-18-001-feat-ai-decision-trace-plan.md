@@ -4,8 +4,23 @@ type: feat
 title: AI Decision Trace (Phase 1 — JSONL emission)
 depth: Standard
 origin: docs/brainstorms/2026-05-18-ai-decision-trace-requirements.md
-status: active
+status: completed
 revised: 2026-05-18
+completed: 2026-05-21
+execution_notes:
+  - "U13 (predicate enumeration) was skipped — its purpose was preventing
+     mid-stream schema churn, but the variant set stabilized through
+     incremental U2-U9 implementation without rework."
+  - "U8 (acquire_targets) narrowed from per-tick emission to per-change
+     emission to keep matrix-mode event volume tractable. Plan said
+     per-tick; implementation gates on target/cc_target changing."
+  - "A pre-existing self-mirror determinism bug was discovered during
+     all-pairings testing and fixed in-scope. Two HashMap → BTreeMap
+     conversions in combat_core/auto_attack.rs and auras.rs (see commit
+     05c28b5). PR #48's narrower tests missed this; this work's broader
+     49-pairing sweep surfaced it."
+  - "design-docs/balance/matrix_baseline_2026-05-16.md was regenerated to
+     reflect post-fix outcomes (self-mirror cells in particular)."
 ---
 
 # feat: AI Decision Trace — Phase 1

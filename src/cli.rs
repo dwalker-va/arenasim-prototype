@@ -9,8 +9,11 @@ use std::path::PathBuf;
 ///
 /// `off` — no trace emitted.
 /// `on` — minimal trace (actor + target + reason codes).
-/// `verbose` — minimal payload plus full aura lists on actor + target
-/// and all visible enemies (larger files; for deep dives).
+/// `verbose` — currently behaves identically to `on`. The flag is plumbed
+/// end-to-end (TraceWriter.verbose is set, propagated through TraceConfig)
+/// but the richer payload — full aura lists on actor + target plus all
+/// visible enemies — is deferred to Phase 2 follow-up work. Passing this
+/// today is harmless but emits the same JSONL as `on`.
 ///
 /// Default per mode: single-match runs default to `off`; matrix runs default
 /// to `on` so every cell's trace is already on disk when you find an anomaly.
@@ -67,9 +70,10 @@ pub struct Args {
     #[arg(long)]
     pub save_logs: bool,
 
-    /// AI decision trace mode. `off` = no trace; `on` = minimal trace;
-    /// `verbose` = minimal + full aura/enemy state. When omitted, single-match
-    /// runs default to `off` and matrix runs default to `on`.
+    /// AI decision trace mode. `off` = no trace; `on` = minimal trace.
+    /// `verbose` is accepted but currently emits the same payload as `on` —
+    /// richer payload (full aura lists, visible enemy state) is deferred to
+    /// Phase 2. Default: `off` for single match, `on` for `--matrix`.
     #[arg(long, value_name = "MODE", value_enum)]
     pub trace_mode: Option<TraceMode>,
 }

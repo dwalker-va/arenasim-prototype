@@ -169,6 +169,13 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
 4. **Add AI logic** in the appropriate `class_ai/<class>.rs` file:
    - Implement when to use the ability in the class's `decide_action()` method
    - Use `CombatContext` helpers like `ctx.target_info()`, `ctx.has_aura()`, etc.
+   - **AI decision trace** — at each predicate gate that rejects this ability,
+     call `builder.reject(AbilityType::NewAbility, RejectionReason::...)`
+     (use `classify_pre_cast_failure` for `pre_cast_ok` failures). On the
+     success branch, call `builder.choose(ability, target, was_instant)`.
+     This is mechanical instrumentation — no new module-level wiring is
+     needed; the builder is already threaded through every class AI
+     function. See `class_ai/warrior.rs` for the canonical pattern.
 
 5. **Add spell icon** for the ability timeline UI:
    - Download icon: `mcp__wowhead-classic__get_spell_icon("New Ability")` to get the URL
@@ -251,6 +258,41 @@ echo '{"team1":["Warrior"],"team2":["Mage"]}' > /tmp/test.json
 cargo run --release -- --headless /tmp/test.json
 cat match_logs/$(ls -t match_logs | head -1)
 ```
+
+### Diagnose AI behaviour with the decision trace
+
+Capture the AI's per-tick reject/choose decisions as JSONL alongside the
+match log. The trace shows every ability the AI considered with a typed
+rejection reason (out of range, on cooldown, friendly-CC guard, etc.) —
+turns "why didn't X cast Y?" from a code-read into a `jq` query.
+
+```bash
+# Single match — opt in via --trace-mode on
+cargo run --release -- --headless /tmp/test.json --trace-mode on
+# Trace lands at match_logs/match_<timestamp>_trace.jsonl
+
+# Matrix run — trace is on by default; opt out with --trace-mode off
+cargo run --release -- --matrix 100
+# 4900 files at match_logs/traces/match_<seed>_<c1>_v_<c2>_trace.jsonl
+
+# Common jq recipes (assumes a trace file):
+T=match_logs/match_*_trace.jsonl
+
+# All rejection reasons for Hunter across the whole match
+jq -r 'select(.actor.class == "Hunter") | .candidates[] | select(.status == "rejected") | .reason | if type == "object" then keys[0] else . end' $T | sort | uniq -c
+
+# Why didn't Hunter cast Aimed Shot? Show rejections by reason
+jq -c 'select(.actor.class == "Hunter") | .candidates[] | select(.ability == "AimedShot" and .status == "rejected") | .reason' $T | sort | uniq -c
+
+# Target switches over the match (when did Rogue switch from Paladin to Mage?)
+jq -c 'select(.kind == "target_acquisition" and .changed)' $T
+
+# Pet decisions grouped by owner
+jq -c 'select(.kind == "pet_decision") | {owner, pet_type, ability: .outcome.ability}' $T
+```
+
+See `docs/solutions/implementation-patterns/ai-decision-trace.md` for the
+full schema and the variant-to-predicate map.
 
 ### Look up spell data for implementation
 ```
