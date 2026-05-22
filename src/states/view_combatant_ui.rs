@@ -1815,7 +1815,7 @@ fn format_item_stats(item: &ItemConfig) -> String {
 }
 
 /// Render a tooltip showing an item's full stat breakdown.
-fn render_item_tooltip(ui: &mut egui::Ui, item: &ItemConfig) {
+pub fn render_item_tooltip(ui: &mut egui::Ui, item: &ItemConfig) {
     ui.label(
         egui::RichText::new(&item.name)
             .size(14.0)

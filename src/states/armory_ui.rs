@@ -11,7 +11,7 @@ use std::collections::HashSet;
 
 use super::GameState;
 use super::play_match::equipment::{ArmorType, ItemConfig, ItemDefinitions, ItemId, ItemSlot};
-use super::view_combatant_ui::ItemIcons;
+use super::view_combatant_ui::{render_item_tooltip, ItemIcons};
 
 // ============================================================================
 // THEME CONSTANTS
@@ -142,10 +142,12 @@ pub fn armory_ui(
 ) {
     let ctx = contexts.ctx_mut();
 
-    // Apply dark theme matching the main menu.
+    // Apply dark theme matching the main menu, with zero-delay tooltips so
+    // hovering a tile shows item info immediately (matches ViewCombatant).
     let mut style = (*ctx.style()).clone();
     style.visuals.window_fill = BG_COLOR;
     style.visuals.panel_fill = BG_COLOR;
+    style.interaction.tooltip_delay = 0.0;
     ctx.set_style(style);
 
     egui::CentralPanel::default()
@@ -374,7 +376,7 @@ fn render_grid(
                 for (id, item) in items {
                     let response = tile_ui(ui, id, item, item_icons);
                     let item_for_tooltip = *item;
-                    response.on_hover_ui(|ui| render_tooltip(ui, item_for_tooltip));
+                    response.on_hover_ui(|ui| render_item_tooltip(ui, item_for_tooltip));
                 }
             });
         });
@@ -469,135 +471,4 @@ fn slot_order(slot: ItemSlot) -> usize {
         ItemSlot::OffHand   => 15,
         ItemSlot::Ranged    => 16,
     }
-}
-
-fn armor_type_name(armor_type: ArmorType) -> Option<&'static str> {
-    match armor_type {
-        ArmorType::Cloth => Some("Cloth"),
-        ArmorType::Leather => Some("Leather"),
-        ArmorType::Mail => Some("Mail"),
-        ArmorType::Plate => Some("Plate"),
-        ArmorType::None => None,
-    }
-}
-
-// ============================================================================
-// TOOLTIP
-// ============================================================================
-
-/// Renders the hover tooltip for a tile: name, identity line, stat block.
-fn render_tooltip(ui: &mut egui::Ui, item: &ItemConfig) {
-    ui.set_max_width(280.0);
-
-    // Item name (gold heading).
-    ui.label(
-        egui::RichText::new(&item.name)
-            .size(16.0)
-            .color(TITLE_GOLD)
-            .strong(),
-    );
-
-    // Identity line: iLvl · Slot · ArmorType (armor type omitted when None).
-    let mut identity = format!("iLvl {} · {}", item.item_level, item.slot.name());
-    if let Some(at) = armor_type_name(item.armor_type) {
-        identity.push_str(" · ");
-        identity.push_str(at);
-    }
-    ui.label(
-        egui::RichText::new(identity)
-            .size(12.0)
-            .color(MUTED_TEXT),
-    );
-
-    ui.add_space(4.0);
-    ui.separator();
-    ui.add_space(4.0);
-
-    let mut any_stat = false;
-
-    // Weapon damage block — guard damage and speed independently so a
-    // weapon with only speed never renders "Damage: 0–0".
-    if item.is_weapon {
-        if item.attack_damage_max > 0.0 {
-            any_stat = true;
-            ui.label(stat_text(format!(
-                "Damage: {:.0}–{:.0}",
-                item.attack_damage_min, item.attack_damage_max
-            )));
-        }
-        if item.attack_speed > 0.0 {
-            any_stat = true;
-            ui.label(stat_text(format!("Speed: {:.1}", item.attack_speed)));
-        }
-    }
-
-    // Armor (free stat, shown when present).
-    if item.armor > 0.0 {
-        any_stat = true;
-        ui.label(stat_text(format!("{:.0} Armor", item.armor)));
-    }
-
-    // Primary stat-budget fields.
-    for (label, value) in [
-        ("Max Health", item.max_health),
-        ("Max Mana", item.max_mana),
-        ("Attack Power", item.attack_power),
-        ("Spell Power", item.spell_power),
-    ] {
-        if value > 0.0 {
-            any_stat = true;
-            ui.label(stat_text(format!("+{:.0} {}", value, label)));
-        }
-    }
-
-    if item.mana_regen > 0.0 {
-        any_stat = true;
-        ui.label(stat_text(format!("+{:.1} Mana Regen / 5s", item.mana_regen)));
-    }
-    if item.crit_chance > 0.0 {
-        any_stat = true;
-        ui.label(stat_text(format!(
-            "+{:.1}% Critical Strike",
-            item.crit_chance * 100.0
-        )));
-    }
-    if item.movement_speed > 0.0 {
-        any_stat = true;
-        ui.label(stat_text(format!(
-            "+{:.0}% Movement Speed",
-            item.movement_speed * 100.0
-        )));
-    }
-
-    // Resistances grouped on a single line (only non-zero entries).
-    let mut resists: Vec<String> = Vec::new();
-    for (label, value) in [
-        ("Fire", item.fire_resistance),
-        ("Frost", item.frost_resistance),
-        ("Shadow", item.shadow_resistance),
-        ("Arcane", item.arcane_resistance),
-        ("Nature", item.nature_resistance),
-        ("Holy", item.holy_resistance),
-    ] {
-        if value > 0.0 {
-            resists.push(format!("+{:.0} {}", value, label));
-        }
-    }
-    if !resists.is_empty() {
-        any_stat = true;
-        ui.label(stat_text(resists.join("   ")));
-    }
-
-    if !any_stat {
-        ui.label(
-            egui::RichText::new("(no stat bonuses)")
-                .size(12.0)
-                .italics()
-                .color(MUTED_TEXT),
-        );
-    }
-}
-
-fn stat_text(text: String) -> egui::RichText {
-    egui::RichText::new(text).size(13.0).color(BUTTON_TEXT)
 }
