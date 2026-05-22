@@ -1,6 +1,6 @@
 ---
 date: 2026-05-22
-status: active
+status: completed
 type: fix
 title: Hunter mana economy tuning
 origin: docs/brainstorms/2026-05-22-hunter-mana-economy-requirements.md
