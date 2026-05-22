@@ -22,8 +22,10 @@ use super::DecisionTrace;
 pub struct TraceWriter {
     inner: BufWriter<File>,
     path: PathBuf,
-    /// True when verbose mode is enabled — extra state may be attached to
-    /// events before serialization. Plumbed but not yet consumed in U1.
+    /// True when verbose mode is enabled. Currently plumbed but not consumed
+    /// by `flush_events` — the richer payload (full aura lists on actor and
+    /// target, visible enemy state) is deferred. CLI `--trace-mode verbose`
+    /// sets this; today its output is identical to `--trace-mode on`.
     pub verbose: bool,
 }
 
@@ -82,27 +84,42 @@ fn kind_order(kind: EventKind) -> u8 {
     }
 }
 
-/// System that updates `DecisionTrace.current_frame` and `current_sim_time` each
-/// frame, then drains any pending events into the writer (if a writer is
-/// attached). Registered in both `add_core_combat_systems` (headless) and
-/// `StatesPlugin::build` (graphical) per the dual-registration discipline.
+/// System that drains pending decision events into the writer and advances
+/// the frame/sim_time clock for the NEXT frame's events.
+///
+/// Registered in `add_core_combat_systems` (which is called from both
+/// `HeadlessPlugin::build` for headless mode and `StatesPlugin::build`
+/// for graphical mode) — a single registration reaches both modes through
+/// that helper.
+///
+/// Frame ordering: events emitted by class AI / target acquisition / pet AI
+/// in Phase 2 (CombatAndMovement) carry the frame number and sim_time set
+/// BEFORE this system runs. We bump the counters AFTER drain so the next
+/// frame's events get fresh values, and frame 0 events carry the initial
+/// `current_frame == 0` / `current_sim_time == 0.0` set at writer install.
 pub fn flush_decision_trace_system(
     time: Res<Time>,
     countdown: Res<crate::states::play_match::components::MatchCountdown>,
     mut trace: ResMut<DecisionTrace>,
 ) {
+    // Drain pending events FIRST so they carry the frame/sim_time values
+    // active when they were emitted.
+    if trace.writer.is_some() && !trace.pending_events.is_empty() {
+        let events = std::mem::take(&mut trace.pending_events);
+        if let Some(writer) = trace.writer.as_mut() {
+            if let Err(e) = writer.flush_events(events) {
+                warn!("decision_trace: flush failed: {}", e);
+            }
+        }
+    } else {
+        // No writer or no events — clear unconditionally so pending_events
+        // doesn't accumulate forever when tracing is disabled.
+        trace.pending_events.clear();
+    }
+
+    // Advance the clock for the NEXT frame's events.
     trace.current_frame = trace.current_frame.wrapping_add(1);
     if countdown.gates_opened {
         trace.current_sim_time += time.delta_secs();
-    }
-    if trace.writer.is_none() || trace.pending_events.is_empty() {
-        trace.pending_events.clear();
-        return;
-    }
-    let events = std::mem::take(&mut trace.pending_events);
-    if let Some(writer) = trace.writer.as_mut() {
-        if let Err(e) = writer.flush_events(events) {
-            warn!("decision_trace: flush failed: {}", e);
-        }
     }
 }

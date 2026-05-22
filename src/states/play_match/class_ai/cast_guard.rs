@@ -170,8 +170,15 @@ pub fn classify_pre_cast_failure(
         }
     };
 
+    // Predicate order MUST match `AbilityType::can_cast_config` exactly:
+    // mana first, then range, then min_range, then stealth. Otherwise the
+    // trace can lie about why a cast failed (e.g., reporting OutOfRange
+    // when can_cast_config actually short-circuited on mana).
     match target {
         Some((_, target_pos)) => {
+            if caster.current_mana < def.mana_cost {
+                return resource_shortage();
+            }
             let distance = caster_pos.distance(target_pos);
             if distance > def.range {
                 return RejectionReason::OutOfRange { distance, max: def.range };
@@ -181,8 +188,10 @@ pub fn classify_pre_cast_failure(
                     return RejectionReason::WithinDeadZone { distance, min: min_range };
                 }
             }
-            if caster.current_mana < def.mana_cost {
-                return resource_shortage();
+            if matches!(ability, AbilityType::Ambush | AbilityType::CheapShot) && !caster.stealthed {
+                return RejectionReason::PreconditionUnmet {
+                    note: "stealth required (Ambush/CheapShot)".into(),
+                };
             }
         }
         None => {

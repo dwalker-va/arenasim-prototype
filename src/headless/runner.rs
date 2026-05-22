@@ -588,10 +588,16 @@ pub fn run_headless_match_with(
     // but the final frame's events would otherwise stay in pending_events until
     // the world is dropped (where TraceWriter's Drop impl catches them via its
     // BufWriter flush — but only if no panics occurred). Belt and suspenders.
-    if trace_config.is_some() {
+    //
+    // A close_writer failure here means the final frame's trace events did
+    // not reach disk. Surface to stderr so matrix runs can see truncation.
+    // We don't fail the match — the in-memory MatchResult is unaffected.
+    if let Some(tc) = trace_config.as_ref() {
         let world = app.world_mut();
         if let Some(mut trace) = world.get_resource_mut::<DecisionTrace>() {
-            trace.close_writer();
+            if let Err(e) = trace.close_writer() {
+                eprintln!("decision_trace: final flush failed at {}: {}", tc.output_path.display(), e);
+            }
         }
     }
 

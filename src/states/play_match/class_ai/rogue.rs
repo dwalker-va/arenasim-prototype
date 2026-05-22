@@ -111,7 +111,7 @@ pub fn decide_rogue_action(
         } else if ctx.is_dr_immune(ks_target_entity, DRCategory::Stuns) {
             builder.reject(
                 kidney_shot,
-                RejectionReason::DRImmune { category: "Stuns".into() },
+                RejectionReason::DRImmune { category: DRCategory::Stuns },
             );
         } else if try_kidney_shot(
             commands, combat_log, abilities, entity, combatant, my_pos,

@@ -176,7 +176,7 @@ pub fn decide_warlock_action(
         } else if ctx.is_dr_immune(fear_target_entity, DRCategory::Fears) {
             builder.reject(
                 AbilityType::Fear,
-                RejectionReason::DRImmune { category: "Fears".into() },
+                RejectionReason::DRImmune { category: DRCategory::Fears },
             );
         } else if let Some(fear_target_info) = ctx.combatants.get(&fear_target_entity) {
             let fear_target_pos = fear_target_info.position;

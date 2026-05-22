@@ -1,4 +1,4 @@
-//! AI Decision Trace — Phase 1
+//! AI Decision Trace
 //!
 //! Structured JSONL trace of AI decisions. See
 //! `docs/plans/2026-05-18-001-feat-ai-decision-trace-plan.md` for the full design.
@@ -15,7 +15,7 @@
 //! ```
 //!
 //! Tracing is disabled by default — `DecisionTrace.writer` is `None` until the
-//! headless runner installs a writer at match start (wired in U10). Builder
+//! headless runner installs a writer at match start. Builder
 //! calls are still cheap (push to an in-memory Vec) and the flush system
 //! discards the vec each frame when no writer is attached.
 
@@ -85,20 +85,26 @@ impl DecisionTrace {
             candidates: Vec::new(),
             chosen: None,
             pet_owner: Some(owner.index()),
-            pet_type: Some(pet_type.to_string()),
+            // Cow::Borrowed avoids the per-tick allocation that
+            // `.to_string()` would do for the always-static pet type name.
+            pet_type: Some(std::borrow::Cow::Borrowed(pet_type)),
         }
     }
 
-    /// Start a `target_acquisition` event.
+    /// Start a `target_acquisition` event. Pass the previous primary target
+    /// and previous cc_target so the resulting event records both transitions
+    /// (the AI may change cc_target without changing primary, and vice versa).
     pub fn start_target_acquisition(
         &mut self,
         actor: ActorView,
         previous_target: Option<Entity>,
+        previous_cc_target: Option<Entity>,
     ) -> TargetEventBuilder<'_> {
         TargetEventBuilder {
             trace: self,
             actor,
             previous_target: previous_target.map(|e| e.index()),
+            previous_cc_target: previous_cc_target.map(|e| e.index()),
             candidates: Vec::new(),
         }
     }
@@ -111,18 +117,23 @@ impl DecisionTrace {
 
     /// Detach and drop the writer (drained on drop). Used between matches in
     /// matrix mode.
-    pub fn close_writer(&mut self) {
-        // Drain any in-flight events into the writer before dropping it so the
-        // last frame's events aren't lost.
+    ///
+    /// Returns `Ok(())` on successful drain + close, `Err(io::Error)` if the
+    /// final flush failed. Callers should surface the error — at match end
+    /// this is the authoritative last-frame write and silent failure leaves
+    /// the trace file truncated without any signal.
+    pub fn close_writer(&mut self) -> std::io::Result<()> {
+        let mut result: std::io::Result<()> = Ok(());
         if let Some(writer) = self.writer.as_mut() {
             if !self.pending_events.is_empty() {
                 let events = std::mem::take(&mut self.pending_events);
-                let _ = writer.flush_events(events);
+                result = writer.flush_events(events).map(|_count| ());
             }
         }
         self.writer = None;
         self.current_frame = 0;
         self.current_sim_time = 0.0;
+        result
     }
 }
 

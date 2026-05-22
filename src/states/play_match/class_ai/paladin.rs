@@ -713,7 +713,7 @@ fn try_cleanse(
         "[CLEANSE]",
         "Cleanse",
         CharacterClass::Paladin,
-        Some(builder),
+        builder,
     )
 }
 

@@ -349,7 +349,7 @@ fn try_dispel_magic(
         "[DISPEL]",
         "Dispel Magic",
         CharacterClass::Priest,
-        Some(builder),
+        builder,
     )
 }
 

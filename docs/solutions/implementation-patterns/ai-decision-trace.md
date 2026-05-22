@@ -167,10 +167,17 @@ Use this as a starting point when adding instrumentation to a new ability:
 
 ## Surfaces you must touch when adding a new combat system
 
-The trace flush system is dual-registered (see `tests/registration_audit.rs`).
-If you add a new system that runs combat logic, follow the existing dual
-registration pattern in `add_core_combat_systems` — see
-`docs/solutions/implementation-patterns/graphical-mode-missing-system-registration.md`.
+The trace flush system is registered inside `add_core_combat_systems` (in
+`src/states/play_match/systems.rs`). Because both `HeadlessPlugin::build`
+and `StatesPlugin::build` call `add_core_combat_systems`, that single
+registration reaches both headless and graphical modes — no separate
+registration in `StatesPlugin::build` is required for systems registered
+this way. The `tests/registration_audit.rs` audit confirms the single
+registration is sufficient for the both-modes case (CLAUDE.md §"Adding
+a New Combat System" documents the two registration paths). When adding
+a new system that runs combat logic, follow the same pattern; see
+`docs/solutions/implementation-patterns/graphical-mode-missing-system-registration.md`
+for the original lesson behind that discipline.
 
 ## Related
 

@@ -19,8 +19,11 @@ execution_notes:
      conversions in combat_core/auto_attack.rs and auras.rs (see commit
      05c28b5). PR #48's narrower tests missed this; this work's broader
      49-pairing sweep surfaced it."
-  - "design-docs/balance/matrix_baseline_2026-05-16.md was regenerated to
-     reflect post-fix outcomes (self-mirror cells in particular)."
+  - "design-docs/balance/matrix_baseline_2026-05-21.md added to reflect
+     post-fix outcomes — self-mirror diagonal cells shifted by 5-15
+     percentage points because the previous nondeterminism was a per-match
+     coin flip. Off-diagonal cells are unchanged within sampling variance.
+     Old baseline (2026-05-16) retained for historical comparison."
 ---
 
 # feat: AI Decision Trace — Phase 1

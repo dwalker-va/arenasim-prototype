@@ -267,7 +267,7 @@ pub fn acquire_targets(
                 mana_pct,
                 my_pos,
             );
-            let mut tbuilder = decision_trace.start_target_acquisition(actor_view, prev_target);
+            let mut tbuilder = decision_trace.start_target_acquisition(actor_view, prev_target, prev_cc_target);
 
             // Populate candidates from the visible enemy set. Chosen = new_target;
             // all other alive non-pet enemies are Rejected{LowerScoreThanChosen}
@@ -319,7 +319,7 @@ pub fn acquire_targets(
                     );
                 }
             }
-            tbuilder.finish(combatant.target);
+            tbuilder.finish(combatant.target, combatant.cc_target);
         }
     }
 }

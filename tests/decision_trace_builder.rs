@@ -7,7 +7,7 @@
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::decision_trace::{
-    ActorView, DecisionTrace, NoActionReason, RejectionReason, ResourceKind, TraceWriter,
+    ActorView, CandidateStatus, DecisionTrace, NoActionReason, RejectionReason, ResourceKind, TraceWriter,
 };
 
 fn warrior_actor() -> ActorView {
@@ -191,6 +191,105 @@ fn writer_sorts_events_by_frame_then_entity_then_kind() {
 }
 
 #[test]
+fn builder_finish_no_action_emits_even_with_zero_candidates() {
+    // Hunter/Rogue top-level TargetImmune short-circuits call finish_no_action
+    // immediately after start_ability_decision without pushing any candidates.
+    // The original implementation gated this case on candidates.is_empty() and
+    // silently dropped the event — defeating the diagnostic use case. Verify
+    // finish_no_action always emits.
+    let mut trace = DecisionTrace::default();
+    let builder = trace.start_ability_decision(warrior_actor(), None);
+    builder.finish_no_action(NoActionReason::TargetImmune);
+    assert_event_count(&trace, 1);
+    let json = serde_json::to_string(&trace.pending_events[0]).unwrap();
+    assert!(
+        json.contains("\"no_action\""),
+        "no_action outcome present: {}",
+        json
+    );
+    assert!(
+        json.contains("\"TargetImmune\""),
+        "TargetImmune reason present: {}",
+        json
+    );
+}
+
+#[test]
+fn start_pet_decision_event_carries_owner_and_pet_type() {
+    use bevy::prelude::Entity;
+    let mut trace = DecisionTrace::default();
+    let owner = Entity::from_raw(42);
+    let actor = ActorView {
+        entity_id: 100,
+        team: 2,
+        slot: 0,
+        class: CharacterClass::Hunter,
+        hp_pct: 1.0,
+        mana_pct: 1.0,
+        position: [0.0, 0.0, 0.0],
+    };
+    let mut builder = trace.start_pet_decision(actor, None, owner, "Spider");
+    builder.reject(AbilityType::SpiderWeb, RejectionReason::AlreadyApplied);
+    builder.finish();
+    assert_event_count(&trace, 1);
+    let json = serde_json::to_string(&trace.pending_events[0]).unwrap();
+    assert!(json.contains("\"kind\":\"pet_decision\""), "kind=pet_decision: {}", json);
+    assert!(json.contains("\"owner\":42"), "owner=42: {}", json);
+    assert!(json.contains("\"pet_type\":\"Spider\""), "pet_type=Spider: {}", json);
+}
+
+#[test]
+fn writer_sorts_target_acquisition_before_ability_decision_at_same_frame_and_entity() {
+    // Canonical order is (frame, entity_id, kind). For two events at the same
+    // frame and entity_id, kind tie-break should put TargetAcquisition (0)
+    // before AbilityDecision (1). The earlier test only covered AbilityDecision
+    // → AbilityDecision which never reaches the kind comparator.
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    let path = tmp.path().to_path_buf();
+    let mut trace = DecisionTrace::default();
+    trace.install_writer(TraceWriter::create(path.clone(), false).unwrap());
+    trace.current_frame = 10;
+
+    // Push ability_decision first
+    let mut b = trace.start_ability_decision(warrior_actor(), None);
+    b.choose(AbilityType::HeroicStrike, None, true);
+    b.finish();
+
+    // Push target_acquisition second (same frame, same entity)
+    let mut t = trace.start_target_acquisition(warrior_actor(), None, None);
+    t.score(
+        bevy::prelude::Entity::from_raw(99),
+        CharacterClass::Mage,
+        -10,
+        CandidateStatus::Chosen,
+        None,
+    );
+    t.finish(Some(bevy::prelude::Entity::from_raw(99)), None);
+
+    let events = std::mem::take(&mut trace.pending_events);
+    let writer = trace.writer.as_mut().unwrap();
+    writer.flush_events(events).unwrap();
+    drop(trace);
+
+    let body = std::fs::read_to_string(&path).unwrap();
+    let lines: Vec<&str> = body.lines().collect();
+    assert_eq!(lines.len(), 2);
+    let kinds: Vec<String> = lines
+        .iter()
+        .map(|l| {
+            let v: serde_json::Value = serde_json::from_str(l).unwrap();
+            v.get("kind").and_then(|k| k.as_str()).unwrap().to_string()
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        vec!["target_acquisition".to_string(), "ability_decision".to_string()],
+        "TargetAcquisition (kind_order=0) sorted before AbilityDecision (kind_order=1): {:?}",
+        kinds
+    );
+}
+
+#[test]
 fn writer_creates_parent_directory_on_create() {
     let temp = tempfile::tempdir().unwrap();
     let nested = temp.path().join("traces").join("subdir").join("trace.jsonl");
@@ -215,7 +314,7 @@ fn close_writer_drains_pending_and_resets_clock() {
     b.finish();
 
     assert_eq!(trace.pending_events.len(), 1);
-    trace.close_writer();
+    trace.close_writer().expect("flush on close");
 
     assert!(trace.writer.is_none(), "writer detached");
     assert_eq!(trace.current_frame, 0, "frame reset");

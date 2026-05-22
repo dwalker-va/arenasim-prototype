@@ -5,18 +5,45 @@
 //! along with the candidate set the AI considered and a typed rejection reason
 //! for each candidate that lost.
 //!
-//! Event schema is JSON Lines (JSONL) — one event per line, serialized via serde_json.
-//! Reason variants carry structured payloads so `jq` filters work directly:
-//! `jq '.candidates[].reason.OutOfRange.distance > 50' < trace.jsonl`.
+//! ## Wire format (JSON Lines)
 //!
-//! Initial variant set is finalized in U13 (predicate enumeration pass). New variants
-//! must be added to `tests/decision_trace_audit.rs::expected_reasons` to pass the audit.
+//! One event per line, serialized via `serde_json`. Two serde details that
+//! matter for downstream `jq` consumers:
+//!
+//! - **`EventPayload` is flattened.** Fields like `candidates`, `outcome`,
+//!   `previous_target`, `new_target`, `pet_type`, `owner` appear at the top
+//!   level of the event object, NOT under a `payload` key. So write
+//!   `.outcome.action_taken.ability`, not `.payload.outcome.action_taken.ability`.
+//! - **Reason variants use mixed serialization shapes.** Unit variants like
+//!   `TargetImmune` serialize as the bare string `"TargetImmune"`. Struct
+//!   variants like `OutOfRange { distance, max }` serialize as
+//!   `{"OutOfRange": {"distance": 35.0, "max": 12.0}}` — a single-key object
+//!   whose key names the variant. Use the `if type == "object" then keys[0]
+//!   else . end` jq idiom (or see CLAUDE.md → "Diagnose AI behaviour with the
+//!   decision trace") to extract the variant name uniformly. The mixed shape
+//!   is the serde default for externally-tagged enums and is preserved here
+//!   intentionally — switching to a fully-tagged form would break every jq
+//!   query already written against the schema.
+//!
+//! ## Entity-id stability
+//!
+//! `actor.entity_id`, `target.entity_id`, `pet_owner`, and the entity_id fields
+//! on `TargetCandidate` come from `Bevy::Entity::index()` — generation bits are
+//! stripped. Combatant and pet entities are stable across a single match (pets
+//! are zeroed in place on death, not despawned). However traps and projectiles
+//! ARE despawned mid-match, returning their slots to Bevy's recycler. In
+//! practice this is harmless because traps/projectiles never appear in
+//! `actor.entity_id` / `target.entity_id` / `pet_owner` — only in fields the
+//! trace doesn't expose. If you need across-match entity tracking, use
+//! `(actor.team, actor.slot)` as the logical key.
+
+use std::borrow::Cow;
 
 use serde::Serialize;
 
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::{AbilityType, SpellSchool};
-use crate::states::play_match::components::AuraType;
+use crate::states::play_match::components::{AuraType, DRCategory};
 
 /// One AI decision event. Serializes to a single JSONL line.
 #[derive(Serialize, Clone, Debug)]
@@ -49,16 +76,28 @@ pub enum EventPayload {
         outcome: AbilityOutcome,
     },
     Target {
+        // Primary (kill) target before / after this acquisition tick.
         #[serde(skip_serializing_if = "Option::is_none")]
         previous_target: Option<u32>,
         #[serde(skip_serializing_if = "Option::is_none")]
         new_target: Option<u32>,
         changed: bool,
+        // CC target (the "polymorph this guy" slot) — independent of primary
+        // target. Emission fires when either target OR cc_target changed;
+        // these fields tell consumers which.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        previous_cc_target: Option<u32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        new_cc_target: Option<u32>,
+        cc_changed: bool,
         candidates: Vec<TargetCandidate>,
     },
     Pet {
         owner: u32,
-        pet_type: String,
+        // Cow<'static, str> (not String) so callers can pass a &'static str
+        // for the pet type name without allocating per pet per tick. The pet
+        // type is always known at compile time (Felhunter / Spider / Boar / Bird).
+        pet_type: Cow<'static, str>,
         candidates: Vec<AbilityCandidate>,
         outcome: AbilityOutcome,
     },
@@ -135,9 +174,14 @@ pub enum NoActionReason {
 /// payloads so the rejection is greppable with `jq` AND retains the numeric
 /// context the predicate observed.
 ///
+/// Note `OutOfRange` and `WithinDeadZone` are distinct variants — a jq filter
+/// looking only at `OutOfRange` will miss dead-zone rejections (Hunter Aimed
+/// Shot below min-range, Warrior Charge below CHARGE_MIN_RANGE). Match both
+/// when doing range analysis.
+///
 /// Adding a new variant requires updating `tests/decision_trace_audit.rs::expected_reasons`
-/// (audit test fails the build otherwise) and ensuring at least one reference match
-/// in U12 exercises the new variant.
+/// (audit test fails the build otherwise) and ensuring at least one reference
+/// match exercises the new variant.
 #[derive(Serialize, Clone, Debug)]
 pub enum RejectionReason {
     OutOfRange { distance: f32, max: f32 },
@@ -148,7 +192,7 @@ pub enum RejectionReason {
     SilencedOrLocked { school: SpellSchool },
     TargetImmune,
     TargetAlreadyCCd { cc_type: AuraType },
-    DRImmune { category: String },
+    DRImmune { category: DRCategory },
     FriendlyBreakableCC,
     SelfIncapacitated,
     Rooted,

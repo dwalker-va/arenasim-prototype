@@ -31,7 +31,7 @@ pub struct DecisionEventBuilder<'a> {
     pub(super) candidates: Vec<AbilityCandidate>,
     pub(super) chosen: Option<ChosenAction>,
     pub(super) pet_owner: Option<u32>,
-    pub(super) pet_type: Option<String>,
+    pub(super) pet_type: Option<std::borrow::Cow<'static, str>>,
 }
 
 pub(super) struct ChosenAction {
@@ -67,12 +67,17 @@ impl<'a> DecisionEventBuilder<'a> {
         });
     }
 
-    /// Commit the event. No-ops when no candidates were pushed (emission gate).
-    pub fn finish(self) {
+    /// Commit the event. Implicit emission gate: no-ops when no candidates were
+    /// pushed AND no explicit outcome was set. Use `finish_no_action(reason)` to
+    /// emit a NoAction event from a top-level short-circuit (e.g., target immune)
+    /// that bypasses the gate.
+    pub fn finish(mut self) {
         if self.candidates.is_empty() {
             return;
         }
-        let outcome = match self.chosen {
+        // Take `chosen` so the destructuring move doesn't partially consume
+        // `self` (which `emit` still needs).
+        let outcome = match self.chosen.take() {
             Some(action) => AbilityOutcome::ActionTaken {
                 ability: action.ability,
                 target_id: action.target_id,
@@ -82,38 +87,24 @@ impl<'a> DecisionEventBuilder<'a> {
                 primary_reason: NoActionReason::AllCandidatesRejected,
             },
         };
-        let payload = match (self.kind, self.pet_owner, self.pet_type) {
-            (EventKind::PetDecision, Some(owner), Some(pet_type)) => EventPayload::Pet {
-                owner,
-                pet_type,
-                candidates: self.candidates,
-                outcome,
-            },
-            _ => EventPayload::Ability {
-                candidates: self.candidates,
-                outcome,
-            },
-        };
-        let event = DecisionEvent {
-            frame: self.trace.current_frame,
-            sim_time: self.trace.current_sim_time,
-            seed: self.trace.seed,
-            kind: self.kind,
-            actor: self.actor,
-            target: self.target,
-            payload,
-        };
-        self.trace.pending_events.push(event);
+        self.emit(outcome);
     }
 
-    /// Commit with an explicit no-action reason (e.g., NoValidTarget short-circuit).
-    /// Still gated on candidates being non-empty — caller can use this when one or
-    /// more rejections were recorded before the no-action exit.
+    /// Commit with an explicit no-action reason. Unlike `finish`, this always
+    /// emits — including when no candidates have been pushed. Use it for
+    /// top-level short-circuits (e.g., `TargetImmune`, `SelfIncapacitated`)
+    /// where the AI made a decision NOT to consider any abilities. Without
+    /// this path, those events would be silently swallowed by the
+    /// candidates-empty gate, defeating diagnostic value for skip cases.
     pub fn finish_no_action(self, primary_reason: NoActionReason) {
-        if self.candidates.is_empty() {
-            return;
-        }
         let outcome = AbilityOutcome::NoAction { primary_reason };
+        self.emit(outcome);
+    }
+
+    /// Shared serialization path for `finish` and `finish_no_action`. Selects
+    /// `EventPayload::Pet` when this is a pet_decision event with owner/type
+    /// set, else `EventPayload::Ability`.
+    fn emit(self, outcome: AbilityOutcome) {
         let payload = match (self.kind, self.pet_owner, self.pet_type) {
             (EventKind::PetDecision, Some(owner), Some(pet_type)) => EventPayload::Pet {
                 owner,
@@ -140,11 +131,15 @@ impl<'a> DecisionEventBuilder<'a> {
 }
 
 /// Builder for one `target_acquisition` event. Caller pushes scored enemies
-/// (chosen + rejected with reasons) and finishes with the new target.
+/// (chosen + rejected with reasons) and finishes with the new target and
+/// cc_target. The event payload carries both the primary-target transition
+/// and the cc_target transition so downstream consumers can distinguish
+/// "Rogue switched kill targets" from "Mage switched its Polymorph mark".
 pub struct TargetEventBuilder<'a> {
     pub(super) trace: &'a mut DecisionTrace,
     pub(super) actor: ActorView,
     pub(super) previous_target: Option<u32>,
+    pub(super) previous_cc_target: Option<u32>,
     pub(super) candidates: Vec<TargetCandidate>,
 }
 
@@ -166,12 +161,24 @@ impl<'a> TargetEventBuilder<'a> {
         });
     }
 
-    pub fn finish(self, new_target: Option<Entity>) {
-        if self.candidates.is_empty() && new_target.is_none() && self.previous_target.is_none() {
+    pub fn finish(self, new_target: Option<Entity>, new_cc_target: Option<Entity>) {
+        let new_target_id = new_target.map(|e| e.index());
+        let new_cc_target_id = new_cc_target.map(|e| e.index());
+        let changed = self.previous_target != new_target_id;
+        let cc_changed = self.previous_cc_target != new_cc_target_id;
+
+        // Skip emission when nothing meaningful changed and there are no
+        // candidates to record. This filters out idle ticks where target
+        // acquisition runs but the state is stable.
+        if !changed
+            && !cc_changed
+            && self.candidates.is_empty()
+            && new_target_id.is_none()
+            && self.previous_target.is_none()
+        {
             return;
         }
-        let new_target_id = new_target.map(|e| e.index());
-        let changed = self.previous_target != new_target_id;
+
         let event = DecisionEvent {
             frame: self.trace.current_frame,
             sim_time: self.trace.current_sim_time,
@@ -183,6 +190,9 @@ impl<'a> TargetEventBuilder<'a> {
                 previous_target: self.previous_target,
                 new_target: new_target_id,
                 changed,
+                previous_cc_target: self.previous_cc_target,
+                new_cc_target: new_cc_target_id,
+                cc_changed,
                 candidates: self.candidates,
             },
         };

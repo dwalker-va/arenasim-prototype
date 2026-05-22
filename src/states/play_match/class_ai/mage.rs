@@ -532,7 +532,7 @@ fn try_polymorph(
         builder.reject(
             ability,
             RejectionReason::DRImmune {
-                category: "Incapacitates".into(),
+                category: DRCategory::Incapacitates,
             },
         );
         return false;
