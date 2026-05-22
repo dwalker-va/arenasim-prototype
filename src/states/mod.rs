@@ -55,6 +55,8 @@ impl Plugin for StatesPlugin {
             // Initialize hunter pet icon resources for view combatant screen
             .init_resource::<view_combatant_ui::HunterPetIcons>()
             .init_resource::<view_combatant_ui::HunterPetIconHandles>()
+            // Player selection (click-to-select) — graphical-only
+            .init_resource::<play_match::Selection>()
             // Main menu systems (now using egui)
             .add_systems(
                 Update,
@@ -106,6 +108,12 @@ impl Plugin for StatesPlugin {
                 (
                     play_match::handle_time_controls,
                     play_match::handle_camera_input,
+                    // pick_selected_combatant consumes the pending_pick flag set
+                    // by handle_camera_input on click-release; must run after it.
+                    play_match::pick_selected_combatant,
+                    // sync_selection_ring spawns/despawns the ring when the
+                    // Selection resource changes — runs after picking.
+                    play_match::sync_selection_ring,
                     play_match::update_camera_position,
                     play_match::animate_gate_bars,
                     play_match::update_play_match,
@@ -271,6 +279,19 @@ impl Plugin for StatesPlugin {
                     play_match::load_spell_icons,
                 )
                     .run_if(in_state(GameState::PlayMatch)),
+            )
+            // Selection ring follow & cleanup — runs after combat resolution
+            // so the ring tracks post-movement positions on the same frame
+            // (matches the `follow_shield_bubbles` pattern).
+            .add_systems(
+                Update,
+                play_match::follow_selection_ring
+                    .after(CombatSystemPhase::CombatResolution)
+                    .run_if(in_state(GameState::PlayMatch)),
+            )
+            .add_systems(
+                OnExit(GameState::PlayMatch),
+                play_match::reset_selection_on_exit,
             )
             .add_systems(OnExit(GameState::PlayMatch), play_match::cleanup_play_match)
             // Results systems (defined in results_ui module)
