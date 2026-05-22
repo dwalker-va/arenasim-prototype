@@ -28,7 +28,7 @@ use crate::states::play_match::components::{
 use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::constants::GCD;
 use crate::states::play_match::decision_trace::{
-    ActorView, DecisionEventBuilder, DecisionTrace, RejectionReason, TargetView,
+    DecisionEventBuilder, DecisionTrace, RejectionReason,
 };
 
 use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
@@ -85,15 +85,9 @@ pub fn decide_warlock_action(
     let target_immune = ctx.entity_is_immune(target_entity);
     let being_kited = is_being_kited(combatant, my_pos, target_pos, auras);
 
-    let actor_view = match ctx.self_info() {
-        Some(info) => ActorView::from_info(info),
-        None => return false,
+    let Some(mut builder) = ctx.start_ability_decision(decision_trace, Some(target_entity), my_pos) else {
+        return false;
     };
-    let target_view = ctx.combatants
-        .get(&target_entity)
-        .map(|info| TargetView::from_info(info, my_pos));
-
-    let mut builder = decision_trace.start_ability_decision(actor_view, target_view);
 
     let enemy_has_dispeller = ctx.alive_enemies().iter().any(|e| matches!(
         e.class,

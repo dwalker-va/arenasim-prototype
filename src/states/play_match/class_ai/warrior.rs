@@ -20,8 +20,7 @@ use crate::states::play_match::components::*;
 use crate::states::play_match::combat_core::{roll_crit, get_attack_power_bonus_from_slice, get_crit_chance_bonus_from_slice};
 use crate::states::play_match::constants::{CHARGE_MIN_RANGE, CRIT_DAMAGE_MULTIPLIER, GCD};
 use crate::states::play_match::decision_trace::{
-    ActorView, DecisionEventBuilder, DecisionTrace, NoActionReason, RejectionReason, ResourceKind,
-    TargetView,
+    DecisionEventBuilder, DecisionTrace, NoActionReason, RejectionReason, ResourceKind,
 };
 
 use crate::states::play_match::utils::log_ability_use;
@@ -57,17 +56,9 @@ pub fn decide_warrior_action(
         return false;
     }
 
-    // Build actor/target view for the trace event.
-    let actor_view = match ctx.self_info() {
-        Some(info) => ActorView::from_info(info),
-        None => return false,
+    let Some(mut builder) = ctx.start_ability_decision(decision_trace, combatant.target, my_pos) else {
+        return false;
     };
-    let target_view = combatant
-        .target
-        .and_then(|t| ctx.combatants.get(&t))
-        .map(|info| TargetView::from_info(info, my_pos));
-
-    let mut builder = decision_trace.start_ability_decision(actor_view, target_view);
 
     // Priority 1: Shout (buff allies or debuff enemies based on preference)
     if try_shout(

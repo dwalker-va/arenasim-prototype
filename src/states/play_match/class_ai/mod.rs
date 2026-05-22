@@ -288,6 +288,25 @@ impl<'a> CombatContext<'a> {
             .unwrap_or(false)
     }
 
+    /// Start a decision-trace `ability_decision` builder for the current
+    /// actor. Returns None only when the snapshot doesn't contain self
+    /// (defensive — shouldn't happen in normal dispatch).
+    ///
+    /// Replaces the actor_view + target_view + builder boilerplate that
+    /// every `decide_<class>_action` had to assemble by hand.
+    pub fn start_ability_decision<'t>(
+        &self,
+        decision_trace: &'t mut crate::states::play_match::decision_trace::DecisionTrace,
+        target: Option<Entity>,
+        my_pos: Vec3,
+    ) -> Option<crate::states::play_match::decision_trace::DecisionEventBuilder<'t>> {
+        use crate::states::play_match::decision_trace::{ActorView, TargetView};
+        let actor_view = ActorView::from_info(self.self_info()?);
+        let target_view = target
+            .and_then(|t| self.combatants.get(&t))
+            .map(|info| TargetView::from_info(info, my_pos));
+        Some(decision_trace.start_ability_decision(actor_view, target_view))
+    }
 }
 
 // ============================================================================

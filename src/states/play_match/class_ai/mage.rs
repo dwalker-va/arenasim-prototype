@@ -22,7 +22,7 @@ use crate::states::play_match::constants::{
 };
 use crate::states::play_match::combat_core::{calculate_cast_time, roll_crit, get_attack_power_bonus_from_slice, get_crit_chance_bonus_from_slice};
 use crate::states::play_match::decision_trace::{
-    ActorView, DecisionEventBuilder, DecisionTrace, RejectionReason, TargetView,
+    DecisionEventBuilder, DecisionTrace, RejectionReason,
 };
 use crate::states::play_match::utils::{combatant_id, log_ability_use, spawn_speech_bubble};
 
@@ -52,16 +52,9 @@ pub fn decide_mage_action(
         return false;
     }
 
-    let actor_view = match ctx.self_info() {
-        Some(info) => ActorView::from_info(info),
-        None => return false,
+    let Some(mut builder) = ctx.start_ability_decision(decision_trace, combatant.target, my_pos) else {
+        return false;
     };
-    let target_view = combatant
-        .target
-        .and_then(|t| ctx.combatants.get(&t))
-        .map(|info| TargetView::from_info(info, my_pos));
-
-    let mut builder = decision_trace.start_ability_decision(actor_view, target_view);
 
     // Priority 1: Ice Barrier (self-shield)
     if try_ice_barrier(commands, combat_log, abilities, entity, combatant, ctx, &mut builder) {

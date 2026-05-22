@@ -29,8 +29,6 @@ use super::config::HeadlessMatchConfig;
 pub struct TraceConfig {
     /// Target JSONL output path. Created on demand (parent dirs included).
     pub output_path: std::path::PathBuf,
-    /// When true, emit verbose payloads (full aura lists + visible enemy state).
-    pub verbose: bool,
 }
 
 /// Result of a completed headless match
@@ -553,7 +551,7 @@ pub fn run_headless_match_with(
     // app.update() so frame-0 events land in the file. Mirror the match's
     // RNG seed onto the trace so downstream consumers can cross-reference.
     if let Some(tc) = trace_config.as_ref() {
-        match TraceWriter::create(tc.output_path.clone(), tc.verbose) {
+        match TraceWriter::create(tc.output_path.clone()) {
             Ok(writer) => {
                 let world = app.world_mut();
                 if let Some(mut trace) = world.get_resource_mut::<DecisionTrace>() {

@@ -291,6 +291,17 @@ jq -c 'select(.kind == "target_acquisition" and .changed)' $T
 jq -c 'select(.kind == "pet_decision") | {owner, pet_type, ability: .outcome.ability}' $T
 ```
 
+**Tolerating truncated traces.** A match that exits via SIGKILL / abort / OOM
+skips the BufWriter flush and leaves a partial last line. Read defensively:
+
+```bash
+# Skip the partial line on the way in
+head -n -1 $T | jq ...
+
+# Or let jq skip parse errors (jq 1.6+)
+jq -c '. // empty' $T 2>/dev/null
+```
+
 See `docs/solutions/implementation-patterns/ai-decision-trace.md` for the
 full schema and the variant-to-predicate map.
 

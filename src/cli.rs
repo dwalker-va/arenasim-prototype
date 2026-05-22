@@ -9,11 +9,11 @@ use std::path::PathBuf;
 ///
 /// `off` — no trace emitted.
 /// `on` — minimal trace (actor + target + reason codes).
-/// `verbose` — currently behaves identically to `on`. The flag is plumbed
-/// end-to-end (TraceWriter.verbose is set, propagated through TraceConfig)
-/// but the richer payload — full aura lists on actor + target plus all
-/// visible enemies — is deferred to Phase 2 follow-up work. Passing this
-/// today is harmless but emits the same JSONL as `on`.
+///
+/// A richer verbose mode (full aura lists, visible enemy state) is a future
+/// addition; when it lands it will be a new variant — `verbose` is NOT
+/// accepted today so scripts depending on it fail loudly at clap parse time
+/// rather than silently receiving the minimal payload.
 ///
 /// Default per mode: single-match runs default to `off`; matrix runs default
 /// to `on` so every cell's trace is already on disk when you find an anomaly.
@@ -23,16 +23,11 @@ pub enum TraceMode {
     #[default]
     Off,
     On,
-    Verbose,
 }
 
 impl TraceMode {
     pub fn is_enabled(self) -> bool {
-        matches!(self, TraceMode::On | TraceMode::Verbose)
-    }
-
-    pub fn is_verbose(self) -> bool {
-        matches!(self, TraceMode::Verbose)
+        matches!(self, TraceMode::On)
     }
 }
 
@@ -70,10 +65,9 @@ pub struct Args {
     #[arg(long)]
     pub save_logs: bool,
 
-    /// AI decision trace mode. `off` = no trace; `on` = minimal trace.
-    /// `verbose` is accepted but currently emits the same payload as `on` —
-    /// richer payload (full aura lists, visible enemy state) is deferred to
-    /// Phase 2. Default: `off` for single match, `on` for `--matrix`.
+    /// AI decision trace mode. `off` = no trace; `on` = minimal trace
+    /// (actor + target + reason codes). Default: `off` for single match,
+    /// `on` for `--matrix`.
     #[arg(long, value_name = "MODE", value_enum)]
     pub trace_mode: Option<TraceMode>,
 }

@@ -22,15 +22,16 @@ use super::DecisionTrace;
 pub struct TraceWriter {
     inner: BufWriter<File>,
     path: PathBuf,
-    /// True when verbose mode is enabled. Currently plumbed but not consumed
-    /// by `flush_events` — the richer payload (full aura lists on actor and
-    /// target, visible enemy state) is deferred. CLI `--trace-mode verbose`
-    /// sets this; today its output is identical to `--trace-mode on`.
-    pub verbose: bool,
+    /// Consecutive flush failures. After CIRCUIT_BREAKER_THRESHOLD, the
+    /// `flush_decision_trace_system` detaches the writer to stop the
+    /// per-frame warn spam loop.
+    consecutive_failures: u32,
 }
 
+const CIRCUIT_BREAKER_THRESHOLD: u32 = 3;
+
 impl TraceWriter {
-    pub fn create(path: PathBuf, verbose: bool) -> std::io::Result<Self> {
+    pub fn create(path: PathBuf) -> std::io::Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -38,8 +39,21 @@ impl TraceWriter {
         Ok(Self {
             inner: BufWriter::new(file),
             path,
-            verbose,
+            consecutive_failures: 0,
         })
+    }
+
+    /// Number of consecutive `flush_events` failures since the last success.
+    /// Used by `flush_decision_trace_system` to drive the circuit breaker.
+    pub fn consecutive_failures(&self) -> u32 {
+        self.consecutive_failures
+    }
+
+    /// True if the writer has accumulated enough consecutive failures to be
+    /// detached. Once true, the next flush_decision_trace_system tick should
+    /// drop the writer from DecisionTrace.
+    pub fn should_detach(&self) -> bool {
+        self.consecutive_failures >= CIRCUIT_BREAKER_THRESHOLD
     }
 
     pub fn path(&self) -> &PathBuf {
@@ -48,6 +62,11 @@ impl TraceWriter {
 
     /// Sort events by `(frame, actor.entity_id, kind)` and write each as a JSONL
     /// line. Returns the number of events written.
+    ///
+    /// Increments `consecutive_failures` on Err and resets it to 0 on Ok.
+    /// The flush system reads this counter to detach the writer after
+    /// `CIRCUIT_BREAKER_THRESHOLD` consecutive failures, stopping the
+    /// per-frame warn spam loop in a broken-writer state (ENOSPC, etc.).
     pub fn flush_events(&mut self, mut events: Vec<DecisionEvent>) -> std::io::Result<usize> {
         events.sort_by(|a, b| {
             (a.frame, a.actor.entity_id, kind_order(a.kind)).cmp(&(
@@ -57,13 +76,25 @@ impl TraceWriter {
             ))
         });
         let count = events.len();
-        for event in events {
-            serde_json::to_writer(&mut self.inner, &event)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-            self.inner.write_all(b"\n")?;
+        let result = (|| -> std::io::Result<()> {
+            for event in events {
+                serde_json::to_writer(&mut self.inner, &event)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                self.inner.write_all(b"\n")?;
+            }
+            self.inner.flush()?;
+            Ok(())
+        })();
+        match result {
+            Ok(()) => {
+                self.consecutive_failures = 0;
+                Ok(count)
+            }
+            Err(e) => {
+                self.consecutive_failures = self.consecutive_failures.saturating_add(1);
+                Err(e)
+            }
         }
-        self.inner.flush()?;
-        Ok(count)
     }
 }
 
@@ -104,17 +135,29 @@ pub fn flush_decision_trace_system(
 ) {
     // Drain pending events FIRST so they carry the frame/sim_time values
     // active when they were emitted.
+    let mut detach_writer = false;
     if trace.writer.is_some() && !trace.pending_events.is_empty() {
         let events = std::mem::take(&mut trace.pending_events);
         if let Some(writer) = trace.writer.as_mut() {
             if let Err(e) = writer.flush_events(events) {
                 warn!("decision_trace: flush failed: {}", e);
             }
+            if writer.should_detach() {
+                detach_writer = true;
+            }
         }
     } else {
         // No writer or no events — clear unconditionally so pending_events
         // doesn't accumulate forever when tracing is disabled.
         trace.pending_events.clear();
+    }
+
+    // Circuit breaker: after N consecutive flush failures, detach the writer
+    // so we stop the per-frame warn-and-discard cycle and stop the in-memory
+    // events from getting written into a broken file.
+    if detach_writer {
+        warn!("decision_trace: detaching writer after repeated flush failures");
+        trace.writer = None;
     }
 
     // Advance the clock for the NEXT frame's events.

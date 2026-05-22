@@ -19,7 +19,7 @@ use crate::states::play_match::components::*;
 use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::constants::*;
 use crate::states::play_match::decision_trace::{
-    ActorView, DecisionEventBuilder, DecisionTrace, NoActionReason, RejectionReason, TargetView,
+    DecisionEventBuilder, DecisionTrace, NoActionReason, RejectionReason,
 };
 use super::CombatContext;
 use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
@@ -63,13 +63,9 @@ pub fn decide_hunter_action(
         return false;
     }
 
-    let actor_view = match ctx.self_info() {
-        Some(info) => ActorView::from_info(info),
-        None => return false,
+    let Some(mut builder) = ctx.start_ability_decision(decision_trace, Some(target_entity), my_pos) else {
+        return false;
     };
-    let target_view = Some(TargetView::from_info(target_info, my_pos));
-
-    let mut builder = decision_trace.start_ability_decision(actor_view, target_view);
 
     if ctx.entity_is_immune(target_entity) {
         builder.finish_no_action(NoActionReason::TargetImmune);

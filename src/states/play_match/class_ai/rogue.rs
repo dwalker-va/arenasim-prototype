@@ -20,7 +20,7 @@ use crate::states::play_match::components::*;
 use crate::states::play_match::combat_core::{roll_crit, get_attack_power_bonus_from_slice, get_crit_chance_bonus_from_slice};
 use crate::states::play_match::constants::{CRIT_DAMAGE_MULTIPLIER, GCD, MELEE_RANGE};
 use crate::states::play_match::decision_trace::{
-    ActorView, DecisionEventBuilder, DecisionTrace, NoActionReason, RejectionReason, TargetView,
+    DecisionEventBuilder, DecisionTrace, NoActionReason, RejectionReason,
 };
 use crate::states::play_match::utils::{combatant_id, log_ability_use, spawn_speech_bubble};
 
@@ -52,15 +52,9 @@ pub fn decide_rogue_action(
         return false;
     };
 
-    let actor_view = match ctx.self_info() {
-        Some(info) => ActorView::from_info(info),
-        None => return false,
+    let Some(mut builder) = ctx.start_ability_decision(decision_trace, Some(target_entity), my_pos) else {
+        return false;
     };
-    let target_view = ctx.combatants
-        .get(&target_entity)
-        .map(|info| TargetView::from_info(info, my_pos));
-
-    let mut builder = decision_trace.start_ability_decision(actor_view, target_view);
 
     // Don't waste abilities on immune targets (Divine Shield).
     if ctx.entity_is_immune(target_entity) {

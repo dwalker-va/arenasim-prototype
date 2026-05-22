@@ -142,10 +142,29 @@ fn seeded_matches_are_deterministic() {
 /// once with None — and asserts MatchResult byte-equality.
 #[test]
 fn trace_on_matches_trace_off_outcomes() {
+    // One pairing per class (every class appears as both T1 and T2 across the
+    // set), × 3 seeds each. Covers Spider + Boar + Bird Hunter pet types and
+    // the Felhunter Warlock pet via the Priest v Warlock matchup. Total: 18
+    // matches in release, ~30s wall-clock.
     let pairings: &[(Vec<&str>, Vec<&str>, u64)] = &[
         (vec!["Warrior"], vec!["Mage"], 42),
         (vec!["Warrior"], vec!["Mage"], 100),
         (vec!["Warrior"], vec!["Mage"], 1000),
+        (vec!["Mage"], vec!["Hunter"], 42),
+        (vec!["Mage"], vec!["Hunter"], 100),
+        (vec!["Mage"], vec!["Hunter"], 1000),
+        (vec!["Priest"], vec!["Warlock"], 42),
+        (vec!["Priest"], vec!["Warlock"], 100),
+        (vec!["Priest"], vec!["Warlock"], 1000),
+        (vec!["Rogue"], vec!["Paladin"], 42),
+        (vec!["Rogue"], vec!["Paladin"], 100),
+        (vec!["Rogue"], vec!["Paladin"], 1000),
+        (vec!["Warlock"], vec!["Priest"], 42),
+        (vec!["Warlock"], vec!["Priest"], 100),
+        (vec!["Paladin"], vec!["Rogue"], 42),
+        (vec!["Paladin"], vec!["Rogue"], 100),
+        (vec!["Hunter"], vec!["Warrior"], 42),
+        (vec!["Hunter"], vec!["Warrior"], 100),
     ];
 
     for (team1, team2, seed) in pairings {
@@ -155,7 +174,7 @@ fn trace_on_matches_trace_off_outcomes() {
 
         let trace_config = Some(TraceConfig {
             output_path: trace_path,
-            verbose: false,
+
         });
 
         let cfg = create_config(team1.clone(), team2.clone(), Some(*seed));
@@ -288,7 +307,7 @@ fn trace_on_matches_trace_off_all_class_pairings() {
 
             let trace_config = Some(TraceConfig {
                 output_path: trace_path,
-                verbose: false,
+
             });
 
             let with_trace = run_headless_match_with(
@@ -394,7 +413,7 @@ fn trace_file_deterministic_all_class_pairings() {
                 true,
                 Some(TraceConfig {
                     output_path: path1.clone(),
-                    verbose: false,
+    
                 }),
             ) {
                 failures.push(format!("{} v {} seed={}: first run failed: {}", c1, c2, seed, e));
@@ -405,7 +424,7 @@ fn trace_file_deterministic_all_class_pairings() {
                 true,
                 Some(TraceConfig {
                     output_path: path2.clone(),
-                    verbose: false,
+    
                 }),
             ) {
                 failures.push(format!("{} v {} seed={}: second run failed: {}", c1, c2, seed, e));
@@ -458,7 +477,7 @@ fn trace_file_is_deterministic_at_same_seed() {
         true,
         Some(TraceConfig {
             output_path: path1.clone(),
-            verbose: false,
+
         }),
     )
     .expect("first trace run");
@@ -469,7 +488,7 @@ fn trace_file_is_deterministic_at_same_seed() {
         true,
         Some(TraceConfig {
             output_path: path2.clone(),
-            verbose: false,
+
         }),
     )
     .expect("second trace run");

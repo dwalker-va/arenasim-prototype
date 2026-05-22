@@ -25,6 +25,18 @@
 //!   intentionally — switching to a fully-tagged form would break every jq
 //!   query already written against the schema.
 //!
+//! ## Truncated last line on abort/SIGKILL
+//!
+//! The writer uses a buffered `BufWriter` for performance. Normal exit (via
+//! `close_writer` or `Drop`) flushes the buffer cleanly. But an `abort()`,
+//! `SIGKILL`, OOM kill, or hard test-runner timeout SKIPS Drop — leaving the
+//! buffer in memory. The trace file's last line is then truncated mid-JSON.
+//!
+//! Trace consumers should tolerate this: prefer `jq -c '. // empty'` (skip
+//! parse errors) or pipe through `head -n -1` when reading a trace from a
+//! match that may not have ended cleanly. CI / scripted consumers should
+//! treat trailing partial lines as an expected failure mode, not corruption.
+//!
 //! ## Entity-id stability
 //!
 //! `actor.entity_id`, `target.entity_id`, `pet_owner`, and the entity_id fields

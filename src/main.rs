@@ -72,7 +72,6 @@ fn run_headless_mode(
             .unwrap_or(0);
         Some(headless::runner::TraceConfig {
             output_path: format!("match_logs/match_{}_trace.jsonl", ts).into(),
-            verbose: trace_mode.is_verbose(),
         })
     } else {
         None

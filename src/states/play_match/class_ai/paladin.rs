@@ -28,7 +28,7 @@ use crate::states::play_match::constants::{
     HOLY_SHOCK_DAMAGE_RANGE, LOW_HP_THRESHOLD, SAFE_HEAL_MAX_THRESHOLD,
 };
 use crate::states::play_match::decision_trace::{
-    ActorView, DecisionEventBuilder, DecisionTrace, RejectionReason, TargetView,
+    DecisionEventBuilder, DecisionTrace, RejectionReason,
 };
 use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
@@ -55,16 +55,9 @@ pub fn decide_paladin_action(
         return false;
     }
 
-    let actor_view = match ctx.self_info() {
-        Some(info) => ActorView::from_info(info),
-        None => return false,
+    let Some(mut builder) = ctx.start_ability_decision(decision_trace, combatant.target, my_pos) else {
+        return false;
     };
-    let target_view = combatant
-        .target
-        .and_then(|t| ctx.combatants.get(&t))
-        .map(|info| TargetView::from_info(info, my_pos));
-
-    let mut builder = decision_trace.start_ability_decision(actor_view, target_view);
 
     // Priority 1: Paladin Aura.
     if try_paladin_aura(

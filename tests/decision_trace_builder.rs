@@ -146,7 +146,7 @@ fn writer_sorts_events_by_frame_then_entity_then_kind() {
     let tmp = tempfile::NamedTempFile::new().unwrap();
     let path = tmp.path().to_path_buf();
     let mut trace = DecisionTrace::default();
-    trace.install_writer(TraceWriter::create(path.clone(), false).unwrap());
+    trace.install_writer(TraceWriter::create(path.clone()).unwrap());
 
     // Push events out of canonical order. Canonical = (frame, entity_id, kind).
     // Use distinct frame numbers to make the sort visible.
@@ -247,7 +247,7 @@ fn writer_sorts_target_acquisition_before_ability_decision_at_same_frame_and_ent
     let tmp = tempfile::NamedTempFile::new().unwrap();
     let path = tmp.path().to_path_buf();
     let mut trace = DecisionTrace::default();
-    trace.install_writer(TraceWriter::create(path.clone(), false).unwrap());
+    trace.install_writer(TraceWriter::create(path.clone()).unwrap());
     trace.current_frame = 10;
 
     // Push ability_decision first
@@ -295,7 +295,7 @@ fn writer_creates_parent_directory_on_create() {
     let nested = temp.path().join("traces").join("subdir").join("trace.jsonl");
     assert!(!nested.parent().unwrap().exists());
 
-    let writer = TraceWriter::create(nested.clone(), false).unwrap();
+    let writer = TraceWriter::create(nested.clone()).unwrap();
     assert!(nested.parent().unwrap().exists());
     drop(writer);
 }
@@ -305,7 +305,7 @@ fn close_writer_drains_pending_and_resets_clock() {
     let tmp = tempfile::NamedTempFile::new().unwrap();
     let path = tmp.path().to_path_buf();
     let mut trace = DecisionTrace::default();
-    trace.install_writer(TraceWriter::create(path.clone(), false).unwrap());
+    trace.install_writer(TraceWriter::create(path.clone()).unwrap());
     trace.current_frame = 100;
     trace.current_sim_time = 42.5;
 
