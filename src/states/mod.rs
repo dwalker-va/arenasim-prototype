@@ -10,6 +10,7 @@ pub mod configure_match_ui;
 pub mod play_match;
 pub mod results_ui;
 pub mod view_combatant_ui;
+pub mod armory_ui;
 
 pub use match_config::MatchConfig;
 
@@ -31,6 +32,8 @@ pub enum GameState {
     PlayMatch,
     /// Post-match results - statistics and breakdown
     Results,
+    /// Armory - browse all equipment in the game
+    Armory,
 }
 
 use play_match::systems::{CombatSystemPhase, configure_combat_system_ordering, add_core_combat_systems};
@@ -55,6 +58,8 @@ impl Plugin for StatesPlugin {
             // Initialize hunter pet icon resources for view combatant screen
             .init_resource::<view_combatant_ui::HunterPetIcons>()
             .init_resource::<view_combatant_ui::HunterPetIconHandles>()
+            // Initialize armory filter state
+            .init_resource::<armory_ui::ArmoryFilters>()
             // Player selection (click-to-select) — graphical-only
             .init_resource::<play_match::Selection>()
             // Main menu systems (now using egui)
@@ -92,6 +97,18 @@ impl Plugin for StatesPlugin {
                 )
                     .chain()
                     .run_if(in_state(GameState::ViewCombatant)),
+            )
+            // Armory systems (defined in armory_ui module).
+            // Reuses view_combatant_ui::load_item_icons — the loader's internal
+            // `loaded: bool` guard makes the second registration idempotent.
+            .add_systems(
+                Update,
+                (
+                    view_combatant_ui::load_item_icons,
+                    armory_ui::armory_ui,
+                )
+                    .chain()
+                    .run_if(in_state(GameState::Armory)),
             )
             // Play match systems (defined in play_match module)
             .add_systems(OnEnter(GameState::PlayMatch), play_match::setup_play_match);
@@ -359,6 +376,23 @@ fn main_menu_ui(
                 {
                     info!("Match button pressed - transitioning to ConfigureMatch");
                     next_state.set(GameState::ConfigureMatch);
+                }
+
+                ui.add_space(10.0);
+
+                if ui
+                    .add_sized(
+                        button_size,
+                        egui::Button::new(
+                            egui::RichText::new("ARMORY")
+                                .size(28.0)
+                                .color(egui::Color32::from_rgb(230, 217, 191)),
+                        ),
+                    )
+                    .clicked()
+                {
+                    info!("Armory button pressed - transitioning to Armory");
+                    next_state.set(GameState::Armory);
                 }
 
                 ui.add_space(10.0);
