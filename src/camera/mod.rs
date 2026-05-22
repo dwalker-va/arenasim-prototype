@@ -73,6 +73,9 @@ fn handle_escape_key(
             GameState::Results => {
                 next_state.set(GameState::MainMenu);
             }
+            GameState::Armory => {
+                next_state.set(GameState::MainMenu);
+            }
         }
     }
 }
