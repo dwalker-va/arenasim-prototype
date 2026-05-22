@@ -19,14 +19,15 @@ use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
 use crate::states::play_match::combat_core::{roll_crit, get_attack_power_bonus_from_slice, get_crit_chance_bonus_from_slice};
 use crate::states::play_match::constants::{CRIT_DAMAGE_MULTIPLIER, GCD, MELEE_RANGE};
+use crate::states::play_match::decision_trace::{
+    DecisionEventBuilder, DecisionTrace, NoActionReason, RejectionReason,
+};
 use crate::states::play_match::utils::{combatant_id, log_ability_use, spawn_speech_bubble};
 
 use super::CombatContext;
-use super::cast_guard::{pre_cast_ok, PreCastOpts};
+use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
 
 /// Rogue AI: Decides and executes abilities for a Rogue combatant.
-///
-/// Returns `true` if an action was taken this frame (caller should skip to next combatant).
 pub fn decide_rogue_action(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -38,8 +39,11 @@ pub fn decide_rogue_action(
     ctx: &CombatContext,
     instant_attacks: &mut Vec<super::QueuedInstantAttack>,
     same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
+    decision_trace: &mut DecisionTrace,
 ) -> bool {
-    // Get target
+    // No target — no decision is produced. (Note: unlike most classes, Rogue
+    // does NOT short-circuit on GCD up front because the stealthed opener path
+    // is independent of GCD. The non-stealthed branch checks GCD itself.)
     let Some(target_entity) = combatant.target else {
         return false;
     };
@@ -48,52 +52,39 @@ pub fn decide_rogue_action(
         return false;
     };
 
-    // Don't waste abilities on immune targets (Divine Shield)
+    let Some(mut builder) = ctx.start_ability_decision(decision_trace, Some(target_entity), my_pos) else {
+        return false;
+    };
+
+    // Don't waste abilities on immune targets (Divine Shield).
     if ctx.entity_is_immune(target_entity) {
+        builder.finish_no_action(NoActionReason::TargetImmune);
         return false;
     }
 
     if combatant.stealthed {
-        // Stealthed: Use opener based on preference
-        return match combatant.rogue_opener {
+        let acted = match combatant.rogue_opener {
             RogueOpener::Ambush => try_ambush(
-                combat_log,
-                game_rng,
-                abilities,
-                entity,
-                combatant,
-                my_pos,
-                target_entity,
-                target_pos,
-                ctx,
-                instant_attacks,
+                combat_log, game_rng, abilities, entity, combatant, my_pos,
+                target_entity, target_pos, ctx, instant_attacks, &mut builder,
             ),
             RogueOpener::CheapShot => try_cheap_shot(
-                commands,
-                combat_log,
-                abilities,
-                entity,
-                combatant,
-                my_pos,
-                target_entity,
-                target_pos,
-                ctx,
-                same_frame_cc_queue,
+                commands, combat_log, abilities, entity, combatant, my_pos,
+                target_entity, target_pos, ctx, same_frame_cc_queue, &mut builder,
             ),
         };
+        builder.finish();
+        return acted;
     }
 
-    // Not stealthed: Check GCD first
+    // Not stealthed: defer to GCD check before considering abilities.
     if combatant.global_cooldown > 0.0 {
+        // Don't emit — no decision produced. Drop the builder (no candidates).
         return false;
     }
 
     // Priority 1: Kidney Shot (melee-range CC)
-    // For melee CC, we need range-aware targeting:
-    // - If CC target is in melee range, use it (strategic CC on healer)
-    // - If CC target is out of range but kill target is in range, use kill target
-    // - A stun on kill target is still valuable (helps secure kill)
-    // - Don't use if target is already stunned (waste of CC)
+    let kidney_shot = AbilityType::KidneyShot;
     let kidney_shot_target = select_melee_cc_target(
         combatant.cc_target,
         combatant.target,
@@ -101,47 +92,42 @@ pub fn decide_rogue_action(
         ctx,
     );
     if let Some((ks_target_entity, ks_target_pos)) = kidney_shot_target {
-        // Check if target is already stunned or DR-immune to stuns
         let target_already_stunned = ctx.active_auras
             .get(&ks_target_entity)
             .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::Stun))
             .unwrap_or(false);
 
-        if !target_already_stunned && !ctx.is_dr_immune(ks_target_entity, DRCategory::Stuns) {
-            if try_kidney_shot(
-                commands,
-                combat_log,
-                abilities,
-                entity,
-                combatant,
-                my_pos,
-                ks_target_entity,
-                ks_target_pos,
-                ctx,
-                same_frame_cc_queue,
-            ) {
-                return true;
-            }
+        if target_already_stunned {
+            builder.reject(
+                kidney_shot,
+                RejectionReason::TargetAlreadyCCd { cc_type: AuraType::Stun },
+            );
+        } else if ctx.is_dr_immune(ks_target_entity, DRCategory::Stuns) {
+            builder.reject(
+                kidney_shot,
+                RejectionReason::DRImmune { category: DRCategory::Stuns },
+            );
+        } else if try_kidney_shot(
+            commands, combat_log, abilities, entity, combatant, my_pos,
+            ks_target_entity, ks_target_pos, ctx, same_frame_cc_queue, &mut builder,
+        ) {
+            builder.finish();
+            return true;
         }
+    } else {
+        builder.reject(kidney_shot, RejectionReason::NoValidTarget);
     }
 
     // Priority 2: Sinister Strike
-    try_sinister_strike(
-        combat_log,
-        game_rng,
-        abilities,
-        entity,
-        combatant,
-        my_pos,
-        target_entity,
-        target_pos,
-        ctx,
-        instant_attacks,
-    )
+    let acted = try_sinister_strike(
+        combat_log, game_rng, abilities, entity, combatant, my_pos,
+        target_entity, target_pos, ctx, instant_attacks, &mut builder,
+    );
+    builder.finish();
+    acted
 }
 
 /// Try to use Ambush from stealth.
-/// Returns true if Ambush was used.
 fn try_ambush(
     combat_log: &mut CombatLog,
     game_rng: &mut GameRng,
@@ -153,29 +139,32 @@ fn try_ambush(
     target_pos: Vec3,
     ctx: &CombatContext,
     instant_attacks: &mut Vec<super::QueuedInstantAttack>,
+    builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = AbilityType::Ambush;
     let def = abilities.get_unchecked(&ability);
 
+    let opts = PreCastOpts { check_friendly_cc: true, ..Default::default() };
     if !pre_cast_ok(
-        ability,
-        def,
-        combatant,
-        my_pos,
-        None,
-        Some((target_entity, target_pos)),
-        ctx,
-        PreCastOpts { check_friendly_cc: true, ..Default::default() },
+        ability, def, combatant, my_pos, None,
+        Some((target_entity, target_pos)), ctx, opts,
     ) {
+        builder.reject(
+            ability,
+            classify_pre_cast_failure(
+                ability, def, combatant, my_pos, None,
+                Some((target_entity, target_pos)), ctx, opts,
+            ),
+        );
         return false;
     }
 
-    // Execute Ambush
+    builder.choose(ability, Some(target_entity), true);
+
     combatant.current_mana -= def.mana_cost;
     combatant.stealthed = false;
     combatant.global_cooldown = GCD;
 
-    // Calculate and queue damage (with dynamic aura bonuses)
     let self_auras = ctx.active_auras.get(&entity).map(|v| v.as_slice()).unwrap_or(&[]);
     let ap_bonus = get_attack_power_bonus_from_slice(self_auras);
     let crit_bonus = get_crit_chance_bonus_from_slice(self_auras);
@@ -192,7 +181,6 @@ fn try_ambush(
         is_crit,
     });
 
-    // Log
     let target_tuple = ctx.combatants
         .get(&target_entity)
         .map(|info| (info.team, info.class));
@@ -209,7 +197,6 @@ fn try_ambush(
 }
 
 /// Try to use Cheap Shot from stealth.
-/// Returns true if Cheap Shot was used.
 fn try_cheap_shot(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -221,46 +208,44 @@ fn try_cheap_shot(
     target_pos: Vec3,
     ctx: &CombatContext,
     same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
+    builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = AbilityType::CheapShot;
     let def = abilities.get_unchecked(&ability);
 
+    let opts = PreCastOpts::default();
     if !pre_cast_ok(
-        ability,
-        def,
-        combatant,
-        my_pos,
-        None,
-        Some((target_entity, target_pos)),
-        ctx,
-        PreCastOpts::default(),
+        ability, def, combatant, my_pos, None,
+        Some((target_entity, target_pos)), ctx, opts,
     ) {
+        builder.reject(
+            ability,
+            classify_pre_cast_failure(
+                ability, def, combatant, my_pos, None,
+                Some((target_entity, target_pos)), ctx, opts,
+            ),
+        );
         return false;
     }
 
-    // Execute Cheap Shot
+    builder.choose(ability, Some(target_entity), true);
+
     spawn_speech_bubble(commands, entity, "Cheap Shot");
     combatant.current_mana -= def.mana_cost;
     combatant.stealthed = false;
     combatant.global_cooldown = GCD;
 
-    // Log
     let target_tuple = ctx.combatants
         .get(&target_entity)
         .map(|info| (info.team, info.class));
     log_ability_use(combat_log, combatant.team, combatant.class, "Cheap Shot", target_tuple, "uses");
 
-    // Apply stun aura
     if let Some(aura) = def.applies_aura.as_ref() {
         if let Some(aura_pending) = AuraPending::from_ability(target_entity, entity, def) {
-            // Reflect the stun in this frame's snapshot so class AIs running later in the
-            // same `decide_abilities` loop see the target as stunned and do not waste a
-            // cast or interrupt on a target that is about to be CC'd anyway.
             same_frame_cc_queue.push((target_entity, aura_pending.aura.clone()));
             commands.spawn(aura_pending);
         }
 
-        // Log CC
         if let Some(info) = ctx.combatants.get(&target_entity) {
             let cc_type = format!("{:?}", aura.aura_type);
             let message = format!(
@@ -292,7 +277,6 @@ fn try_cheap_shot(
 }
 
 /// Try to use Kidney Shot.
-/// Returns true if Kidney Shot was used.
 fn try_kidney_shot(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -304,44 +288,44 @@ fn try_kidney_shot(
     target_pos: Vec3,
     ctx: &CombatContext,
     same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
+    builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let kidney_shot = AbilityType::KidneyShot;
     let def = abilities.get_unchecked(&kidney_shot);
 
+    let opts = PreCastOpts::default();
     if !pre_cast_ok(
-        kidney_shot,
-        def,
-        combatant,
-        my_pos,
-        None,
-        Some((target_entity, target_pos)),
-        ctx,
-        PreCastOpts::default(),
+        kidney_shot, def, combatant, my_pos, None,
+        Some((target_entity, target_pos)), ctx, opts,
     ) {
+        builder.reject(
+            kidney_shot,
+            classify_pre_cast_failure(
+                kidney_shot, def, combatant, my_pos, None,
+                Some((target_entity, target_pos)), ctx, opts,
+            ),
+        );
         return false;
     }
 
-    // Execute Kidney Shot
+    builder.choose(kidney_shot, Some(target_entity), true);
+
     spawn_speech_bubble(commands, entity, "Kidney Shot");
     combatant.current_mana -= def.mana_cost;
     combatant.ability_cooldowns.insert(kidney_shot, def.cooldown);
     combatant.global_cooldown = GCD;
 
-    // Log
     let target_tuple = ctx.combatants
         .get(&target_entity)
         .map(|info| (info.team, info.class));
     log_ability_use(combat_log, combatant.team, combatant.class, "Kidney Shot", target_tuple, "uses");
 
-    // Apply stun aura
     if let Some(aura) = def.applies_aura.as_ref() {
         if let Some(aura_pending) = AuraPending::from_ability(target_entity, entity, def) {
-            // Reflect same-frame — see try_cheap_shot for rationale.
             same_frame_cc_queue.push((target_entity, aura_pending.aura.clone()));
             commands.spawn(aura_pending);
         }
 
-        // Log CC
         if let Some(info) = ctx.combatants.get(&target_entity) {
             let cc_type = format!("{:?}", aura.aura_type);
             let message = format!(
@@ -373,7 +357,6 @@ fn try_kidney_shot(
 }
 
 /// Try to use Sinister Strike.
-/// Returns true if Sinister Strike was used.
 fn try_sinister_strike(
     combat_log: &mut CombatLog,
     game_rng: &mut GameRng,
@@ -385,28 +368,31 @@ fn try_sinister_strike(
     target_pos: Vec3,
     ctx: &CombatContext,
     instant_attacks: &mut Vec<super::QueuedInstantAttack>,
+    builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = AbilityType::SinisterStrike;
     let def = abilities.get_unchecked(&ability);
 
+    let opts = PreCastOpts { check_friendly_cc: true, ..Default::default() };
     if !pre_cast_ok(
-        ability,
-        def,
-        combatant,
-        my_pos,
-        None,
-        Some((target_entity, target_pos)),
-        ctx,
-        PreCastOpts { check_friendly_cc: true, ..Default::default() },
+        ability, def, combatant, my_pos, None,
+        Some((target_entity, target_pos)), ctx, opts,
     ) {
+        builder.reject(
+            ability,
+            classify_pre_cast_failure(
+                ability, def, combatant, my_pos, None,
+                Some((target_entity, target_pos)), ctx, opts,
+            ),
+        );
         return false;
     }
 
-    // Execute Sinister Strike
+    builder.choose(ability, Some(target_entity), true);
+
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
 
-    // Calculate and queue damage (with dynamic aura bonuses)
     let self_auras = ctx.active_auras.get(&entity).map(|v| v.as_slice()).unwrap_or(&[]);
     let ap_bonus = get_attack_power_bonus_from_slice(self_auras);
     let crit_bonus = get_crit_chance_bonus_from_slice(self_auras);
@@ -423,7 +409,6 @@ fn try_sinister_strike(
         is_crit,
     });
 
-    // Log
     let target_tuple = ctx.combatants
         .get(&target_entity)
         .map(|info| (info.team, info.class));
@@ -453,7 +438,6 @@ fn select_melee_cc_target(
     my_pos: Vec3,
     ctx: &CombatContext,
 ) -> Option<(Entity, Vec3)> {
-    // First, check if CC target is in melee range and not immune
     if let Some(cc_entity) = cc_target {
         if !ctx.entity_is_immune(cc_entity) {
             if let Some(info) = ctx.combatants.get(&cc_entity) {
@@ -464,7 +448,6 @@ fn select_melee_cc_target(
         }
     }
 
-    // CC target not in range - fall back to kill target if in melee range and not immune
     if let Some(kill_entity) = kill_target {
         if !ctx.entity_is_immune(kill_entity) {
             if let Some(info) = ctx.combatants.get(&kill_entity) {
@@ -475,6 +458,5 @@ fn select_melee_cc_target(
         }
     }
 
-    // Neither target in melee range
     None
 }

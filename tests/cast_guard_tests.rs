@@ -416,3 +416,151 @@ fn spell_school_lockout_blocks_matching_school() {
         PreCastOpts::default(),
     ));
 }
+
+// ============================================================================
+// classify_pre_cast_failure: reason variants must match the predicate that
+// actually fired in pre_cast_ok (which mirrors can_cast_config). Order matters
+// — mana before range, range before min_range — so the trace doesn't lie.
+// ============================================================================
+
+use arenasim::states::play_match::class_ai::cast_guard::classify_pre_cast_failure;
+use arenasim::states::play_match::decision_trace::{RejectionReason, ResourceKind};
+
+#[test]
+fn classify_returns_friendly_breakable_cc_when_opt_in_and_friendly_cc_present() {
+    let world = TestWorld::new(CharacterClass::Mage);
+    let mut combatant = caster_combatant(CharacterClass::Mage);
+    combatant.current_mana = 100.0;
+    let abilities = defs();
+    let def = abilities.get_unchecked(&AbilityType::Frostbolt);
+
+    // Place friendly Polymorph on target — cast by self team
+    let mut poly = make_aura(AuraType::Polymorph, "Polymorph", Some(world.caster));
+    poly.break_on_damage_threshold = 0.0;
+    let target_active = ActiveAuras { auras: vec![poly] };
+    let mut active_auras_map = BTreeMap::new();
+    active_auras_map.insert(world.target, target_active.auras.clone());
+
+    let ctx = CombatContext {
+        combatants: &world.combatants,
+        active_auras: &active_auras_map,
+        dr_trackers: &world.dr_trackers,
+        self_entity: world.caster,
+    };
+
+    let opts = PreCastOpts { check_friendly_cc: true, ..Default::default() };
+    let reason = classify_pre_cast_failure(
+        AbilityType::Frostbolt,
+        def,
+        &combatant,
+        world.caster_pos,
+        None,
+        Some((world.target, world.target_pos)),
+        &ctx,
+        opts,
+    );
+    assert!(matches!(reason, RejectionReason::FriendlyBreakableCC), "got: {:?}", reason);
+}
+
+#[test]
+fn classify_returns_insufficient_mana_before_range_for_mana_classes() {
+    // can_cast_config order is mana → range → min_range. For an ability that's
+    // BOTH out-of-range AND mana-short, the rejection reason must be
+    // InsufficientMana (the gate that actually fires first), not OutOfRange.
+    let mut world = TestWorld::new(CharacterClass::Mage);
+    world.target_pos = world.caster_pos + Vec3::new(100.0, 0.0, 0.0); // way out of range
+    let mut combatant = caster_combatant(CharacterClass::Mage);
+    combatant.current_mana = 0.0; // also broke
+    let abilities = defs();
+    let def = abilities.get_unchecked(&AbilityType::Frostbolt);
+
+    let reason = classify_pre_cast_failure(
+        AbilityType::Frostbolt,
+        def,
+        &combatant,
+        world.caster_pos,
+        None,
+        Some((world.target, world.target_pos)),
+        &world.ctx(),
+        PreCastOpts::default(),
+    );
+    assert!(
+        matches!(reason, RejectionReason::InsufficientMana { .. }),
+        "expected InsufficientMana (predicate order matches can_cast_config), got: {:?}",
+        reason
+    );
+}
+
+#[test]
+fn classify_resource_kind_matches_class() {
+    // Warrior uses rage (ResourceKind::Rage); Rogue uses energy.
+    // Mana-class fallback returns InsufficientMana { have, need }.
+    let world_warrior = TestWorld::new(CharacterClass::Warrior);
+    let mut warrior = caster_combatant(CharacterClass::Warrior);
+    warrior.current_mana = 0.0;
+    let abilities = defs();
+    let def = abilities.get_unchecked(&AbilityType::MortalStrike);
+
+    let reason = classify_pre_cast_failure(
+        AbilityType::MortalStrike,
+        def,
+        &warrior,
+        world_warrior.caster_pos,
+        None,
+        Some((world_warrior.target, world_warrior.target_pos)),
+        &world_warrior.ctx(),
+        PreCastOpts::default(),
+    );
+    assert!(
+        matches!(reason, RejectionReason::InsufficientResource { resource: ResourceKind::Rage, .. }),
+        "Warrior gets InsufficientResource{{Rage}}: {:?}",
+        reason
+    );
+
+    let world_rogue = TestWorld::new(CharacterClass::Rogue);
+    let mut rogue = caster_combatant(CharacterClass::Rogue);
+    rogue.current_mana = 0.0;
+    let def = abilities.get_unchecked(&AbilityType::SinisterStrike);
+
+    let reason = classify_pre_cast_failure(
+        AbilityType::SinisterStrike,
+        def,
+        &rogue,
+        world_rogue.caster_pos,
+        None,
+        Some((world_rogue.target, world_rogue.target_pos)),
+        &world_rogue.ctx(),
+        PreCastOpts::default(),
+    );
+    assert!(
+        matches!(reason, RejectionReason::InsufficientResource { resource: ResourceKind::Energy, .. }),
+        "Rogue gets InsufficientResource{{Energy}}: {:?}",
+        reason
+    );
+}
+
+#[test]
+fn classify_returns_out_of_range_when_only_range_fails() {
+    let mut world = TestWorld::new(CharacterClass::Mage);
+    world.target_pos = world.caster_pos + Vec3::new(100.0, 0.0, 0.0);
+    let mut combatant = caster_combatant(CharacterClass::Mage);
+    combatant.current_mana = 100.0; // plenty
+    let abilities = defs();
+    let def = abilities.get_unchecked(&AbilityType::Frostbolt);
+
+    let reason = classify_pre_cast_failure(
+        AbilityType::Frostbolt,
+        def,
+        &combatant,
+        world.caster_pos,
+        None,
+        Some((world.target, world.target_pos)),
+        &world.ctx(),
+        PreCastOpts::default(),
+    );
+    assert!(
+        matches!(reason, RejectionReason::OutOfRange { .. }),
+        "expected OutOfRange when only range fails, got: {:?}",
+        reason
+    );
+}

@@ -186,7 +186,7 @@ pub fn apply_pending_auras(
     mut fct_states: Query<&mut FloatingTextState>,
     pet_query: Query<&Pet>,
 ) {
-    use std::collections::{HashSet, HashMap};
+    use std::collections::{BTreeMap, HashSet};
 
     // Track which buff auras we've applied this frame to prevent stacking
     // Key: (target_entity, buff_key) where buff_key identifies the specific buff
@@ -195,7 +195,11 @@ pub fn apply_pending_auras(
 
     // Track auras to add for entities that don't have ActiveAuras component yet
     // This prevents multiple insert() calls from overwriting each other
-    let mut new_auras_map: HashMap<Entity, Vec<Aura>> = HashMap::new();
+    // BTreeMap (not HashMap) so the final ActiveAuras insertion loop iterates
+    // by Entity in deterministic order. HashMap iteration uses Rust's
+    // randomized hasher (RandomState), causing self-mirror non-determinism
+    // when both teams apply pending auras simultaneously.
+    let mut new_auras_map: BTreeMap<Entity, Vec<Aura>> = BTreeMap::new();
 
     for (pending_entity, pending) in pending_auras.iter() {
         // Invariant: aura duration should be positive

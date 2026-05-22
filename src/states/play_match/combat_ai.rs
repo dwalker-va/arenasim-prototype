@@ -23,6 +23,7 @@ pub fn acquire_targets(
     config: Res<match_config::MatchConfig>,
     mut combatants: Query<(Entity, &mut Combatant, &Transform, Option<&ActiveAuras>)>,
     pet_query: Query<&Pet>,
+    mut decision_trace: ResMut<crate::states::play_match::decision_trace::DecisionTrace>,
 ) {
     // Don't acquire targets until gates open
     if !countdown.gates_opened {
@@ -106,6 +107,13 @@ pub fn acquire_targets(
             combatant.cc_target = None;
             continue;
         }
+
+        // Snapshot target state BEFORE acquisition so we can emit a trace event
+        // when either changes. Pet AI doesn't participate in target acquisition,
+        // so skip pet entities entirely.
+        let is_pet_entity = pet_query.get(entity).is_ok();
+        let prev_target = combatant.target;
+        let prev_cc_target = combatant.cc_target;
 
         // Check if this combatant has Shadow Sight
         let i_have_shadow_sight = shadow_sight_holders.contains(&entity);
@@ -229,6 +237,90 @@ pub fn acquire_targets(
                 }
             }
         }
+
+        // Emit a target_acquisition trace event when target or cc_target changed.
+        // Pets are not primary actors in target acquisition; skip them entirely
+        // to keep the trace focused on combatant-level decisions.
+        if !is_pet_entity
+            && (combatant.target != prev_target || combatant.cc_target != prev_cc_target)
+        {
+            use crate::states::play_match::decision_trace::{
+                ActorView, CandidateStatus, TargetRejectionReason,
+            };
+            let my_pos = transform.translation;
+            let hp_pct = if combatant.max_health > 0.0 {
+                combatant.current_health / combatant.max_health
+            } else {
+                0.0
+            };
+            let mana_pct = if combatant.max_mana > 0.0 {
+                combatant.current_mana / combatant.max_mana
+            } else {
+                0.0
+            };
+            let actor_view = ActorView::from_raw(
+                entity,
+                combatant.team,
+                combatant.slot,
+                combatant.class,
+                hp_pct,
+                mana_pct,
+                my_pos,
+            );
+            let mut tbuilder = decision_trace.start_target_acquisition(actor_view, prev_target, prev_cc_target);
+
+            // Populate candidates from the visible enemy set. Chosen = new_target;
+            // all other alive non-pet enemies are Rejected{LowerScoreThanChosen}
+            // using distance as the score proxy (negated, since nearer = higher
+            // priority for primary targeting).
+            let chosen = combatant.target;
+            let chosen_pos = chosen
+                .and_then(|t| enemy_combatants.iter().find(|(e, _, _, _, _, _, _, _)| *e == t))
+                .map(|(_, p, _, _, _, _, _, _)| *p);
+            let chosen_distance = chosen_pos.map(|p| my_pos.distance(p));
+            let chosen_score = chosen_distance.map(|d| -(d as i32)).unwrap_or(0);
+
+            for (enemy_entity, enemy_pos, stealthed, enemy_ss, enemy_class, enemy_hp, enemy_immune, is_pet) in
+                enemy_combatants.iter()
+            {
+                if *is_pet || *enemy_hp <= 0.0 {
+                    continue;
+                }
+                let distance = my_pos.distance(*enemy_pos);
+                let score = -(distance as i32);
+                if Some(*enemy_entity) == chosen {
+                    tbuilder.score(*enemy_entity, *enemy_class, score, CandidateStatus::Chosen, None);
+                } else if *enemy_immune {
+                    tbuilder.score(
+                        *enemy_entity,
+                        *enemy_class,
+                        score,
+                        CandidateStatus::Rejected,
+                        Some(TargetRejectionReason::Immune),
+                    );
+                } else if *stealthed && !i_have_shadow_sight && !enemy_ss {
+                    tbuilder.score(
+                        *enemy_entity,
+                        *enemy_class,
+                        score,
+                        CandidateStatus::Rejected,
+                        Some(TargetRejectionReason::Stealthed),
+                    );
+                } else {
+                    tbuilder.score(
+                        *enemy_entity,
+                        *enemy_class,
+                        score,
+                        CandidateStatus::Rejected,
+                        Some(TargetRejectionReason::LowerScoreThanChosen {
+                            score,
+                            chosen_score,
+                        }),
+                    );
+                }
+            }
+            tbuilder.finish(combatant.target, combatant.cc_target);
+        }
     }
 }
 
@@ -328,6 +420,7 @@ pub fn decide_abilities(
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
     pet_query: Query<&Pet>,
+    mut decision_trace: ResMut<crate::states::play_match::decision_trace::DecisionTrace>,
 ) {
     // Don't cast abilities during victory celebration
     if celebration.is_some() {
@@ -407,18 +500,33 @@ pub fn decide_abilities(
             })
             .unwrap_or(false);
 
-        // Paladin-specific: Divine Shield can be used while incapacitated
+        // Paladin-specific: Divine Shield can be used while incapacitated.
+        // Because the normal dispatch never runs this frame, we own a builder
+        // here so the Divine-Shield-while-CC decision still produces a trace
+        // event when the predicates fire.
         if is_incapacitated && combatant.class == match_config::CharacterClass::Paladin {
             let cc_ctx = snapshot.context_for(entity);
-            if class_ai::paladin::try_divine_shield_while_cc(
-                &mut commands,
-                &mut combat_log,
-                &abilities,
-                entity,
-                &mut combatant,
-                auras.as_deref(),
-                &cc_ctx,
-            ) {
+            let actor_view = cc_ctx
+                .self_info()
+                .map(crate::states::play_match::decision_trace::ActorView::from_info);
+            let acted = if let Some(av) = actor_view {
+                let mut builder = decision_trace.start_ability_decision(av, None);
+                let result = class_ai::paladin::try_divine_shield_while_cc(
+                    &mut commands,
+                    &mut combat_log,
+                    &abilities,
+                    entity,
+                    &mut combatant,
+                    auras.as_deref(),
+                    &cc_ctx,
+                    &mut builder,
+                );
+                builder.finish();
+                result
+            } else {
+                false
+            };
+            if acted {
                 continue; // DivineShieldPending spawned — CC will be purged next frame
             }
             continue; // Still incapacitated, can't do anything else
@@ -453,6 +561,7 @@ pub fn decide_abilities(
                 &ctx,
                 &mut frost_nova_damage,
                 &mut same_frame_cc_queue,
+                &mut decision_trace,
             ),
             match_config::CharacterClass::Priest => class_ai::priest::decide_priest_action(
                 &mut commands,
@@ -465,6 +574,7 @@ pub fn decide_abilities(
                 &ctx,
                 &mut shielded_this_frame,
                 &mut fortified_this_frame,
+                &mut decision_trace,
             ),
             match_config::CharacterClass::Warrior => class_ai::warrior::decide_warrior_action(
                 &mut commands,
@@ -478,6 +588,7 @@ pub fn decide_abilities(
                 &ctx,
                 &mut instant_attacks,
                 &mut battle_shouted_this_frame,
+                &mut decision_trace,
             ),
             match_config::CharacterClass::Rogue => class_ai::rogue::decide_rogue_action(
                 &mut commands,
@@ -490,6 +601,7 @@ pub fn decide_abilities(
                 &ctx,
                 &mut instant_attacks,
                 &mut same_frame_cc_queue,
+                &mut decision_trace,
             ),
             match_config::CharacterClass::Warlock => class_ai::warlock::decide_warlock_action(
                 &mut commands,
@@ -500,6 +612,7 @@ pub fn decide_abilities(
                 my_pos,
                 auras.as_deref(),
                 &ctx,
+                &mut decision_trace,
             ),
             match_config::CharacterClass::Paladin => class_ai::paladin::decide_paladin_action(
                 &mut commands,
@@ -512,6 +625,7 @@ pub fn decide_abilities(
                 &ctx,
                 &mut paladin_aura_this_frame,
                 &mut same_frame_cc_queue,
+                &mut decision_trace,
             ),
             match_config::CharacterClass::Hunter => class_ai::hunter::decide_hunter_action(
                 &mut commands,
@@ -524,6 +638,7 @@ pub fn decide_abilities(
                 auras.as_deref(),
                 &ctx,
                 &mut instant_attacks,
+                &mut decision_trace,
             ),
         };
         if acted {

@@ -321,7 +321,7 @@ impl AuraPending {
 
 /// DR categories — fixed enum with known size for array indexing.
 /// Each category is independent: Stun DR doesn't affect Fear DR.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum DRCategory {
     Stuns = 0,
     Fears = 1,

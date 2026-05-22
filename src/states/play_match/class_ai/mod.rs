@@ -288,6 +288,25 @@ impl<'a> CombatContext<'a> {
             .unwrap_or(false)
     }
 
+    /// Start a decision-trace `ability_decision` builder for the current
+    /// actor. Returns None only when the snapshot doesn't contain self
+    /// (defensive — shouldn't happen in normal dispatch).
+    ///
+    /// Replaces the actor_view + target_view + builder boilerplate that
+    /// every `decide_<class>_action` had to assemble by hand.
+    pub fn start_ability_decision<'t>(
+        &self,
+        decision_trace: &'t mut crate::states::play_match::decision_trace::DecisionTrace,
+        target: Option<Entity>,
+        my_pos: Vec3,
+    ) -> Option<crate::states::play_match::decision_trace::DecisionEventBuilder<'t>> {
+        use crate::states::play_match::decision_trace::{ActorView, TargetView};
+        let actor_view = ActorView::from_info(self.self_info()?);
+        let target_view = target
+            .and_then(|t| self.combatants.get(&t))
+            .map(|info| TargetView::from_info(info, my_pos));
+        Some(decision_trace.start_ability_decision(actor_view, target_view))
+    }
 }
 
 // ============================================================================
@@ -318,6 +337,9 @@ pub fn dispel_priority(aura_type: AuraType) -> i32 {
 /// - 90: Only urgent CC (Polymorph, Fear)
 /// - 50: Include roots and DoTs
 /// - 20: Include slows (not recommended)
+///
+/// Predicate failures emit typed reject events on the dispel ability;
+/// success emits choose.
 #[allow(clippy::too_many_arguments)]
 pub fn try_dispel_ally(
     commands: &mut Commands,
@@ -333,21 +355,39 @@ pub fn try_dispel_ally(
     log_prefix: &'static str,
     log_name: &str,
     caster_class: CharacterClass,
+    trace: &mut crate::states::play_match::decision_trace::DecisionEventBuilder<'_>,
 ) -> bool {
+    use crate::states::play_match::decision_trace::RejectionReason;
+
     let def = abilities.get_unchecked(&ability_type);
 
     // Check if spell school is locked out
     if is_spell_school_locked(def.spell_school, auras) {
+        trace.reject(
+            ability_type,
+            RejectionReason::SilencedOrLocked { school: def.spell_school },
+        );
         return false;
     }
     // Silence gate (UA backlash). The dispel helper bypasses can_cast_config and
     // deducts mana directly, so this check must live here — otherwise a silenced
     // healer would still successfully dispel.
     if is_silenced(combatant, auras) && def.mana_cost > 0.0 {
+        trace.reject(
+            ability_type,
+            RejectionReason::SilencedOrLocked { school: def.spell_school },
+        );
         return false;
     }
 
     if combatant.current_mana < def.mana_cost {
+        trace.reject(
+            ability_type,
+            RejectionReason::InsufficientMana {
+                have: combatant.current_mana,
+                need: def.mana_cost,
+            },
+        );
         return false;
     }
 
@@ -398,8 +438,11 @@ pub fn try_dispel_ally(
     }
 
     let Some((dispel_target, _)) = best_candidate else {
+        trace.reject(ability_type, RejectionReason::NoValidTarget);
         return false;
     };
+
+    trace.choose(ability_type, Some(dispel_target), true);
 
     // Execute the ability
     combatant.current_mana -= def.mana_cost;

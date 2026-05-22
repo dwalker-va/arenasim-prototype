@@ -65,6 +65,9 @@ pub use super::traps::slow_zone_system;
 // === Phase 3: Combat Resolution ===
 pub use super::combat_core::combat_auto_attack;
 
+// === Decision Trace ===
+pub use super::decision_trace::flush_decision_trace_system;
+
 // === Utilities ===
 pub use super::utils::combatant_id;
 
@@ -124,6 +127,10 @@ pub fn add_core_combat_systems<M>(app: &mut App, run_condition: impl Condition<M
 where
     M: 'static,
 {
+    // Initialize DecisionTrace resource (idempotent — safe to call from both
+    // headless and graphical setup paths).
+    app.init_resource::<super::decision_trace::DecisionTrace>();
+
     // Phase 1: Resources and Auras
     app.add_systems(
         Update,
@@ -188,7 +195,11 @@ where
     // Phase 3: Combat Resolution
     app.add_systems(
         Update,
-        combat_auto_attack
+        (
+            combat_auto_attack,
+            flush_decision_trace_system,
+        )
+            .chain()
             .in_set(CombatSystemPhase::CombatResolution)
             .run_if(run_condition),
     );

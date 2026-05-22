@@ -21,14 +21,18 @@ fn main() {
     let args = cli::parse_args();
 
     if let Some(n) = args.matrix {
-        // 7×7 matchup matrix mode
-        if let Err(e) = headless::run_matrix(n, args.seed_base, args.save_logs) {
+        // 7×7 matchup matrix mode — defaults to trace `on` so every cell's
+        // trace is on disk when an anomaly surfaces; explicit `off` opts out.
+        let trace_mode = args.trace_mode.unwrap_or(cli::TraceMode::On);
+        if let Err(e) = headless::run_matrix(n, args.seed_base, args.save_logs, trace_mode) {
             eprintln!("Matrix run failed: {}", e);
             std::process::exit(1);
         }
     } else if let Some(config_path) = args.headless {
-        // Single headless match
-        run_headless_mode(config_path, args.output, args.max_duration);
+        // Single headless match — defaults to trace `off`; opt in via
+        // `--trace-mode on` (or `verbose`).
+        let trace_mode = args.trace_mode.unwrap_or(cli::TraceMode::Off);
+        run_headless_mode(config_path, args.output, args.max_duration, trace_mode);
     } else {
         // Normal graphical mode
         run_graphical_mode();
@@ -39,6 +43,7 @@ fn run_headless_mode(
     config_path: std::path::PathBuf,
     output: Option<std::path::PathBuf>,
     max_duration: Option<f32>,
+    trace_mode: cli::TraceMode,
 ) {
     println!("Running in headless mode with config: {:?}", config_path);
 
@@ -58,7 +63,21 @@ fn run_headless_mode(
         config.max_duration_secs = duration;
     }
 
-    match headless::run_headless_match(config) {
+    // Build trace config when enabled. Single-match writes alongside the .txt
+    // log with the same timestamp suffix.
+    let trace_config = if trace_mode.is_enabled() {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        Some(headless::runner::TraceConfig {
+            output_path: format!("match_logs/match_{}_trace.jsonl", ts).into(),
+        })
+    } else {
+        None
+    };
+
+    match headless::run_headless_match_with(config, false, trace_config) {
         Ok(result) => {
             // Brief stdout summary; full details live in the saved log file.
             let winner = match result.winner {

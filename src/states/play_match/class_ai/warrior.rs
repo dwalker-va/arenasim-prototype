@@ -19,11 +19,14 @@ use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
 use crate::states::play_match::combat_core::{roll_crit, get_attack_power_bonus_from_slice, get_crit_chance_bonus_from_slice};
 use crate::states::play_match::constants::{CHARGE_MIN_RANGE, CRIT_DAMAGE_MULTIPLIER, GCD};
+use crate::states::play_match::decision_trace::{
+    DecisionEventBuilder, DecisionTrace, NoActionReason, RejectionReason, ResourceKind,
+};
 
 use crate::states::play_match::utils::log_ability_use;
 
 use super::CombatContext;
-use super::cast_guard::{pre_cast_ok, PreCastOpts};
+use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
 
 /// Shout range constant (applies to all shout variants)
 const SHOUT_RANGE: f32 = 30.0;
@@ -46,11 +49,16 @@ pub fn decide_warrior_action(
     ctx: &CombatContext,
     instant_attacks: &mut Vec<super::QueuedInstantAttack>,
     battle_shouted_this_frame: &mut std::collections::HashSet<Entity>,
+    decision_trace: &mut DecisionTrace,
 ) -> bool {
-    // Check if global cooldown is active
+    // GCD short-circuit — no event (emission gate: tick produced no decision).
     if combatant.global_cooldown > 0.0 {
         return false;
     }
+
+    let Some(mut builder) = ctx.start_ability_decision(decision_trace, combatant.target, my_pos) else {
+        return false;
+    };
 
     // Priority 1: Shout (buff allies or debuff enemies based on preference)
     if try_shout(
@@ -62,22 +70,27 @@ pub fn decide_warrior_action(
         my_pos,
         ctx,
         battle_shouted_this_frame,
+        &mut builder,
     ) {
+        builder.finish();
         return true;
     }
 
     // Get target for combat abilities
     let Some(target_entity) = combatant.target else {
+        builder.finish_no_action(NoActionReason::NoValidTarget);
         return false;
     };
 
     let Some(target_info) = ctx.combatants.get(&target_entity) else {
+        builder.finish_no_action(NoActionReason::NoValidTarget);
         return false;
     };
     let target_pos = target_info.position;
 
     // Don't waste abilities on immune targets (Divine Shield)
     if ctx.entity_is_immune(target_entity) {
+        builder.finish_no_action(NoActionReason::TargetImmune);
         return false;
     }
 
@@ -93,7 +106,9 @@ pub fn decide_warrior_action(
         target_entity,
         target_pos,
         ctx,
+        &mut builder,
     ) {
+        builder.finish();
         return true;
     }
 
@@ -105,10 +120,13 @@ pub fn decide_warrior_action(
         entity,
         combatant,
         my_pos,
+        auras,
         target_entity,
         target_pos,
         ctx,
+        &mut builder,
     ) {
+        builder.finish();
         return true;
     }
 
@@ -121,17 +139,24 @@ pub fn decide_warrior_action(
         entity,
         combatant,
         my_pos,
+        auras,
         target_entity,
         target_pos,
         ctx,
         instant_attacks,
+        &mut builder,
     ) {
+        builder.finish();
         return true;
     }
 
     // Priority 5: Heroic Strike (rage dump)
-    try_heroic_strike(abilities, combatant, target_pos, my_pos);
+    try_heroic_strike(abilities, combatant, target_pos, my_pos, &mut builder);
 
+    // No GCD-consuming ability used this tick. Heroic Strike may have queued
+    // an attack-bonus without taking a GCD; either way, finish records the
+    // candidate set with NoAction (AllCandidatesRejected) when none chose.
+    builder.finish();
     false
 }
 
@@ -147,16 +172,17 @@ fn try_shout(
     my_pos: Vec3,
     ctx: &CombatContext,
     shouted_this_frame: &mut std::collections::HashSet<Entity>,
+    builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     match combatant.warrior_shout {
         WarriorShout::BattleShout => try_battle_shout(
-            commands, combat_log, abilities, entity, combatant, my_pos, ctx, shouted_this_frame,
+            commands, combat_log, abilities, entity, combatant, my_pos, ctx, shouted_this_frame, builder,
         ),
         WarriorShout::DemoralizingShout => try_demoralizing_shout(
-            commands, combat_log, abilities, entity, combatant, my_pos, ctx, shouted_this_frame,
+            commands, combat_log, abilities, entity, combatant, my_pos, ctx, shouted_this_frame, builder,
         ),
         WarriorShout::CommandingShout => try_commanding_shout(
-            commands, combat_log, abilities, entity, combatant, my_pos, ctx, shouted_this_frame,
+            commands, combat_log, abilities, entity, combatant, my_pos, ctx, shouted_this_frame, builder,
         ),
     }
 }
@@ -172,7 +198,11 @@ fn try_battle_shout(
     my_pos: Vec3,
     ctx: &CombatContext,
     shouted_this_frame: &mut std::collections::HashSet<Entity>,
+    builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
+    let ability = AbilityType::BattleShout;
+    let def = abilities.get_unchecked(&ability);
+
     let mut targets: Vec<Entity> = Vec::new();
 
     for (ally_entity, info) in ctx.combatants.iter() {
@@ -194,15 +224,23 @@ fn try_battle_shout(
     }
 
     if targets.is_empty() {
+        builder.reject(ability, RejectionReason::NoValidTarget);
         return false;
     }
-
-    let ability = AbilityType::BattleShout;
-    let def = abilities.get_unchecked(&ability);
 
     if combatant.current_mana < def.mana_cost && def.mana_cost > 0.0 {
+        builder.reject(
+            ability,
+            RejectionReason::InsufficientResource {
+                resource: ResourceKind::Rage,
+                have: combatant.current_mana,
+                need: def.mana_cost,
+            },
+        );
         return false;
     }
+
+    builder.choose(ability, None, true);
 
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
@@ -236,11 +274,14 @@ fn try_demoralizing_shout(
     my_pos: Vec3,
     ctx: &CombatContext,
     shouted_this_frame: &mut std::collections::HashSet<Entity>,
+    builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
+    let ability = AbilityType::DemoralizingShout;
+    let def = abilities.get_unchecked(&ability);
+
     let mut targets: Vec<Entity> = Vec::new();
 
     for (enemy_entity, info) in ctx.combatants.iter() {
-        // Must be opposite team, alive, and visible (not stealthed)
         if info.team == combatant.team || info.current_health <= 0.0 || info.stealthed {
             continue;
         }
@@ -259,15 +300,23 @@ fn try_demoralizing_shout(
     }
 
     if targets.is_empty() {
+        builder.reject(ability, RejectionReason::NoValidTarget);
         return false;
     }
-
-    let ability = AbilityType::DemoralizingShout;
-    let def = abilities.get_unchecked(&ability);
 
     if combatant.current_mana < def.mana_cost && def.mana_cost > 0.0 {
+        builder.reject(
+            ability,
+            RejectionReason::InsufficientResource {
+                resource: ResourceKind::Rage,
+                have: combatant.current_mana,
+                need: def.mana_cost,
+            },
+        );
         return false;
     }
+
+    builder.choose(ability, None, true);
 
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
@@ -301,7 +350,11 @@ fn try_commanding_shout(
     my_pos: Vec3,
     ctx: &CombatContext,
     shouted_this_frame: &mut std::collections::HashSet<Entity>,
+    builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
+    let ability = AbilityType::CommandingShout;
+    let def = abilities.get_unchecked(&ability);
+
     let mut targets: Vec<Entity> = Vec::new();
 
     for (ally_entity, info) in ctx.combatants.iter() {
@@ -323,15 +376,23 @@ fn try_commanding_shout(
     }
 
     if targets.is_empty() {
+        builder.reject(ability, RejectionReason::NoValidTarget);
         return false;
     }
-
-    let ability = AbilityType::CommandingShout;
-    let def = abilities.get_unchecked(&ability);
 
     if combatant.current_mana < def.mana_cost && def.mana_cost > 0.0 {
+        builder.reject(
+            ability,
+            RejectionReason::InsufficientResource {
+                resource: ResourceKind::Rage,
+                have: combatant.current_mana,
+                need: def.mana_cost,
+            },
+        );
         return false;
     }
+
+    builder.choose(ability, None, true);
 
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
@@ -367,16 +428,18 @@ fn try_charge(
     target_entity: Entity,
     target_pos: Vec3,
     ctx: &CombatContext,
+    builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
+    let charge = AbilityType::Charge;
+    let charge_def = abilities.get_unchecked(&charge);
+
     if ctx.has_friendly_breakable_cc(target_entity) {
+        builder.reject(charge, RejectionReason::FriendlyBreakableCC);
         return false;
     }
 
-    let charge = AbilityType::Charge;
-    let charge_def = abilities.get_unchecked(&charge);
-    let charge_on_cooldown = combatant.ability_cooldowns.contains_key(&charge);
-
-    if charge_on_cooldown {
+    if let Some(remaining) = combatant.ability_cooldowns.get(&charge) {
+        builder.reject(charge, RejectionReason::OnCooldown { remaining: *remaining });
         return false;
     }
 
@@ -386,15 +449,35 @@ fn try_charge(
         .unwrap_or(false);
 
     if is_rooted {
+        builder.reject(charge, RejectionReason::Rooted);
         return false;
     }
 
     let distance_to_target = my_pos.distance(target_pos);
 
     // Must be within charge range
-    if distance_to_target < CHARGE_MIN_RANGE || distance_to_target > charge_def.range {
+    if distance_to_target < CHARGE_MIN_RANGE {
+        builder.reject(
+            charge,
+            RejectionReason::WithinDeadZone {
+                distance: distance_to_target,
+                min: CHARGE_MIN_RANGE,
+            },
+        );
         return false;
     }
+    if distance_to_target > charge_def.range {
+        builder.reject(
+            charge,
+            RejectionReason::OutOfRange {
+                distance: distance_to_target,
+                max: charge_def.range,
+            },
+        );
+        return false;
+    }
+
+    builder.choose(charge, Some(target_entity), true);
 
     // Execute Charge
     combatant.ability_cooldowns.insert(charge, charge_def.cooldown);
@@ -429,10 +512,15 @@ fn try_rend(
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
     target_entity: Entity,
     target_pos: Vec3,
     ctx: &CombatContext,
+    builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
+    let rend = AbilityType::Rend;
+    let rend_def = abilities.get_unchecked(&rend);
+
     // Check if target already has Rend (any DoT for now)
     let target_has_rend = ctx.active_auras
         .get(&target_entity)
@@ -440,24 +528,38 @@ fn try_rend(
         .unwrap_or(false);
 
     if target_has_rend {
+        builder.reject(rend, RejectionReason::AlreadyApplied);
         return false;
     }
 
-    let rend = AbilityType::Rend;
-    let rend_def = abilities.get_unchecked(&rend);
-
+    let rend_opts = PreCastOpts { check_friendly_cc: true, ..Default::default() };
     if !pre_cast_ok(
         rend,
         rend_def,
         combatant,
         my_pos,
-        None,
+        auras,
         Some((target_entity, target_pos)),
         ctx,
-        PreCastOpts { check_friendly_cc: true, ..Default::default() },
+        rend_opts,
     ) {
+        builder.reject(
+            rend,
+            classify_pre_cast_failure(
+                rend,
+                rend_def,
+                combatant,
+                my_pos,
+                auras,
+                Some((target_entity, target_pos)),
+                ctx,
+                rend_opts,
+            ),
+        );
         return false;
     }
+
+    builder.choose(rend, Some(target_entity), true);
 
     // Execute Rend
     combatant.current_mana -= rend_def.mana_cost;
@@ -502,32 +604,53 @@ fn try_mortal_strike(
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
     target_entity: Entity,
     target_pos: Vec3,
     ctx: &CombatContext,
     instant_attacks: &mut Vec<super::QueuedInstantAttack>,
+    builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let mortal_strike = AbilityType::MortalStrike;
     let ms_def = abilities.get_unchecked(&mortal_strike);
 
+    let ms_opts = PreCastOpts { check_friendly_cc: true, ..Default::default() };
     if !pre_cast_ok(
         mortal_strike,
         ms_def,
         combatant,
         my_pos,
-        None,
+        auras,
         Some((target_entity, target_pos)),
         ctx,
-        PreCastOpts { check_friendly_cc: true, ..Default::default() },
+        ms_opts,
     ) {
+        builder.reject(
+            mortal_strike,
+            classify_pre_cast_failure(
+                mortal_strike,
+                ms_def,
+                combatant,
+                my_pos,
+                auras,
+                Some((target_entity, target_pos)),
+                ctx,
+                ms_opts,
+            ),
+        );
         return false;
     }
 
     // Get target info
     let target_info = match ctx.combatants.get(&target_entity) {
         Some(info) => info,
-        None => return false,
+        None => {
+            builder.reject(mortal_strike, RejectionReason::NoValidTarget);
+            return false;
+        }
     };
+
+    builder.choose(mortal_strike, Some(target_entity), true);
 
     // Execute Mortal Strike
     combatant.current_mana -= ms_def.mana_cost;
@@ -571,25 +694,49 @@ fn try_mortal_strike(
 
 /// Try to queue Heroic Strike for next auto-attack.
 /// This doesn't consume a GCD, just queues bonus damage.
-fn try_heroic_strike(abilities: &AbilityDefinitions, combatant: &mut Combatant, target_pos: Vec3, my_pos: Vec3) {
-    // Don't queue if one is already pending
-    if combatant.next_attack_bonus_damage > 0.0 {
-        return;
-    }
-
+fn try_heroic_strike(
+    abilities: &AbilityDefinitions,
+    combatant: &mut Combatant,
+    target_pos: Vec3,
+    my_pos: Vec3,
+    builder: &mut DecisionEventBuilder<'_>,
+) {
     let ability = AbilityType::HeroicStrike;
     let def = abilities.get_unchecked(&ability);
 
-    // Only use if we have enough rage for Heroic Strike AND reserve
-    let can_afford = combatant.current_mana >= (def.mana_cost + RAGE_RESERVE);
+    // Don't queue if one is already pending
+    if combatant.next_attack_bonus_damage > 0.0 {
+        builder.reject(ability, RejectionReason::AlreadyApplied);
+        return;
+    }
 
-    if !can_afford {
+    // Only use if we have enough rage for Heroic Strike AND reserve
+    if combatant.current_mana < (def.mana_cost + RAGE_RESERVE) {
+        builder.reject(
+            ability,
+            RejectionReason::InsufficientResource {
+                resource: ResourceKind::Rage,
+                have: combatant.current_mana,
+                need: def.mana_cost + RAGE_RESERVE,
+            },
+        );
         return;
     }
 
     if !ability.can_cast_config(combatant, target_pos, my_pos, def) {
+        // can_cast_config failed — most likely range. We don't have a direct
+        // distance here, but the predicate already short-circuited on the
+        // standard range/mana checks. Emit PreconditionUnmet with a hint.
+        builder.reject(
+            ability,
+            RejectionReason::PreconditionUnmet {
+                note: "can_cast_config failed (range/mana/stealth)".into(),
+            },
+        );
         return;
     }
+
+    builder.choose(ability, None, true);
 
     // Consume rage and queue bonus damage
     combatant.current_mana -= def.mana_cost;
@@ -604,3 +751,4 @@ fn try_heroic_strike(abilities: &AbilityDefinitions, combatant: &mut Combatant, 
         bonus_damage
     );
 }
+

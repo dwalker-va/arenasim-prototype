@@ -1,6 +1,5 @@
 //! Auto-attack system: melee swings, wand shots, auto shots, Heroic Strike, rage generation.
 
-use std::collections::HashMap;
 use bevy::prelude::*;
 use bevy_egui::egui;
 use crate::combat::log::CombatLog;
@@ -71,10 +70,16 @@ pub fn combat_auto_attack(
     // Collect attacks that will happen this frame (attacker, target, damage)
     let mut attacks = Vec::new();
 
-    // Track damage per target for batching floating combat text
-    let mut damage_per_target: std::collections::HashMap<Entity, f32> = std::collections::HashMap::new();
-    // Track damage per target for aura breaking
-    let mut damage_per_aura_break: std::collections::HashMap<Entity, f32> = std::collections::HashMap::new();
+    // Track damage per target for batching floating combat text.
+    // BTreeMap (not HashMap) so iteration order is deterministic by Entity —
+    // FCT entity spawn order would otherwise vary across runs due to Rust's
+    // randomized HashMap hasher, breaking byte-identical determinism for
+    // self-mirror matchups (same class on both teams).
+    let mut damage_per_target: std::collections::BTreeMap<Entity, f32> = std::collections::BTreeMap::new();
+    // Track damage per target for aura breaking. Same BTreeMap rationale as
+    // above — the iteration at the bottom of this function spawns commands
+    // whose order can ripple into downstream entity allocation.
+    let mut damage_per_aura_break: std::collections::BTreeMap<Entity, f32> = std::collections::BTreeMap::new();
 
     for (attacker_entity, transform, mut combatant, casting_state, channeling_state, auras) in combatants.iter_mut() {
         if !combatant.is_alive() {
@@ -185,25 +190,27 @@ pub fn combat_auto_attack(
         }
     }
 
-    // Apply damage to targets and track damage dealt
+    // Apply damage to targets and track damage dealt.
+    // The maps/sets below all use BTreeMap/BTreeSet rather than HashMap/HashSet
+    // so iteration order is deterministic by Entity. `frost_armor_procs` in
+    // particular drives `commands.spawn(AuraPending)` calls below, where the
+    // call order determines entity ID allocation and ripples into downstream
+    // query iteration — a pre-existing source of self-mirror non-determinism
+    // before this fix.
     let mut damage_dealt_updates: Vec<(Entity, f32)> = Vec::new();
-    let mut absorbed_per_target: HashMap<Entity, f32> = HashMap::new();
+    let mut absorbed_per_target: std::collections::BTreeMap<Entity, f32> = std::collections::BTreeMap::new();
 
     // Track which combatants have died during this frame's attack processing
-    // This prevents dead combatants from dealing damage after being killed
-    let mut died_this_frame: std::collections::HashSet<Entity> = std::collections::HashSet::new();
+    let mut died_this_frame: std::collections::BTreeSet<Entity> = std::collections::BTreeSet::new();
 
-    // Track crit status per target for FCT display (auto-attacks batch into damage_per_target)
-    let mut crit_per_target: HashMap<Entity, bool> = HashMap::new();
+    // Track crit status per target for FCT display
+    let mut crit_per_target: std::collections::BTreeMap<Entity, bool> = std::collections::BTreeMap::new();
 
-    // Track Frost Armor procs: attacker entities to apply slows to after the loop
-    // Use a HashSet to deduplicate (one proc per attacker per frame)
-    let mut frost_armor_procs: std::collections::HashSet<Entity> = std::collections::HashSet::new();
+    // Track Frost Armor procs: attacker entities to apply slows to after the loop.
+    let mut frost_armor_procs: std::collections::BTreeSet<Entity> = std::collections::BTreeSet::new();
 
     // Build a map of targets with breakable CC from friendly casters.
-    // Key: target entity, Value: team of the CC caster.
-    // This prevents friendly auto-attacks from breaking their own team's Polymorph/Fear.
-    let mut friendly_cc_team: HashMap<Entity, u8> = HashMap::new();
+    let mut friendly_cc_team: std::collections::BTreeMap<Entity, u8> = std::collections::BTreeMap::new();
     for (entity, _, combatant, _, _, auras) in combatants.iter() {
         if let Some(auras) = auras {
             for aura in &auras.auras {

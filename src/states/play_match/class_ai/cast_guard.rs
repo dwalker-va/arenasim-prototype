@@ -107,3 +107,98 @@ pub fn pre_cast_ok(
         None => caster.current_mana >= def.mana_cost,
     }
 }
+
+/// Decompose a `pre_cast_ok` failure into the specific `RejectionReason` that
+/// caused it. Re-runs the same predicate sequence pre_cast_ok uses (in the same
+/// order) so the emitted reason matches the gate that fired.
+///
+/// Used by every class AI's traced wrapper around `pre_cast_ok` — when the
+/// guard fails, this turns the bool into a typed reason for the decision-trace
+/// builder.
+#[allow(clippy::too_many_arguments)]
+pub fn classify_pre_cast_failure(
+    ability: AbilityType,
+    def: &AbilityConfig,
+    caster: &Combatant,
+    caster_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    target: Option<(Entity, Vec3)>,
+    ctx: &CombatContext,
+    opts: PreCastOpts,
+) -> crate::states::play_match::decision_trace::RejectionReason {
+    use crate::states::play_match::abilities::{is_silenced, is_spell_school_locked};
+    use crate::states::play_match::decision_trace::RejectionReason;
+
+    if let Some((target_entity, _)) = target {
+        if opts.check_friendly_cc && ctx.has_friendly_breakable_cc(target_entity) {
+            return RejectionReason::FriendlyBreakableCC;
+        }
+        if opts.check_friendly_dots && ctx.has_friendly_dots_on_target(target_entity) {
+            return RejectionReason::FriendlyBreakableCC;
+        }
+        if opts.check_target_immune && ctx.entity_is_immune(target_entity) {
+            return RejectionReason::TargetImmune;
+        }
+    }
+    if is_spell_school_locked(def.spell_school, auras) {
+        return RejectionReason::SilencedOrLocked { school: def.spell_school };
+    }
+    if !opts.bypass_silence && def.mana_cost > 0.0 && is_silenced(caster, auras) {
+        return RejectionReason::SilencedOrLocked { school: def.spell_school };
+    }
+    if let Some(remaining) = caster.ability_cooldowns.get(&ability) {
+        return RejectionReason::OnCooldown { remaining: *remaining };
+    }
+    let resource_shortage = || -> RejectionReason {
+        use crate::states::match_config::CharacterClass;
+        use crate::states::play_match::decision_trace::ResourceKind;
+        match caster.class {
+            CharacterClass::Warrior => RejectionReason::InsufficientResource {
+                resource: ResourceKind::Rage,
+                have: caster.current_mana,
+                need: def.mana_cost,
+            },
+            CharacterClass::Rogue => RejectionReason::InsufficientResource {
+                resource: ResourceKind::Energy,
+                have: caster.current_mana,
+                need: def.mana_cost,
+            },
+            _ => RejectionReason::InsufficientMana {
+                have: caster.current_mana,
+                need: def.mana_cost,
+            },
+        }
+    };
+
+    // Predicate order MUST match `AbilityType::can_cast_config` exactly:
+    // mana first, then range, then min_range, then stealth. Otherwise the
+    // trace can lie about why a cast failed (e.g., reporting OutOfRange
+    // when can_cast_config actually short-circuited on mana).
+    match target {
+        Some((_, target_pos)) => {
+            if caster.current_mana < def.mana_cost {
+                return resource_shortage();
+            }
+            let distance = caster_pos.distance(target_pos);
+            if distance > def.range {
+                return RejectionReason::OutOfRange { distance, max: def.range };
+            }
+            if let Some(min_range) = def.min_range {
+                if distance < min_range {
+                    return RejectionReason::WithinDeadZone { distance, min: min_range };
+                }
+            }
+            if matches!(ability, AbilityType::Ambush | AbilityType::CheapShot) && !caster.stealthed {
+                return RejectionReason::PreconditionUnmet {
+                    note: "stealth required (Ambush/CheapShot)".into(),
+                };
+            }
+        }
+        None => {
+            if caster.current_mana < def.mana_cost {
+                return resource_shortage();
+            }
+        }
+    }
+    RejectionReason::PreconditionUnmet { note: "can_cast_config failed".into() }
+}

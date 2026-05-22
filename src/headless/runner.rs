@@ -17,9 +17,19 @@ use crate::states::play_match::systems::{
 };
 use crate::states::play_match::components::{Pet, PetType, DRTracker};
 use crate::states::play_match::constants::PET_SLOT_BASE;
+use crate::states::play_match::decision_trace::{DecisionTrace, TraceWriter};
 use crate::states::match_config::CharacterClass;
 
 use super::config::HeadlessMatchConfig;
+
+/// Configuration for the AI decision trace, resolved from `--trace-mode` and
+/// passed into `run_headless_match_with`. When `None`, no trace file is
+/// written; the in-process builder still runs but is a no-op.
+#[derive(Debug, Clone)]
+pub struct TraceConfig {
+    /// Target JSONL output path. Created on demand (parent dirs included).
+    pub output_path: std::path::PathBuf,
+}
 
 /// Result of a completed headless match
 ///
@@ -496,14 +506,18 @@ fn headless_exit_on_complete(headless_state: Res<HeadlessMatchState>, mut exit: 
 /// stats) so callers like the matrix runner can aggregate outcomes without
 /// parsing the human-readable log.
 pub fn run_headless_match(config: HeadlessMatchConfig) -> Result<MatchResult, String> {
-    run_headless_match_with(config, false)
+    run_headless_match_with(config, false, None)
 }
 
 /// Lower-level entry point used by the matrix runner. When `suppress_log` is
-/// true the per-match `.txt` file is not written.
+/// true the per-match `.txt` file is not written. When `trace_config` is
+/// `Some(_)`, the AI decision trace is captured and written to the configured
+/// JSONL path; the in-process builder remains active either way (a no-op when
+/// `None`).
 pub fn run_headless_match_with(
     config: HeadlessMatchConfig,
     suppress_log: bool,
+    trace_config: Option<TraceConfig>,
 ) -> Result<MatchResult, String> {
     if !suppress_log {
         println!("Starting headless match simulation...");
@@ -531,7 +545,25 @@ pub fn run_headless_match_with(
         .add_plugins(HierarchyPlugin)
         .add_plugins(AbilityConfigPlugin)
         .add_plugins(EquipmentPlugin)
-        .add_plugins(HeadlessPlugin { config, suppress_log });
+        .add_plugins(HeadlessPlugin { config: config.clone(), suppress_log });
+
+    // Install the decision-trace writer (if requested) BEFORE the first
+    // app.update() so frame-0 events land in the file. Mirror the match's
+    // RNG seed onto the trace so downstream consumers can cross-reference.
+    if let Some(tc) = trace_config.as_ref() {
+        match TraceWriter::create(tc.output_path.clone()) {
+            Ok(writer) => {
+                let world = app.world_mut();
+                if let Some(mut trace) = world.get_resource_mut::<DecisionTrace>() {
+                    trace.install_writer(writer);
+                    trace.seed = config.random_seed.unwrap_or(0);
+                }
+            }
+            Err(e) => {
+                eprintln!("decision_trace: failed to create writer at {}: {}", tc.output_path.display(), e);
+            }
+        }
+    }
 
     // Tick the schedule until either the match completes or we hit a hard cap.
     // The cap is wall-time independent — it counts simulated frames at 60Hz —
@@ -546,6 +578,24 @@ pub fn run_headless_match_with(
             .unwrap_or(false);
         if done {
             break;
+        }
+    }
+
+    // Explicit flush of any in-flight trace events before reading the result.
+    // `flush_decision_trace_system` runs each frame and already drains events,
+    // but the final frame's events would otherwise stay in pending_events until
+    // the world is dropped (where TraceWriter's Drop impl catches them via its
+    // BufWriter flush — but only if no panics occurred). Belt and suspenders.
+    //
+    // A close_writer failure here means the final frame's trace events did
+    // not reach disk. Surface to stderr so matrix runs can see truncation.
+    // We don't fail the match — the in-memory MatchResult is unaffected.
+    if let Some(tc) = trace_config.as_ref() {
+        let world = app.world_mut();
+        if let Some(mut trace) = world.get_resource_mut::<DecisionTrace>() {
+            if let Err(e) = trace.close_writer() {
+                eprintln!("decision_trace: final flush failed at {}: {}", tc.output_path.display(), e);
+            }
         }
     }
 

@@ -21,9 +21,12 @@ use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
 use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::constants::GCD;
+use crate::states::play_match::decision_trace::{
+    DecisionEventBuilder, DecisionTrace, RejectionReason,
+};
 use crate::states::play_match::utils::log_ability_use;
 
-use super::cast_guard::{pre_cast_ok, PreCastOpts};
+use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
 
 use super::CombatContext;
 
@@ -41,109 +44,78 @@ pub fn decide_priest_action(
     ctx: &CombatContext,
     shielded_this_frame: &mut HashSet<Entity>,
     fortified_this_frame: &mut HashSet<Entity>,
+    decision_trace: &mut DecisionTrace,
 ) -> bool {
-    // Check if global cooldown is active
+    // GCD short-circuit — no event (emission gate).
     if combatant.global_cooldown > 0.0 {
         return false;
     }
 
+    let Some(mut builder) = ctx.start_ability_decision(decision_trace, combatant.target, my_pos) else {
+        return false;
+    };
+
     // Priority 1: Power Word: Fortitude (buff allies)
     if try_fortitude(
-        commands,
-        combat_log,
-        abilities,
-        entity,
-        combatant,
-        my_pos,
-        auras,
-        ctx,
-        fortified_this_frame,
+        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
+        fortified_this_frame, &mut builder,
     ) {
+        builder.finish();
         return true;
     }
 
-    // Priority 2: Dispel Magic - Urgent (Polymorph, Fear - complete loss of control)
-    // These debuffs completely incapacitate, so dispel immediately - before anything else
+    // Priority 2: Dispel Magic - Urgent (Polymorph, Fear)
     if try_dispel_magic(
-        commands,
-        combat_log,
-        abilities,
-        entity,
-        combatant,
-        my_pos,
-        auras,
-        ctx,
-        90, // Only Polymorph (100) and Fear (90)
+        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
+        90, &mut builder,
     ) {
+        builder.finish();
         return true;
     }
 
-    // Priority 3: Power Word: Shield (shield allies)
+    // Priority 3: Power Word: Shield
     if try_power_word_shield(
-        commands,
-        combat_log,
-        abilities,
-        entity,
-        combatant,
-        my_pos,
-        auras,
-        ctx,
-        shielded_this_frame,
+        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
+        shielded_this_frame, &mut builder,
     ) {
+        builder.finish();
         return true;
     }
 
-    // Priority 4: Flash Heal (heal injured allies)
+    // Priority 4: Flash Heal
     if try_flash_heal(
-        commands,
-        combat_log,
-        abilities,
-        entity,
-        combatant,
-        my_pos,
-        auras,
-        ctx,
+        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
+        &mut builder,
     ) {
+        builder.finish();
         return true;
     }
 
-    // Priority 5: Dispel Magic - Maintenance (Roots, DoTs when team is healthy)
-    // Only clean up lesser debuffs when there's no urgent healing needed
+    // Priority 5: Dispel Magic - Maintenance (only when team healthy)
     if ctx.is_team_healthy(0.70, my_pos) {
         if try_dispel_magic(
-            commands,
-            combat_log,
-            abilities,
-            entity,
-            combatant,
-            my_pos,
-            auras,
-            ctx,
-            50, // Roots (80) and DoTs (50)
+            commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
+            50, &mut builder,
         ) {
+            builder.finish();
             return true;
         }
     }
 
-    // Priority 6: Mind Blast (damage)
+    // Priority 6: Mind Blast
     if try_mind_blast(
-        commands,
-        combat_log,
-        abilities,
-        entity,
-        combatant,
-        my_pos,
-        auras,
-        ctx,
+        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
+        &mut builder,
     ) {
+        builder.finish();
         return true;
     }
 
+    builder.finish();
     false
 }
 
 /// Try to cast Power Word: Fortitude on an unbuffed ally.
-/// Returns true if the ability was used.
 fn try_fortitude(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -154,69 +126,63 @@ fn try_fortitude(
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
     fortified_this_frame: &mut HashSet<Entity>,
+    builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
-    // Find an unbuffed ally
+    let ability = AbilityType::PowerWordFortitude;
+    let def = abilities.get_unchecked(&ability);
+
     let mut unbuffed_ally: Option<(Entity, Vec3)> = None;
 
     for (ally_entity, info) in ctx.combatants.iter() {
-        // Must be same team, alive, and not a pet
         if info.team != combatant.team || info.current_health <= 0.0 || info.is_pet {
             continue;
         }
-
-        // Check if ally already has MaxHealthIncrease buff
         let has_fortitude = ctx.active_auras
             .get(ally_entity)
             .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::MaxHealthIncrease))
             .unwrap_or(false);
-
         if has_fortitude {
             continue;
         }
-
-        // Check if target was fortified by another Priest this frame
         if fortified_this_frame.contains(ally_entity) {
             continue;
         }
-
         unbuffed_ally = Some((*ally_entity, info.position));
         break;
     }
 
     let Some((buff_target, target_pos)) = unbuffed_ally else {
+        builder.reject(ability, RejectionReason::NoValidTarget);
         return false;
     };
 
-    let ability = AbilityType::PowerWordFortitude;
-    let def = abilities.get_unchecked(&ability);
-
+    let opts = PreCastOpts::default();
     if !pre_cast_ok(
-        ability,
-        def,
-        combatant,
-        my_pos,
-        auras,
-        Some((buff_target, target_pos)),
-        ctx,
-        PreCastOpts::default(),
+        ability, def, combatant, my_pos, auras,
+        Some((buff_target, target_pos)), ctx, opts,
     ) {
+        builder.reject(
+            ability,
+            classify_pre_cast_failure(
+                ability, def, combatant, my_pos, auras,
+                Some((buff_target, target_pos)), ctx, opts,
+            ),
+        );
         return false;
     }
 
-    // Execute the ability
+    builder.choose(ability, Some(buff_target), true);
+
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
 
-    // Log
     let target_tuple = ctx.combatants.get(&buff_target).map(|info| (info.team, info.class));
     log_ability_use(combat_log, combatant.team, combatant.class, "Power Word: Fortitude", target_tuple, "casts");
 
-    // Apply buff aura
     if let Some(aura_pending) = AuraPending::from_ability(buff_target, entity, def) {
         commands.spawn(aura_pending);
     }
 
-    // Mark target as fortified this frame
     fortified_this_frame.insert(buff_target);
 
     info!(
@@ -229,7 +195,6 @@ fn try_fortitude(
 }
 
 /// Try to cast Power Word: Shield on an ally.
-/// Returns true if the ability was used.
 fn try_power_word_shield(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -240,26 +205,28 @@ fn try_power_word_shield(
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
     shielded_this_frame: &mut HashSet<Entity>,
+    builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let pw_shield = AbilityType::PowerWordShield;
     let pw_shield_def = abilities.get_unchecked(&pw_shield);
 
-    // Cheap fail-fast before scanning allies. The full preamble (school lockout,
-    // silence, range) runs in `pre_cast_ok` once a target is chosen.
     if combatant.current_mana < pw_shield_def.mana_cost {
+        builder.reject(
+            pw_shield,
+            RejectionReason::InsufficientMana {
+                have: combatant.current_mana,
+                need: pw_shield_def.mana_cost,
+            },
+        );
         return false;
     }
 
-    // Find ally to shield (prioritize lowest HP)
     let mut best_candidate: Option<(Entity, Vec3, f32)> = None;
 
     for (ally_entity, info) in ctx.combatants.iter() {
-        // Must be same team, alive, and not a pet
         if info.team != combatant.team || info.current_health <= 0.0 || info.is_pet {
             continue;
         }
-
-        // Check if ally has Weakened Soul or already has Power Word: Shield
         let ally_auras = ctx.active_auras.get(ally_entity);
         let has_weakened_soul = ally_auras
             .map_or(false, |auras| auras.iter().any(|a| a.effect_type == AuraType::WeakenedSoul));
@@ -268,8 +235,6 @@ fn try_power_word_shield(
                 .iter()
                 .any(|a| a.effect_type == AuraType::Absorb && a.ability_name == "Power Word: Shield")
         });
-
-        // Check if target was shielded by another Priest this frame
         let shielded_this_frame_check = shielded_this_frame.contains(ally_entity);
 
         if has_weakened_soul || has_pw_shield || shielded_this_frame_check {
@@ -277,9 +242,6 @@ fn try_power_word_shield(
         }
 
         let hp_percent = info.current_health / info.max_health;
-
-        // Pre-combat (full HP): Shield anyone
-        // In-combat: Only shield if below 70% HP
         let is_full_hp = hp_percent >= 1.0;
         let is_below_threshold = hp_percent < 0.7;
 
@@ -295,43 +257,44 @@ fn try_power_word_shield(
     }
 
     let Some((shield_entity, target_pos, _)) = best_candidate else {
+        builder.reject(pw_shield, RejectionReason::NoValidTarget);
         return false;
     };
 
+    let opts = PreCastOpts::default();
     if !pre_cast_ok(
-        pw_shield,
-        pw_shield_def,
-        combatant,
-        my_pos,
-        auras,
-        Some((shield_entity, target_pos)),
-        ctx,
-        PreCastOpts::default(),
+        pw_shield, pw_shield_def, combatant, my_pos, auras,
+        Some((shield_entity, target_pos)), ctx, opts,
     ) {
+        builder.reject(
+            pw_shield,
+            classify_pre_cast_failure(
+                pw_shield, pw_shield_def, combatant, my_pos, auras,
+                Some((shield_entity, target_pos)), ctx, opts,
+            ),
+        );
         return false;
     }
 
-    // Execute the ability
+    builder.choose(pw_shield, Some(shield_entity), true);
+
     combatant.current_mana -= pw_shield_def.mana_cost;
     combatant.global_cooldown = GCD;
 
-    // Log
     let target_tuple = ctx.combatants.get(&shield_entity).map(|info| (info.team, info.class));
     log_ability_use(combat_log, combatant.team, combatant.class, "Power Word: Shield", target_tuple, "casts");
 
-    // Apply absorb shield aura
     if let Some(aura_pending) = AuraPending::from_ability(shield_entity, entity, pw_shield_def) {
         commands.spawn(aura_pending);
     }
 
-    // Apply Weakened Soul debuff (doesn't break on damage)
     commands.spawn(AuraPending {
         target: shield_entity,
         aura: Aura {
             effect_type: AuraType::WeakenedSoul,
             duration: 15.0,
             magnitude: 0.0,
-            break_on_damage_threshold: -1.0, // Never breaks on damage
+            break_on_damage_threshold: -1.0,
             accumulated_damage: 0.0,
             tick_interval: 0.0,
             time_until_next_tick: 0.0,
@@ -339,22 +302,20 @@ fn try_power_word_shield(
             ability_name: "Weakened Soul".to_string(),
             fear_direction: (0.0, 0.0),
             fear_direction_timer: 0.0,
-            spell_school: None, // Weakened Soul is not dispellable
+            spell_school: None,
             applied_this_frame: false,
             backlash_damage: None,
         },
     });
 
-    // Mark target as shielded this frame
     shielded_this_frame.insert(shield_entity);
 
     true
 }
 
 /// Try to cast Dispel Magic on an ally with a dispellable debuff.
-/// Returns true if the ability was used.
-///
-/// Delegates to the shared `try_dispel_ally()` in `class_ai/mod.rs`.
+/// Delegates to the shared `try_dispel_ally()` in `class_ai/mod.rs`, which
+/// emits its own reject/choose events to the builder.
 fn try_dispel_magic(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -365,6 +326,7 @@ fn try_dispel_magic(
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
     min_priority: i32,
+    builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     super::try_dispel_ally(
         commands,
@@ -380,11 +342,11 @@ fn try_dispel_magic(
         "[DISPEL]",
         "Dispel Magic",
         CharacterClass::Priest,
+        builder,
     )
 }
 
 /// Try to cast Flash Heal on the lowest HP ally.
-/// Returns true if the ability was used (started casting).
 fn try_flash_heal(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -394,37 +356,40 @@ fn try_flash_heal(
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
+    builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = AbilityType::FlashHeal;
     let def = abilities.get_unchecked(&ability);
 
-    // Find the lowest HP ally below 90% health, within range, excluding pets
     let Some(target_info) = ctx.lowest_health_ally_below(0.9, def.range, my_pos) else {
+        builder.reject(ability, RejectionReason::NoValidTarget);
         return false;
     };
     let heal_target = target_info.entity;
     let target_pos = target_info.position;
 
+    let opts = PreCastOpts::default();
     if !pre_cast_ok(
-        ability,
-        def,
-        combatant,
-        my_pos,
-        auras,
-        Some((heal_target, target_pos)),
-        ctx,
-        PreCastOpts::default(),
+        ability, def, combatant, my_pos, auras,
+        Some((heal_target, target_pos)), ctx, opts,
     ) {
+        builder.reject(
+            ability,
+            classify_pre_cast_failure(
+                ability, def, combatant, my_pos, auras,
+                Some((heal_target, target_pos)), ctx, opts,
+            ),
+        );
         return false;
     }
 
-    // Start casting (affected by Curse of Tongues)
+    builder.choose(ability, Some(heal_target), false);
+
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras);
 
     commands.entity(entity).insert(CastingState::new(ability, heal_target, cast_time));
 
-    // Log
     let target_tuple = ctx.combatants
         .get(&heal_target)
         .map(|info| (info.team, info.class));
@@ -441,7 +406,6 @@ fn try_flash_heal(
 }
 
 /// Try to cast Mind Blast on the current target.
-/// Returns true if casting was started.
 fn try_mind_blast(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -451,45 +415,50 @@ fn try_mind_blast(
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
+    builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
+    let ability = AbilityType::MindBlast;
+    let def = abilities.get_unchecked(&ability);
+
     let Some(target_entity) = combatant.target else {
+        builder.reject(ability, RejectionReason::NoValidTarget);
         return false;
     };
 
     let Some(target_info) = ctx.combatants.get(&target_entity) else {
+        builder.reject(ability, RejectionReason::NoValidTarget);
         return false;
     };
 
     let target_pos = target_info.position;
 
-    let ability = AbilityType::MindBlast;
-    let def = abilities.get_unchecked(&ability);
-
+    let opts = PreCastOpts {
+        check_friendly_cc: true,
+        check_target_immune: true,
+        ..Default::default()
+    };
     if !pre_cast_ok(
-        ability,
-        def,
-        combatant,
-        my_pos,
-        auras,
-        Some((target_entity, target_pos)),
-        ctx,
-        PreCastOpts {
-            check_friendly_cc: true,
-            check_target_immune: true,
-            ..Default::default()
-        },
+        ability, def, combatant, my_pos, auras,
+        Some((target_entity, target_pos)), ctx, opts,
     ) {
+        builder.reject(
+            ability,
+            classify_pre_cast_failure(
+                ability, def, combatant, my_pos, auras,
+                Some((target_entity, target_pos)), ctx, opts,
+            ),
+        );
         return false;
     }
 
-    // Execute the ability (affected by Curse of Tongues)
+    builder.choose(ability, Some(target_entity), false);
+
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras);
 
     commands.entity(entity).insert(CastingState::new(ability, target_entity, cast_time));
 
-    // Log
     let target_tuple = ctx.combatants
         .get(&target_entity)
         .map(|info| (info.team, info.class));

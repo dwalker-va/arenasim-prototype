@@ -1,13 +1,8 @@
 //! Pet AI System
 //!
-//! Handles AI decisions for pet entities (Felhunter, etc.).
+//! Handles AI decisions for pet entities (Felhunter, Spider, Boar, Bird).
 //! Runs separately from class AI - pets are skipped in the main dispatch loop
 //! and processed here instead.
-//!
-//! ## Felhunter Priority
-//! 1. Spell Lock (interrupt enemy casts within 30yd, 30s CD)
-//! 2. Devour Magic (dispel debuffs from allies within 30yd, 8s CD)
-//! 3. Auto-attack (handled by combat_auto_attack, not here)
 
 use bevy::prelude::*;
 
@@ -15,11 +10,24 @@ use crate::combat::log::CombatLog;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
+use crate::states::play_match::decision_trace::{
+    ActorView, DecisionEventBuilder, DecisionTrace, RejectionReason, TargetView,
+};
 use crate::states::play_match::utils::spawn_speech_bubble;
 use crate::states::match_config::CharacterClass;
 use super::CombatContext;
 
-/// Pet AI decision system. Runs after class AI for non-pet combatants.
+/// Render a PetType variant into a stable string for pet_decision events.
+fn pet_type_str(pt: PetType) -> &'static str {
+    match pt {
+        PetType::Felhunter => "Felhunter",
+        PetType::Spider => "Spider",
+        PetType::Boar => "Boar",
+        PetType::Bird => "Bird",
+    }
+}
+
+/// Pet AI decision system.
 pub fn pet_ai_system(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
@@ -33,12 +41,12 @@ pub fn pet_ai_system(
     all_combatants: Query<(Entity, &Combatant, &Transform, Option<&ActiveAuras>), Without<Pet>>,
     dr_tracker_query: Query<(Entity, &DRTracker)>,
     celebration: Option<Res<VictoryCelebration>>,
+    mut decision_trace: ResMut<DecisionTrace>,
 ) {
     if celebration.is_some() {
         return;
     }
 
-    // Build CombatantInfo snapshot (same pattern as decide_abilities)
     let combatant_info: std::collections::BTreeMap<Entity, super::CombatantInfo> = all_combatants
         .iter()
         .map(|(entity, combatant, transform, _)| {
@@ -55,7 +63,7 @@ pub fn pet_ai_system(
                 is_alive: combatant.is_alive(),
                 stealthed: combatant.stealthed,
                 target: combatant.target,
-                is_pet: false, // We identify pets via the Pet component
+                is_pet: false,
                 pet_type: None,
             })
         })
@@ -78,9 +86,7 @@ pub fn pet_ai_system(
             continue;
         }
 
-        // Pets can't act while incapacitated
         let is_incapacitated = crate::states::play_match::utils::is_incapacitated(auras);
-
         if is_incapacitated {
             continue;
         }
@@ -93,64 +99,71 @@ pub fn pet_ai_system(
             self_entity: entity,
         };
 
+        // Build an ActorView for the pet. Pets don't appear in combatant_info
+        // (which is non-pet only), so we synthesize one from raw fields.
+        let hp_pct = if combatant.max_health > 0.0 {
+            combatant.current_health / combatant.max_health
+        } else {
+            0.0
+        };
+        let mana_pct = if combatant.max_mana > 0.0 {
+            combatant.current_mana / combatant.max_mana
+        } else {
+            0.0
+        };
+        let actor_view = ActorView::from_raw(
+            entity,
+            combatant.team,
+            combatant.slot,
+            combatant.class,
+            hp_pct,
+            mana_pct,
+            my_pos,
+        );
+        let target_view = combatant
+            .target
+            .and_then(|t| ctx.combatants.get(&t))
+            .map(|info| TargetView::from_info(info, my_pos));
+
+        let mut builder = decision_trace.start_pet_decision(
+            actor_view,
+            target_view,
+            pet.owner,
+            pet_type_str(pet.pet_type),
+        );
+
         match pet.pet_type {
             PetType::Felhunter => {
                 felhunter_ai(
-                    &mut commands,
-                    &mut combat_log,
-                    &abilities,
-                    entity,
-                    &mut combatant,
-                    my_pos,
-                    &ctx,
-                    &casting_targets,
-                    &channeling_targets,
+                    &mut commands, &mut combat_log, &abilities, entity, &mut combatant,
+                    my_pos, &ctx, &casting_targets, &channeling_targets, &mut builder,
                 );
             }
             PetType::Spider => {
                 spider_ai(
-                    &mut commands,
-                    &mut combat_log,
-                    &abilities,
-                    entity,
-                    &mut combatant,
-                    my_pos,
-                    pet,
-                    &ctx,
+                    &mut commands, &mut combat_log, &abilities, entity, &mut combatant,
+                    my_pos, pet, &ctx, &mut builder,
                 );
             }
             PetType::Boar => {
                 boar_ai(
-                    &mut commands,
-                    &mut combat_log,
-                    &abilities,
-                    entity,
-                    &mut combatant,
-                    my_pos,
-                    pet,
-                    &ctx,
-                    &casting_targets,
+                    &mut commands, &mut combat_log, &abilities, entity, &mut combatant,
+                    my_pos, pet, &ctx, &casting_targets, &mut builder,
                 );
             }
             PetType::Bird => {
                 bird_ai(
-                    &mut commands,
-                    &mut combat_log,
-                    &abilities,
-                    entity,
-                    &mut combatant,
-                    my_pos,
-                    pet,
-                    &ctx,
+                    &mut commands, &mut combat_log, &abilities, entity, &mut combatant,
+                    my_pos, pet, &ctx, &mut builder,
                 );
             }
         }
+
+        builder.finish();
     }
 }
 
-/// Felhunter AI priorities:
-/// 1. Spell Lock - interrupt enemy casts (highest priority)
-/// 2. Devour Magic - dispel debuffs from allies
+/// Felhunter AI priorities: Spell Lock then Devour Magic.
 fn felhunter_ai(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -161,23 +174,19 @@ fn felhunter_ai(
     ctx: &CombatContext,
     casting_targets: &Query<(Entity, &Combatant, &CastingState), Without<Pet>>,
     channeling_targets: &Query<(Entity, &Combatant, &ChannelingState), (Without<CastingState>, Without<Pet>)>,
+    builder: &mut DecisionEventBuilder<'_>,
 ) {
-    // On GCD — can't act
     if combatant.global_cooldown > 0.0 {
         return;
     }
 
-    // Priority 1: Spell Lock (interrupt)
-    if try_spell_lock(commands, combat_log, abilities, entity, combatant, my_pos, ctx, casting_targets, channeling_targets) {
+    if try_spell_lock(commands, combat_log, abilities, entity, combatant, my_pos, ctx, casting_targets, channeling_targets, builder) {
         return;
     }
 
-    // Priority 2: Devour Magic (dispel ally debuffs)
-    if try_devour_magic(commands, combat_log, abilities, entity, combatant, my_pos, ctx) {
+    if try_devour_magic(commands, combat_log, abilities, entity, combatant, my_pos, ctx, builder) {
         return;
     }
-
-    // Auto-attack is handled by combat_auto_attack system
 }
 
 /// Try to interrupt an enemy cast with Spell Lock.
@@ -191,66 +200,58 @@ fn try_spell_lock(
     ctx: &CombatContext,
     casting_targets: &Query<(Entity, &Combatant, &CastingState), Without<Pet>>,
     channeling_targets: &Query<(Entity, &Combatant, &ChannelingState), (Without<CastingState>, Without<Pet>)>,
+    builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = AbilityType::SpellLock;
     let def = abilities.get_unchecked(&ability);
 
-    // Check cooldown
-    if combatant.ability_cooldowns.contains_key(&ability) {
+    if let Some(remaining) = combatant.ability_cooldowns.get(&ability) {
+        builder.reject(ability, RejectionReason::OnCooldown { remaining: *remaining });
         return false;
     }
 
     let my_team = combatant.team;
 
-    // Find an enemy that is casting or channeling within range
-    // Check casters first
     for (target_entity, target_combatant, cast_state) in casting_targets.iter() {
         if target_combatant.team == my_team || !target_combatant.is_alive() {
             continue;
         }
-
         if cast_state.interrupted {
-            continue; // Already interrupted
+            continue;
         }
-
         if ctx.entity_is_immune(target_entity) {
             continue;
         }
-
         let distance = my_pos.distance(ctx.combatants.get(&target_entity)
             .map(|i| i.position)
             .unwrap_or(Vec3::ZERO));
-
         if distance > def.range {
             continue;
         }
-
+        builder.choose(ability, Some(target_entity), true);
         execute_spell_lock(commands, combat_log, abilities, entity, combatant, target_entity, &def.name);
         return true;
     }
 
-    // Check channeling targets
     for (target_entity, target_combatant, _) in channeling_targets.iter() {
         if target_combatant.team == my_team || !target_combatant.is_alive() {
             continue;
         }
-
         if ctx.entity_is_immune(target_entity) {
             continue;
         }
-
         let distance = my_pos.distance(ctx.combatants.get(&target_entity)
             .map(|i| i.position)
             .unwrap_or(Vec3::ZERO));
-
         if distance > def.range {
             continue;
         }
-
+        builder.choose(ability, Some(target_entity), true);
         execute_spell_lock(commands, combat_log, abilities, entity, combatant, target_entity, &def.name);
         return true;
     }
 
+    builder.reject(ability, RejectionReason::NoValidTarget);
     false
 }
 
@@ -267,7 +268,6 @@ fn execute_spell_lock(
     let def = abilities.get_unchecked(&ability);
 
     combatant.ability_cooldowns.insert(ability, def.cooldown);
-    // Interrupts don't trigger GCD in WoW
 
     let caster_id = format!("Team {} Felhunter", combatant.team);
     combat_log.log_ability_cast(
@@ -296,41 +296,34 @@ fn try_devour_magic(
     combatant: &mut Combatant,
     my_pos: Vec3,
     ctx: &CombatContext,
+    builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = AbilityType::DevourMagic;
     let def = abilities.get_unchecked(&ability);
 
-    // Check cooldown
-    if combatant.ability_cooldowns.contains_key(&ability) {
+    if let Some(remaining) = combatant.ability_cooldowns.get(&ability) {
+        builder.reject(ability, RejectionReason::OnCooldown { remaining: *remaining });
         return false;
     }
 
     let my_team = combatant.team;
-
-    // Find an ally with a dispellable debuff (prioritize primary allies, then self)
     let mut best_target: Option<(Entity, Vec3)> = None;
 
     for (ally_entity, info) in ctx.combatants.iter() {
         if info.team != my_team || !info.is_alive {
             continue;
         }
-
         let distance = my_pos.distance(info.position);
         if distance > def.range {
             continue;
         }
-
-        // Check if ally has any dispellable debuffs
         let has_dispellable = ctx.active_auras
             .get(ally_entity)
             .map(|auras| auras.iter().any(|a| a.can_be_dispelled()))
             .unwrap_or(false);
-
         if !has_dispellable {
             continue;
         }
-
-        // Prefer primary allies over pets for dispels
         match best_target {
             None => best_target = Some((*ally_entity, info.position)),
             Some(_) if !info.is_pet => {
@@ -341,10 +334,12 @@ fn try_devour_magic(
     }
 
     let Some((target_entity, _)) = best_target else {
+        builder.reject(ability, RejectionReason::NoValidTarget);
         return false;
     };
 
-    // Use Devour Magic!
+    builder.choose(ability, Some(target_entity), true);
+
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = super::super::constants::GCD;
 
@@ -358,8 +353,7 @@ fn try_devour_magic(
 
     spawn_speech_bubble(commands, entity, &def.name);
 
-    // Devour Magic heals the Felhunter for a percentage of its max HP on successful dispel
-    let heal_amount = combatant.max_health * 0.10; // 10% of Felhunter max HP
+    let heal_amount = combatant.max_health * 0.10;
 
     commands.spawn(DispelPending {
         target: target_entity,
@@ -377,7 +371,6 @@ fn try_devour_magic(
 // Spider AI
 // ==============================================================================
 
-/// Spider AI: Use Web to root enemies approaching the owner.
 fn spider_ai(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -387,39 +380,38 @@ fn spider_ai(
     my_pos: Vec3,
     pet: &Pet,
     ctx: &CombatContext,
+    builder: &mut DecisionEventBuilder<'_>,
 ) {
     if combatant.global_cooldown > 0.0 {
         return;
     }
 
-    // Try Spider Web: root enemy closest to owner that is approaching
     let ability = AbilityType::SpiderWeb;
     let Some(def) = abilities.get(&ability) else { return };
-    if combatant.ability_cooldowns.contains_key(&ability) {
+    if let Some(remaining) = combatant.ability_cooldowns.get(&ability) {
+        builder.reject(ability, RejectionReason::OnCooldown { remaining: *remaining });
         return;
     }
 
-    // Find owner position
     let owner_pos = ctx.combatants.get(&pet.owner).map(|info| info.position);
-    let Some(owner_pos) = owner_pos else { return };
+    let Some(owner_pos) = owner_pos else {
+        builder.reject(ability, RejectionReason::NoValidTarget);
+        return;
+    };
 
-    // Find enemy closest to owner that is within Web range of the spider
     let mut best_target: Option<(Entity, f32)> = None;
     for (target_entity, info) in ctx.combatants.iter() {
         if info.team == combatant.team || !info.is_alive || info.is_pet || info.stealthed {
             continue;
         }
         let dist_to_owner = info.position.distance(owner_pos);
-        // Only use Web if enemy is within 15 yards of owner (approaching)
         if dist_to_owner > 15.0 {
             continue;
         }
-        // Check spider is within Web range of target
         let dist_to_spider = my_pos.distance(info.position);
         if dist_to_spider > def.range {
             continue;
         }
-        // Don't root already-rooted targets
         if let Some(auras) = ctx.active_auras.get(target_entity) {
             if auras.iter().any(|a| a.effect_type == AuraType::Root) {
                 continue;
@@ -430,9 +422,13 @@ fn spider_ai(
         }
     }
 
-    let Some((target_entity, _)) = best_target else { return };
+    let Some((target_entity, _)) = best_target else {
+        builder.reject(ability, RejectionReason::NoValidTarget);
+        return;
+    };
 
-    // Spawn projectile — root aura applied on impact by process_projectile_hits
+    builder.choose(ability, Some(target_entity), true);
+
     let projectile_speed = def.projectile_speed.unwrap_or(50.0);
     commands.spawn((
         Projectile {
@@ -465,7 +461,6 @@ fn spider_ai(
 // Boar AI
 // ==============================================================================
 
-/// Boar AI: Charge enemies mid-cast or the kill target.
 fn boar_ai(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -476,6 +471,7 @@ fn boar_ai(
     pet: &Pet,
     ctx: &CombatContext,
     casting_targets: &Query<(Entity, &Combatant, &CastingState), Without<Pet>>,
+    builder: &mut DecisionEventBuilder<'_>,
 ) {
     if combatant.global_cooldown > 0.0 {
         return;
@@ -483,11 +479,11 @@ fn boar_ai(
 
     let ability = AbilityType::BoarCharge;
     let Some(def) = abilities.get(&ability) else { return };
-    if combatant.ability_cooldowns.contains_key(&ability) {
+    if let Some(remaining) = combatant.ability_cooldowns.get(&ability) {
+        builder.reject(ability, RejectionReason::OnCooldown { remaining: *remaining });
         return;
     }
 
-    // Priority 1: Charge enemy mid-cast (especially healers)
     let mut charge_target: Option<Entity> = None;
     for (target_entity, target_combatant, _cast_state) in casting_targets.iter() {
         if target_combatant.team == combatant.team || !target_combatant.is_alive() || target_combatant.stealthed {
@@ -502,7 +498,6 @@ fn boar_ai(
         }
     }
 
-    // Priority 2: Charge owner's target
     if charge_target.is_none() {
         if let Some(owner_info) = ctx.combatants.get(&pet.owner) {
             if let Some(owner_target) = owner_info.target {
@@ -518,12 +513,15 @@ fn boar_ai(
         }
     }
 
-    let Some(target) = charge_target else { return };
+    let Some(target) = charge_target else {
+        builder.reject(ability, RejectionReason::NoValidTarget);
+        return;
+    };
 
-    // Start charging (use ChargingState like Warrior Charge)
+    builder.choose(ability, Some(target), true);
+
     commands.entity(entity).try_insert(ChargingState { target });
 
-    // Apply stun via AuraPending
     if let Some(aura_pending) = AuraPending::from_ability(target, entity, def) {
         commands.spawn((aura_pending, PlayMatchEntity));
     }
@@ -546,7 +544,6 @@ fn boar_ai(
 // Bird AI
 // ==============================================================================
 
-/// Bird AI: Master's Call to remove movement impairments from owner/allies.
 fn bird_ai(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -556,6 +553,7 @@ fn bird_ai(
     _my_pos: Vec3,
     pet: &Pet,
     ctx: &CombatContext,
+    builder: &mut DecisionEventBuilder<'_>,
 ) {
     if combatant.global_cooldown > 0.0 {
         return;
@@ -563,11 +561,11 @@ fn bird_ai(
 
     let ability = AbilityType::MastersCall;
     let Some(def) = abilities.get(&ability) else { return };
-    if combatant.ability_cooldowns.contains_key(&ability) {
+    if let Some(remaining) = combatant.ability_cooldowns.get(&ability) {
+        builder.reject(ability, RejectionReason::OnCooldown { remaining: *remaining });
         return;
     }
 
-    // Priority 1: Use when owner has Root or MovementSpeedSlow
     let owner_needs_cleanse = ctx.active_auras.get(&pet.owner).map_or(false, |auras| {
         auras.iter().any(|a| matches!(
             a.effect_type,
@@ -578,7 +576,6 @@ fn bird_ai(
     let cleanse_target = if owner_needs_cleanse {
         Some(pet.owner)
     } else {
-        // Priority 2: Use on teammate with movement impairments
         let mut fallback: Option<Entity> = None;
         for (ally_entity, info) in ctx.combatants.iter() {
             if info.team != combatant.team || !info.is_alive || info.is_pet {
@@ -597,11 +594,13 @@ fn bird_ai(
         fallback
     };
 
-    let Some(target) = cleanse_target else { return };
+    let Some(target) = cleanse_target else {
+        builder.reject(ability, RejectionReason::NoValidTarget);
+        return;
+    };
 
-    // Master's Call: only removes movement impairments (Root, MovementSpeedSlow)
-    // Note: The filter excludes DoTs so UA can never be removed via this path; backlash
-    // will never fire for Master's Call. The dispeller field is populated for consistency.
+    builder.choose(ability, Some(target), true);
+
     commands.spawn(DispelPending {
         target,
         dispeller: entity,
@@ -611,7 +610,6 @@ fn bird_ai(
         aura_type_filter: Some(vec![AuraType::Root, AuraType::MovementSpeedSlow]),
     });
 
-    // Spawn golden burst visual on the cleanse target
     commands.spawn((
         DispelBurst {
             target,

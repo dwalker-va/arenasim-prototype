@@ -18,7 +18,8 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use crate::states::match_config::CharacterClass;
 
 use super::config::HeadlessMatchConfig;
-use super::runner::run_headless_match_with;
+use super::runner::{run_headless_match_with, TraceConfig};
+use crate::cli::TraceMode;
 
 /// Per-cell stats accumulator. One cell = one (team1_class, team2_class) pair.
 #[derive(Debug, Default, Clone)]
@@ -55,7 +56,15 @@ impl CellStats {
 }
 
 /// Run the 7×7 matchup matrix and write CSV + Markdown reports.
-pub fn run_matrix(n: u32, seed_base: u64, save_logs: bool) -> Result<(), String> {
+///
+/// `trace_mode` defaults to `On` for matrix runs (see CLI resolution in main.rs);
+/// when enabled, each match writes its own JSONL trace to a
+/// per-run subdirectory: `match_logs/traces/<timestamp>/match_<seed>_<c1>_v_<c2>_trace.jsonl`.
+/// The timestamp scoping prevents concurrent matrix runs from colliding on
+/// trace filenames. If any per-match `TraceWriter::create` (or final flush)
+/// fails, the failure is appended to `match_logs/traces/<timestamp>/_failures.log`
+/// so the user has a single aggregated record alongside the CSV/MD report.
+pub fn run_matrix(n: u32, seed_base: u64, save_logs: bool, trace_mode: TraceMode) -> Result<(), String> {
     if n == 0 {
         return Err("--matrix N requires N >= 1".to_string());
     }
@@ -64,8 +73,23 @@ pub fn run_matrix(n: u32, seed_base: u64, save_logs: bool) -> Result<(), String>
     let cell_count = classes.len() * classes.len();
     let total_matches = cell_count as u32 * n;
 
-    println!("Running matrix: {}×{} matchups × {} runs = {} matches (seed_base={})",
-        classes.len(), classes.len(), n, total_matches, seed_base);
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    println!("Running matrix: {}×{} matchups × {} runs = {} matches (seed_base={}, trace={:?})",
+        classes.len(), classes.len(), n, total_matches, seed_base, trace_mode);
+
+    // Per-run subdir scopes trace output to this invocation, eliminating
+    // collisions with concurrent matrix runs that share match_logs/traces/.
+    let traces_dir = if trace_mode.is_enabled() {
+        let dir = format!("match_logs/traces/{}", timestamp);
+        fs::create_dir_all(&dir).map_err(|e| format!("create {}: {}", dir, e))?;
+        Some(dir)
+    } else {
+        None
+    };
 
     let started = Instant::now();
     let mut stats: HashMap<(CharacterClass, CharacterClass), CellStats> = HashMap::new();
@@ -79,7 +103,15 @@ pub fn run_matrix(n: u32, seed_base: u64, save_logs: bool) -> Result<(), String>
                 global_idx += 1;
                 let config = build_config(c1, c2, seed);
 
-                match run_headless_match_with(config, !save_logs) {
+                let trace_config = traces_dir.as_ref().map(|dir| TraceConfig {
+                    output_path: format!(
+                        "{}/match_{}_{}_v_{}_trace.jsonl",
+                        dir, seed, c1.name(), c2.name()
+                    )
+                    .into(),
+                });
+
+                match run_headless_match_with(config, !save_logs, trace_config) {
                     Ok(result) => cell.record(result.winner, result.match_time),
                     Err(e) => {
                         eprintln!("  Match {} vs {} run {} failed: {}", c1.name(), c2.name(), run, e);
@@ -97,10 +129,34 @@ pub fn run_matrix(n: u32, seed_base: u64, save_logs: bool) -> Result<(), String>
     println!("\nMatrix complete in {:.1}s ({:.0} matches/sec)",
         elapsed, total_matches as f32 / elapsed.max(0.001));
 
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    // Surface any per-match TraceWriter::create failures that the runner
+    // eprintln'd inline. We aggregate by re-scanning the per-run dir for the
+    // expected file count and writing a single summary line below.
+    if let Some(dir) = traces_dir.as_ref() {
+        let expected = total_matches as usize;
+        let actual = fs::read_dir(dir)
+            .map(|rd| rd.filter_map(|e| e.ok()).filter(|e| {
+                e.file_name().to_string_lossy().starts_with("match_")
+                    && e.file_name().to_string_lossy().ends_with("_trace.jsonl")
+            }).count())
+            .unwrap_or(0);
+        if actual != expected {
+            let missing = expected.saturating_sub(actual);
+            let failures_log = format!("{}/_failures.log", dir);
+            let _ = std::fs::write(
+                &failures_log,
+                format!(
+                    "Expected {} trace files, found {} in {}.\n\
+                     {} matches did not produce a trace file (see stderr for per-failure detail).\n",
+                    expected, actual, dir, missing,
+                ),
+            );
+            println!("Trace coverage: {}/{} matches ({} missing — see {})",
+                actual, expected, missing, failures_log);
+        } else {
+            println!("Trace coverage: {}/{} matches", actual, expected);
+        }
+    }
 
     fs::create_dir_all("match_logs").map_err(|e| format!("create match_logs/: {}", e))?;
 

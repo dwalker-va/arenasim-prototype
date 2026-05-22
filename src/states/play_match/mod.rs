@@ -48,6 +48,7 @@ pub mod systems;
 pub mod utils;
 pub mod class_ai;
 pub mod constants;
+pub mod decision_trace;
 pub mod selection;
 
 // Re-exports
