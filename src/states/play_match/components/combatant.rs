@@ -212,7 +212,10 @@ impl Combatant {
             match_config::CharacterClass::Paladin => (ResourceType::Mana, 275.0, 160.0, 0.0, 160.0, 8.0, 0.9, 20.0, 35.0, 0.06, 5.0),
             // Hunters: Medium HP (mail), ranged physical, scales with Attack Power (7% crit)
             // Auto Shot is the primary sustained damage (~18 per 2.5s = 7.2 DPS base).
-            match_config::CharacterClass::Hunter => (ResourceType::Mana, 265.0, 150.0, 3.0, 150.0, 18.0, 0.4, 30.0, 0.0, 0.07, 5.0),
+            // Mana model matches the other mana classes (Mage/Priest/Warlock/Paladin):
+            // one full bar per fight, no regen. Pool sized to afford ~1.6 full rotations
+            // (240 / ~150 post cost-cut). See docs/plans/2026-05-22-001-fix-hunter-mana-economy-plan.md.
+            match_config::CharacterClass::Hunter => (ResourceType::Mana, 265.0, 240.0, 0.0, 240.0, 18.0, 0.4, 30.0, 0.0, 0.07, 5.0),
         };
 
         // Rogues start stealthed
