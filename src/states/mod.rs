@@ -256,6 +256,14 @@ impl Plugin for StatesPlugin {
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_state(GameState::PlayMatch)),
             )
+            // Walking animation: vertical bob on moving combatants/pets.
+            // Must run after movement has settled so the post-movement XZ is read.
+            .add_systems(
+                Update,
+                play_match::update_walk_animation
+                    .after(CombatSystemPhase::CombatResolution)
+                    .run_if(in_state(GameState::PlayMatch)),
+            )
             // UI rendering systems
             .add_systems(
                 Update,

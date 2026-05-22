@@ -177,6 +177,17 @@ pub struct BacklashBurst {
     pub initial_lifetime: f32,
 }
 
+/// Drives a subtle vertical bob on combatant/pet capsules while they are moving.
+/// `ground_y` is captured at spawn; the bob is applied as an offset above it.
+/// `phase` advances by horizontal distance traveled, so slowed units bob slowly
+/// and stationary units do not bob at all.
+#[derive(Component)]
+pub struct WalkAnim {
+    pub ground_y: f32,
+    pub phase: f32,
+    pub previous_xz: Vec2,
+}
+
 /// Marker component for the player's selection ring — a translucent torus
 /// laid flat at the selected combatant's feet. One ring exists at most.
 #[derive(Component)]

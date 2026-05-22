@@ -569,6 +569,13 @@ fn spawn_gate_bars(
     }
 }
 
+/// Deterministic per-entity walk-animation phase offset derived from the
+/// spawn XZ position. Two units at the same Z separated in X get different
+/// phases, so a 3v3 team that starts walking in lockstep does not bob in unison.
+fn walk_phase_seed(xz: Vec2) -> f32 {
+    (xz.x * 7.314 + xz.y * 11.927).rem_euclid(std::f32::consts::TAU)
+}
+
 /// Helper function to spawn a single combatant entity.
 ///
 /// Creates a capsule mesh colored by class, with darker shades for duplicates.
@@ -638,6 +645,11 @@ fn spawn_combatant(
         },
         OriginalMesh(mesh_handle),
         PlayMatchEntity,
+        WalkAnim {
+            ground_y: position.y,
+            phase: walk_phase_seed(position.xz()),
+            previous_xz: position.xz(),
+        },
     )).id();
 
     (entity, combatant_clone)
@@ -691,6 +703,11 @@ fn spawn_pet(
         },
         OriginalMesh(mesh_handle),
         PlayMatchEntity,
+        WalkAnim {
+            ground_y: pet_position.y,
+            phase: walk_phase_seed(pet_position.xz()),
+            previous_xz: pet_position.xz(),
+        },
     ));
 
     // Register pet with combat log
