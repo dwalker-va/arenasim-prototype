@@ -7,7 +7,6 @@
 
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
-use std::cmp::Reverse;
 use std::collections::HashSet;
 
 use super::GameState;
@@ -64,7 +63,17 @@ impl Default for ArmoryFilters {
 impl ArmoryFilters {
     /// Whether the given item passes all active filters.
     /// AND across axes, OR within each axis.
-    pub fn matches(&self, item: &ItemConfig) -> bool {
+    /// Compute the search needle once for a batch of matches.
+    /// Returns `None` when there is no active name search.
+    pub fn name_needle(&self) -> Option<String> {
+        let trimmed = self.name_search.trim();
+        if trimmed.is_empty() { None } else { Some(trimmed.to_lowercase()) }
+    }
+
+    /// Whether the given item passes all active filters.
+    /// `needle` is the pre-lowercased result of `name_needle()`.
+    /// AND across axes, OR within each axis.
+    pub fn matches(&self, item: &ItemConfig, needle: Option<&str>) -> bool {
         if !self.selected_slots.is_empty() && !self.selected_slots.contains(&item.slot) {
             return false;
         }
@@ -76,9 +85,8 @@ impl ArmoryFilters {
         if item.item_level < self.item_level_min || item.item_level > self.item_level_max {
             return false;
         }
-        if !self.name_search.trim().is_empty() {
-            let needle = self.name_search.trim().to_lowercase();
-            if !item.name.to_lowercase().contains(&needle) {
+        if let Some(needle) = needle {
+            if !item.name.to_lowercase().contains(needle) {
                 return false;
             }
         }
@@ -159,12 +167,25 @@ pub fn armory_ui(
             }
 
             let total = item_defs.item_count();
-            render_chip_bar(ui, &mut filters, &item_defs, total);
+            // Single filter pass shared by the chip-bar count and the grid.
+            let needle = filters.name_needle();
+            let needle_ref = needle.as_deref();
+            let mut filtered: Vec<(&ItemId, &ItemConfig)> = item_defs
+                .iter()
+                .filter(|(_, item)| filters.matches(item, needle_ref))
+                .collect();
+            filtered.sort_unstable_by(|(_, a), (_, b)| {
+                slot_order(a.slot).cmp(&slot_order(b.slot))
+                    .then(b.item_level.cmp(&a.item_level))
+                    .then(a.name.as_str().cmp(b.name.as_str()))
+            });
+            let visible = filtered.len();
+            render_chip_bar(ui, &mut filters, total, visible);
             ui.add_space(8.0);
             ui.separator();
             ui.add_space(8.0);
 
-            render_grid(ui, &item_defs, &mut filters, item_icons.as_deref());
+            render_grid(ui, &filtered, &mut filters, item_icons.as_deref());
         });
 }
 
@@ -218,14 +239,17 @@ fn render_loading(ui: &mut egui::Ui) {
 fn render_chip_bar(
     ui: &mut egui::Ui,
     filters: &mut ArmoryFilters,
-    item_defs: &ItemDefinitions,
     total: usize,
+    visible: usize,
 ) {
     // Row 1 — Slot chips.
     ui.horizontal_wrapped(|ui| {
         ui.label(egui::RichText::new("SLOT:").size(13.0).color(MUTED_TEXT));
         for (label, slots) in SLOT_CHIPS {
-            let active = slots.iter().any(|s| filters.selected_slots.contains(s));
+            // Use `all` rather than `any` so the chip's active state matches its
+            // toggle semantics — paired slots (Ring1/Ring2, Trinket1/Trinket2)
+            // stay in lockstep even if external state ever drifts.
+            let active = slots.iter().all(|s| filters.selected_slots.contains(s));
             if ui.selectable_label(active, *label).clicked() {
                 if active {
                     for s in *slots {
@@ -259,20 +283,25 @@ fn render_chip_bar(
         ui.separator();
 
         ui.label(egui::RichText::new("iLvl").size(13.0).color(MUTED_TEXT));
-        ui.add(
+        let min_response = ui.add(
             egui::DragValue::new(&mut filters.item_level_min)
                 .range(0..=DEFAULT_ITEM_LEVEL_MAX)
                 .speed(1.0),
         );
         ui.label("–");
-        ui.add(
+        let max_response = ui.add(
             egui::DragValue::new(&mut filters.item_level_max)
                 .range(0..=DEFAULT_ITEM_LEVEL_MAX)
                 .speed(1.0),
         );
-        // Keep min ≤ max without surprising the user mid-drag.
+        // Keep min ≤ max by yielding to whichever side the user just moved,
+        // so the active drag never "bounces" the other way.
         if filters.item_level_min > filters.item_level_max {
-            filters.item_level_max = filters.item_level_min;
+            if min_response.changed() {
+                filters.item_level_max = filters.item_level_min;
+            } else if max_response.changed() {
+                filters.item_level_min = filters.item_level_max;
+            }
         }
 
         ui.separator();
@@ -285,7 +314,6 @@ fn render_chip_bar(
 
         ui.separator();
 
-        let visible = item_defs.iter().filter(|(_, item)| filters.matches(item)).count();
         ui.label(
             egui::RichText::new(format!("{} / {} items", visible, total))
                 .size(13.0)
@@ -310,15 +338,10 @@ fn render_chip_bar(
 /// state with an inline "Clear filters" button.
 fn render_grid(
     ui: &mut egui::Ui,
-    item_defs: &ItemDefinitions,
+    items: &[(&ItemId, &ItemConfig)],
     filters: &mut ArmoryFilters,
     item_icons: Option<&ItemIcons>,
 ) {
-    let mut items: Vec<(&ItemId, &ItemConfig)> = item_defs
-        .iter()
-        .filter(|(_, item)| filters.matches(item))
-        .collect();
-    items.sort_by_key(|(_, item)| (slot_order(item.slot), Reverse(item.item_level), item.name.clone()));
 
     if items.is_empty() {
         ui.vertical_centered(|ui| {
@@ -348,7 +371,7 @@ fn render_grid(
         .show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
-                for (id, item) in &items {
+                for (id, item) in items {
                     let response = tile_ui(ui, id, item, item_icons);
                     let item_for_tooltip = *item;
                     response.on_hover_ui(|ui| render_tooltip(ui, item_for_tooltip));
@@ -358,7 +381,7 @@ fn render_grid(
 }
 
 /// Renders a single item tile: uniform frame, item icon centered, item-level
-/// badge at the bottom-right corner. Returns the response so callers (U5) can
+/// badge at the bottom-right corner. Returns the response so callers can
 /// attach hover tooltips.
 fn tile_ui(
     ui: &mut egui::Ui,
@@ -427,10 +450,25 @@ fn tile_ui(
 /// Canonical ordering index for slots. Lower values sort first.
 /// Mirrors `ItemSlot::all()` ordering.
 fn slot_order(slot: ItemSlot) -> usize {
-    ItemSlot::all()
-        .iter()
-        .position(|s| *s == slot)
-        .unwrap_or(usize::MAX)
+    match slot {
+        ItemSlot::Head      =>  0,
+        ItemSlot::Neck      =>  1,
+        ItemSlot::Shoulders =>  2,
+        ItemSlot::Back      =>  3,
+        ItemSlot::Chest     =>  4,
+        ItemSlot::Wrists    =>  5,
+        ItemSlot::Hands     =>  6,
+        ItemSlot::Waist     =>  7,
+        ItemSlot::Legs      =>  8,
+        ItemSlot::Feet      =>  9,
+        ItemSlot::Ring1     => 10,
+        ItemSlot::Ring2     => 11,
+        ItemSlot::Trinket1  => 12,
+        ItemSlot::Trinket2  => 13,
+        ItemSlot::MainHand  => 14,
+        ItemSlot::OffHand   => 15,
+        ItemSlot::Ranged    => 16,
+    }
 }
 
 fn armor_type_name(armor_type: ArmorType) -> Option<&'static str> {
@@ -477,14 +515,18 @@ fn render_tooltip(ui: &mut egui::Ui, item: &ItemConfig) {
 
     let mut any_stat = false;
 
-    // Weapon damage block.
-    if item.is_weapon && (item.attack_damage_max > 0.0 || item.attack_speed > 0.0) {
-        any_stat = true;
-        ui.label(stat_text(format!(
-            "Damage: {:.0}–{:.0}",
-            item.attack_damage_min, item.attack_damage_max
-        )));
+    // Weapon damage block — guard damage and speed independently so a
+    // weapon with only speed never renders "Damage: 0–0".
+    if item.is_weapon {
+        if item.attack_damage_max > 0.0 {
+            any_stat = true;
+            ui.label(stat_text(format!(
+                "Damage: {:.0}–{:.0}",
+                item.attack_damage_min, item.attack_damage_max
+            )));
+        }
         if item.attack_speed > 0.0 {
+            any_stat = true;
             ui.label(stat_text(format!("Speed: {:.1}", item.attack_speed)));
         }
     }
