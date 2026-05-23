@@ -31,14 +31,14 @@ impl GameRng {
     /// Create a new GameRng with random entropy (non-deterministic)
     pub fn from_entropy() -> Self {
         Self {
-            rng: StdRng::from_entropy(),
+            rng: StdRng::from_os_rng(),
             seed: None,
         }
     }
 
     /// Generate a random f32 in the range [0.0, 1.0)
     pub fn random_f32(&mut self) -> f32 {
-        self.rng.gen()
+        self.rng.random()
     }
 
     /// Generate a random f32 in the given range
