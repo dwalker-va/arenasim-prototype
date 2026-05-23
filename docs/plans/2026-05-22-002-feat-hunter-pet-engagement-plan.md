@@ -1,11 +1,33 @@
 ---
 date: 2026-05-22
-status: completed
+status: active
 type: feat
-title: Hunter pet engagement (AI-only Send/Heel)
+title: Hunter pet engagement (Send/Heel + Hunter dispatch)
 origin: docs/brainstorms/2026-05-22-hunter-pet-engagement-requirements.md
 shipped_units: [U1, U2, U3, U5, U6, U7, U8]
-deferred_units: [U4]
+remaining_units: [U4]
+---
+
+## Handoff Status
+
+**Open PR:** https://github.com/dwalker-va/arenasim-prototype/pull/59 (branch `worktree-hunter-rebalance`).
+
+**Shipped on the PR so far:** U1, U2, U3, U5, U6, U7, U8. Validation in `docs/reports/2026-05-22-hunter-pet-engagement.md` shows Hunter v Warrior 0→20%, Hunter v Paladin 0→5% at N=20.
+
+**Remaining: U4 — Hunter `try_dispatch_*` helpers.** Will bundle into the same PR before merge (decision: avoid landing ~75 LOC of dormant infrastructure that the code review flagged as 90% dead until U4 ships).
+
+**Next-session invocation:** run `/ce-work` against this plan path. ce-work will see `status: active` + the U1-U3,5-8 commits already in git history, identify U4 as the only remaining unit, and pick up there. Do **not** re-run `/ce-plan` (the plan is correct as written) or `/lfg` (would restart the whole pipeline).
+
+**Pre-merge checklist after U4 lands:**
+
+- [ ] Confirm `pet_decision` trace events include `dispatched_by: Some(hunter_id)` for Hunter-dispatched casts (recipe in CLAUDE.md decision-trace section)
+- [ ] Re-run trace audit on Hunter v Warlock — Spider Web fires via PetCommand path, not via the autonomous `spider_ai` fallback
+- [ ] Decide whether to keep the autonomous `spider_ai` Spider Web path as a fallback (the U5 Outstanding Question — default delete per the plan)
+- [ ] Re-run 1v1 matrix at N=20 to confirm Hunter v Warrior 20% holds with Hunter-dispatched Web instead of autonomous Web
+- [ ] N=100 rerun (1v1) before tagging the PR ready
+
+**Why bundle on the same PR (vs split):** the code review flagged ~75 LOC of inert surface (PetCommand component, `ability_cooldowns` snapshot field, `start_pet_dispatch_decision` builder, AbilityType Ord derive) at 90% confidence dead until U4. Landing U4 on the same PR makes the maintainability finding moot — the infrastructure ships with its consumer. Reverting U3 to split would also work but loses the Hunter v Warrior 0→20% signal that U3+U5+U8 produced.
+
 ---
 
 # feat: Hunter pet engagement (AI-only Send/Heel)
