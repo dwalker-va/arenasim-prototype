@@ -37,7 +37,22 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --help|-h)
-            grep '^#' "$0" | head -25
+            cat <<'USAGE'
+Hunter 2v2 Matrix Sweep
+
+Runs N matches per matchup for Hunter+Priest vs each-class+Priest (6 matchups)
+and aggregates winrates into a CSV byte-compatible with the 1v1 matrix output.
+
+Usage:
+  ./scripts/hunter_2v2_matrix.sh [N] [--seed-base SEED] [--out OUT_CSV]
+
+Arguments:
+  N             Number of seeds per matchup (default: 100)
+  --seed-base   Base RNG seed (default: 0)
+  --out         Output CSV path (default: match_logs/hunter_2v2_<timestamp>.csv)
+
+CSV columns: team1,team2,runs,team1_wins,team2_wins,draws,team1_winrate,draw_rate,avg_duration_secs
+USAGE
             exit 0
             ;;
         *)
