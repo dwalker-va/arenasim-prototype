@@ -32,6 +32,9 @@ pub struct DecisionEventBuilder<'a> {
     pub(super) chosen: Option<ChosenAction>,
     pub(super) pet_owner: Option<u32>,
     pub(super) pet_type: Option<std::borrow::Cow<'static, str>>,
+    /// For hybrid-model dispatches: entity ID of the owner whose AI commanded
+    /// this pet ability. `None` for autonomous pet decisions.
+    pub(super) pet_dispatched_by: Option<u32>,
 }
 
 pub(super) struct ChosenAction {
@@ -111,6 +114,7 @@ impl<'a> DecisionEventBuilder<'a> {
                 pet_type,
                 candidates: self.candidates,
                 outcome,
+                dispatched_by: self.pet_dispatched_by,
             },
             _ => EventPayload::Ability {
                 candidates: self.candidates,

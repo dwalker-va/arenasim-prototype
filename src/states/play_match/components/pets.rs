@@ -68,6 +68,27 @@ pub struct Pet {
     pub pet_type: PetType,
 }
 
+/// One-shot command attached to a pet entity by an owner's AI to dispatch a
+/// headline pet ability (Spider Web, Boar Charge, Master's Call). Matches the
+/// existing one-shot-component idiom used by `AuraPending`, `DispelPending`,
+/// `InterruptPending`. `pet_ai_system` reads this at the top of its per-pet
+/// loop, executes the commanded ability if conditions still hold (authoritative
+/// `pre_cast_ok` check at execution time per the optimistic-dispatch model),
+/// then despawns the component.
+///
+/// The hybrid model: Hunter AI owns the strategic decision to dispatch
+/// (snapshot heuristics — cooldown ready, target in range, not in Heel). Pet
+/// AI owns execution (authoritative `pre_cast_ok` check, projectile spawn or
+/// aura application, GCD/cooldown bookkeeping, trace event emission).
+#[derive(Component, Clone, Copy)]
+pub struct PetCommand {
+    pub ability: crate::states::play_match::abilities::AbilityType,
+    pub target: Entity,
+    /// Owner entity that dispatched the command. Surfaced in the trace event's
+    /// `dispatched_by` field for audit attribution.
+    pub dispatched_by: Entity,
+}
+
 // ============================================================================
 // Hunter Components
 // ============================================================================

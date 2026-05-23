@@ -112,6 +112,13 @@ pub enum EventPayload {
         pet_type: Cow<'static, str>,
         candidates: Vec<AbilityCandidate>,
         outcome: AbilityOutcome,
+        /// When `Some(entity_id)`, this pet decision was dispatched by the
+        /// pet's owner (e.g., Hunter AI commanded Spider Web). `None` for
+        /// autonomous pet decisions. Serialized only when present so
+        /// pre-existing audit recipes that don't filter on this field stay
+        /// backward-compatible.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        dispatched_by: Option<u32>,
     },
 }
 
@@ -212,6 +219,11 @@ pub enum RejectionReason {
     AlreadyApplied,
     NoValidTarget,
     PreconditionUnmet { note: String },
+    /// Pet is below the Heel HP threshold (25%). Emitted from pet_ai_system
+    /// when the pet retreats to the owner's flank and suppresses ability
+    /// execution. Hunter-dispatched PetCommands targeting this pet are
+    /// despawned without execution under the same flag.
+    LowHealthHeel,
 }
 
 #[derive(Serialize, Clone, Debug)]

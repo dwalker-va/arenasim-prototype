@@ -27,13 +27,25 @@ fn pet_type_str(pt: PetType) -> &'static str {
     }
 }
 
+/// Map a pet type to its headline ability — used for the Heel-mode trace
+/// event's `reject` payload so the audit attributes the no-action to the
+/// pet's primary capability.
+fn headline_ability_for(pt: PetType) -> AbilityType {
+    match pt {
+        PetType::Felhunter => AbilityType::SpellLock,
+        PetType::Spider => AbilityType::SpiderWeb,
+        PetType::Boar => AbilityType::BoarCharge,
+        PetType::Bird => AbilityType::MastersCall,
+    }
+}
+
 /// Pet AI decision system.
 pub fn pet_ai_system(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
     abilities: Res<AbilityDefinitions>,
     mut pets: Query<
-        (Entity, &mut Combatant, &Transform, &Pet, Option<&ActiveAuras>),
+        (Entity, &mut Combatant, &Transform, &Pet, Option<&ActiveAuras>, Option<&PetCommand>),
         (Without<CastingState>, Without<ChannelingState>),
     >,
     casting_targets: Query<(Entity, &Combatant, &CastingState), Without<Pet>>,
@@ -52,7 +64,7 @@ pub fn pet_ai_system(
     // loop). Matches the CombatSnapshot::build pattern in combat_snapshot.rs.
     let owner_to_pet: std::collections::BTreeMap<Entity, Entity> = pets
         .iter()
-        .map(|(entity, _, _, pet, _)| (pet.owner, entity))
+        .map(|(entity, _, _, pet, _, _)| (pet.owner, entity))
         .collect();
 
     let combatant_info: std::collections::BTreeMap<Entity, super::CombatantInfo> = all_combatants
@@ -106,13 +118,17 @@ pub fn pet_ai_system(
             })
             .collect();
 
-    for (entity, mut combatant, transform, pet, auras) in pets.iter_mut() {
+    for (entity, mut combatant, transform, pet, auras, pet_command) in pets.iter_mut() {
         if !combatant.is_alive() {
             continue;
         }
 
         let is_incapacitated = crate::states::play_match::utils::is_incapacitated(auras);
         if is_incapacitated {
+            // Despawn any queued PetCommand so it doesn't fire next tick.
+            if pet_command.is_some() {
+                commands.entity(entity).remove::<PetCommand>();
+            }
             continue;
         }
 
@@ -121,8 +137,11 @@ pub fn pet_ai_system(
         // ~107). Pet AI assigns pet.target = owner.target so existing
         // target-pursuit movement (movement.rs:391+) closes pets on enemies.
         //
-        // U6: Heel predicate — when HP < 25%, target is cleared and pet returns
-        // to owner's flank via the existing follow-owner branch (movement.rs:309+).
+        // U6: Heel predicate — when HP < 25%, target is cleared, any queued
+        // PetCommand is despawned, and the pet returns to the owner's flank
+        // via the existing follow-owner branch (movement.rs:309+). A
+        // LowHealthHeel rejection trace event is emitted so the audit can
+        // attribute the no-action to the predicate.
         let hp_ratio = if combatant.max_health > 0.0 {
             combatant.current_health / combatant.max_health
         } else {
@@ -131,14 +150,50 @@ pub fn pet_ai_system(
         let in_heel = hp_ratio < 0.25;
         if in_heel {
             combatant.target = None;
-            // U6: When in Heel mode, suppress all pet ability decisions. The
-            // existing follow-owner movement branch (movement.rs:309+) routes
-            // the pet back to the Hunter's flank.
-            // A LowHealthHeel rejection trace event will be emitted by U3+U6
-            // wiring; for now we just skip the autonomous decide path.
+            // Despawn any Hunter-dispatched PetCommand without execution.
+            if pet_command.is_some() {
+                commands.entity(entity).remove::<PetCommand>();
+            }
+            // Emit a pet_decision trace event with reject(headline, LowHealthHeel)
+            // so the audit attributes the no-action correctly. Headline ability
+            // selection is per-pet-type to match what would otherwise be the
+            // pet's first try_* candidate.
+            let headline = headline_ability_for(pet.pet_type);
+            let hp_pct = hp_ratio;
+            let mana_pct = if combatant.max_mana > 0.0 {
+                combatant.current_mana / combatant.max_mana
+            } else {
+                0.0
+            };
+            let actor_view = ActorView::from_raw(
+                entity,
+                combatant.team,
+                combatant.slot,
+                combatant.class,
+                hp_pct,
+                mana_pct,
+                transform.translation,
+            );
+            let mut builder = decision_trace.start_pet_decision(
+                actor_view,
+                None,
+                pet.owner,
+                pet_type_str(pet.pet_type),
+            );
+            builder.reject(headline, RejectionReason::LowHealthHeel);
+            builder.finish();
             continue;
         } else {
             combatant.target = combatant_info.get(&pet.owner).and_then(|owner_info| owner_info.target);
+        }
+
+        // PetCommand handling: U3 wires the component; full Hunter-dispatch
+        // execution lands with U4. For now, consume any queued command (despawn
+        // without execution) so the framework is in place. The autonomous
+        // spider_ai/boar_ai/bird_ai/felhunter_ai paths still drive ability
+        // selection until U4 replaces them with Hunter-side dispatch.
+        if pet_command.is_some() {
+            commands.entity(entity).remove::<PetCommand>();
         }
 
         let my_pos = transform.translation;
@@ -444,11 +499,12 @@ fn spider_ai(
         return;
     }
 
-    let owner_pos = ctx.combatants.get(&pet.owner).map(|info| info.position);
-    let Some(owner_pos) = owner_pos else {
+    // Owner presence is still required (pet without an owner shouldn't dispatch);
+    // owner position is no longer used now that the dist_to_owner filter is gone.
+    if ctx.combatants.get(&pet.owner).is_none() {
         builder.reject(ability, RejectionReason::NoValidTarget);
         return;
-    };
+    }
 
     // U5: dist_to_owner ≤ 15.0 filter removed. The Spider's only spatial
     // constraint is its own ability range (currently 20yd) against the target.
