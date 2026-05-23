@@ -69,7 +69,7 @@ mod tests {
 
     #[test]
     fn test_entropy_rng_has_no_seed() {
-        let rng = GameRng::from_entropy();
+        let rng = GameRng::from_os_rng();
         assert!(rng.seed.is_none());
     }
 
