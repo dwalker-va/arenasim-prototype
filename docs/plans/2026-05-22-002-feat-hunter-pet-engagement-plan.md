@@ -1,9 +1,11 @@
 ---
 date: 2026-05-22
-status: active
+status: completed
 type: feat
 title: Hunter pet engagement (AI-only Send/Heel)
 origin: docs/brainstorms/2026-05-22-hunter-pet-engagement-requirements.md
+shipped_units: [U1, U2, U3, U5, U6, U7, U8]
+deferred_units: [U4]
 ---
 
 # feat: Hunter pet engagement (AI-only Send/Heel)
