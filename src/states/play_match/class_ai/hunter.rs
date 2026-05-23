@@ -845,7 +845,11 @@ fn dispatch_predicates_for_damaging(
         return Some(RejectionReason::WithinDeadZone { distance: dist, min: CHARGE_MIN_RANGE });
     }
 
-    if ctx.has_friendly_breakable_cc(target_entity) {
+    // Friendly-CC guard only applies to abilities that deal damage on landing
+    // — Spider Web is a 0-damage Root aura and cannot break a friendly CC by
+    // existing on the target. Boar Charge does deal impact damage and would
+    // break a threshold-0 friendly CC (Polymorph, Freezing Trap incap).
+    if ability == AbilityType::BoarCharge && ctx.has_friendly_breakable_cc(target_entity) {
         return Some(RejectionReason::FriendlyBreakableCC);
     }
 
