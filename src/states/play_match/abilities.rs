@@ -41,7 +41,7 @@ pub enum ScalingStat {
 }
 
 /// Enum representing available abilities.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub enum AbilityType {
     Frostbolt,
     FlashHeal,

@@ -19,6 +19,7 @@ use std::collections::BTreeMap;
 use bevy::prelude::*;
 
 use super::{CombatContext, CombatantInfo};
+use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::auras::reflect_instant_cc_in_snapshot;
 use crate::states::play_match::components::{
     ActiveAuras, Aura, CastingState, ChannelingState, Combatant, DRTracker, Pet,
@@ -37,6 +38,11 @@ pub struct CombatSnapshot {
     pub combatants: BTreeMap<Entity, CombatantInfo>,
     pub active_auras: BTreeMap<Entity, Vec<Aura>>,
     pub dr_trackers: BTreeMap<Entity, DRTracker>,
+    /// Per-entity ability cooldowns. Hunter AI reads this when dispatching pet
+    /// abilities — it needs to know the pet's cooldown state without holding a
+    /// mutable handle to the pet `Combatant`. Cloned from `Combatant.ability_cooldowns`
+    /// (which is a `HashMap`) into a `BTreeMap` for deterministic iteration.
+    pub ability_cooldowns: BTreeMap<Entity, BTreeMap<AbilityType, f32>>,
 }
 
 impl CombatSnapshot {
@@ -63,6 +69,18 @@ impl CombatSnapshot {
     ) -> Self {
         let mut combatants: BTreeMap<Entity, CombatantInfo> = BTreeMap::new();
         let mut active_auras: BTreeMap<Entity, Vec<Aura>> = BTreeMap::new();
+        let mut ability_cooldowns: BTreeMap<Entity, BTreeMap<AbilityType, f32>> = BTreeMap::new();
+
+        // Build owner→pet reverse lookup once so each combatant's `pet` field
+        // can be populated in O(1) inside the main loop. `Query<&Pet>` does not
+        // yield entity from `.iter()`, so we iterate aura_query (which yields
+        // entity) and check pet_query for each.
+        let mut owner_to_pet: BTreeMap<Entity, Entity> = BTreeMap::new();
+        for (entity, _, _, _) in aura_query.iter() {
+            if let Ok(pet) = pet_query.get(entity) {
+                owner_to_pet.insert(pet.owner, entity);
+            }
+        }
 
         for (entity, combatant, transform, auras_opt) in aura_query.iter() {
             let pet_comp = pet_query.get(entity).ok();
@@ -81,7 +99,16 @@ impl CombatSnapshot {
                 target: combatant.target,
                 is_pet: pet_comp.is_some(),
                 pet_type: pet_comp.map(|p| p.pet_type),
+                pet: owner_to_pet.get(&entity).copied(),
             });
+            // Clone Combatant.ability_cooldowns (HashMap) into a BTreeMap so
+            // downstream iteration is deterministic.
+            let cooldowns: BTreeMap<AbilityType, f32> = combatant
+                .ability_cooldowns
+                .iter()
+                .map(|(k, v)| (*k, *v))
+                .collect();
+            ability_cooldowns.insert(entity, cooldowns);
             if let Some(auras) = auras_opt {
                 active_auras.insert(entity, auras.auras.clone());
             }
@@ -99,7 +126,7 @@ impl CombatSnapshot {
             .map(|(entity, tracker)| (entity, tracker.clone()))
             .collect();
 
-        Self { combatants, active_auras, dr_trackers }
+        Self { combatants, active_auras, dr_trackers, ability_cooldowns }
     }
 
     /// Borrow a `CombatContext` view of this snapshot for the given combatant.
@@ -110,6 +137,7 @@ impl CombatSnapshot {
             combatants: &self.combatants,
             active_auras: &self.active_auras,
             dr_trackers: &self.dr_trackers,
+            ability_cooldowns: &self.ability_cooldowns,
             self_entity,
         }
     }

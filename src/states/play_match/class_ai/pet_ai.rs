@@ -47,6 +47,14 @@ pub fn pet_ai_system(
         return;
     }
 
+    // Owner→pet reverse lookup, populated from the mutable `pets` query via a
+    // read-only `.iter()` pass (released before `.iter_mut()` in the main
+    // loop). Matches the CombatSnapshot::build pattern in combat_snapshot.rs.
+    let owner_to_pet: std::collections::BTreeMap<Entity, Entity> = pets
+        .iter()
+        .map(|(entity, _, _, pet, _)| (pet.owner, entity))
+        .collect();
+
     let combatant_info: std::collections::BTreeMap<Entity, super::CombatantInfo> = all_combatants
         .iter()
         .map(|(entity, combatant, transform, _)| {
@@ -65,6 +73,7 @@ pub fn pet_ai_system(
                 target: combatant.target,
                 is_pet: false,
                 pet_type: None,
+                pet: owner_to_pet.get(&entity).copied(),
             })
         })
         .collect();
@@ -81,6 +90,22 @@ pub fn pet_ai_system(
         .map(|(entity, tracker)| (entity, tracker.clone()))
         .collect();
 
+    // Per-entity ability cooldowns snapshot (BTreeMap for determinism). Pet AI
+    // doesn't currently read this from `ctx`, but keeping it consistent with
+    // CombatSnapshot::build avoids drift if future pet AI code reads cooldowns.
+    let ability_cooldowns: std::collections::BTreeMap<Entity, std::collections::BTreeMap<crate::states::play_match::abilities::AbilityType, f32>> =
+        all_combatants
+            .iter()
+            .map(|(entity, combatant, _, _)| {
+                let cds: std::collections::BTreeMap<_, _> = combatant
+                    .ability_cooldowns
+                    .iter()
+                    .map(|(k, v)| (*k, *v))
+                    .collect();
+                (entity, cds)
+            })
+            .collect();
+
     for (entity, mut combatant, transform, pet, auras) in pets.iter_mut() {
         if !combatant.is_alive() {
             continue;
@@ -96,6 +121,7 @@ pub fn pet_ai_system(
             combatants: &combatant_info,
             active_auras: &active_auras_map,
             dr_trackers: &dr_trackers,
+            ability_cooldowns: &ability_cooldowns,
             self_entity: entity,
         };
 

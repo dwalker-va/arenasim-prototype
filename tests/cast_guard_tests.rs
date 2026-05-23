@@ -35,6 +35,7 @@ fn target_info(entity: Entity, team: u8, class: CharacterClass) -> CombatantInfo
         target: None,
         is_pet: false,
         pet_type: None,
+        pet: None,
     }
 }
 
@@ -68,6 +69,7 @@ struct TestWorld {
     combatants: BTreeMap<Entity, CombatantInfo>,
     active_auras: BTreeMap<Entity, Vec<Aura>>,
     dr_trackers: BTreeMap<Entity, DRTracker>,
+    ability_cooldowns: BTreeMap<Entity, BTreeMap<AbilityType, f32>>,
 }
 
 impl TestWorld {
@@ -89,6 +91,7 @@ impl TestWorld {
             combatants,
             active_auras: BTreeMap::new(),
             dr_trackers: BTreeMap::new(),
+            ability_cooldowns: BTreeMap::new(),
         }
     }
 
@@ -97,6 +100,7 @@ impl TestWorld {
             combatants: &self.combatants,
             active_auras: &self.active_auras,
             dr_trackers: &self.dr_trackers,
+            ability_cooldowns: &self.ability_cooldowns,
             self_entity: self.caster,
         }
     }
@@ -445,6 +449,7 @@ fn classify_returns_friendly_breakable_cc_when_opt_in_and_friendly_cc_present() 
         combatants: &world.combatants,
         active_auras: &active_auras_map,
         dr_trackers: &world.dr_trackers,
+        ability_cooldowns: &world.ability_cooldowns,
         self_entity: world.caster,
     };
 

@@ -55,6 +55,10 @@ pub struct CombatantInfo {
     pub target: Option<Entity>,
     pub is_pet: bool,
     pub pet_type: Option<PetType>,
+    /// Owner→pet reverse lookup. For pet-owning combatants (Hunter, Warlock)
+    /// this is `Some(pet_entity)`. For pets themselves and non-owners, `None`.
+    /// Populated by `CombatSnapshot::build` and `pet_ai_system`'s local build.
+    pub pet: Option<Entity>,
 }
 
 /// Deferred instant melee attack (Mortal Strike, Ambush, Sinister Strike, etc.)
@@ -124,6 +128,11 @@ pub struct CombatContext<'a> {
     pub active_auras: &'a BTreeMap<Entity, Vec<Aura>>,
     /// Map of entity to their DR tracker (for immunity queries)
     pub dr_trackers: &'a BTreeMap<Entity, DRTracker>,
+    /// Map of entity to their per-ability cooldowns (per-frame snapshot).
+    /// Hunter AI reads this when dispatching pet abilities — it needs to know
+    /// the pet's cooldown state without holding a mutable handle to pet
+    /// `Combatant`. `BTreeMap` (nested) for determinism.
+    pub ability_cooldowns: &'a BTreeMap<Entity, BTreeMap<AbilityType, f32>>,
     /// The combatant making the decision
     pub self_entity: Entity,
 }
