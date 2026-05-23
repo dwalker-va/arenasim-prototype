@@ -426,7 +426,7 @@ fn main_menu_ui(
                     .clicked()
                 {
                     info!("Exit button pressed - quitting application");
-                    exit_events.send(AppExit::Success);
+                    exit_events.write(AppExit::Success);
                 }
             });
 
@@ -468,10 +468,10 @@ fn options_ui(
             egui::Frame::none()
                 .fill(egui::Color32::from_rgb(20, 20, 30))
                 .inner_margin(egui::Margin {
-                    left: 20.0,
-                    right: 20.0,
-                    top: 20.0,
-                    bottom: 20.0,
+                    left: 20,
+                    right: 20,
+                    top: 20,
+                    bottom: 20,
                 })
         )
         .show(ctx, |ui| {
@@ -806,10 +806,10 @@ fn keybindings_ui(
             egui::Frame::none()
                 .fill(egui::Color32::from_rgb(20, 20, 30))
                 .inner_margin(egui::Margin {
-                    left: 20.0,
-                    right: 20.0,
-                    top: 20.0,
-                    bottom: 20.0,
+                    left: 20,
+                    right: 20,
+                    top: 20,
+                    bottom: 20,
                 })
         )
         .show(ctx, |ui| {

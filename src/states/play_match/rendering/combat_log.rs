@@ -301,7 +301,8 @@ fn render_timeline_content(ui: &mut egui::Ui, combat_log: &CombatLog, spell_icon
                         painter.rect_stroke(
                             icon_rect.expand(1.0),
                             3.0,
-                            egui::Stroke::new(if interrupted { 2.0 } else { 1.0 }, border_color)
+                            egui::Stroke::new(if interrupted { 2.0 } else { 1.0 }, border_color),
+                            egui::StrokeKind::Outside,
                         );
                         // Draw the spell icon (tinted red if interrupted)
                         let icon_tint = if interrupted {

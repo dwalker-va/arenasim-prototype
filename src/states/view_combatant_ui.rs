@@ -574,7 +574,7 @@ pub fn view_combatant_ui(
         .frame(
             egui::Frame::none()
                 .fill(egui::Color32::from_rgb(20, 20, 30))
-                .inner_margin(egui::Margin::same(20.0)),
+                .inner_margin(egui::Margin::same(20)),
         )
         .show(ctx, |ui| {
             ui.add_space(10.0);
@@ -615,7 +615,7 @@ pub fn view_combatant_ui(
                         egui::Frame::none()
                             .fill(egui::Color32::from_rgb(35, 35, 45))
                             .rounding(8.0)
-                            .inner_margin(egui::Margin::same(15.0))
+                            .inner_margin(egui::Margin::same(15))
                             .stroke(egui::Stroke::new(2.0, class_color32.gamma_multiply(0.6)))
                             .show(ui, |ui| {
                                 ui.set_min_width(header_width - 30.0);
@@ -640,6 +640,7 @@ pub fn view_combatant_ui(
                                         rect,
                                         6.0,
                                         egui::Stroke::new(2.0, class_color32),
+                                        egui::StrokeKind::Outside,
                                     );
                                 }
 
@@ -1123,6 +1124,7 @@ fn render_abilities_panel(
                     icon_rect,
                     3.0,
                     egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 80, 100)),
+                    egui::StrokeKind::Outside,
                 );
             } else {
                 painter.rect_filled(icon_rect, 3.0, egui::Color32::from_rgb(50, 50, 65));
@@ -1130,6 +1132,7 @@ fn render_abilities_panel(
                     icon_rect,
                     3.0,
                     egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 80, 100)),
+                    egui::StrokeKind::Outside,
                 );
             }
 
@@ -1931,7 +1934,7 @@ fn render_rogue_opener_panel(
                     }
 
                     // Draw border
-                    painter.rect_stroke(rect, 4.0, egui::Stroke::new(border_width, border_color));
+                    painter.rect_stroke(rect, 4.0, egui::Stroke::new(border_width, border_color), egui::StrokeKind::Outside);
 
                     // Track click
                     if response.clicked() && !is_selected {
@@ -2047,7 +2050,7 @@ fn render_strategic_option_panel<T: Copy + PartialEq>(
                         painter.rect_filled(rect, 4.0, egui::Color32::from_rgb(50, 50, 65));
                     }
 
-                    painter.rect_stroke(rect, 4.0, egui::Stroke::new(border_width, border_color));
+                    painter.rect_stroke(rect, 4.0, egui::Stroke::new(border_width, border_color), egui::StrokeKind::Outside);
 
                     if response.clicked() && !is_selected {
                         clicked_index = Some(i);
@@ -2176,7 +2179,7 @@ fn render_hunter_pet_panel(
                     } else {
                         painter.rect_filled(rect, 4.0, egui::Color32::from_rgb(50, 50, 65));
                     }
-                    painter.rect_stroke(rect, 4.0, egui::Stroke::new(border_width, border_color));
+                    painter.rect_stroke(rect, 4.0, egui::Stroke::new(border_width, border_color), egui::StrokeKind::Outside);
 
                     if response.clicked() && !is_selected {
                         clicked_pet = Some(*pet);
@@ -2361,7 +2364,7 @@ fn render_warlock_curse_panel(
                         }
 
                         // Draw border
-                        painter.rect_stroke(rect, 4.0, egui::Stroke::new(border_width, border_color));
+                        painter.rect_stroke(rect, 4.0, egui::Stroke::new(border_width, border_color), egui::StrokeKind::Outside);
 
                         // Track click
                         if response.clicked() && !is_selected {

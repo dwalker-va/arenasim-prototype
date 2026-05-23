@@ -251,7 +251,7 @@ pub fn cleanup_consumed_orbs(
 
         // Despawn when lifetime expires
         if consuming.lifetime <= 0.0 {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
         }
     }
 }

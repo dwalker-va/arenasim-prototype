@@ -151,7 +151,7 @@ pub fn armory_ui(
     ctx.set_style(style);
 
     egui::CentralPanel::default()
-        .frame(egui::Frame::none().fill(BG_COLOR).inner_margin(egui::Margin::same(16.0)))
+        .frame(egui::Frame::none().fill(BG_COLOR).inner_margin(egui::Margin::same(16)))
         .show(ctx, |ui| {
             render_header(ui, &mut next_state);
             ui.add_space(12.0);
@@ -400,7 +400,7 @@ fn tile_ui(
 
     // Tile background and frame.
     painter.rect_filled(rect, 4.0, TILE_BG);
-    painter.rect_stroke(rect, 4.0, egui::Stroke::new(1.0, TILE_FRAME));
+    painter.rect_stroke(rect, 4.0, egui::Stroke::new(1.0, TILE_FRAME), egui::StrokeKind::Outside);
 
     // Centered icon.
     let icon_rect = egui::Rect::from_center_size(

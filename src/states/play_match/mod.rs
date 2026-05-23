@@ -193,6 +193,7 @@ pub fn setup_play_match(
     commands.insert_resource(AmbientLight {
         color: Color::srgb(0.9, 0.85, 0.7), // Warm peachy ambient light
         brightness: 400.0,
+        affects_lightmapped_meshes: true,
     });
     
     // Initialize simulation speed control
@@ -723,7 +724,7 @@ pub fn cleanup_play_match(
     query: Query<Entity, With<PlayMatchEntity>>,
 ) {
     for entity in query.iter() {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
     
     // Remove resources

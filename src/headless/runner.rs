@@ -493,12 +493,21 @@ fn save_headless_match_log(
     }
 }
 
-/// Exit the app when the match is complete
-fn headless_exit_on_complete(headless_state: Res<HeadlessMatchState>, mut exit: EventWriter<AppExit>) {
-    if headless_state.match_complete {
-        exit.send(AppExit::Success);
-    }
-}
+/// Match-completion sentinel system (no-op under manual update loops).
+///
+/// Pre-migration this wrote `AppExit::Success` to signal `ScheduleRunnerPlugin`
+/// to terminate the runner. The matrix runner doesn't use `app.run()` — it
+/// drives the schedule via manual `app.update()` calls and polls the
+/// `HeadlessMatchState::match_complete` resource flag for completion (see
+/// `run_headless_match_with`'s loop). `App::update()` does not consume
+/// `AppExit` events in Bevy 0.16, so writing one would have been a no-op
+/// here anyway.
+///
+/// Kept registered (the audit requires every `pub fn` with SystemParam
+/// types to live in one of the known registration paths) but the body is
+/// a no-op to make the intent explicit and avoid any future Bevy version
+/// quietly starting to process `AppExit` during `update()` calls.
+fn headless_exit_on_complete(_headless_state: Res<HeadlessMatchState>) {}
 
 /// Run a headless match with the given configuration.
 ///
@@ -542,7 +551,6 @@ pub fn run_headless_match_with(
         // match would never end.
         .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(1.0 / 60.0)))
         .add_plugins(TransformPlugin)
-        .add_plugins(HierarchyPlugin)
         .add_plugins(AbilityConfigPlugin)
         .add_plugins(EquipmentPlugin)
         .add_plugins(HeadlessPlugin { config: config.clone(), suppress_log });

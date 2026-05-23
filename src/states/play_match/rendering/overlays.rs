@@ -117,6 +117,7 @@ pub fn render_countdown(
                 icon_rect.expand(2.0),
                 4.0,
                 egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 150, 255)),
+                egui::StrokeKind::Outside,
             );
             painter.image(
                 texture_id,
@@ -190,6 +191,7 @@ pub fn render_countdown(
                 icon_rect.expand(2.0),
                 4.0,
                 egui::Stroke::new(2.0, egui::Color32::from_rgb(255, 100, 100)),
+                egui::StrokeKind::Outside,
             );
             painter.image(
                 texture_id,

@@ -157,10 +157,10 @@ pub fn configure_match_ui(
             egui::Frame::none()
                 .fill(egui::Color32::from_rgb(20, 20, 30))
                 .inner_margin(egui::Margin {
-                    left: 15.0,
-                    right: 15.0,
-                    top: 20.0,
-                    bottom: 20.0,
+                    left: 15,
+                    right: 15,
+                    top: 20,
+                    bottom: 20,
                 })
         )
         .show(ctx, |ui| {
@@ -305,7 +305,8 @@ fn render_character_picker_modal(
                 ui.painter().rect_stroke(
                     rect,
                     8.0,
-                    egui::Stroke::new(2.0, color32.gamma_multiply(0.5))
+                    egui::Stroke::new(2.0, color32.gamma_multiply(0.5)),
+                    egui::StrokeKind::Outside,
                 );
 
                 // Draw content
@@ -330,11 +331,11 @@ fn render_character_picker_modal(
                         egui::Color32::WHITE,
                     );
                     // Add border around the icon
-                    ui.painter().rect_stroke(icon_rect, 6.0, egui::Stroke::new(2.0, color32));
+                    ui.painter().rect_stroke(icon_rect, 6.0, egui::Stroke::new(2.0, color32), egui::StrokeKind::Outside);
                 } else {
                     // Fallback: colored rectangle placeholder
                     ui.painter().rect_filled(icon_rect, 6.0, color32.gamma_multiply(0.3));
-                    ui.painter().rect_stroke(icon_rect, 6.0, egui::Stroke::new(2.0, color32));
+                    ui.painter().rect_stroke(icon_rect, 6.0, egui::Stroke::new(2.0, color32), egui::StrokeKind::Outside);
                 }
 
                 // Class text
@@ -580,7 +581,8 @@ fn render_character_slot(
     ui.painter().rect_stroke(
         rect,
         8.0,
-        egui::Stroke::new(2.0, team_color.gamma_multiply(border_alpha))
+        egui::Stroke::new(2.0, team_color.gamma_multiply(border_alpha)),
+        egui::StrokeKind::Outside,
     );
 
     // Draw content based on slot state
@@ -614,11 +616,11 @@ fn render_character_slot(
                 egui::Color32::WHITE,
             );
             // Add border around the icon
-            ui.painter().rect_stroke(icon_rect, 6.0, egui::Stroke::new(2.0, color32));
+            ui.painter().rect_stroke(icon_rect, 6.0, egui::Stroke::new(2.0, color32), egui::StrokeKind::Outside);
         } else {
             // Fallback: colored rectangle placeholder
             ui.painter().rect_filled(icon_rect, 6.0, color32.gamma_multiply(0.3));
-            ui.painter().rect_stroke(icon_rect, 6.0, egui::Stroke::new(2.0, color32));
+            ui.painter().rect_stroke(icon_rect, 6.0, egui::Stroke::new(2.0, color32), egui::StrokeKind::Outside);
         }
 
         // Class text
@@ -751,6 +753,7 @@ fn render_map_panel(ui: &mut egui::Ui, config: &mut MatchConfig, max_width: f32)
             rect,
             8.0,
             egui::Stroke::new(2.0, egui::Color32::from_rgb(77, 77, 77)),
+            egui::StrokeKind::Outside,
         );
 
         ui.add_space(20.0);

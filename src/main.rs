@@ -119,7 +119,7 @@ fn run_graphical_mode() {
         }))
         // Our game plugins
         .add_plugins((
-            EguiPlugin,
+            EguiPlugin { enable_multipass_for_primary_context: false },
             SettingsPlugin,
             AbilityConfigPlugin,
             EquipmentPlugin,
@@ -146,13 +146,13 @@ fn setup_custom_font(
     // Load Rajdhani Bold
     fonts.font_data.insert(
         "rajdhani_bold".to_owned(),
-        egui::FontData::from_static(include_bytes!("../assets/fonts/Rajdhani-Bold.ttf")),
+        egui::FontData::from_static(include_bytes!("../assets/fonts/Rajdhani-Bold.ttf")).into(),
     );
-    
+
     // Load Rajdhani Regular
     fonts.font_data.insert(
         "rajdhani_regular".to_owned(),
-        egui::FontData::from_static(include_bytes!("../assets/fonts/Rajdhani-Regular.ttf")),
+        egui::FontData::from_static(include_bytes!("../assets/fonts/Rajdhani-Regular.ttf")).into(),
     );
     
     // Set Rajdhani Bold as the primary proportional font for headings

@@ -93,7 +93,7 @@ fn camera_controls(
 ) {
     use crate::keybindings::GameAction;
     
-    let Ok(mut camera_transform) = camera_query.get_single_mut() else {
+    let Ok(mut camera_transform) = camera_query.single_mut() else {
         return;
     };
 
