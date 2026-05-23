@@ -174,6 +174,11 @@ where
             check_orb_pickups,
             cleanup_consumed_orbs,
             decide_abilities,
+            apply_deferred, // Flush PetCommand components spawned by Hunter
+                            // AI in decide_abilities so pet_ai_system sees
+                            // them on the same tick (per U3 of the pet
+                            // engagement plan). Without this, PetCommand has
+                            // one-tick lag.
             pet_ai_system,
             apply_deferred, // Flush CastingState for interrupt checks
             check_interrupts,

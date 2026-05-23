@@ -247,7 +247,7 @@ mcp__wowhead-classic__lookup_item("Lionheart Helm")
 - **Priest**: Mana, healer, Flash Heal/Mind Blast/Power Word: Fortitude
 - **Warlock**: Mana, DoT caster, Corruption/Shadow Bolt/Fear
 - **Paladin**: Mana, healer/melee, Holy Shock/Flash of Light/Hammer of Justice
-- **Hunter**: Mana, ranged physical DPS with pet, Aimed Shot/Arcane Shot/Concussive Shot/Disengage/Freezing Trap/Frost Trap
+- **Hunter**: Mana, ranged physical DPS with pet, Aimed Shot/Arcane Shot/Concussive Shot/Disengage/Freezing Trap/Frost Trap. Pet engagement model: pet inherits Hunter's target, pursues into melee via existing target-pursuit movement, and retreats ("Heel") when pet HP drops below 25%. Per-pet headline abilities (Spider Web, Boar Charge, Master's Call) are dispatched by Hunter AI via the `PetCommand` component (hybrid model — Hunter owns headline calls, pet handles auto-attacks and pursuit). Iteration 2a ships pet target ownership + Heel predicate + PetCommand framework; Hunter `try_dispatch_*` helpers (active consumer of PetCommand) land in iteration 2b.
 
 ## Common Tasks
 
@@ -310,6 +310,20 @@ jq -c 'select(.kind == "target_acquisition" and .changed)' $T
 
 # Pet decisions grouped by owner
 jq -c 'select(.kind == "pet_decision") | {owner, pet_type, ability: .outcome.ability}' $T
+
+# Hunter-dispatched pet abilities (hybrid model — `dispatched_by` set when
+# the pet's owner AI commanded the ability instead of the pet deciding
+# autonomously). Field is `Option<u32>` and omitted from JSON when None;
+# this recipe filters to non-null values.
+jq -c 'select(.kind == "pet_decision" and .dispatched_by != null) | {owner, pet_type, ability: .outcome.ability, dispatched_by}' $T
+
+# Heel-state retreats (pet HP < 25%, target cleared, returns to owner's
+# flank, queued PetCommand despawned without execution)
+jq -c 'select(.kind == "pet_decision") | .candidates[]? | select((.reason | if type == "object" then keys[0] else . end) == "LowHealthHeel")' $T | wc -l
+
+# NOTE: pets are excluded from `acquire_targets` events. Pet target state
+# lives in pet_decision actor views and the match log, not in
+# target_acquisition events.
 ```
 
 **Tolerating truncated traces.** A match that exits via SIGKILL / abort / OOM

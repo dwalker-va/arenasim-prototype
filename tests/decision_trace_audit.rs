@@ -89,6 +89,8 @@ const EXPECTED_REJECTION_REASONS: &[&str] = &[
     "AlreadyApplied",
     "NoValidTarget",
     "PreconditionUnmet",
+    "LowHealthHeel",
+    "Rooted",
 ];
 
 /// Variants of `TargetRejectionReason` that production code currently emits.

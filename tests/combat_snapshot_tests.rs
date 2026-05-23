@@ -31,6 +31,7 @@ fn target_info(entity: Entity, team: u8, class: CharacterClass) -> CombatantInfo
         target: None,
         is_pet: false,
         pet_type: None,
+        pet: None,
     }
 }
 
@@ -61,6 +62,7 @@ fn empty_snapshot_with(caster: Entity, target: Entity) -> CombatSnapshot {
         combatants,
         active_auras: BTreeMap::new(),
         dr_trackers: BTreeMap::new(),
+        ability_cooldowns: BTreeMap::new(),
     }
 }
 

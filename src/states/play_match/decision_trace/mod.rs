@@ -65,6 +65,7 @@ impl DecisionTrace {
             chosen: None,
             pet_owner: None,
             pet_type: None,
+            pet_dispatched_by: None,
         }
     }
 
@@ -88,6 +89,33 @@ impl DecisionTrace {
             // Cow::Borrowed avoids the per-tick allocation that
             // `.to_string()` would do for the always-static pet type name.
             pet_type: Some(std::borrow::Cow::Borrowed(pet_type)),
+            pet_dispatched_by: None,
+        }
+    }
+
+    /// Start a `pet_decision` event for a hybrid-model dispatch (Hunter AI
+    /// commanded the pet ability). Identical shape to `start_pet_decision` but
+    /// sets `dispatched_by` so trace audits can attribute the decision to the
+    /// commanding owner. Use the existing `start_pet_decision` for autonomous
+    /// pet decisions where the pet AI chose the ability on its own.
+    pub fn start_pet_dispatch_decision(
+        &mut self,
+        actor: ActorView,
+        target: Option<TargetView>,
+        owner: Entity,
+        pet_type: &'static str,
+        dispatched_by: Entity,
+    ) -> DecisionEventBuilder<'_> {
+        DecisionEventBuilder {
+            trace: self,
+            kind: EventKind::PetDecision,
+            actor,
+            target,
+            candidates: Vec::new(),
+            chosen: None,
+            pet_owner: Some(owner.index()),
+            pet_type: Some(std::borrow::Cow::Borrowed(pet_type)),
+            pet_dispatched_by: Some(dispatched_by.index()),
         }
     }
 

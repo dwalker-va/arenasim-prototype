@@ -806,7 +806,7 @@
             cast_time: 0.0,
             range: 20.0,
             mana_cost: 0.0,
-            cooldown: 45.0,
+            cooldown: 20.0,
             applies_aura: Some((
                 aura_type: Root,
                 duration: 4.0,
