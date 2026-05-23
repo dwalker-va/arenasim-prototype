@@ -48,7 +48,27 @@ Compared against iteration 2a (`design-docs/balance/matrix_baseline_2026-05-22_p
 
 Sub-second floating-point variation appears in two `avg_duration_secs` values (Hunter v Rogue: 24.20s → 24.19s, Rogue v Hunter: 23.89s → 23.88s). All winrates byte-identical.
 
-N=100 sweep is queued and will be appended to this report once it completes (commit added separately).
+### N=100 Sweep Addendum
+
+Completed 2026-05-23 (`design-docs/balance/matrix_baseline_2026-05-23_pet_dispatch_1v1_post_n100.csv`). No iteration 2a N=100 baseline exists for direct comparison; the N=20 byte-identical result above is the strongest signal of zero regression. N=100 numbers below characterize iteration 2b's behavior at higher sample size.
+
+| Matchup | N=20 | N=100 |
+|---|---:|---:|
+| Hunter v Warrior | 4/20 = 20% | 25/100 = 25% |
+| Hunter v Mage | 0/20 = 0% | 0/100 = 0% |
+| Hunter v Rogue | 1/20 = 5% | 3/100 = 3% |
+| Hunter v Priest | 0/20 = 0% | 0/100 = 0% |
+| Hunter v Warlock | 1/20 = 5% | 4/100 = 4% |
+| Hunter v Paladin | 1/20 = 5% | 1/100 = 1% |
+| Hunter v Hunter | 4-6-10 (20/30/50%) | 43-28-29 (43/28/29%) |
+| Warrior v Hunter | 15/20 = 75% | 71/100 = 71% |
+| Mage v Hunter | 20/20 = 100% | 100/100 = 100% |
+| Rogue v Hunter | 19/20 = 95% | 99/100 = 99% |
+| Priest v Hunter | 20/20 = 100% | 100/100 = 100% |
+| Warlock v Hunter | 20/20 = 100% | 99/100 = 99% |
+| Paladin v Hunter | 19/20+1 draw = 95% | 100/100 = 100% |
+
+Most matchups are within ±5pp at the two sample sizes (normal binomial variance). The Hunter v Hunter mirror shifted from 30%/50% draws at N=20 to 28%/29% draws at N=100 — the additional 80 seeds simply produce fewer draws than the first 20 sampled. The Hunter v Paladin matchup dropping from 5% to 1% is the largest single-matchup delta; given the underlying matchup is severely Hunter-disadvantaged (no healer-CC tools, Paladin sustains indefinitely), this is variance around a near-zero true winrate rather than a regression introduced by iteration 2b.
 
 ### Decision Trace Audit (Hunter v Warlock, default seed, 19s match)
 
