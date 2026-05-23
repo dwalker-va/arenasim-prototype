@@ -159,7 +159,7 @@ fn headless_setup_match(
         }
         None => {
             info!("Using non-deterministic RNG (no seed provided)");
-            GameRng::from_entropy()
+            GameRng::from_os_rng()
         }
     };
     commands.insert_resource(game_rng);

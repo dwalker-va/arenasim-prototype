@@ -28,8 +28,8 @@ impl GameRng {
         }
     }
 
-    /// Create a new GameRng with random entropy (non-deterministic)
-    pub fn from_entropy() -> Self {
+    /// Create a new GameRng seeded from OS entropy (non-deterministic)
+    pub fn from_os_rng() -> Self {
         Self {
             rng: StdRng::from_os_rng(),
             seed: None,
@@ -49,7 +49,7 @@ impl GameRng {
 
 impl Default for GameRng {
     fn default() -> Self {
-        Self::from_entropy()
+        Self::from_os_rng()
     }
 }
 
