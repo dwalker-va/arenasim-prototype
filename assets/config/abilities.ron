@@ -687,7 +687,7 @@
             cast_time: 2.5,
             range: 35.0,
             min_range: Some(8.0),
-            mana_cost: 40.0,
+            mana_cost: 34.0,
             cooldown: 10.0,
             damage_base_min: 18.0,
             damage_base_max: 28.0,
@@ -714,7 +714,7 @@
             cast_time: 0.0,
             range: 35.0,
             min_range: Some(8.0),
-            mana_cost: 25.0,
+            mana_cost: 21.0,
             cooldown: 6.0,
             damage_base_min: 10.0,
             damage_base_max: 16.0,
@@ -736,7 +736,7 @@
             cast_time: 0.0,
             range: 35.0,
             min_range: Some(8.0),
-            mana_cost: 15.0,
+            mana_cost: 13.0,
             cooldown: 12.0,
             applies_aura: Some((
                 aura_type: MovementSpeedSlow,
@@ -758,7 +758,7 @@
             icon: "icons/abilities/ability_rogue_feint.jpg",
             cast_time: 0.0,
             range: 0.0,  // Self-cast, no target needed
-            mana_cost: 20.0,
+            mana_cost: 17.0,
             cooldown: 25.0,
             spell_school: Physical,
         ),
@@ -770,7 +770,7 @@
             icon: "icons/abilities/spell_frost_chainsofice.jpg",
             cast_time: 0.0,
             range: 30.0,  // Placement range
-            mana_cost: 50.0,
+            mana_cost: 43.0,
             cooldown: 25.0,
             applies_aura: Some((
                 aura_type: Incapacitate,
@@ -789,7 +789,7 @@
             icon: "icons/abilities/spell_frost_freezingbreath.jpg",
             cast_time: 0.0,
             range: 30.0,  // Placement range
-            mana_cost: 30.0,
+            mana_cost: 26.0,
             cooldown: 20.0,
             spell_school: None,
         ),

@@ -260,6 +260,26 @@ cargo run --release -- --headless /tmp/test.json
 cat match_logs/$(ls -t match_logs | head -1)
 ```
 
+### Run a 2v2-with-healer balance sweep
+
+`--matrix N` runs the 7×7 1v1 matrix. For 2v2-with-healer validation
+(Hunter+Priest vs each-class+Priest), use the wrapper script:
+
+```bash
+# Default N=100, output to match_logs/hunter_2v2_<timestamp>.csv
+cargo build --release
+scripts/hunter_2v2_matrix.sh 100 --seed-base 0
+
+# Custom output path (e.g., commit to design-docs/balance/)
+scripts/hunter_2v2_matrix.sh 100 \
+  --seed-base 0 \
+  --out design-docs/balance/matrix_baseline_<date>_2v2.csv
+```
+
+CSV columns are byte-compatible with the 1v1 matrix output from
+`src/headless/matrix.rs:217` (`team1,team2,runs,team1_wins,team2_wins,
+draws,team1_winrate,draw_rate,avg_duration_secs`).
+
 ### Diagnose AI behaviour with the decision trace
 
 Capture the AI's per-tick reject/choose decisions as JSONL alongside the
