@@ -116,6 +116,31 @@ pub fn pet_ai_system(
             continue;
         }
 
+        // U1: Pet target ownership. Pets no longer receive target assignments
+        // from `acquire_targets` (per the pet-skip at combat_ai.rs around line
+        // ~107). Pet AI assigns pet.target = owner.target so existing
+        // target-pursuit movement (movement.rs:391+) closes pets on enemies.
+        //
+        // U6: Heel predicate — when HP < 25%, target is cleared and pet returns
+        // to owner's flank via the existing follow-owner branch (movement.rs:309+).
+        let hp_ratio = if combatant.max_health > 0.0 {
+            combatant.current_health / combatant.max_health
+        } else {
+            0.0
+        };
+        let in_heel = hp_ratio < 0.25;
+        if in_heel {
+            combatant.target = None;
+            // U6: When in Heel mode, suppress all pet ability decisions. The
+            // existing follow-owner movement branch (movement.rs:309+) routes
+            // the pet back to the Hunter's flank.
+            // A LowHealthHeel rejection trace event will be emitted by U3+U6
+            // wiring; for now we just skip the autonomous decide path.
+            continue;
+        } else {
+            combatant.target = combatant_info.get(&pet.owner).and_then(|owner_info| owner_info.target);
+        }
+
         let my_pos = transform.translation;
         let ctx = CombatContext {
             combatants: &combatant_info,
@@ -425,13 +450,14 @@ fn spider_ai(
         return;
     };
 
+    // U5: dist_to_owner ≤ 15.0 filter removed. The Spider's only spatial
+    // constraint is its own ability range (currently 20yd) against the target.
+    // The filter was incompatible with Hunter's 35yd kit range — when Hunter
+    // kited at safe distance, no target ever passed the 15yd-from-owner check
+    // and Spider Web never fired in 1v1.
     let mut best_target: Option<(Entity, f32)> = None;
     for (target_entity, info) in ctx.combatants.iter() {
         if info.team == combatant.team || !info.is_alive || info.is_pet || info.stealthed {
-            continue;
-        }
-        let dist_to_owner = info.position.distance(owner_pos);
-        if dist_to_owner > 15.0 {
             continue;
         }
         let dist_to_spider = my_pos.distance(info.position);
@@ -443,8 +469,11 @@ fn spider_ai(
                 continue;
             }
         }
-        if best_target.map_or(true, |(_, d)| dist_to_owner < d) {
-            best_target = Some((*target_entity, dist_to_owner));
+        // Prefer the closer-to-spider target (was: closer-to-owner under the
+        // old filter). Since the Spider stays near the owner today, this is
+        // equivalent in practice but more correct in spirit.
+        if best_target.map_or(true, |(_, d)| dist_to_spider < d) {
+            best_target = Some((*target_entity, dist_to_spider));
         }
     }
 

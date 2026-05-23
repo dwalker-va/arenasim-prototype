@@ -108,10 +108,17 @@ pub fn acquire_targets(
             continue;
         }
 
+        // Pets are excluded from acquire_targets entirely (per U1 of the pet
+        // engagement plan). Pet target ownership lives in pet_ai_system, which
+        // assigns pet.target = owner.target at the top of its per-pet loop.
+        // This change is mirror to the existing dispatch-loop skip further down.
+        if pet_query.get(entity).is_ok() {
+            continue;
+        }
+
         // Snapshot target state BEFORE acquisition so we can emit a trace event
-        // when either changes. Pet AI doesn't participate in target acquisition,
-        // so skip pet entities entirely.
-        let is_pet_entity = pet_query.get(entity).is_ok();
+        // when either changes.
+        let is_pet_entity = false;
         let prev_target = combatant.target;
         let prev_cc_target = combatant.cc_target;
 
