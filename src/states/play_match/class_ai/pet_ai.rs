@@ -187,15 +187,6 @@ pub fn pet_ai_system(
             combatant.target = combatant_info.get(&pet.owner).and_then(|owner_info| owner_info.target);
         }
 
-        // PetCommand handling: U3 wires the component; full Hunter-dispatch
-        // execution lands with U4. For now, consume any queued command (despawn
-        // without execution) so the framework is in place. The autonomous
-        // spider_ai/boar_ai/bird_ai/felhunter_ai paths still drive ability
-        // selection until U4 replaces them with Hunter-side dispatch.
-        if pet_command.is_some() {
-            commands.entity(entity).remove::<PetCommand>();
-        }
-
         let my_pos = transform.translation;
         let ctx = CombatContext {
             combatants: &combatant_info,
@@ -226,6 +217,73 @@ pub fn pet_ai_system(
             mana_pct,
             my_pos,
         );
+
+        // U4: Hunter-dispatched PetCommand execution. Runs before the
+        // autonomous decide path; on completion the autonomous path is skipped
+        // (continue) since the pet's GCD/ability slot for this tick is owned
+        // by the dispatched ability.
+        //
+        // Authoritative checks at execution time (the "optimistic dispatch"
+        // contract per the plan's Key Technical Decisions): Hunter uses
+        // snapshot heuristics to spawn the PetCommand; pet AI re-validates
+        // here with live `&Combatant` state. If conditions changed since
+        // dispatch (cooldown rolled, target died, friendly CC landed), the
+        // command is rejected and despawned without firing.
+        if let Some(command) = pet_command.copied() {
+            let dispatch_target_view = ctx.combatants.get(&command.target)
+                .map(|info| TargetView::from_info(info, my_pos));
+            let mut builder = decision_trace.start_pet_dispatch_decision(
+                actor_view.clone(),
+                dispatch_target_view,
+                pet.owner,
+                pet_type_str(pet.pet_type),
+                command.dispatched_by,
+            );
+
+            let ability = command.ability;
+            if let Some(def) = abilities.get(&ability) {
+                let rejection = pet_command_rejection(
+                    ability, def, &combatant, my_pos, command.target, &ctx,
+                );
+                if let Some(reason) = rejection {
+                    builder.reject(ability, reason);
+                } else {
+                    builder.choose(ability, Some(command.target), true);
+                    match ability {
+                        AbilityType::SpiderWeb => execute_spider_web(
+                            &mut commands, &mut combat_log, def, entity,
+                            &mut combatant, my_pos, command.target,
+                        ),
+                        AbilityType::BoarCharge => execute_boar_charge(
+                            &mut commands, &mut combat_log, def, entity,
+                            &mut combatant, command.target,
+                        ),
+                        AbilityType::MastersCall => execute_masters_call(
+                            &mut commands, &mut combat_log, def, entity,
+                            &mut combatant, command.target,
+                        ),
+                        _ => {
+                            // Unsupported ability via PetCommand. Drop with no
+                            // execution; the builder's `choose` is already set
+                            // so the trace will record an unintended cast —
+                            // this path should be unreachable in normal flow.
+                        }
+                    }
+                }
+            } else {
+                builder.reject(
+                    ability,
+                    RejectionReason::PreconditionUnmet {
+                        note: "missing ability def".to_string(),
+                    },
+                );
+            }
+
+            builder.finish();
+            commands.entity(entity).remove::<PetCommand>();
+            continue;
+        }
+
         let target_view = combatant
             .target
             .and_then(|t| ctx.combatants.get(&t))
@@ -238,6 +296,16 @@ pub fn pet_ai_system(
             pet_type_str(pet.pet_type),
         );
 
+        // Per-pet autonomous decide. Headline pet abilities (Spider Web, Boar
+        // Charge, Master's Call) are Hunter-dispatched via PetCommand when
+        // Hunter AI is eligible to run. These autonomous fallbacks fire when
+        // no PetCommand was queued this tick — covers the case where Hunter
+        // is mid-cast (CastingState filters Hunter out of `decide_abilities`),
+        // ensuring the pet's headline ability isn't starved of opportunities
+        // during Hunter's Aimed Shot windows. Both paths share the same
+        // execute_* helpers, so behavior matches except for the dispatched_by
+        // trace attribution. Heel + CD + AlreadyApplied + friendly-CC checks
+        // mirror the Hunter-dispatch predicates.
         match pet.pet_type {
             PetType::Felhunter => {
                 felhunter_ai(
@@ -246,19 +314,19 @@ pub fn pet_ai_system(
                 );
             }
             PetType::Spider => {
-                spider_ai(
+                spider_autonomous_dispatch(
                     &mut commands, &mut combat_log, &abilities, entity, &mut combatant,
                     my_pos, pet, &ctx, &mut builder,
                 );
             }
             PetType::Boar => {
-                boar_ai(
+                boar_autonomous_dispatch(
                     &mut commands, &mut combat_log, &abilities, entity, &mut combatant,
-                    my_pos, pet, &ctx, &casting_targets, &mut builder,
+                    my_pos, pet, &ctx, &mut builder,
                 );
             }
             PetType::Bird => {
-                bird_ai(
+                bird_autonomous_dispatch(
                     &mut commands, &mut combat_log, &abilities, entity, &mut combatant,
                     my_pos, pet, &ctx, &mut builder,
                 );
@@ -267,6 +335,57 @@ pub fn pet_ai_system(
 
         builder.finish();
     }
+}
+
+/// Authoritative pre-execution checks for a Hunter-dispatched PetCommand.
+/// Returns the rejection reason if any check fails, or `None` if the command
+/// is OK to execute. Mirrors what `pre_cast_ok` does for class-AI casts but
+/// scoped to the predicates that matter for pet headline abilities.
+fn pet_command_rejection(
+    ability: AbilityType,
+    def: &crate::states::play_match::ability_config::AbilityConfig,
+    combatant: &Combatant,
+    my_pos: Vec3,
+    target: Entity,
+    ctx: &CombatContext,
+) -> Option<RejectionReason> {
+    if combatant.global_cooldown > 0.0 {
+        return Some(RejectionReason::OnCooldown { remaining: combatant.global_cooldown });
+    }
+    if let Some(remaining) = combatant.ability_cooldowns.get(&ability) {
+        return Some(RejectionReason::OnCooldown { remaining: *remaining });
+    }
+
+    let Some(target_info) = ctx.combatants.get(&target) else {
+        return Some(RejectionReason::NoValidTarget);
+    };
+    if !target_info.is_alive {
+        return Some(RejectionReason::NoValidTarget);
+    }
+
+    if matches!(ability, AbilityType::SpiderWeb | AbilityType::BoarCharge) {
+        let dist = my_pos.distance(target_info.position);
+        if dist > def.range {
+            return Some(RejectionReason::OutOfRange { distance: dist, max: def.range });
+        }
+        if ability == AbilityType::BoarCharge
+            && dist < super::super::constants::CHARGE_MIN_RANGE
+        {
+            return Some(RejectionReason::WithinDeadZone {
+                distance: dist,
+                min: super::super::constants::CHARGE_MIN_RANGE,
+            });
+        }
+        // Friendly-CC guard only applies to abilities that deal damage on
+        // landing — Spider Web is a 0-damage Root and can't break a friendly
+        // CC. Boar Charge's impact damage would break threshold-0 auras
+        // (Polymorph, Freezing Trap incap).
+        if ability == AbilityType::BoarCharge && ctx.has_friendly_breakable_cc(target) {
+            return Some(RejectionReason::FriendlyBreakableCC);
+        }
+    }
+
+    None
 }
 
 /// Felhunter AI priorities: Spell Lock then Devour Magic.
@@ -474,77 +593,26 @@ fn try_devour_magic(
 }
 
 // ==============================================================================
-// Spider AI
+// Pet ability execution helpers (Hunter-dispatched via PetCommand)
 // ==============================================================================
 
-fn spider_ai(
+/// Spawn the Spider Web projectile at the spider, set CD/GCD, log the cast.
+/// Called from `pet_ai_system` after authoritative pre-execution checks pass.
+fn execute_spider_web(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    def: &crate::states::play_match::ability_config::AbilityConfig,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
-    pet: &Pet,
-    ctx: &CombatContext,
-    builder: &mut DecisionEventBuilder<'_>,
+    target: Entity,
 ) {
-    if combatant.global_cooldown > 0.0 {
-        return;
-    }
-
     let ability = AbilityType::SpiderWeb;
-    let Some(def) = abilities.get(&ability) else { return };
-    if let Some(remaining) = combatant.ability_cooldowns.get(&ability) {
-        builder.reject(ability, RejectionReason::OnCooldown { remaining: *remaining });
-        return;
-    }
-
-    // Owner presence is still required (pet without an owner shouldn't dispatch);
-    // owner position is no longer used now that the dist_to_owner filter is gone.
-    if ctx.combatants.get(&pet.owner).is_none() {
-        builder.reject(ability, RejectionReason::NoValidTarget);
-        return;
-    }
-
-    // U5: dist_to_owner ≤ 15.0 filter removed. The Spider's only spatial
-    // constraint is its own ability range (currently 20yd) against the target.
-    // The filter was incompatible with Hunter's 35yd kit range — when Hunter
-    // kited at safe distance, no target ever passed the 15yd-from-owner check
-    // and Spider Web never fired in 1v1.
-    let mut best_target: Option<(Entity, f32)> = None;
-    for (target_entity, info) in ctx.combatants.iter() {
-        if info.team == combatant.team || !info.is_alive || info.is_pet || info.stealthed {
-            continue;
-        }
-        let dist_to_spider = my_pos.distance(info.position);
-        if dist_to_spider > def.range {
-            continue;
-        }
-        if let Some(auras) = ctx.active_auras.get(target_entity) {
-            if auras.iter().any(|a| a.effect_type == AuraType::Root) {
-                continue;
-            }
-        }
-        // Prefer the closer-to-spider target (was: closer-to-owner under the
-        // old filter). Since the Spider stays near the owner today, this is
-        // equivalent in practice but more correct in spirit.
-        if best_target.map_or(true, |(_, d)| dist_to_spider < d) {
-            best_target = Some((*target_entity, dist_to_spider));
-        }
-    }
-
-    let Some((target_entity, _)) = best_target else {
-        builder.reject(ability, RejectionReason::NoValidTarget);
-        return;
-    };
-
-    builder.choose(ability, Some(target_entity), true);
-
     let projectile_speed = def.projectile_speed.unwrap_or(50.0);
     commands.spawn((
         Projectile {
             caster: entity,
-            target: target_entity,
+            target,
             ability,
             speed: projectile_speed,
             caster_team: combatant.team,
@@ -568,69 +636,17 @@ fn spider_ai(
     spawn_speech_bubble(commands, entity, &def.name);
 }
 
-// ==============================================================================
-// Boar AI
-// ==============================================================================
-
-fn boar_ai(
+/// Apply Boar Charge to a target: ChargingState marker + delayed Stun aura,
+/// set CD/GCD, log the cast.
+fn execute_boar_charge(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    def: &crate::states::play_match::ability_config::AbilityConfig,
     entity: Entity,
     combatant: &mut Combatant,
-    my_pos: Vec3,
-    pet: &Pet,
-    ctx: &CombatContext,
-    casting_targets: &Query<(Entity, &Combatant, &CastingState), Without<Pet>>,
-    builder: &mut DecisionEventBuilder<'_>,
+    target: Entity,
 ) {
-    if combatant.global_cooldown > 0.0 {
-        return;
-    }
-
     let ability = AbilityType::BoarCharge;
-    let Some(def) = abilities.get(&ability) else { return };
-    if let Some(remaining) = combatant.ability_cooldowns.get(&ability) {
-        builder.reject(ability, RejectionReason::OnCooldown { remaining: *remaining });
-        return;
-    }
-
-    let mut charge_target: Option<Entity> = None;
-    for (target_entity, target_combatant, _cast_state) in casting_targets.iter() {
-        if target_combatant.team == combatant.team || !target_combatant.is_alive() || target_combatant.stealthed {
-            continue;
-        }
-        if let Some(info) = ctx.combatants.get(&target_entity) {
-            let dist = my_pos.distance(info.position);
-            if dist >= super::super::constants::CHARGE_MIN_RANGE && dist <= def.range {
-                charge_target = Some(target_entity);
-                break;
-            }
-        }
-    }
-
-    if charge_target.is_none() {
-        if let Some(owner_info) = ctx.combatants.get(&pet.owner) {
-            if let Some(owner_target) = owner_info.target {
-                if let Some(target_info) = ctx.combatants.get(&owner_target) {
-                    if target_info.is_alive && target_info.team != combatant.team {
-                        let dist = my_pos.distance(target_info.position);
-                        if dist >= super::super::constants::CHARGE_MIN_RANGE && dist <= def.range {
-                            charge_target = Some(owner_target);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    let Some(target) = charge_target else {
-        builder.reject(ability, RejectionReason::NoValidTarget);
-        return;
-    };
-
-    builder.choose(ability, Some(target), true);
-
     commands.entity(entity).try_insert(ChargingState { target });
 
     if let Some(aura_pending) = AuraPending::from_ability(target, entity, def) {
@@ -651,67 +667,18 @@ fn boar_ai(
     spawn_speech_bubble(commands, entity, &def.name);
 }
 
-// ==============================================================================
-// Bird AI
-// ==============================================================================
-
-fn bird_ai(
+/// Apply Master's Call to a target: spawn DispelPending + DispelBurst, set
+/// CD/GCD, log the cast. Caller is responsible for verifying the target has
+/// at least one dispellable Root/MovementSpeedSlow aura.
+fn execute_masters_call(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    def: &crate::states::play_match::ability_config::AbilityConfig,
     entity: Entity,
     combatant: &mut Combatant,
-    _my_pos: Vec3,
-    pet: &Pet,
-    ctx: &CombatContext,
-    builder: &mut DecisionEventBuilder<'_>,
+    target: Entity,
 ) {
-    if combatant.global_cooldown > 0.0 {
-        return;
-    }
-
     let ability = AbilityType::MastersCall;
-    let Some(def) = abilities.get(&ability) else { return };
-    if let Some(remaining) = combatant.ability_cooldowns.get(&ability) {
-        builder.reject(ability, RejectionReason::OnCooldown { remaining: *remaining });
-        return;
-    }
-
-    let owner_needs_cleanse = ctx.active_auras.get(&pet.owner).map_or(false, |auras| {
-        auras.iter().any(|a| matches!(
-            a.effect_type,
-            AuraType::Root | AuraType::MovementSpeedSlow
-        ))
-    });
-
-    let cleanse_target = if owner_needs_cleanse {
-        Some(pet.owner)
-    } else {
-        let mut fallback: Option<Entity> = None;
-        for (ally_entity, info) in ctx.combatants.iter() {
-            if info.team != combatant.team || !info.is_alive || info.is_pet {
-                continue;
-            }
-            if let Some(auras) = ctx.active_auras.get(ally_entity) {
-                if auras.iter().any(|a| matches!(
-                    a.effect_type,
-                    AuraType::Root | AuraType::MovementSpeedSlow
-                )) {
-                    fallback = Some(*ally_entity);
-                    break;
-                }
-            }
-        }
-        fallback
-    };
-
-    let Some(target) = cleanse_target else {
-        builder.reject(ability, RejectionReason::NoValidTarget);
-        return;
-    };
-
-    builder.choose(ability, Some(target), true);
-
     commands.spawn(DispelPending {
         target,
         dispeller: entity,
@@ -743,4 +710,242 @@ fn bird_ai(
     );
 
     spawn_speech_bubble(commands, entity, &def.name);
+}
+
+// ==============================================================================
+// Autonomous pet dispatch fallbacks (fire when no PetCommand queued)
+// ==============================================================================
+//
+// These mirror the Hunter-side `try_dispatch_*` helpers' predicate logic but
+// run inside `pet_ai_system` so they fire even when Hunter is mid-cast (the
+// `Without<CastingState>` filter on `decide_abilities` would otherwise gate
+// dispatch). Both paths share the same execute_* helpers; the only difference
+// in the resulting trace is `dispatched_by` (set by Hunter, omitted by these
+// autonomous paths).
+
+/// Autonomous Spider Web dispatch — fires on the owner's target if conditions
+/// hold. Skips silently if the pet has no eligible target (e.g., owner has no
+/// target or target is out of range). Cooldown/heel/already-rooted are
+/// emitted as candidate rejections so the trace remains attributable.
+fn spider_autonomous_dispatch(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    pet: &Pet,
+    ctx: &CombatContext,
+    builder: &mut DecisionEventBuilder<'_>,
+) {
+    if combatant.global_cooldown > 0.0 {
+        return;
+    }
+    let ability = AbilityType::SpiderWeb;
+    let Some(def) = abilities.get(&ability) else { return };
+
+    // Heel suppression — pet AI already handled HP<25% via continue above,
+    // but defensively skip dispatch if the pet is heeling.
+    let hp_ratio = if combatant.max_health > 0.0 {
+        combatant.current_health / combatant.max_health
+    } else {
+        0.0
+    };
+    if hp_ratio < 0.25 {
+        return;
+    }
+
+    if let Some(remaining) = combatant.ability_cooldowns.get(&ability) {
+        builder.reject(ability, RejectionReason::OnCooldown { remaining: *remaining });
+        return;
+    }
+
+    let Some(owner_info) = ctx.combatants.get(&pet.owner) else {
+        builder.reject(ability, RejectionReason::NoValidTarget);
+        return;
+    };
+    let Some(target) = owner_info.target else {
+        builder.reject(ability, RejectionReason::NoValidTarget);
+        return;
+    };
+    let Some(target_info) = ctx.combatants.get(&target) else {
+        builder.reject(ability, RejectionReason::NoValidTarget);
+        return;
+    };
+    if !target_info.is_alive || target_info.is_pet || target_info.stealthed
+        || target_info.team == combatant.team
+    {
+        builder.reject(ability, RejectionReason::NoValidTarget);
+        return;
+    }
+
+    let dist = my_pos.distance(target_info.position);
+    if dist > def.range {
+        builder.reject(ability, RejectionReason::OutOfRange { distance: dist, max: def.range });
+        return;
+    }
+
+    if let Some(auras) = ctx.active_auras.get(&target) {
+        if auras.iter().any(|a| a.effect_type == AuraType::Root) {
+            builder.reject(ability, RejectionReason::AlreadyApplied);
+            return;
+        }
+    }
+
+    builder.choose(ability, Some(target), true);
+    execute_spider_web(commands, combat_log, def, entity, combatant, my_pos, target);
+}
+
+/// Autonomous Boar Charge dispatch. Friendly-CC guard applies here because
+/// charge deals impact damage (would break threshold-0 friendly CC).
+fn boar_autonomous_dispatch(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    pet: &Pet,
+    ctx: &CombatContext,
+    builder: &mut DecisionEventBuilder<'_>,
+) {
+    if combatant.global_cooldown > 0.0 {
+        return;
+    }
+    let ability = AbilityType::BoarCharge;
+    let Some(def) = abilities.get(&ability) else { return };
+
+    let hp_ratio = if combatant.max_health > 0.0 {
+        combatant.current_health / combatant.max_health
+    } else {
+        0.0
+    };
+    if hp_ratio < 0.25 {
+        return;
+    }
+
+    if let Some(remaining) = combatant.ability_cooldowns.get(&ability) {
+        builder.reject(ability, RejectionReason::OnCooldown { remaining: *remaining });
+        return;
+    }
+
+    let Some(owner_info) = ctx.combatants.get(&pet.owner) else {
+        builder.reject(ability, RejectionReason::NoValidTarget);
+        return;
+    };
+    let Some(target) = owner_info.target else {
+        builder.reject(ability, RejectionReason::NoValidTarget);
+        return;
+    };
+    let Some(target_info) = ctx.combatants.get(&target) else {
+        builder.reject(ability, RejectionReason::NoValidTarget);
+        return;
+    };
+    if !target_info.is_alive || target_info.is_pet || target_info.stealthed
+        || target_info.team == combatant.team
+    {
+        builder.reject(ability, RejectionReason::NoValidTarget);
+        return;
+    }
+
+    let dist = my_pos.distance(target_info.position);
+    if dist > def.range {
+        builder.reject(ability, RejectionReason::OutOfRange { distance: dist, max: def.range });
+        return;
+    }
+    if dist < super::super::constants::CHARGE_MIN_RANGE {
+        builder.reject(
+            ability,
+            RejectionReason::WithinDeadZone {
+                distance: dist,
+                min: super::super::constants::CHARGE_MIN_RANGE,
+            },
+        );
+        return;
+    }
+    if ctx.has_friendly_breakable_cc(target) {
+        builder.reject(ability, RejectionReason::FriendlyBreakableCC);
+        return;
+    }
+
+    builder.choose(ability, Some(target), true);
+    execute_boar_charge(commands, combat_log, def, entity, combatant, target);
+}
+
+/// Autonomous Master's Call dispatch. Cleanses Root/MovementSpeedSlow from
+/// the owner first, then scans allies. Mirrors `try_dispatch_masters_call`.
+fn bird_autonomous_dispatch(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    _my_pos: Vec3,
+    pet: &Pet,
+    ctx: &CombatContext,
+    builder: &mut DecisionEventBuilder<'_>,
+) {
+    if combatant.global_cooldown > 0.0 {
+        return;
+    }
+    let ability = AbilityType::MastersCall;
+    let Some(def) = abilities.get(&ability) else { return };
+
+    let hp_ratio = if combatant.max_health > 0.0 {
+        combatant.current_health / combatant.max_health
+    } else {
+        0.0
+    };
+    if hp_ratio < 0.25 {
+        return;
+    }
+
+    if let Some(remaining) = combatant.ability_cooldowns.get(&ability) {
+        builder.reject(ability, RejectionReason::OnCooldown { remaining: *remaining });
+        return;
+    }
+
+    let owner_needs_cleanse = ctx.active_auras.get(&pet.owner).map_or(false, |auras| {
+        auras.iter().any(|a| matches!(
+            a.effect_type,
+            AuraType::Root | AuraType::MovementSpeedSlow,
+        ))
+    });
+    let target = if owner_needs_cleanse {
+        Some(pet.owner)
+    } else {
+        let mut fallback: Option<Entity> = None;
+        for (ally_entity, info) in ctx.combatants.iter() {
+            if info.team != combatant.team || !info.is_alive || info.is_pet {
+                continue;
+            }
+            if let Some(auras) = ctx.active_auras.get(ally_entity) {
+                if auras.iter().any(|a| matches!(
+                    a.effect_type,
+                    AuraType::Root | AuraType::MovementSpeedSlow,
+                )) {
+                    fallback = Some(*ally_entity);
+                    break;
+                }
+            }
+        }
+        fallback
+    };
+
+    let Some(target) = target else {
+        builder.reject(ability, RejectionReason::NoValidTarget);
+        return;
+    };
+
+    // Range check from the bird's position to the cleanse recipient.
+    if let Some(target_info) = ctx.combatants.get(&target) {
+        let dist = _my_pos.distance(target_info.position);
+        if dist > def.range {
+            builder.reject(ability, RejectionReason::OutOfRange { distance: dist, max: def.range });
+            return;
+        }
+    }
+
+    builder.choose(ability, Some(target), true);
+    execute_masters_call(commands, combat_log, def, entity, combatant, target);
 }
