@@ -107,10 +107,10 @@ pub fn pick_selected_combatant(
     }
     camera_controller.pending_pick = false;
 
-    let Ok((camera, camera_transform)) = cameras.get_single() else {
+    let Ok((camera, camera_transform)) = cameras.single() else {
         return;
     };
-    let Ok(window) = windows.get_single() else {
+    let Ok(window) = windows.single() else {
         return;
     };
     let Some(cursor) = window.cursor_position() else {
@@ -145,7 +145,7 @@ pub fn sync_selection_ring(
     }
 
     for entity in existing_rings.iter() {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
 
     let Some(target) = selection.entity else {
@@ -199,7 +199,7 @@ pub fn follow_selection_ring(
                 ring_transform.scale = Vec3::splat(pulse);
             }
             _ => {
-                commands.entity(ring_entity).despawn_recursive();
+                commands.entity(ring_entity).despawn();
                 if selection.entity == Some(ring.target) {
                     selection.entity = None;
                 }

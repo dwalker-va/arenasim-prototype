@@ -159,7 +159,7 @@ where
     // Flush deferred commands between phases
     app.add_systems(
         Update,
-        apply_deferred
+        ApplyDeferred
             .after(CombatSystemPhase::ResourcesAndAuras)
             .before(CombatSystemPhase::CombatAndMovement)
             .run_if(run_condition.clone()),
@@ -180,7 +180,7 @@ where
                             // engagement plan). Without this, PetCommand has
                             // one-tick lag.
             pet_ai_system,
-            apply_deferred, // Flush CastingState for interrupt checks
+            ApplyDeferred, // Flush CastingState for interrupt checks
             check_interrupts,
             process_interrupts,
             process_casting,

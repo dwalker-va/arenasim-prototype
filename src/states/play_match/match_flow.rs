@@ -255,32 +255,32 @@ pub fn check_match_end(
         
         // Despawn all active projectiles to avoid frozen projectiles during celebration
         for projectile_entity in projectiles.iter() {
-            commands.entity(projectile_entity).despawn_recursive();
+            commands.entity(projectile_entity).despawn();
         }
         
         // Despawn all active spell impact effects (e.g., Mind Blast shadow spheres)
         for effect_entity in spell_effects.iter() {
-            commands.entity(effect_entity).despawn_recursive();
+            commands.entity(effect_entity).despawn();
         }
 
         // Despawn all active traps to prevent triggering during celebration
         for trap_entity in traps.iter() {
-            commands.entity(trap_entity).despawn_recursive();
+            commands.entity(trap_entity).despawn();
         }
 
         // Despawn all in-flight trap projectiles
         for trap_proj_entity in trap_projectiles.iter() {
-            commands.entity(trap_proj_entity).despawn_recursive();
+            commands.entity(trap_proj_entity).despawn();
         }
 
         // Despawn all active slow zones
         for zone_entity in slow_zones.iter() {
-            commands.entity(zone_entity).despawn_recursive();
+            commands.entity(zone_entity).despawn();
         }
 
         // Despawn all ice block visuals (aura system frozen during celebration prevents self-cleanup)
         for ice_entity in ice_blocks.iter() {
-            commands.entity(ice_entity).despawn_recursive();
+            commands.entity(ice_entity).despawn();
         }
 
         // Save combat log to file for debugging.

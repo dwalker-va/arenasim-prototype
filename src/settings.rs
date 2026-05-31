@@ -233,7 +233,7 @@ fn apply_runtime_settings(
 ) {
     // Only apply if settings changed AND it's not a restart-required change
     if settings.is_changed() && !settings.is_added() && !pending_restart.restart_required {
-        if let Ok(mut window) = windows.get_single_mut() {
+        if let Ok(mut window) = windows.single_mut() {
             // Apply VSync setting
             window.present_mode = if settings.vsync {
                 PresentMode::AutoVsync

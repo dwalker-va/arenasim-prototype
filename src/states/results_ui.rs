@@ -58,7 +58,7 @@ pub fn results_ui(
         .frame(
             egui::Frame::none()
                 .fill(egui::Color32::from_rgb(20, 20, 30))
-                .inner_margin(egui::Margin::same(20.0))
+                .inner_margin(egui::Margin::same(20))
         )
         .show(ctx, |ui| {
             ui.add_space(20.0);
@@ -245,7 +245,7 @@ fn render_expandable_combatant_row(ui: &mut egui::Ui, stats: &CombatantStats, te
     egui::Frame::none()
         .fill(egui::Color32::from_rgb(30, 30, 40))
         .rounding(4.0)
-        .inner_margin(egui::Margin::same(10.0))
+        .inner_margin(egui::Margin::same(10))
         .show(ui, |ui| {
             // Header row: Class name + Status badge
             ui.horizontal(|ui| {
@@ -261,7 +261,7 @@ fn render_expandable_combatant_row(ui: &mut egui::Ui, stats: &CombatantStats, te
                 egui::Frame::none()
                     .fill(status_bg)
                     .rounding(3.0)
-                    .inner_margin(egui::Margin::symmetric(6.0, 2.0))
+                    .inner_margin(egui::Margin::symmetric(6, 2))
                     .show(ui, |ui| {
                         ui.label(egui::RichText::new(status_text).size(10.0).color(egui::Color32::WHITE));
                     });
@@ -396,7 +396,8 @@ fn render_ability_bar(
         painter.rect_stroke(
             rect,
             2.0,
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 60, 70))
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 60, 70)),
+            egui::StrokeKind::Outside,
         );
 
         // Rank number

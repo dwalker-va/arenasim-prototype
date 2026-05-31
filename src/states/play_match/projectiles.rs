@@ -157,13 +157,13 @@ pub fn process_projectile_hits(
         // Get target position (immutable borrow)
         let Ok((target_transform, target, _)) = combatants.get(projectile.target) else {
             // Target no longer exists, despawn projectile
-            commands.entity(projectile_entity).despawn_recursive();
+            commands.entity(projectile_entity).despawn();
             continue;
         };
 
         if !target.is_alive() {
             // Target already dead, despawn projectile
-            commands.entity(projectile_entity).despawn_recursive();
+            commands.entity(projectile_entity).despawn();
             continue;
         }
 
@@ -176,7 +176,7 @@ pub fn process_projectile_hits(
             // Get caster data (position, combatant stats, auras) in a single query
             let Ok((caster_transform, caster_combatant, caster_auras)) = combatants.get(projectile.caster) else {
                 // Caster no longer exists, despawn projectile
-                commands.entity(projectile_entity).despawn_recursive();
+                commands.entity(projectile_entity).despawn();
                 continue;
             };
 
@@ -230,7 +230,7 @@ pub fn process_projectile_hits(
             // Get target info and apply damage
             let (actual_damage, absorbed, target_team, target_class, is_killing_blow, is_first_death) = {
                 let Ok((_, mut target, mut target_auras)) = combatants.get_mut(target_entity) else {
-                    commands.entity(projectile_entity).despawn_recursive();
+                    commands.entity(projectile_entity).despawn();
                     continue;
                 };
 
@@ -264,7 +264,7 @@ pub fn process_projectile_hits(
             // Update caster damage dealt (include absorbed damage - caster dealt it)
             {
                 let Ok((_, mut caster, _)) = combatants.get_mut(caster_entity) else {
-                    commands.entity(projectile_entity).despawn_recursive();
+                    commands.entity(projectile_entity).despawn();
                     continue;
                 };
                 caster.damage_dealt += actual_damage + absorbed;
@@ -392,7 +392,7 @@ pub fn process_projectile_hits(
         }
 
         // Despawn the projectile
-        commands.entity(projectile_entity).despawn_recursive();
+        commands.entity(projectile_entity).despawn();
     }
 }
 

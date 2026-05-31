@@ -119,7 +119,7 @@ pub fn handle_camera_input(
     // first cursor movement after a match enters, so the first click of a
     // match would silently never fire. The window's cursor_position() is
     // always current.
-    let cursor_now = windows.get_single().ok().and_then(|w| w.cursor_position());
+    let cursor_now = windows.single().ok().and_then(|w| w.cursor_position());
 
     // Handle mouse drag for rotation (left mouse button, only if not over UI)
     if mouse_button.just_pressed(MouseButton::Left) && !egui_wants_pointer {
@@ -179,7 +179,7 @@ pub fn update_camera_position(
     mut camera_query: Query<&mut Transform, With<ArenaCamera>>,
     combatants: Query<(Entity, &Transform, &Combatant), Without<ArenaCamera>>,
 ) {
-    let Ok(mut camera_transform) = camera_query.get_single_mut() else {
+    let Ok(mut camera_transform) = camera_query.single_mut() else {
         return;
     };
     

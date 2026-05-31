@@ -202,7 +202,7 @@ pub fn render_health_bars(
     // Use try_ctx_mut to gracefully handle window close
     let Some(ctx) = contexts.try_ctx_mut() else { return; };
 
-    let Ok((camera, camera_transform)) = camera_query.get_single() else {
+    let Ok((camera, camera_transform)) = camera_query.single() else {
         return;
     };
 
@@ -352,6 +352,7 @@ pub fn render_health_bars(
                         egui::Rect::from_min_size(bar_pos, egui::vec2(bar_width, bar_height)),
                         corner_radius,
                         egui::Stroke::new(border_width, border_color),
+                        egui::StrokeKind::Outside,
                     );
 
                     // Low HP outer glow effect (pulsing red halo)
@@ -365,6 +366,7 @@ pub fn render_health_bars(
                             ),
                             4.0 * ui_scale,
                             egui::Stroke::new(2.0 * ui_scale, egui::Color32::from_rgba_unmultiplied(255, 50, 50, glow_alpha)),
+                            egui::StrokeKind::Outside,
                         );
                     }
 
@@ -416,6 +418,7 @@ pub fn render_health_bars(
                             egui::Rect::from_min_size(resource_bar_pos, egui::vec2(bar_width, resource_bar_height)),
                             corner_radius,
                             egui::Stroke::new(1.0 * ui_scale, res_border_color),
+                            egui::StrokeKind::Outside,
                         );
 
                         next_bar_y_offset += resource_bar_height + bar_spacing;
@@ -454,6 +457,7 @@ pub fn render_health_bars(
                                 egui::Rect::from_min_size(cast_bar_pos, egui::vec2(cast_bar_width, cast_bar_height)),
                                 corner_radius,
                                 egui::Stroke::new(1.5 * ui_scale, egui::Color32::from_rgb(220, 50, 50)),
+                                egui::StrokeKind::Outside,
                             );
 
                             // "INTERRUPTED" text in white
@@ -494,6 +498,7 @@ pub fn render_health_bars(
                                 egui::Rect::from_min_size(cast_bar_pos, egui::vec2(cast_bar_width, cast_bar_height)),
                                 corner_radius,
                                 egui::Stroke::new(1.5 * ui_scale, egui::Color32::from_rgb(255, 200, 100)),
+                                egui::StrokeKind::Outside,
                             );
 
                             // Spell name text (centered on cast bar)
@@ -548,6 +553,7 @@ pub fn render_health_bars(
                                 egui::Rect::from_min_size(channel_bar_pos, egui::vec2(channel_bar_width, channel_bar_height)),
                                 corner_radius,
                                 egui::Stroke::new(1.5 * ui_scale, egui::Color32::from_rgb(220, 50, 50)),
+                                egui::StrokeKind::Outside,
                             );
 
                             // "INTERRUPTED" text
@@ -588,6 +594,7 @@ pub fn render_health_bars(
                                 egui::Rect::from_min_size(channel_bar_pos, egui::vec2(channel_bar_width, channel_bar_height)),
                                 corner_radius,
                                 egui::Stroke::new(1.5 * ui_scale, egui::Color32::from_rgb(100, 220, 180)),
+                                egui::StrokeKind::Outside,
                             );
 
                             // Spell name text (centered on channel bar)
@@ -779,6 +786,7 @@ fn render_aura_icons(
             icon_rect,
             corner_radius,
             egui::Stroke::new(border_width, border_color),
+            egui::StrokeKind::Outside,
         );
 
         // Draw pulsing outer glow for hard CC effects
@@ -789,6 +797,7 @@ fn render_aura_icons(
                 icon_rect.expand(glow_expand),
                 corner_radius + glow_expand,
                 egui::Stroke::new(3.0 * ui_scale, egui::Color32::from_rgba_unmultiplied(255, 80, 80, glow_alpha)),
+                egui::StrokeKind::Outside,
             );
         }
 

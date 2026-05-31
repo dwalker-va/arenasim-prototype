@@ -45,7 +45,7 @@ pub fn render_floating_combat_text(
     // Use try_ctx_mut to gracefully handle window close
     let Some(ctx) = contexts.try_ctx_mut() else { return; };
 
-    let Ok((camera, camera_transform)) = camera_query.get_single() else {
+    let Ok((camera, camera_transform)) = camera_query.single() else {
         return;
     };
 
@@ -257,7 +257,7 @@ pub fn cleanup_expired_spell_impacts(
 ) {
     for (entity, effect) in effects.iter() {
         if effect.lifetime <= 0.0 {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
         }
     }
 }
@@ -273,7 +273,7 @@ pub fn render_speech_bubbles(
     combatants: Query<&Transform, With<Combatant>>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
 ) {
-    let Ok((camera, camera_transform)) = camera_query.get_single() else {
+    let Ok((camera, camera_transform)) = camera_query.single() else {
         return;
     };
 
@@ -317,15 +317,16 @@ pub fn render_speech_bubbles(
         // White rounded rectangle background
         painter.rect_filled(
             rect,
-            egui::Rounding::same(6.0),
+            egui::Rounding::same(6),
             egui::Color32::from_rgba_unmultiplied(255, 255, 255, 240),
         );
 
         // Black border
         painter.rect_stroke(
             rect,
-            egui::Rounding::same(6.0),
+            egui::Rounding::same(6),
             egui::Stroke::new(2.0, egui::Color32::BLACK),
+            egui::StrokeKind::Outside,
         );
 
         // Draw text
@@ -351,7 +352,7 @@ pub fn update_speech_bubbles(
         bubble.lifetime -= dt;
 
         if bubble.lifetime <= 0.0 {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
         }
     }
 }
@@ -477,7 +478,7 @@ pub fn update_shield_bubbles(
     // Despawn bubbles for combatants without shield auras
     for (bubble_entity, bubble) in existing_bubbles.iter() {
         if !combatants_with_shield.contains(&bubble.combatant) {
-            commands.entity(bubble_entity).despawn_recursive();
+            commands.entity(bubble_entity).despawn();
         }
     }
 }
@@ -558,7 +559,7 @@ pub fn update_flame_particles(
         particle.lifetime -= dt;
 
         if particle.lifetime <= 0.0 {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
             continue;
         }
 
@@ -761,7 +762,7 @@ pub fn update_drain_particles(
         // Get the beam this particle belongs to
         let Ok(beam) = beams.get(particle.beam) else {
             // Beam was despawned, remove particle
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
             continue;
         };
 
@@ -770,17 +771,17 @@ pub fn update_drain_particles(
 
         // Despawn when reached caster
         if particle.progress >= 1.0 {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
             continue;
         }
 
         // Get caster and target positions
         let Ok(caster_transform) = positions.get(beam.caster) else {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
             continue;
         };
         let Ok(target_transform) = positions.get(beam.target) else {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
             continue;
         };
 
@@ -811,12 +812,12 @@ pub fn cleanup_drain_life_beams(
             // Despawn all particles belonging to this beam
             for (particle_entity, particle) in particles.iter() {
                 if particle.beam == beam_entity {
-                    commands.entity(particle_entity).despawn_recursive();
+                    commands.entity(particle_entity).despawn();
                 }
             }
 
             // Despawn the beam itself
-            commands.entity(beam_entity).despawn_recursive();
+            commands.entity(beam_entity).despawn();
         }
     }
 }
@@ -921,7 +922,7 @@ pub fn cleanup_expired_healing_lights(
 ) {
     for (entity, column) in columns.iter() {
         if column.lifetime <= 0.0 {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
         }
     }
 }
@@ -1031,7 +1032,7 @@ pub fn cleanup_expired_dispel_bursts(
 ) {
     for (entity, burst) in bursts.iter() {
         if burst.lifetime <= 0.0 {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
         }
     }
 }
