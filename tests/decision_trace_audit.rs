@@ -30,6 +30,7 @@ fn create_config(team1: Vec<&str>, team2: Vec<&str>, seed: Option<u64>) -> Headl
         // root-induced Charge rejections) to develop.
         max_duration_secs: 180.0,
         random_seed: seed,
+        label: None,
         team1_rogue_openers: vec![],
         team2_rogue_openers: vec![],
         team1_warlock_curse_prefs: vec![],

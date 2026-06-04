@@ -21,10 +21,12 @@
 //! }
 //! ```
 
+pub mod batch;
 pub mod config;
 pub mod matrix;
 pub mod runner;
 
+pub use batch::run_batch;
 pub use config::HeadlessMatchConfig;
 pub use matrix::run_matrix;
-pub use runner::{run_headless_match, run_headless_match_with, CombatantResult, HeadlessMatchState, MatchResult};
+pub use runner::{run_headless_match, run_headless_match_with, CombatantResult, EndReason, HeadlessMatchState, MatchResult};

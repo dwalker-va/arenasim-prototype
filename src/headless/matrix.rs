@@ -188,6 +188,7 @@ fn build_config(team1: CharacterClass, team2: CharacterClass, seed: u64) -> Head
         output_path: None,
         max_duration_secs: 300.0,
         random_seed: Some(seed),
+        label: None,
         team1_rogue_openers: vec![],
         team2_rogue_openers: vec![],
         team1_warlock_curse_prefs: vec![],

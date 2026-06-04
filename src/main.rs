@@ -20,7 +20,20 @@ use arenasim::ui::UiPlugin;
 fn main() {
     let args = cli::parse_args();
 
-    if let Some(n) = args.matrix {
+    if let Some(batch_path) = args.batch {
+        // Parallel in-process batch runner for sweeps (2v2/3v3/strategy vars).
+        let out = args.out.unwrap_or_else(|| {
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            format!("match_logs/batch_{}.csv", ts).into()
+        });
+        if let Err(e) = headless::run_batch(batch_path, out, args.jobs) {
+            eprintln!("Batch run failed: {}", e);
+            std::process::exit(1);
+        }
+    } else if let Some(n) = args.matrix {
         // 7×7 matchup matrix mode — defaults to trace `on` so every cell's
         // trace is on disk when an anomaly surfaces; explicit `off` opts out.
         let trace_mode = args.trace_mode.unwrap_or(cli::TraceMode::On);

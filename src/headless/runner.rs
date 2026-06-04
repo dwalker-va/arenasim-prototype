@@ -9,7 +9,8 @@ use std::time::Duration;
 use crate::combat::log::{CombatLog, CombatLogEventType, CombatantMetadata, MatchMetadata};
 use crate::states::match_config::MatchConfig;
 use crate::states::play_match::AbilityConfigPlugin;
-use crate::states::play_match::equipment::{EquipmentPlugin, ItemDefinitions, DefaultLoadouts, resolve_loadout, enforce_two_hand_conflicts, format_loadout};
+use crate::states::play_match::ability_config::{AbilityDefinitions, load_ability_definitions};
+use crate::states::play_match::equipment::{EquipmentPlugin, ItemDefinitions, DefaultLoadouts, resolve_loadout, enforce_two_hand_conflicts, format_loadout, load_item_definitions, load_default_loadouts};
 // Use the stable systems API instead of importing internal functions directly
 use crate::states::play_match::systems::{
     self, combatant_id, Combatant, FloatingTextState, GameRng, MatchCountdown, ShadowSightState,
@@ -40,12 +41,35 @@ pub struct MatchResult {
     pub winner: Option<u8>,
     /// Total match duration in seconds (from gates opening to match end)
     pub match_time: f32,
+    /// Why the match ended (kill / stalemate / cap).
+    pub end_reason: EndReason,
     /// Combatant statistics from the match
     pub team1_combatants: Vec<CombatantResult>,
     /// Combatant statistics from the match
     pub team2_combatants: Vec<CombatantResult>,
     /// Random seed used (if deterministic mode)
     pub random_seed: Option<u64>,
+}
+
+/// Why a match ended. Lets the batch runner distinguish a decisive result
+/// (`Kill`) from a timeout draw (`CapDraw`) — both `Kill` and `CapDraw` carry a
+/// `winner` of `Some`/`None` respectively, but the reason aids analysis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EndReason {
+    /// A team was eliminated — a decisive result.
+    Kill,
+    /// The hard `max_duration_secs` cap was hit — draw.
+    CapDraw,
+}
+
+impl EndReason {
+    /// Stable lowercase token for CSV/JSONL output.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            EndReason::Kill => "kill",
+            EndReason::CapDraw => "cap",
+        }
+    }
 }
 
 /// Statistics for a single combatant after the match
@@ -118,7 +142,7 @@ impl Plugin for HeadlessPlugin {
         // Add core combat systems using the shared API (always run in headless mode)
         systems::add_core_combat_systems(app, || true);
 
-        // Add headless-specific systems after combat resolution
+        // Add headless-specific systems after combat resolution.
         app.add_systems(Startup, headless_setup_match)
             .add_systems(
                 Update,
@@ -353,13 +377,13 @@ fn headless_check_match_end(
         return;
     }
 
-    // Check for timeout first
+    // Check for timeout (hard cap) first.
     if headless_state.elapsed_time >= headless_state.max_duration {
         info!(
             "Match timed out after {:.1}s - declaring DRAW",
             headless_state.elapsed_time
         );
-        let result = build_match_result(&combatants, &pets, None, &headless_state);
+        let result = build_match_result(&combatants, &pets, None, EndReason::CapDraw, &headless_state);
         if !headless_state.suppress_log {
             save_headless_match_log(&combatants, &pets, &config, &combat_log, None, &headless_state);
         }
@@ -384,7 +408,7 @@ fn headless_check_match_end(
             Some(2)
         };
 
-        let result = build_match_result(&combatants, &pets, winner, &headless_state);
+        let result = build_match_result(&combatants, &pets, winner, EndReason::Kill, &headless_state);
         if !headless_state.suppress_log {
             save_headless_match_log(&combatants, &pets, &config, &combat_log, winner, &headless_state);
         }
@@ -398,6 +422,7 @@ fn build_match_result(
     combatants: &Query<(Entity, &Combatant, &Transform), Without<Pet>>,
     pets: &Query<(&Combatant, &Pet)>,
     winner: Option<u8>,
+    end_reason: EndReason,
     headless_state: &HeadlessMatchState,
 ) -> MatchResult {
     let mut team1_combatants = Vec::new();
@@ -426,6 +451,7 @@ fn build_match_result(
     MatchResult {
         winner,
         match_time: headless_state.elapsed_time,
+        end_reason,
         team1_combatants,
         team2_combatants,
         random_seed: headless_state.random_seed,
@@ -523,10 +549,52 @@ pub fn run_headless_match(config: HeadlessMatchConfig) -> Result<MatchResult, St
 /// `Some(_)`, the AI decision trace is captured and written to the configured
 /// JSONL path; the in-process builder remains active either way (a no-op when
 /// `None`).
+/// Pre-parsed game configs (abilities, items, loadouts) for reuse across many
+/// matches in one process. Parsing the three RON files is identical work every
+/// match; loading once and cloning into each match removes that per-match cost.
+/// Used by the batch runner.
+pub struct PreloadedConfigs {
+    pub abilities: AbilityDefinitions,
+    pub items: ItemDefinitions,
+    pub loadouts: DefaultLoadouts,
+}
+
+impl PreloadedConfigs {
+    /// Parse all three RON config files once (abilities, items, then loadouts
+    /// which validate against items).
+    pub fn load() -> Result<Self, String> {
+        let abilities = load_ability_definitions()?;
+        let items = load_item_definitions()?;
+        let loadouts = load_default_loadouts(&items)?;
+        Ok(Self { abilities, items, loadouts })
+    }
+}
+
 pub fn run_headless_match_with(
     config: HeadlessMatchConfig,
     suppress_log: bool,
     trace_config: Option<TraceConfig>,
+) -> Result<MatchResult, String> {
+    run_match_impl(config, suppress_log, trace_config, None)
+}
+
+/// Like `run_headless_match_with`, but injects pre-parsed configs instead of
+/// re-reading the three RON files. Used by the batch runner so the parse cost
+/// is paid once per process rather than once per match.
+pub fn run_headless_match_prepared(
+    config: HeadlessMatchConfig,
+    configs: &PreloadedConfigs,
+    suppress_log: bool,
+    trace_config: Option<TraceConfig>,
+) -> Result<MatchResult, String> {
+    run_match_impl(config, suppress_log, trace_config, Some(configs))
+}
+
+fn run_match_impl(
+    config: HeadlessMatchConfig,
+    suppress_log: bool,
+    trace_config: Option<TraceConfig>,
+    preloaded: Option<&PreloadedConfigs>,
 ) -> Result<MatchResult, String> {
     if !suppress_log {
         println!("Starting headless match simulation...");
@@ -550,10 +618,44 @@ pub fn run_headless_match_with(
         // which is ~0µs in a tight loop — no in-game time would pass and the
         // match would never end.
         .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(1.0 / 60.0)))
-        .add_plugins(TransformPlugin)
-        .add_plugins(AbilityConfigPlugin)
-        .add_plugins(EquipmentPlugin)
-        .add_plugins(HeadlessPlugin { config: config.clone(), suppress_log });
+        .add_plugins(TransformPlugin);
+
+    // Game configs: reuse pre-parsed resources when provided (batch runner),
+    // otherwise load from disk via the plugins (single-match / matrix paths).
+    // The two loader plugins only *insert these resources* — no systems — so
+    // inserting clones directly is equivalent.
+    match preloaded {
+        Some(c) => {
+            app.insert_resource(c.abilities.clone())
+                .insert_resource(c.items.clone())
+                .insert_resource(c.loadouts.clone());
+        }
+        None => {
+            app.add_plugins(AbilityConfigPlugin)
+                .add_plugins(EquipmentPlugin);
+        }
+    }
+    app.add_plugins(HeadlessPlugin { config: config.clone(), suppress_log });
+
+    // Run each match with the single-threaded executor: systems execute inline
+    // on the calling thread instead of being dispatched to the shared global
+    // ComputeTaskPool. This is what lets the batch runner's match-level worker
+    // threads scale — otherwise every match funnels its system execution through
+    // the one task pool and cross-match parallelism collapses. Determinism is
+    // preserved (and arguably strengthened): execution order is fully fixed by
+    // the explicit combat-phase ordering.
+    {
+        use bevy::ecs::schedule::ExecutorKind;
+        let single = |s: &mut Schedule| {
+            s.set_executor_kind(ExecutorKind::SingleThreaded);
+        };
+        app.edit_schedule(First, single)
+            .edit_schedule(PreUpdate, single)
+            .edit_schedule(Update, single)
+            .edit_schedule(PostUpdate, single)
+            .edit_schedule(Last, single)
+            .edit_schedule(Startup, single);
+    }
 
     // Install the decision-trace writer (if requested) BEFORE the first
     // app.update() so frame-0 events land in the file. Mirror the match's
