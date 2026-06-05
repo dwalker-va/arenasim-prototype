@@ -27,9 +27,13 @@ only — 2v2/3v3 is the balance target.**
 
 ## Method
 
-- Tooling: in-process 1v1 `--matrix N` (`src/headless/matrix.rs`) and the
-  `scripts/hunter_2v2_full_matrix.sh` sweep (Hunter+partner vs every distinct
-  opposing pair, excluding double-healer comps; 120 matchups).
+- Tooling: this investigation predates the `balance-sweep` skill; it used the
+  in-process 1v1 `--matrix N` runner and an ad-hoc 2v2 shell sweep (Hunter+partner
+  vs every distinct opposing pair, excluding double-healer comps; 120 matchups).
+  Reproduce equivalents today via the `balance-sweep` skill (`scripts/gen_sweep.py`
+  + `arenasim --batch`). Note: the multithreaded `--matrix` numbers below differ
+  by a few points from today's canonical batch baselines (see the canonical
+  baselines summary); the conclusions are unaffected.
 - Discipline: clean before/after on the **same binary/toolchain**, matched seeds,
   matched N. Both `abilities.ron` and `items.ron` are runtime assets, so balance
   edits need no rebuild.
@@ -49,7 +53,7 @@ only — 2v2/3v3 is the balance target.**
 | **Hunter** | **10.9%** | **bottom** |
 
 Mage beats Warrior, Priest, Warlock, Paladin, **and Hunter 100–0**; its only losing
-matchup is Rogue. Data: `matrix_1v1_n100_2026-06-04_baseline.csv`.
+matchup is Rogue.
 
 ## 2. Hunter vs Mage is a damage problem, not control
 
@@ -75,8 +79,6 @@ applies a 70% slow. Hunter's sustained answer is Auto Shot at ~9 DPS.
 | 20–26 (baseline) | 10.9% |
 | 30–39 (1.5×) | 22.0% |
 | 40–52 (2×) | 37.3% |
-
-Data: `matrix_1v1_n100_2026-06-04_{baseline,autoshot15,autoshot2x}.csv`.
 
 ### The lever is blunt — it scales with match length
 Because Auto Shot fires once per 2.5s (0.4 attacks/sec, untouched per the "damage
@@ -134,8 +136,6 @@ healer-backed carry**. Every opposing comp containing a Mage stays near-unwinnab
 (Mage+Warlock 0%, Mage+Priest 2%, Mage+Paladin 3%) — more sustained Auto Shot DPS
 can't change a race the team loses to burst.
 
-Data: `matrix_2v2_full_n20_{baseline,autoshot15}.csv`.
-
 ## 6. The Frostbolt nerf: works on its target, but is symmetric
 
 Coefficient 0.8 → 0.6 (Frostbolt ~110 → ~86, a ~22% cut).
@@ -151,9 +151,6 @@ Coefficient 0.8 → 0.6 (Frostbolt ~110 → ~86, a ~22% cut).
   Hunter's partner does not) **6.5% → 7.3% (Auto Shot only) → 15.2% (combo)** — the
   Frostbolt nerf more than doubled Hunter's odds vs enemy Mages. Even so, 15% is still
   a losing matchup, and Mage+healer comps stay ~0%.
-
-Data: `matrix_1v1_n100_2026-06-04_{frostnerf,combo}.csv`,
-`matrix_2v2_full_n20_combo.csv`.
 
 ## Conclusions & open problems
 

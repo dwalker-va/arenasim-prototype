@@ -78,8 +78,11 @@ def enumerate_opponents(size, exclude_double_healer, exclude_all_healer):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--t1", required=True,
+    ap.add_argument("--t1", default=None,
                     help="team1 template, e.g. 'Hunter', 'Hunter+{p}', 'Hunter+Priest+Warrior'")
+    ap.add_argument("--full", type=int, default=None, metavar="SIZE",
+                    help="complete SIZE-v-SIZE matrix: every distinct-class team of SIZE "
+                         "vs every other (both orderings). Ignores --t1/--t2-size.")
     ap.add_argument("--t2-size", type=int, default=None,
                     help="opposing team size (default: same as t1)")
     ap.add_argument("--n", type=int, default=100, help="seeds per matchup (default 100)")
@@ -98,12 +101,28 @@ def main():
 
     extra = json.loads(args.extra) if args.extra else {}
 
+    # team1 set: --full enumerates every distinct-class team of SIZE; otherwise
+    # expand the --t1 template.
+    if args.full is not None:
+        # Full matrix keeps every distinct-class combo on team1 (no all-healer
+        # auto-exclusion); --exclude-double-healer still applies if requested.
+        team1_set = list(enumerate_opponents(args.full, args.exclude_double_healer, False))
+    else:
+        if not args.t1:
+            ap.error("provide --t1 or --full")
+        team1_set = list(expand_t1(args.t1))
+
     out = sys.stdout
     count = 0
-    for team1 in expand_t1(args.t1):
-        t2_size = args.t2_size if args.t2_size is not None else len(team1)
-        for opp in enumerate_opponents(t2_size, args.exclude_double_healer,
-                                       not args.include_all_healer):
+    for team1 in team1_set:
+        if args.full is not None:
+            t2_size = args.full
+            opp_iter = enumerate_opponents(t2_size, args.exclude_double_healer, False)
+        else:
+            t2_size = args.t2_size if args.t2_size is not None else len(team1)
+            opp_iter = enumerate_opponents(t2_size, args.exclude_double_healer,
+                                           not args.include_all_healer)
+        for opp in opp_iter:
             label = "+".join(team1) + "_vs_" + "+".join(opp)
             if args.label_suffix:
                 label += "#" + args.label_suffix
