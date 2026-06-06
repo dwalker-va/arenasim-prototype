@@ -21,6 +21,7 @@ fn create_config(team1: Vec<&str>, team2: Vec<&str>, seed: Option<u64>) -> Headl
         output_path: None,
         max_duration_secs: 60.0, // Short duration for tests
         random_seed: seed,
+        label: None,
         team1_rogue_openers: vec![],
         team2_rogue_openers: vec![],
         team1_warlock_curse_prefs: vec![],
@@ -50,6 +51,7 @@ fn test_match_result_has_winner() {
     let result = MatchResult {
         winner: Some(1),
         match_time: 30.0,
+        end_reason: arenasim::headless::EndReason::Kill,
         team1_combatants: vec![],
         team2_combatants: vec![],
         random_seed: Some(12345),

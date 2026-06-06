@@ -567,7 +567,7 @@ pub struct ItemsConfig {
 }
 
 /// Resource containing all item definitions
-#[derive(Resource)]
+#[derive(Resource, Clone)]
 pub struct ItemDefinitions {
     definitions: HashMap<ItemId, ItemConfig>,
 }
@@ -615,7 +615,7 @@ pub struct LoadoutsConfig {
 }
 
 /// Resource containing default loadouts per class
-#[derive(Resource)]
+#[derive(Resource, Clone)]
 pub struct DefaultLoadouts {
     loadouts: HashMap<CharacterClass, HashMap<ItemSlot, ItemId>>,
 }
