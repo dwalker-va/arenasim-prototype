@@ -134,11 +134,15 @@ just those at high N.
 
 ## Canonical baselines
 
-Current-state references (batch harness, 300s cap), regenerate after any change
-that ships:
+Current-state references (batch harness, 300s cap). **Regenerate and overwrite
+these after any change that ships**, and update the summary's class/comp tier
+lists:
 
-- `design-docs/balance/2026-06-04_canonical_1v1_n100_300s.csv`
-- `design-docs/balance/2026-06-04_canonical_2v2_n20_300s.csv`
+- `design-docs/balance/canonical_1v1_n100_300s.csv` (full 7×7)
+- `design-docs/balance/canonical_2v2_full_n100_300s.csv` (complete 441-comp matrix)
+- `design-docs/balance/canonical_3v3_full_n50_300s.csv` (complete 1225-comp matrix)
+- `design-docs/balance/canonical_baselines_summary.md` — tier lists + the current
+  meta read (what's meta-defining / unplayable), with a generated-on date inside.
 
 For deeper context on a worked investigation (Hunter/Mage), see
 `design-docs/balance/2026-06-04-hunter-mage-balance-findings.md`.
