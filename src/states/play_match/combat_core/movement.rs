@@ -72,11 +72,15 @@ fn find_best_kiting_direction(
     best_direction
 }
 
+/// How close a `MovementGoal::Point` directive walks before stopping (units).
+/// Prevents oscillation around the exact formation point.
+pub const DIRECTIVE_POINT_EPSILON: f32 = 0.25;
+
 pub fn move_to_target(
     countdown: Res<MatchCountdown>,
     time: Res<Time>,
     mut commands: Commands,
-    mut combatants: Query<(Entity, &mut Transform, &Combatant, Option<&ActiveAuras>, Option<&CastingState>, Option<&ChargingState>, Option<&ChannelingState>, Option<&DisengagingState>)>,
+    mut combatants: Query<(Entity, &mut Transform, &Combatant, Option<&ActiveAuras>, Option<&CastingState>, Option<&ChargingState>, Option<&ChannelingState>, Option<&DisengagingState>, Option<&MovementDirective>)>,
     orbs: Query<&Transform, (With<ShadowSightOrb>, Without<Combatant>)>,
     pet_query: Query<&Pet>,
 ) {
@@ -86,6 +90,8 @@ pub fn move_to_target(
     }
 
     let dt = time.delta_secs();
+    // Absolute sim-time, compared against MovementDirective.expires deadlines.
+    let now = time.elapsed_secs();
 
     // Build a snapshot of all combatant positions and team info for lookups.
     // BTreeMap (not HashMap) so iteration order is deterministic by Entity —
@@ -97,11 +103,25 @@ pub fn move_to_target(
     // section) and the matching comments in auto_attack.rs.
     let positions: std::collections::BTreeMap<Entity, (Vec3, u8)> = combatants
         .iter()
-        .map(|(entity, transform, combatant, _, _, _, _, _)| (entity, (transform.translation, combatant.team)))
+        .map(|(entity, transform, combatant, _, _, _, _, _, _)| (entity, (transform.translation, combatant.team)))
         .collect();
 
     // Move each combatant towards their target if needed
-    for (entity, mut transform, combatant, auras, casting_state, charging_state, channeling_state, disengaging_state) in combatants.iter_mut() {
+    for (entity, mut transform, combatant, auras, casting_state, charging_state, channeling_state, disengaging_state, movement_directive) in combatants.iter_mut() {
+        // MOVEMENT DIRECTIVE EXPIRY — checked before EVERY early-continue
+        // below (death, casting, channeling, root/stun). `expires` is an
+        // absolute sim-time deadline: a directive issued pre-stun must be
+        // gone on the first post-stun frame, not survive the stun frozen at
+        // full lifetime and move the healer along a stale vector. Expired
+        // directives are removed and never executed.
+        let movement_directive = match movement_directive {
+            Some(d) if now >= d.expires => {
+                commands.entity(entity).remove::<MovementDirective>();
+                None
+            }
+            other => other,
+        };
+
         if !combatant.is_alive() {
             continue;
         }
@@ -255,6 +275,67 @@ pub fn move_to_target(
             } else {
                 commands.entity(entity).remove::<DisengagingState>();
             }
+        }
+
+        // MOVEMENT DIRECTIVE: execute an unexpired directive issued by class
+        // AI (healer postures, U6+). Ladder position is deliberate: casting/
+        // channeling/root/stun continue ABOVE (R12 — posture movement happens
+        // in cast gaps and never overrides CC), Charge/Disengage are scripted
+        // bursts that outrank it, and the kiting branch below stays untouched
+        // (R14 — Mage/Hunter kiting is a separate mechanism). Entities
+        // without the component fall through unchanged.
+        if let Some(directive) = movement_directive {
+            // Effective movement speed: base × MovementSpeedSlow multipliers
+            // (mirrors the kiting branch's slow handling).
+            let mut movement_speed = combatant.base_movement_speed;
+            if let Some(auras) = auras {
+                for aura in &auras.auras {
+                    if aura.effect_type == AuraType::MovementSpeedSlow {
+                        movement_speed *= aura.magnitude;
+                    }
+                }
+            }
+            let mut move_distance = movement_speed * dt;
+
+            let direction = match directive.goal {
+                MovementGoal::Direction(dir) => {
+                    Vec3::new(dir.x, 0.0, dir.y).normalize_or_zero()
+                }
+                MovementGoal::Point(point) => {
+                    let to_point = Vec3::new(point.x - my_pos.x, 0.0, point.z - my_pos.z);
+                    let distance = to_point.length();
+                    if distance <= DIRECTIVE_POINT_EPSILON {
+                        // Arrived: hold position until the directive expires
+                        // or the issuing AI replaces it.
+                        Vec3::ZERO
+                    } else {
+                        // Don't overshoot the point this frame.
+                        move_distance = move_distance.min(distance);
+                        to_point.normalize_or_zero()
+                    }
+                }
+                MovementGoal::Entity(target) => {
+                    if let Some(&(target_pos, _)) = positions.get(&target) {
+                        Vec3::new(target_pos.x - my_pos.x, 0.0, target_pos.z - my_pos.z)
+                            .normalize_or_zero()
+                    } else {
+                        // Target despawned — hold; the directive's TTL or the
+                        // issuing AI's abort logic cleans it up.
+                        Vec3::ZERO
+                    }
+                }
+            };
+
+            if direction != Vec3::ZERO {
+                transform.translation += direction * move_distance;
+                transform.translation = clamp_to_arena(transform.translation);
+
+                // Rotate to face direction of travel
+                let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
+                transform.rotation = target_rotation;
+            }
+
+            continue; // Directive owns this frame's movement
         }
 
         // KITING BEHAVIOR: If kiting_timer > 0, move away from nearest enemy
