@@ -113,6 +113,39 @@ pub fn decide_rogue_action(
         ) {
             builder.finish();
             return true;
+        } else {
+            // ENERGY POOLING: when the ONLY thing stopping Kidney Shot is
+            // energy, do not burn energy on Sinister Strike this tick — hold
+            // until Kidney Shot (60) is affordable. Without this gate, SS
+            // (40) re-drains the pool every tick and energy oscillates in
+            // the 40-59 band, so the stun NEVER fires. Pre-U4.1 this worked
+            // by accident: a target invisible mid-cast made the Rogue skip
+            // whole decision ticks, pooling energy unintentionally; the
+            // snapshot casting-visibility fix removed those idle ticks and
+            // Kidney Shot usage collapsed (86/100 -> 0/100 vs Priest).
+            //
+            // Classifier-order guarantees make this safe: cooldown is
+            // classified before resource, so InsufficientResource implies
+            // the CD is ready; resource precedes range, but Kidney Shot and
+            // SS share MELEE_RANGE, so suppressing SS while out of range
+            // costs nothing. Energy regen ticks passively, so pooling
+            // always terminates.
+            let ks_def = abilities.get_unchecked(&kidney_shot);
+            let reason = classify_pre_cast_failure(
+                kidney_shot, ks_def, combatant, my_pos, None,
+                Some((ks_target_entity, ks_target_pos)), ctx,
+                PreCastOpts::default(),
+            );
+            if matches!(reason, RejectionReason::InsufficientResource { .. }) {
+                builder.reject(
+                    AbilityType::SinisterStrike,
+                    RejectionReason::PreconditionUnmet {
+                        note: "pooling energy for Kidney Shot".into(),
+                    },
+                );
+                builder.finish();
+                return false;
+            }
         }
     } else {
         builder.reject(kidney_shot, RejectionReason::NoValidTarget);

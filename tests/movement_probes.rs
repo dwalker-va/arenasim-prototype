@@ -720,11 +720,96 @@ mod priest_postures {
         let priest_events = events.iter().filter(|e| e.team == 1 && e.slot == 1).count();
         assert_min_occurrences("focused Priest movement_decision events", priest_events, 1);
 
-        assert!(
-            path > 60.0,
-            "statue pathology: focused Priest post-gate path is only {:.1} units \
-             (pre-U6 baseline ~21; measured post-U6 ~89; healthy threshold 60)",
+        // Hard-CC exclusion (added with the Rogue energy-pooling fix): the
+        // Rogue now reliably lands Kidney Shot on the focused Priest, and a
+        // STUNNED Priest cannot move — raw path length during stun windows
+        // measures the CC, not the posture AI ("won't move" vs "can't
+        // move"). Exclude [cast, cast + stun_duration] spans around every
+        // enemy Rogue stun landing (the Rogue is forced onto the Priest, so
+        // every stun it casts is on it) and assert the threshold over the
+        // un-CC'd segments only. Trace sim_time is combat time — shift by
+        // gate_time to compare against timeline timestamps.
+        use arenasim::states::play_match::abilities::AbilityType;
+        let ability_defs =
+            arenasim::states::play_match::ability_config::load_ability_definitions()
+                .expect("abilities.ron loads");
+        let stun_spans: Vec<(f32, f32)> = trace
+            .iter()
+            .filter(|v| {
+                v["kind"] == "ability_decision"
+                    && v["actor"]["team"] == 2
+                    && v["actor"]["class"] == "Rogue"
+                    && v["outcome"]["type"] == "action_taken"
+                    && matches!(
+                        v["outcome"]["ability"].as_str(),
+                        Some("KidneyShot") | Some("CheapShot")
+                    )
+            })
+            .map(|v| {
+                let t = v["sim_time"].as_f64().unwrap() as f32 + gate_time;
+                let ability = match v["outcome"]["ability"].as_str().unwrap() {
+                    "KidneyShot" => AbilityType::KidneyShot,
+                    _ => AbilityType::CheapShot,
+                };
+                let dur = ability_defs
+                    .get_unchecked(&ability)
+                    .applies_aura
+                    .as_ref()
+                    .map(|a| a.duration)
+                    .unwrap_or(0.0);
+                (t, t + dur)
+            })
+            .collect();
+
+        let in_stun = |t: f32| stun_spans.iter().any(|(a, b)| t >= *a && t <= *b);
+        let mut free_path = 0.0_f32;
+        let mut free_secs = 0.0_f32;
+        let mut seg_start = None::<usize>;
+        let mut close_seg = |start: usize, end: usize, fp: &mut f32, fs: &mut f32| {
+            let seg = &post_gate[start..end];
+            if seg.len() >= 2 {
+                *fp += path_length(seg);
+                *fs += seg.last().unwrap().0 - seg.first().unwrap().0;
+            }
+        };
+        for (i, s) in post_gate.iter().enumerate() {
+            if in_stun(s.0) {
+                if let Some(start) = seg_start.take() {
+                    close_seg(start, i, &mut free_path, &mut free_secs);
+                }
+            } else if seg_start.is_none() {
+                seg_start = Some(i);
+            }
+        }
+        if let Some(start) = seg_start {
+            close_seg(start, post_gate.len(), &mut free_path, &mut free_secs);
+        }
+
+        // RATE, not absolute distance: a working Rogue (energy pooling lands
+        // Kidney Shot now) halves the focused Priest's survival, so any
+        // absolute path threshold conflates mobility with lifespan. The
+        // statue band is ~0.65 units per un-CC'd second (21 units / ~32s);
+        // healthy post-U6 movement measures ~2.8-3.3 u/s. Threshold 1.5 sits
+        // well above statue, well below healthy.
+        let rate = free_path / free_secs.max(f32::EPSILON);
+        eprintln!(
+            "statue probe: un-CC'd path={:.1} over {:.1}s free = {:.2} u/s \
+             ({} stun span(s) excluded; raw path={:.1})",
+            free_path,
+            free_secs,
+            rate,
+            stun_spans.len(),
             path
+        );
+
+        assert!(
+            rate > 1.5,
+            "statue pathology: focused Priest moved {:.2} units per un-CC'd \
+             second ({:.1} units / {:.1}s free; statue band ~0.65, healthy \
+             ~2.8+, threshold 1.5)",
+            rate,
+            free_path,
+            free_secs
         );
         // Threat-range ceiling — a REGRESSION NET, not an aspiration. The
         // Rogue moves at the same base speed as the Priest and casting locks

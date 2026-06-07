@@ -425,3 +425,90 @@ fn movement_decision_volume_is_bounded_in_double_healer_match() {
         count, match_time, per_second, seed,
     );
 }
+
+/// Regression: Rogue energy pooling for Kidney Shot.
+///
+/// The U4.1 snapshot casting-visibility fix removed the Rogue's accidental
+/// idle ticks (its target was invisible mid-cast pre-fix), and Kidney Shot
+/// usage vs casters collapsed from 86/100 to 0/100 matches: Sinister Strike
+/// (40 energy) re-drained the pool every tick so Kidney Shot (60) was never
+/// affordable. The pooling gate in `decide_rogue_action` holds energy when
+/// Kidney Shot's only blocker is energy. This pins both halves:
+///   (a) the stun fires again vs a casting target, and
+///   (b) pooling does not starve the Rogue's damage output (SS still casts
+///       while Kidney Shot is on cooldown).
+#[test]
+fn rogue_pools_energy_and_lands_kidney_shot() {
+    let mut found = None;
+    // The pre-U4 meta landed Kidney Shot in 86/100 Rogue v Priest games; with
+    // pooling it should be near-universal again — scan a few seeds and accept
+    // the first hit so a meta shift moves the pin instead of breaking it.
+    for seed in [1_u64, 2, 3, 5, 8, 13] {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+        drop(tmp);
+
+        let config = HeadlessMatchConfig {
+            team1: vec!["Rogue".to_string()],
+            team2: vec!["Priest".to_string()],
+            max_duration_secs: 120.0,
+            random_seed: Some(seed),
+            ..Default::default()
+        };
+        run_headless_match_with(
+            config,
+            true,
+            Some(TraceConfig { output_path: path.clone() }),
+        )
+        .unwrap_or_else(|e| panic!("Rogue v Priest seed {} failed: {}", seed, e));
+
+        let body = std::fs::read_to_string(&path).expect("read trace file");
+        let mut kidney_casts = 0_usize;
+        let mut ss_casts = 0_usize;
+        let mut pooling_rejects = 0_usize;
+        for line in body.lines() {
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+                continue;
+            };
+            if v["kind"] != "ability_decision" || v["actor"]["class"] != "Rogue" {
+                continue;
+            }
+            if v["outcome"]["type"] == "action_taken" {
+                match v["outcome"]["ability"].as_str() {
+                    Some("KidneyShot") => kidney_casts += 1,
+                    Some("SinisterStrike") => ss_casts += 1,
+                    _ => {}
+                }
+            }
+            if let Some(cands) = v["candidates"].as_array() {
+                pooling_rejects += cands
+                    .iter()
+                    .filter(|c| {
+                        c["ability"] == "SinisterStrike"
+                            && c["reason"]["PreconditionUnmet"]["note"]
+                                .as_str()
+                                .is_some_and(|n| n.contains("pooling"))
+                    })
+                    .count();
+            }
+        }
+        let _ = std::fs::remove_file(&path);
+
+        if kidney_casts >= 1 {
+            found = Some((seed, kidney_casts, ss_casts, pooling_rejects));
+            break;
+        }
+    }
+
+    let (seed, kidney, ss, pools) =
+        found.expect("no scanned seed produced a Kidney Shot vs a Priest — pooling gate broken?");
+    assert!(
+        ss >= 1,
+        "pooling starved Sinister Strike entirely (seed {}): kidney={} ss={}",
+        seed, kidney, ss,
+    );
+    println!(
+        "rogue pooling regression: seed {} — {} Kidney Shot(s), {} Sinister Strike(s), {} pooling holds",
+        seed, kidney, ss, pools,
+    );
+}
