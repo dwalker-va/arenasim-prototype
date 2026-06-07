@@ -1,7 +1,7 @@
 ---
 title: "feat: Healer Posture-Based Movement AI"
 type: feat
-status: active
+status: completed
 date: 2026-06-06
 ---
 
