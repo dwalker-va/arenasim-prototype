@@ -342,6 +342,24 @@ impl<'a> CombatContext<'a> {
         })
     }
 
+    /// Product of `MovementSpeedSlow` magnitudes currently on `entity`
+    /// (`1.0` = unslowed; `0.5` = moving at half speed). Mirrors the
+    /// executor's slow handling in `move_to_target`, so the ESCAPE window
+    /// math (R7) predicts the same effective speed the directive will
+    /// actually move at.
+    pub fn movement_slow_multiplier(&self, entity: Entity) -> f32 {
+        self.active_auras
+            .get(&entity)
+            .map(|auras| {
+                auras
+                    .iter()
+                    .filter(|a| a.effect_type == AuraType::MovementSpeedSlow)
+                    .map(|a| a.magnitude)
+                    .product()
+            })
+            .unwrap_or(1.0)
+    }
+
     /// Derived closing intent — no velocity history (keeps the hot path free
     /// of mutable state). `threat` is closing on `me` when its kill target is
     /// `me` AND its pursuit movement would reduce the distance this frame,

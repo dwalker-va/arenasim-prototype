@@ -577,16 +577,22 @@ pub fn decide_abilities(
                 &mut decision_trace,
             ),
             match_config::CharacterClass::Priest => {
-                // Posture evaluation (healer movement AI, U6) runs BEFORE the
-                // ability pass and OUTSIDE the GCD short-circuit inside
+                // Posture evaluation (healer movement AI, U6/U7) runs BEFORE
+                // the ability pass and OUTSIDE the GCD short-circuit inside
                 // decide_priest_action — directives must refresh while on GCD
                 // (the GCD locks casts, not legs). Gated on gates_opened: no
                 // pre-match directives or trace events. Casting Priests never
                 // get here (query excludes CastingState/ChannelingState), so
                 // posture movement lives in cast gaps only (R12).
+                //
+                // `escape_defer` is `Some(urgency_hp_threshold)` while an
+                // ESCAPE window is live (U7 cast-vs-move urgency): the heal
+                // ladder defers non-critical movement-locking casts for the
+                // window.
+                let mut escape_defer: Option<f32> = None;
                 if countdown.gates_opened {
                     if let Ok((posture, directive)) = healer_movement.get_mut(entity) {
-                        class_ai::priest::evaluate_priest_posture(
+                        escape_defer = class_ai::priest::evaluate_priest_posture(
                             &mut commands,
                             entity,
                             &combatant,
@@ -611,6 +617,7 @@ pub fn decide_abilities(
                     &ctx,
                     &mut shielded_this_frame,
                     &mut fortified_this_frame,
+                    escape_defer,
                     &mut decision_trace,
                 )
             },

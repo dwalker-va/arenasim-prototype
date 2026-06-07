@@ -37,6 +37,18 @@ use super::{CombatContext, CombatantInfo};
 
 /// Priest AI: Decides and executes abilities for a Priest combatant.
 ///
+/// `escape_defer` is the cast-vs-move urgency input (R7/AE1), returned by
+/// `evaluate_priest_posture`: `Some(urgency_hp_threshold)` while an ESCAPE
+/// window is live. While set, NON-critical movement-locking casts are
+/// deferred — Flash Heal is skipped when the would-be heal target's HP
+/// fraction is above the threshold (movement wins), and Mind Blast (a damage
+/// cast, never critical) is skipped outright. At or below the threshold the
+/// heal fires normally: critical heals always win. Instants (PW: Shield,
+/// PW: Fortitude, Dispel Magic) are NOT deferred — they trigger the GCD but
+/// never insert `CastingState`, so they don't lock movement (the directive
+/// keeps executing through the GCD). R12 holds structurally: an in-progress
+/// cast is never reached by this function, let alone canceled.
+///
 /// Returns `true` if an action was taken this frame (caller should skip to next combatant).
 pub fn decide_priest_action(
     commands: &mut Commands,
@@ -49,6 +61,7 @@ pub fn decide_priest_action(
     ctx: &CombatContext,
     shielded_this_frame: &mut HashSet<Entity>,
     fortified_this_frame: &mut HashSet<Entity>,
+    escape_defer: Option<f32>,
     decision_trace: &mut DecisionTrace,
 ) -> bool {
     // GCD short-circuit — no event (emission gate).
@@ -90,7 +103,7 @@ pub fn decide_priest_action(
     // Priority 4: Flash Heal
     if try_flash_heal(
         commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
-        &mut builder,
+        escape_defer, &mut builder,
     ) {
         builder.finish();
         return true;
@@ -110,7 +123,7 @@ pub fn decide_priest_action(
     // Priority 6: Mind Blast
     if try_mind_blast(
         commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
-        &mut builder,
+        escape_defer, &mut builder,
     ) {
         builder.finish();
         return true;
@@ -352,6 +365,13 @@ fn try_dispel_magic(
 }
 
 /// Try to cast Flash Heal on the lowest HP ally.
+///
+/// Cast-vs-move urgency (R7/AE1): while `escape_defer` is `Some(threshold)`
+/// (a live ESCAPE window) and the would-be heal target's HP fraction is
+/// ABOVE the threshold, the heal is deferred — Flash Heal locks movement for
+/// its whole cast, which would freeze the Priest mid-escape and waste the
+/// window. At or below the threshold the heal fires normally (critical heals
+/// always win, even at the cost of the window).
 fn try_flash_heal(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -361,6 +381,7 @@ fn try_flash_heal(
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
+    escape_defer: Option<f32>,
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = AbilityType::FlashHeal;
@@ -372,6 +393,18 @@ fn try_flash_heal(
     };
     let heal_target = target_info.entity;
     let target_pos = target_info.position;
+
+    if let Some(threshold) = escape_defer {
+        if target_info.health_pct() > threshold {
+            builder.reject(
+                ability,
+                RejectionReason::PreconditionUnmet {
+                    note: "escape window live: non-critical heal deferred".to_string(),
+                },
+            );
+            return false;
+        }
+    }
 
     let opts = PreCastOpts::default();
     if !pre_cast_ok(
@@ -411,6 +444,11 @@ fn try_flash_heal(
 }
 
 /// Try to cast Mind Blast on the current target.
+///
+/// Deferred outright while an ESCAPE window is live (`escape_defer` is
+/// `Some`): Mind Blast is a movement-locking cast and is never critical, so
+/// letting it fire after a deferred Flash Heal would freeze the Priest
+/// mid-escape anyway — defeating the deferral one priority rung above it.
 fn try_mind_blast(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -420,10 +458,21 @@ fn try_mind_blast(
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
+    escape_defer: Option<f32>,
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = AbilityType::MindBlast;
     let def = abilities.get_unchecked(&ability);
+
+    if escape_defer.is_some() {
+        builder.reject(
+            ability,
+            RejectionReason::PreconditionUnmet {
+                note: "escape window live: movement-locking cast deferred".to_string(),
+            },
+        );
+        return false;
+    }
 
     let Some(target_entity) = combatant.target else {
         builder.reject(ability, RejectionReason::NoValidTarget);
@@ -480,8 +529,61 @@ fn try_mind_blast(
 }
 
 // ============================================================================
-// Posture evaluation (healer movement AI — U6: FREE/PRESSURED)
+// Posture evaluation (healer movement AI — U6: FREE/PRESSURED, U7: ESCAPE)
 // ============================================================================
+
+/// ESCAPE window math (R7), pure for unit testing.
+///
+/// `proximate_cc_remaining` holds, per threat within the danger radius, the
+/// remaining Root/Stun/Incapacitate duration (`attacker_escape_window`) or
+/// `None` for an unimpaired threat. Rules:
+///
+/// - **Multi-attacker rule:** a single unimpaired proximate threat voids the
+///   window (`None` anywhere → no ESCAPE).
+/// - **Empty set:** no proximate threat → nothing to escape from → no window.
+/// - **Window duration:** min over the impaired threats of their remaining CC
+///   (the first attacker to break free ends the useful window).
+/// - **Sub-cutoff rule (slow-adjusted):** the window is only worth a heal
+///   deferral if it buys real distance. Distance gained ≈ window ×
+///   base_speed × slow_multiplier (see [`escape_distance_gained`]), so the
+///   slow-adjusted *effective* window is `window × slow_multiplier`. If that
+///   falls below `min_window` (config `shared.escape_min_window`, calibrated
+///   at full speed), do not enter ESCAPE — a 50%-slowed Priest needs twice
+///   the CC time to gain the same separation.
+///
+/// Returns the RAW window duration in seconds (the directive/posture hold
+/// time — the slowed Priest still escapes for the full CC duration once the
+/// window is worth entering).
+pub fn escape_window(
+    proximate_cc_remaining: &[Option<f32>],
+    slow_multiplier: f32,
+    min_window: f32,
+) -> Option<f32> {
+    if proximate_cc_remaining.is_empty() {
+        return None;
+    }
+    let mut window = f32::MAX;
+    for cc in proximate_cc_remaining {
+        match cc {
+            Some(remaining) => window = window.min(*remaining),
+            // Multi-attacker rule: one free proximate threat voids the window.
+            None => return None,
+        }
+    }
+    // Sub-cutoff rule, slow-adjusted: effective window = raw × slow multiplier.
+    if window * slow_multiplier < min_window {
+        return None;
+    }
+    Some(window)
+}
+
+/// Distance gained over an ESCAPE window: `window × base_speed ×
+/// slow_multiplier`. A 50% slow (`slow_multiplier = 0.5`) halves the
+/// effective escape distance — this is the relationship the sub-cutoff rule
+/// in [`escape_window`] is built on.
+pub fn escape_distance_gained(window: f32, base_speed: f32, slow_multiplier: f32) -> f32 {
+    window * base_speed * slow_multiplier
+}
 
 /// Distance the FREE formation point must move (XZ units) before the
 /// directive is re-targeted and a `FormationShift` trace event fires.
@@ -496,10 +598,10 @@ const SCORER_LOOKAHEAD: f32 = 2.0;
 /// emitting — refreshes are not decisions).
 const DIRECTIVE_REFRESH_MARGIN: f32 = 0.25;
 
-/// Evaluate the Priest's movement posture (FREE/PRESSURED) and issue/refresh
-/// a [`MovementDirective`] accordingly. Runs at the top of the Priest's
-/// decide tick, BEFORE the GCD short-circuit (the GCD locks casts, not
-/// legs), and only after gates open (the caller gates on
+/// Evaluate the Priest's movement posture (FREE/PRESSURED/ESCAPE) and
+/// issue/refresh a [`MovementDirective`] accordingly. Runs at the top of the
+/// Priest's decide tick, BEFORE the GCD short-circuit (the GCD locks casts,
+/// not legs), and only after gates open (the caller gates on
 /// `countdown.gates_opened` — no pre-match directives or trace events).
 ///
 /// R12 is structural: casting Priests never reach this function
@@ -509,6 +611,11 @@ const DIRECTIVE_REFRESH_MARGIN: f32 = 0.25;
 ///
 /// Trace emission (R3): posture transitions and committed direction /
 /// formation re-commit changes only — never per-tick.
+///
+/// Returns `Some(urgency_hp_threshold)` while an ESCAPE window is live — the
+/// caller threads it into `decide_priest_action`, whose heal priority defers
+/// non-critical movement-locking casts for the window (R7 cast-vs-move
+/// urgency; AE1). `None` otherwise.
 #[allow(clippy::too_many_arguments)]
 pub fn evaluate_priest_posture(
     commands: &mut Commands,
@@ -521,7 +628,7 @@ pub fn evaluate_priest_posture(
     movement: &MovementConfig,
     now: f32,
     decision_trace: &mut DecisionTrace,
-) {
+) -> Option<f32> {
     // First evaluation inserts the persistent component via Commands
     // (visible to this tick's executor through the existing apply_deferred,
     // and to next tick's query).
@@ -550,13 +657,43 @@ pub fn evaluate_priest_posture(
     });
 
     let prev = state.posture;
+
+    // --- ESCAPE entry window (R7) --- evaluated only while currently
+    // PRESSURED with the trigger still live: every visible threat within the
+    // danger radius must be movement-impaired (Root/Stun/Incapacitate — Fear
+    // excluded by `attacker_escape_window`: a feared attacker self-solves,
+    // and a Fear-only window must NOT trigger ESCAPE). One unimpaired
+    // proximate threat voids the window; sub-cutoff windows (slow-adjusted)
+    // are ignored. See `escape_window` for the full rule set.
+    let escape_window_secs = if prev == Posture::Pressured && trigger {
+        let cc_remaining: Vec<Option<f32>> = ctx
+            .visible_enemies_within(entity, my_pos, shared.danger_radius)
+            .iter()
+            .map(|t| ctx.attacker_escape_window(t.entity))
+            .collect();
+        escape_window(
+            &cc_remaining,
+            ctx.movement_slow_multiplier(entity),
+            shared.escape_min_window,
+        )
+    } else {
+        None
+    };
+
     let next = match prev {
+        // ESCAPE is committed for the whole window (no re-evaluation churn
+        // mid-escape); the window end is an absolute sim-time deadline.
+        Posture::Escape if now < state.escape_until => Posture::Escape,
+        // Window expired: → PRESSURED if still threatened, else FREE.
+        Posture::Escape if trigger => Posture::Pressured,
+        Posture::Escape => Posture::Free,
         // Hysteresis: PRESSURED may not relax before `hold_until` even when
         // the trigger momentarily drops (threat hovering at the radius must
         // not strobe the posture). Exiting requires the trigger false.
         Posture::Pressured if !trigger && now >= state.hold_until => Posture::Free,
+        Posture::Pressured if escape_window_secs.is_some() => Posture::Escape,
         Posture::Pressured => Posture::Pressured,
-        // U6 only reaches Free/Pressured; ESCAPE/DIP arrive in U7/U8.
+        // DIP is Paladin-only (U8); Priest FREE transitions on the trigger.
         _ if trigger => Posture::Pressured,
         _ => Posture::Free,
     };
@@ -567,15 +704,27 @@ pub fn evaluate_priest_posture(
         state.since = now;
         state.last_direction = None;
         state.last_point = None;
-        if next == Posture::Pressured {
-            state.hold_until = now + shared.pressured_hold;
-        } else {
-            state.hold_until = 0.0;
-            state.anchor = None;
+        match next {
+            Posture::Pressured => state.hold_until = now + shared.pressured_hold,
+            Posture::Escape => {
+                // Hold ESCAPE (and the committed directive, and the heal
+                // deferral) until the first impaired attacker breaks free.
+                // The anchor and hysteresis floor survive — exiting back to
+                // PRESSURED must not restart from scratch.
+                state.escape_until = now + escape_window_secs.unwrap_or(0.0);
+            }
+            _ => {
+                state.hold_until = 0.0;
+                state.anchor = None;
+            }
         }
     }
 
     match next {
+        Posture::Escape => escape_tick(
+            commands, entity, my_pos, ctx, state, directive, movement,
+            decision_trace, transitioned, prev,
+        ),
         Posture::Pressured => pressured_tick(
             commands, entity, combatant, my_pos, ctx, state, directive, movement, now,
             decision_trace, transitioned, prev,
@@ -589,6 +738,141 @@ pub fn evaluate_priest_posture(
     if needs_insert {
         commands.entity(entity).try_insert(*state);
     }
+
+    // Cast-vs-move urgency: live ESCAPE window → defer non-critical casts.
+    if state.posture == Posture::Escape {
+        Some(shared.urgency_hp_threshold)
+    } else {
+        None
+    }
+}
+
+/// ESCAPE tick (R7): on entry, score one direction with attacker repulsion
+/// dominant — threats are the impaired proximate attackers; the formation
+/// and wand pulls are OFF so repulsion is the only directional soft term,
+/// while the ally-anchor heal-range constraint and the boundary/corner
+/// penalties stay ACTIVE (escapes bend along walls instead of pinning into
+/// them, and never leave heal range of the anchor). The directive is
+/// committed for the whole window (`expires == committed_until ==
+/// escape_until`): mid-window ticks re-issue defensively but never re-score
+/// or re-emit.
+#[allow(clippy::too_many_arguments)]
+fn escape_tick(
+    commands: &mut Commands,
+    entity: Entity,
+    my_pos: Vec3,
+    ctx: &CombatContext,
+    state: &mut HealerPosture,
+    directive: Option<&MovementDirective>,
+    movement: &MovementConfig,
+    decision_trace: &mut DecisionTrace,
+    transitioned: bool,
+    prev: Posture,
+) {
+    let shared = &movement.shared;
+
+    if !transitioned {
+        // Committed mid-window: keep the directive alive if it somehow died
+        // (its expiry equals the window end, so this is defensive only) —
+        // refreshes are not decisions, so no re-score and no trace event.
+        if directive.is_none() {
+            if let Some(dir) = state.last_direction {
+                commands.entity(entity).try_insert(MovementDirective {
+                    goal: MovementGoal::Direction(dir),
+                    expires: state.escape_until,
+                    committed_until: state.escape_until,
+                });
+            }
+        }
+        return;
+    }
+
+    // Same sticky anchor as PRESSURED — the heal-range constraint stays hard
+    // during the escape (a window must never carry the Priest out of range
+    // of the ally it exists to keep healing).
+    let anchor_info = select_sticky_anchor(entity, ctx, state, shared);
+
+    // Threats: the impaired proximate attackers (ESCAPE entry guarantees
+    // every visible enemy inside the danger radius is impaired right now).
+    // BTreeMap for deterministic scorer input order.
+    let mut threat_positions: std::collections::BTreeMap<Entity, Vec3> = Default::default();
+    for t in ctx.visible_enemies_within(entity, my_pos, shared.danger_radius) {
+        threat_positions.insert(t.entity, t.position);
+    }
+
+    let inputs = ScorerInputs {
+        my_pos,
+        lookahead: SCORER_LOOKAHEAD,
+        threats: threat_positions.into_values().collect(),
+        anchor: anchor_info.map(|i| AnchorConstraint {
+            pos: i.position,
+            heal_range: shared.heal_range,
+        }),
+        formation_point: None,
+        // No wand pull during an escape — repulsion must dominate, and a
+        // pull toward any enemy would shrink the separation the window buys.
+        wand_target: None,
+        wand_range: shared.wand_range,
+        committed_direction: None,
+    };
+    let chosen = score_directions(&compass_directions_16(), &inputs, &movement.priest.weights);
+    if chosen == Vec2::ZERO {
+        return; // defensive — 16 candidates always yield a direction
+    }
+
+    commands.entity(entity).try_insert(MovementDirective {
+        goal: MovementGoal::Direction(chosen),
+        expires: state.escape_until,
+        committed_until: state.escape_until,
+    });
+    state.last_direction = Some(chosen);
+
+    if let Some(mut builder) = start_movement_event(decision_trace, ctx) {
+        builder.transition(
+            prev.into(),
+            TracePosture::Escape,
+            MovementTrigger::EscapeWindowOpen,
+            MovementGoalKind::Direction,
+        );
+        builder.chosen_direction([chosen.x, chosen.y]);
+        builder.finish();
+    }
+}
+
+/// Sticky anchor ally (R6): most-injured living non-pet ally, excluding
+/// self (the constraint keeps US within heal range of THEM). Switching
+/// requires the candidate to be more injured than the current anchor by
+/// `anchor_switch_margin`, so two similarly-injured allies don't flap the
+/// constraint region tick to tick. BTree iteration + strict `<` keeps
+/// ties deterministic. Shared by PRESSURED and ESCAPE (the escape direction
+/// honors the same heal-range constraint). Updates `state.anchor`.
+fn select_sticky_anchor<'c>(
+    entity: Entity,
+    ctx: &'c CombatContext,
+    state: &mut HealerPosture,
+    shared: &crate::states::play_match::movement_config::SharedMovementConfig,
+) -> Option<&'c CombatantInfo> {
+    let candidate = ctx
+        .alive_allies()
+        .into_iter()
+        .filter(|a| a.entity != entity)
+        .min_by(|a, b| a.health_pct().partial_cmp(&b.health_pct()).unwrap());
+    let current = state
+        .anchor
+        .and_then(|a| ctx.combatants.get(&a))
+        .filter(|i| i.is_alive && !i.is_pet);
+    let anchor_info: Option<&CombatantInfo> = match (current, candidate) {
+        (Some(cur), Some(cand))
+            if cand.entity != cur.entity
+                && cand.health_pct() + shared.anchor_switch_margin < cur.health_pct() =>
+        {
+            Some(cand)
+        }
+        (Some(cur), _) => Some(cur),
+        (None, cand) => cand,
+    };
+    state.anchor = anchor_info.map(|i| i.entity);
+    anchor_info
 }
 
 /// PRESSURED tick: sticky anchor selection, hard commitment window, scored
@@ -610,32 +894,7 @@ fn pressured_tick(
 ) {
     let shared = &movement.shared;
 
-    // Sticky anchor ally (R6): most-injured living non-pet ally, excluding
-    // self (the constraint keeps US within heal range of THEM). Switching
-    // requires the candidate to be more injured than the current anchor by
-    // `anchor_switch_margin`, so two similarly-injured allies don't flap the
-    // constraint region tick to tick. BTree iteration + strict `<` keeps
-    // ties deterministic.
-    let candidate = ctx
-        .alive_allies()
-        .into_iter()
-        .filter(|a| a.entity != entity)
-        .min_by(|a, b| a.health_pct().partial_cmp(&b.health_pct()).unwrap());
-    let current = state
-        .anchor
-        .and_then(|a| ctx.combatants.get(&a))
-        .filter(|i| i.is_alive && !i.is_pet);
-    let anchor_info: Option<&CombatantInfo> = match (current, candidate) {
-        (Some(cur), Some(cand))
-            if cand.entity != cur.entity
-                && cand.health_pct() + shared.anchor_switch_margin < cur.health_pct() =>
-        {
-            Some(cand)
-        }
-        (Some(cur), _) => Some(cur),
-        (None, cand) => cand,
-    };
-    state.anchor = anchor_info.map(|i| i.entity);
+    let anchor_info = select_sticky_anchor(entity, ctx, state, shared);
 
     // Hard commitment window (R11): re-evaluation happens only once the
     // committed window lapses (or the directive died — e.g. expired across a
@@ -702,10 +961,17 @@ fn pressured_tick(
     if transitioned || direction_changed {
         if let Some(mut builder) = start_movement_event(decision_trace, ctx) {
             if transitioned {
+                // ESCAPE → PRESSURED is the window-expiry exit, not a fresh
+                // pressure onset — trace it as EscapeWindowClosed.
+                let trigger = if prev == Posture::Escape {
+                    MovementTrigger::EscapeWindowClosed
+                } else {
+                    MovementTrigger::PressuredEnter
+                };
                 builder.transition(
                     prev.into(),
                     TracePosture::Pressured,
-                    MovementTrigger::PressuredEnter,
+                    trigger,
                     MovementGoalKind::Direction,
                 );
             } else {
@@ -741,16 +1007,24 @@ fn free_tick(
 ) {
     let shared = &movement.shared;
 
+    // ESCAPE → FREE is the window-expiry exit with no remaining threat —
+    // trace it as EscapeWindowClosed, not PressuredExit.
+    let exit_trigger = if prev == Posture::Escape {
+        MovementTrigger::EscapeWindowClosed
+    } else {
+        MovementTrigger::PressuredExit
+    };
+
     let Some(point) = compute_formation_point(entity, combatant, my_pos, ctx, movement) else {
         // DEGENERATE (R5/AE4): no formation directive; fall through to the
-        // legacy ladder. PressuredExit transitions still emit — goal_kind
+        // legacy ladder. Exit transitions still emit — goal_kind
         // Entity records "legacy target pursuit governs".
         if transitioned {
             if let Some(mut builder) = start_movement_event(decision_trace, ctx) {
                 builder.transition(
                     prev.into(),
                     TracePosture::Free,
-                    MovementTrigger::PressuredExit,
+                    exit_trigger,
                     MovementGoalKind::Entity,
                 );
                 builder.finish();
@@ -784,7 +1058,7 @@ fn free_tick(
             builder.transition(
                 prev.into(),
                 TracePosture::Free,
-                MovementTrigger::PressuredExit,
+                exit_trigger,
                 MovementGoalKind::Point,
             );
             builder.finish();
