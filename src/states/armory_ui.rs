@@ -140,7 +140,9 @@ pub fn armory_ui(
     item_defs: Res<ItemDefinitions>,
     item_icons: Option<Res<ItemIcons>>,
 ) {
-    let ctx = contexts.ctx_mut();
+    // Use try_ctx_mut to gracefully handle window close (the context
+    // dies with the primary window; ctx_mut panics on the final frame)
+    let Some(ctx) = contexts.try_ctx_mut() else { return; };
 
     // Apply dark theme matching the main menu, with zero-delay tooltips so
     // hovering a tile shows item info immediately (matches ViewCombatant).

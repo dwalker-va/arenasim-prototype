@@ -152,6 +152,9 @@ fn run_graphical_mode() {
 fn setup_custom_font(
     mut contexts: EguiContexts,
 ) {
+    // Deliberately ctx_mut (not try_ctx_mut): this is a run-once Startup
+    // system — silently skipping would permanently lose the custom font.
+    // A missing context here should fail loudly.
     let ctx = contexts.ctx_mut();
     
     // Load font data
