@@ -336,6 +336,17 @@ jq -r 'select(.kind == "movement_decision") | .trigger' $T | sort | uniq -c
 # harness for full timelines)
 jq -c 'select(.kind == "movement_decision" and .actor.entity_id == 7) | {t: .sim_time, position, posture}' $T
 
+# Paladin HoJ dips: DipEnter carries the goal entity (the enemy healer) in
+# the event's `target` view; DipComplete fires when HoJ lands, DipAbort when
+# the dip bails without casting (teammate HP dive / target dead-or-immune /
+# budget). Pair with the Paladin's HoJ ability_decision to confirm the stun
+# landed on the enemy HEALER.
+jq -c 'select(.kind == "movement_decision" and .actor.class == "Paladin" and (.trigger | startswith("Dip"))) | {t: .sim_time, trigger, goal_healer: .target.entity_id}' $T
+
+# Did the HoJ reservation suppress rotation HoJ? (rejection note fires only
+# while a living enemy healer exists AND the Paladin is not PRESSURED)
+jq -c 'select(.kind == "ability_decision" and .actor.class == "Paladin") | .candidates[]? | select(.ability == "HammerOfJustice" and (.reason.PreconditionUnmet.note // "") == "HoJ reserved for enemy-healer dip")' $T | wc -l
+
 # NOTE: pets are excluded from `acquire_targets` events. Pet target state
 # lives in pet_decision actor views and the match log, not in
 # target_acquisition events.

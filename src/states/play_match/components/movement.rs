@@ -107,6 +107,12 @@ pub struct HealerPosture {
     /// meaningfully). `None` before the first formation directive and after
     /// posture transitions.
     pub last_point: Option<Vec2>,
+    /// DIP target (Paladin only, U8): the enemy healer the committed Hammer
+    /// of Justice walk is pursuing. `None` outside DIP.
+    pub dip_target: Option<Entity>,
+    /// DIP budget deadline: absolute sim-time at which the walk-stun-return
+    /// cycle aborts (budget exceeded). `0.0` = no live dip.
+    pub dip_until: f32,
 }
 
 impl HealerPosture {
@@ -120,6 +126,8 @@ impl HealerPosture {
             escape_until: 0.0,
             last_direction: None,
             last_point: None,
+            dip_target: None,
+            dip_until: 0.0,
         }
     }
 }

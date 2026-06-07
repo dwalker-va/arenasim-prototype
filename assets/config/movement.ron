@@ -72,5 +72,9 @@
         fallback_range: 15.0,
         // DIP walk-stun-return duration budget in seconds.
         dip_budget: 6.0,
+        // Healing-heavy PRESSURED trigger: lowest team HP fraction
+        // (self included, pets excluded) below this pulls the Paladin to
+        // fallback range even before it is focused.
+        healing_heavy_hp: 0.6,
     ),
 )

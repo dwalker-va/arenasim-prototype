@@ -153,6 +153,11 @@ pub struct PaladinMovementConfig {
     /// DIP duration budget in seconds — the walk-stun-return cycle aborts
     /// when exceeded (R8).
     pub dip_budget: f32,
+    /// Healing-heavy PRESSURED trigger (R8): the Paladin counts as
+    /// healing-heavy while the lowest HP fraction across living non-pet
+    /// team members (self included) is below this. Observable, deterministic
+    /// state — no cast-history bookkeeping.
+    pub healing_heavy_hp: f32,
 }
 
 impl Default for PaladinMovementConfig {
@@ -166,6 +171,7 @@ impl Default for PaladinMovementConfig {
             },
             fallback_range: 15.0,
             dip_budget: 6.0,
+            healing_heavy_hp: 0.6,
         }
     }
 }
@@ -219,6 +225,7 @@ impl MovementConfig {
         let fractions = [
             ("shared.center_bias", s.center_bias),
             ("shared.urgency_hp_threshold", s.urgency_hp_threshold),
+            ("paladin.healing_heavy_hp", self.paladin.healing_heavy_hp),
         ];
         for (name, value) in fractions {
             if !(0.0..=1.0).contains(&value) {

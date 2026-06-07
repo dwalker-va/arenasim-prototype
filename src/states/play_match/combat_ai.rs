@@ -659,19 +659,51 @@ pub fn decide_abilities(
                 &ctx,
                 &mut decision_trace,
             ),
-            match_config::CharacterClass::Paladin => class_ai::paladin::decide_paladin_action(
-                &mut commands,
-                &mut combat_log,
-                &abilities,
-                entity,
-                &mut combatant,
-                my_pos,
-                auras.as_deref(),
-                &ctx,
-                &mut paladin_aura_this_frame,
-                &mut same_frame_cc_queue,
-                &mut decision_trace,
-            ),
+            match_config::CharacterClass::Paladin => {
+                // Posture evaluation (healer movement AI, U8) — mirrors the
+                // Priest arm: runs BEFORE the ability pass and OUTSIDE the
+                // GCD short-circuit, gated on gates_opened, and never for
+                // casting Paladins (query excludes CastingState — R12).
+                //
+                // The returned plan carries the ESCAPE/DIP cast deferral
+                // (Flash of Light / Holy Light are skipped for targets above
+                // the urgency threshold while a window or dip is live) and
+                // the Hammer of Justice gate (reservation for the
+                // enemy-healer dip; `DipCast` on dip arrival).
+                let mut plan = class_ai::paladin::PaladinMovementPlan::default();
+                if countdown.gates_opened {
+                    if let Ok((posture, directive)) = healer_movement.get_mut(entity) {
+                        plan = class_ai::paladin::evaluate_paladin_posture(
+                            &mut commands,
+                            &abilities,
+                            entity,
+                            &combatant,
+                            my_pos,
+                            auras.as_deref(),
+                            &ctx,
+                            posture.map(bevy::prelude::Mut::into_inner),
+                            directive,
+                            &movement_config,
+                            time.elapsed_secs(),
+                            &mut decision_trace,
+                        );
+                    }
+                }
+                class_ai::paladin::decide_paladin_action(
+                    &mut commands,
+                    &mut combat_log,
+                    &abilities,
+                    entity,
+                    &mut combatant,
+                    my_pos,
+                    auras.as_deref(),
+                    &ctx,
+                    &mut paladin_aura_this_frame,
+                    &mut same_frame_cc_queue,
+                    &plan,
+                    &mut decision_trace,
+                )
+            },
             match_config::CharacterClass::Hunter => class_ai::hunter::decide_hunter_action(
                 &mut commands,
                 &mut combat_log,

@@ -25,13 +25,17 @@ use crate::states::play_match::combat_core::{
 };
 use crate::states::play_match::constants::GCD;
 use crate::states::play_match::decision_trace::{
-    ActorView, DecisionEventBuilder, DecisionTrace, MovementEventBuilder, MovementGoalKind,
-    MovementTrigger, Posture as TracePosture, RejectionReason,
+    DecisionEventBuilder, DecisionTrace, MovementGoalKind, MovementTrigger,
+    Posture as TracePosture, RejectionReason,
 };
 use crate::states::play_match::movement_config::MovementConfig;
 use crate::states::play_match::utils::log_ability_use;
 
 use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
+use super::healer_postures::{
+    compound_pressure_trigger, escape_tick, select_sticky_anchor, start_movement_event,
+    SCORER_LOOKAHEAD,
+};
 
 use super::{CombatContext, CombatantInfo};
 
@@ -591,8 +595,6 @@ const FORMATION_SHIFT_THRESHOLD: f32 = 3.0;
 /// FREE deadzone: no Point directive is issued when the Priest is already
 /// this close to the formation point (prevents micro-shuffling).
 const FORMATION_DEADZONE: f32 = 1.5;
-/// Distance ahead at which the position scorer evaluates candidate steps.
-const SCORER_LOOKAHEAD: f32 = 2.0;
 /// Refresh the standing FREE directive when its remaining TTL drops below
 /// this (keeps a walk alive across decide ticks without re-scoring or
 /// emitting — refreshes are not decisions).
@@ -641,20 +643,9 @@ pub fn evaluate_priest_posture(
 
     let shared = &movement.shared;
 
-    // --- PRESSURED compound trigger (R6) ---
-    // Targeted by a VISIBLE enemy (enemies_targeting is stealth-filtered —
-    // AE2: no pre-dodging invisible Rogues; pets included) AND a proximity /
-    // intent condition: within the danger radius, or a melee-class / pet /
-    // closing threat within the intent radius. A distant caster holding
-    // position while targeting me does NOT flip the posture (AE5), and
-    // neither does a melee targeting me from across the arena — pressure
-    // requires the threat to be near enough that intent matters.
-    let trigger = ctx.enemies_targeting(entity).iter().any(|t| {
-        let distance = my_pos.distance(t.position);
-        distance <= shared.danger_radius
-            || (distance <= shared.threat_intent_radius
-                && (t.is_pet || t.class.is_melee() || ctx.is_closing(t.entity, entity)))
-    });
+    // --- PRESSURED compound trigger (R6) --- see
+    // `healer_postures::compound_pressure_trigger` (shared with the Paladin).
+    let trigger = compound_pressure_trigger(entity, my_pos, ctx, shared);
 
     let prev = state.posture;
 
@@ -722,8 +713,8 @@ pub fn evaluate_priest_posture(
 
     match next {
         Posture::Escape => escape_tick(
-            commands, entity, my_pos, ctx, state, directive, movement,
-            decision_trace, transitioned, prev,
+            commands, entity, my_pos, ctx, state, directive, shared,
+            &movement.priest.weights, decision_trace, transitioned, prev,
         ),
         Posture::Pressured => pressured_tick(
             commands, entity, combatant, my_pos, ctx, state, directive, movement, now,
@@ -745,134 +736,6 @@ pub fn evaluate_priest_posture(
     } else {
         None
     }
-}
-
-/// ESCAPE tick (R7): on entry, score one direction with attacker repulsion
-/// dominant — threats are the impaired proximate attackers; the formation
-/// and wand pulls are OFF so repulsion is the only directional soft term,
-/// while the ally-anchor heal-range constraint and the boundary/corner
-/// penalties stay ACTIVE (escapes bend along walls instead of pinning into
-/// them, and never leave heal range of the anchor). The directive is
-/// committed for the whole window (`expires == committed_until ==
-/// escape_until`): mid-window ticks re-issue defensively but never re-score
-/// or re-emit.
-#[allow(clippy::too_many_arguments)]
-fn escape_tick(
-    commands: &mut Commands,
-    entity: Entity,
-    my_pos: Vec3,
-    ctx: &CombatContext,
-    state: &mut HealerPosture,
-    directive: Option<&MovementDirective>,
-    movement: &MovementConfig,
-    decision_trace: &mut DecisionTrace,
-    transitioned: bool,
-    prev: Posture,
-) {
-    let shared = &movement.shared;
-
-    if !transitioned {
-        // Committed mid-window: keep the directive alive if it somehow died
-        // (its expiry equals the window end, so this is defensive only) —
-        // refreshes are not decisions, so no re-score and no trace event.
-        if directive.is_none() {
-            if let Some(dir) = state.last_direction {
-                commands.entity(entity).try_insert(MovementDirective {
-                    goal: MovementGoal::Direction(dir),
-                    expires: state.escape_until,
-                    committed_until: state.escape_until,
-                });
-            }
-        }
-        return;
-    }
-
-    // Same sticky anchor as PRESSURED — the heal-range constraint stays hard
-    // during the escape (a window must never carry the Priest out of range
-    // of the ally it exists to keep healing).
-    let anchor_info = select_sticky_anchor(entity, ctx, state, shared);
-
-    // Threats: the impaired proximate attackers (ESCAPE entry guarantees
-    // every visible enemy inside the danger radius is impaired right now).
-    // BTreeMap for deterministic scorer input order.
-    let mut threat_positions: std::collections::BTreeMap<Entity, Vec3> = Default::default();
-    for t in ctx.visible_enemies_within(entity, my_pos, shared.danger_radius) {
-        threat_positions.insert(t.entity, t.position);
-    }
-
-    let inputs = ScorerInputs {
-        my_pos,
-        lookahead: SCORER_LOOKAHEAD,
-        threats: threat_positions.into_values().collect(),
-        anchor: anchor_info.map(|i| AnchorConstraint {
-            pos: i.position,
-            heal_range: shared.heal_range,
-        }),
-        formation_point: None,
-        // No wand pull during an escape — repulsion must dominate, and a
-        // pull toward any enemy would shrink the separation the window buys.
-        wand_target: None,
-        wand_range: shared.wand_range,
-        committed_direction: None,
-    };
-    let chosen = score_directions(&compass_directions_16(), &inputs, &movement.priest.weights);
-    if chosen == Vec2::ZERO {
-        return; // defensive — 16 candidates always yield a direction
-    }
-
-    commands.entity(entity).try_insert(MovementDirective {
-        goal: MovementGoal::Direction(chosen),
-        expires: state.escape_until,
-        committed_until: state.escape_until,
-    });
-    state.last_direction = Some(chosen);
-
-    if let Some(mut builder) = start_movement_event(decision_trace, ctx) {
-        builder.transition(
-            prev.into(),
-            TracePosture::Escape,
-            MovementTrigger::EscapeWindowOpen,
-            MovementGoalKind::Direction,
-        );
-        builder.chosen_direction([chosen.x, chosen.y]);
-        builder.finish();
-    }
-}
-
-/// Sticky anchor ally (R6): most-injured living non-pet ally, excluding
-/// self (the constraint keeps US within heal range of THEM). Switching
-/// requires the candidate to be more injured than the current anchor by
-/// `anchor_switch_margin`, so two similarly-injured allies don't flap the
-/// constraint region tick to tick. BTree iteration + strict `<` keeps
-/// ties deterministic. Shared by PRESSURED and ESCAPE (the escape direction
-/// honors the same heal-range constraint). Updates `state.anchor`.
-fn select_sticky_anchor<'c>(
-    entity: Entity,
-    ctx: &'c CombatContext,
-    state: &mut HealerPosture,
-    shared: &crate::states::play_match::movement_config::SharedMovementConfig,
-) -> Option<&'c CombatantInfo> {
-    let candidate = ctx
-        .alive_allies()
-        .into_iter()
-        .filter(|a| a.entity != entity)
-        .min_by(|a, b| a.health_pct().partial_cmp(&b.health_pct()).unwrap());
-    let current = state
-        .anchor
-        .and_then(|a| ctx.combatants.get(&a))
-        .filter(|i| i.is_alive && !i.is_pet);
-    let anchor_info: Option<&CombatantInfo> = match (current, candidate) {
-        (Some(cur), Some(cand))
-            if cand.entity != cur.entity
-                && cand.health_pct() + shared.anchor_switch_margin < cur.health_pct() =>
-        {
-            Some(cand)
-        }
-        (Some(cur), _) => Some(cur),
-        (None, cand) => cand,
-    };
-    state.anchor = anchor_info.map(|i| i.entity);
-    anchor_info
 }
 
 /// PRESSURED tick: sticky anchor selection, hard commitment window, scored
@@ -1167,14 +1030,4 @@ fn compute_formation_point(
     }
 
     Some(clamp_to_arena(point))
-}
-
-/// Start a `movement_decision` builder for the current actor. `None` only
-/// when the snapshot lacks self (defensive — shouldn't happen in dispatch).
-fn start_movement_event<'t>(
-    decision_trace: &'t mut DecisionTrace,
-    ctx: &CombatContext,
-) -> Option<MovementEventBuilder<'t>> {
-    let actor = ActorView::from_info(ctx.self_info()?);
-    Some(decision_trace.start_movement_decision(actor, None))
 }

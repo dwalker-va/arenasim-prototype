@@ -24,6 +24,7 @@ pub mod hunter;
 pub mod pet_ai;
 pub mod cast_guard;
 pub mod combat_snapshot;
+pub(crate) mod healer_postures;
 
 use bevy::prelude::*;
 use std::collections::BTreeMap;
