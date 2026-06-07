@@ -24,6 +24,16 @@
 //!   is the serde default for externally-tagged enums and is preserved here
 //!   intentionally — switching to a fully-tagged form would break every jq
 //!   query already written against the schema.
+//! - **`movement_decision` events flatten the same way.** `posture`,
+//!   `previous_posture`, `trigger`, `goal_kind`, `chosen_direction`,
+//!   `position`, and `scorer_terms` are top-level keys. `posture` /
+//!   `goal_kind` serialize snake_case (`"pressured"`, `"direction"`);
+//!   `trigger` variants are unit-only and serialize as bare PascalCase
+//!   strings (`"PressuredEnter"`) — same convention as unit
+//!   `RejectionReason` variants, so `jq -r .trigger` needs no object
+//!   unwrapping. `previous_posture` is present only on posture transitions;
+//!   `scorer_terms` is present only when the emitter attached a score
+//!   breakdown.
 //!
 //! ## Truncated last line on abort/SIGKILL
 //!
@@ -50,8 +60,9 @@
 //! `(actor.team, actor.slot)` as the logical key.
 
 use std::borrow::Cow;
+use std::collections::BTreeMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::{AbilityType, SpellSchool};
@@ -77,12 +88,39 @@ pub enum EventKind {
     AbilityDecision,
     TargetAcquisition,
     PetDecision,
+    MovementDecision,
 }
 
 /// Payload varies by `kind`. Flattened into the parent event JSON object.
-#[derive(Serialize, Clone, Debug)]
+///
+/// Untagged: serde distinguishes variants structurally, trying them in
+/// declaration order on deserialize (declaration order has NO effect on
+/// serialization). `Pet` is declared before `Ability` because Pet's shape is
+/// a strict superset of Ability's (`candidates` + `outcome` plus
+/// `owner`/`pet_type`) — superset-first ordering makes deserialization pick
+/// the right variant. `Movement` sits last and is disambiguated by its
+/// REQUIRED `posture` field (no other variant has one) while lacking the
+/// `candidates` field every other variant requires — keep both properties
+/// intact when evolving the shapes.
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(untagged)]
 pub enum EventPayload {
+    Pet {
+        owner: u32,
+        // Cow<'static, str> (not String) so callers can pass a &'static str
+        // for the pet type name without allocating per pet per tick. The pet
+        // type is always known at compile time (Felhunter / Spider / Boar / Bird).
+        pet_type: Cow<'static, str>,
+        candidates: Vec<AbilityCandidate>,
+        outcome: AbilityOutcome,
+        /// When `Some(entity_id)`, this pet decision was dispatched by the
+        /// pet's owner (e.g., Hunter AI commanded Spider Web). `None` for
+        /// autonomous pet decisions. Serialized only when present so
+        /// pre-existing audit recipes that don't filter on this field stay
+        /// backward-compatible.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        dispatched_by: Option<u32>,
+    },
     Ability {
         candidates: Vec<AbilityCandidate>,
         outcome: AbilityOutcome,
@@ -104,22 +142,99 @@ pub enum EventPayload {
         cc_changed: bool,
         candidates: Vec<TargetCandidate>,
     },
-    Pet {
-        owner: u32,
-        // Cow<'static, str> (not String) so callers can pass a &'static str
-        // for the pet type name without allocating per pet per tick. The pet
-        // type is always known at compile time (Felhunter / Spider / Boar / Bird).
-        pet_type: Cow<'static, str>,
-        candidates: Vec<AbilityCandidate>,
-        outcome: AbilityOutcome,
-        /// When `Some(entity_id)`, this pet decision was dispatched by the
-        /// pet's owner (e.g., Hunter AI commanded Spider Web). `None` for
-        /// autonomous pet decisions. Serialized only when present so
-        /// pre-existing audit recipes that don't filter on this field stay
-        /// backward-compatible.
+    /// One `movement_decision` event. Emitted by healer posture AI on posture
+    /// transitions and committed direction changes ONLY — never per-tick
+    /// (emitters land in the healer-movement plan's U6-U8; until then this
+    /// variant exists but no events carry it).
+    Movement {
+        /// Posture in effect AFTER this decision. REQUIRED — this field is
+        /// the structural discriminator that keeps the untagged payload
+        /// unambiguous against the Ability/Pet shapes.
+        posture: Posture,
+        /// Posture before the decision. Present only on posture transitions;
+        /// omitted for within-posture committed direction changes.
         #[serde(skip_serializing_if = "Option::is_none")]
-        dispatched_by: Option<u32>,
+        previous_posture: Option<Posture>,
+        /// Why the decision fired (closed enum — see `MovementTrigger`).
+        trigger: MovementTrigger,
+        /// Shape of the movement goal the directive carries.
+        goal_kind: MovementGoalKind,
+        /// Unit XZ direction chosen by the position scorer, when the goal is
+        /// directional. Omitted for point/entity goals.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        chosen_direction: Option<[f32; 2]>,
+        /// Actor world position at decision time. Duplicated from
+        /// `actor.position` so coarse trace-side movement KPIs (path
+        /// sketches, separation estimates) can read one field.
+        position: [f32; 3],
+        /// Optional per-term score breakdown from the position scorer
+        /// (term name → score for the winning candidate). BTreeMap so
+        /// serialization order is deterministic (trace byte-identity at a
+        /// fixed seed). Cow keys: term names are compile-time constants;
+        /// avoid per-event allocation.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        scorer_terms: Option<BTreeMap<Cow<'static, str>, f32>>,
     },
+}
+
+/// Healer movement posture (the FREE/PRESSURED/ESCAPE/DIP state machine).
+/// Serializes snake_case (`"free"`, `"pressured"`, ...) to match the
+/// `kind`/`status` convention.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Posture {
+    Free,
+    Pressured,
+    Escape,
+    Dip,
+}
+
+/// Closed set of causes for a `movement_decision` event. Unit-only variants
+/// serialize as bare PascalCase strings (same convention as unit
+/// `RejectionReason` variants), so `jq -r .trigger` works without the
+/// object-unwrapping idiom.
+///
+/// Adding a new variant requires updating
+/// `tests/decision_trace_audit.rs::EXPECTED_MOVEMENT_TRIGGERS` (the
+/// surprise-only audit fails on any emitted variant missing from that list).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MovementTrigger {
+    /// FREE/DIP → PRESSURED: targeted by a visible enemy AND a proximity /
+    /// intent condition holds (danger radius, melee/pet threat, or closing).
+    PressuredEnter,
+    /// PRESSURED → FREE: the compound trigger no longer holds (post-hysteresis).
+    PressuredExit,
+    /// PRESSURED → ESCAPE: all proximate threats are movement-impaired
+    /// (Root/Stun/Incapacitate — not Fear); window converted to separation.
+    EscapeWindowOpen,
+    /// ESCAPE → PRESSURED or FREE: window duration elapsed (or threats freed).
+    EscapeWindowClosed,
+    /// FREE → DIP (Paladin): HoJ ready, teammate stable, enemy healer reachable.
+    DipEnter,
+    /// DIP → FREE via an abort condition (teammate HP dive, target
+    /// dead/immune/DR-immune, budget exceeded). Self-focus preemption is
+    /// `PressuredEnter` (DIP → PRESSURED), not an abort.
+    DipAbort,
+    /// DIP → FREE: HoJ cast landed; returning to team.
+    DipComplete,
+    /// Committed direction window expired and re-evaluation chose a new
+    /// direction within the SAME posture (no transition).
+    CommitExpired,
+    /// FREE formation goal moved enough to re-commit (engaged-ally centroid
+    /// shifted) within the same posture.
+    FormationShift,
+}
+
+/// Shape of the movement goal carried by the directive this decision issued.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MovementGoalKind {
+    /// Scored unit direction (PRESSURED repositioning, ESCAPE separation).
+    Direction,
+    /// Fixed world point (FREE formation anchor).
+    Point,
+    /// Pursue an entity (DIP target chase).
+    Entity,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -141,7 +256,7 @@ pub struct TargetView {
     pub distance: f32,
 }
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct AbilityCandidate {
     pub ability: AbilityType,
     pub status: CandidateStatus,
@@ -149,7 +264,7 @@ pub struct AbilityCandidate {
     pub reason: Option<RejectionReason>,
 }
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TargetCandidate {
     pub entity_id: u32,
     pub class: CharacterClass,
@@ -159,14 +274,14 @@ pub struct TargetCandidate {
     pub reason: Option<TargetRejectionReason>,
 }
 
-#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CandidateStatus {
     Chosen,
     Rejected,
 }
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(tag = "type")]
 pub enum AbilityOutcome {
     #[serde(rename = "action_taken")]
@@ -180,7 +295,7 @@ pub enum AbilityOutcome {
     NoAction { primary_reason: NoActionReason },
 }
 
-#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NoActionReason {
     AllCandidatesRejected,
     SelfIncapacitated,
@@ -201,7 +316,7 @@ pub enum NoActionReason {
 /// Adding a new variant requires updating `tests/decision_trace_audit.rs::expected_reasons`
 /// (audit test fails the build otherwise) and ensuring at least one reference
 /// match exercises the new variant.
-#[derive(Serialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum RejectionReason {
     OutOfRange { distance: f32, max: f32 },
     WithinDeadZone { distance: f32, min: f32 },
@@ -226,7 +341,7 @@ pub enum RejectionReason {
     LowHealthHeel,
 }
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum TargetRejectionReason {
     OutOfRange { distance: f32, max: f32 },
     Stealthed,
@@ -237,7 +352,7 @@ pub enum TargetRejectionReason {
     KillTargetOverride,
 }
 
-#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResourceKind {
     Rage,
     Energy,

@@ -12,8 +12,8 @@ use bevy::prelude::Entity;
 
 use super::events::{
     AbilityCandidate, AbilityOutcome, ActorView, CandidateStatus, DecisionEvent, EventKind,
-    EventPayload, NoActionReason, RejectionReason, TargetCandidate, TargetRejectionReason,
-    TargetView,
+    EventPayload, MovementGoalKind, MovementTrigger, NoActionReason, Posture, RejectionReason,
+    TargetCandidate, TargetRejectionReason, TargetView,
 };
 use super::DecisionTrace;
 use crate::states::play_match::abilities::AbilityType;
@@ -129,6 +129,123 @@ impl<'a> DecisionEventBuilder<'a> {
             actor: self.actor,
             target: self.target,
             payload,
+        };
+        self.trace.pending_events.push(event);
+    }
+}
+
+/// Builder for one `movement_decision` event.
+///
+/// Healer posture AI calls `.transition(...)` when the posture changes, or
+/// `.direction_change(...)` when a committed direction is re-chosen within an
+/// unchanged posture, then optionally attaches `.chosen_direction(...)` /
+/// `.scorer_term(...)` detail, and commits with `.finish()`.
+///
+/// Emission gate: if neither `transition` nor `direction_change` was called
+/// before `.finish()`, no event is emitted — a posture tick that decides
+/// nothing produces nothing. This is the structural guarantee behind the
+/// transition-only volume policy (no per-tick movement events).
+pub struct MovementEventBuilder<'a> {
+    pub(super) trace: &'a mut DecisionTrace,
+    pub(super) actor: ActorView,
+    pub(super) target: Option<TargetView>,
+    pub(super) decision: Option<MovementDecisionDetails>,
+}
+
+pub(super) struct MovementDecisionDetails {
+    pub posture: Posture,
+    pub previous_posture: Option<Posture>,
+    pub trigger: MovementTrigger,
+    pub goal_kind: MovementGoalKind,
+    pub chosen_direction: Option<[f32; 2]>,
+    pub scorer_terms: Option<std::collections::BTreeMap<std::borrow::Cow<'static, str>, f32>>,
+}
+
+impl<'a> MovementEventBuilder<'a> {
+    /// Record a posture transition (`previous` → `new`). The event will carry
+    /// both postures plus the typed trigger that fired the transition.
+    pub fn transition(
+        &mut self,
+        previous: Posture,
+        new: Posture,
+        trigger: MovementTrigger,
+        goal_kind: MovementGoalKind,
+    ) {
+        self.decision = Some(MovementDecisionDetails {
+            posture: new,
+            previous_posture: Some(previous),
+            trigger,
+            goal_kind,
+            chosen_direction: None,
+            scorer_terms: None,
+        });
+    }
+
+    /// Record a committed direction change within an unchanged posture (e.g.,
+    /// `CommitExpired` re-evaluation, `FormationShift`). `previous_posture`
+    /// is omitted from the event — its absence is how jq consumers separate
+    /// re-commits from real transitions.
+    pub fn direction_change(
+        &mut self,
+        posture: Posture,
+        trigger: MovementTrigger,
+        goal_kind: MovementGoalKind,
+    ) {
+        self.decision = Some(MovementDecisionDetails {
+            posture,
+            previous_posture: None,
+            trigger,
+            goal_kind,
+            chosen_direction: None,
+            scorer_terms: None,
+        });
+    }
+
+    /// Attach the scorer's winning unit XZ direction. No-op until a decision
+    /// has been recorded via `transition` / `direction_change`.
+    pub fn chosen_direction(&mut self, direction: [f32; 2]) {
+        if let Some(decision) = self.decision.as_mut() {
+            decision.chosen_direction = Some(direction);
+        }
+    }
+
+    /// Attach one named scorer-term score (threat repulsion, formation pull,
+    /// ...) for the winning candidate. No-op until a decision has been
+    /// recorded. Terms accumulate into a BTreeMap so serialization order is
+    /// deterministic regardless of call order.
+    pub fn scorer_term(&mut self, term: &'static str, score: f32) {
+        if let Some(decision) = self.decision.as_mut() {
+            decision
+                .scorer_terms
+                .get_or_insert_with(Default::default)
+                .insert(std::borrow::Cow::Borrowed(term), score);
+        }
+    }
+
+    /// Commit the event. Emission gate: no recorded decision → no event.
+    pub fn finish(self) {
+        let Some(decision) = self.decision else {
+            return;
+        };
+        // Duplicated from actor.position by construction so the two can
+        // never disagree (see the field doc on EventPayload::Movement).
+        let position = self.actor.position;
+        let event = DecisionEvent {
+            frame: self.trace.current_frame,
+            sim_time: self.trace.current_sim_time,
+            seed: self.trace.seed,
+            kind: EventKind::MovementDecision,
+            actor: self.actor,
+            target: self.target,
+            payload: EventPayload::Movement {
+                posture: decision.posture,
+                previous_posture: decision.previous_posture,
+                trigger: decision.trigger,
+                goal_kind: decision.goal_kind,
+                chosen_direction: decision.chosen_direction,
+                position,
+                scorer_terms: decision.scorer_terms,
+            },
         };
         self.trace.pending_events.push(event);
     }

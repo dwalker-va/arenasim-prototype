@@ -26,11 +26,15 @@ date: 2026-05-21
 A JSONL stream of AI decisions, captured per actor per AI tick. Each event
 records who decided, what they targeted, what abilities they considered, and
 a typed rejection reason (with numeric context) for every candidate that
-lost. Three event kinds emit through the same `DecisionTrace` Resource:
+lost. Four event kinds emit through the same `DecisionTrace` Resource:
 
 - `ability_decision` — emitted from `decide_<class>_action` for all 7 classes
 - `target_acquisition` — emitted from `acquire_targets` on target changes
 - `pet_decision` — emitted from `pet_ai_system` for Felhunter / Spider / Boar / Bird
+- `movement_decision` — healer posture transitions and committed direction
+  changes (see the schema addendum below; emitters land with the
+  healer-posture movement plan's U6-U8 — until then the kind exists but no
+  events carry it)
 
 Enable with `--trace-mode on` (single match) or rely on the matrix default
 (`on`). See `CLAUDE.md` → "Diagnose AI behaviour with the decision trace" for
@@ -103,6 +107,42 @@ all 7 classes + 2 × 2v2 for multi-actor variants) and asserts:
    doesn't reliably produce the condition that fires your variant, either
    add a matchup that does, or document it in the `// Variants NOT in this
    list` comment block in `tests/decision_trace_audit.rs`.
+
+## `movement_decision` schema addendum
+
+Added for the healer posture-movement work
+(`docs/plans/2026-06-06-001-feat-healer-posture-movement-ai-plan.md`, U3).
+Flattened payload fields (top-level keys, like every other kind):
+
+| Field | Type | Notes |
+|---|---|---|
+| `posture` | `"free" \| "pressured" \| "escape" \| "dip"` | Posture AFTER the decision. REQUIRED — the structural discriminator for the untagged payload. |
+| `previous_posture` | same enum, optional | Present only on posture transitions; absent on within-posture re-commits. Its absence is how jq separates transitions from re-commits. |
+| `trigger` | `MovementTrigger` | Closed enum, unit-only variants, bare PascalCase strings: `PressuredEnter`, `PressuredExit`, `EscapeWindowOpen`, `EscapeWindowClosed`, `DipEnter`, `DipAbort`, `DipComplete`, `CommitExpired`, `FormationShift`. `jq -r .trigger` needs no object unwrapping. New variants must be added to `EXPECTED_MOVEMENT_TRIGGERS` in `tests/decision_trace_audit.rs`. |
+| `goal_kind` | `"direction" \| "point" \| "entity"` | Shape of the issued movement goal (scored direction / formation point / DIP pursuit target). |
+| `chosen_direction` | `[f32; 2]`, optional | Unit XZ direction from the position scorer; omitted for point/entity goals. |
+| `position` | `[f32; 3]` | Actor world position at decision time. Duplicated from `actor.position` by the builder so coarse trace-side movement KPIs read one field. |
+| `scorer_terms` | map name → f32, optional | Per-term score breakdown of the winning candidate. BTreeMap — deterministic key order for trace byte-identity. |
+
+The event's top-level `target` is set when the goal is an entity (e.g., the
+enemy healer a Paladin DIP pursues).
+
+**Emission policy (the volume contract).** Events fire on posture
+transitions and committed direction changes ONLY — never per-tick. The
+`MovementEventBuilder` enforces this structurally: `.finish()` without a
+recorded `.transition(...)` / `.direction_change(...)` emits nothing (same
+empty-builder-drops gate as the other builders). Per-tick positions belong
+to the probe harness (in-process observer), not the trace — per-tick
+emission would balloon the 4900-file matrix traces ~100x. Expected volume
+is duration-normalized: a bounded number of events per match-second, sized
+by the commitment window (the worst-case 300s timeout draw is the bound
+that matters, and is guarded by a volume test once emitters exist).
+
+Builder entry point: `DecisionTrace::start_movement_decision(actor, target)`
+mirroring `start_pet_decision`. Writer sort key: `MovementDecision` is
+appended to `kind_order` as 3 — `kind_order` is APPEND-ONLY (never renumber
+existing kinds; the canonical `(frame, entity_id, kind)` sort is what makes
+trace files byte-identical across runs).
 
 ## Determinism discipline (critical)
 

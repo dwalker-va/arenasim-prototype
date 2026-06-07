@@ -25,11 +25,11 @@ pub mod writer;
 
 use bevy::prelude::*;
 
-pub use builder::{DecisionEventBuilder, TargetEventBuilder};
+pub use builder::{DecisionEventBuilder, MovementEventBuilder, TargetEventBuilder};
 pub use events::{
     AbilityCandidate, AbilityOutcome, ActorView, CandidateStatus, DecisionEvent, EventKind,
-    NoActionReason, RejectionReason, ResourceKind, TargetCandidate, TargetRejectionReason,
-    TargetView,
+    EventPayload, MovementGoalKind, MovementTrigger, NoActionReason, Posture, RejectionReason,
+    ResourceKind, TargetCandidate, TargetRejectionReason, TargetView,
 };
 pub use writer::{flush_decision_trace_system, TraceWriter};
 
@@ -116,6 +116,26 @@ impl DecisionTrace {
             pet_owner: Some(owner.index()),
             pet_type: Some(std::borrow::Cow::Borrowed(pet_type)),
             pet_dispatched_by: Some(dispatched_by.index()),
+        }
+    }
+
+    /// Start a `movement_decision` event. Mirrors `start_pet_decision`
+    /// semantics: the caller records a posture transition or committed
+    /// direction change on the builder and commits with `.finish()`; a
+    /// builder that records no decision emits nothing (emission gate — this
+    /// is what keeps movement events transition-only, never per-tick).
+    /// `target` is the movement goal's entity when one exists (e.g., the
+    /// enemy healer a Paladin DIP pursues), `None` for direction/point goals.
+    pub fn start_movement_decision(
+        &mut self,
+        actor: ActorView,
+        target: Option<TargetView>,
+    ) -> MovementEventBuilder<'_> {
+        MovementEventBuilder {
+            trace: self,
+            actor,
+            target,
+            decision: None,
         }
     }
 

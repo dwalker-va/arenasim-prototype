@@ -102,6 +102,33 @@ const EXPECTED_TARGET_REJECTION_REASONS: &[&str] = &[
     //   emitted by acquire_targets' simplified candidate enumeration.
 ];
 
+/// `MovementTrigger` variants `movement_decision` events may carry.
+///
+/// The full closed set is listed even though NO emitters exist yet — the
+/// healer-posture plan ships the event kind (U3) before the emitters (U6-U8).
+/// The audit is surprise-only (see the comment above the assertion in the
+/// test body: the forward "every expected variant must be emitted" direction
+/// was removed deliberately), so present-but-unexercised entries are fine and
+/// don't fail the build. Once emitters land, any typo'd or out-of-band
+/// trigger will trip the surprise check exactly like rejection reasons do.
+///
+/// Variants NOT expected to be exercised by the current reference matchups
+/// even after emitters land (all of them, today): the reference set has no
+/// forced-focus healer matchup, so PRESSURED/ESCAPE/DIP traffic is
+/// seed-dependent. The healer-movement plan's U6 extends the reference
+/// matchups when the emitters ship.
+const EXPECTED_MOVEMENT_TRIGGERS: &[&str] = &[
+    "PressuredEnter",
+    "PressuredExit",
+    "EscapeWindowOpen",
+    "EscapeWindowClosed",
+    "DipEnter",
+    "DipAbort",
+    "DipComplete",
+    "CommitExpired",
+    "FormationShift",
+];
+
 /// One reference matchup: team configs + seed + label for error messages.
 struct ReferenceMatch {
     label: &'static str,
@@ -156,16 +183,37 @@ fn reference_matchups() -> Vec<ReferenceMatch> {
     ]
 }
 
-/// Parse a JSONL file and collect the set of `RejectionReason` + `TargetRejectionReason`
-/// variant names that appear in any event's candidates.
-fn collect_reasons(path: &PathBuf) -> (HashSet<String>, HashSet<String>) {
+/// Parse a JSONL file and collect the sets of `RejectionReason` /
+/// `TargetRejectionReason` variant names that appear in any event's
+/// candidates, plus `MovementTrigger` variant names from `movement_decision`
+/// events (which carry a top-level `trigger` field instead of candidates).
+fn collect_reasons(path: &PathBuf) -> (HashSet<String>, HashSet<String>, HashSet<String>) {
     let body = std::fs::read_to_string(path).expect("read trace file");
     let mut ability_reasons: HashSet<String> = HashSet::new();
     let mut target_reasons: HashSet<String> = HashSet::new();
+    let mut movement_triggers: HashSet<String> = HashSet::new();
 
     for line in body.lines() {
         let v: serde_json::Value = serde_json::from_str(line).expect("parse JSONL line");
         let kind = v.get("kind").and_then(|k| k.as_str()).unwrap_or("");
+        if kind == "movement_decision" {
+            // MovementTrigger variants are unit-only and serialize as bare
+            // strings; handle the single-key-object shape defensively in
+            // case a payload-carrying variant is ever added.
+            if let Some(trigger) = v.get("trigger") {
+                let name: Option<String> = if let Some(s) = trigger.as_str() {
+                    Some(s.to_string())
+                } else if let Some(obj) = trigger.as_object() {
+                    obj.keys().next().cloned()
+                } else {
+                    None
+                };
+                if let Some(name) = name {
+                    movement_triggers.insert(name);
+                }
+            }
+            continue;
+        }
         let candidates = match v.get("candidates") {
             Some(c) => c,
             None => continue,
@@ -201,13 +249,14 @@ fn collect_reasons(path: &PathBuf) -> (HashSet<String>, HashSet<String>) {
         }
     }
 
-    (ability_reasons, target_reasons)
+    (ability_reasons, target_reasons, movement_triggers)
 }
 
 #[test]
 fn reason_enum_variants_all_emitted_by_reference_matches() {
     let mut all_ability: HashSet<String> = HashSet::new();
     let mut all_target: HashSet<String> = HashSet::new();
+    let mut all_movement: HashSet<String> = HashSet::new();
     let mut artifacts: Vec<(String, PathBuf)> = Vec::new();
 
     for matchup in reference_matchups() {
@@ -226,9 +275,10 @@ fn reason_enum_variants_all_emitted_by_reference_matches() {
         )
         .unwrap_or_else(|e| panic!("{} failed: {}", matchup.label, e));
 
-        let (ability, target) = collect_reasons(&path);
+        let (ability, target, movement) = collect_reasons(&path);
         all_ability.extend(ability);
         all_target.extend(target);
+        all_movement.extend(movement);
         artifacts.push((matchup.label.to_string(), path));
     }
 
@@ -242,9 +292,11 @@ fn reason_enum_variants_all_emitted_by_reference_matches() {
     // changes on coverage-coincidence.
     let expected_ability: HashSet<String> = EXPECTED_REJECTION_REASONS.iter().map(|s| s.to_string()).collect();
     let expected_target: HashSet<String> = EXPECTED_TARGET_REJECTION_REASONS.iter().map(|s| s.to_string()).collect();
+    let expected_movement: HashSet<String> = EXPECTED_MOVEMENT_TRIGGERS.iter().map(|s| s.to_string()).collect();
 
     let surprise_ability: Vec<&String> = all_ability.difference(&expected_ability).collect();
     let surprise_target: Vec<&String> = all_target.difference(&expected_target).collect();
+    let surprise_movement: Vec<&String> = all_movement.difference(&expected_movement).collect();
 
     let mut issues = Vec::new();
     if !surprise_ability.is_empty() {
@@ -262,6 +314,15 @@ fn reason_enum_variants_all_emitted_by_reference_matches() {
         issues.push(format!(
             "TargetRejectionReason variants emitted but NOT in EXPECTED list: {:?}\n  \
              Add them to EXPECTED_TARGET_REJECTION_REASONS in tests/decision_trace_audit.rs.",
+            sorted
+        ));
+    }
+    if !surprise_movement.is_empty() {
+        let mut sorted: Vec<&&String> = surprise_movement.iter().collect();
+        sorted.sort();
+        issues.push(format!(
+            "MovementTrigger variants emitted but NOT in EXPECTED list: {:?}\n  \
+             Add them to EXPECTED_MOVEMENT_TRIGGERS in tests/decision_trace_audit.rs.",
             sorted
         ));
     }
@@ -284,8 +345,9 @@ fn reason_enum_variants_all_emitted_by_reference_matches() {
     }
 
     println!(
-        "Reason-enum audit passed (surprise-only): {} RejectionReason + {} TargetRejectionReason variants emitted across reference matches; none were unexpected.",
+        "Reason-enum audit passed (surprise-only): {} RejectionReason + {} TargetRejectionReason + {} MovementTrigger variants emitted across reference matches; none were unexpected.",
         all_ability.len(),
         all_target.len(),
+        all_movement.len(),
     );
 }
