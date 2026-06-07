@@ -321,7 +321,10 @@ impl AuraPending {
 
 /// DR categories — fixed enum with known size for array indexing.
 /// Each category is independent: Stun DR doesn't affect Fear DR.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+/// `Deserialize` exists for trace-payload roundtripping
+/// (`decision_trace::EventPayload` derives `Deserialize` and
+/// `RejectionReason::DRImmune` carries this enum), not for config loading.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DRCategory {
     Stuns = 0,
     Fears = 1,

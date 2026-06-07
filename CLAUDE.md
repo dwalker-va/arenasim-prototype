@@ -321,6 +321,21 @@ jq -c 'select(.kind == "pet_decision" and .dispatched_by != null) | {owner, pet_
 # flank, queued PetCommand despawned without execution)
 jq -c 'select(.kind == "pet_decision") | .candidates[]? | select((.reason | if type == "object" then keys[0] else . end) == "LowHealthHeel")' $T | wc -l
 
+# Healer posture transitions over time (movement_decision events fire on
+# posture transitions + committed direction changes only — never per-tick).
+# `previous_posture` is present only on real transitions; re-commits
+# (CommitExpired / FormationShift) omit it.
+jq -c 'select(.kind == "movement_decision" and .actor.class == "Priest") | {t: .sim_time, from: .previous_posture, to: .posture, trigger}' $T
+
+# Movement trigger histogram (triggers are unit variants — bare strings,
+# no object unwrapping needed)
+jq -r 'select(.kind == "movement_decision") | .trigger' $T | sort | uniq -c
+
+# Position track for one entity at its movement decisions (coarse path
+# sketch — decision points only, not a per-tick trail; use the probe
+# harness for full timelines)
+jq -c 'select(.kind == "movement_decision" and .actor.entity_id == 7) | {t: .sim_time, position, posture}' $T
+
 # NOTE: pets are excluded from `acquire_targets` events. Pet target state
 # lives in pet_decision actor views and the match log, not in
 # target_acquisition events.

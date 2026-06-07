@@ -107,11 +107,16 @@ impl Drop for TraceWriter {
     }
 }
 
+/// Canonical sort key for the kind tie-break. APPEND-ONLY: new kinds take the
+/// next free number — never renumber existing entries, or every previously
+/// captured trace's canonical order (and the byte-identity determinism gates)
+/// silently changes meaning.
 fn kind_order(kind: EventKind) -> u8 {
     match kind {
         EventKind::TargetAcquisition => 0,
         EventKind::AbilityDecision => 1,
         EventKind::PetDecision => 2,
+        EventKind::MovementDecision => 3,
     }
 }
 
