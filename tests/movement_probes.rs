@@ -19,6 +19,12 @@
 //! baseline test documented the pathology; U6 fixed it), plus anchor /
 //! stealth / time-in-FREE / corner / 1v1-degenerate / zigzag / wand probes
 //! at fixed seeds.
+//!
+//! The `escape_windows` / `escape_window_math` modules are the U7 suite for
+//! ESCAPE windows and cast-vs-move urgency: escape-separation, heal-defer,
+//! critical-heal, multi-attacker, and wall probes at fixed seeds (see the
+//! seed notes on the module), plus pure unit tests of the slow-adjusted
+//! window math.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -487,17 +493,21 @@ mod priest_postures {
     /// (the trace clock starts at gates-open); add the timeline's
     /// `gates_open_time` to compare against `FrameObservation` timestamps.
     #[derive(Debug, Clone)]
-    struct MovementEvent {
-        sim_time: f32,
-        team: u8,
-        slot: u8,
-        trigger: String,
-        goal_kind: String,
+    pub(super) struct MovementEvent {
+        pub(super) sim_time: f32,
+        pub(super) team: u8,
+        pub(super) slot: u8,
+        pub(super) trigger: String,
+        pub(super) goal_kind: String,
+        /// Actor world position at decision time (the event's `position`).
+        pub(super) position: [f32; 3],
+        /// Scorer-chosen unit XZ direction, when the goal is directional.
+        pub(super) chosen_direction: Option<[f32; 2]>,
     }
 
     /// Run an observed + traced match; returns the result, the position
     /// timeline, and every parsed trace line.
-    fn run_observed_traced(
+    pub(super) fn run_observed_traced(
         config: HeadlessMatchConfig,
     ) -> (MatchResult, Timeline, Vec<serde_json::Value>) {
         let tmp = tempfile::NamedTempFile::new().unwrap();
@@ -524,7 +534,7 @@ mod priest_postures {
         (result, timeline, events)
     }
 
-    fn movement_events(trace: &[serde_json::Value]) -> Vec<MovementEvent> {
+    pub(super) fn movement_events(trace: &[serde_json::Value]) -> Vec<MovementEvent> {
         trace
             .iter()
             .filter(|v| v["kind"] == "movement_decision")
@@ -534,13 +544,27 @@ mod priest_postures {
                 slot: v["actor"]["slot"].as_u64().unwrap() as u8,
                 trigger: v["trigger"].as_str().unwrap_or_default().to_string(),
                 goal_kind: v["goal_kind"].as_str().unwrap_or_default().to_string(),
+                position: {
+                    let p = &v["position"];
+                    [
+                        p[0].as_f64().unwrap_or_default() as f32,
+                        p[1].as_f64().unwrap_or_default() as f32,
+                        p[2].as_f64().unwrap_or_default() as f32,
+                    ]
+                },
+                chosen_direction: v["chosen_direction"].as_array().map(|d| {
+                    [
+                        d[0].as_f64().unwrap_or_default() as f32,
+                        d[1].as_f64().unwrap_or_default() as f32,
+                    ]
+                }),
             })
             .collect()
     }
 
     /// PRESSURED windows (combat-time) for one actor, from PressuredEnter /
     /// PressuredExit transitions; an unclosed window ends at `end`.
-    fn pressured_windows(
+    pub(super) fn pressured_windows(
         events: &[MovementEvent],
         team: u8,
         slot: u8,
@@ -993,6 +1017,513 @@ mod priest_postures {
              working",
             frac * 100.0
         );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// U7 — ESCAPE windows and cast-vs-move urgency
+// ---------------------------------------------------------------------------
+//
+// Seed notes (scanned seeds 1..20 per comp during development; the forced-
+// target openings are essentially seed-invariant for the first ~15s, so the
+// pinned seeds are robust):
+//
+// - Escape/defer comp: Priest+Paladin vs Warrior+Mage, both kill targets on
+//   index 0 (team1 → enemy Warrior, team2 → our Priest). The Paladin melees
+//   the Warrior that is chasing the Priest and rotation-HoJs it at first
+//   contact (~6.4s combat time) — a 6s stun right next to the Priest, the
+//   canonical escape window. The enemy Mage stays at caster range (beyond
+//   the danger radius), so the Warrior is the only proximate threat.
+//   NOTE: the plan suggested Mage Frost Nova as the window source, but the
+//   Mage AI only Novas with an enemy inside MELEE_RANGE of the MAGE — a
+//   Warrior forced onto the Priest never gets that close to the Mage in any
+//   scanned seed (0 windows over 8 seeds × 2 comps). A teammate stun (HoJ /
+//   Kidney Shot) is the reliable natural source. Also scanned and rejected:
+//   enemy comps with pet owners (Warlock/Hunter) — the pet inherits the
+//   Priest as target and parks in melee as a permanently-unimpaired
+//   proximate threat, correctly voiding every window (multi-attacker rule).
+// - Critical-heal comp: Priest+Paladin vs Rogue+Mage at seed 14 — the only
+//   scanned seed (1..20) where the Priest's HP sits below the urgency
+//   threshold mid-window with Holy school unlocked and PW:Shield spent, so
+//   a Flash Heal STARTS inside the live window (measured: t=12.37, hp=0.36).
+// - Multi-attacker comp: Priest+Paladin vs Warrior+Warrior — both Warriors
+//   reach the Priest together, HoJ stuns exactly one, the other stays free:
+//   0 windows across all scanned seeds.
+// - Wall comp: Priest+Rogue vs lone Warrior (forced onto the Priest). The
+//   Rogue's Kidney Shot lands at ~10.8s combat time, by which point the
+//   Priest has been chased onto the west wall (x = -36.5): the window OPENS
+//   in the wall band and the scored direction bends back into the arena
+//   (measured chosen_direction ≈ (0.92, 0.38), not the straight-away (-1,0)
+//   that would pin into the wall).
+
+mod escape_windows {
+    use super::priest_postures::{movement_events, pressured_windows, run_observed_traced, MovementEvent};
+    use super::*;
+    use arenasim::states::play_match::constants::{
+        ARENA_CORNER_SUM, ARENA_HALF_X, ARENA_HALF_Z,
+    };
+    use arenasim::states::play_match::movement_config::load_movement_config;
+
+    /// Separation floor asserted per window (units of XZ distance gained
+    /// from the impaired attacker). There is no movement.ron knob for this —
+    /// it is the probe's regression bound, set at a quarter of the measured
+    /// value (~20 units over the canonical ~5.9s HoJ window) so weight
+    /// tuning has headroom without letting the behavior regress to "stood
+    /// still through the window".
+    const MIN_WINDOW_SEPARATION: f32 = 5.0;
+
+    /// ESCAPE windows (combat time) for one actor, from EscapeWindowOpen /
+    /// EscapeWindowClosed transitions; an unclosed window (match ended
+    /// mid-escape) ends at `end`.
+    fn escape_window_spans(
+        events: &[MovementEvent],
+        team: u8,
+        slot: u8,
+        end: f32,
+    ) -> Vec<(f32, f32)> {
+        let mut windows = Vec::new();
+        let mut open: Option<f32> = None;
+        for e in events.iter().filter(|e| e.team == team && e.slot == slot) {
+            match e.trigger.as_str() {
+                "EscapeWindowOpen" if open.is_none() => open = Some(e.sim_time),
+                "EscapeWindowClosed" => {
+                    if let Some(start) = open.take() {
+                        windows.push((start, e.sim_time));
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let Some(start) = open {
+            windows.push((start, end));
+        }
+        windows
+    }
+
+    /// Flash Heal deferral rejects (combat time) emitted by the team-1
+    /// Priest — the cast-vs-move urgency rule's trace fingerprint.
+    fn flash_heal_defer_times(trace: &[serde_json::Value]) -> Vec<f32> {
+        trace
+            .iter()
+            .filter(|v| {
+                v["kind"] == "ability_decision"
+                    && v["actor"]["team"] == 1
+                    && v["actor"]["class"] == "Priest"
+            })
+            .filter(|v| {
+                v["candidates"].as_array().map_or(false, |cands| {
+                    cands.iter().any(|c| {
+                        c["ability"] == "FlashHeal"
+                            && c["reason"]["PreconditionUnmet"]["note"]
+                                .as_str()
+                                .map_or(false, |n| n.starts_with("escape window"))
+                    })
+                })
+            })
+            .map(|v| v["sim_time"].as_f64().unwrap() as f32)
+            .collect()
+    }
+
+    /// Flash Heal cast STARTS (combat time, actor hp_pct) by the team-1
+    /// Priest.
+    fn flash_heal_starts(trace: &[serde_json::Value]) -> Vec<(f32, f32)> {
+        trace
+            .iter()
+            .filter(|v| {
+                v["kind"] == "ability_decision"
+                    && v["actor"]["team"] == 1
+                    && v["actor"]["class"] == "Priest"
+                    && v["outcome"]["type"] == "action_taken"
+                    && v["outcome"]["ability"] == "FlashHeal"
+            })
+            .map(|v| {
+                (
+                    v["sim_time"].as_f64().unwrap() as f32,
+                    v["actor"]["hp_pct"].as_f64().unwrap() as f32,
+                )
+            })
+            .collect()
+    }
+
+    /// Half-open in-window test, `[open, close)`: the close tick itself is
+    /// post-window (the EscapeWindowClosed transition and the first
+    /// post-window decision share a tick — `evaluate_priest_posture` runs
+    /// before the ability pass).
+    fn in_window(t: f32, windows: &[(f32, f32)]) -> bool {
+        windows.iter().any(|(open, close)| t >= *open && t < *close)
+    }
+
+    /// Distance from `pos` to the nearest arena boundary (rect edges + the
+    /// |x|+|z| corner walls). Small values = pressed against a wall.
+    fn boundary_proximity(pos: [f32; 3]) -> f32 {
+        let (x, z) = (pos[0], pos[2]);
+        (ARENA_HALF_X - x.abs())
+            .min(ARENA_HALF_Z - z.abs())
+            .min(ARENA_CORNER_SUM - (x.abs() + z.abs()))
+    }
+
+    /// The canonical escape comp: Priest+Paladin vs Warrior+Mage, Warrior
+    /// forced onto the Priest, team 1 forced onto the Warrior.
+    fn escape_config(seed: u64) -> HeadlessMatchConfig {
+        let mut cfg = create_config(
+            vec!["Priest", "Paladin"],
+            vec!["Warrior", "Mage"],
+            Some(seed),
+        );
+        cfg.team1_kill_target = Some(0);
+        cfg.team2_kill_target = Some(0);
+        cfg
+    }
+
+    /// (a) ESCAPE PROBE — a teammate's stun on the Priest's attacker
+    /// converts into separation: ≥1 window occurred (non-vacuity), and in
+    /// EVERY window the Priest gained at least the configured separation
+    /// from the impaired attacker.
+    #[test]
+    fn escape_window_converts_cc_into_separation() {
+        let (result, timeline, trace) = run_observed_traced(escape_config(1));
+        let gate = timeline.gates_open_time.expect("gates opened");
+
+        let events = movement_events(&trace);
+        let windows = escape_window_spans(&events, 1, 0, result.match_time);
+        assert_min_occurrences("escape windows", windows.len(), 1);
+
+        let priest = timeline.find(1, CharacterClass::Priest, false);
+        let warrior = timeline.find(2, CharacterClass::Warrior, false);
+        let priest_samples = timeline.samples.get(&priest).cloned().unwrap_or_default();
+        let warrior_samples = timeline.samples.get(&warrior).cloned().unwrap_or_default();
+
+        for (open, close) in &windows {
+            let gained = separation_gained_during(
+                &priest_samples,
+                &warrior_samples,
+                (open + gate, close + gate),
+            )
+            .expect("window must contain matched samples");
+            eprintln!(
+                "escape probe: window [{:.1},{:.1}]s (combat time) separation gained {:.1} \
+                 (floor {})",
+                open, close, gained, MIN_WINDOW_SEPARATION
+            );
+            assert!(
+                gained >= MIN_WINDOW_SEPARATION,
+                "escape window [{:.1},{:.1}] gained only {:.1} separation from the \
+                 impaired attacker (floor {})",
+                open,
+                close,
+                gained,
+                MIN_WINDOW_SEPARATION
+            );
+        }
+    }
+
+    /// (b) DEFER PROBE — while a window is live and the would-be heal target
+    /// is above the urgency threshold, the Priest does NOT start a Flash
+    /// Heal: the deferral reject fires in-window (non-vacuity), and no Flash
+    /// Heal cast starts inside any live window at this seed (the only
+    /// sub-threshold moment gets an instant PW:Shield — instants are not
+    /// deferred — whose GCD outlasts the window).
+    #[test]
+    fn live_window_defers_noncritical_heals() {
+        let (result, _timeline, trace) = run_observed_traced(escape_config(1));
+
+        let events = movement_events(&trace);
+        let windows = escape_window_spans(&events, 1, 0, result.match_time);
+        assert_min_occurrences("escape windows", windows.len(), 1);
+
+        let defers_in_window = flash_heal_defer_times(&trace)
+            .into_iter()
+            .filter(|t| in_window(*t, &windows))
+            .count();
+        assert_min_occurrences("in-window Flash Heal deferrals", defers_in_window, 1);
+
+        let starts_in_window: Vec<(f32, f32)> = flash_heal_starts(&trace)
+            .into_iter()
+            .filter(|(t, _)| in_window(*t, &windows))
+            .collect();
+        eprintln!(
+            "defer probe: {} in-window deferral rejects, {} in-window Flash Heal starts",
+            defers_in_window,
+            starts_in_window.len()
+        );
+        assert!(
+            starts_in_window.is_empty(),
+            "Flash Heal started inside a live escape window at {:?} — the \
+             cast-vs-move deferral did not hold",
+            starts_in_window
+        );
+    }
+
+    /// (c) CRITICAL-HEAL PROBE (AE1) — an ally below the urgency threshold
+    /// during a live window is healed anyway: a Flash Heal STARTS in-window.
+    /// Seed 14 is the scanned seed where the Priest's own HP (it is the
+    /// lowest ally — the whole enemy team is on it) is sub-threshold
+    /// mid-window with Holy unlocked: measured start t=12.37, hp=0.36.
+    #[test]
+    fn critical_heal_fires_despite_live_window() {
+        let threshold = load_movement_config()
+            .expect("movement.ron loads")
+            .shared
+            .urgency_hp_threshold;
+
+        let mut cfg = create_config(
+            vec!["Priest", "Paladin"],
+            vec!["Rogue", "Mage"],
+            Some(14),
+        );
+        cfg.team1_kill_target = Some(0);
+        cfg.team2_kill_target = Some(0);
+        let (result, _timeline, trace) = run_observed_traced(cfg);
+
+        let events = movement_events(&trace);
+        let windows = escape_window_spans(&events, 1, 0, result.match_time);
+        assert_min_occurrences("escape windows", windows.len(), 1);
+
+        let critical_starts: Vec<(f32, f32)> = flash_heal_starts(&trace)
+            .into_iter()
+            .filter(|(t, hp)| in_window(*t, &windows) && *hp <= threshold)
+            .collect();
+        eprintln!(
+            "critical-heal probe: in-window sub-threshold Flash Heal starts: {:?}",
+            critical_starts
+        );
+        assert_min_occurrences(
+            "in-window critical Flash Heal starts",
+            critical_starts.len(),
+            1,
+        );
+    }
+
+    /// (d) MULTI-ATTACKER PROBE — two melee on the Priest, only one stunned:
+    /// no EscapeWindowOpen ever fires. Non-vacuity is established
+    /// structurally: the Paladin's HoJ landed while the Priest was PRESSURED
+    /// with BOTH Warriors inside the danger radius — exactly one of them
+    /// impaired — so a window WOULD have opened but for the unimpaired
+    /// second attacker.
+    #[test]
+    fn unimpaired_second_attacker_voids_window() {
+        let danger_radius = load_movement_config()
+            .expect("movement.ron loads")
+            .shared
+            .danger_radius;
+
+        let mut cfg = create_config(
+            vec!["Priest", "Paladin"],
+            vec!["Warrior", "Warrior"],
+            Some(1),
+        );
+        cfg.team1_kill_target = Some(0);
+        cfg.team2_kill_target = Some(0);
+        let (result, timeline, trace) = run_observed_traced(cfg);
+        let gate = timeline.gates_open_time.expect("gates opened");
+
+        // Non-vacuity 1: the stun actually landed.
+        let hoj_times: Vec<f32> = trace
+            .iter()
+            .filter(|v| {
+                v["kind"] == "ability_decision"
+                    && v["actor"]["team"] == 1
+                    && v["actor"]["class"] == "Paladin"
+                    && v["outcome"]["type"] == "action_taken"
+                    && v["outcome"]["ability"] == "HammerOfJustice"
+            })
+            .map(|v| v["sim_time"].as_f64().unwrap() as f32)
+            .collect();
+        assert_min_occurrences("Paladin HoJ casts", hoj_times.len(), 1);
+
+        // Non-vacuity 2: the Priest was PRESSURED at the stun moment.
+        let events = movement_events(&trace);
+        let pressured = pressured_windows(&events, 1, 0, result.match_time);
+        let hoj = hoj_times[0];
+        assert!(
+            pressured.iter().any(|(a, b)| hoj >= *a && hoj <= *b),
+            "probe went vacuous — re-scan seeds: HoJ at {:.1}s fell outside every \
+             PRESSURED window {:?}",
+            hoj,
+            pressured
+        );
+
+        // Non-vacuity 3: both Warriors were proximate threats at that moment.
+        let priest = timeline.find(1, CharacterClass::Priest, false);
+        let warriors: Vec<bevy::prelude::Entity> = timeline
+            .info
+            .iter()
+            .filter(|(_, i)| i.team == 2 && i.class == CharacterClass::Warrior && !i.is_pet)
+            .map(|(e, _)| *e)
+            .collect();
+        assert_eq!(warriors.len(), 2, "comp must field two enemy Warriors");
+        let at = |entity: bevy::prelude::Entity, t: f32| -> Vec3 {
+            timeline
+                .samples
+                .get(&entity)
+                .and_then(|s| {
+                    s.iter()
+                        .min_by(|a, b| {
+                            (a.0 - t).abs().partial_cmp(&(b.0 - t).abs()).unwrap()
+                        })
+                        .map(|(_, p)| *p)
+                })
+                .expect("entity has samples")
+        };
+        let priest_pos = at(priest, hoj + gate);
+        for w in &warriors {
+            let d = priest_pos.distance(at(*w, hoj + gate));
+            eprintln!(
+                "multi-attacker probe: warrior at {:.1} units from the Priest at the \
+                 HoJ moment (danger radius {})",
+                d, danger_radius
+            );
+            assert!(
+                d <= danger_radius,
+                "probe went vacuous — re-scan seeds: a Warrior was {:.1} units away \
+                 at the HoJ moment (outside danger radius {})",
+                d,
+                danger_radius
+            );
+        }
+
+        // The actual rule: one free proximate attacker voids every window.
+        let opens = events
+            .iter()
+            .filter(|e| e.team == 1 && e.slot == 0 && e.trigger == "EscapeWindowOpen")
+            .count();
+        assert_eq!(
+            opens, 0,
+            "EscapeWindowOpen fired with an unimpaired second melee on the Priest — \
+             the multi-attacker rule leaked"
+        );
+    }
+
+    /// (e) WALL PROBE — a window that OPENS with the Priest pressed against
+    /// a boundary still produces separation: the scored direction bends back
+    /// into the arena (boundary penalty active) instead of pinning into the
+    /// wall. Priest+Rogue vs a lone forced Warrior: Kidney Shot lands at
+    /// ~10.8s, by which point the Priest sits on the west wall (x=-36.5).
+    #[test]
+    fn wall_adjacent_window_still_gains_separation() {
+        let mut cfg = create_config(vec!["Priest", "Rogue"], vec!["Warrior"], Some(1));
+        cfg.team2_kill_target = Some(0);
+        let (result, timeline, trace) = run_observed_traced(cfg);
+        let gate = timeline.gates_open_time.expect("gates opened");
+
+        let events = movement_events(&trace);
+        let opens: Vec<&MovementEvent> = events
+            .iter()
+            .filter(|e| e.team == 1 && e.slot == 0 && e.trigger == "EscapeWindowOpen")
+            .collect();
+        let wall_opens: Vec<&&MovementEvent> = opens
+            .iter()
+            .filter(|e| boundary_proximity(e.position) <= 1.0)
+            .collect();
+        assert_min_occurrences("wall-adjacent escape windows", wall_opens.len(), 1);
+
+        let windows = escape_window_spans(&events, 1, 0, result.match_time);
+        let priest = timeline.find(1, CharacterClass::Priest, false);
+        let warrior = timeline.find(2, CharacterClass::Warrior, false);
+        let priest_samples = timeline.samples.get(&priest).cloned().unwrap_or_default();
+        let warrior_samples = timeline.samples.get(&warrior).cloned().unwrap_or_default();
+
+        for open_event in &wall_opens {
+            // The scored direction must not push out of bounds: one
+            // scorer-lookahead step along it stays inside the arena.
+            let dir = open_event
+                .chosen_direction
+                .expect("escape windows carry a chosen direction");
+            let next = [
+                open_event.position[0] + dir[0] * 2.0,
+                open_event.position[2] + dir[1] * 2.0,
+            ];
+            assert!(
+                next[0].abs() <= ARENA_HALF_X
+                    && next[1].abs() <= ARENA_HALF_Z
+                    && next[0].abs() + next[1].abs() <= ARENA_CORNER_SUM,
+                "wall-adjacent escape direction {:?} from {:?} pushes out of bounds — \
+                 the boundary penalty is not bending the escape",
+                dir,
+                open_event.position
+            );
+
+            // And the window still buys separation (measured to the last
+            // matched sample — the attacker may die mid-window in this comp).
+            let (open, close) = windows
+                .iter()
+                .find(|(a, _)| (*a - open_event.sim_time).abs() < 1e-3)
+                .copied()
+                .expect("open event has a matching window span");
+            let gained = separation_gained_during(
+                &priest_samples,
+                &warrior_samples,
+                (open + gate, close + gate),
+            )
+            .expect("wall window must contain matched samples");
+            eprintln!(
+                "wall probe: window [{:.1},{:.1}]s opened at {:?} (boundary {:.2} away), \
+                 dir {:?}, separation gained {:.1}",
+                open,
+                close,
+                open_event.position,
+                boundary_proximity(open_event.position),
+                dir,
+                gained
+            );
+            assert!(
+                gained >= 3.0,
+                "wall-adjacent window gained only {:.1} separation (floor 3.0)",
+                gained
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// U7 — ESCAPE window math unit tests (pure, no Bevy world)
+// ---------------------------------------------------------------------------
+
+mod escape_window_math {
+    use arenasim::states::play_match::class_ai::priest::{
+        escape_distance_gained, escape_window,
+    };
+
+    /// (f) Window math: a 50% slow on the Priest halves the effective window
+    /// distance.
+    #[test]
+    fn fifty_percent_slow_halves_effective_distance() {
+        let full = escape_distance_gained(2.0, 5.0, 1.0);
+        let slowed = escape_distance_gained(2.0, 5.0, 0.5);
+        assert!((full - 10.0).abs() < 1e-6, "2s at speed 5 = 10 units, got {}", full);
+        assert!(
+            (slowed - full / 2.0).abs() < 1e-6,
+            "50% slow must halve the distance: {} vs {}",
+            slowed,
+            full
+        );
+    }
+
+    /// (g) Sub-cutoff windows do not trigger ESCAPE — including windows that
+    /// are only sub-cutoff AFTER the slow adjustment.
+    #[test]
+    fn sub_cutoff_window_is_rejected() {
+        // Raw window below the cutoff: rejected.
+        assert_eq!(escape_window(&[Some(0.3)], 1.0, 0.5), None);
+        // At/above the cutoff: accepted, raw duration returned.
+        assert_eq!(escape_window(&[Some(0.6)], 1.0, 0.5), Some(0.6));
+        // A 50% slow halves the effective window: 0.8s raw → 0.4s effective,
+        // below the 0.5 cutoff → rejected.
+        assert_eq!(escape_window(&[Some(0.8)], 0.5, 0.5), None);
+        // 1.2s raw → 0.6s effective → accepted (and the RAW window is
+        // returned: the slowed Priest still escapes for the full CC time).
+        assert_eq!(escape_window(&[Some(1.2)], 0.5, 0.5), Some(1.2));
+    }
+
+    /// Multi-attacker rule and min-over-threats window duration.
+    #[test]
+    fn multi_attacker_rule_and_min_window() {
+        // One unimpaired proximate threat voids the window.
+        assert_eq!(escape_window(&[Some(4.0), None], 1.0, 0.5), None);
+        // No proximate threat → nothing to escape from.
+        assert_eq!(escape_window(&[], 1.0, 0.5), None);
+        // Window = min over impaired threats (first to break free ends it).
+        assert_eq!(escape_window(&[Some(4.0), Some(1.5)], 1.0, 0.5), Some(1.5));
     }
 }
 

@@ -92,6 +92,12 @@ pub struct HealerPosture {
     /// similarly-injured allies don't flap the constraint region tick to
     /// tick.
     pub anchor: Option<Entity>,
+    /// ESCAPE window end: absolute sim-time at which the committed escape
+    /// directive (and the cast-vs-move heal deferral) expires. Set on
+    /// PRESSURED → ESCAPE entry to `now + min(CC remaining over impaired
+    /// proximate threats)`; the posture exits (→ PRESSURED or FREE) on the
+    /// first evaluation at/after this deadline. `0.0` = no window.
+    pub escape_until: f32,
     /// Last committed scorer direction (unit XZ), input to the scorer's
     /// commitment-bonus term at the next re-evaluation. `None` before the
     /// first directional decision and after posture transitions.
@@ -111,6 +117,7 @@ impl HealerPosture {
             since: now,
             hold_until: 0.0,
             anchor: None,
+            escape_until: 0.0,
             last_direction: None,
             last_point: None,
         }
