@@ -10,12 +10,14 @@
 
 mod damage;
 mod movement;
+mod movement_scoring;
 mod auto_attack;
 mod casting;
 mod death;
 
 pub use damage::*;
 pub use movement::*;
+pub use movement_scoring::*;
 pub use auto_attack::*;
 pub use casting::*;
 pub use death::*;

@@ -189,6 +189,22 @@ pub enum Posture {
     Dip,
 }
 
+/// The gameplay-side posture (`components::movement::Posture`, carried by the
+/// `HealerPosture` component) converts losslessly into the trace enum.
+/// Conversion lives here — events.rs already depends on `components` — so the
+/// gameplay component stays free of trace-schema concerns.
+impl From<crate::states::play_match::components::Posture> for Posture {
+    fn from(p: crate::states::play_match::components::Posture) -> Self {
+        use crate::states::play_match::components::Posture as GamePosture;
+        match p {
+            GamePosture::Free => Posture::Free,
+            GamePosture::Pressured => Posture::Pressured,
+            GamePosture::Escape => Posture::Escape,
+            GamePosture::Dip => Posture::Dip,
+        }
+    }
+}
+
 /// Closed set of causes for a `movement_decision` event. Unit-only variants
 /// serialize as bare PascalCase strings (same convention as unit
 /// `RejectionReason` variants), so `jq -r .trigger` works without the

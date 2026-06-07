@@ -516,3 +516,312 @@ fn current_build_exhibits_statue_pathology() {
         path
     );
 }
+
+// ---------------------------------------------------------------------------
+// U5 — movement config registration probe
+// ---------------------------------------------------------------------------
+
+/// (j) Headless mode loads `assets/config/movement.ron`. Two mechanisms make
+/// a successful run the proof: `MovementConfigPlugin` panics if the file is
+/// missing/malformed/invalid, and `run_headless_match_impl` carries a
+/// `debug_assert!` that the `MovementConfig` resource exists (so deleting the
+/// plugin registration fails this test under `cargo test`, where
+/// debug_assertions are on).
+#[test]
+fn headless_runner_registers_movement_config() {
+    let cfg = create_config(vec!["Warrior"], vec!["Mage"], Some(7));
+    run_headless_match_with(cfg, true, None)
+        .expect("headless run must succeed with MovementConfigPlugin registered");
+}
+
+// ---------------------------------------------------------------------------
+// U5 — MovementDirective executor tests (World-level, minimal App/schedule)
+// ---------------------------------------------------------------------------
+//
+// These drive `move_to_target` directly in a minimal Bevy App: MinimalPlugins
+// for the clock (manual 1/60s steps, same strategy as the headless runner),
+// gates forced open, and only the system under test registered. No class AI
+// runs, so the directives injected here are the ONLY movement source — which
+// is exactly the isolation the executor contract needs.
+
+mod directive_executor {
+    use std::time::Duration;
+
+    use arenasim::states::play_match::abilities::AbilityType;
+    use arenasim::states::play_match::combat_core::{move_to_target, DIRECTIVE_POINT_EPSILON};
+    use arenasim::states::play_match::components::{
+        ActiveAuras, Aura, AuraType, CastingState, Combatant, MatchCountdown, MovementDirective,
+        MovementGoal,
+    };
+    use arenasim::CharacterClass;
+    use bevy::prelude::*;
+    use bevy::time::TimeUpdateStrategy;
+    use bevy::MinimalPlugins;
+
+    /// Minimal App that runs only `move_to_target` with gates open and a
+    /// manual 1/60s clock (mirrors the headless runner's time strategy).
+    fn executor_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
+                1.0 / 60.0,
+            )))
+            .insert_resource(MatchCountdown {
+                time_remaining: 0.0,
+                gates_opened: true,
+            })
+            .add_systems(Update, move_to_target);
+        app
+    }
+
+    /// Spawn a combatant at `pos` with NO target (so the legacy ladder's
+    /// no-target branch holds still while within 5 units of arena center —
+    /// keeping the directive the only movement source in these tests).
+    fn spawn_combatant(app: &mut App, pos: Vec3) -> (Entity, f32) {
+        let combatant = Combatant::new(1, 0, CharacterClass::Priest);
+        let speed = combatant.base_movement_speed;
+        let entity = app
+            .world_mut()
+            .spawn((Transform::from_translation(pos), combatant))
+            .id();
+        (entity, speed)
+    }
+
+    fn now(app: &App) -> f32 {
+        app.world().resource::<Time>().elapsed_secs()
+    }
+
+    fn pos_of(app: &App, entity: Entity) -> Vec3 {
+        app.world().get::<Transform>(entity).unwrap().translation
+    }
+
+    fn slow_aura(magnitude: f32) -> ActiveAuras {
+        ActiveAuras {
+            auras: vec![Aura {
+                effect_type: AuraType::MovementSpeedSlow,
+                duration: 60.0,
+                magnitude,
+                ..Default::default()
+            }],
+        }
+    }
+
+    fn stun_aura() -> ActiveAuras {
+        ActiveAuras {
+            auras: vec![Aura {
+                effect_type: AuraType::Stun,
+                duration: 60.0,
+                magnitude: 1.0,
+                ..Default::default()
+            }],
+        }
+    }
+
+    /// (e) A Direction directive moves the entity at base speed: distance
+    /// traveled equals base_movement_speed × elapsed sim time.
+    #[test]
+    fn direction_directive_moves_at_base_speed() {
+        let mut app = executor_app();
+        let start = Vec3::new(0.0, 1.0, 0.0);
+        let (entity, speed) = spawn_combatant(&mut app, start);
+        app.world_mut().entity_mut(entity).insert(MovementDirective {
+            goal: MovementGoal::Direction(Vec2::new(1.0, 0.0)),
+            expires: 100.0,
+            committed_until: 100.0,
+        });
+
+        for _ in 0..30 {
+            app.update();
+        }
+
+        let elapsed = now(&app);
+        let pos = pos_of(&app, entity);
+        let expected_x = speed * elapsed;
+        assert!(
+            (pos.x - expected_x).abs() < 1e-3,
+            "expected x ≈ {} (speed {} × elapsed {}), got {}",
+            expected_x,
+            speed,
+            elapsed,
+            pos.x
+        );
+        assert!(pos.x > 1.0, "entity should have moved meaningfully");
+        assert_eq!(pos.z, start.z, "Direction(+X) must not move on Z");
+    }
+
+    /// (e) Slow-adjusted speed: a 50% MovementSpeedSlow halves directive
+    /// movement (mirrors the kiting branch's slow handling).
+    #[test]
+    fn direction_directive_respects_movement_slows() {
+        let mut app = executor_app();
+        let (entity, speed) = spawn_combatant(&mut app, Vec3::new(0.0, 1.0, 0.0));
+        app.world_mut().entity_mut(entity).insert((
+            MovementDirective {
+                goal: MovementGoal::Direction(Vec2::new(1.0, 0.0)),
+                expires: 100.0,
+                committed_until: 100.0,
+            },
+            slow_aura(0.5),
+        ));
+
+        for _ in 0..30 {
+            app.update();
+        }
+
+        let elapsed = now(&app);
+        let pos = pos_of(&app, entity);
+        let expected_x = speed * 0.5 * elapsed;
+        assert!(
+            (pos.x - expected_x).abs() < 1e-3,
+            "expected slow-adjusted x ≈ {}, got {}",
+            expected_x,
+            pos.x
+        );
+    }
+
+    /// (f) Expiry removes the directive WITHOUT executing it — including the
+    /// stunned-past-deadline case: a directive issued pre-stun must be gone
+    /// on the first post-stun frame, with zero movement along the stale
+    /// vector. The expiry check sits ABOVE the root/stun early-continue.
+    #[test]
+    fn expired_directive_removed_while_stunned_no_stale_movement() {
+        let mut app = executor_app();
+        app.update(); // prime the clock so `now` is meaningful
+        let start = Vec3::new(0.0, 1.0, 0.0);
+        let (entity, _) = spawn_combatant(&mut app, start);
+        let deadline = now(&app) + 0.1;
+        app.world_mut().entity_mut(entity).insert((
+            MovementDirective {
+                goal: MovementGoal::Direction(Vec2::new(1.0, 0.0)),
+                expires: deadline,
+                committed_until: deadline,
+            },
+            stun_aura(),
+        ));
+
+        // Stunned across the deadline: no movement, and once sim time passes
+        // `expires` the directive must be gone (removed, never executed).
+        for _ in 0..30 {
+            app.update();
+        }
+        assert!(now(&app) > deadline, "test must run past the deadline");
+        assert_eq!(pos_of(&app, entity), start, "stunned entity must not move");
+        assert!(
+            app.world().get::<MovementDirective>(entity).is_none(),
+            "expired directive must be removed even while the owner is stunned"
+        );
+
+        // First post-stun frame: still no movement along the stale vector
+        // (the no-target legacy branch holds still this close to center).
+        app.world_mut().entity_mut(entity).remove::<ActiveAuras>();
+        app.update();
+        assert_eq!(
+            pos_of(&app, entity),
+            start,
+            "no movement along stale directive vector on first post-stun frame"
+        );
+    }
+
+    /// (f) Plain expiry without CC: directive executes until the deadline,
+    /// then is removed and movement stops.
+    #[test]
+    fn directive_expires_and_movement_stops() {
+        let mut app = executor_app();
+        app.update();
+        let (entity, _) = spawn_combatant(&mut app, Vec3::new(0.0, 1.0, 0.0));
+        let deadline = now(&app) + 0.2;
+        app.world_mut().entity_mut(entity).insert(MovementDirective {
+            goal: MovementGoal::Direction(Vec2::new(1.0, 0.0)),
+            expires: deadline,
+            committed_until: deadline,
+        });
+
+        for _ in 0..30 {
+            app.update();
+        }
+        assert!(now(&app) > deadline);
+        assert!(
+            app.world().get::<MovementDirective>(entity).is_none(),
+            "directive must be removed after expiry"
+        );
+
+        let frozen = pos_of(&app, entity);
+        assert!(frozen.x > 0.0, "directive should have moved the entity before expiry");
+        for _ in 0..10 {
+            app.update();
+        }
+        assert_eq!(pos_of(&app, entity), frozen, "movement must stop after expiry");
+    }
+
+    /// (g) Casting blocks directive execution (R12: the casting-locks-movement
+    /// rule is preserved — the cast early-continue sits above the directive
+    /// branch). The unexpired directive itself survives the cast.
+    #[test]
+    fn casting_blocks_directive_execution() {
+        let mut app = executor_app();
+        let start = Vec3::new(0.0, 1.0, 0.0);
+        let (entity, _) = spawn_combatant(&mut app, start);
+        app.world_mut().entity_mut(entity).insert((
+            MovementDirective {
+                goal: MovementGoal::Direction(Vec2::new(1.0, 0.0)),
+                expires: 100.0,
+                committed_until: 100.0,
+            },
+            CastingState::new(AbilityType::FlashHeal, entity, 2.0),
+        ));
+
+        for _ in 0..30 {
+            app.update();
+        }
+        assert_eq!(pos_of(&app, entity), start, "casting must block directive movement");
+        assert!(
+            app.world().get::<MovementDirective>(entity).is_some(),
+            "unexpired directive must survive the cast"
+        );
+
+        // Cast gap: once the cast ends, the directive executes.
+        app.world_mut().entity_mut(entity).remove::<CastingState>();
+        for _ in 0..10 {
+            app.update();
+        }
+        assert!(
+            pos_of(&app, entity).x > 0.0,
+            "directive must execute in the cast gap"
+        );
+    }
+
+    /// (h) A Point goal walks to the point and stops within
+    /// DIRECTIVE_POINT_EPSILON, holding position afterwards (no oscillation).
+    #[test]
+    fn point_goal_stops_at_epsilon() {
+        let mut app = executor_app();
+        let (entity, speed) = spawn_combatant(&mut app, Vec3::new(0.0, 1.0, 0.0));
+        let point = Vec3::new(3.0, 1.0, 1.0);
+        app.world_mut().entity_mut(entity).insert(MovementDirective {
+            goal: MovementGoal::Point(point),
+            expires: 100.0,
+            committed_until: 100.0,
+        });
+
+        // More than enough frames to cover the ~3.2-unit walk.
+        let frames = ((4.0 / speed) * 60.0) as usize + 30;
+        for _ in 0..frames {
+            app.update();
+        }
+
+        let pos = pos_of(&app, entity);
+        let xz_dist = ((pos.x - point.x).powi(2) + (pos.z - point.z).powi(2)).sqrt();
+        assert!(
+            xz_dist <= DIRECTIVE_POINT_EPSILON + 1e-4,
+            "entity must stop within epsilon of the point, ended {} away",
+            xz_dist
+        );
+
+        // Stable: holding at the point, no oscillation.
+        let settled = pos_of(&app, entity);
+        for _ in 0..20 {
+            app.update();
+        }
+        assert_eq!(pos_of(&app, entity), settled, "entity must hold at the point");
+    }
+}

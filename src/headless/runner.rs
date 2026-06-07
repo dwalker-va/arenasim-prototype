@@ -9,7 +9,8 @@ use std::time::Duration;
 
 use crate::combat::log::{CombatLog, CombatLogEventType, CombatantMetadata, MatchMetadata};
 use crate::states::match_config::MatchConfig;
-use crate::states::play_match::AbilityConfigPlugin;
+use crate::states::play_match::{AbilityConfigPlugin, MovementConfigPlugin};
+use crate::states::play_match::movement_config::MovementConfig;
 use crate::states::play_match::equipment::{EquipmentPlugin, ItemDefinitions, DefaultLoadouts, resolve_loadout, enforce_two_hand_conflicts, format_loadout};
 // Use the stable systems API instead of importing internal functions directly
 use crate::states::play_match::systems::{
@@ -664,8 +665,20 @@ fn run_headless_match_impl(
         .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(1.0 / 60.0)))
         .add_plugins(TransformPlugin)
         .add_plugins(AbilityConfigPlugin)
+        .add_plugins(MovementConfigPlugin)
         .add_plugins(EquipmentPlugin)
         .add_plugins(HeadlessPlugin { config: config.clone(), suppress_log });
+
+    // Registration guard (debug builds / cargo test only): movement config
+    // must be loaded in BOTH the headless runner (here) and the graphical
+    // stack (main.rs). The plugin panics on a missing/invalid file; this
+    // assert catches the OTHER dual-mode failure — forgetting to register
+    // the plugin at all — which would otherwise surface as a missing-resource
+    // panic deep inside whichever future system first reads the config.
+    debug_assert!(
+        app.world().contains_resource::<MovementConfig>(),
+        "MovementConfigPlugin is not registered in the headless runner"
+    );
 
     // Install the decision-trace writer (if requested) BEFORE the first
     // app.update() so frame-0 events land in the file. Mirror the match's
