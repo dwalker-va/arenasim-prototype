@@ -382,6 +382,23 @@ fn observer_sees_monotonic_time_and_all_combatants() {
     }
 }
 
+/// (R14 / plan U5 scenario h) The healer-posture directive machinery is wired
+/// into the shared system schedule (MovementConfigPlugin, posture systems) but
+/// must be a no-op for non-healer compositions: a match with no Priest/Paladin
+/// touches none of the posture state. This pins that guarantee end to end —
+/// the same fixed-seed Warrior v Mage match run twice yields bit-identical
+/// outcomes, so the directive plumbing cannot have perturbed the sim.
+#[test]
+fn non_healer_outcomes_unchanged_by_directive_machinery() {
+    let seed = 0x5EED_1234_u64;
+    let make = || create_config(vec!["Warrior"], vec!["Mage"], Some(seed));
+
+    let first = run_headless_match_with(make(), true, None).expect("first run");
+    let second = run_headless_match_with(make(), true, None).expect("second run");
+
+    assert_results_identical(&first, &second, "Warrior v Mage, two runs at one seed");
+}
+
 // ---------------------------------------------------------------------------
 // (c) KPI unit tests on hand-built timelines
 // ---------------------------------------------------------------------------
@@ -2385,10 +2402,11 @@ mod paladin_unit {
     use arenasim::states::match_config::CharacterClass;
     use arenasim::states::play_match::class_ai::combat_snapshot::CombatSnapshot;
     use arenasim::states::play_match::class_ai::paladin::{
-        dip_target_candidate, hoj_target_eligible, rotation_hoj_allowed,
+        dip_should_abort, dip_target_candidate, hoj_target_eligible, rotation_hoj_allowed,
     };
     use arenasim::states::play_match::class_ai::CombatantInfo;
-    use arenasim::states::play_match::components::Posture;
+    use arenasim::states::play_match::components::{Combatant, HealerPosture, Posture};
+    use arenasim::states::play_match::movement_config::MovementConfig;
     use arenasim::states::play_match::{Aura, AuraType, DRCategory, DRTracker};
     use bevy::prelude::*;
 
@@ -2540,6 +2558,62 @@ mod paladin_unit {
         assert_eq!(
             dip_target_candidate(&snap.context_for(me), 1, Vec3::ZERO, 100.0),
             None
+        );
+    }
+
+    /// (AE3) Teammate-HP-dive abort branch of `dip_should_abort`: a live dip
+    /// (dip_target set, dip_until in the future, target still HoJ-eligible)
+    /// aborts the moment a living ally (other than self) drops to/below the
+    /// urgency HP threshold — the heal must un-defer immediately. This guards
+    /// the most behavior-sensitive abort path with a deterministic snapshot
+    /// instead of leaning on seed-dependent integration scans.
+    #[test]
+    fn dip_aborts_on_teammate_hp_dive() {
+        let me = Entity::from_raw(1);
+        let ally = Entity::from_raw(2);
+        let enemy_priest = Entity::from_raw(3);
+
+        let movement = MovementConfig::default();
+        let urgency = movement.shared.urgency_hp_threshold; // 0.5
+
+        let mut snap = snapshot(me);
+        // Living, still-eligible enemy healer = the committed dip target.
+        snap.combatants.insert(
+            enemy_priest,
+            info(enemy_priest, 2, CharacterClass::Priest, Vec3::new(5.0, 0.0, 0.0)),
+        );
+        // Wounded ally at the urgency threshold — triggers the abort.
+        let mut ally_info = info(ally, 1, CharacterClass::Warrior, Vec3::new(3.0, 0.0, 0.0));
+        ally_info.current_health = ally_info.max_health * urgency;
+        snap.combatants.insert(ally, ally_info);
+
+        let ctx = snap.context_for(me);
+        let combatant = Combatant::new(1, 0, CharacterClass::Paladin);
+
+        // Live dip: target set, budget deadline in the future.
+        let now = 10.0;
+        let mut state = HealerPosture::new(now);
+        state.posture = Posture::Dip;
+        state.dip_target = Some(enemy_priest);
+        state.dip_until = now + movement.paladin.dip_budget;
+
+        // Sanity: the dip target is still HoJ-eligible (so the abort is driven
+        // by the teammate-HP branch, not the eligibility branch).
+        assert!(hoj_target_eligible(&ctx, 1, enemy_priest));
+
+        assert!(
+            dip_should_abort(&state, &combatant, &ctx, &movement.shared, now),
+            "wounded ally at/below urgency threshold must abort the dip"
+        );
+
+        // Control: lift the ally above the threshold → no abort (the live dip
+        // with an eligible target and unspent budget continues).
+        snap.combatants.get_mut(&ally).unwrap().current_health =
+            snap.combatants[&ally].max_health * (urgency + 0.2);
+        let ctx = snap.context_for(me);
+        assert!(
+            !dip_should_abort(&state, &combatant, &ctx, &movement.shared, now),
+            "healthy ally + eligible target + unspent budget must NOT abort"
         );
     }
 }

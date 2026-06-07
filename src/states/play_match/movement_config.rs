@@ -412,6 +412,55 @@ mod tests {
     }
 
     #[test]
+    fn validate_rejects_out_of_range_center_bias() {
+        // center_bias is a [0.0, 1.0] fraction — a value above 1.0 is a config
+        // bug (the FREE formation point would over-pull past arena center).
+        let mut config = MovementConfig::default();
+        config.shared.center_bias = 1.5;
+        let issues = config
+            .validate()
+            .expect_err("out-of-range center_bias must fail");
+        assert!(
+            issues.iter().any(|i| i.contains("shared.center_bias")),
+            "issues should name center_bias: {:?}",
+            issues
+        );
+    }
+
+    #[test]
+    fn validate_rejects_wand_range_exceeding_heal_range() {
+        // The Priest can only wand-pull toward targets it can still heal — a
+        // wand_range beyond heal_range would pull it out of healing range.
+        let mut config = MovementConfig::default();
+        config.shared.wand_range = config.shared.heal_range + 5.0;
+        let issues = config
+            .validate()
+            .expect_err("wand_range > heal_range must fail");
+        assert!(
+            issues.iter().any(|i| i.contains("shared.wand_range")),
+            "issues should name wand_range: {:?}",
+            issues
+        );
+    }
+
+    #[test]
+    fn validate_rejects_directive_ttl_below_commit_window() {
+        // A directive that expires before its commitment window closes would
+        // strand the healer mid-commitment and stutter movement.
+        let mut config = MovementConfig::default();
+        config.shared.commit_window = 0.6;
+        config.shared.directive_ttl = 0.3;
+        let issues = config
+            .validate()
+            .expect_err("directive_ttl < commit_window must fail");
+        assert!(
+            issues.iter().any(|i| i.contains("shared.directive_ttl")),
+            "issues should name directive_ttl: {:?}",
+            issues
+        );
+    }
+
+    #[test]
     fn defaults_pass_validation() {
         MovementConfig::default()
             .validate()

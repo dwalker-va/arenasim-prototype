@@ -332,3 +332,96 @@ fn reason_enum_variants_all_emitted_by_reference_matches() {
         all_movement.len(),
     );
 }
+
+/// Count `movement_decision` events in a trace file.
+fn count_movement_decisions(path: &PathBuf) -> usize {
+    let body = std::fs::read_to_string(path).expect("read trace file");
+    body.lines()
+        .filter(|line| {
+            serde_json::from_str::<serde_json::Value>(line)
+                .ok()
+                .and_then(|v| v.get("kind").and_then(|k| k.as_str()).map(|s| s == "movement_decision"))
+                .unwrap_or(false)
+        })
+        .count()
+}
+
+/// U3 volume guard: the movement event stream is transition-gated (a posture
+/// tick that holds station emits nothing), so even a long, double-healer match
+/// that goes the distance must not flood the trace. We bound the emission rate
+/// at <= 5 movement_decision events per second of match time.
+///
+/// Double-healer mirror (Paladin+Priest vs Paladin+Priest) maximizes posture
+/// traffic: four healers all running the FREE/PRESSURED/ESCAPE/DIP machine.
+/// These tend toward long attrition matches, so we scan a few seeds for one
+/// that draws near the cap (>= 200s), then assert the rate bound on it.
+#[test]
+fn movement_decision_volume_is_bounded_in_double_healer_match() {
+    // Cap match duration at 300 (the default timeout) so a true draw still
+    // terminates the test; the rate bound holds at any duration.
+    let max_duration = 300.0_f32;
+
+    let mut best: Option<(u64, usize, f32, PathBuf)> = None;
+    // Scan a handful of seeds for one that draws long; settle on the longest
+    // seen so the per-second bound is exercised on a near-cap match.
+    for seed in [7_u64, 11, 23, 42, 99] {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+        drop(tmp);
+
+        let config = HeadlessMatchConfig {
+            team1: vec!["Paladin".to_string(), "Priest".to_string()],
+            team2: vec!["Paladin".to_string(), "Priest".to_string()],
+            max_duration_secs: max_duration,
+            random_seed: Some(seed),
+            ..Default::default()
+        };
+        let result = run_headless_match_with(
+            config,
+            true,
+            Some(TraceConfig { output_path: path.clone() }),
+        )
+        .unwrap_or_else(|e| panic!("double-healer seed {} failed: {}", seed, e));
+
+        let count = count_movement_decisions(&path);
+        let match_time = result.match_time;
+
+        let take = match &best {
+            Some((_, _, t, _)) => match_time > *t,
+            None => true,
+        };
+        if take {
+            if let Some((_, _, _, old)) = best.replace((seed, count, match_time, path.clone())) {
+                let _ = std::fs::remove_file(old);
+            }
+        } else {
+            let _ = std::fs::remove_file(path);
+        }
+
+        // Near-cap draw found — good enough, stop scanning.
+        if match_time >= 200.0 {
+            break;
+        }
+    }
+
+    let (seed, count, match_time, path) = best.expect("at least one match ran");
+    assert!(match_time > 0.0, "match_time must be positive");
+
+    let per_second = count as f32 / match_time;
+    assert!(
+        per_second <= 5.0,
+        "movement_decision volume too high: {} events over {:.1}s = {:.2}/s (seed {}); \
+         the transition-gate must keep the stream sparse",
+        count,
+        match_time,
+        per_second,
+        seed,
+    );
+
+    let _ = std::fs::remove_file(path);
+
+    println!(
+        "U3 volume guard passed: {} movement_decision events over {:.1}s = {:.2}/s (seed {}).",
+        count, match_time, per_second, seed,
+    );
+}

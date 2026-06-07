@@ -104,6 +104,7 @@ assets/
     abilities.ron         # Data-driven ability definitions
     items.ron             # Equipment item definitions (stats, slots, armor)
     loadouts.ron          # Default per-class equipment loadouts
+    movement.ron          # Healer posture AI weights, radii, thresholds
 ```
 
 ## Documentation Index
@@ -240,6 +241,53 @@ Items are data-driven via `assets/config/items.ron`. Every item must stay within
 mcp__wowhead-classic__lookup_item("Lionheart Helm")
 ```
 
+### Tuning healer posture behavior
+
+The Priest and Paladin movement AI (the FREE/PRESSURED/ESCAPE/DIP posture
+state machine) is fully data-driven via `assets/config/movement.ron`. Loaded
+and validated identically in headless and graphical modes by
+`MovementConfigPlugin` (`src/states/play_match/movement_config.rs`), which
+panics at startup if the file is missing, malformed, or fails `validate()`.
+Every field has a struct default, so a partial file overrides one value
+without restating the rest. No code changes are needed to retune behavior —
+edit the RON, run `cargo test`, then sweep with the matrix.
+
+**Shared params** (`shared:` block — radii in yards, windows in seconds,
+fractions in 0..1; values below are the shipped defaults):
+- `danger_radius: 12.0` — a targeting/melee/pet/closing enemy inside this flips PRESSURED
+- `threat_intent_radius: 30.0` — intent bound on the melee/pet/closing trigger branch
+- `heal_range: 40.0` — PRESSURED constraint: stay within heal range of the anchor ally
+- `formation_offset: 8.0` — FREE formation point offset behind the engaged-ally centroid
+- `center_bias: 0.3` — FREE formation point bias toward arena center (fraction)
+- `commit_window: 0.6` — committed-direction window (anti-zigzag; band 0.4–0.8)
+- `pressured_hold: 1.5` — hysteresis floor before PRESSURED may relax to FREE
+- `directive_ttl: 1.0` — `MovementDirective` TTL (must cover `commit_window`)
+- `escape_min_window: 0.5` — ESCAPE windows shorter than this are ignored
+- `urgency_hp_threshold: 0.5` — defer non-critical casts during ESCAPE/DIP unless an ally is below this HP fraction
+- `anchor_switch_margin: 0.1` — sticky-anchor switch requires this HP-fraction injury margin
+- `wand_range: 30.0` — wand-range pull target distance (Priest)
+
+**Per-class scorer weights** (`priest.weights:` / `paladin.weights:` —
+`score_directions` term weights; `0.0` disables a term):
+- `threat_repulsion` (3.0/3.0) — pull away per visible threat, weighted by proximity
+- `ally_anchor` (1000.0) — HARD constraint: outside heal range of the anchor ally; must dominate all soft terms (enforced by `validate()`)
+- `formation_pull` (Priest 2.0 / Paladin 0.0) — pull toward the FREE backline point (Paladin keeps its melee identity, so 0 disables it)
+- `boundary_penalty` (1000.0) — HARD constraint: never score an out-of-bounds step
+- `corner_penalty` (Priest 6.0 / Paladin 4.0) — graded penalty approaching arena corners
+- `wand_pull` (Priest 0.5 / Paladin 0.0) — low-weight pull toward wand range of the kill target (`0.0` disables it for the wandless Paladin)
+- `commitment_bonus` (1.5/1.5) — bonus toward the committed direction during the commit window
+
+**Paladin-only block** (`paladin:` — alongside its `weights:`):
+- `fallback_range: 15.0` — PRESSURED retreat range (instead of face-tanking at melee)
+- `dip_budget: 6.0` — DIP walk-stun-return duration budget in seconds
+- `healing_heavy_hp: 0.6` — lowest team HP fraction (self included, pets excluded) below which the Paladin pulls to fallback range even before it is focused
+
+After editing, validate and sweep:
+```bash
+cargo test                          # validate() + posture probes/unit tests
+scripts/hunter_2v2_matrix.sh 100    # 2v2-with-healer balance sweep (adapt teams as needed)
+```
+
 ### Class Design
 - **Warrior**: Rage (generates on damage), melee, Charge/Mortal Strike/Pummel
 - **Mage**: Mana, ranged, Frostbolt/Frost Nova/Polymorph
@@ -336,6 +384,11 @@ jq -r 'select(.kind == "movement_decision") | .trigger' $T | sort | uniq -c
 # harness for full timelines)
 jq -c 'select(.kind == "movement_decision" and .actor.entity_id == 7) | {t: .sim_time, position, posture}' $T
 
+# Scorer term breakdown — which weighted terms drove a Priest's chosen
+# direction? (`scorer_terms` is a {name: value} map, present only when the
+# decision ran the scorer; re-commits / Point goals omit it.)
+jq -c 'select(.kind == "movement_decision" and .actor.class == "Priest" and .scorer_terms != null) | {t: .sim_time, posture, dir: .chosen_direction, terms: .scorer_terms}' $T
+
 # Paladin HoJ dips: DipEnter carries the goal entity (the enemy healer) in
 # the event's `target` view; DipComplete fires when HoJ lands, DipAbort when
 # the dip bails without casting (teammate HP dive / target dead-or-immune /
@@ -365,6 +418,61 @@ jq -c '. // empty' $T 2>/dev/null
 
 See `docs/solutions/implementation-patterns/ai-decision-trace.md` for the
 full schema and the variant-to-predicate map.
+
+### Extract movement KPIs from traces
+
+`scripts/movement_kpis.sh` reduces one or more decision-trace JSONL files to a
+per-(match, entity) CSV of position-derivable KPIs — distance traveled and
+proximity-to-enemy stats — computed from the positions carried on trace
+events. It needs no extra instrumentation: it reads the same traces the
+diagnosis recipes above use.
+
+```bash
+# Single trace
+scripts/movement_kpis.sh match_logs/match_*_trace.jsonl
+
+# Many traces (e.g. a whole matrix run) — one CSV with all matches
+scripts/movement_kpis.sh match_logs/traces/*.jsonl > /tmp/kpis.csv
+
+# Override the gates-open time (default 10.0 — the fixed 10s countdown);
+# pre-gate samples are excluded from path length, included in distance KPIs
+scripts/movement_kpis.sh --gate-time 10.0 match_logs/match_*_trace.jsonl
+```
+
+CSV columns:
+`match,team,slot,class,samples,post_gate_path_len,avg_nearest_enemy,min_nearest_enemy,pct_within_4yd,pct_within_10yd`
+(distances on the x/z plane — y is height, and pets float at a different y
+than their owners).
+
+**Sparse-sample caveat.** These KPIs are derived from trace *events*, which
+are emitted only at decisions (ability casts, target acquisitions, posture
+transitions) — NOT every tick. `post_gate_path_len` is therefore an
+UNDERESTIMATE (straight lines between sparse samples cut corners), and the
+proximity percentages are over paired samples, not wall-clock time. For dense,
+per-tick position timelines use the probe harness (below) instead. Truncated
+traces (SIGKILL / OOM) are tolerated — the script's `fromjson?` skips the
+partial last line.
+
+### Write a movement behavior probe
+
+For dense, per-tick assertions about healer movement (path length, time spent
+near an enemy, separation gained during a window), write a probe in
+`tests/movement_probes.rs` rather than reducing a sparse trace. The harness
+runs an observed headless match via `run_headless_match_observed`, collecting
+a full per-frame, alive-only position timeline, then asserts on it with the
+KPI helpers:
+
+- `path_length(samples)` — total distance traveled along a sample slice
+- `time_within_range_of(a, b, range)` — sim-seconds two entities were within `range`
+- `separation_gained_during(a, b, window)` — distance gained over a `[start, end]` window (`None` if vacuous)
+- `assert_min_occurrences(label, actual, min)` — fail loudly if a window-conditional probe went vacuous (e.g., a seed shift emptied the window set) instead of passing trivially
+
+The observer is read-only by construction. The harness's load-bearing
+self-test (`observed_run_does_not_perturb_outcomes`) proves an observed run
+returns a `MatchResult` bit-identical to an unobserved run at the same seed —
+so probing never perturbs the sim. Probes pin behavior at fixed seeds; see the
+`priest_postures` / `escape_windows` / `paladin_postures` modules for the
+established idiom.
 
 ### Look up spell data for implementation
 ```

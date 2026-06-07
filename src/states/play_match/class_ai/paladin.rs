@@ -33,7 +33,7 @@ use crate::states::play_match::decision_trace::{
     DecisionEventBuilder, DecisionTrace, MovementGoalKind, MovementTrigger,
     Posture as TracePosture, RejectionReason,
 };
-use crate::states::play_match::movement_config::MovementConfig;
+use crate::states::play_match::movement_config::{MovementConfig, SharedMovementConfig};
 use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
 use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
@@ -1348,11 +1348,11 @@ fn evaluate_dip_entry(
 /// teammate's HP at/below the urgency threshold (the dip aborts WITHOUT
 /// casting — the heal fires immediately after, un-deferred, because the
 /// abort clears `cast_defer` before the ability pass runs this same tick).
-fn dip_should_abort(
+pub fn dip_should_abort(
     state: &HealerPosture,
     combatant: &Combatant,
     ctx: &CombatContext,
-    shared: &crate::states::play_match::movement_config::SharedMovementConfig,
+    shared: &SharedMovementConfig,
     now: f32,
 ) -> bool {
     let Some(target) = state.dip_target else {

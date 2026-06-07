@@ -676,3 +676,99 @@ fn is_closing_uses_pet_preferred_range_for_pets() {
     let ctx = snapshot.context_for(me);
     assert!(ctx.is_closing(felhunter, me));
 }
+
+// ============================================================================
+// visible_enemies_within — proximity threat half of the PRESSURED trigger
+// ============================================================================
+
+#[test]
+fn visible_enemies_within_includes_only_enemies_inside_radius() {
+    let (mut snapshot, me) = priest_snapshot();
+    // Enemy at distance 5 (inside radius 10).
+    let near = Entity::from_raw(2);
+    snapshot.combatants.insert(near, CombatantInfo {
+        position: Vec3::new(5.0, 0.0, 0.0),
+        ..info(near, 2, CharacterClass::Warrior)
+    });
+    // Enemy at distance 15 (outside radius 10).
+    let far = Entity::from_raw(3);
+    snapshot.combatants.insert(far, CombatantInfo {
+        position: Vec3::new(15.0, 0.0, 0.0),
+        ..info(far, 2, CharacterClass::Mage)
+    });
+
+    let ctx = snapshot.context_for(me);
+    let within: Vec<Entity> = ctx
+        .visible_enemies_within(me, Vec3::ZERO, 10.0)
+        .iter()
+        .map(|c| c.entity)
+        .collect();
+    assert_eq!(within, vec![near], "only the enemy inside the radius is returned");
+}
+
+#[test]
+fn visible_enemies_within_respects_radius_boundary_and_team() {
+    let (mut snapshot, me) = priest_snapshot();
+    // Enemy exactly at the radius (10.0) — `<=` so it is included.
+    let on_edge = Entity::from_raw(2);
+    snapshot.combatants.insert(on_edge, CombatantInfo {
+        position: Vec3::new(10.0, 0.0, 0.0),
+        ..info(on_edge, 2, CharacterClass::Warrior)
+    });
+    // Ally inside the radius — never a "threat", regardless of distance.
+    let ally = Entity::from_raw(3);
+    snapshot.combatants.insert(ally, CombatantInfo {
+        position: Vec3::new(2.0, 0.0, 0.0),
+        ..info(ally, 1, CharacterClass::Warrior)
+    });
+
+    let ctx = snapshot.context_for(me);
+    let within: Vec<Entity> = ctx
+        .visible_enemies_within(me, Vec3::ZERO, 10.0)
+        .iter()
+        .map(|c| c.entity)
+        .collect();
+    assert_eq!(within, vec![on_edge], "boundary enemy in, ally out");
+}
+
+// ============================================================================
+// movement_slow_multiplier — product of MovementSpeedSlow magnitudes
+// ============================================================================
+
+#[test]
+fn movement_slow_multiplier_no_aura_is_one() {
+    let (snapshot, me) = priest_snapshot();
+    let ctx = snapshot.context_for(me);
+    assert_eq!(ctx.movement_slow_multiplier(me), 1.0, "unslowed = 1.0");
+}
+
+#[test]
+fn movement_slow_multiplier_single_slow() {
+    let (mut snapshot, me) = priest_snapshot();
+    let mut slow = aura_with(AuraType::MovementSpeedSlow, None, 0.0);
+    slow.magnitude = 0.5;
+    snapshot.active_auras.insert(me, vec![slow]);
+
+    let ctx = snapshot.context_for(me);
+    assert_eq!(ctx.movement_slow_multiplier(me), 0.5, "one 50% slow halves speed");
+}
+
+#[test]
+fn movement_slow_multiplier_stacks_multiplicatively() {
+    let (mut snapshot, me) = priest_snapshot();
+    let mut slow_a = aura_with(AuraType::MovementSpeedSlow, None, 0.0);
+    slow_a.magnitude = 0.5;
+    let mut slow_b = aura_with(AuraType::MovementSpeedSlow, None, 0.0);
+    slow_b.magnitude = 0.7;
+    // A non-slow aura must be ignored by the product.
+    let unrelated = aura_with(AuraType::DamageOverTime, None, 0.0);
+    snapshot.active_auras.insert(me, vec![slow_a, slow_b, unrelated]);
+
+    let ctx = snapshot.context_for(me);
+    // 0.5 * 0.7 = 0.35 (the DoT does not participate).
+    assert!(
+        (ctx.movement_slow_multiplier(me) - 0.35).abs() < 1e-6,
+        "two slows multiply: got {}",
+        ctx.movement_slow_multiplier(me)
+    );
+}

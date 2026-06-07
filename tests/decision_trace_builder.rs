@@ -407,6 +407,42 @@ fn movement_builder_emission_gate_drops_event_with_no_decision() {
 }
 
 #[test]
+fn movement_builder_writer_path_writes_nothing_when_no_decision() {
+    // Companion to the in-memory gate above, exercised through the writer
+    // path (mirrors the ability builder's writer-path tests): with a real
+    // TraceWriter installed, a movement builder that records no transition or
+    // direction change must leave the file empty — the emission gate runs
+    // before anything reaches disk, so a posture tick that holds station does
+    // not bloat the trace.
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    let path = tmp.path().to_path_buf();
+    let mut trace = DecisionTrace::default();
+    trace.install_writer(TraceWriter::create(path.clone()).unwrap());
+    trace.current_frame = 10;
+
+    let builder = trace.start_movement_decision(priest_actor(), None);
+    builder.finish();
+
+    // Drain whatever (if anything) the gate let through, write it, flush.
+    let events = std::mem::take(&mut trace.pending_events);
+    let writer = trace.writer.as_mut().expect("writer attached");
+    writer.flush_events(events).unwrap();
+    drop(trace); // flush via Drop
+
+    let body = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        !body.contains("movement_decision"),
+        "no-decision movement tick must not emit a movement_decision line: {:?}",
+        body
+    );
+    assert!(
+        body.lines().next().is_none(),
+        "file should be empty, got: {:?}",
+        body
+    );
+}
+
+#[test]
 fn movement_payload_roundtrips_to_movement_variant_via_untagged_deserialize() {
     use arenasim::states::play_match::decision_trace::EventPayload;
 
