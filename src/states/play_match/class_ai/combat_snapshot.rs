@@ -49,10 +49,13 @@ impl CombatSnapshot {
     /// Build a snapshot from the live Bevy queries that `decide_abilities`
     /// already holds.
     ///
-    /// The split across three aura sources is required because casting and
+    /// The split across three sources is required because casting and
     /// channeling combatants are excluded from the main `aura_query` (Bevy
     /// borrow-checker rules forbid simultaneous mutable + immutable access to
-    /// the same component). Together the three queries cover every entity.
+    /// the same component). Together the three queries cover every entity:
+    /// casting/channeling combatants contribute full `CombatantInfo` entries
+    /// (position, hp/mana, `.target`, stealth) just like idle ones, so class
+    /// AI can see a casting ally's HP and a casting enemy's target.
     ///
     /// Each `&Query<...>` is a shared borrow of a query the caller still owns
     /// mutably — we only need read access here, and the caller resumes its
@@ -62,8 +65,14 @@ impl CombatSnapshot {
             (Entity, &mut Combatant, &Transform, Option<&mut ActiveAuras>),
             (Without<CastingState>, Without<ChannelingState>),
         >,
-        casting_auras: &Query<(Entity, &ActiveAuras), With<CastingState>>,
-        channeling_auras: &Query<(Entity, &ActiveAuras), (With<ChannelingState>, Without<CastingState>)>,
+        casting_auras: &Query<
+            (Entity, &Combatant, &Transform, Option<&ActiveAuras>),
+            With<CastingState>,
+        >,
+        channeling_auras: &Query<
+            (Entity, &Combatant, &Transform, Option<&ActiveAuras>),
+            (With<ChannelingState>, Without<CastingState>),
+        >,
         dr_tracker_query: &Query<(Entity, &DRTracker)>,
         pet_query: &Query<&Pet>,
     ) -> Self {
@@ -73,16 +82,30 @@ impl CombatSnapshot {
 
         // Build owner→pet reverse lookup once so each combatant's `pet` field
         // can be populated in O(1) inside the main loop. `Query<&Pet>` does not
-        // yield entity from `.iter()`, so we iterate aura_query (which yields
-        // entity) and check pet_query for each.
+        // yield entity from `.iter()`, so we iterate the queries (which yield
+        // entity) and check pet_query for each. Casting/channeling pets are
+        // included so an owner's `pet` link survives the pet being mid-cast.
         let mut owner_to_pet: BTreeMap<Entity, Entity> = BTreeMap::new();
-        for (entity, _, _, _) in aura_query.iter() {
+        let all_entities = aura_query
+            .iter()
+            .map(|(entity, _, _, _)| entity)
+            .chain(casting_auras.iter().map(|(entity, _, _, _)| entity))
+            .chain(channeling_auras.iter().map(|(entity, _, _, _)| entity));
+        for entity in all_entities {
             if let Ok(pet) = pet_query.get(entity) {
                 owner_to_pet.insert(pet.owner, entity);
             }
         }
 
-        for (entity, combatant, transform, auras_opt) in aura_query.iter() {
+        // Shared insert for all three sources: full CombatantInfo + cooldowns.
+        let mut insert_combatant = |entity: Entity,
+                                    combatant: &Combatant,
+                                    transform: &Transform,
+                                    combatants: &mut BTreeMap<Entity, CombatantInfo>,
+                                    ability_cooldowns: &mut BTreeMap<
+            Entity,
+            BTreeMap<AbilityType, f32>,
+        >| {
             let pet_comp = pet_query.get(entity).ok();
             combatants.insert(entity, CombatantInfo {
                 entity,
@@ -109,16 +132,26 @@ impl CombatSnapshot {
                 .map(|(k, v)| (*k, *v))
                 .collect();
             ability_cooldowns.insert(entity, cooldowns);
+        };
+
+        for (entity, combatant, transform, auras_opt) in aura_query.iter() {
+            insert_combatant(entity, &combatant, transform, &mut combatants, &mut ability_cooldowns);
             if let Some(auras) = auras_opt {
                 active_auras.insert(entity, auras.auras.clone());
             }
         }
 
-        for (entity, auras) in casting_auras.iter() {
-            active_auras.insert(entity, auras.auras.clone());
+        for (entity, combatant, transform, auras_opt) in casting_auras.iter() {
+            insert_combatant(entity, combatant, transform, &mut combatants, &mut ability_cooldowns);
+            if let Some(auras) = auras_opt {
+                active_auras.insert(entity, auras.auras.clone());
+            }
         }
-        for (entity, auras) in channeling_auras.iter() {
-            active_auras.insert(entity, auras.auras.clone());
+        for (entity, combatant, transform, auras_opt) in channeling_auras.iter() {
+            insert_combatant(entity, combatant, transform, &mut combatants, &mut ability_cooldowns);
+            if let Some(auras) = auras_opt {
+                active_auras.insert(entity, auras.auras.clone());
+            }
         }
 
         let dr_trackers: BTreeMap<Entity, DRTracker> = dr_tracker_query
