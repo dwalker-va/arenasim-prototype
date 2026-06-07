@@ -55,6 +55,20 @@ pub struct Args {
     #[arg(long, value_name = "N")]
     pub matrix: Option<u32>,
 
+    /// Run a batch of matches from a JSONL file (one HeadlessMatchConfig per
+    /// line) in parallel across all cores, writing one CSV row per match to
+    /// --out. The fast path for 2v2/3v3/strategy-var sweeps.
+    #[arg(long, value_name = "JSONL_FILE")]
+    pub batch: Option<PathBuf>,
+
+    /// Output CSV path for --batch mode (default: match_logs/batch_<timestamp>.csv).
+    #[arg(long, value_name = "CSV_FILE")]
+    pub out: Option<PathBuf>,
+
+    /// Worker thread count for --batch mode (default: cores - 2).
+    #[arg(long, value_name = "N")]
+    pub jobs: Option<usize>,
+
     /// Base RNG seed for matrix mode. Each match gets seed = base + run_index,
     /// so the same --seed-base reproduces the same matrix exactly. Default: 0.
     #[arg(long, value_name = "SEED", default_value_t = 0)]

@@ -20,7 +20,7 @@
             cooldown: 0.0,
             damage_base_min: 10.0,
             damage_base_max: 15.0,
-            damage_coefficient: 0.8,
+            damage_coefficient: 0.6, // was 0.8 — Mage is the meta-defining carry (74% 2v2 / 69% 3v3); ~22% Frostbolt cut
             damage_scales_with: SpellPower,
             applies_aura: Some((
                 aura_type: MovementSpeedSlow,

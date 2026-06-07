@@ -31,6 +31,7 @@ fn test_match_result_has_winner() {
     let result = MatchResult {
         winner: Some(1),
         match_time: 30.0,
+        end_reason: arenasim::headless::EndReason::Kill,
         team1_combatants: vec![],
         team2_combatants: vec![],
         random_seed: Some(12345),

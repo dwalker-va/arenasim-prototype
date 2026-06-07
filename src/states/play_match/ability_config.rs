@@ -239,7 +239,7 @@ pub struct AbilitiesConfig {
 ///
 /// Loaded from `assets/config/abilities.ron` at startup.
 /// Access via `Res<AbilityDefinitions>` in systems.
-#[derive(Resource)]
+#[derive(Resource, Clone)]
 pub struct AbilityDefinitions {
     definitions: HashMap<AbilityType, AbilityConfig>,
 }

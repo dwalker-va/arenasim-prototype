@@ -1273,9 +1273,11 @@ mod escape_windows {
 
     /// (c) CRITICAL-HEAL PROBE (AE1) — an ally below the urgency threshold
     /// during a live window is healed anyway: a Flash Heal STARTS in-window.
-    /// Seed 14 is the scanned seed where the Priest's own HP (it is the
-    /// lowest ally — the whole enemy team is on it) is sub-threshold
-    /// mid-window with Holy unlocked: measured start t=12.37, hp=0.36.
+    /// Seed 5 (re-scanned 2026-06-07 after the PR #62 meta shift re-rolled
+    /// the original seed 14): the Priest own HP (it is the lowest ally —
+    /// the whole enemy team is on it) goes sub-threshold mid-window with
+    /// Holy unlocked, twice. The scenario is near-universal in this comp
+    /// (48/60 scanned seeds) — seed 5 was picked for its 2-occurrence margin.
     #[test]
     fn critical_heal_fires_despite_live_window() {
         let threshold = load_movement_config()
@@ -1286,7 +1288,7 @@ mod escape_windows {
         let mut cfg = create_config(
             vec!["Priest", "Paladin"],
             vec!["Rogue", "Mage"],
-            Some(14),
+            Some(5),
         );
         cfg.team1_kill_target = Some(0);
         cfg.team2_kill_target = Some(0);

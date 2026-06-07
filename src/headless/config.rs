@@ -41,6 +41,12 @@ pub struct HeadlessMatchConfig {
     /// If provided, the match will use a seeded RNG for reproducible results
     #[serde(default)]
     pub random_seed: Option<u64>,
+    /// Optional grouping label echoed verbatim into batch-runner output. Lets a
+    /// strategy-var sweep keep variants distinct (e.g. "Hunter+Spider vs Mage"
+    /// vs "Hunter+Boar vs Mage") when two configs share the same class lists.
+    /// Ignored by the single-match and matrix paths.
+    #[serde(default)]
+    pub label: Option<String>,
     /// Team 1's rogue opener preferences (one per slot: "Ambush" or "CheapShot")
     #[serde(default)]
     pub team1_rogue_openers: Vec<String>,
@@ -104,6 +110,7 @@ impl Default for HeadlessMatchConfig {
         Self {
             team1: Vec::new(),
             team2: Vec::new(),
+            label: None,
             map: default_map(),
             team1_kill_target: None,
             team2_kill_target: None,

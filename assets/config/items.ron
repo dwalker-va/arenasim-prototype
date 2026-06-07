@@ -745,8 +745,8 @@
             slot: Ranged,
             weapon_type: Bow,
             is_weapon: true,
-            attack_damage_min: 20.0,
-            attack_damage_max: 26.0,
+            attack_damage_min: 30.0, // was 20 — Hunter is dead-weight (32% 2v2 / 34% 3v3); 1.5x Auto Shot
+            attack_damage_max: 39.0, // was 26
             attack_speed: 0.4,
             attack_power: 4.0,
         ),

@@ -3,12 +3,25 @@
 use bevy::prelude::*;
 use super::super::components::*;
 use super::{is_in_arena_bounds, clamp_to_arena};
-use super::super::{MELEE_RANGE, DISENGAGE_SPEED};
+use super::super::{MELEE_RANGE, DISENGAGE_SPEED, AUTO_SHOT_RANGE};
 
+/// Choose a kiting move direction that maximizes distance from the enemy being
+/// fled (`enemy_pos`) while keeping the team's kill-target (`kill_target_pos`)
+/// within `keep_range` (shot range).
+///
+/// The key behavior: when fleeing straight away from the enemy would pull the
+/// kiter out of shot range of its kill-target, the constrained search below
+/// picks the best *in-range* direction instead — which is perpendicular to the
+/// target line. The kiter therefore **arcs / circle-strafes around the target**
+/// rather than running to the wall and going out of range (the bug that made
+/// the Hunter deal ~zero damage in team fights, where the enemy chasing it is
+/// not the enemy it is trying to kill).
 fn find_best_kiting_direction(
     current_pos: Vec3,
     enemy_pos: Vec3,
     move_distance: f32,
+    kill_target_pos: Option<Vec3>,
+    keep_range: f32,
 ) -> Vec3 {
     // Calculate ideal direction (directly away from enemy)
     let ideal_direction = Vec3::new(
@@ -21,18 +34,20 @@ fn find_best_kiting_direction(
         return Vec3::ZERO; // Already on top of enemy, can't kite
     }
 
-    // Check if ideal direction keeps us in bounds
+    // Fast path: flee straight away when it stays in bounds AND we are still
+    // comfortably inside shot range of the kill-target. The 0.9 margin makes us
+    // start arcing *before* the target slips out of range, so we never stop
+    // threatening it.
     let ideal_next_pos = current_pos + ideal_direction * move_distance;
-    let ideal_in_bounds = is_in_arena_bounds(ideal_next_pos);
-
-    if ideal_in_bounds {
-        return ideal_direction; // Ideal direction works, use it!
+    let near_target_edge = kill_target_pos
+        .map_or(false, |b| current_pos.distance(b) >= keep_range * 0.9);
+    if is_in_arena_bounds(ideal_next_pos) && !near_target_edge {
+        return ideal_direction;
     }
 
-    // Ideal direction would hit boundary - find best alternative
-    // Test 16 directions around a circle and pick the one that:
-    // 1. Stays in bounds
-    // 2. Maximizes distance from enemy
+    // Constrained search: test 16 directions and pick the one that maximizes
+    // distance from the enemy while staying in bounds and within shot range of
+    // the kill-target.
     let mut best_direction = Vec3::ZERO;
     let mut best_score = f32::MIN;
 
@@ -61,7 +76,22 @@ fn find_best_kiting_direction(
         let alignment_with_ideal = candidate_direction.dot(ideal_direction).max(0.0);
         let center_dist = Vec3::new(candidate_next_pos.x, 0.0, candidate_next_pos.z).length();
         let center_bonus = (40.0 - center_dist).max(0.0) * 0.1;
-        let score = distance_from_enemy * 2.0 + alignment_with_ideal * 5.0 + center_bonus;
+        let mut score = distance_from_enemy * 2.0 + alignment_with_ideal * 5.0 + center_bonus;
+
+        // 3. Stay in shot range of the kill-target. A heavy penalty for leaving
+        //    range dominates the score, so the search will never pick a
+        //    direction that drops the target out of range when an in-range
+        //    option exists; a mild pull toward an in-range orbit distance keeps
+        //    a little margin instead of hugging max range.
+        if let Some(b) = kill_target_pos {
+            let dist_to_target = candidate_next_pos.distance(b);
+            if dist_to_target > keep_range {
+                score -= 1000.0 + (dist_to_target - keep_range) * 50.0;
+            } else {
+                let orbit_dist = keep_range * 0.85;
+                score -= (dist_to_target - orbit_dist).abs() * 0.5;
+            }
+        }
 
         if score > best_score {
             best_score = score;
@@ -369,12 +399,22 @@ pub fn move_to_target(
 
                 let move_distance = movement_speed * dt;
 
+                // Keep the team's kill-target in shot range while kiting, so the
+                // kiter arcs around it instead of fleeing out of range (the
+                // enemy being fled is often not the kill-target in team fights).
+                let kill_target_pos = combatant
+                    .target
+                    .and_then(|t| positions.get(&t))
+                    .map(|&(pos, _)| pos);
+
                 // Find the best direction to move that maximizes distance from enemy
-                // while staying within arena bounds
+                // while staying within arena bounds and within shot range of the target.
                 let best_direction = find_best_kiting_direction(
                     my_pos,
                     enemy_pos,
                     move_distance,
+                    kill_target_pos,
+                    AUTO_SHOT_RANGE,
                 );
 
                 if best_direction != Vec3::ZERO {
