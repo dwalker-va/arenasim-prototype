@@ -2339,6 +2339,40 @@ mod paladin_postures {
             hojs
         );
     }
+
+    /// Degenerate-case identity probe (the Priest's R5 no-ally rule applied
+    /// to the Paladin's retreat): a Paladin with no living non-pet teammate
+    /// never enters PRESSURED — there is no team to retreat for, and falling
+    /// back only deletes its melee output. The U9 validation matrix caught
+    /// the failure this guards against: every Paladin 1v1 collapsed, e.g.
+    /// the Paladin permanently kiting a Hunter's pet (85 PressuredEnter/Exit
+    /// strobes, 300s draw; Paladin v Hunter went 100% -> 0% wins).
+    ///
+    /// Seed 4100 is the matrix seed of the inspected pathological trace.
+    #[test]
+    fn paladin_1v1_never_retreats() {
+        let config = create_config(vec!["Paladin"], vec!["Hunter"], Some(4100));
+        let (result, _timeline, trace) = run_observed_traced(config);
+
+        let paladin_movement: Vec<MovementEvent> = movement_events(&trace)
+            .into_iter()
+            .filter(|e| e.team == 1 && e.slot == 0)
+            .collect();
+        assert!(
+            paladin_movement.is_empty(),
+            "1v1 Paladin (no teammate) must issue no posture movement; got {:?}",
+            paladin_movement
+                .iter()
+                .map(|e| (e.sim_time, e.trigger.clone()))
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            result.winner.is_some(),
+            "1v1 Paladin v Hunter must be decisive (no permanent-retreat draw); \
+             match ran {:.1}s",
+            result.match_time
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

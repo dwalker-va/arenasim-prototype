@@ -1152,7 +1152,18 @@ pub fn evaluate_paladin_posture(
         .iter()
         .any(|a| a.health_pct() < pal.healing_heavy_hp);
     let healing_heavy = team_hurting && melee_pressure;
-    let trigger = focused || healing_heavy;
+    // Degenerate-case gate (the Priest's R5 no-ally rule, applied to the
+    // Paladin's retreat): PRESSURED exists to protect the team's healing
+    // capacity — fall back, keep the team alive from safety. With no living
+    // non-pet ally there is no team to retreat FOR, and falling back only
+    // deletes the Paladin's melee output (it can heal itself from anywhere).
+    // Validation caught the failure: every Paladin 1v1 collapsed (e.g. the
+    // Paladin permanently kiting a Hunter's pet into a 300s draw, 85
+    // PressuredEnter/Exit strobes per match). Melee identity governs when
+    // alone; dips and rotation HoJ still apply (`alive_allies` includes
+    // self, so require an ally other than us).
+    let has_teammate = ctx.alive_allies().iter().any(|a| a.entity != entity);
+    let trigger = (focused || healing_heavy) && has_teammate;
 
     let prev = state.posture;
 
