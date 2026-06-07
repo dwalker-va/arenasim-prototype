@@ -245,6 +245,108 @@ impl<'a> CombatContext<'a> {
         self.lowest_health_ally_below(threshold, f32::MAX, my_pos).is_none()
     }
 
+    /// Check if `entity` currently has a specific aura type.
+    fn entity_has_aura(&self, entity: Entity, aura_type: AuraType) -> bool {
+        self.active_auras
+            .get(&entity)
+            .map(|auras| auras.iter().any(|a| a.effect_type == aura_type))
+            .unwrap_or(false)
+    }
+
+    /// Visibility check mirroring the `can_see` closure in `combat_ai.rs`:
+    /// a stealthed enemy is invisible unless the observer has Shadow Sight,
+    /// or the enemy itself holds Shadow Sight (picking up the buff reveals
+    /// the holder).
+    fn visible_to(&self, observer: Entity, enemy: &CombatantInfo) -> bool {
+        !enemy.stealthed
+            || self.entity_has_aura(observer, AuraType::ShadowSight)
+            || self.entity_has_aura(enemy.entity, AuraType::ShadowSight)
+    }
+
+    // ------------------------------------------------------------------
+    // Threat predicates (healer postures — R6/R7 trigger and window inputs)
+    // ------------------------------------------------------------------
+
+    /// Visible enemies whose current target is `me`. Enemy pets count as
+    /// threats (`is_pet` entities are included, unlike `alive_enemies()`).
+    /// Stealth-filtered: a stealthed enemy is NOT a threat unless shadow
+    /// sight applies — healers never pre-dodge invisible Rogues.
+    ///
+    /// Iterates the `BTreeMap` snapshot, so the returned order is
+    /// deterministic (ascending `Entity`).
+    pub fn enemies_targeting(&self, me: Entity) -> Vec<&CombatantInfo> {
+        let Some(my_team) = self.combatants.get(&me).map(|i| i.team) else {
+            return Vec::new();
+        };
+        self.combatants
+            .values()
+            .filter(|c| {
+                c.team != my_team
+                    && c.is_alive
+                    && c.target == Some(me)
+                    && self.visible_to(me, c)
+            })
+            .collect()
+    }
+
+    /// The nearest alive visible enemy (including pets) currently targeting
+    /// `me`. Ties resolve to the lowest `Entity` (BTreeMap iteration order)
+    /// for determinism.
+    pub fn primary_attacker(&self, me: Entity) -> Option<&CombatantInfo> {
+        let my_pos = self.combatants.get(&me)?.position;
+        self.enemies_targeting(me)
+            .into_iter()
+            .min_by(|a, b| {
+                my_pos
+                    .distance(a.position)
+                    .partial_cmp(&my_pos.distance(b.position))
+                    .unwrap()
+            })
+    }
+
+    /// Remaining movement-impairment window on `attacker`: the longest
+    /// remaining Root/Stun/Incapacitate duration, or `None` if the attacker
+    /// is free to move. Fear is deliberately excluded — a feared attacker
+    /// wanders away on its own, so it is not a reliable escape window.
+    pub fn attacker_escape_window(&self, attacker: Entity) -> Option<f32> {
+        self.active_auras.get(&attacker).and_then(|auras| {
+            auras
+                .iter()
+                .filter(|a| {
+                    matches!(
+                        a.effect_type,
+                        AuraType::Root | AuraType::Stun | AuraType::Incapacitate
+                    )
+                })
+                .map(|a| a.duration)
+                .max_by(|a, b| a.partial_cmp(b).unwrap())
+        })
+    }
+
+    /// Derived closing intent — no velocity history (keeps the hot path free
+    /// of mutable state). `threat` is closing on `me` when its kill target is
+    /// `me` AND its pursuit movement would reduce the distance this frame,
+    /// i.e. it currently sits beyond its preferred range to me (pursuit in
+    /// `move_to_target` walks toward targets outside `preferred_range` and
+    /// holds position inside it). A stationary caster already in range
+    /// targeting me is NOT closing.
+    pub fn is_closing(&self, threat: Entity, me: Entity) -> bool {
+        let Some(threat_info) = self.combatants.get(&threat) else {
+            return false;
+        };
+        let Some(my_info) = self.combatants.get(&me) else {
+            return false;
+        };
+        if !threat_info.is_alive || threat_info.target != Some(me) {
+            return false;
+        }
+        let preferred = match threat_info.pet_type {
+            Some(pet_type) => pet_type.preferred_range(),
+            None => threat_info.class.preferred_range(),
+        };
+        threat_info.distance_to(my_info.position) > preferred
+    }
+
     /// Check if target has a break-on-any-damage CC from a friendly caster.
     /// Uses threshold-based detection: any aura with `break_on_damage_threshold == 0.0`
     /// (breaks on ANY damage) from a same-team caster is protected.
