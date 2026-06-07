@@ -1,0 +1,68 @@
+// Healer Movement Configuration
+//
+// All scorer weights, radii, thresholds, and commitment windows for the
+// healer posture state machine (FREE/PRESSURED/ESCAPE/DIP). Loaded
+// identically in headless and graphical modes by MovementConfigPlugin
+// (src/states/play_match/movement_config.rs); the plugin panics at startup
+// if this file is missing, malformed, or fails validation.
+//
+// Missing fields fall back to the struct defaults in movement_config.rs —
+// every field is stated explicitly here anyway so this file is the single
+// place balance tuning happens.
+//
+// Scorer term weights: ally_anchor and boundary_penalty are HARD penalties
+// (constraints) and must dominate the sum of all soft terms — validate()
+// enforces this.
+(
+    shared: (
+        // PRESSURED proximity condition: a targeting enemy within this
+        // radius (or melee/pet, or closing) flips the posture.
+        danger_radius: 12.0,
+        // Stay within heal range of the anchor ally while PRESSURED.
+        heal_range: 40.0,
+        // FREE formation point: offset behind the engaged-ally centroid.
+        formation_offset: 8.0,
+        // FREE formation point: bias toward arena center (0..1).
+        center_bias: 0.3,
+        // Committed-direction window in seconds (anti-zigzag; plan band
+        // 0.4-0.8).
+        commit_window: 0.6,
+        // MovementDirective TTL in seconds (expires = now + ttl).
+        directive_ttl: 1.0,
+        // ESCAPE windows shorter than this are ignored.
+        escape_min_window: 0.5,
+        // Defer non-critical casts during ESCAPE/DIP unless an ally is
+        // below this HP fraction.
+        urgency_hp_threshold: 0.5,
+        // Anchor ally switches require this HP-fraction injury margin.
+        anchor_switch_margin: 0.1,
+        // Wand-range pull target distance (Priest wand range).
+        wand_range: 30.0,
+    ),
+    priest: (
+        weights: (
+            threat_repulsion: 3.0,
+            ally_anchor: 1000.0,      // HARD: heal-range constraint
+            formation_pull: 2.0,
+            boundary_penalty: 1000.0, // HARD: never score an out-of-bounds step
+            corner_penalty: 4.0,
+            wand_pull: 0.5,
+            commitment_bonus: 1.5,
+        ),
+    ),
+    paladin: (
+        weights: (
+            threat_repulsion: 3.0,
+            ally_anchor: 1000.0,      // HARD: heal-range constraint
+            formation_pull: 0.0,      // Paladin keeps melee identity — no backline point
+            boundary_penalty: 1000.0, // HARD: never score an out-of-bounds step
+            corner_penalty: 4.0,
+            wand_pull: 0.0,           // Paladin has no wand
+            commitment_bonus: 1.5,
+        ),
+        // PRESSURED retreat range (instead of face-tanking at melee).
+        fallback_range: 15.0,
+        // DIP walk-stun-return duration budget in seconds.
+        dip_budget: 6.0,
+    ),
+)

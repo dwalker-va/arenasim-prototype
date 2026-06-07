@@ -518,6 +518,23 @@ fn current_build_exhibits_statue_pathology() {
 }
 
 // ---------------------------------------------------------------------------
+// U5 — movement config registration probe
+// ---------------------------------------------------------------------------
+
+/// (j) Headless mode loads `assets/config/movement.ron`. Two mechanisms make
+/// a successful run the proof: `MovementConfigPlugin` panics if the file is
+/// missing/malformed/invalid, and `run_headless_match_impl` carries a
+/// `debug_assert!` that the `MovementConfig` resource exists (so deleting the
+/// plugin registration fails this test under `cargo test`, where
+/// debug_assertions are on).
+#[test]
+fn headless_runner_registers_movement_config() {
+    let cfg = create_config(vec!["Warrior"], vec!["Mage"], Some(7));
+    run_headless_match_with(cfg, true, None)
+        .expect("headless run must succeed with MovementConfigPlugin registered");
+}
+
+// ---------------------------------------------------------------------------
 // U5 — MovementDirective executor tests (World-level, minimal App/schedule)
 // ---------------------------------------------------------------------------
 //
