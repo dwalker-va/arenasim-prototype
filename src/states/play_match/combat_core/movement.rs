@@ -87,8 +87,15 @@ pub fn move_to_target(
 
     let dt = time.delta_secs();
 
-    // Build a snapshot of all combatant positions and team info for lookups
-    let positions: std::collections::HashMap<Entity, (Vec3, u8)> = combatants
+    // Build a snapshot of all combatant positions and team info for lookups.
+    // BTreeMap (not HashMap) so iteration order is deterministic by Entity —
+    // downstream consumers iterate this map (kiting's nearest-enemy scan, and
+    // the position scorer's threat inputs), and Rust's randomized HashMap
+    // hasher would otherwise make tie-breaks between equidistant enemies vary
+    // across runs, breaking byte-identical determinism at a fixed seed. See
+    // docs/solutions/implementation-patterns/ai-decision-trace.md (determinism
+    // section) and the matching comments in auto_attack.rs.
+    let positions: std::collections::BTreeMap<Entity, (Vec3, u8)> = combatants
         .iter()
         .map(|(entity, transform, combatant, _, _, _, _, _)| (entity, (transform.translation, combatant.team)))
         .collect();
