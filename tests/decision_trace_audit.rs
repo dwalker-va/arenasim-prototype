@@ -19,31 +19,12 @@ fn create_config(team1: Vec<&str>, team2: Vec<&str>, seed: Option<u64>) -> Headl
     HeadlessMatchConfig {
         team1: team1.into_iter().map(String::from).collect(),
         team2: team2.into_iter().map(String::from).collect(),
-        map: "BasicArena".to_string(),
-        team1_kill_target: None,
-        team2_kill_target: None,
-        team1_cc_target: None,
-        team2_cc_target: None,
-        output_path: None,
         // Longer than the 60s used in headless_tests — 2v2 matches need more
         // time for late-game CC drama (DR stacks, Divine Shield triggers,
         // root-induced Charge rejections) to develop.
         max_duration_secs: 180.0,
         random_seed: seed,
-        team1_rogue_openers: vec![],
-        team2_rogue_openers: vec![],
-        team1_warlock_curse_prefs: vec![],
-        team2_warlock_curse_prefs: vec![],
-        team1_hunter_pet_types: vec![],
-        team2_hunter_pet_types: vec![],
-        team1_equipment: vec![],
-        team2_equipment: vec![],
-        team1_warrior_shouts: vec![],
-        team2_warrior_shouts: vec![],
-        team1_mage_armors: vec![],
-        team2_mage_armors: vec![],
-        team1_paladin_auras: vec![],
-        team2_paladin_auras: vec![],
+        ..Default::default()
     }
 }
 

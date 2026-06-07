@@ -27,4 +27,4 @@ pub mod runner;
 
 pub use config::HeadlessMatchConfig;
 pub use matrix::run_matrix;
-pub use runner::{run_headless_match, run_headless_match_with, CombatantResult, HeadlessMatchState, MatchResult};
+pub use runner::{run_headless_match, run_headless_match_observed, run_headless_match_with, CombatantResult, FrameObservation, HeadlessMatchState, MatchResult, ObservedCombatant};
