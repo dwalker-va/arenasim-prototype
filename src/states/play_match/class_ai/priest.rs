@@ -19,16 +19,21 @@ use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
-use crate::states::play_match::combat_core::calculate_cast_time;
+use crate::states::play_match::combat_core::{
+    calculate_cast_time, clamp_to_arena, compass_directions_16, score_directions,
+    AnchorConstraint, ScorerInputs,
+};
 use crate::states::play_match::constants::GCD;
 use crate::states::play_match::decision_trace::{
-    DecisionEventBuilder, DecisionTrace, RejectionReason,
+    ActorView, DecisionEventBuilder, DecisionTrace, MovementEventBuilder, MovementGoalKind,
+    MovementTrigger, Posture as TracePosture, RejectionReason,
 };
+use crate::states::play_match::movement_config::MovementConfig;
 use crate::states::play_match::utils::log_ability_use;
 
 use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
 
-use super::CombatContext;
+use super::{CombatContext, CombatantInfo};
 
 /// Priest AI: Decides and executes abilities for a Priest combatant.
 ///
@@ -472,4 +477,430 @@ fn try_mind_blast(
     );
 
     true
+}
+
+// ============================================================================
+// Posture evaluation (healer movement AI — U6: FREE/PRESSURED)
+// ============================================================================
+
+/// Distance the FREE formation point must move (XZ units) before the
+/// directive is re-targeted and a `FormationShift` trace event fires.
+const FORMATION_SHIFT_THRESHOLD: f32 = 3.0;
+/// FREE deadzone: no Point directive is issued when the Priest is already
+/// this close to the formation point (prevents micro-shuffling).
+const FORMATION_DEADZONE: f32 = 1.5;
+/// Distance ahead at which the position scorer evaluates candidate steps.
+const SCORER_LOOKAHEAD: f32 = 2.0;
+/// Refresh the standing FREE directive when its remaining TTL drops below
+/// this (keeps a walk alive across decide ticks without re-scoring or
+/// emitting — refreshes are not decisions).
+const DIRECTIVE_REFRESH_MARGIN: f32 = 0.25;
+
+/// Evaluate the Priest's movement posture (FREE/PRESSURED) and issue/refresh
+/// a [`MovementDirective`] accordingly. Runs at the top of the Priest's
+/// decide tick, BEFORE the GCD short-circuit (the GCD locks casts, not
+/// legs), and only after gates open (the caller gates on
+/// `countdown.gates_opened` — no pre-match directives or trace events).
+///
+/// R12 is structural: casting Priests never reach this function
+/// (`decide_abilities` excludes `CastingState`/`ChannelingState` entities)
+/// and `move_to_target` blocks directive execution while casting — posture
+/// movement happens in cast gaps and never cancels an in-progress cast.
+///
+/// Trace emission (R3): posture transitions and committed direction /
+/// formation re-commit changes only — never per-tick.
+#[allow(clippy::too_many_arguments)]
+pub fn evaluate_priest_posture(
+    commands: &mut Commands,
+    entity: Entity,
+    combatant: &Combatant,
+    my_pos: Vec3,
+    ctx: &CombatContext,
+    posture: Option<&mut HealerPosture>,
+    directive: Option<&MovementDirective>,
+    movement: &MovementConfig,
+    now: f32,
+    decision_trace: &mut DecisionTrace,
+) {
+    // First evaluation inserts the persistent component via Commands
+    // (visible to this tick's executor through the existing apply_deferred,
+    // and to next tick's query).
+    let mut local = HealerPosture::new(now);
+    let needs_insert = posture.is_none();
+    let state: &mut HealerPosture = match posture {
+        Some(p) => p,
+        None => &mut local,
+    };
+
+    let shared = &movement.shared;
+
+    // --- PRESSURED compound trigger (R6) ---
+    // Targeted by a VISIBLE enemy (enemies_targeting is stealth-filtered —
+    // AE2: no pre-dodging invisible Rogues; pets included) AND a proximity /
+    // intent condition: within the danger radius, or a melee-class / pet /
+    // closing threat within the intent radius. A distant caster holding
+    // position while targeting me does NOT flip the posture (AE5), and
+    // neither does a melee targeting me from across the arena — pressure
+    // requires the threat to be near enough that intent matters.
+    let trigger = ctx.enemies_targeting(entity).iter().any(|t| {
+        let distance = my_pos.distance(t.position);
+        distance <= shared.danger_radius
+            || (distance <= shared.threat_intent_radius
+                && (t.is_pet || t.class.is_melee() || ctx.is_closing(t.entity, entity)))
+    });
+
+    let prev = state.posture;
+    let next = match prev {
+        // Hysteresis: PRESSURED may not relax before `hold_until` even when
+        // the trigger momentarily drops (threat hovering at the radius must
+        // not strobe the posture). Exiting requires the trigger false.
+        Posture::Pressured if !trigger && now >= state.hold_until => Posture::Free,
+        Posture::Pressured => Posture::Pressured,
+        // U6 only reaches Free/Pressured; ESCAPE/DIP arrive in U7/U8.
+        _ if trigger => Posture::Pressured,
+        _ => Posture::Free,
+    };
+
+    let transitioned = next != prev;
+    if transitioned {
+        state.posture = next;
+        state.since = now;
+        state.last_direction = None;
+        state.last_point = None;
+        if next == Posture::Pressured {
+            state.hold_until = now + shared.pressured_hold;
+        } else {
+            state.hold_until = 0.0;
+            state.anchor = None;
+        }
+    }
+
+    match next {
+        Posture::Pressured => pressured_tick(
+            commands, entity, combatant, my_pos, ctx, state, directive, movement, now,
+            decision_trace, transitioned, prev,
+        ),
+        _ => free_tick(
+            commands, entity, combatant, my_pos, ctx, state, directive, movement, now,
+            decision_trace, transitioned, prev,
+        ),
+    }
+
+    if needs_insert {
+        commands.entity(entity).try_insert(*state);
+    }
+}
+
+/// PRESSURED tick: sticky anchor selection, hard commitment window, scored
+/// direction, directive issuance, transition/direction-change trace events.
+#[allow(clippy::too_many_arguments)]
+fn pressured_tick(
+    commands: &mut Commands,
+    entity: Entity,
+    combatant: &Combatant,
+    my_pos: Vec3,
+    ctx: &CombatContext,
+    state: &mut HealerPosture,
+    directive: Option<&MovementDirective>,
+    movement: &MovementConfig,
+    now: f32,
+    decision_trace: &mut DecisionTrace,
+    transitioned: bool,
+    prev: Posture,
+) {
+    let shared = &movement.shared;
+
+    // Sticky anchor ally (R6): most-injured living non-pet ally, excluding
+    // self (the constraint keeps US within heal range of THEM). Switching
+    // requires the candidate to be more injured than the current anchor by
+    // `anchor_switch_margin`, so two similarly-injured allies don't flap the
+    // constraint region tick to tick. BTree iteration + strict `<` keeps
+    // ties deterministic.
+    let candidate = ctx
+        .alive_allies()
+        .into_iter()
+        .filter(|a| a.entity != entity)
+        .min_by(|a, b| a.health_pct().partial_cmp(&b.health_pct()).unwrap());
+    let current = state
+        .anchor
+        .and_then(|a| ctx.combatants.get(&a))
+        .filter(|i| i.is_alive && !i.is_pet);
+    let anchor_info: Option<&CombatantInfo> = match (current, candidate) {
+        (Some(cur), Some(cand))
+            if cand.entity != cur.entity
+                && cand.health_pct() + shared.anchor_switch_margin < cur.health_pct() =>
+        {
+            Some(cand)
+        }
+        (Some(cur), _) => Some(cur),
+        (None, cand) => cand,
+    };
+    state.anchor = anchor_info.map(|i| i.entity);
+
+    // Hard commitment window (R11): re-evaluation happens only once the
+    // committed window lapses (or the directive died — e.g. expired across a
+    // Flash Heal cast). The scorer's commitment bonus applies only AT
+    // re-evaluation; the two governors never stack.
+    let window_open =
+        directive.map_or(false, |d| now < d.committed_until && now < d.expires);
+    if window_open && !transitioned {
+        return;
+    }
+
+    // Threat set: visible enemies targeting me + any visible enemy inside
+    // the danger radius (an enemy in my face is a threat even while it
+    // targets someone else). BTreeMap dedupes in deterministic order.
+    let mut threat_positions: std::collections::BTreeMap<Entity, Vec3> = Default::default();
+    for t in ctx.enemies_targeting(entity) {
+        threat_positions.insert(t.entity, t.position);
+    }
+    for t in ctx.visible_enemies_within(entity, my_pos, shared.danger_radius) {
+        threat_positions.insert(t.entity, t.position);
+    }
+
+    // Wand pull while PRESSURED — but never toward an enemy that is itself
+    // in the threat set: drifting toward your own attacker would cancel the
+    // repulsion term at mid range and park the Priest at a standoff distance
+    // instead of escaping (observed in the statue probe before this guard).
+    let wand_target = combatant
+        .target
+        .filter(|t| !threat_positions.contains_key(t))
+        .and_then(|t| ctx.combatants.get(&t))
+        .filter(|i| i.is_alive)
+        .map(|i| i.position);
+
+    let inputs = ScorerInputs {
+        my_pos,
+        lookahead: SCORER_LOOKAHEAD,
+        threats: threat_positions.into_values().collect(),
+        anchor: anchor_info.map(|i| AnchorConstraint {
+            pos: i.position,
+            heal_range: shared.heal_range,
+        }),
+        formation_point: None,
+        wand_target,
+        wand_range: shared.wand_range,
+        committed_direction: state.last_direction,
+    };
+    let chosen = score_directions(&compass_directions_16(), &inputs, &movement.priest.weights);
+    if chosen == Vec2::ZERO {
+        return; // defensive — 16 candidates always yield a direction
+    }
+
+    commands.entity(entity).try_insert(MovementDirective {
+        goal: MovementGoal::Direction(chosen),
+        expires: now + shared.directive_ttl,
+        committed_until: now + shared.commit_window,
+    });
+
+    let direction_changed = state
+        .last_direction
+        .map_or(true, |d| d.distance(chosen) > 1e-3);
+    state.last_direction = Some(chosen);
+
+    // Trace (R3): posture transitions and committed direction CHANGES only.
+    if transitioned || direction_changed {
+        if let Some(mut builder) = start_movement_event(decision_trace, ctx) {
+            if transitioned {
+                builder.transition(
+                    prev.into(),
+                    TracePosture::Pressured,
+                    MovementTrigger::PressuredEnter,
+                    MovementGoalKind::Direction,
+                );
+            } else {
+                builder.direction_change(
+                    TracePosture::Pressured,
+                    MovementTrigger::CommitExpired,
+                    MovementGoalKind::Direction,
+                );
+            }
+            builder.chosen_direction([chosen.x, chosen.y]);
+            builder.finish();
+        }
+    }
+}
+
+/// FREE tick: formation-point anchoring (R5). Degenerate case (no living
+/// non-pet ally): NO directive — the legacy preferred_range pursuit governs
+/// (AE4 — 1v1 behavior preserved).
+#[allow(clippy::too_many_arguments)]
+fn free_tick(
+    commands: &mut Commands,
+    entity: Entity,
+    combatant: &Combatant,
+    my_pos: Vec3,
+    ctx: &CombatContext,
+    state: &mut HealerPosture,
+    directive: Option<&MovementDirective>,
+    movement: &MovementConfig,
+    now: f32,
+    decision_trace: &mut DecisionTrace,
+    transitioned: bool,
+    prev: Posture,
+) {
+    let shared = &movement.shared;
+
+    let Some(point) = compute_formation_point(entity, combatant, my_pos, ctx, movement) else {
+        // DEGENERATE (R5/AE4): no formation directive; fall through to the
+        // legacy ladder. PressuredExit transitions still emit — goal_kind
+        // Entity records "legacy target pursuit governs".
+        if transitioned {
+            if let Some(mut builder) = start_movement_event(decision_trace, ctx) {
+                builder.transition(
+                    prev.into(),
+                    TracePosture::Free,
+                    MovementTrigger::PressuredExit,
+                    MovementGoalKind::Entity,
+                );
+                builder.finish();
+            }
+        }
+        return;
+    };
+
+    let point_xz = Vec2::new(point.x, point.z);
+    let my_xz = Vec2::new(my_pos.x, my_pos.z);
+    let moved = state
+        .last_point
+        .map_or(true, |lp| lp.distance(point_xz) > FORMATION_SHIFT_THRESHOLD);
+    let near = my_xz.distance(point_xz) <= FORMATION_DEADZONE;
+
+    let issue = |commands: &mut Commands| {
+        commands.entity(entity).try_insert(MovementDirective {
+            goal: MovementGoal::Point(point),
+            expires: now + shared.directive_ttl,
+            committed_until: now + shared.commit_window,
+        });
+    };
+
+    if transitioned {
+        // PRESSURED → FREE: re-anchor to the formation immediately.
+        if !near {
+            issue(commands);
+        }
+        state.last_point = Some(point_xz);
+        if let Some(mut builder) = start_movement_event(decision_trace, ctx) {
+            builder.transition(
+                prev.into(),
+                TracePosture::Free,
+                MovementTrigger::PressuredExit,
+                MovementGoalKind::Point,
+            );
+            builder.finish();
+        }
+    } else if moved && !near {
+        // Formation goal moved enough to re-commit (engaged-ally centroid
+        // shifted) — FormationShift, within the same posture.
+        issue(commands);
+        state.last_point = Some(point_xz);
+        if let Some(mut builder) = start_movement_event(decision_trace, ctx) {
+            builder.direction_change(
+                TracePosture::Free,
+                MovementTrigger::FormationShift,
+                MovementGoalKind::Point,
+            );
+            builder.finish();
+        }
+    } else if !near && directive.map_or(true, |d| d.expires - now < DIRECTIVE_REFRESH_MARGIN) {
+        // Keep the standing walk alive (post-cast gaps, TTL expiry) without
+        // re-scoring or emitting — refreshes are not decisions.
+        issue(commands);
+    }
+    // `near` with no meaningful point move: the executor's Point-arrival
+    // hold keeps us parked; the directive's TTL cleans it up.
+}
+
+/// FREE formation point (R5): centroid of living non-pet ENGAGED allies
+/// (allies with an enemy target), excluding self; pre-contact (no ally
+/// engaged) falls back to all living non-pet allies. Offset
+/// `formation_offset` away from the nearest visible enemy ("behind the
+/// line"), direction-blended toward arena center by `center_bias`, clamped
+/// into wand range of the kill target (the FREE wand pull — an idle Priest
+/// still drifts into wand range) and into arena bounds. `None` when no
+/// living non-pet ally exists (degenerate case R5/AE4).
+fn compute_formation_point(
+    entity: Entity,
+    combatant: &Combatant,
+    my_pos: Vec3,
+    ctx: &CombatContext,
+    movement: &MovementConfig,
+) -> Option<Vec3> {
+    let shared = &movement.shared;
+    let allies: Vec<&CombatantInfo> = ctx
+        .alive_allies()
+        .into_iter()
+        .filter(|a| a.entity != entity)
+        .collect();
+    if allies.is_empty() {
+        return None;
+    }
+    let engaged: Vec<&CombatantInfo> = allies
+        .iter()
+        .copied()
+        .filter(|a| a.target.is_some())
+        .collect();
+    let group: &[&CombatantInfo] = if engaged.is_empty() { &allies } else { &engaged };
+    let centroid =
+        group.iter().fold(Vec3::ZERO, |acc, a| acc + a.position) / group.len() as f32;
+
+    // "Behind the line": offset away from the nearest visible enemy; with no
+    // visible enemy (stealth pre-contact), away from arena center — trailing
+    // the allies as they advance.
+    let nearest_enemy = ctx
+        .visible_enemies_within(entity, centroid, f32::MAX)
+        .into_iter()
+        .min_by(|a, b| {
+            centroid
+                .distance(a.position)
+                .partial_cmp(&centroid.distance(b.position))
+                .unwrap()
+        });
+    let away = match nearest_enemy {
+        Some(e) => Vec2::new(centroid.x - e.position.x, centroid.z - e.position.z)
+            .normalize_or_zero(),
+        None => Vec2::new(centroid.x, centroid.z).normalize_or_zero(),
+    };
+    let to_center = Vec2::new(-centroid.x, -centroid.z).normalize_or_zero();
+    let mut dir = (away * (1.0 - shared.center_bias) + to_center * shared.center_bias)
+        .normalize_or_zero();
+    if dir == Vec2::ZERO {
+        dir = away;
+    }
+    let mut point = Vec3::new(
+        centroid.x + dir.x * shared.formation_offset,
+        my_pos.y,
+        centroid.z + dir.y * shared.formation_offset,
+    );
+
+    // Wand-range pull: clamp the point to the wand-range boundary of the
+    // kill target when it would sit outside it (weight 0 disables — the
+    // Paladin has no wand).
+    if movement.priest.weights.wand_pull > 0.0 {
+        if let Some(target) = combatant
+            .target
+            .and_then(|t| ctx.combatants.get(&t))
+            .filter(|i| i.is_alive)
+        {
+            let offset = Vec2::new(point.x - target.position.x, point.z - target.position.z);
+            let dist = offset.length();
+            if dist > shared.wand_range {
+                let clamped = offset / dist * shared.wand_range;
+                point.x = target.position.x + clamped.x;
+                point.z = target.position.z + clamped.y;
+            }
+        }
+    }
+
+    Some(clamp_to_arena(point))
+}
+
+/// Start a `movement_decision` builder for the current actor. `None` only
+/// when the snapshot lacks self (defensive — shouldn't happen in dispatch).
+fn start_movement_event<'t>(
+    decision_trace: &'t mut DecisionTrace,
+    ctx: &CombatContext,
+) -> Option<MovementEventBuilder<'t>> {
+    let actor = ActorView::from_info(ctx.self_info()?);
+    Some(decision_trace.start_movement_decision(actor, None))
 }

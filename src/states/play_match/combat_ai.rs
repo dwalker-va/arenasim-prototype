@@ -420,10 +420,16 @@ pub fn decide_abilities(
     mut combat_log: ResMut<CombatLog>,
     mut game_rng: ResMut<GameRng>,
     abilities: Res<AbilityDefinitions>,
+    countdown: Res<MatchCountdown>,
+    time: Res<Time>,
+    movement_config: Res<crate::states::play_match::movement_config::MovementConfig>,
     mut combatants: Query<(Entity, &mut Combatant, &Transform, Option<&mut ActiveAuras>), (Without<CastingState>, Without<ChannelingState>)>,
     casting_auras: Query<(Entity, &Combatant, &Transform, Option<&ActiveAuras>), With<CastingState>>,
     channeling_auras: Query<(Entity, &Combatant, &Transform, Option<&ActiveAuras>), (With<ChannelingState>, Without<CastingState>)>,
     dr_tracker_query: Query<(Entity, &DRTracker)>,
+    // Healer posture state + standing directive read-back (movement AI).
+    // Disjoint from `combatants` component-wise, so the two queries coexist.
+    mut healer_movement: Query<(Option<&mut HealerPosture>, Option<&MovementDirective>)>,
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
     pet_query: Query<&Pet>,
@@ -570,19 +576,44 @@ pub fn decide_abilities(
                 &mut same_frame_cc_queue,
                 &mut decision_trace,
             ),
-            match_config::CharacterClass::Priest => class_ai::priest::decide_priest_action(
-                &mut commands,
-                &mut combat_log,
-                &abilities,
-                entity,
-                &mut combatant,
-                my_pos,
-                auras.as_deref(),
-                &ctx,
-                &mut shielded_this_frame,
-                &mut fortified_this_frame,
-                &mut decision_trace,
-            ),
+            match_config::CharacterClass::Priest => {
+                // Posture evaluation (healer movement AI, U6) runs BEFORE the
+                // ability pass and OUTSIDE the GCD short-circuit inside
+                // decide_priest_action — directives must refresh while on GCD
+                // (the GCD locks casts, not legs). Gated on gates_opened: no
+                // pre-match directives or trace events. Casting Priests never
+                // get here (query excludes CastingState/ChannelingState), so
+                // posture movement lives in cast gaps only (R12).
+                if countdown.gates_opened {
+                    if let Ok((posture, directive)) = healer_movement.get_mut(entity) {
+                        class_ai::priest::evaluate_priest_posture(
+                            &mut commands,
+                            entity,
+                            &combatant,
+                            my_pos,
+                            &ctx,
+                            posture.map(bevy::prelude::Mut::into_inner),
+                            directive,
+                            &movement_config,
+                            time.elapsed_secs(),
+                            &mut decision_trace,
+                        );
+                    }
+                }
+                class_ai::priest::decide_priest_action(
+                    &mut commands,
+                    &mut combat_log,
+                    &abilities,
+                    entity,
+                    &mut combatant,
+                    my_pos,
+                    auras.as_deref(),
+                    &ctx,
+                    &mut shielded_this_frame,
+                    &mut fortified_this_frame,
+                    &mut decision_trace,
+                )
+            },
             match_config::CharacterClass::Warrior => class_ai::warrior::decide_warrior_action(
                 &mut commands,
                 &mut combat_log,

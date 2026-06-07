@@ -14,12 +14,11 @@
 //!   NON-PERTURBATION test: an observed run must return a `MatchResult`
 //!   identical to an unobserved run at the same seed.
 //!
-//! The `current_build_exhibits_statue_pathology` test at the bottom is a
-//! BASELINE DOCUMENT, not a feature test: it asserts that today's build
-//! exhibits the healer-statue pathology (focused Priest barely moves),
-//! proving the harness detects the problem the posture work will fix.
-//! When U6 lands, that test is expected to start failing and should be
-//! inverted into the real statue probe.
+//! The `priest_postures` module at the bottom is the U6 probe suite for the
+//! Priest FREE/PRESSURED posture work: the inverted statue probe (the U2
+//! baseline test documented the pathology; U6 fixed it), plus anchor /
+//! stealth / time-in-FREE / corner / 1v1-degenerate / zigzag / wand probes
+//! at fixed seeds.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -473,48 +472,528 @@ fn assert_min_occurrences_fails_loudly_below_threshold() {
 }
 
 // ---------------------------------------------------------------------------
-// (d) Demo statue probe — documents the CURRENT pathology
+// U6 — Priest FREE/PRESSURED posture probes
 // ---------------------------------------------------------------------------
 
-/// BASELINE DOCUMENT, not a feature test. Today's Priest is positionally
-/// inert: in a forced-focus match (Rogue training the Priest), its entire
-/// post-gate path is roughly the initial approach walk (~21 units measured),
-/// even while being attacked in melee. This test asserts the pathology IS
-/// present — proving the probe harness detects the problem the healer
-/// posture work (U6+) will fix. When that work lands, this test should
-/// FAIL; invert it into the real statue probe (path length materially
-/// ABOVE the baseline) at that point.
-#[test]
-fn current_build_exhibits_statue_pathology() {
-    let mut cfg = create_config(
-        vec!["Warrior", "Priest"],
-        vec!["Rogue", "Priest"],
-        Some(20260606),
-    );
-    // Rogue (team2) trains team1's Priest (slot 1).
-    cfg.team2_kill_target = Some(1);
+/// Probe support for the posture suite: an observed + traced run, with the
+/// trace JSONL parsed into `serde_json::Value`s and a typed view of the
+/// `movement_decision` events.
+mod priest_postures {
+    use super::*;
+    use arenasim::headless::runner::TraceConfig;
+    use arenasim::states::play_match::combat_core::CORNER_PENALTY_ONSET;
 
-    let (_result, timeline) = run_observed_collecting(cfg);
+    /// One parsed `movement_decision` trace event. `sim_time` is COMBAT time
+    /// (the trace clock starts at gates-open); add the timeline's
+    /// `gates_open_time` to compare against `FrameObservation` timestamps.
+    #[derive(Debug, Clone)]
+    struct MovementEvent {
+        sim_time: f32,
+        team: u8,
+        slot: u8,
+        trigger: String,
+        goal_kind: String,
+    }
 
-    let gate_time = timeline
-        .gates_open_time
-        .expect("gates never opened — match misconfigured");
+    /// Run an observed + traced match; returns the result, the position
+    /// timeline, and every parsed trace line.
+    fn run_observed_traced(
+        config: HeadlessMatchConfig,
+    ) -> (MatchResult, Timeline, Vec<serde_json::Value>) {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+        drop(tmp);
 
-    let focused_priest = timeline.find(1, CharacterClass::Priest, false);
-    let post_gate = timeline.samples_from(focused_priest, gate_time);
+        let mut timeline = Timeline::default();
+        let result = run_headless_match_observed(
+            config,
+            true,
+            Some(TraceConfig {
+                output_path: path.clone(),
+            }),
+            |frame| timeline.record(frame),
+        )
+        .expect("observed traced headless match failed");
 
-    // Non-vacuity: the Priest must survive at least ~1s of post-gate combat
-    // for the path measurement to mean anything (60 frames at 60Hz).
-    assert_min_occurrences("focused Priest post-gate samples", post_gate.len(), 60);
+        let body = std::fs::read_to_string(&path).expect("read trace file");
+        let events: Vec<serde_json::Value> = body
+            .lines()
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .collect();
+        let _ = std::fs::remove_file(path);
+        (result, timeline, events)
+    }
 
-    let path = path_length(&post_gate);
-    assert!(
-        path < 30.0,
-        "statue pathology no longer present: focused Priest post-gate path \
-         length is {:.1} units (baseline ~21, threshold 30). If healer \
-         movement AI has landed, invert this probe into the real statue test.",
-        path
-    );
+    fn movement_events(trace: &[serde_json::Value]) -> Vec<MovementEvent> {
+        trace
+            .iter()
+            .filter(|v| v["kind"] == "movement_decision")
+            .map(|v| MovementEvent {
+                sim_time: v["sim_time"].as_f64().unwrap() as f32,
+                team: v["actor"]["team"].as_u64().unwrap() as u8,
+                slot: v["actor"]["slot"].as_u64().unwrap() as u8,
+                trigger: v["trigger"].as_str().unwrap_or_default().to_string(),
+                goal_kind: v["goal_kind"].as_str().unwrap_or_default().to_string(),
+            })
+            .collect()
+    }
+
+    /// PRESSURED windows (combat-time) for one actor, from PressuredEnter /
+    /// PressuredExit transitions; an unclosed window ends at `end`.
+    fn pressured_windows(
+        events: &[MovementEvent],
+        team: u8,
+        slot: u8,
+        end: f32,
+    ) -> Vec<(f32, f32)> {
+        let mut windows = Vec::new();
+        let mut open: Option<f32> = None;
+        for e in events.iter().filter(|e| e.team == team && e.slot == slot) {
+            match e.trigger.as_str() {
+                "PressuredEnter" if open.is_none() => open = Some(e.sim_time),
+                "PressuredExit" => {
+                    if let Some(start) = open.take() {
+                        windows.push((start, e.sim_time));
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let Some(start) = open {
+            windows.push((start, end));
+        }
+        windows
+    }
+
+    /// Per-frame `(sim_time, min distance)` from `me` to the nearest of
+    /// `others`, matched on identical frame stamps.
+    fn min_distance_series(
+        timeline: &Timeline,
+        me: Entity,
+        others: &[Entity],
+    ) -> Vec<(f32, f32)> {
+        let me_samples = timeline.samples.get(&me).cloned().unwrap_or_default();
+        // Keyed by f32 bits — sim_time is positive and increasing, so bit
+        // order equals numeric order.
+        let mut merged: BTreeMap<u32, f32> = BTreeMap::new();
+        for other in others {
+            let other_samples = timeline.samples.get(other).cloned().unwrap_or_default();
+            let (mut i, mut j) = (0usize, 0usize);
+            while i < me_samples.len() && j < other_samples.len() {
+                let (ta, pa) = me_samples[i];
+                let (tb, pb) = other_samples[j];
+                if ta == tb {
+                    let d = pa.distance(pb);
+                    merged
+                        .entry(ta.to_bits())
+                        .and_modify(|m| *m = m.min(d))
+                        .or_insert(d);
+                    i += 1;
+                    j += 1;
+                } else if ta < tb {
+                    i += 1;
+                } else {
+                    j += 1;
+                }
+            }
+        }
+        merged
+            .into_iter()
+            .map(|(bits, d)| (f32::from_bits(bits), d))
+            .collect()
+    }
+
+    /// Longest consecutive stretch (seconds) where `predicate` holds across
+    /// a `(sim_time, value)` series.
+    fn max_consecutive_secs(series: &[(f32, f32)], predicate: impl Fn(f32) -> bool) -> f32 {
+        let mut longest = 0.0f32;
+        let mut run_start: Option<f32> = None;
+        let mut last_t = 0.0f32;
+        for &(t, v) in series {
+            if predicate(v) {
+                if run_start.is_none() {
+                    run_start = Some(t);
+                }
+                last_t = t;
+            } else if let Some(start) = run_start.take() {
+                longest = longest.max(last_t - start);
+            }
+        }
+        if let Some(start) = run_start {
+            longest = longest.max(last_t - start);
+        }
+        longest
+    }
+
+    /// The statue comp at its fixed seed: Warrior+Priest vs Rogue+Priest,
+    /// team 2 forced onto team 1's Priest (slot 1).
+    fn statue_config() -> HeadlessMatchConfig {
+        let mut cfg = create_config(
+            vec!["Warrior", "Priest"],
+            vec!["Rogue", "Priest"],
+            Some(20260606),
+        );
+        cfg.team2_kill_target = Some(1);
+        cfg
+    }
+
+    /// (a) STATUE PROBE — the inversion of U2's
+    /// `current_build_exhibits_statue_pathology` baseline test. Pre-U6 the
+    /// focused Priest's post-gate path was ~21 units (the approach walk) and
+    /// it face-tanked the Rogue. With FREE/PRESSURED postures the Priest
+    /// repositions: path length materially ABOVE the old statue band AND
+    /// bounded time within 10yd of its attacker.
+    #[test]
+    fn forced_focus_priest_escapes_statue_pathology() {
+        let (_result, timeline, trace) = run_observed_traced(statue_config());
+
+        let gate_time = timeline
+            .gates_open_time
+            .expect("gates never opened — match misconfigured");
+
+        let priest = timeline.find(1, CharacterClass::Priest, false);
+        let rogue = timeline.find(2, CharacterClass::Rogue, false);
+        let post_gate = timeline.samples_from(priest, gate_time);
+        assert_min_occurrences("focused Priest post-gate samples", post_gate.len(), 60);
+
+        let path = path_length(&post_gate);
+        let alive_secs = post_gate.last().unwrap().0 - post_gate.first().unwrap().0;
+        let rogue_post_gate = timeline.samples_from(rogue, gate_time);
+        let t10 = time_within_range_of(&post_gate, &rogue_post_gate, 10.0);
+        let frac10 = t10 / alive_secs.max(f32::EPSILON);
+        let t4 = time_within_range_of(&post_gate, &rogue_post_gate, 4.0);
+        let frac4 = t4 / alive_secs.max(f32::EPSILON);
+        eprintln!(
+            "statue probe: path={:.1} (pre-U6 baseline ~21), alive={:.1}s, \
+             time-within-10yd-of-Rogue={:.1}s ({:.0}%), within-4yd={:.1}s ({:.0}%)",
+            path,
+            alive_secs,
+            t10,
+            frac10 * 100.0,
+            t4,
+            frac4 * 100.0
+        );
+
+        // Non-vacuity: the posture machinery actually fired.
+        let events = movement_events(&trace);
+        let priest_events = events.iter().filter(|e| e.team == 1 && e.slot == 1).count();
+        assert_min_occurrences("focused Priest movement_decision events", priest_events, 1);
+
+        assert!(
+            path > 60.0,
+            "statue pathology: focused Priest post-gate path is only {:.1} units \
+             (pre-U6 baseline ~21; measured post-U6 ~89; healthy threshold 60)",
+            path
+        );
+        // Threat-range ceiling — a REGRESSION NET, not an aspiration. The
+        // Rogue moves at the same base speed as the Priest and casting locks
+        // movement (R12), so a healing Priest can never shake an equal-speed
+        // melee chaser: measured per-frame within-10yd is ~80% post-U6 and
+        // was ~81% pre-U6 at this seed (the discriminator is path length).
+        // The ceiling catches the failure mode where the Priest stops
+        // repositioning between casts entirely and the Rogue parks at
+        // 0.9-1.9yd for its whole life (the U2-documented pathology, ~100%
+        // once engaged).
+        assert!(
+            frac10 < 0.85,
+            "focused Priest spent {:.0}% of its post-gate life within 10yd of \
+             the Rogue (ceiling 85% — see regression-net comment)",
+            frac10 * 100.0
+        );
+    }
+
+    /// (b) ANCHOR PROBE — while PRESSURED, the Priest never exits heal range
+    /// (40) of its ally for more than a 1s grace (R6 anchor constraint).
+    #[test]
+    fn pressured_priest_stays_in_heal_range_of_ally() {
+        let (_result, timeline, trace) = run_observed_traced(statue_config());
+        let gate_time = timeline.gates_open_time.expect("gates opened");
+
+        let priest = timeline.find(1, CharacterClass::Priest, false);
+        let warrior = timeline.find(1, CharacterClass::Warrior, false);
+        let events = movement_events(&trace);
+
+        // Last priest sample (combat time) bounds any unclosed window.
+        let priest_samples = timeline.samples.get(&priest).cloned().unwrap_or_default();
+        let end = priest_samples.last().map(|(t, _)| t - gate_time).unwrap_or(0.0);
+        let windows = pressured_windows(&events, 1, 1, end);
+        assert_min_occurrences("PRESSURED windows (focused Priest)", windows.len(), 1);
+
+        let ally_distance = min_distance_series(&timeline, priest, &[warrior]);
+        for (start, stop) in &windows {
+            // Convert combat-time window to timeline time.
+            let (w0, w1) = (start + gate_time, stop + gate_time);
+            let in_window: Vec<(f32, f32)> = ally_distance
+                .iter()
+                .copied()
+                .filter(|(t, _)| *t >= w0 && *t <= w1)
+                .collect();
+            let out_of_range = max_consecutive_secs(&in_window, |d| d > 40.0);
+            eprintln!(
+                "anchor probe: window [{:.1},{:.1}]s, max consecutive out-of-heal-range {:.2}s",
+                w0, w1, out_of_range
+            );
+            assert!(
+                out_of_range <= 1.0,
+                "PRESSURED Priest left heal range (40) of its ally for {:.2}s \
+                 (grace 1.0s) during window [{:.1},{:.1}]",
+                out_of_range,
+                w0,
+                w1
+            );
+        }
+    }
+
+    /// (c) STEALTH PROBE (AE2) — vs a stealth-opener Rogue forced onto the
+    /// Priest, no posture transition fires before the opener lands:
+    /// `enemies_targeting` is stealth-filtered, so the healer never
+    /// pre-dodges an invisible Rogue.
+    #[test]
+    fn no_pressured_transition_before_stealth_opener_lands() {
+        let mut cfg = create_config(vec!["Warrior", "Priest"], vec!["Rogue"], Some(404));
+        // The lone Rogue trains the Priest (slot 1). A 2-enemy comp would
+        // contaminate the probe: the Rogue's visible teammate would also be
+        // forced onto the Priest and legitimately pressure it pre-opener.
+        cfg.team2_kill_target = Some(1);
+
+        let (_result, _timeline, trace) = run_observed_traced(cfg);
+
+        // Opener = the Rogue's first non-Stealth action_taken.
+        let opener_time = trace
+            .iter()
+            .filter(|v| {
+                v["kind"] == "ability_decision"
+                    && v["actor"]["team"] == 2
+                    && v["actor"]["class"] == "Rogue"
+                    && v["outcome"]["type"] == "action_taken"
+                    && v["outcome"]["ability"] != "Stealth"
+            })
+            .map(|v| v["sim_time"].as_f64().unwrap() as f32)
+            .next();
+        let opener_time = opener_time.expect("probe went vacuous — Rogue never opened");
+
+        let events = movement_events(&trace);
+        let priest_enters: Vec<f32> = events
+            .iter()
+            .filter(|e| e.team == 1 && e.slot == 1 && e.trigger == "PressuredEnter")
+            .map(|e| e.sim_time)
+            .collect();
+        assert_min_occurrences("Priest PressuredEnter events", priest_enters.len(), 1);
+
+        eprintln!(
+            "stealth probe: opener at {:.2}s (combat time), first PressuredEnter at {:.2}s",
+            opener_time, priest_enters[0]
+        );
+        for t in &priest_enters {
+            assert!(
+                *t >= opener_time - 0.05,
+                "PressuredEnter at {:.2}s fired BEFORE the stealth opener landed at \
+                 {:.2}s — stealth filtering leaked",
+                t,
+                opener_time
+            );
+        }
+    }
+
+    /// (d) TIME-IN-FREE PROBE — Warrior+Priest mirror, unforced targeting:
+    /// each Priest spends substantial time in FREE. Kill-target acquisition
+    /// is nearest-or-configured, so healers are rarely the formal target in
+    /// team comps; the PRESSURED trigger must not over-fire.
+    #[test]
+    fn priests_spend_substantial_time_free_in_unforced_mirror() {
+        let cfg = create_config(
+            vec!["Warrior", "Priest"],
+            vec!["Warrior", "Priest"],
+            Some(11),
+        );
+        let (result, _timeline, trace) = run_observed_traced(cfg);
+        assert!(
+            result.match_time > 20.0,
+            "probe needs a multi-phase match, got {:.1}s",
+            result.match_time
+        );
+
+        let events = movement_events(&trace);
+        for team in [1u8, 2u8] {
+            let windows = pressured_windows(&events, team, 1, result.match_time);
+            let pressured: f32 = windows.iter().map(|(a, b)| b - a).sum();
+            let frac = pressured / result.match_time;
+            eprintln!(
+                "time-in-FREE probe: team{} Priest pressured {:.1}s of {:.1}s ({:.0}%)",
+                team,
+                pressured,
+                result.match_time,
+                frac * 100.0
+            );
+            assert!(
+                frac < 0.5,
+                "team{} Priest spent {:.0}% of the match PRESSURED in an unforced \
+                 mirror (ceiling 50% — the trigger is over-firing)",
+                team,
+                frac * 100.0
+            );
+        }
+    }
+
+    /// (e) CORNER PROBE — under sustained melee pressure the Priest never
+    /// sits inside the scorer's corner geometry (|x|+|z| >=
+    /// CORNER_PENALTY_ONSET) for more than 5 consecutive seconds.
+    #[test]
+    fn pressured_priest_does_not_pin_into_corners() {
+        let (_result, timeline, _trace) = run_observed_traced(statue_config());
+        let gate_time = timeline.gates_open_time.expect("gates opened");
+
+        let priest = timeline.find(1, CharacterClass::Priest, false);
+        let post_gate = timeline.samples_from(priest, gate_time);
+        assert_min_occurrences("focused Priest post-gate samples", post_gate.len(), 60);
+
+        let corner_series: Vec<(f32, f32)> = post_gate
+            .iter()
+            .map(|(t, p)| (*t, p.x.abs() + p.z.abs()))
+            .collect();
+        let in_corner = max_consecutive_secs(&corner_series, |s| s >= CORNER_PENALTY_ONSET);
+        eprintln!(
+            "corner probe: max consecutive time at |x|+|z| >= {:.1}: {:.2}s",
+            CORNER_PENALTY_ONSET, in_corner
+        );
+        assert!(
+            in_corner < 5.0,
+            "Priest sat in the corner band (|x|+|z| >= {:.1}) for {:.2}s \
+             consecutively (ceiling 5s)",
+            CORNER_PENALTY_ONSET,
+            in_corner
+        );
+    }
+
+    /// (f) 1v1 DEGENERATE PROBE (AE4) — Priest vs Warrior: with no living
+    /// non-pet ally, FREE issues NO formation directive (legacy
+    /// preferred_range pursuit governs); PRESSURED remains available; the
+    /// match is sane (completes decisively, no crash).
+    #[test]
+    fn priest_1v1_issues_no_formation_directive() {
+        let cfg = create_config(vec!["Priest"], vec!["Warrior"], Some(7));
+        let (result, _timeline, trace) = run_observed_traced(cfg);
+
+        assert!(
+            result.winner.is_some(),
+            "1v1 Priest vs Warrior at seed 7 should end decisively, got draw \
+             after {:.1}s",
+            result.match_time
+        );
+
+        let events = movement_events(&trace);
+        let point_events = events.iter().filter(|e| e.goal_kind == "point").count();
+        assert_eq!(
+            point_events, 0,
+            "1v1 Priest issued {} formation (Point-goal) movement decisions — \
+             the degenerate case must fall through to legacy pursuit",
+            point_events
+        );
+        // PRESSURED is still active in 1v1 (the Warrior is a melee threat
+        // targeting the Priest) — non-vacuity for the degenerate branch.
+        let pressured = events
+            .iter()
+            .filter(|e| e.team == 1 && e.trigger == "PressuredEnter")
+            .count();
+        assert_min_occurrences("1v1 Priest PressuredEnter", pressured, 1);
+    }
+
+    /// (g) ZIGZAG PROBE (R11) — committed direction changes per 10s of
+    /// PRESSURED time stay below a ceiling: the commitment window + bonus
+    /// must suppress per-tick direction thrash.
+    #[test]
+    fn pressured_direction_changes_are_bounded() {
+        let (result, _timeline, trace) = run_observed_traced(statue_config());
+        let events = movement_events(&trace);
+
+        let mut total_pressured = 0.0f32;
+        let mut total_changes = 0usize;
+        for (team, slot) in [(1u8, 1u8), (2u8, 1u8)] {
+            let windows = pressured_windows(&events, team, slot, result.match_time);
+            total_pressured += windows.iter().map(|(a, b)| b - a).sum::<f32>();
+            total_changes += events
+                .iter()
+                .filter(|e| e.team == team && e.slot == slot && e.trigger == "CommitExpired")
+                .count();
+        }
+        assert!(
+            total_pressured >= 5.0,
+            "probe went vacuous — re-scan seeds: only {:.1}s of combined \
+             PRESSURED time",
+            total_pressured
+        );
+
+        let rate = total_changes as f32 / total_pressured * 10.0;
+        eprintln!(
+            "zigzag probe: {} committed direction changes over {:.1}s PRESSURED \
+             ({:.1} per 10s)",
+            total_changes, total_pressured, rate
+        );
+        assert!(
+            rate <= 12.0,
+            "{:.1} committed direction changes per 10s of PRESSURED time \
+             (ceiling 12) — commitment window is not suppressing zigzag",
+            rate
+        );
+    }
+
+    /// (h) WAND PROBE — an unthreatened Priest (its teammate soaks the
+    /// focus) drifts into wand range (30) of its kill target. The U2
+    /// `FrameObservation` does not expose wand hits, so this asserts
+    /// POSITIONAL CONVERGENCE into wand range (per the probe spec's
+    /// fallback), not landed-hit counts.
+    #[test]
+    fn unthreatened_priest_drifts_into_wand_range() {
+        let mut cfg = create_config(
+            vec!["Warrior", "Priest"],
+            vec!["Warrior", "Priest"],
+            Some(11),
+        );
+        // Team 2 trains team 1's WARRIOR — team 1's Priest stays unthreatened.
+        cfg.team2_kill_target = Some(0);
+
+        let (_result, timeline, _trace) = run_observed_traced(cfg);
+        let gate_time = timeline.gates_open_time.expect("gates opened");
+
+        let priest = timeline.find(1, CharacterClass::Priest, false);
+        let enemies: Vec<Entity> = timeline
+            .info
+            .iter()
+            .filter(|(_, i)| i.team == 2 && !i.is_pet)
+            .map(|(e, _)| *e)
+            .collect();
+
+        // Allow the formation to settle before measuring convergence.
+        let settle = gate_time + 8.0;
+        let series: Vec<(f32, f32)> = min_distance_series(&timeline, priest, &enemies)
+            .into_iter()
+            .filter(|(t, _)| *t >= settle)
+            .collect();
+        assert_min_occurrences("post-settle samples", series.len(), 60);
+
+        let total = series.last().unwrap().0 - series.first().unwrap().0;
+        let mut in_range = 0.0f32;
+        for w in series.windows(2) {
+            if w[0].1 <= 30.0 {
+                in_range += w[1].0 - w[0].0;
+            }
+        }
+        let frac = in_range / total.max(f32::EPSILON);
+        eprintln!(
+            "wand probe: {:.1}s of {:.1}s ({:.0}%) within wand range (30) of the \
+             nearest enemy after settling",
+            in_range,
+            total,
+            frac * 100.0
+        );
+        assert!(
+            frac >= 0.5,
+            "unthreatened Priest spent only {:.0}% of post-settle time within \
+             wand range (30) of an enemy (floor 50%) — the wand pull is not \
+             working",
+            frac * 100.0
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

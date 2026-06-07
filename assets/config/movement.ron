@@ -18,6 +18,10 @@
         // PRESSURED proximity condition: a targeting enemy within this
         // radius (or melee/pet, or closing) flips the posture.
         danger_radius: 12.0,
+        // Intent bound on the melee/pet/closing trigger branch: such a
+        // threat counts only within this radius (a melee targeting the
+        // healer from across the arena is not yet pressure).
+        threat_intent_radius: 30.0,
         // Stay within heal range of the anchor ally while PRESSURED.
         heal_range: 40.0,
         // FREE formation point: offset behind the engaged-ally centroid.
@@ -27,6 +31,10 @@
         // Committed-direction window in seconds (anti-zigzag; plan band
         // 0.4-0.8).
         commit_window: 0.6,
+        // Hysteresis: minimum seconds PRESSURED holds after entry before it
+        // may relax back to FREE (threat hovering at the radius must not
+        // strobe the posture).
+        pressured_hold: 1.5,
         // MovementDirective TTL in seconds (expires = now + ttl).
         directive_ttl: 1.0,
         // ESCAPE windows shorter than this are ignored.
@@ -45,7 +53,7 @@
             ally_anchor: 1000.0,      // HARD: heal-range constraint
             formation_pull: 2.0,
             boundary_penalty: 1000.0, // HARD: never score an out-of-bounds step
-            corner_penalty: 4.0,
+            corner_penalty: 6.0,
             wand_pull: 0.5,
             commitment_bonus: 1.5,
         ),

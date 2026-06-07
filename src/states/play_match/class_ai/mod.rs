@@ -289,6 +289,25 @@ impl<'a> CombatContext<'a> {
             .collect()
     }
 
+    /// Visible alive enemies (pets included) within `radius` of `pos` —
+    /// the proximity half of the PRESSURED threat set (an enemy in your face
+    /// is a threat even when it currently targets someone else). Same stealth
+    /// filtering as `enemies_targeting`; same deterministic BTree order.
+    pub fn visible_enemies_within(&self, me: Entity, pos: Vec3, radius: f32) -> Vec<&CombatantInfo> {
+        let Some(my_team) = self.combatants.get(&me).map(|i| i.team) else {
+            return Vec::new();
+        };
+        self.combatants
+            .values()
+            .filter(|c| {
+                c.team != my_team
+                    && c.is_alive
+                    && pos.distance(c.position) <= radius
+                    && self.visible_to(me, c)
+            })
+            .collect()
+    }
+
     /// The nearest alive visible enemy (including pets) currently targeting
     /// `me`. Ties resolve to the lowest `Entity` (BTreeMap iteration order)
     /// for determinism.

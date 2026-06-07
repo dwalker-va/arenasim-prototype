@@ -96,6 +96,11 @@ pub struct HealerPosture {
     /// commitment-bonus term at the next re-evaluation. `None` before the
     /// first directional decision and after posture transitions.
     pub last_direction: Option<Vec2>,
+    /// Last issued FREE formation point (XZ), input to the FormationShift
+    /// re-commit threshold (only re-target + emit when the point moved
+    /// meaningfully). `None` before the first formation directive and after
+    /// posture transitions.
+    pub last_point: Option<Vec2>,
 }
 
 impl HealerPosture {
@@ -107,6 +112,7 @@ impl HealerPosture {
             hold_until: 0.0,
             anchor: None,
             last_direction: None,
+            last_point: None,
         }
     }
 }

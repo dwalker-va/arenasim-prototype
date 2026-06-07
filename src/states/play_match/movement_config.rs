@@ -76,6 +76,12 @@ pub struct SharedMovementConfig {
     /// PRESSURED proximity condition: a targeting enemy within this radius
     /// (or melee/pet, or closing) flips the posture (R6).
     pub danger_radius: f32,
+    /// Intent bound on the trigger's melee/pet/closing branch: a targeting
+    /// melee/pet/closing threat counts only within this radius. Without it
+    /// a melee enemy targeting the healer from across the arena (or an
+    /// enemy healer "closing" toward its own preferred range) flips
+    /// PRESSURED at gates-open (R6/AE5 refinement).
+    pub threat_intent_radius: f32,
     /// PRESSURED constraint: stay within this range of the anchor ally
     /// (WoW heal range).
     pub heal_range: f32,
@@ -88,6 +94,11 @@ pub struct SharedMovementConfig {
     /// Commitment window in seconds — re-evaluation of a committed direction
     /// happens only after this elapses (R11 anti-zigzag; plan band 0.4–0.8).
     pub commit_window: f32,
+    /// Hysteresis: minimum seconds PRESSURED holds after entry before it may
+    /// relax back to FREE — a threat hovering at the danger radius must not
+    /// strobe the posture (R6). Exiting additionally requires the compound
+    /// trigger to be false.
+    pub pressured_hold: f32,
     /// Directive time-to-live in seconds — `MovementDirective.expires` is
     /// issued as `now + directive_ttl` so stale directives self-clean.
     pub directive_ttl: f32,
@@ -109,10 +120,12 @@ impl Default for SharedMovementConfig {
     fn default() -> Self {
         Self {
             danger_radius: 12.0,
+            threat_intent_radius: 30.0,
             heal_range: 40.0,
             formation_offset: 8.0,
             center_bias: 0.3,
             commit_window: 0.6,
+            pressured_hold: 1.5,
             directive_ttl: 1.0,
             escape_min_window: 0.5,
             urgency_hp_threshold: 0.5,
@@ -177,8 +190,10 @@ impl MovementConfig {
 
         let positives = [
             ("shared.danger_radius", s.danger_radius),
+            ("shared.threat_intent_radius", s.threat_intent_radius),
             ("shared.heal_range", s.heal_range),
             ("shared.commit_window", s.commit_window),
+            ("shared.pressured_hold", s.pressured_hold),
             ("shared.directive_ttl", s.directive_ttl),
             ("shared.wand_range", s.wand_range),
             ("paladin.fallback_range", self.paladin.fallback_range),
