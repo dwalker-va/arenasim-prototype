@@ -1,6 +1,6 @@
 # Rogue Energy Pooling — Fix Assessment (2026-06-07)
 
-**Commit:** `7adf7f3` · **Sweeps:** batch harness, 300s cap, `design-docs/balance/sweep_2026-06-07_rogue_pooling_*.csv` (before = parent commit binary, identical match sets)
+**Commit:** `7adf7f3` · **Sweeps:** batch harness, 300s cap, before/after on identical match sets (before = the parent-commit binary `7adf7f3^`). Per-match CSVs not retained — reproducible via `gen_sweep.py --t1 Rogue` / `--t1 'Rogue+{p}'` against the two binaries; the aggregated deltas below are the record.
 
 ## The bug
 

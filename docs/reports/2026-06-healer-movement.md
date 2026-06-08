@@ -35,7 +35,7 @@ This slice gave the Priest and Paladin a posture-based movement AI (FREE / PRESS
 
 Cells are **side-symmetrized** per the mirror protocol: row-vs-col winrate = avg of the (row,col) and (100 − (col,row)) cells, cancelling first-mover bias to first order. **Mirror cells (diagonal) are reported raw** and are never tuning targets. Two transitions are shown: **pre → post-U4** isolates the snapshot-visibility effect; **post-U4 → final** isolates the movement effect.
 
-Baselines: `matrix_baseline_2026-06-06_1v1_n100_pre.csv`, `matrix_2026-06-06_1v1_n100_post_u4_snapshot_fix.csv`, `matrix_2026-06-07_1v1_n100_final.csv`.
+Underlying per-run matrix CSVs are not retained (point-in-time, reproducible from the binaries at this slice's commits); the symmetrized deltas below are the durable record.
 
 ### Symmetrized winrate (row vs col), FINAL
 
@@ -93,7 +93,7 @@ The snapshot fix is draw-neutral; the entire 2.3%→6.0% rise is the movement ef
 
 ## 2v2 Healer Sweep — Movement Effect (N=100)
 
-Hunter+Priest vs (each class)+Priest. 120s cap (durations reported reach 130s where matches consistently time out). Sources: `matrix_2026-06-07_2v2_n100_post_u4.csv`, `matrix_2026-06-07_2v2_n100_final.csv`.
+Hunter+Priest vs (each class)+Priest. 120s cap (durations reported reach 130s where matches consistently time out). Per-run CSVs not retained (reproducible); the post-U4 → final deltas below are the record.
 
 | Matchup (T1 = Hunter+Priest) | post-U4 (W/D, dur) | final (W/D, dur) |
 |---|---|---|
