@@ -4,12 +4,14 @@
 
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use crate::combat::log::{CombatLog, CombatLogEventType, CombatantMetadata, MatchMetadata};
 use crate::states::match_config::MatchConfig;
-use crate::states::play_match::AbilityConfigPlugin;
+use crate::states::play_match::{AbilityConfigPlugin, MovementConfigPlugin};
 use crate::states::play_match::ability_config::{AbilityDefinitions, load_ability_definitions};
+use crate::states::play_match::movement_config::{load_movement_config, MovementConfig};
 use crate::states::play_match::equipment::{EquipmentPlugin, ItemDefinitions, DefaultLoadouts, resolve_loadout, enforce_two_hand_conflicts, format_loadout, load_item_definitions, load_default_loadouts};
 // Use the stable systems API instead of importing internal functions directly
 use crate::states::play_match::systems::{
@@ -30,6 +32,40 @@ use super::config::HeadlessMatchConfig;
 pub struct TraceConfig {
     /// Target JSONL output path. Created on demand (parent dirs included).
     pub output_path: std::path::PathBuf,
+}
+
+/// A read-only snapshot of one combatant, captured after a frame's systems
+/// have run. Part of the deliberately narrow observation surface exposed to
+/// behavior probes — probes get positions and identity, not `&World`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ObservedCombatant {
+    /// World-space position (y is height; gameplay distances are on x/z).
+    pub position: Vec3,
+    /// Team identifier (1 or 2)
+    pub team: u8,
+    /// Slot index within the team (pets use PET_SLOT_BASE + owner slot)
+    pub slot: u8,
+    /// Character class (pets report their owner's class)
+    pub class: CharacterClass,
+    /// True for pet entities (Felhunter / Spider / Boar / Bird)
+    pub is_pet: bool,
+    /// False once current_health hits 0. Dead combatants stay in the
+    /// snapshot (their entities are not despawned) with frozen positions.
+    pub alive: bool,
+}
+
+/// One frame's observation, passed to the observer callback of
+/// [`run_headless_match_observed`] after each `app.update()`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FrameObservation {
+    /// Total simulated time since app start (includes the 10s countdown).
+    /// Advances by exactly 1/60s per frame.
+    pub sim_time: f32,
+    /// True once the gates have opened and combat has started.
+    pub gates_open: bool,
+    /// All combatant entities (including pets, including dead ones), keyed
+    /// by entity. BTreeMap so iteration order is deterministic.
+    pub combatants: BTreeMap<Entity, ObservedCombatant>,
 }
 
 /// Result of a completed headless match
@@ -557,16 +593,18 @@ pub struct PreloadedConfigs {
     pub abilities: AbilityDefinitions,
     pub items: ItemDefinitions,
     pub loadouts: DefaultLoadouts,
+    pub movement: MovementConfig,
 }
 
 impl PreloadedConfigs {
-    /// Parse all three RON config files once (abilities, items, then loadouts
-    /// which validate against items).
+    /// Parse all four RON config files once (abilities, items, loadouts
+    /// which validate against items, and the healer movement config).
     pub fn load() -> Result<Self, String> {
         let abilities = load_ability_definitions()?;
         let items = load_item_definitions()?;
         let loadouts = load_default_loadouts(&items)?;
-        Ok(Self { abilities, items, loadouts })
+        let movement = load_movement_config()?;
+        Ok(Self { abilities, items, loadouts, movement })
     }
 }
 
@@ -575,11 +613,11 @@ pub fn run_headless_match_with(
     suppress_log: bool,
     trace_config: Option<TraceConfig>,
 ) -> Result<MatchResult, String> {
-    run_match_impl(config, suppress_log, trace_config, None)
+    run_match_impl(config, suppress_log, trace_config, None, None)
 }
 
 /// Like `run_headless_match_with`, but injects pre-parsed configs instead of
-/// re-reading the three RON files. Used by the batch runner so the parse cost
+/// re-reading the four RON files. Used by the batch runner so the parse cost
 /// is paid once per process rather than once per match.
 pub fn run_headless_match_prepared(
     config: HeadlessMatchConfig,
@@ -587,14 +625,84 @@ pub fn run_headless_match_prepared(
     suppress_log: bool,
     trace_config: Option<TraceConfig>,
 ) -> Result<MatchResult, String> {
-    run_match_impl(config, suppress_log, trace_config, Some(configs))
+    run_match_impl(config, suppress_log, trace_config, Some(configs), None)
 }
 
+/// Observed-run variant of [`run_headless_match_with`] for behavior probes.
+///
+/// `observer` is invoked once after each `app.update()` with a read-only
+/// [`FrameObservation`] — sim time, gate state, and a position snapshot of
+/// every combatant. The snapshot is built from read-only world access only;
+/// observation must not (and cannot) perturb the simulation, so an observed
+/// run produces a `MatchResult` identical to an unobserved run at the same
+/// seed (enforced by `tests/movement_probes.rs`).
+///
+/// The callback deliberately does NOT receive `&App`/`&World`: keeping the
+/// introspection surface narrow is what makes the non-perturbation guarantee
+/// auditable.
+pub fn run_headless_match_observed<F>(
+    config: HeadlessMatchConfig,
+    suppress_log: bool,
+    trace_config: Option<TraceConfig>,
+    mut observer: F,
+) -> Result<MatchResult, String>
+where
+    F: FnMut(&FrameObservation),
+{
+    run_match_impl(config, suppress_log, trace_config, None, Some(&mut observer))
+}
+
+/// Build a [`FrameObservation`] from read-only world access. Uses
+/// `World::iter_entities` + `EntityRef::get` (no `&mut World`, no query-state
+/// caching) so observation cannot mutate anything the simulation reads.
+fn observe_frame(world: &World) -> FrameObservation {
+    let sim_time = world
+        .get_resource::<Time>()
+        .map(|t| t.elapsed_secs())
+        .unwrap_or(0.0);
+    let gates_open = world
+        .get_resource::<MatchCountdown>()
+        .map(|c| c.gates_opened)
+        .unwrap_or(false);
+
+    let mut combatants = BTreeMap::new();
+    for entity_ref in world.iter_entities() {
+        let (Some(combatant), Some(transform)) = (
+            entity_ref.get::<Combatant>(),
+            entity_ref.get::<Transform>(),
+        ) else {
+            continue;
+        };
+        combatants.insert(
+            entity_ref.id(),
+            ObservedCombatant {
+                position: transform.translation,
+                team: combatant.team,
+                slot: combatant.slot,
+                class: combatant.class,
+                is_pet: entity_ref.contains::<Pet>(),
+                alive: combatant.is_alive(),
+            },
+        );
+    }
+
+    FrameObservation {
+        sim_time,
+        gates_open,
+        combatants,
+    }
+}
+
+/// Shared implementation behind `run_headless_match_with` (no preload, no
+/// observer), `run_headless_match_prepared` (preloaded configs — batch
+/// runner), and `run_headless_match_observed` (per-frame observer — behavior
+/// probes). One loop, so no path can drift from the canonical one.
 fn run_match_impl(
     config: HeadlessMatchConfig,
     suppress_log: bool,
     trace_config: Option<TraceConfig>,
     preloaded: Option<&PreloadedConfigs>,
+    mut observer: Option<&mut dyn FnMut(&FrameObservation)>,
 ) -> Result<MatchResult, String> {
     if !suppress_log {
         println!("Starting headless match simulation...");
@@ -622,16 +730,18 @@ fn run_match_impl(
 
     // Game configs: reuse pre-parsed resources when provided (batch runner),
     // otherwise load from disk via the plugins (single-match / matrix paths).
-    // The two loader plugins only *insert these resources* — no systems — so
-    // inserting clones directly is equivalent.
+    // The three loader plugins only *insert these resources* — no systems —
+    // so inserting clones directly is equivalent.
     match preloaded {
         Some(c) => {
             app.insert_resource(c.abilities.clone())
                 .insert_resource(c.items.clone())
-                .insert_resource(c.loadouts.clone());
+                .insert_resource(c.loadouts.clone())
+                .insert_resource(c.movement);
         }
         None => {
             app.add_plugins(AbilityConfigPlugin)
+                .add_plugins(MovementConfigPlugin)
                 .add_plugins(EquipmentPlugin);
         }
     }
@@ -656,6 +766,17 @@ fn run_match_impl(
             .edit_schedule(Last, single)
             .edit_schedule(Startup, single);
     }
+
+    // Registration guard (debug builds / cargo test only): movement config
+    // must be loaded in BOTH the headless runner (here) and the graphical
+    // stack (main.rs). The plugin panics on a missing/invalid file; this
+    // assert catches the OTHER dual-mode failure — forgetting to register
+    // the plugin at all — which would otherwise surface as a missing-resource
+    // panic deep inside whichever future system first reads the config.
+    debug_assert!(
+        app.world().contains_resource::<MovementConfig>(),
+        "MovementConfigPlugin is not registered in the headless runner"
+    );
 
     // Install the decision-trace writer (if requested) BEFORE the first
     // app.update() so frame-0 events land in the file. Mirror the match's
@@ -682,6 +803,12 @@ fn run_match_impl(
     const MAX_FRAMES: u32 = 60 * 60 * 30; // 30 simulated minutes — far above any real match.
     for _ in 0..MAX_FRAMES {
         app.update();
+        // Per-frame read-only observation hook (behavior probes). Built from
+        // `&World` only — see `observe_frame` for the non-perturbation notes.
+        if let Some(obs) = observer.as_mut() {
+            let frame = observe_frame(app.world());
+            obs(&frame);
+        }
         let done = app.world()
             .get_resource::<HeadlessMatchState>()
             .map(|s| s.match_complete)

@@ -12,7 +12,7 @@ use arenasim::cli;
 use arenasim::combat::CombatPlugin;
 use arenasim::headless;
 use arenasim::settings::{GameSettings, SettingsPlugin};
-use arenasim::states::play_match::AbilityConfigPlugin;
+use arenasim::states::play_match::{AbilityConfigPlugin, MovementConfigPlugin};
 use arenasim::states::play_match::equipment::EquipmentPlugin;
 use arenasim::states::{GameState, StatesPlugin};
 use arenasim::ui::UiPlugin;
@@ -135,6 +135,7 @@ fn run_graphical_mode() {
             EguiPlugin { enable_multipass_for_primary_context: false },
             SettingsPlugin,
             AbilityConfigPlugin,
+            MovementConfigPlugin,
             EquipmentPlugin,
             StatesPlugin,
             CameraPlugin,
@@ -151,6 +152,9 @@ fn run_graphical_mode() {
 fn setup_custom_font(
     mut contexts: EguiContexts,
 ) {
+    // Deliberately ctx_mut (not try_ctx_mut): this is a run-once Startup
+    // system — silently skipping would permanently lose the custom font.
+    // A missing context here should fail loudly.
     let ctx = contexts.ctx_mut();
     
     // Load font data

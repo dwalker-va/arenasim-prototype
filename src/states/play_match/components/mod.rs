@@ -7,12 +7,14 @@ pub mod auras;
 pub mod resources;
 pub mod pets;
 pub mod visual;
+pub mod movement;
 
 pub use combatant::*;
 pub use auras::*;
 pub use resources::*;
 pub use pets::*;
 pub use visual::*;
+pub use movement::*;
 
 // =============================================================================
 // Unit Tests

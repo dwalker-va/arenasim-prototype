@@ -8,12 +8,17 @@
 
 use std::collections::BTreeMap;
 
+use bevy::ecs::system::SystemState;
 use bevy::prelude::*;
 
 use arenasim::states::match_config::CharacterClass;
+use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::class_ai::combat_snapshot::CombatSnapshot;
 use arenasim::states::play_match::class_ai::CombatantInfo;
-use arenasim::states::play_match::{Aura, AuraType, DRCategory, DRTracker};
+use arenasim::states::play_match::{
+    ActiveAuras, Aura, AuraType, CastingState, ChannelingState, Combatant, DRCategory, DRTracker,
+    Pet,
+};
 
 fn target_info(entity: Entity, team: u8, class: CharacterClass) -> CombatantInfo {
     CombatantInfo {
@@ -163,4 +168,136 @@ fn reflect_instant_cc_respects_existing_dr_immunity() {
 
     // DR-immune targets reject the reflection — no aura was added.
     assert!(snapshot.active_auras.get(&target).map_or(true, |a| a.is_empty()));
+}
+
+// ---------------------------------------------------------------------------
+// `build` visibility of casting/channeling combatants (U4.1)
+//
+// Before this fix, `build` only constructed `combatants` entries from the
+// query filtered `Without<CastingState>`/`Without<ChannelingState>` — every
+// mid-cast combatant was invisible to all class AI (healers could not see a
+// casting ally's HP; nobody could see a casting enemy's target).
+// ---------------------------------------------------------------------------
+
+/// Run `CombatSnapshot::build` against a real Bevy `World`, with the same
+/// query shapes `decide_abilities` holds.
+fn build_snapshot_from_world(world: &mut World) -> CombatSnapshot {
+    let mut state: SystemState<(
+        Query<
+            (Entity, &'static mut Combatant, &'static Transform, Option<&'static mut ActiveAuras>),
+            (Without<CastingState>, Without<ChannelingState>),
+        >,
+        Query<
+            (Entity, &'static Combatant, &'static Transform, Option<&'static ActiveAuras>),
+            With<CastingState>,
+        >,
+        Query<
+            (Entity, &'static Combatant, &'static Transform, Option<&'static ActiveAuras>),
+            (With<ChannelingState>, Without<CastingState>),
+        >,
+        Query<(Entity, &'static DRTracker)>,
+        Query<&'static Pet>,
+    )> = SystemState::new(world);
+    let (aura_q, casting_q, channeling_q, dr_q, pet_q) = state.get_mut(world);
+    CombatSnapshot::build(&aura_q, &casting_q, &channeling_q, &dr_q, &pet_q)
+}
+
+fn spawn_combatant(world: &mut World, team: u8, slot: u8, class: CharacterClass, pos: Vec3) -> Entity {
+    world
+        .spawn((
+            Combatant::new(team, slot, class),
+            Transform::from_translation(pos),
+        ))
+        .id()
+}
+
+#[test]
+fn build_includes_mid_cast_enemy_with_readable_target() {
+    let mut world = World::new();
+    let me = spawn_combatant(&mut world, 1, 0, CharacterClass::Priest, Vec3::ZERO);
+    let enemy = spawn_combatant(&mut world, 2, 0, CharacterClass::Mage, Vec3::new(20.0, 0.0, 0.0));
+
+    // The enemy Mage is mid-Frostbolt at me.
+    world.entity_mut(enemy).get_mut::<Combatant>().unwrap().target = Some(me);
+    world.entity_mut(enemy).insert(CastingState::new(AbilityType::Frostbolt, me, 2.5));
+
+    let snapshot = build_snapshot_from_world(&mut world);
+
+    let info = snapshot
+        .combatants
+        .get(&enemy)
+        .expect("mid-cast enemy must be present in the snapshot");
+    assert_eq!(info.target, Some(me), "casting enemy's target must be readable");
+    assert_eq!(info.team, 2);
+    assert_eq!(info.position, Vec3::new(20.0, 0.0, 0.0));
+    assert!(info.is_alive);
+
+    // And it shows up through the CombatContext enemy view.
+    let ctx = snapshot.context_for(me);
+    assert!(
+        ctx.alive_enemies().iter().any(|c| c.entity == enemy),
+        "casting enemy must appear in alive_enemies()"
+    );
+}
+
+#[test]
+fn build_exposes_casting_ally_hp() {
+    let mut world = World::new();
+    let healer = spawn_combatant(&mut world, 1, 0, CharacterClass::Priest, Vec3::ZERO);
+    let ally = spawn_combatant(&mut world, 1, 1, CharacterClass::Mage, Vec3::new(5.0, 0.0, 0.0));
+    let _enemy = spawn_combatant(&mut world, 2, 0, CharacterClass::Warrior, Vec3::new(30.0, 0.0, 0.0));
+
+    // The ally is mid-cast at 40% HP — the healer must see that HP.
+    {
+        let mut c = world.entity_mut(ally);
+        let mut combatant = c.get_mut::<Combatant>().unwrap();
+        combatant.current_health = combatant.max_health * 0.4;
+    }
+    world.entity_mut(ally).insert(CastingState::new(AbilityType::Frostbolt, healer, 2.5));
+
+    let snapshot = build_snapshot_from_world(&mut world);
+
+    let info = snapshot.combatants.get(&ally).expect("casting ally must be in snapshot");
+    assert!((info.health_pct() - 0.4).abs() < 1e-6, "casting ally HP must be visible");
+
+    let ctx = snapshot.context_for(healer);
+    let lowest = ctx.lowest_health_ally().expect("healer sees at least one ally");
+    assert_eq!(
+        lowest.entity, ally,
+        "the casting ally at 40% must be the lowest-health ally the healer sees"
+    );
+}
+
+#[test]
+fn build_includes_channeling_combatant_with_auras() {
+    let mut world = World::new();
+    let me = spawn_combatant(&mut world, 1, 0, CharacterClass::Warrior, Vec3::ZERO);
+    let enemy = spawn_combatant(&mut world, 2, 0, CharacterClass::Warlock, Vec3::new(15.0, 0.0, 0.0));
+
+    world.entity_mut(enemy).get_mut::<Combatant>().unwrap().target = Some(me);
+    world.entity_mut(enemy).insert((
+        ChannelingState {
+            ability: AbilityType::DrainLife,
+            duration_remaining: 4.0,
+            time_until_next_tick: 1.0,
+            tick_interval: 1.0,
+            target: me,
+            interrupted: false,
+            interrupted_display_time: 0.0,
+            ticks_applied: 0,
+        },
+        ActiveAuras { auras: vec![make_aura(AuraType::MovementSpeedSlow, "Concussive Shot")] },
+    ));
+
+    let snapshot = build_snapshot_from_world(&mut world);
+
+    let info = snapshot
+        .combatants
+        .get(&enemy)
+        .expect("channeling enemy must be present in the snapshot");
+    assert_eq!(info.target, Some(me));
+
+    // Aura harvesting for channeling entities (pre-existing behavior) still works.
+    let auras = snapshot.active_auras.get(&enemy).expect("channeling enemy auras harvested");
+    assert!(auras.iter().any(|a| a.effect_type == AuraType::MovementSpeedSlow));
 }

@@ -7,7 +7,8 @@
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::decision_trace::{
-    ActorView, CandidateStatus, DecisionTrace, NoActionReason, RejectionReason, ResourceKind, TraceWriter,
+    ActorView, CandidateStatus, DecisionTrace, MovementGoalKind, MovementTrigger, NoActionReason,
+    Posture, RejectionReason, ResourceKind, TraceWriter,
 };
 
 fn warrior_actor() -> ActorView {
@@ -298,6 +299,272 @@ fn writer_creates_parent_directory_on_create() {
     let writer = TraceWriter::create(nested.clone()).unwrap();
     assert!(nested.parent().unwrap().exists());
     drop(writer);
+}
+
+fn priest_actor() -> ActorView {
+    ActorView {
+        entity_id: 11,
+        team: 2,
+        slot: 1,
+        class: CharacterClass::Priest,
+        hp_pct: 0.8,
+        mana_pct: 0.6,
+        position: [3.0, 0.5, -7.0],
+    }
+}
+
+#[test]
+fn movement_builder_transition_carries_old_new_posture_and_trigger() {
+    let mut trace = DecisionTrace::default();
+
+    let mut builder = trace.start_movement_decision(priest_actor(), None);
+    builder.transition(
+        Posture::Free,
+        Posture::Pressured,
+        MovementTrigger::PressuredEnter,
+        MovementGoalKind::Direction,
+    );
+    builder.chosen_direction([0.6, -0.8]);
+    builder.scorer_term("threat_repulsion", 4.2);
+    builder.scorer_term("boundary_penalty", -1.1);
+    builder.finish();
+
+    assert_event_count(&trace, 1);
+    let json = serde_json::to_string(&trace.pending_events[0]).unwrap();
+    assert!(json.contains("\"kind\":\"movement_decision\""), "kind: {}", json);
+    assert!(json.contains("\"posture\":\"pressured\""), "new posture: {}", json);
+    assert!(
+        json.contains("\"previous_posture\":\"free\""),
+        "old posture: {}",
+        json
+    );
+    assert!(
+        json.contains("\"trigger\":\"PressuredEnter\""),
+        "trigger as bare string: {}",
+        json
+    );
+    assert!(json.contains("\"goal_kind\":\"direction\""), "goal_kind: {}", json);
+    assert!(
+        json.contains("\"chosen_direction\":[0.6,-0.8]"),
+        "chosen_direction: {}",
+        json
+    );
+    // Payload position duplicates actor.position.
+    assert!(
+        json.contains("\"position\":[3.0,0.5,-7.0]"),
+        "position present: {}",
+        json
+    );
+    // BTreeMap order: boundary_penalty < threat_repulsion lexicographically.
+    let bp = json.find("boundary_penalty").expect("boundary_penalty term");
+    let tr = json.find("threat_repulsion").expect("threat_repulsion term");
+    assert!(bp < tr, "scorer_terms in BTreeMap (sorted) order: {}", json);
+}
+
+#[test]
+fn movement_builder_direction_change_omits_previous_posture() {
+    let mut trace = DecisionTrace::default();
+
+    let mut builder = trace.start_movement_decision(priest_actor(), None);
+    builder.direction_change(
+        Posture::Pressured,
+        MovementTrigger::CommitExpired,
+        MovementGoalKind::Direction,
+    );
+    builder.finish();
+
+    assert_event_count(&trace, 1);
+    let json = serde_json::to_string(&trace.pending_events[0]).unwrap();
+    assert!(json.contains("\"posture\":\"pressured\""), "posture: {}", json);
+    assert!(
+        !json.contains("previous_posture"),
+        "previous_posture omitted on re-commit (skip_serializing_if): {}",
+        json
+    );
+    assert!(
+        json.contains("\"trigger\":\"CommitExpired\""),
+        "trigger: {}",
+        json
+    );
+    assert!(
+        !json.contains("chosen_direction") && !json.contains("scorer_terms"),
+        "optional detail omitted when not attached: {}",
+        json
+    );
+}
+
+#[test]
+fn movement_builder_emission_gate_drops_event_with_no_decision() {
+    let mut trace = DecisionTrace::default();
+
+    // A posture tick that decides nothing: builder started, no transition or
+    // direction change recorded. Finish must be a no-op (emission gate — the
+    // structural guarantee behind transition-only event volume).
+    let builder = trace.start_movement_decision(priest_actor(), None);
+    builder.finish();
+
+    assert_event_count(&trace, 0);
+}
+
+#[test]
+fn movement_builder_writer_path_writes_nothing_when_no_decision() {
+    // Companion to the in-memory gate above, exercised through the writer
+    // path (mirrors the ability builder's writer-path tests): with a real
+    // TraceWriter installed, a movement builder that records no transition or
+    // direction change must leave the file empty — the emission gate runs
+    // before anything reaches disk, so a posture tick that holds station does
+    // not bloat the trace.
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    let path = tmp.path().to_path_buf();
+    let mut trace = DecisionTrace::default();
+    trace.install_writer(TraceWriter::create(path.clone()).unwrap());
+    trace.current_frame = 10;
+
+    let builder = trace.start_movement_decision(priest_actor(), None);
+    builder.finish();
+
+    // Drain whatever (if anything) the gate let through, write it, flush.
+    let events = std::mem::take(&mut trace.pending_events);
+    let writer = trace.writer.as_mut().expect("writer attached");
+    writer.flush_events(events).unwrap();
+    drop(trace); // flush via Drop
+
+    let body = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        !body.contains("movement_decision"),
+        "no-decision movement tick must not emit a movement_decision line: {:?}",
+        body
+    );
+    assert!(
+        body.lines().next().is_none(),
+        "file should be empty, got: {:?}",
+        body
+    );
+}
+
+#[test]
+fn movement_payload_roundtrips_to_movement_variant_via_untagged_deserialize() {
+    use arenasim::states::play_match::decision_trace::EventPayload;
+
+    let mut trace = DecisionTrace::default();
+    let mut builder = trace.start_movement_decision(priest_actor(), None);
+    builder.transition(
+        Posture::Pressured,
+        Posture::Escape,
+        MovementTrigger::EscapeWindowOpen,
+        MovementGoalKind::Direction,
+    );
+    builder.chosen_direction([1.0, 0.0]);
+    builder.finish();
+
+    // Serialize the full event, then deserialize just the (flattened) payload
+    // back as EventPayload. Untagged disambiguation must pick Movement — the
+    // required `posture` field plus the absence of `candidates` rules out the
+    // Ability/Target/Pet shapes.
+    let json = serde_json::to_string(&trace.pending_events[0]).unwrap();
+    let payload: EventPayload = serde_json::from_str(&json).unwrap();
+    match payload {
+        EventPayload::Movement {
+            posture,
+            previous_posture,
+            trigger,
+            goal_kind,
+            chosen_direction,
+            position,
+            scorer_terms,
+        } => {
+            assert_eq!(posture, Posture::Escape);
+            assert_eq!(previous_posture, Some(Posture::Pressured));
+            assert_eq!(trigger, MovementTrigger::EscapeWindowOpen);
+            assert_eq!(goal_kind, MovementGoalKind::Direction);
+            assert_eq!(chosen_direction, Some([1.0, 0.0]));
+            assert_eq!(position, [3.0, 0.5, -7.0]);
+            assert!(scorer_terms.is_none());
+        }
+        other => panic!("expected EventPayload::Movement, got {:?}", other),
+    }
+
+    // Counter-check: an ability-shaped payload must NOT deserialize as
+    // Movement (it lacks `posture` and carries `candidates`/`outcome`).
+    let mut ability_trace = DecisionTrace::default();
+    let mut b = ability_trace.start_ability_decision(warrior_actor(), None);
+    b.choose(AbilityType::HeroicStrike, None, true);
+    b.finish();
+    let ability_json = serde_json::to_string(&ability_trace.pending_events[0]).unwrap();
+    let ability_payload: EventPayload = serde_json::from_str(&ability_json).unwrap();
+    assert!(
+        matches!(ability_payload, EventPayload::Ability { .. }),
+        "ability JSON stays Ability under untagged deserialize: {:?}",
+        ability_payload
+    );
+
+    // And a pet-shaped payload stays Pet.
+    let mut pet_trace = DecisionTrace::default();
+    let mut p = pet_trace.start_pet_decision(
+        priest_actor(),
+        None,
+        bevy::prelude::Entity::from_raw(42),
+        "Spider",
+    );
+    p.reject(AbilityType::SpiderWeb, RejectionReason::AlreadyApplied);
+    p.finish();
+    let pet_json = serde_json::to_string(&pet_trace.pending_events[0]).unwrap();
+    let pet_payload: EventPayload = serde_json::from_str(&pet_json).unwrap();
+    assert!(
+        matches!(pet_payload, EventPayload::Pet { .. }),
+        "pet JSON stays Pet under untagged deserialize: {:?}",
+        pet_payload
+    );
+}
+
+#[test]
+fn writer_sorts_movement_decision_after_pet_decision_at_same_frame_and_entity() {
+    // kind_order is append-only: MovementDecision (3) sorts after
+    // PetDecision (2) at the same (frame, entity_id).
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    let path = tmp.path().to_path_buf();
+    let mut trace = DecisionTrace::default();
+    trace.install_writer(TraceWriter::create(path.clone()).unwrap());
+    trace.current_frame = 10;
+
+    // Push movement_decision FIRST so the sort (not push order) decides.
+    let mut m = trace.start_movement_decision(priest_actor(), None);
+    m.transition(
+        Posture::Free,
+        Posture::Pressured,
+        MovementTrigger::PressuredEnter,
+        MovementGoalKind::Direction,
+    );
+    m.finish();
+
+    let mut p = trace.start_pet_decision(
+        priest_actor(),
+        None,
+        bevy::prelude::Entity::from_raw(42),
+        "Spider",
+    );
+    p.reject(AbilityType::SpiderWeb, RejectionReason::AlreadyApplied);
+    p.finish();
+
+    let events = std::mem::take(&mut trace.pending_events);
+    let writer = trace.writer.as_mut().unwrap();
+    writer.flush_events(events).unwrap();
+    drop(trace);
+
+    let body = std::fs::read_to_string(&path).unwrap();
+    let kinds: Vec<String> = body
+        .lines()
+        .map(|l| {
+            let v: serde_json::Value = serde_json::from_str(l).unwrap();
+            v.get("kind").and_then(|k| k.as_str()).unwrap().to_string()
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        vec!["pet_decision".to_string(), "movement_decision".to_string()],
+        "PetDecision (kind_order=2) sorted before MovementDecision (kind_order=3): {:?}",
+        kinds
+    );
 }
 
 #[test]

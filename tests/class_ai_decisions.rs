@@ -364,3 +364,411 @@ fn is_dr_immune_returns_true_after_three_stuns() {
     // Different categories share no DR — Incapacitates is still actionable.
     assert!(!ctx.is_dr_immune(target, DRCategory::Incapacitates));
 }
+
+// ============================================================================
+// Threat predicates (U4.2) — enemies_targeting / primary_attacker /
+// attacker_escape_window / is_closing
+// ============================================================================
+
+/// Priest at origin, returns (snapshot, priest_entity). Tests extend it.
+fn priest_snapshot() -> (CombatSnapshot, Entity) {
+    let me = Entity::from_raw(1);
+    (snapshot_for(me, 1, CharacterClass::Priest), me)
+}
+
+#[test]
+fn enemies_targeting_excludes_stealthed_rogue() {
+    let (mut snapshot, me) = priest_snapshot();
+    let rogue = Entity::from_raw(2);
+    snapshot.combatants.insert(rogue, CombatantInfo {
+        stealthed: true,
+        target: Some(me),
+        position: Vec3::new(3.0, 0.0, 0.0),
+        ..info(rogue, 2, CharacterClass::Rogue)
+    });
+
+    let ctx = snapshot.context_for(me);
+    assert!(
+        ctx.enemies_targeting(me).is_empty(),
+        "a stealthed Rogue targeting me must NOT register as a threat"
+    );
+}
+
+#[test]
+fn enemies_targeting_includes_stealthed_rogue_under_shadow_sight() {
+    let (mut snapshot, me) = priest_snapshot();
+    let rogue = Entity::from_raw(2);
+    snapshot.combatants.insert(rogue, CombatantInfo {
+        stealthed: true,
+        target: Some(me),
+        position: Vec3::new(3.0, 0.0, 0.0),
+        ..info(rogue, 2, CharacterClass::Rogue)
+    });
+    // I hold Shadow Sight — the stealthed Rogue is revealed.
+    snapshot
+        .active_auras
+        .insert(me, vec![aura_with(AuraType::ShadowSight, None, -1.0)]);
+
+    let ctx = snapshot.context_for(me);
+    let threats = ctx.enemies_targeting(me);
+    assert_eq!(threats.len(), 1, "shadow sight reveals the stealthed threat");
+    assert_eq!(threats[0].entity, rogue);
+}
+
+#[test]
+fn enemies_targeting_includes_rogue_holding_shadow_sight() {
+    // The other arm of the can_see rule: an enemy that picked up Shadow
+    // Sight is revealed even while stealthed.
+    let (mut snapshot, me) = priest_snapshot();
+    let rogue = Entity::from_raw(2);
+    snapshot.combatants.insert(rogue, CombatantInfo {
+        stealthed: true,
+        target: Some(me),
+        ..info(rogue, 2, CharacterClass::Rogue)
+    });
+    snapshot
+        .active_auras
+        .insert(rogue, vec![aura_with(AuraType::ShadowSight, None, -1.0)]);
+
+    let ctx = snapshot.context_for(me);
+    assert_eq!(ctx.enemies_targeting(me).len(), 1);
+}
+
+#[test]
+fn enemies_targeting_includes_enemy_pet() {
+    let (mut snapshot, me) = priest_snapshot();
+    let pet = Entity::from_raw(2);
+    snapshot.combatants.insert(pet, CombatantInfo {
+        target: Some(me),
+        position: Vec3::new(4.0, 0.0, 0.0),
+        ..pet_info(pet, 2, CharacterClass::Warlock)
+    });
+
+    let ctx = snapshot.context_for(me);
+    let threats = ctx.enemies_targeting(me);
+    assert_eq!(threats.len(), 1, "enemy pets count as threats");
+    assert_eq!(threats[0].entity, pet);
+}
+
+#[test]
+fn enemies_targeting_excludes_enemy_targeting_someone_else_and_dead() {
+    let (mut snapshot, me) = priest_snapshot();
+    let ally = Entity::from_raw(2);
+    snapshot.combatants.insert(ally, info(ally, 1, CharacterClass::Warrior));
+    // Enemy on my team's Warrior, not me.
+    let warrior = Entity::from_raw(3);
+    snapshot.combatants.insert(warrior, CombatantInfo {
+        target: Some(ally),
+        ..info(warrior, 2, CharacterClass::Warrior)
+    });
+    // Dead enemy "targeting" me.
+    let corpse = Entity::from_raw(4);
+    snapshot.combatants.insert(corpse, CombatantInfo {
+        target: Some(me),
+        is_alive: false,
+        current_health: 0.0,
+        ..info(corpse, 2, CharacterClass::Rogue)
+    });
+
+    let ctx = snapshot.context_for(me);
+    assert!(ctx.enemies_targeting(me).is_empty());
+}
+
+#[test]
+fn primary_attacker_picks_nearest_of_two() {
+    let (mut snapshot, me) = priest_snapshot();
+    let far = Entity::from_raw(2);
+    snapshot.combatants.insert(far, CombatantInfo {
+        target: Some(me),
+        position: Vec3::new(20.0, 0.0, 0.0),
+        ..info(far, 2, CharacterClass::Warrior)
+    });
+    let near = Entity::from_raw(3);
+    snapshot.combatants.insert(near, CombatantInfo {
+        target: Some(me),
+        position: Vec3::new(5.0, 0.0, 0.0),
+        ..info(near, 2, CharacterClass::Rogue)
+    });
+
+    let ctx = snapshot.context_for(me);
+    let attacker = ctx.primary_attacker(me).expect("two attackers exist");
+    assert_eq!(attacker.entity, near, "nearest attacker wins");
+}
+
+#[test]
+fn primary_attacker_skips_dead_and_invisible() {
+    let (mut snapshot, me) = priest_snapshot();
+    // Nearest is dead.
+    let dead = Entity::from_raw(2);
+    snapshot.combatants.insert(dead, CombatantInfo {
+        target: Some(me),
+        position: Vec3::new(2.0, 0.0, 0.0),
+        is_alive: false,
+        current_health: 0.0,
+        ..info(dead, 2, CharacterClass::Warrior)
+    });
+    // Second-nearest is stealthed (invisible).
+    let hidden = Entity::from_raw(3);
+    snapshot.combatants.insert(hidden, CombatantInfo {
+        target: Some(me),
+        position: Vec3::new(4.0, 0.0, 0.0),
+        stealthed: true,
+        ..info(hidden, 2, CharacterClass::Rogue)
+    });
+    // Farthest is the only live, visible attacker.
+    let live = Entity::from_raw(4);
+    snapshot.combatants.insert(live, CombatantInfo {
+        target: Some(me),
+        position: Vec3::new(15.0, 0.0, 0.0),
+        ..info(live, 2, CharacterClass::Warrior)
+    });
+
+    let ctx = snapshot.context_for(me);
+    let attacker = ctx.primary_attacker(me).expect("one valid attacker");
+    assert_eq!(attacker.entity, live);
+}
+
+#[test]
+fn primary_attacker_none_when_unthreatened() {
+    let (mut snapshot, me) = priest_snapshot();
+    let enemy = Entity::from_raw(2);
+    snapshot.combatants.insert(enemy, info(enemy, 2, CharacterClass::Mage)); // target: None
+
+    let ctx = snapshot.context_for(me);
+    assert!(ctx.primary_attacker(me).is_none());
+}
+
+#[test]
+fn attacker_escape_window_returns_remaining_impair_duration() {
+    let (mut snapshot, me) = priest_snapshot();
+    let attacker = Entity::from_raw(2);
+    snapshot.combatants.insert(attacker, CombatantInfo {
+        target: Some(me),
+        ..info(attacker, 2, CharacterClass::Warrior)
+    });
+
+    for (effect, expected) in [
+        (AuraType::Root, 5.0_f32),
+        (AuraType::Stun, 5.0),
+        (AuraType::Incapacitate, 5.0),
+    ] {
+        snapshot
+            .active_auras
+            .insert(attacker, vec![aura_with(effect, None, -1.0)]);
+        let ctx = snapshot.context_for(me);
+        let window = ctx.attacker_escape_window(attacker);
+        assert_eq!(
+            window,
+            Some(expected),
+            "{:?} must open an escape window of its remaining duration",
+            effect
+        );
+    }
+}
+
+#[test]
+fn attacker_escape_window_takes_longest_of_multiple() {
+    let (mut snapshot, me) = priest_snapshot();
+    let attacker = Entity::from_raw(2);
+    snapshot.combatants.insert(attacker, info(attacker, 2, CharacterClass::Warrior));
+
+    let mut short_stun = aura_with(AuraType::Stun, None, -1.0);
+    short_stun.duration = 1.5;
+    let mut long_root = aura_with(AuraType::Root, None, 80.0);
+    long_root.duration = 6.0;
+    snapshot.active_auras.insert(attacker, vec![short_stun, long_root]);
+
+    let ctx = snapshot.context_for(me);
+    assert_eq!(ctx.attacker_escape_window(attacker), Some(6.0));
+}
+
+#[test]
+fn attacker_escape_window_none_for_fear_or_free_attacker() {
+    let (mut snapshot, me) = priest_snapshot();
+    let attacker = Entity::from_raw(2);
+    snapshot.combatants.insert(attacker, info(attacker, 2, CharacterClass::Warrior));
+
+    // No CC at all → no window.
+    {
+        let ctx = snapshot.context_for(me);
+        assert_eq!(ctx.attacker_escape_window(attacker), None);
+    }
+
+    // Fear is excluded — it self-solves (the attacker wanders off).
+    snapshot
+        .active_auras
+        .insert(attacker, vec![aura_with(AuraType::Fear, None, 80.0)]);
+    let ctx = snapshot.context_for(me);
+    assert_eq!(ctx.attacker_escape_window(attacker), None);
+}
+
+#[test]
+fn is_closing_true_for_melee_pursuing_me() {
+    let (mut snapshot, me) = priest_snapshot();
+    // Warrior (preferred_range 2.0) at 10 units, kill target = me: its
+    // pursuit moves toward me this frame.
+    let warrior = Entity::from_raw(2);
+    snapshot.combatants.insert(warrior, CombatantInfo {
+        target: Some(me),
+        position: Vec3::new(10.0, 0.0, 0.0),
+        ..info(warrior, 2, CharacterClass::Warrior)
+    });
+
+    let ctx = snapshot.context_for(me);
+    assert!(ctx.is_closing(warrior, me));
+}
+
+#[test]
+fn is_closing_false_for_stationary_caster_in_range() {
+    let (mut snapshot, me) = priest_snapshot();
+    // Mage (preferred_range 38.0) at 20 units targeting me: already inside
+    // its preferred range, so pursuit holds position — not closing.
+    let mage = Entity::from_raw(2);
+    snapshot.combatants.insert(mage, CombatantInfo {
+        target: Some(me),
+        position: Vec3::new(20.0, 0.0, 0.0),
+        ..info(mage, 2, CharacterClass::Mage)
+    });
+
+    let ctx = snapshot.context_for(me);
+    assert!(!ctx.is_closing(mage, me));
+}
+
+#[test]
+fn is_closing_false_when_threat_targets_someone_else_or_is_in_melee() {
+    let (mut snapshot, me) = priest_snapshot();
+    let ally = Entity::from_raw(2);
+    snapshot.combatants.insert(ally, info(ally, 1, CharacterClass::Warrior));
+
+    // Distant melee whose kill target is my ally, not me.
+    let off_target = Entity::from_raw(3);
+    snapshot.combatants.insert(off_target, CombatantInfo {
+        target: Some(ally),
+        position: Vec3::new(10.0, 0.0, 0.0),
+        ..info(off_target, 2, CharacterClass::Warrior)
+    });
+    // Melee already on top of me (inside preferred_range 2.0): targeting me
+    // but not "closing" — it is already there.
+    let in_melee = Entity::from_raw(4);
+    snapshot.combatants.insert(in_melee, CombatantInfo {
+        target: Some(me),
+        position: Vec3::new(1.5, 0.0, 0.0),
+        ..info(in_melee, 2, CharacterClass::Rogue)
+    });
+
+    let ctx = snapshot.context_for(me);
+    assert!(!ctx.is_closing(off_target, me));
+    assert!(!ctx.is_closing(in_melee, me));
+}
+
+#[test]
+fn is_closing_uses_pet_preferred_range_for_pets() {
+    let (mut snapshot, me) = priest_snapshot();
+    // Felhunter (pet preferred_range 2.0, melee) at 12 units with kill
+    // target me: closing.
+    let felhunter = Entity::from_raw(2);
+    snapshot.combatants.insert(felhunter, CombatantInfo {
+        target: Some(me),
+        position: Vec3::new(12.0, 0.0, 0.0),
+        ..pet_info(felhunter, 2, CharacterClass::Warlock)
+    });
+
+    let ctx = snapshot.context_for(me);
+    assert!(ctx.is_closing(felhunter, me));
+}
+
+// ============================================================================
+// visible_enemies_within — proximity threat half of the PRESSURED trigger
+// ============================================================================
+
+#[test]
+fn visible_enemies_within_includes_only_enemies_inside_radius() {
+    let (mut snapshot, me) = priest_snapshot();
+    // Enemy at distance 5 (inside radius 10).
+    let near = Entity::from_raw(2);
+    snapshot.combatants.insert(near, CombatantInfo {
+        position: Vec3::new(5.0, 0.0, 0.0),
+        ..info(near, 2, CharacterClass::Warrior)
+    });
+    // Enemy at distance 15 (outside radius 10).
+    let far = Entity::from_raw(3);
+    snapshot.combatants.insert(far, CombatantInfo {
+        position: Vec3::new(15.0, 0.0, 0.0),
+        ..info(far, 2, CharacterClass::Mage)
+    });
+
+    let ctx = snapshot.context_for(me);
+    let within: Vec<Entity> = ctx
+        .visible_enemies_within(me, Vec3::ZERO, 10.0)
+        .iter()
+        .map(|c| c.entity)
+        .collect();
+    assert_eq!(within, vec![near], "only the enemy inside the radius is returned");
+}
+
+#[test]
+fn visible_enemies_within_respects_radius_boundary_and_team() {
+    let (mut snapshot, me) = priest_snapshot();
+    // Enemy exactly at the radius (10.0) — `<=` so it is included.
+    let on_edge = Entity::from_raw(2);
+    snapshot.combatants.insert(on_edge, CombatantInfo {
+        position: Vec3::new(10.0, 0.0, 0.0),
+        ..info(on_edge, 2, CharacterClass::Warrior)
+    });
+    // Ally inside the radius — never a "threat", regardless of distance.
+    let ally = Entity::from_raw(3);
+    snapshot.combatants.insert(ally, CombatantInfo {
+        position: Vec3::new(2.0, 0.0, 0.0),
+        ..info(ally, 1, CharacterClass::Warrior)
+    });
+
+    let ctx = snapshot.context_for(me);
+    let within: Vec<Entity> = ctx
+        .visible_enemies_within(me, Vec3::ZERO, 10.0)
+        .iter()
+        .map(|c| c.entity)
+        .collect();
+    assert_eq!(within, vec![on_edge], "boundary enemy in, ally out");
+}
+
+// ============================================================================
+// movement_slow_multiplier — product of MovementSpeedSlow magnitudes
+// ============================================================================
+
+#[test]
+fn movement_slow_multiplier_no_aura_is_one() {
+    let (snapshot, me) = priest_snapshot();
+    let ctx = snapshot.context_for(me);
+    assert_eq!(ctx.movement_slow_multiplier(me), 1.0, "unslowed = 1.0");
+}
+
+#[test]
+fn movement_slow_multiplier_single_slow() {
+    let (mut snapshot, me) = priest_snapshot();
+    let mut slow = aura_with(AuraType::MovementSpeedSlow, None, 0.0);
+    slow.magnitude = 0.5;
+    snapshot.active_auras.insert(me, vec![slow]);
+
+    let ctx = snapshot.context_for(me);
+    assert_eq!(ctx.movement_slow_multiplier(me), 0.5, "one 50% slow halves speed");
+}
+
+#[test]
+fn movement_slow_multiplier_stacks_multiplicatively() {
+    let (mut snapshot, me) = priest_snapshot();
+    let mut slow_a = aura_with(AuraType::MovementSpeedSlow, None, 0.0);
+    slow_a.magnitude = 0.5;
+    let mut slow_b = aura_with(AuraType::MovementSpeedSlow, None, 0.0);
+    slow_b.magnitude = 0.7;
+    // A non-slow aura must be ignored by the product.
+    let unrelated = aura_with(AuraType::DamageOverTime, None, 0.0);
+    snapshot.active_auras.insert(me, vec![slow_a, slow_b, unrelated]);
+
+    let ctx = snapshot.context_for(me);
+    // 0.5 * 0.7 = 0.35 (the DoT does not participate).
+    assert!(
+        (ctx.movement_slow_multiplier(me) - 0.35).abs() < 1e-6,
+        "two slows multiply: got {}",
+        ctx.movement_slow_multiplier(me)
+    );
+}

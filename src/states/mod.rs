@@ -326,9 +326,12 @@ impl Plugin for StatesPlugin {
 fn main_menu_ui(
     mut contexts: EguiContexts,
     mut next_state: ResMut<NextState<GameState>>,
-    mut exit_events: EventWriter<AppExit>,
+    mut commands: Commands,
+    primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
 ) {
-    let ctx = contexts.ctx_mut();
+    // Use try_ctx_mut to gracefully handle window close (the context
+    // dies with the primary window; ctx_mut panics on the final frame)
+    let Some(ctx) = contexts.try_ctx_mut() else { return; };
     
     // Configure style for a dark theme
     let mut style = (*ctx.style()).clone();
@@ -425,8 +428,17 @@ fn main_menu_ui(
                     )
                     .clicked()
                 {
-                    info!("Exit button pressed - quitting application");
-                    exit_events.write(AppExit::Success);
+                    info!("Exit button pressed - closing primary window");
+                    // Do NOT write `AppExit` from a system here: on macOS the
+                    // programmatic exit path can deadlock the winit event
+                    // loop and the app freezes instead of quitting
+                    // (bevyengine/bevy#23313 — observed here on Bevy 0.16
+                    // after the 0.16/winit-0.30 migration). Despawning the
+                    // primary window re-enters winit's native close path and
+                    // the default `ExitCondition::OnAllClosed` exits cleanly.
+                    for window in primary_window.iter() {
+                        commands.entity(window).despawn();
+                    }
                 }
             });
 
@@ -455,7 +467,9 @@ fn options_ui(
     mut settings: ResMut<crate::settings::GameSettings>,
     pending_restart: Res<crate::settings::PendingSettingsRestart>,
 ) {
-    let ctx = contexts.ctx_mut();
+    // Use try_ctx_mut to gracefully handle window close (the context
+    // dies with the primary window; ctx_mut panics on the final frame)
+    let Some(ctx) = contexts.try_ctx_mut() else { return; };
     
     // Configure style for a dark theme
     let mut style = (*ctx.style()).clone();
@@ -793,7 +807,9 @@ fn keybindings_ui(
         keys_just_pressed.push(*key);
     }
     
-    let ctx = contexts.ctx_mut();
+    // Use try_ctx_mut to gracefully handle window close (the context
+    // dies with the primary window; ctx_mut panics on the final frame)
+    let Some(ctx) = contexts.try_ctx_mut() else { return; };
     
     // Configure style for a dark theme
     let mut style = (*ctx.style()).clone();

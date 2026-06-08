@@ -100,6 +100,43 @@ fn default_max_duration() -> f32 {
     300.0
 }
 
+/// Mirrors the serde per-field defaults: empty teams (callers must fill them
+/// in — `validate()` rejects empty teams), `BasicArena`, 300s timeout, no
+/// seed, and empty per-class strategy/equipment preference vectors. Lets test
+/// helpers write `HeadlessMatchConfig { team1, team2, ..Default::default() }`
+/// instead of the full 24-field struct literal.
+impl Default for HeadlessMatchConfig {
+    fn default() -> Self {
+        Self {
+            team1: Vec::new(),
+            team2: Vec::new(),
+            label: None,
+            map: default_map(),
+            team1_kill_target: None,
+            team2_kill_target: None,
+            team1_cc_target: None,
+            team2_cc_target: None,
+            output_path: None,
+            max_duration_secs: default_max_duration(),
+            random_seed: None,
+            team1_rogue_openers: Vec::new(),
+            team2_rogue_openers: Vec::new(),
+            team1_warlock_curse_prefs: Vec::new(),
+            team2_warlock_curse_prefs: Vec::new(),
+            team1_hunter_pet_types: Vec::new(),
+            team2_hunter_pet_types: Vec::new(),
+            team1_equipment: Vec::new(),
+            team2_equipment: Vec::new(),
+            team1_warrior_shouts: Vec::new(),
+            team2_warrior_shouts: Vec::new(),
+            team1_mage_armors: Vec::new(),
+            team2_mage_armors: Vec::new(),
+            team1_paladin_auras: Vec::new(),
+            team2_paladin_auras: Vec::new(),
+        }
+    }
+}
+
 impl HeadlessMatchConfig {
     /// Load configuration from a JSON file
     pub fn load_from_file(path: &Path) -> Result<Self, String> {
