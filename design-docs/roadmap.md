@@ -22,6 +22,77 @@
 
 ---
 
+## Follow-ups from healer movement AI (PR #63, merged 2026-06-08)
+
+The healer posture-movement slice shipped with four buckets of deferred work.
+This is the consolidated, durable list — a new session can start from here.
+Context: `docs/plans/2026-06-06-001-feat-healer-posture-movement-ai-plan.md`
+(the completed plan), `docs/reports/2026-06-healer-movement.md` (validation),
+and the three learnings under `docs/solutions/` (casting-visibility blind spot,
+mirror-asymmetry measurement protocol, bevy macOS exit).
+
+### A. Offensive-punish slice (triggered)
+
+The R13 draw-rate watch **tripped** as designed (1v1 draws 2.3%→7.0%, all
+healer-mirror cells; Paladin+Priest 2v2 became the worst comp at 12.2% — the
+draw wall resolves into losses at the 300s cap). Healers got harder to kill with
+no offsetting pressure, so this slice is the agreed answer:
+
+- [ ] Target-swap responsiveness: when a melee's kill target kites out of reach
+      and a softer target is in range, swap instead of chasing forever (with
+      hysteresis to avoid ping-pong).
+- [ ] Burst-during-CC: DPS prefers burst when the enemy healer is CC'd (priority
+      tweak on existing aura tracking, not new machinery).
+- Both also reduce the #1 "bot tell" (tunnel-vision chasing). Scope mirrors the
+  healer-movement slice: probes + matrix/sweep validation, side-symmetrized
+  deltas, draw-rate as the success metric (should come back down).
+
+### B. Code-review residuals from PR #63
+
+Not auto-applied during review because they touch the sim path or need judgment;
+one matrix re-validation covers the behavioral ones. Source: PR #63 Known
+Residuals table + `/tmp` review artifact (now only here).
+
+- [ ] P1 `class_ai/paladin.rs` — file crossed 1k lines (1626); extract `paladin_postures.rs`.
+- [ ] P1 `class_ai/paladin.rs:1136` — ~7 per-tick Vec allocations in posture eval; hoist to single-pass scalars (~65M allocs/matrix).
+- [ ] P2 `class_ai/priest.rs:914` — stale PRESSURED Direction directive survives FREE transition (~1s TTL; Paladin path removes it, Priest doesn't); **needs matrix re-validation**.
+- [ ] P2 `class_ai/priest.rs:776` — threat set computed twice per PRESSURED tick.
+- [ ] P2 `class_ai/priest.rs:967` — `compute_formation_point` allocates 3 Vecs every FREE tick.
+- [ ] P2 `class_ai/priest.rs:561` — shared escape helpers live in priest.rs, imported by paladin.rs; move to `healer_postures.rs`.
+- [ ] P2 `class_ai/paladin.rs:1454` — ~45-line pressured-tick duplication vs Priest; extract shared helper.
+- [ ] P2 `class_ai/priest.rs:594` — four movement constants hardcoded despite the RON-first policy; move to `movement.ron`.
+- [ ] P3 `assets/config/movement.ron:56` — Priest `corner_penalty` 6.0 vs struct default 4.0 silent divergence.
+
+### C. Movement-AI extensions (build on the posture skeleton)
+
+- [ ] Line-of-sight / pillar play — the structural counter to Mage team dominance
+      (Mage is clear #1 in 2v2/3v3 with no counterplay). LoS terms plug into the
+      existing scorer term list.
+- [ ] CC danger radii — cooldown-aware avoidance of enemy CC ranges (new scorer term).
+- [ ] Cast-juking — step out of range of an incoming CC cast (new trigger).
+- [ ] Migrate Mage/Hunter `kiting_timer` onto the `MovementDirective` system (unify the two movement mechanisms).
+- [ ] Psychic Scream (short-range Priest CC) — the Priest DIP predicate is already
+      built ability-agnostic; Scream plugs in when it ships.
+
+### D. Infrastructure / methodology
+
+- [ ] Early-draw heuristic — declare a draw when neither team has dealt meaningful
+      damage in N seconds. Draw-wall healer mirrors now dominate matrix wall time;
+      this reclaims most of it without touching balance. (The parallel in-process
+      batch runner already landed via PR #62.)
+- [ ] Mirror-asymmetry root fix — same-frame action races resolve in ECS iteration
+      order (side bias up to ~18%). Mechanism documented
+      (`docs/reports/2026-06-mirror-asymmetry-diagnostic.md`); fix is a
+      same-frame-resolution redesign, deferred. Until then, the side-symmetrized
+      measurement protocol is the standing workaround
+      (`docs/solutions/implementation-patterns/mirror-asymmetry-side-symmetrized-measurement.md`).
+- [ ] Manual naturalness pass — watch seeded replays in the graphical client (the
+      one validation loop with no automation): statue comp seed 20260606, escape
+      comp Priest+Mage seed 1, dip comp Pal+War seed 1. Look for zigzag,
+      indecision, robotic geometry.
+
+---
+
 ## Milestone 2: Visual Polish
 
 - [ ] Procedural character meshes (distinct silhouettes per class)
