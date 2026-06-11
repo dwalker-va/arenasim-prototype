@@ -6,13 +6,14 @@
 //!
 //! ## Range Zone Priorities
 //! - **Dead zone (<8 yards)**: Disengage > Frost Trap at feet > Kite
-//! - **Closing (8-20 yards)**: Concussive Shot > Frost Trap > Kite + Serpent Sting > Arcane Shot
+//! - **Closing (8-20 yards)**: Concussive Shot > Frost Trap > Kite + Arcane Shot
 //! - **Safe (20-40 yards)**: Concussive Shot > Serpent Sting > Freezing Trap > Aimed Shot > Arcane Shot
 #![allow(clippy::too_many_arguments)]
 
 use bevy::prelude::*;
 
 use crate::combat::log::CombatLog;
+use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
@@ -181,19 +182,11 @@ pub fn decide_hunter_action(
             }
         }
 
-        // Sting before Arcane Shot: it's the kiting-damage button — cheap,
-        // instant, keeps ticking while we reposition. Targets the kill target
-        // (`target_entity`), not the nearest enemy: the closing block is gated
-        // on `nearest_dist`, but a far kill target is still in shot range.
-        if try_serpent_sting(
-            commands, combat_log, abilities, entity, combatant, my_pos,
-            target_entity, target_info, ctx, auras, &mut builder,
-        ) {
-            combatant.kiting_timer = 3.0;
-            builder.finish();
-            return true;
-        }
-
+        // No Serpent Sting in the closing block: with melee bearing down,
+        // every GCD belongs to the kiting toolkit. The sting applies from the
+        // safe-range rotation and keeps ticking while we kite through this
+        // band — that's the point of a DoT. (Sweep data: a sting GCD spent
+        // during the approach window cost more than 50 DoT damage bought.)
         if try_arcane_shot(
             commands, combat_log, game_rng, abilities, entity, combatant, my_pos,
             target_entity, target_info, ctx, instant_attacks, auras, &mut builder,
@@ -598,6 +591,44 @@ fn try_serpent_sting(
 
     if target_has_sting {
         builder.reject(ability, RejectionReason::AlreadyApplied);
+        return false;
+    }
+
+    // Mana floor: the sting is a luxury good, the kiting toolkit (Concussive /
+    // Frost Trap / Disengage) is survival. Sweep data showed the sting draining
+    // the fixed 240 pool and starving mobility vs melee (1v1 vs Warrior
+    // 100% -> 34% without this floor).
+    const STING_MANA_FLOOR: f32 = 100.0;
+    if combatant.current_mana < STING_MANA_FLOOR {
+        builder.reject(ability, RejectionReason::PreconditionUnmet {
+            note: "mana reserved for kiting toolkit".to_string(),
+        });
+        return false;
+    }
+
+    // Never sting a rage user: Warriors convert 15% of damage taken into rage
+    // (auto_attack.rs / auras.rs), so a permanent DoT is a steady rage faucet
+    // funding extra Mortal Strikes against our team. Sweep data: stinging
+    // Warriors was uniquely immune to every other mitigation.
+    if target_info.class == CharacterClass::Warrior {
+        builder.reject(ability, RejectionReason::PreconditionUnmet {
+            note: "sting feeds Warrior rage".to_string(),
+        });
+        return false;
+    }
+
+    // Trap-candidate reservation: don't sting the Freezing Trap candidate while
+    // the trap is ready — a ticking sting would suppress the trap permanently
+    // via the friendly-DoT guard (the kill target is often the enemy healer,
+    // which is exactly who the trap wants). Once the trap is on cooldown the
+    // sting resumes freely. Reactive state check, not predictive sequencing.
+    let trap_ready = !combatant.ability_cooldowns.contains_key(&AbilityType::FreezingTrap)
+        && abilities.get(&AbilityType::FreezingTrap)
+            .is_some_and(|trap_def| combatant.current_mana >= trap_def.mana_cost);
+    if trap_ready && ctx.enemy_healer().or(Some(target_entity)) == Some(target_entity) {
+        builder.reject(ability, RejectionReason::PreconditionUnmet {
+            note: "trap candidate reserved for Freezing Trap".to_string(),
+        });
         return false;
     }
 
