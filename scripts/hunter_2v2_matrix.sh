@@ -53,12 +53,14 @@ Runs N matches per matchup for Hunter+Priest vs each-class+Priest (6 matchups)
 and aggregates winrates into a CSV byte-compatible with the 1v1 matrix output.
 
 Usage:
-  ./scripts/hunter_2v2_matrix.sh [N] [--seed-base SEED] [--out OUT_CSV]
+  ./scripts/hunter_2v2_matrix.sh [N] [--seed-base SEED] [--out OUT_CSV] [--swap-sides]
 
 Arguments:
   N             Number of seeds per matchup (default: 100)
   --seed-base   Base RNG seed (default: 0)
   --out         Output CSV path (default: match_logs/hunter_2v2_<timestamp>.csv)
+  --swap-sides  Run the transposed ordering (<class>+Priest as team1) for
+                side-symmetrized measurement
 
 CSV columns: team1,team2,runs,team1_wins,team2_wins,draws,team1_winrate,draw_rate,avg_duration_secs
 USAGE
@@ -112,15 +114,9 @@ for opp in "${OPPONENTS[@]}"; do
     DRAWS=0
     TOTAL_DURATION="0.0"
 
-    if [[ "$SWAP_SIDES" -eq 1 ]]; then
-        SIDE_A="${opp}"
-        SIDE_B="Hunter"
-        matchup_label="${opp}+${HEALER}_vs_Hunter+${HEALER}"
-    else
-        SIDE_A="Hunter"
-        SIDE_B="${opp}"
-        matchup_label="Hunter+${HEALER}_vs_${opp}+${HEALER}"
-    fi
+    SIDE_A="Hunter"; SIDE_B="${opp}"
+    if [[ "$SWAP_SIDES" -eq 1 ]]; then SIDE_A="${opp}"; SIDE_B="Hunter"; fi
+    matchup_label="${SIDE_A}+${HEALER}_vs_${SIDE_B}+${HEALER}"
     echo -n "  ${matchup_label}: "
 
     for run_idx in $(seq 0 $((N - 1))); do

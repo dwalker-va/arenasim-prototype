@@ -1747,6 +1747,14 @@ pub fn spawn_ua_glow_for_afflicted(
 // from UA's chest-height deep-violet 0.5 Hz glow so stacked sting + UA reads
 // as two independent effects (plan R14 / AE4).
 
+/// Shared sting-aura predicate for the detector and cleanup systems, so the
+/// two can't drift apart (the same key the Hunter AI's dedup uses).
+fn has_serpent_sting_aura(auras: &ActiveAuras) -> bool {
+    auras.auras.iter().any(|a| {
+        a.effect_type == AuraType::DamageOverTime && a.ability_name == "Serpent Sting"
+    })
+}
+
 /// Detect targets that have a Serpent Sting aura but no `SerpentVenomPulse`
 /// visual yet, and spawn the pulse. Cleanup is handled by `cleanup_venom_pulse`
 /// once the sting aura is no longer present.
@@ -1759,11 +1767,7 @@ pub fn spawn_venom_pulse_for_stung(
     let already_pulsing: HashSet<Entity> = existing_pulses.iter().map(|p| p.target).collect();
 
     for (entity, auras) in stung.iter() {
-        let has_sting = auras.auras.iter().any(|a| {
-            a.effect_type == AuraType::DamageOverTime
-                && a.ability_name == "Serpent Sting"
-        });
-        if has_sting && !already_pulsing.contains(&entity) {
+        if has_serpent_sting_aura(auras) && !already_pulsing.contains(&entity) {
             commands.spawn((
                 SerpentVenomPulse { target: entity, phase: 0.0 },
                 PlayMatchEntity,
@@ -1786,9 +1790,11 @@ pub fn spawn_venom_pulse_visuals(
         };
 
         let mesh = meshes.add(Sphere::new(0.45));
+        // Spawn at the update formula's phase-0 values (beat 0.5 → alpha 0.30,
+        // intensity 0.75) so the first update frame doesn't visibly snap.
         let material = materials.add(StandardMaterial {
             base_color: Color::srgba(0.15, 0.50, 0.10, 0.30),
-            emissive: LinearRgba::new(0.30, 1.00, 0.20, 1.0),
+            emissive: LinearRgba::new(0.225, 0.75, 0.15, 1.0),
             alpha_mode: AlphaMode::Add,
             unlit: true,
             ..default()
@@ -1839,12 +1845,7 @@ pub fn cleanup_venom_pulse(
     for (pulse_entity, pulse) in pulses.iter() {
         let still_stung = targets
             .get(pulse.target)
-            .map(|auras| {
-                auras.auras.iter().any(|a| {
-                    a.effect_type == AuraType::DamageOverTime
-                        && a.ability_name == "Serpent Sting"
-                })
-            })
+            .map(has_serpent_sting_aura)
             .unwrap_or(false);
 
         if !still_stung {

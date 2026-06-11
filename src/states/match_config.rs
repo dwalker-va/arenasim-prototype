@@ -263,6 +263,13 @@ impl CharacterClass {
         matches!(self, CharacterClass::Priest | CharacterClass::Paladin)
     }
 
+    /// Whether this class converts damage taken into rage (see the 15%
+    /// rage-from-damage-taken sites in combat_core / auras). DoT-applying AIs
+    /// check this to avoid feeding the target free resource.
+    pub fn gains_rage_from_damage(&self) -> bool {
+        matches!(self, CharacterClass::Warrior)
+    }
+
     /// Whether this class uses mana as its resource.
     pub fn uses_mana(&self) -> bool {
         matches!(

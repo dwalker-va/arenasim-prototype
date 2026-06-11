@@ -13,7 +13,6 @@
 use bevy::prelude::*;
 
 use crate::combat::log::CombatLog;
-use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
@@ -222,27 +221,21 @@ pub fn decide_hunter_action(
         return true;
     }
 
-    let freezing_trap_target = ctx.enemy_healer().or(Some(target_entity));
-    if let Some(trap_target) = freezing_trap_target {
-        if let Some(trap_target_info) = ctx.combatants.get(&trap_target) {
-            if trap_target_info.is_alive {
-                // Two-way CC guard (R8/R9): never aim Freezing Trap at a target
-                // the team has DoT'd — the first tick breaks the incapacitate
-                // (break_on_damage: 0.0). Reactive and binary: skip this tick,
-                // no fallthrough to a second candidate.
-                if ctx.has_friendly_dots_on_target(trap_target) {
-                    builder.reject(AbilityType::FreezingTrap, RejectionReason::FriendlyBreakableCC);
-                } else {
-                    let midpoint = (my_pos + trap_target_info.position) / 2.0;
-                    if try_place_trap_at(
-                        commands, combat_log, abilities, entity, combatant, my_pos, midpoint,
-                        TrapType::Freezing, &mut builder,
-                    ) {
-                        builder.finish();
-                        return true;
-                    }
-                }
-            }
+    let trap_target = freezing_trap_candidate(ctx, target_entity);
+    if let Some(trap_target_info) = ctx.combatants.get(&trap_target).filter(|info| info.is_alive) {
+        // Two-way CC guard (R8/R9): never aim Freezing Trap at a target the
+        // team has DoT'd — the first tick breaks the incapacitate
+        // (break_on_damage: 0.0). Reactive and binary: skip this tick, no
+        // fallthrough to a second candidate.
+        if ctx.has_friendly_dots_on_target(trap_target) {
+            builder.reject(AbilityType::FreezingTrap, RejectionReason::FriendlyBreakableCC);
+        } else if try_place_trap_at(
+            commands, combat_log, abilities, entity, combatant, my_pos,
+            (my_pos + trap_target_info.position) / 2.0,
+            TrapType::Freezing, &mut builder,
+        ) {
+            builder.finish();
+            return true;
         }
     }
 
@@ -279,6 +272,14 @@ pub fn decide_hunter_action(
 // ==============================================================================
 // Helper Functions
 // ==============================================================================
+
+/// The entity Freezing Trap wants: the enemy healer, falling back to the kill
+/// target. Single source of truth shared by trap placement and the sting's
+/// trap-candidate reservation — if these drifted apart, the sting would
+/// silently re-open the trap-suppression hole the reservation closes.
+fn freezing_trap_candidate(ctx: &CombatContext, fallback: Entity) -> Entity {
+    ctx.enemy_healer().unwrap_or(fallback)
+}
 
 fn find_nearest_enemy(self_entity: Entity, my_team: u8, my_pos: Vec3, ctx: &CombatContext) -> (Option<(Entity, f32)>, Option<f32>) {
     let mut nearest: Option<(Entity, f32)> = None;
@@ -606,11 +607,11 @@ fn try_serpent_sting(
         return false;
     }
 
-    // Never sting a rage user: Warriors convert 15% of damage taken into rage
+    // Never sting a rage user: they convert 15% of damage taken into rage
     // (auto_attack.rs / auras.rs), so a permanent DoT is a steady rage faucet
     // funding extra Mortal Strikes against our team. Sweep data: stinging
     // Warriors was uniquely immune to every other mitigation.
-    if target_info.class == CharacterClass::Warrior {
+    if target_info.class.gains_rage_from_damage() {
         builder.reject(ability, RejectionReason::PreconditionUnmet {
             note: "sting feeds Warrior rage".to_string(),
         });
@@ -625,7 +626,7 @@ fn try_serpent_sting(
     let trap_ready = !combatant.ability_cooldowns.contains_key(&AbilityType::FreezingTrap)
         && abilities.get(&AbilityType::FreezingTrap)
             .is_some_and(|trap_def| combatant.current_mana >= trap_def.mana_cost);
-    if trap_ready && ctx.enemy_healer().or(Some(target_entity)) == Some(target_entity) {
+    if trap_ready && freezing_trap_candidate(ctx, target_entity) == target_entity {
         builder.reject(ability, RejectionReason::PreconditionUnmet {
             note: "trap candidate reserved for Freezing Trap".to_string(),
         });
