@@ -6,8 +6,8 @@
 //!
 //! ## Range Zone Priorities
 //! - **Dead zone (<8 yards)**: Disengage > Frost Trap at feet > Kite
-//! - **Closing (8-20 yards)**: Concussive Shot > Frost Trap > Kite + Arcane Shot
-//! - **Safe (20-40 yards)**: Concussive Shot > Aimed Shot > Arcane Shot
+//! - **Closing (8-20 yards)**: Concussive Shot > Frost Trap > Kite + Serpent Sting > Arcane Shot
+//! - **Safe (20-40 yards)**: Concussive Shot > Serpent Sting > Freezing Trap > Aimed Shot > Arcane Shot
 #![allow(clippy::too_many_arguments)]
 
 use bevy::prelude::*;
@@ -181,6 +181,19 @@ pub fn decide_hunter_action(
             }
         }
 
+        // Sting before Arcane Shot: it's the kiting-damage button — cheap,
+        // instant, keeps ticking while we reposition. Targets the kill target
+        // (`target_entity`), not the nearest enemy: the closing block is gated
+        // on `nearest_dist`, but a far kill target is still in shot range.
+        if try_serpent_sting(
+            commands, combat_log, abilities, entity, combatant, my_pos,
+            target_entity, target_info, ctx, auras, &mut builder,
+        ) {
+            combatant.kiting_timer = 3.0;
+            builder.finish();
+            return true;
+        }
+
         if try_arcane_shot(
             commands, combat_log, game_rng, abilities, entity, combatant, my_pos,
             target_entity, target_info, ctx, instant_attacks, auras, &mut builder,
@@ -205,17 +218,36 @@ pub fn decide_hunter_action(
         return true;
     }
 
+    // Sting sits ABOVE Freezing Trap so the trap guard below always sees an
+    // already-applied sting at placement time (closes the trap-placed-first,
+    // stung-second ordering hole for the single-target case — plan KTD 3).
+    if try_serpent_sting(
+        commands, combat_log, abilities, entity, combatant, my_pos,
+        target_entity, target_info, ctx, auras, &mut builder,
+    ) {
+        builder.finish();
+        return true;
+    }
+
     let freezing_trap_target = ctx.enemy_healer().or(Some(target_entity));
     if let Some(trap_target) = freezing_trap_target {
         if let Some(trap_target_info) = ctx.combatants.get(&trap_target) {
             if trap_target_info.is_alive {
-                let midpoint = (my_pos + trap_target_info.position) / 2.0;
-                if try_place_trap_at(
-                    commands, combat_log, abilities, entity, combatant, my_pos, midpoint,
-                    TrapType::Freezing, &mut builder,
-                ) {
-                    builder.finish();
-                    return true;
+                // Two-way CC guard (R8/R9): never aim Freezing Trap at a target
+                // the team has DoT'd — the first tick breaks the incapacitate
+                // (break_on_damage: 0.0). Reactive and binary: skip this tick,
+                // no fallthrough to a second candidate.
+                if ctx.has_friendly_dots_on_target(trap_target) {
+                    builder.reject(AbilityType::FreezingTrap, RejectionReason::FriendlyBreakableCC);
+                } else {
+                    let midpoint = (my_pos + trap_target_info.position) / 2.0;
+                    if try_place_trap_at(
+                        commands, combat_log, abilities, entity, combatant, my_pos, midpoint,
+                        TrapType::Freezing, &mut builder,
+                    ) {
+                        builder.finish();
+                        return true;
+                    }
                 }
             }
         }
@@ -526,6 +558,81 @@ fn try_arcane_shot(
 
     combatant.current_mana -= def.mana_cost;
     combatant.ability_cooldowns.insert(ability, def.cooldown);
+    combatant.global_cooldown = GCD;
+
+    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, Some((target_info.team, target_info.class)), "fires");
+
+    true
+}
+
+/// Serpent Sting: instant, no-cooldown Nature DoT projectile — the Hunter's
+/// kiting damage. Pure DoT (zero direct damage), so the projectile applies the
+/// aura via the non-damage branch and its impact can never break CC.
+///
+/// Dedup keys on `effect_type == DamageOverTime && ability_name == "Serpent
+/// Sting"` (the Corruption idiom — never `AuraType` alone, so stings and
+/// Warlock DoTs coexist). No cooldown is inserted: the ability has none, and
+/// `pre_cast_ok`'s cooldown check passes on an absent key.
+fn try_serpent_sting(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    target_entity: Entity,
+    target_info: &super::CombatantInfo,
+    ctx: &CombatContext,
+    auras: Option<&ActiveAuras>,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    let ability = AbilityType::SerpentSting;
+    let Some(def) = abilities.get(&ability) else { return false };
+
+    let target_has_sting = ctx.active_auras
+        .get(&target_entity)
+        .map(|target_auras| target_auras.iter().any(|a|
+            a.effect_type == AuraType::DamageOverTime && a.ability_name == "Serpent Sting"
+        ))
+        .unwrap_or(false);
+
+    if target_has_sting {
+        builder.reject(ability, RejectionReason::AlreadyApplied);
+        return false;
+    }
+
+    let opts = PreCastOpts { check_friendly_cc: true, ..Default::default() };
+    if !pre_cast_ok(
+        ability, def, combatant, my_pos, auras,
+        Some((target_entity, target_info.position)), ctx, opts,
+    ) {
+        builder.reject(
+            ability,
+            classify_pre_cast_failure(
+                ability, def, combatant, my_pos, auras,
+                Some((target_entity, target_info.position)), ctx, opts,
+            ),
+        );
+        return false;
+    }
+
+    builder.choose(ability, Some(target_entity), true);
+
+    let projectile_speed = def.projectile_speed.unwrap_or(45.0);
+    commands.spawn((
+        Projectile {
+            caster: entity,
+            target: target_entity,
+            ability,
+            speed: projectile_speed,
+            caster_team: combatant.team,
+            caster_class: combatant.class,
+        },
+        Transform::from_translation(my_pos + Vec3::new(0.0, 1.5, 0.0)),
+        PlayMatchEntity,
+    ));
+
+    combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
 
     log_ability_use(combat_log, combatant.team, combatant.class, &def.name, Some((target_info.team, target_info.class)), "fires");
