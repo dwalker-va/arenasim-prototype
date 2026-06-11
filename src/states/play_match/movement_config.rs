@@ -62,7 +62,10 @@ impl Default for MovementWeights {
             ally_anchor: 1000.0,
             formation_pull: 2.0,
             boundary_penalty: 1000.0,
-            corner_penalty: 4.0,
+            // Matches the shipped Priest value in movement.ron (the Paladin
+            // block explicitly overrides to 4.0). Was 4.0 here — a silent
+            // divergence from the RON, now aligned (P3 residual).
+            corner_penalty: 6.0,
             wand_pull: 0.5,
             commitment_bonus: 1.5,
         }
@@ -136,10 +139,31 @@ impl Default for SharedMovementConfig {
 }
 
 /// Priest-specific movement configuration.
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PriestMovementConfig {
     pub weights: MovementWeights,
+    /// FREE: distance (XZ units) the formation point must move before the
+    /// directive is re-targeted and a `FormationShift` trace event fires.
+    pub formation_shift_threshold: f32,
+    /// FREE deadzone: no Point directive is issued when the Priest is already
+    /// this close to the formation point (prevents micro-shuffling).
+    pub formation_deadzone: f32,
+    /// FREE: refresh the standing directive when its remaining TTL drops below
+    /// this — keeps a walk alive across decide ticks without re-scoring or
+    /// emitting (refreshes are not decisions).
+    pub directive_refresh_margin: f32,
+}
+
+impl Default for PriestMovementConfig {
+    fn default() -> Self {
+        Self {
+            weights: MovementWeights::default(),
+            formation_shift_threshold: 3.0,
+            formation_deadzone: 1.5,
+            directive_refresh_margin: 0.25,
+        }
+    }
 }
 
 /// Paladin-specific movement configuration.
@@ -176,6 +200,36 @@ impl Default for PaladinMovementConfig {
     }
 }
 
+/// Melee target-swap tuning (bucket A offensive-punish). When a melee's kill
+/// target kites persistently out of reach and a softer enemy is in melee, the
+/// melee swaps instead of chasing forever — gated by hysteresis to avoid
+/// ping-pong. Consumed by `acquire_targets` in `combat_ai.rs`.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MeleeMovementConfig {
+    /// A candidate softer target must be within this range (yards) to be worth
+    /// swapping to — i.e. already in (or right at) melee, so the swap buys
+    /// immediate uptime the kited kill target can't.
+    pub swap_range: f32,
+    /// Minimum seconds between swaps for one combatant — the anti-ping-pong
+    /// hysteresis. A fresh swap (or a kill-target change) resets the timer.
+    pub swap_hysteresis: f32,
+    /// The softer target must be at least this HP fraction below the kited kill
+    /// target to justify abandoning the original focus (prevents swapping over
+    /// trivial HP differences).
+    pub swap_hp_margin: f32,
+}
+
+impl Default for MeleeMovementConfig {
+    fn default() -> Self {
+        Self {
+            swap_range: 4.0,
+            swap_hysteresis: 2.0,
+            swap_hp_margin: 0.15,
+        }
+    }
+}
+
 /// Resource containing all healer-movement weights and thresholds.
 ///
 /// Loaded from `assets/config/movement.ron` at startup (both modes).
@@ -186,6 +240,7 @@ pub struct MovementConfig {
     pub shared: SharedMovementConfig,
     pub priest: PriestMovementConfig,
     pub paladin: PaladinMovementConfig,
+    pub melee: MeleeMovementConfig,
 }
 
 impl MovementConfig {
@@ -215,6 +270,9 @@ impl MovementConfig {
             ("shared.formation_offset", s.formation_offset),
             ("shared.escape_min_window", s.escape_min_window),
             ("shared.anchor_switch_margin", s.anchor_switch_margin),
+            ("priest.formation_shift_threshold", self.priest.formation_shift_threshold),
+            ("priest.formation_deadzone", self.priest.formation_deadzone),
+            ("priest.directive_refresh_margin", self.priest.directive_refresh_margin),
         ];
         for (name, value) in non_negatives {
             if value < 0.0 || !value.is_finite() {
@@ -244,6 +302,40 @@ impl MovementConfig {
                 "shared.directive_ttl ({}) must cover shared.commit_window ({}) — otherwise \
                  directives expire mid-commitment and movement stutters",
                 s.directive_ttl, s.commit_window
+            ));
+        }
+        if self.priest.formation_deadzone >= self.priest.formation_shift_threshold {
+            issues.push(format!(
+                "priest.formation_deadzone ({}) must be below priest.formation_shift_threshold \
+                 ({}) — otherwise the deadzone swallows every formation shift",
+                self.priest.formation_deadzone, self.priest.formation_shift_threshold
+            ));
+        }
+        if self.priest.directive_refresh_margin >= s.directive_ttl {
+            issues.push(format!(
+                "priest.directive_refresh_margin ({}) must be below shared.directive_ttl ({}) — \
+                 a margin at/above the TTL refreshes the directive every tick",
+                self.priest.directive_refresh_margin, s.directive_ttl
+            ));
+        }
+
+        let m = &self.melee;
+        if !(m.swap_range > 0.0) || !m.swap_range.is_finite() {
+            issues.push(format!(
+                "melee.swap_range must be a positive finite number, got {}",
+                m.swap_range
+            ));
+        }
+        if !(m.swap_hysteresis > 0.0) || !m.swap_hysteresis.is_finite() {
+            issues.push(format!(
+                "melee.swap_hysteresis must be a positive finite number, got {}",
+                m.swap_hysteresis
+            ));
+        }
+        if !(0.0..=1.0).contains(&m.swap_hp_margin) {
+            issues.push(format!(
+                "melee.swap_hp_margin must be within [0.0, 1.0], got {}",
+                m.swap_hp_margin
             ));
         }
 

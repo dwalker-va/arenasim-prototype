@@ -57,6 +57,10 @@
             wand_pull: 0.5,
             commitment_bonus: 1.5,
         ),
+        // FREE-directive tuning (formerly hardcoded consts in priest.rs).
+        formation_shift_threshold: 3.0, // re-target the formation point past this XZ move
+        formation_deadzone: 1.5,        // no Point directive issued within this of the point
+        directive_refresh_margin: 0.25, // refresh the standing walk below this remaining TTL
     ),
     paladin: (
         weights: (
@@ -76,5 +80,12 @@
         // (self included, pets excluded) below this pulls the Paladin to
         // fallback range even before it is focused.
         healing_heavy_hp: 0.6,
+    ),
+    // Melee target-swap (bucket A offensive-punish): swap off a kited kill
+    // target onto a softer in-melee enemy instead of chasing forever.
+    melee: (
+        swap_range: 4.0,       // softer target must be this close (yards) to swap to
+        swap_hysteresis: 2.0,  // min seconds between swaps (anti-ping-pong)
+        swap_hp_margin: 0.15,  // softer target must be this HP fraction below the kill target
     ),
 )

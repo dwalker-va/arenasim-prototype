@@ -19,10 +19,7 @@ use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
-use crate::states::play_match::combat_core::{
-    calculate_cast_time, clamp_to_arena, compass_directions_16, score_directions,
-    AnchorConstraint, ScorerInputs,
-};
+use crate::states::play_match::combat_core::{calculate_cast_time, clamp_to_arena};
 use crate::states::play_match::constants::GCD;
 use crate::states::play_match::decision_trace::{
     DecisionEventBuilder, DecisionTrace, MovementGoalKind, MovementTrigger,
@@ -33,11 +30,11 @@ use crate::states::play_match::utils::log_ability_use;
 
 use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
 use super::healer_postures::{
-    compound_pressure_trigger, escape_tick, select_sticky_anchor, start_movement_event,
-    SCORER_LOOKAHEAD,
+    compound_pressure_trigger, escape_tick, escape_window_from, healer_pressured_tick_shared,
+    start_movement_event,
 };
 
-use super::{CombatContext, CombatantInfo};
+use super::CombatContext;
 
 /// Priest AI: Decides and executes abilities for a Priest combatant.
 ///
@@ -536,69 +533,15 @@ fn try_mind_blast(
 // Posture evaluation (healer movement AI — U6: FREE/PRESSURED, U7: ESCAPE)
 // ============================================================================
 
-/// ESCAPE window math (R7), pure for unit testing.
-///
-/// `proximate_cc_remaining` holds, per threat within the danger radius, the
-/// remaining Root/Stun/Incapacitate duration (`attacker_escape_window`) or
-/// `None` for an unimpaired threat. Rules:
-///
-/// - **Multi-attacker rule:** a single unimpaired proximate threat voids the
-///   window (`None` anywhere → no ESCAPE).
-/// - **Empty set:** no proximate threat → nothing to escape from → no window.
-/// - **Window duration:** min over the impaired threats of their remaining CC
-///   (the first attacker to break free ends the useful window).
-/// - **Sub-cutoff rule (slow-adjusted):** the window is only worth a heal
-///   deferral if it buys real distance. Distance gained ≈ window ×
-///   base_speed × slow_multiplier (see [`escape_distance_gained`]), so the
-///   slow-adjusted *effective* window is `window × slow_multiplier`. If that
-///   falls below `min_window` (config `shared.escape_min_window`, calibrated
-///   at full speed), do not enter ESCAPE — a 50%-slowed Priest needs twice
-///   the CC time to gain the same separation.
-///
-/// Returns the RAW window duration in seconds (the directive/posture hold
-/// time — the slowed Priest still escapes for the full CC duration once the
-/// window is worth entering).
-pub fn escape_window(
-    proximate_cc_remaining: &[Option<f32>],
-    slow_multiplier: f32,
-    min_window: f32,
-) -> Option<f32> {
-    if proximate_cc_remaining.is_empty() {
-        return None;
-    }
-    let mut window = f32::MAX;
-    for cc in proximate_cc_remaining {
-        match cc {
-            Some(remaining) => window = window.min(*remaining),
-            // Multi-attacker rule: one free proximate threat voids the window.
-            None => return None,
-        }
-    }
-    // Sub-cutoff rule, slow-adjusted: effective window = raw × slow multiplier.
-    if window * slow_multiplier < min_window {
-        return None;
-    }
-    Some(window)
-}
+/// ESCAPE window math (R7) lives in [`super::healer_postures`] (shared with
+/// the Paladin). Re-exported here so the public `class_ai::priest::` path —
+/// and the `escape_window_math` probe suite that imports it — keeps working.
+pub use super::healer_postures::{escape_distance_gained, escape_window};
 
-/// Distance gained over an ESCAPE window: `window × base_speed ×
-/// slow_multiplier`. A 50% slow (`slow_multiplier = 0.5`) halves the
-/// effective escape distance — this is the relationship the sub-cutoff rule
-/// in [`escape_window`] is built on.
-pub fn escape_distance_gained(window: f32, base_speed: f32, slow_multiplier: f32) -> f32 {
-    window * base_speed * slow_multiplier
-}
-
-/// Distance the FREE formation point must move (XZ units) before the
-/// directive is re-targeted and a `FormationShift` trace event fires.
-const FORMATION_SHIFT_THRESHOLD: f32 = 3.0;
-/// FREE deadzone: no Point directive is issued when the Priest is already
-/// this close to the formation point (prevents micro-shuffling).
-const FORMATION_DEADZONE: f32 = 1.5;
-/// Refresh the standing FREE directive when its remaining TTL drops below
-/// this (keeps a walk alive across decide ticks without re-scoring or
-/// emitting — refreshes are not decisions).
-const DIRECTIVE_REFRESH_MARGIN: f32 = 0.25;
+// FREE-directive tuning (formation_shift_threshold / formation_deadzone /
+// directive_refresh_margin) is data-driven via `movement.priest` — see
+// `PriestMovementConfig` in movement_config.rs and the priest block in
+// assets/config/movement.ron (RON-first policy).
 
 /// Evaluate the Priest's movement posture (FREE/PRESSURED/ESCAPE) and
 /// issue/refresh a [`MovementDirective`] accordingly. Runs at the top of the
@@ -657,13 +600,10 @@ pub fn evaluate_priest_posture(
     // proximate threat voids the window; sub-cutoff windows (slow-adjusted)
     // are ignored. See `escape_window` for the full rule set.
     let escape_window_secs = if prev == Posture::Pressured && trigger {
-        let cc_remaining: Vec<Option<f32>> = ctx
-            .visible_enemies_within(entity, my_pos, shared.danger_radius)
-            .iter()
-            .map(|t| ctx.attacker_escape_window(t.entity))
-            .collect();
-        escape_window(
-            &cc_remaining,
+        escape_window_from(
+            ctx.visible_enemies_within(entity, my_pos, shared.danger_radius)
+                .iter()
+                .map(|t| ctx.attacker_escape_window(t.entity)),
             ctx.movement_slow_multiplier(entity),
             shared.escape_min_window,
         )
@@ -738,8 +678,10 @@ pub fn evaluate_priest_posture(
     }
 }
 
-/// PRESSURED tick: sticky anchor selection, hard commitment window, scored
-/// direction, directive issuance, transition/direction-change trace events.
+/// PRESSURED tick: thin wrapper over [`healer_pressured_tick_shared`] with the
+/// Priest's scorer weights, the kill target as the wand-pull source, and no
+/// retreat band (`fallback_range = None` — the Priest scores a repulsion step
+/// every re-evaluation rather than parking at a band like the Paladin).
 #[allow(clippy::too_many_arguments)]
 fn pressured_tick(
     commands: &mut Commands,
@@ -755,99 +697,22 @@ fn pressured_tick(
     transitioned: bool,
     prev: Posture,
 ) {
-    let shared = &movement.shared;
-
-    let anchor_info = select_sticky_anchor(entity, ctx, state, shared);
-
-    // Hard commitment window (R11): re-evaluation happens only once the
-    // committed window lapses (or the directive died — e.g. expired across a
-    // Flash Heal cast). The scorer's commitment bonus applies only AT
-    // re-evaluation; the two governors never stack.
-    let window_open =
-        directive.map_or(false, |d| now < d.committed_until && now < d.expires);
-    if window_open && !transitioned {
-        return;
-    }
-
-    // Threat set: visible enemies targeting me + any visible enemy inside
-    // the danger radius (an enemy in my face is a threat even while it
-    // targets someone else). BTreeMap dedupes in deterministic order.
-    let mut threat_positions: std::collections::BTreeMap<Entity, Vec3> = Default::default();
-    for t in ctx.enemies_targeting(entity) {
-        threat_positions.insert(t.entity, t.position);
-    }
-    for t in ctx.visible_enemies_within(entity, my_pos, shared.danger_radius) {
-        threat_positions.insert(t.entity, t.position);
-    }
-
-    // Wand pull while PRESSURED — but never toward an enemy that is itself
-    // in the threat set: drifting toward your own attacker would cancel the
-    // repulsion term at mid range and park the Priest at a standoff distance
-    // instead of escaping (observed in the statue probe before this guard).
-    let wand_target = combatant
-        .target
-        .filter(|t| !threat_positions.contains_key(t))
-        .and_then(|t| ctx.combatants.get(&t))
-        .filter(|i| i.is_alive)
-        .map(|i| i.position);
-
-    let inputs = ScorerInputs {
+    healer_pressured_tick_shared(
+        commands,
+        entity,
         my_pos,
-        lookahead: SCORER_LOOKAHEAD,
-        threats: threat_positions.into_values().collect(),
-        anchor: anchor_info.map(|i| AnchorConstraint {
-            pos: i.position,
-            heal_range: shared.heal_range,
-        }),
-        formation_point: None,
-        wand_target,
-        wand_range: shared.wand_range,
-        committed_direction: state.last_direction,
-    };
-    let chosen = score_directions(&compass_directions_16(), &inputs, &movement.priest.weights);
-    if chosen == Vec2::ZERO {
-        return; // defensive — 16 candidates always yield a direction
-    }
-
-    commands.entity(entity).try_insert(MovementDirective {
-        goal: MovementGoal::Direction(chosen),
-        expires: now + shared.directive_ttl,
-        committed_until: now + shared.commit_window,
-    });
-
-    let direction_changed = state
-        .last_direction
-        .map_or(true, |d| d.distance(chosen) > 1e-3);
-    state.last_direction = Some(chosen);
-
-    // Trace (R3): posture transitions and committed direction CHANGES only.
-    if transitioned || direction_changed {
-        if let Some(mut builder) = start_movement_event(decision_trace, ctx) {
-            if transitioned {
-                // ESCAPE → PRESSURED is the window-expiry exit, not a fresh
-                // pressure onset — trace it as EscapeWindowClosed.
-                let trigger = if prev == Posture::Escape {
-                    MovementTrigger::EscapeWindowClosed
-                } else {
-                    MovementTrigger::PressuredEnter
-                };
-                builder.transition(
-                    prev.into(),
-                    TracePosture::Pressured,
-                    trigger,
-                    MovementGoalKind::Direction,
-                );
-            } else {
-                builder.direction_change(
-                    TracePosture::Pressured,
-                    MovementTrigger::CommitExpired,
-                    MovementGoalKind::Direction,
-                );
-            }
-            builder.chosen_direction([chosen.x, chosen.y]);
-            builder.finish();
-        }
-    }
+        ctx,
+        state,
+        directive,
+        &movement.shared,
+        &movement.priest.weights,
+        combatant.target,
+        None,
+        now,
+        decision_trace,
+        transitioned,
+        prev,
+    );
 }
 
 /// FREE tick: formation-point anchoring (R5). Degenerate case (no living
@@ -878,6 +743,18 @@ fn free_tick(
         MovementTrigger::PressuredExit
     };
 
+    // Clear any directive committed under the prior posture on entry to FREE
+    // (mirrors `paladin_free_tick`). A PRESSURED Direction walk carries a
+    // ~1s TTL; without this it survives the transition and keeps driving the
+    // Priest along the stale vector — the executor lets a live directive own
+    // the frame — corrupting formation positioning and the commit-window
+    // anti-zigzag guarantee. The normal path below re-issues a fresh Point
+    // directive when the Priest is not already at the formation point; the
+    // degenerate (no-ally) path leaves none so legacy pursuit governs.
+    if transitioned {
+        commands.entity(entity).remove::<MovementDirective>();
+    }
+
     let Some(point) = compute_formation_point(entity, combatant, my_pos, ctx, movement) else {
         // DEGENERATE (R5/AE4): no formation directive; fall through to the
         // legacy ladder. Exit transitions still emit — goal_kind
@@ -900,8 +777,8 @@ fn free_tick(
     let my_xz = Vec2::new(my_pos.x, my_pos.z);
     let moved = state
         .last_point
-        .map_or(true, |lp| lp.distance(point_xz) > FORMATION_SHIFT_THRESHOLD);
-    let near = my_xz.distance(point_xz) <= FORMATION_DEADZONE;
+        .map_or(true, |lp| lp.distance(point_xz) > movement.priest.formation_shift_threshold);
+    let near = my_xz.distance(point_xz) <= movement.priest.formation_deadzone;
 
     let issue = |commands: &mut Commands| {
         commands.entity(entity).try_insert(MovementDirective {
@@ -912,10 +789,12 @@ fn free_tick(
     };
 
     if transitioned {
-        // PRESSURED → FREE: re-anchor to the formation immediately.
-        if !near {
-            issue(commands);
-        }
+        // PRESSURED/ESCAPE → FREE: re-anchor to the formation point. Issue
+        // unconditionally (even when already near it): the stale prior-posture
+        // directive was just removed above, so when near, a Point directive's
+        // arrival-hold is what parks the Priest at the backline — without it
+        // legacy pursuit would drag the Priest forward into fresh pressure.
+        issue(commands);
         state.last_point = Some(point_xz);
         if let Some(mut builder) = start_movement_event(decision_trace, ctx) {
             builder.transition(
@@ -939,7 +818,9 @@ fn free_tick(
             );
             builder.finish();
         }
-    } else if !near && directive.map_or(true, |d| d.expires - now < DIRECTIVE_REFRESH_MARGIN) {
+    } else if !near
+        && directive.map_or(true, |d| d.expires - now < movement.priest.directive_refresh_margin)
+    {
         // Keep the standing walk alive (post-cast gaps, TTL expiry) without
         // re-scoring or emitting — refreshes are not decisions.
         issue(commands);
@@ -964,22 +845,35 @@ fn compute_formation_point(
     movement: &MovementConfig,
 ) -> Option<Vec3> {
     let shared = &movement.shared;
-    let allies: Vec<&CombatantInfo> = ctx
-        .alive_allies()
-        .into_iter()
-        .filter(|a| a.entity != entity)
-        .collect();
-    if allies.is_empty() {
+    // Single pass over living non-pet allies (excluding self): accumulate the
+    // all-ally and engaged-ally position sums + counts together, instead of
+    // collecting two `Vec<&CombatantInfo>`. The formation anchors on engaged
+    // allies (those with an enemy target) when any are engaged, else on all
+    // allies (pre-contact). Bit-identical to the prior two-Vec version: the
+    // centroid is the same group's mean, summed in `alive_allies()` order.
+    let mut all_sum = Vec3::ZERO;
+    let mut all_count = 0u32;
+    let mut engaged_sum = Vec3::ZERO;
+    let mut engaged_count = 0u32;
+    for a in ctx.alive_allies() {
+        if a.entity == entity {
+            continue;
+        }
+        all_sum += a.position;
+        all_count += 1;
+        if a.target.is_some() {
+            engaged_sum += a.position;
+            engaged_count += 1;
+        }
+    }
+    if all_count == 0 {
         return None;
     }
-    let engaged: Vec<&CombatantInfo> = allies
-        .iter()
-        .copied()
-        .filter(|a| a.target.is_some())
-        .collect();
-    let group: &[&CombatantInfo] = if engaged.is_empty() { &allies } else { &engaged };
-    let centroid =
-        group.iter().fold(Vec3::ZERO, |acc, a| acc + a.position) / group.len() as f32;
+    let centroid = if engaged_count > 0 {
+        engaged_sum / engaged_count as f32
+    } else {
+        all_sum / all_count as f32
+    };
 
     // "Behind the line": offset away from the nearest visible enemy; with no
     // visible enemy (stealth pre-contact), away from arena center — trailing

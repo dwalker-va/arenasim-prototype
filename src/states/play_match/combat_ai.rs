@@ -21,6 +21,7 @@ pub use super::utils::spawn_speech_bubble;
 pub fn acquire_targets(
     countdown: Res<MatchCountdown>,
     config: Res<match_config::MatchConfig>,
+    movement_config: Res<crate::states::play_match::movement_config::MovementConfig>,
     mut combatants: Query<(Entity, &mut Combatant, &Transform, Option<&ActiveAuras>)>,
     pet_query: Query<&Pet>,
     mut decision_trace: ResMut<crate::states::play_match::decision_trace::DecisionTrace>,
@@ -191,10 +192,75 @@ pub fn acquire_targets(
             }
         } else if let Some(index) = kill_target_index {
             // Current target is valid, but check if configured kill target has become
-            // available (e.g., Rogue broke stealth) and should take priority
-            if let Some((kt_entity, _, stealthed, enemy_ss, _, _, immune, _)) = enemy_primary.get(index) {
-                if can_see(*stealthed, *enemy_ss) && !immune && combatant.target != Some(*kt_entity) {
-                    combatant.target = Some(*kt_entity);
+            // available (e.g., Rogue broke stealth) and should take priority —
+            // UNLESS a melee target-swap is currently sticky (bucket A, below),
+            // which deliberately holds a softer in-melee target for the
+            // hysteresis window. Without this gate the re-force would undo the
+            // swap every tick (ping-pong).
+            let swap_sticky = combatant.class.is_melee()
+                && decision_trace.current_sim_time - combatant.last_target_swap_time
+                    < movement_config.melee.swap_hysteresis;
+            if !swap_sticky {
+                if let Some((kt_entity, _, stealthed, enemy_ss, _, _, immune, _)) = enemy_primary.get(index) {
+                    if can_see(*stealthed, *enemy_ss) && !immune && combatant.target != Some(*kt_entity) {
+                        combatant.target = Some(*kt_entity);
+                    }
+                }
+            }
+        }
+
+        // ===== Bucket A: melee target-swap =====
+        // When a melee has chased its CURRENT target (configured kill target OR
+        // a nearest-acquired one — both stick once acquired) persistently out of
+        // melee reach and a softer enemy is already in melee, swap to it instead
+        // of chasing forever (the #1 "bot tell"). Runs AFTER the re-force above
+        // in the same tick, so for the configured case the kill target's
+        // intermediate write is never observed; the `swap_sticky` gate on that
+        // re-force holds the swap across the hysteresis window (no ping-pong).
+        if combatant.class.is_melee() {
+            if let Some((cur_entity, cur_pos, _, _, _, cur_health, _, _)) = combatant
+                .target
+                .and_then(|t| enemy_combatants.iter().find(|(e, ..)| *e == t))
+                .map(|t| *t)
+            {
+                let my_pos = transform.translation;
+                let now = decision_trace.current_sim_time;
+                let swap_cfg = &movement_config.melee;
+
+                // A change in the chase focus (re-acquisition, prior swap, the
+                // re-force above) restarts the chase clock so each new focus is
+                // pursued for the full hysteresis window before a swap is
+                // considered.
+                if combatant.last_kill_target != Some(cur_entity) {
+                    combatant.last_kill_target = Some(cur_entity);
+                    combatant.last_target_swap_time = now;
+                }
+
+                let out_of_reach = my_pos.distance(cur_pos) > swap_cfg.swap_range;
+                let chased_long_enough =
+                    now - combatant.last_target_swap_time >= swap_cfg.swap_hysteresis;
+                if out_of_reach && chased_long_enough {
+                    let candidates = enemy_combatants.iter().filter_map(
+                        |(e, pos, st, ss, _, hp, imm, is_pet)| {
+                            if *e == cur_entity || *is_pet || *imm || *hp <= 0.0 {
+                                return None;
+                            }
+                            if !can_see(*st, *ss) {
+                                return None;
+                            }
+                            Some((*e, my_pos.distance(*pos), *hp))
+                        },
+                    );
+                    if let Some(softer) = class_ai::select_softer_melee_target(
+                        cur_health,
+                        candidates,
+                        swap_cfg.swap_range,
+                        swap_cfg.swap_hp_margin,
+                    ) {
+                        combatant.target = Some(softer);
+                        combatant.last_kill_target = Some(softer);
+                        combatant.last_target_swap_time = now;
+                    }
                 }
             }
         }
