@@ -19,6 +19,16 @@
 - [ ] Diminishing returns for CC
 - [ ] Team summary totals on results screen
 - [ ] Silence CC type (prevent casting)
+- [ ] DoT stat scaling engine support — snapshot AP/SP into aura magnitude at
+      application time. DoT ticks are currently flat for every class; Serpent
+      Sting's origin requirement asked for AttackPower scaling and was amended
+      to flat pending this (see
+      docs/plans/2026-06-11-001-feat-serpent-sting-hunter-plan.md, Scope
+      Boundaries). Affects Corruption/UA/Curse of Agony tuning too.
+- [ ] Remaining-duration-aware Freezing Trap guard — trap anyway when the
+      blocking friendly DoT expires within ~1s (deferred from Serpent Sting v1,
+      reactive-binary guard). Pull forward if sweep data shows costly trap
+      suppression.
 
 ---
 
