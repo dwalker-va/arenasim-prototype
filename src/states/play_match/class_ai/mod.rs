@@ -25,6 +25,7 @@ pub mod pet_ai;
 pub mod cast_guard;
 pub mod combat_snapshot;
 pub(crate) mod healer_postures;
+pub(crate) mod paladin_postures;
 
 use bevy::prelude::*;
 use std::collections::BTreeMap;
@@ -197,6 +198,41 @@ impl<'a> CombatContext<'a> {
                 })
             })
             .unwrap_or(false)
+    }
+
+    /// The enemy healer — first alive non-pet Priest/Paladin in deterministic
+    /// entity order (BTreeMap), if any. Shared by bucket-A burst-during-CC and
+    /// the Hunter's freezing-trap targeting (which both want "the healer to
+    /// shut down"), replacing per-class `find_enemy_healer` copies.
+    pub fn enemy_healer(&self) -> Option<Entity> {
+        let my_team = self.self_info().map(|i| i.team).unwrap_or(0);
+        self.combatants
+            .iter()
+            .find(|(_, info)| {
+                info.team != my_team && info.is_alive && !info.is_pet && info.class.is_healer()
+            })
+            .map(|(entity, _)| *entity)
+    }
+
+    /// True when a living enemy healer exists AND is currently unable to cast
+    /// a heal — the bucket-A burst window. This is the CAST-PREVENTING CC
+    /// subset (Stun / Fear / Polymorph / Incapacitate), NOT [`is_ccd`]: a
+    /// rooted healer still heals freely, so Root must not open a burst window.
+    pub fn enemy_healer_is_cced(&self) -> bool {
+        let Some(healer) = self.enemy_healer() else {
+            return false;
+        };
+        self.active_auras.get(&healer).map_or(false, |auras| {
+            auras.iter().any(|a| {
+                matches!(
+                    a.effect_type,
+                    AuraType::Stun
+                        | AuraType::Fear
+                        | AuraType::Polymorph
+                        | AuraType::Incapacitate
+                )
+            })
+        })
     }
 
     /// Get all alive enemies (excluding pets)
@@ -456,6 +492,42 @@ impl<'a> CombatContext<'a> {
             .map(|info| TargetView::from_info(info, my_pos));
         Some(decision_trace.start_ability_decision(actor_view, target_view))
     }
+}
+
+// ============================================================================
+// Shared Targeting Utilities
+// ============================================================================
+
+/// Bucket A target-swap chooser (pure). Given the kill target's current HP and
+/// an iterator of eligible melee candidates `(entity, distance, current_health)`,
+/// returns the SOFTEST (lowest current HP) candidate within `swap_range` whose
+/// current HP is at least `hp_margin` (a fraction of the kill target's CURRENT
+/// HP) below it — so a swap is only offered when it meaningfully shortens
+/// time-to-kill, never for a trivial difference. Deterministic tie-break by
+/// entity. Returns `None` when nothing qualifies.
+///
+/// The caller is responsible for passing only ELIGIBLE candidates (alive,
+/// non-pet, visible, not immune) and excluding the current kill target itself.
+/// Kept context-free so it unit-tests in isolation and composes with the raw
+/// tuple lists in `acquire_targets`.
+pub fn select_softer_melee_target<I>(
+    kill_target_health: f32,
+    candidates: I,
+    swap_range: f32,
+    hp_margin: f32,
+) -> Option<Entity>
+where
+    I: IntoIterator<Item = (Entity, f32, f32)>,
+{
+    let threshold = kill_target_health * (1.0 - hp_margin);
+    candidates
+        .into_iter()
+        .filter(|(_, distance, _)| *distance <= swap_range)
+        .filter(|(_, _, health)| *health <= threshold)
+        .min_by(|(ea, _, ha), (eb, _, hb)| {
+            ha.partial_cmp(hb).unwrap().then(ea.cmp(eb))
+        })
+        .map(|(entity, _, _)| entity)
 }
 
 // ============================================================================

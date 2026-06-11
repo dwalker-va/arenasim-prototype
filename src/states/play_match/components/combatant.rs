@@ -178,6 +178,12 @@ pub struct Combatant {
     pub global_cooldown: f32,
     /// When > 0, combatant will move away from enemies (kiting). Decrements over time.
     pub kiting_timer: f32,
+    /// Bucket A target-swap: sim-time of this combatant's last kill-target swap
+    /// (the anti-ping-pong hysteresis floor). 0.0 = never swapped.
+    pub last_target_swap_time: f32,
+    /// Bucket A target-swap: the kill target as of the previous acquisition, so
+    /// a target change by ANY path resets the swap hysteresis timer.
+    pub last_kill_target: Option<Entity>,
     /// Rogue-specific: which opener to use from stealth (Ambush or Cheap Shot)
     pub rogue_opener: RogueOpener,
     /// Warlock-specific: which curse to apply to each enemy target (indexed by enemy slot)
@@ -259,6 +265,8 @@ impl Combatant {
             ability_cooldowns: std::collections::HashMap::new(),
             global_cooldown: 0.0,
             kiting_timer: 0.0,
+            last_target_swap_time: 0.0,
+            last_kill_target: None,
             rogue_opener: RogueOpener::default(),
             warlock_curse_prefs: Vec::new(),
             warrior_shout: WarriorShout::default(),

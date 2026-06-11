@@ -112,6 +112,24 @@ pub fn decide_warrior_action(
         return true;
     }
 
+    // Burst-during-CC (bucket A): while the enemy healer is hard-CC'd and
+    // can't react, land Mortal Strike (the hard hit + Mortal Wounds healing
+    // debuff) BEFORE spending the GCD refreshing the Rend DoT. Outside the
+    // window the normal order holds (Rend, then Mortal Strike). Each ability
+    // is still attempted at most once per tick (the `!burst_window` guard on
+    // the trailing Mortal Strike), keeping the decision trace clean.
+    let burst_window = ctx.enemy_healer_is_cced();
+
+    if burst_window
+        && try_mortal_strike(
+            commands, combat_log, game_rng, abilities, entity, combatant, my_pos, auras,
+            target_entity, target_pos, ctx, instant_attacks, &mut builder,
+        )
+    {
+        builder.finish();
+        return true;
+    }
+
     // Priority 3: Rend (DoT)
     if try_rend(
         commands,
@@ -130,22 +148,25 @@ pub fn decide_warrior_action(
         return true;
     }
 
-    // Priority 4: Mortal Strike
-    if try_mortal_strike(
-        commands,
-        combat_log,
-        game_rng,
-        abilities,
-        entity,
-        combatant,
-        my_pos,
-        auras,
-        target_entity,
-        target_pos,
-        ctx,
-        instant_attacks,
-        &mut builder,
-    ) {
+    // Priority 4: Mortal Strike (normal-order attempt — skipped when the burst
+    // window already attempted it above).
+    if !burst_window
+        && try_mortal_strike(
+            commands,
+            combat_log,
+            game_rng,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            target_entity,
+            target_pos,
+            ctx,
+            instant_attacks,
+            &mut builder,
+        )
+    {
         builder.finish();
         return true;
     }

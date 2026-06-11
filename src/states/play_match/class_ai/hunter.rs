@@ -205,8 +205,7 @@ pub fn decide_hunter_action(
         return true;
     }
 
-    let freezing_trap_target = find_enemy_healer(combatant.team, ctx)
-        .or(Some(target_entity));
+    let freezing_trap_target = ctx.enemy_healer().or(Some(target_entity));
     if let Some(trap_target) = freezing_trap_target {
         if let Some(trap_target_info) = ctx.combatants.get(&trap_target) {
             if trap_target_info.is_alive {
@@ -269,17 +268,6 @@ fn find_nearest_enemy(self_entity: Entity, my_team: u8, my_pos: Vec3, ctx: &Comb
     }
     let distance = nearest.map(|(_, d)| d);
     (nearest, distance)
-}
-
-fn find_enemy_healer(my_team: u8, ctx: &CombatContext) -> Option<Entity> {
-    ctx.combatants.iter()
-        .find(|(_, info)| {
-            info.team != my_team
-                && info.is_alive
-                && !info.is_pet
-                && info.class.is_healer()
-        })
-        .map(|(entity, _)| *entity)
 }
 
 fn is_target_slowed(target: Entity, ctx: &CombatContext) -> bool {
