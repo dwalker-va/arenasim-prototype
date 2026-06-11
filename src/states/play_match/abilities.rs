@@ -93,6 +93,7 @@ pub enum AbilityType {
     AimedShot,        // Hunter cast-time physical damage + healing reduction (35yd, 10s CD)
     ArcaneShot,       // Hunter instant Arcane damage (35yd, 6s CD)
     ConcussiveShot,   // Hunter instant slow (35yd, 12s CD)
+    SerpentSting,     // Hunter instant Nature DoT (35yd, no CD, pure DoT)
     Disengage,        // Hunter backward leap (~15 yards, 25s CD, no range req)
     FreezingTrap,     // Hunter trap — incapacitates first enemy (25s CD)
     FrostTrap,        // Hunter trap — creates persistent slow zone (20s CD)
