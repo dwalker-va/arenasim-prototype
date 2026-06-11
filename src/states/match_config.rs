@@ -264,8 +264,11 @@ impl CharacterClass {
     }
 
     /// Whether this class converts damage taken into rage (see the 15%
-    /// rage-from-damage-taken sites in combat_core / auras). DoT-applying AIs
-    /// check this to avoid feeding the target free resource.
+    /// rage-from-damage-taken sites in combat_core / auras). The Hunter's
+    /// Serpent Sting checks this to avoid feeding the target free resource;
+    /// Warlock DoTs deliberately accept the rage feed (their damage outweighs
+    /// it). Must stay in sync with the class→ResourceType mapping in
+    /// `Combatant::new`.
     pub fn gains_rage_from_damage(&self) -> bool {
         matches!(self, CharacterClass::Warrior)
     }

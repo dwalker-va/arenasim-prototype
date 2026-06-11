@@ -104,7 +104,11 @@ OPPONENTS=("Warrior" "Mage" "Rogue" "Priest" "Warlock" "Paladin")
 # Write CSV header
 echo "team1,team2,runs,team1_wins,team2_wins,draws,team1_winrate,draw_rate,avg_duration_secs" > "$OUT_CSV"
 
-echo "Running Hunter+${HEALER} vs <class>+${HEALER} 2v2 sweep: N=${N} per matchup, seed_base=${SEED_BASE}"
+if [[ "$SWAP_SIDES" -eq 1 ]]; then
+    echo "Running <class>+${HEALER} vs Hunter+${HEALER} 2v2 sweep (swapped sides): N=${N} per matchup, seed_base=${SEED_BASE}"
+else
+    echo "Running Hunter+${HEALER} vs <class>+${HEALER} 2v2 sweep: N=${N} per matchup, seed_base=${SEED_BASE}"
+fi
 echo "Output: $OUT_CSV"
 echo ""
 

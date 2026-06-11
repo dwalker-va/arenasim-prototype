@@ -226,8 +226,12 @@ pub fn decide_hunter_action(
         // Two-way CC guard (R8/R9): never aim Freezing Trap at a target the
         // team has DoT'd — the first tick breaks the incapacitate
         // (break_on_damage: 0.0). Reactive and binary: skip this tick, no
-        // fallthrough to a second candidate.
-        if ctx.has_friendly_dots_on_target(trap_target) {
+        // fallthrough to a second candidate. Only traced when the trap is
+        // otherwise castable — while it's on cooldown, fall through so the
+        // trace records OnCooldown instead of masking it as the DoT guard.
+        if ctx.has_friendly_dots_on_target(trap_target)
+            && !combatant.ability_cooldowns.contains_key(&AbilityType::FreezingTrap)
+        {
             builder.reject(AbilityType::FreezingTrap, RejectionReason::FriendlyBreakableCC);
         } else if try_place_trap_at(
             commands, combat_log, abilities, entity, combatant, my_pos,
@@ -598,9 +602,10 @@ fn try_serpent_sting(
     // Mana floor: the sting is a luxury good, the kiting toolkit (Concussive /
     // Frost Trap / Disengage) is survival. Sweep data showed the sting draining
     // the fixed 240 pool and starving mobility vs melee (1v1 vs Warrior
-    // 100% -> 34% without this floor).
+    // 100% -> 34% without this floor). The sting's own cost counts against the
+    // floor so the reserve holds AFTER the cast, not just before it.
     const STING_MANA_FLOOR: f32 = 100.0;
-    if combatant.current_mana < STING_MANA_FLOOR {
+    if combatant.current_mana - def.mana_cost < STING_MANA_FLOOR {
         builder.reject(ability, RejectionReason::PreconditionUnmet {
             note: "mana reserved for kiting toolkit".to_string(),
         });
@@ -619,14 +624,17 @@ fn try_serpent_sting(
     }
 
     // Trap-candidate reservation: don't sting the Freezing Trap candidate while
-    // the trap is ready — a ticking sting would suppress the trap permanently
-    // via the friendly-DoT guard (the kill target is often the enemy healer,
-    // which is exactly who the trap wants). Once the trap is on cooldown the
-    // sting resumes freely. Reactive state check, not predictive sequencing.
-    let trap_ready = !combatant.ability_cooldowns.contains_key(&AbilityType::FreezingTrap)
-        && abilities.get(&AbilityType::FreezingTrap)
-            .is_some_and(|trap_def| combatant.current_mana >= trap_def.mana_cost);
-    if trap_ready && freezing_trap_candidate(ctx, target_entity) == target_entity {
+    // the trap is poised to fire at it — a ticking sting would suppress the
+    // trap permanently via the friendly-DoT guard (the kill target is often the
+    // enemy healer, which is exactly who the trap wants). Once the trap is on
+    // cooldown the sting resumes freely. "Poised" requires the candidate to be
+    // free of OTHER friendly DoTs too: if a teammate's Corruption already
+    // blocks the trap, reserving the sting as well would deadlock both
+    // abilities for the rest of the match. (Mana isn't checked — the sting
+    // floor above already guarantees the trap's cost.)
+    let trap_poised = !combatant.ability_cooldowns.contains_key(&AbilityType::FreezingTrap)
+        && !ctx.has_friendly_dots_on_target(target_entity);
+    if trap_poised && freezing_trap_candidate(ctx, target_entity) == target_entity {
         builder.reject(ability, RejectionReason::PreconditionUnmet {
             note: "trap candidate reserved for Freezing Trap".to_string(),
         });
@@ -650,7 +658,9 @@ fn try_serpent_sting(
 
     builder.choose(ability, Some(target_entity), true);
 
-    let projectile_speed = def.projectile_speed.unwrap_or(45.0);
+    let projectile_speed = def
+        .projectile_speed
+        .expect("Serpent Sting projectile_speed is contract-tested (ability_tests.rs)");
     commands.spawn((
         Projectile {
             caster: entity,

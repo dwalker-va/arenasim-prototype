@@ -490,6 +490,15 @@ fn test_serpent_sting_pure_dot_contract() {
     let abilities = load_abilities();
     let def = abilities.get_unchecked(&AbilityType::SerpentSting);
 
+    // Identity key: the AI's dedup, the venom-pulse detector/cleanup, and the
+    // combat-log entries all string-match this exact name. Renaming it in the
+    // RON would silently break dedup (sting recast every off-GCD tick) and
+    // visuals — this pin turns that into a test failure.
+    assert_eq!(
+        def.name, "Serpent Sting",
+        "AI dedup and venom-pulse visuals key on this exact name"
+    );
+
     // Pure DoT: zero direct damage keeps is_damage() false, which routes the
     // projectile through the non-damage aura branch — impact can never
     // contribute to break_on_damage CC thresholds.
