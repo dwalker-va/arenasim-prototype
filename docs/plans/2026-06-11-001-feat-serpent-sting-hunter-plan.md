@@ -1,7 +1,7 @@
 ---
 title: "feat: Add Serpent Sting ability for Hunter"
 type: feat
-status: active
+status: completed
 date: 2026-06-11
 origin: docs/brainstorms/2026-06-10-serpent-sting-hunter-requirements.md
 ---
