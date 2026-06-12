@@ -751,6 +751,34 @@
             )),
         ),
 
+        // Serpent Sting: Instant Nature DoT — mana-efficient kiting damage
+        // WoW Classic Spell ID 13550 family, adapted: pure DoT (zero direct damage
+        // so is_damage() stays false and the projectile applies the aura via the
+        // non-damage branch — impact can never break break_on_damage CC).
+        // DoT ticks are flat magnitude (engine convention; no AP scaling at tick
+        // time — see docs/plans/2026-06-11-001-feat-serpent-sting-hunter-plan.md).
+        SerpentSting: (
+            name: "Serpent Sting",
+            icon: "icons/abilities/ability_hunter_quickshot.jpg",
+            cast_time: 0.0,
+            range: 35.0,
+            min_range: Some(8.0),
+            mana_cost: 15.0,
+            cooldown: 0.0,
+            applies_aura: Some((
+                aura_type: DamageOverTime,
+                duration: 15.0,
+                magnitude: 10.0,  // flat per tick; 5 ticks = 50 total (vs Corruption 60/25 mana)
+                tick_interval: 3.0,
+            )),
+            spell_school: Nature,
+            projectile_speed: Some(45.0),  // must stay >= 35: flight window inside GCD (KTD 4)
+            projectile_visuals: Some((
+                color: (0.5, 1.0, 0.4),
+                emissive: (0.75, 2.0, 0.6),
+            )),
+        ),
+
         // Disengage: Backward leap to escape dead zone
         // TBC ability adapted for Classic — instant, 25s CD, no range requirement
         Disengage: (

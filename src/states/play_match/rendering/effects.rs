@@ -1738,6 +1738,130 @@ pub fn spawn_ua_glow_for_afflicted(
     }
 }
 
+// ==============================================================================
+// Serpent Sting Venom Pulse
+// ==============================================================================
+//
+// Spawn/update/cleanup three-system pattern plus an aura detector, mirroring
+// the UA glow above. Venom-green, waist-height, fast ~1.5 Hz pulse — distinct
+// from UA's chest-height deep-violet 0.5 Hz glow so stacked sting + UA reads
+// as two independent effects (plan R14 / AE4).
+
+/// Shared sting-aura predicate for the detector and cleanup systems, so the
+/// two can't drift apart (the same key the Hunter AI's dedup uses).
+fn has_serpent_sting_aura(auras: &ActiveAuras) -> bool {
+    auras.auras.iter().any(|a| {
+        a.effect_type == AuraType::DamageOverTime && a.ability_name == "Serpent Sting"
+    })
+}
+
+/// Detect targets that have a Serpent Sting aura but no `SerpentVenomPulse`
+/// visual yet, and spawn the pulse. Cleanup is handled by `cleanup_venom_pulse`
+/// once the sting aura is no longer present.
+pub fn spawn_venom_pulse_for_stung(
+    mut commands: Commands,
+    stung: Query<(Entity, &ActiveAuras)>,
+    existing_pulses: Query<&SerpentVenomPulse>,
+) {
+    use std::collections::HashSet;
+    let already_pulsing: HashSet<Entity> = existing_pulses.iter().map(|p| p.target).collect();
+
+    for (entity, auras) in stung.iter() {
+        if has_serpent_sting_aura(auras) && !already_pulsing.contains(&entity) {
+            commands.spawn((
+                SerpentVenomPulse { target: entity, phase: 0.0 },
+                PlayMatchEntity,
+            ));
+        }
+    }
+}
+
+/// Spawn the venom pulse mesh when a `SerpentVenomPulse` component is added.
+pub fn spawn_venom_pulse_visuals(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    new_pulses: Query<(Entity, &SerpentVenomPulse), (Added<SerpentVenomPulse>, Without<Mesh3d>)>,
+    transforms: Query<&Transform, Without<SerpentVenomPulse>>,
+) {
+    for (pulse_entity, pulse) in new_pulses.iter() {
+        let Ok(target_transform) = transforms.get(pulse.target) else {
+            continue;
+        };
+
+        // Radius must exceed the body capsule's 0.5 radius (Capsule3d::new(0.5, 1.5))
+        // or the sphere sits entirely inside the opaque body and is depth-rejected —
+        // invisible. 0.65 pokes through as a venom band around the lower torso.
+        let mesh = meshes.add(Sphere::new(0.65));
+        // Spawn at the update formula's phase-0 values (beat 0.5 → alpha 0.65,
+        // intensity 0.75, scale 1.1) so the first update frame doesn't visibly snap.
+        // AlphaMode::Add is inherently translucent — solidity comes from heat, so
+        // the emissive runs in the codebase's 2-4x range (cf. BacklashBurst).
+        let material = materials.add(StandardMaterial {
+            base_color: Color::srgba(0.25, 0.80, 0.15, 0.65),
+            emissive: LinearRgba::new(0.675, 2.25, 0.45, 1.0),
+            alpha_mode: AlphaMode::Add,
+            unlit: true,
+            ..default()
+        });
+
+        let position = target_transform.translation + Vec3::Y * 0.4;
+        commands.entity(pulse_entity).try_insert((
+            Mesh3d(mesh),
+            MeshMaterial3d(material),
+            Transform::from_translation(position).with_scale(Vec3::splat(1.1)),
+        ));
+    }
+}
+
+/// Update the venom pulse: follow target at waist height, pulse at ~1.5 Hz.
+pub fn update_venom_pulse(
+    time: Res<Time>,
+    mut pulses: Query<(&mut SerpentVenomPulse, &mut Transform, &MeshMaterial3d<StandardMaterial>)>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    transforms: Query<&Transform, Without<SerpentVenomPulse>>,
+) {
+    let dt = time.delta_secs();
+    for (mut pulse, mut pulse_transform, material_handle) in pulses.iter_mut() {
+        pulse.phase += dt;
+
+        if let Ok(target_transform) = transforms.get(pulse.target) {
+            pulse_transform.translation = target_transform.translation + Vec3::Y * 0.4;
+        }
+
+        // 1.5 Hz pulse — period ~0.67s, 3x UA's cadence so the two read apart.
+        // The scale breathing (1.0 → 1.2) is the noticeability carrier: motion
+        // reads at a glance where a brightness wobble alone gets lost.
+        let beat = (pulse.phase * std::f32::consts::TAU * 1.5).sin() * 0.5 + 0.5; // [0,1]
+        let alpha = 0.45 + 0.40 * beat;
+        let intensity = 0.50 + 0.50 * beat;
+        pulse_transform.scale = Vec3::splat(1.0 + 0.2 * beat);
+
+        if let Some(material) = materials.get_mut(&material_handle.0) {
+            material.base_color = Color::srgba(0.25, 0.80, 0.15, alpha);
+            material.emissive = LinearRgba::new(0.90 * intensity, 3.00 * intensity, 0.60 * intensity, 1.0);
+        }
+    }
+}
+
+/// Despawn the venom pulse when its target loses the sting aura (or dies).
+pub fn cleanup_venom_pulse(
+    mut commands: Commands,
+    pulses: Query<(Entity, &SerpentVenomPulse)>,
+    targets: Query<&ActiveAuras>,
+) {
+    for (pulse_entity, pulse) in pulses.iter() {
+        let still_stung = targets
+            .get(pulse.target)
+            .map(has_serpent_sting_aura)
+            .unwrap_or(false);
+
+        if !still_stung {
+            commands.entity(pulse_entity).despawn();
+        }
+    }
+}
+
 // Silence visibility note: an earlier iteration spawned a dedicated "Silenced"
 // floating combat text on apply, but that diverged from how Stun / Fear / Polymorph
 // surface to viewers. Those CC types use the `[CC]` combat-log entry plus the

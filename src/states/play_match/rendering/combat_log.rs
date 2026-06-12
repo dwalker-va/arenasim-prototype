@@ -437,6 +437,7 @@ fn get_ability_abbreviation(ability: &str) -> &'static str {
         "Sinister Strike" => "SS",
         "Kidney Shot" => "KS",
         "Corruption" => "CO",
+        "Serpent Sting" => "ST",
         "Shadow Bolt" => "SB",
         "Fear" => "FE",
         "Pummel" => "PM",
@@ -461,6 +462,8 @@ fn get_ability_icon_color(ability: &str) -> egui::Color32 {
         "Charge" | "Rend" | "Mortal Strike" | "Heroic Strike" | "Pummel" => egui::Color32::from_rgb(160, 100, 60),
         // Rogue (yellow)
         "Ambush" | "Sinister Strike" | "Kidney Shot" | "Kick" => egui::Color32::from_rgb(180, 160, 60),
+        // Nature (green)
+        "Serpent Sting" => egui::Color32::from_rgb(100, 170, 60),
         // Default
         _ => egui::Color32::from_rgb(100, 100, 100),
     }

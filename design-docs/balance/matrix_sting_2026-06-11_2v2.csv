@@ -1,0 +1,7 @@
+team1,team2,runs,team1_wins,team2_wins,draws,team1_winrate,draw_rate,avg_duration_secs
+Hunter+Priest,Warrior+Priest,100,19,81,0,0.1900,0.0000,86.62
+Hunter+Priest,Mage+Priest,100,0,100,0,0.0000,0.0000,52.27
+Hunter+Priest,Rogue+Priest,100,8,92,0,0.0800,0.0000,69.70
+Hunter+Priest,Priest+Priest,100,100,0,0,1.0000,0.0000,84.86
+Hunter+Priest,Warlock+Priest,100,0,100,0,0.0000,0.0000,61.18
+Hunter+Priest,Paladin+Priest,100,30,0,70,0.3000,0.7000,127.21

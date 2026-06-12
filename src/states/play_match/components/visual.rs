@@ -164,6 +164,18 @@ pub struct UnstableAfflictionGlow {
     pub phase: f32,
 }
 
+/// Visual effect indicating a combatant has Serpent Sting active.
+/// Venom-green, sits low on the body (waist height vs UA's chest height) and
+/// pulses fast at ~1.5Hz so it reads independently from UA's slow violet
+/// 0.5Hz glow when both DoTs are stacked on the target.
+#[derive(Component)]
+pub struct SerpentVenomPulse {
+    /// The stung target — pulse follows this entity until the sting expires/dispels.
+    pub target: Entity,
+    /// Phase accumulator (seconds) used to drive the pulse.
+    pub phase: f32,
+}
+
 /// Visual effect spawned on the dispeller the frame UA backlash fires.
 /// Distinct from `DispelBurst`: ~2x particle count, dark-violet shadow color,
 /// snappier 0.3s lifetime — reads as "impact" rather than "sparkle".

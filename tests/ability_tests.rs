@@ -6,7 +6,7 @@
 //! - Damage/healing abilities have appropriate scaling
 //! - Spell schools are correctly assigned
 
-use arenasim::states::play_match::{AbilityType, SpellSchool, ScalingStat, AbilityDefinitions};
+use arenasim::states::play_match::{AbilityType, AuraType, SpellSchool, ScalingStat, AbilityDefinitions};
 
 // =============================================================================
 // Ability Definition Validation Tests
@@ -478,4 +478,62 @@ fn test_shield_abilities_apply_absorb_auras() {
             aura.magnitude
         );
     }
+}
+
+#[test]
+fn test_serpent_sting_pure_dot_contract() {
+    // Serpent Sting's design invariants (see
+    // docs/plans/2026-06-11-001-feat-serpent-sting-hunter-plan.md, KTDs 1/4):
+    // pure DoT and a projectile fast enough that the flight window stays
+    // inside the GCD. Tuning edits may change magnitude/duration/mana freely;
+    // these properties must hold.
+    let abilities = load_abilities();
+    let def = abilities.get_unchecked(&AbilityType::SerpentSting);
+
+    // Identity key: the AI's dedup, the venom-pulse detector/cleanup, and the
+    // combat-log entries all string-match this exact name. Renaming it in the
+    // RON would silently break dedup (sting recast every off-GCD tick) and
+    // visuals — this pin turns that into a test failure.
+    assert_eq!(
+        def.name, "Serpent Sting",
+        "AI dedup and venom-pulse visuals key on this exact name"
+    );
+
+    // Pure DoT: zero direct damage keeps is_damage() false, which routes the
+    // projectile through the non-damage aura branch — impact can never
+    // contribute to break_on_damage CC thresholds.
+    assert!(
+        !def.is_damage(),
+        "Serpent Sting must stay a pure DoT (zero direct-damage fields); \
+         direct damage would let the projectile impact break friendly CC"
+    );
+
+    // Instant and cooldown-free (the AI never inserts a cooldown for it).
+    assert_eq!(def.cast_time, 0.0, "Serpent Sting must be instant");
+    assert_eq!(def.cooldown, 0.0, "Serpent Sting must have no cooldown");
+
+    // Projectile speed >= 35: worst-case flight (~35yd fleeing target) lands
+    // inside the 1.5s GCD, so the next decision tick always sees the applied
+    // aura — no self-double-cast and no in-flight trap-guard hole.
+    let speed = def
+        .projectile_speed
+        .expect("Serpent Sting must be a projectile");
+    assert!(
+        speed >= 35.0,
+        "Serpent Sting projectile_speed {} reopens the in-flight dedup window; keep >= 35",
+        speed
+    );
+
+    // DoT aura shape: ticking DamageOverTime that never self-breaks.
+    let aura = def
+        .applies_aura
+        .as_ref()
+        .expect("Serpent Sting must apply a DoT aura");
+    assert_eq!(aura.aura_type, AuraType::DamageOverTime);
+    assert!(aura.tick_interval > 0.0, "DoT must tick");
+    assert!(aura.magnitude > 0.0, "DoT ticks must deal damage");
+    assert!(
+        aura.break_on_damage < 0.0,
+        "Serpent Sting's own aura must never break on damage"
+    );
 }

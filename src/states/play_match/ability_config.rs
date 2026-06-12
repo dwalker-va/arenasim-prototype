@@ -321,6 +321,7 @@ impl AbilityDefinitions {
             AbilityType::AimedShot,
             AbilityType::ArcaneShot,
             AbilityType::ConcussiveShot,
+            AbilityType::SerpentSting,
             AbilityType::Disengage,
             AbilityType::FreezingTrap,
             AbilityType::FrostTrap,

@@ -7,12 +7,16 @@
 # from src/headless/matrix.rs:217.
 #
 # Usage:
-#   ./scripts/hunter_2v2_matrix.sh [N] [--seed-base SEED] [--out OUT_CSV]
+#   ./scripts/hunter_2v2_matrix.sh [N] [--seed-base SEED] [--out OUT_CSV] [--swap-sides]
 #
 # Arguments:
 #   N             Number of seeds per matchup (default: 100)
 #   --seed-base   Base RNG seed; each match gets seed = base + run_idx (default: 0)
 #   --out         Output CSV path (default: match_logs/hunter_2v2_<timestamp>.csv)
+#   --swap-sides  Run the transposed ordering (<class>+Priest as team1, Hunter+Priest
+#                 as team2). Pair a normal and a --swap-sides run at the same seeds to
+#                 compute side-symmetrized cells (see docs/solutions/implementation-
+#                 patterns/mirror-asymmetry-side-symmetrized-measurement.md).
 #
 # Output:
 #   CSV columns: team1,team2,runs,team1_wins,team2_wins,draws,team1_winrate,draw_rate,avg_duration_secs
@@ -24,6 +28,7 @@ set -e
 N=100
 SEED_BASE=0
 OUT_CSV=""
+SWAP_SIDES=0
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -36,6 +41,10 @@ while [[ $# -gt 0 ]]; do
             OUT_CSV="$2"
             shift 2
             ;;
+        --swap-sides)
+            SWAP_SIDES=1
+            shift
+            ;;
         --help|-h)
             cat <<'USAGE'
 Hunter 2v2 Matrix Sweep
@@ -44,12 +53,14 @@ Runs N matches per matchup for Hunter+Priest vs each-class+Priest (6 matchups)
 and aggregates winrates into a CSV byte-compatible with the 1v1 matrix output.
 
 Usage:
-  ./scripts/hunter_2v2_matrix.sh [N] [--seed-base SEED] [--out OUT_CSV]
+  ./scripts/hunter_2v2_matrix.sh [N] [--seed-base SEED] [--out OUT_CSV] [--swap-sides]
 
 Arguments:
   N             Number of seeds per matchup (default: 100)
   --seed-base   Base RNG seed (default: 0)
   --out         Output CSV path (default: match_logs/hunter_2v2_<timestamp>.csv)
+  --swap-sides  Run the transposed ordering (<class>+Priest as team1) for
+                side-symmetrized measurement
 
 CSV columns: team1,team2,runs,team1_wins,team2_wins,draws,team1_winrate,draw_rate,avg_duration_secs
 USAGE
@@ -93,7 +104,11 @@ OPPONENTS=("Warrior" "Mage" "Rogue" "Priest" "Warlock" "Paladin")
 # Write CSV header
 echo "team1,team2,runs,team1_wins,team2_wins,draws,team1_winrate,draw_rate,avg_duration_secs" > "$OUT_CSV"
 
-echo "Running Hunter+${HEALER} vs <class>+${HEALER} 2v2 sweep: N=${N} per matchup, seed_base=${SEED_BASE}"
+if [[ "$SWAP_SIDES" -eq 1 ]]; then
+    echo "Running <class>+${HEALER} vs Hunter+${HEALER} 2v2 sweep (swapped sides): N=${N} per matchup, seed_base=${SEED_BASE}"
+else
+    echo "Running Hunter+${HEALER} vs <class>+${HEALER} 2v2 sweep: N=${N} per matchup, seed_base=${SEED_BASE}"
+fi
 echo "Output: $OUT_CSV"
 echo ""
 
@@ -103,7 +118,9 @@ for opp in "${OPPONENTS[@]}"; do
     DRAWS=0
     TOTAL_DURATION="0.0"
 
-    matchup_label="Hunter+${HEALER}_vs_${opp}+${HEALER}"
+    SIDE_A="Hunter"; SIDE_B="${opp}"
+    if [[ "$SWAP_SIDES" -eq 1 ]]; then SIDE_A="${opp}"; SIDE_B="Hunter"; fi
+    matchup_label="${SIDE_A}+${HEALER}_vs_${SIDE_B}+${HEALER}"
     echo -n "  ${matchup_label}: "
 
     for run_idx in $(seq 0 $((N - 1))); do
@@ -113,8 +130,8 @@ for opp in "${OPPONENTS[@]}"; do
 
         cat > "$CFG_PATH" <<EOF
 {
-  "team1": ["Hunter", "${HEALER}"],
-  "team2": ["${opp}", "${HEALER}"],
+  "team1": ["${SIDE_A}", "${HEALER}"],
+  "team2": ["${SIDE_B}", "${HEALER}"],
   "random_seed": ${SEED},
   "max_duration_secs": 120,
   "output_path": "${LOG_PATH}"
@@ -151,7 +168,7 @@ EOF
     # CSV row uses paired-team identifiers in the team1/team2 columns to mirror
     # the 1v1 matrix CSV shape (single value per side). The 2v2 nature is
     # encoded in the pair label.
-    echo "Hunter+${HEALER},${opp}+${HEALER},${N},${T1_WINS},${T2_WINS},${DRAWS},${T1_WINRATE},${DRAW_RATE},${AVG_DURATION}" >> "$OUT_CSV"
+    echo "${SIDE_A}+${HEALER},${SIDE_B}+${HEALER},${N},${T1_WINS},${T2_WINS},${DRAWS},${T1_WINRATE},${DRAW_RATE},${AVG_DURATION}" >> "$OUT_CSV"
 
     echo "T1 ${T1_WINS}/${N}, T2 ${T2_WINS}/${N}, draws ${DRAWS} (avg ${AVG_DURATION}s)"
 done

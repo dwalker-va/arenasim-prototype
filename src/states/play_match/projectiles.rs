@@ -20,6 +20,7 @@ fn is_arrow_projectile(ability: AbilityType) -> bool {
         AbilityType::AimedShot
             | AbilityType::ArcaneShot
             | AbilityType::ConcussiveShot
+            | AbilityType::SerpentSting
     )
 }
 

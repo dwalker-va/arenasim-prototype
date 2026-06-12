@@ -222,6 +222,19 @@ impl Plugin for StatesPlugin {
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_state(GameState::PlayMatch)),
             )
+            // Serpent Sting visuals: venom pulse on stung targets
+            // (graphical only — never registered in headless systems.rs).
+            .add_systems(
+                Update,
+                (
+                    play_match::spawn_venom_pulse_for_stung, // Detect sting aura and spawn pulse
+                    play_match::spawn_venom_pulse_visuals,   // Build mesh for new pulses
+                    play_match::update_venom_pulse,          // Pulse and follow target
+                    play_match::cleanup_venom_pulse,         // Despawn when sting is gone
+                )
+                    .after(CombatSystemPhase::CombatResolution)
+                    .run_if(in_state(GameState::PlayMatch)),
+            )
             // Drain Life beam visual effects (separate group to avoid tuple size limits)
             .add_systems(
                 Update,
