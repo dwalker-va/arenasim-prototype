@@ -1793,11 +1793,13 @@ pub fn spawn_venom_pulse_visuals(
         // or the sphere sits entirely inside the opaque body and is depth-rejected —
         // invisible. 0.65 pokes through as a venom band around the lower torso.
         let mesh = meshes.add(Sphere::new(0.65));
-        // Spawn at the update formula's phase-0 values (beat 0.5 → alpha 0.375,
+        // Spawn at the update formula's phase-0 values (beat 0.5 → alpha 0.65,
         // intensity 0.75, scale 1.1) so the first update frame doesn't visibly snap.
+        // AlphaMode::Add is inherently translucent — solidity comes from heat, so
+        // the emissive runs in the codebase's 2-4x range (cf. BacklashBurst).
         let material = materials.add(StandardMaterial {
-            base_color: Color::srgba(0.15, 0.50, 0.10, 0.375),
-            emissive: LinearRgba::new(0.3375, 1.125, 0.225, 1.0),
+            base_color: Color::srgba(0.25, 0.80, 0.15, 0.65),
+            emissive: LinearRgba::new(0.675, 2.25, 0.45, 1.0),
             alpha_mode: AlphaMode::Add,
             unlit: true,
             ..default()
@@ -1831,13 +1833,13 @@ pub fn update_venom_pulse(
         // The scale breathing (1.0 → 1.2) is the noticeability carrier: motion
         // reads at a glance where a brightness wobble alone gets lost.
         let beat = (pulse.phase * std::f32::consts::TAU * 1.5).sin() * 0.5 + 0.5; // [0,1]
-        let alpha = 0.20 + 0.35 * beat;
+        let alpha = 0.45 + 0.40 * beat;
         let intensity = 0.50 + 0.50 * beat;
         pulse_transform.scale = Vec3::splat(1.0 + 0.2 * beat);
 
         if let Some(material) = materials.get_mut(&material_handle.0) {
-            material.base_color = Color::srgba(0.15, 0.50, 0.10, alpha);
-            material.emissive = LinearRgba::new(0.45 * intensity, 1.50 * intensity, 0.30 * intensity, 1.0);
+            material.base_color = Color::srgba(0.25, 0.80, 0.15, alpha);
+            material.emissive = LinearRgba::new(0.90 * intensity, 3.00 * intensity, 0.60 * intensity, 1.0);
         }
     }
 }
