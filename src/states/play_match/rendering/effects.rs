@@ -1739,126 +1739,179 @@ pub fn spawn_ua_glow_for_afflicted(
 }
 
 // ==============================================================================
-// Serpent Sting Venom Pulse
+// DoT Drip Indicators (poison / bleed)
 // ==============================================================================
 //
-// Spawn/update/cleanup three-system pattern plus an aura detector, mirroring
-// the UA glow above. Venom-green, waist-height, fast ~1.5 Hz pulse — distinct
-// from UA's chest-height deep-violet 0.5 Hz glow so stacked sting + UA reads
-// as two independent effects (plan R14 / AE4).
+// Generic affliction indicator: a `DotDripEmitter` per (target, kind) spawns
+// small falling drops — green for poisons, red for bleeds. Color is game
+// language shared across abilities; new afflictions are one row in
+// `drip_kind_for_aura`. Drips mirror the FlameParticle idiom (velocity +
+// lifetime + shrink), emitters follow the detector/cleanup convention.
 
-/// Shared sting-aura predicate for the detector and cleanup systems, so the
-/// two can't drift apart (the same key the Hunter AI's dedup uses).
-fn has_serpent_sting_aura(auras: &ActiveAuras) -> bool {
-    auras.auras.iter().any(|a| {
-        a.effect_type == AuraType::DamageOverTime && a.ability_name == "Serpent Sting"
-    })
+/// Map an aura to the affliction family it should drip as, or None for DoTs
+/// with their own identity (UA glow) or no body visual (Corruption, CoA).
+/// Keys on the exact RON `name:` string, same as the class-AI dedup checks.
+fn drip_kind_for_aura(aura: &Aura) -> Option<DripKind> {
+    if aura.effect_type != AuraType::DamageOverTime {
+        return None;
+    }
+    match aura.ability_name.as_str() {
+        "Serpent Sting" => Some(DripKind::Poison), // future rogue poisons join here
+        "Rend" => Some(DripKind::Bleed),           // future Rupture/Garrote join here
+        _ => None,
+    }
 }
 
-/// Detect targets that have a Serpent Sting aura but no `SerpentVenomPulse`
-/// visual yet, and spawn the pulse. Cleanup is handled by `cleanup_venom_pulse`
-/// once the sting aura is no longer present.
-pub fn spawn_venom_pulse_for_stung(
+/// Cheap deterministic jitter in [0,1) from a seed — visual-only, so it does
+/// not touch the sim's seeded GameRng.
+fn drip_jitter(seed: u32) -> f32 {
+    let s = seed.wrapping_mul(747_796_405).wrapping_add(2_891_336_453);
+    ((s >> 9) & 0xFFFF) as f32 / 65536.0
+}
+
+/// Detect combatants carrying a mapped DoT and ensure one emitter per
+/// (target, kind). Emitter removal is handled by `update_drip_emitters`
+/// once the mapped aura is gone.
+pub fn spawn_drip_emitters_for_afflicted(
     mut commands: Commands,
-    stung: Query<(Entity, &ActiveAuras)>,
-    existing_pulses: Query<&SerpentVenomPulse>,
+    afflicted: Query<(Entity, &ActiveAuras)>,
+    existing: Query<&DotDripEmitter>,
 ) {
     use std::collections::HashSet;
-    let already_pulsing: HashSet<Entity> = existing_pulses.iter().map(|p| p.target).collect();
+    let already: HashSet<(Entity, DripKind)> =
+        existing.iter().map(|e| (e.target, e.kind)).collect();
 
-    for (entity, auras) in stung.iter() {
-        if has_serpent_sting_aura(auras) && !already_pulsing.contains(&entity) {
+    for (entity, auras) in afflicted.iter() {
+        let mut kinds: HashSet<DripKind> = HashSet::new();
+        for aura in auras.auras.iter() {
+            if let Some(kind) = drip_kind_for_aura(aura) {
+                kinds.insert(kind);
+            }
+        }
+        for kind in kinds {
+            if !already.contains(&(entity, kind)) {
+                commands.spawn((
+                    DotDripEmitter {
+                        target: entity,
+                        kind,
+                        spawn_accumulator: 0.0,
+                        drips_spawned: 0,
+                    },
+                    PlayMatchEntity,
+                ));
+            }
+        }
+    }
+}
+
+/// Tick emitters: despawn when the mapped aura is gone, otherwise spawn a
+/// drip every `DRIP_INTERVAL` at a jittered point around the target's torso.
+pub fn update_drip_emitters(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut emitters: Query<(Entity, &mut DotDripEmitter)>,
+    targets: Query<(&ActiveAuras, &Transform)>,
+) {
+    const DRIP_INTERVAL: f32 = 0.45;
+    let dt = time.delta_secs();
+
+    for (emitter_entity, mut emitter) in emitters.iter_mut() {
+        let Ok((auras, target_transform)) = targets.get(emitter.target) else {
+            commands.entity(emitter_entity).despawn();
+            continue;
+        };
+        let still_afflicted = auras
+            .auras
+            .iter()
+            .any(|a| drip_kind_for_aura(a) == Some(emitter.kind));
+        if !still_afflicted {
+            commands.entity(emitter_entity).despawn();
+            continue;
+        }
+
+        emitter.spawn_accumulator += dt;
+        while emitter.spawn_accumulator >= DRIP_INTERVAL {
+            emitter.spawn_accumulator -= DRIP_INTERVAL;
+            let seed = emitter.target.index().wrapping_add(emitter.drips_spawned.wrapping_mul(3));
+            emitter.drips_spawned = emitter.drips_spawned.wrapping_add(1);
+
+            // Jittered spawn point around the torso (body capsule radius 0.5).
+            let angle = drip_jitter(seed) * std::f32::consts::TAU;
+            let radius = 0.35 + 0.20 * drip_jitter(seed + 1);
+            let height = 0.6 + 0.5 * drip_jitter(seed + 2);
+            let offset = Vec3::new(angle.cos() * radius, height, angle.sin() * radius);
+
             commands.spawn((
-                SerpentVenomPulse { target: entity, phase: 0.0 },
+                DotDrip {
+                    kind: emitter.kind,
+                    velocity: Vec3::new(
+                        angle.cos() * 0.25,
+                        -2.2,
+                        angle.sin() * 0.25,
+                    ),
+                    lifetime: 0.7,
+                    initial_lifetime: 0.7,
+                },
+                Transform::from_translation(target_transform.translation + offset),
                 PlayMatchEntity,
             ));
         }
     }
 }
 
-/// Spawn the venom pulse mesh when a `SerpentVenomPulse` component is added.
-pub fn spawn_venom_pulse_visuals(
+/// Spawn visual meshes for newly created drips: small glowing drops,
+/// green for poison, red for bleed.
+pub fn spawn_drip_visuals(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    new_pulses: Query<(Entity, &SerpentVenomPulse), (Added<SerpentVenomPulse>, Without<Mesh3d>)>,
-    transforms: Query<&Transform, Without<SerpentVenomPulse>>,
+    new_drips: Query<(Entity, &DotDrip), (Added<DotDrip>, Without<Mesh3d>)>,
 ) {
-    for (pulse_entity, pulse) in new_pulses.iter() {
-        let Ok(target_transform) = transforms.get(pulse.target) else {
-            continue;
+    for (drip_entity, drip) in new_drips.iter() {
+        let (base, emissive) = match drip.kind {
+            DripKind::Poison => (
+                Color::srgba(0.30, 0.90, 0.20, 0.90),
+                LinearRgba::new(0.90, 3.00, 0.60, 1.0),
+            ),
+            DripKind::Bleed => (
+                Color::srgba(0.85, 0.10, 0.10, 0.90),
+                LinearRgba::new(2.50, 0.30, 0.20, 1.0),
+            ),
         };
 
-        // Radius must exceed the body capsule's 0.5 radius (Capsule3d::new(0.5, 1.5))
-        // or the sphere sits entirely inside the opaque body and is depth-rejected —
-        // invisible. 0.65 pokes through as a venom band around the lower torso.
-        let mesh = meshes.add(Sphere::new(0.65));
-        // Spawn at the update formula's phase-0 values (beat 0.5 → alpha 0.65,
-        // intensity 0.75, scale 1.1) so the first update frame doesn't visibly snap.
-        // AlphaMode::Add is inherently translucent — solidity comes from heat, so
-        // the emissive runs in the codebase's 2-4x range (cf. BacklashBurst).
+        let mesh = meshes.add(Sphere::new(0.10));
         let material = materials.add(StandardMaterial {
-            base_color: Color::srgba(0.25, 0.80, 0.15, 0.65),
-            emissive: LinearRgba::new(0.675, 2.25, 0.45, 1.0),
+            base_color: base,
+            emissive,
             alpha_mode: AlphaMode::Add,
             unlit: true,
             ..default()
         });
 
-        let position = target_transform.translation + Vec3::Y * 0.4;
-        commands.entity(pulse_entity).try_insert((
-            Mesh3d(mesh),
-            MeshMaterial3d(material),
-            Transform::from_translation(position).with_scale(Vec3::splat(1.1)),
-        ));
+        commands.entity(drip_entity).try_insert((Mesh3d(mesh), MeshMaterial3d(material)));
     }
 }
 
-/// Update the venom pulse: follow target at waist height, pulse at ~1.5 Hz.
-pub fn update_venom_pulse(
+/// Animate drips: fall along velocity, shrink over lifetime, despawn at zero.
+pub fn update_drips(
+    mut commands: Commands,
     time: Res<Time>,
-    mut pulses: Query<(&mut SerpentVenomPulse, &mut Transform, &MeshMaterial3d<StandardMaterial>)>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    transforms: Query<&Transform, Without<SerpentVenomPulse>>,
+    mut drips: Query<(Entity, &mut DotDrip, &mut Transform)>,
 ) {
     let dt = time.delta_secs();
-    for (mut pulse, mut pulse_transform, material_handle) in pulses.iter_mut() {
-        pulse.phase += dt;
 
-        if let Ok(target_transform) = transforms.get(pulse.target) {
-            pulse_transform.translation = target_transform.translation + Vec3::Y * 0.4;
+    for (entity, mut drip, mut transform) in drips.iter_mut() {
+        drip.lifetime -= dt;
+
+        if drip.lifetime <= 0.0 || transform.translation.y <= 0.02 {
+            commands.entity(entity).despawn();
+            continue;
         }
 
-        // 1.5 Hz pulse — period ~0.67s, 3x UA's cadence so the two read apart.
-        // The scale breathing (1.0 → 1.2) is the noticeability carrier: motion
-        // reads at a glance where a brightness wobble alone gets lost.
-        let beat = (pulse.phase * std::f32::consts::TAU * 1.5).sin() * 0.5 + 0.5; // [0,1]
-        let alpha = 0.45 + 0.40 * beat;
-        let intensity = 0.50 + 0.50 * beat;
-        pulse_transform.scale = Vec3::splat(1.0 + 0.2 * beat);
+        transform.translation += drip.velocity * dt;
 
-        if let Some(material) = materials.get_mut(&material_handle.0) {
-            material.base_color = Color::srgba(0.25, 0.80, 0.15, alpha);
-            material.emissive = LinearRgba::new(0.90 * intensity, 3.00 * intensity, 0.60 * intensity, 1.0);
-        }
-    }
-}
-
-/// Despawn the venom pulse when its target loses the sting aura (or dies).
-pub fn cleanup_venom_pulse(
-    mut commands: Commands,
-    pulses: Query<(Entity, &SerpentVenomPulse)>,
-    targets: Query<&ActiveAuras>,
-) {
-    for (pulse_entity, pulse) in pulses.iter() {
-        let still_stung = targets
-            .get(pulse.target)
-            .map(has_serpent_sting_aura)
-            .unwrap_or(false);
-
-        if !still_stung {
-            commands.entity(pulse_entity).despawn();
-        }
+        let life_ratio = (drip.lifetime / drip.initial_lifetime).max(0.1);
+        transform.scale = Vec3::splat(life_ratio);
     }
 }
 

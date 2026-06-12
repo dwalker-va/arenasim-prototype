@@ -164,16 +164,43 @@ pub struct UnstableAfflictionGlow {
     pub phase: f32,
 }
 
-/// Visual effect indicating a combatant has Serpent Sting active.
-/// Venom-green, sits low on the body (waist height vs UA's chest height) and
-/// pulses fast at ~1.5Hz so it reads independently from UA's slow violet
-/// 0.5Hz glow when both DoTs are stacked on the target.
+/// Affliction family for DoT drip indicators. The drip color is game
+/// language, not per-ability decoration: green = poison, red = bleed.
+#[derive(Component, Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum DripKind {
+    /// Green drips — Serpent Sting today; future rogue poisons join the table.
+    Poison,
+    /// Red drips — Rend today; future Rupture/Garrote join the table.
+    Bleed,
+}
+
+/// Continuous drip emitter attached (logically) to a combatant carrying a
+/// mapped DoT. One emitter per (target, kind); spawns falling `DotDrip`
+/// particles on an interval until the mapped aura is gone.
 #[derive(Component)]
-pub struct SerpentVenomPulse {
-    /// The stung target — pulse follows this entity until the sting expires/dispels.
+pub struct DotDripEmitter {
+    /// The afflicted combatant the drips fall from.
     pub target: Entity,
-    /// Phase accumulator (seconds) used to drive the pulse.
-    pub phase: f32,
+    /// Which affliction family (and therefore color) this emitter renders.
+    pub kind: DripKind,
+    /// Seconds accumulated toward the next drip spawn.
+    pub spawn_accumulator: f32,
+    /// Count of drips spawned — doubles as the jitter seed.
+    pub drips_spawned: u32,
+}
+
+/// One falling drop spawned by a `DotDripEmitter`. Mirrors `FlameParticle`:
+/// constant velocity, shrink over lifetime, despawn at zero.
+#[derive(Component)]
+pub struct DotDrip {
+    /// Which affliction family — picks the drop color at visual-spawn time.
+    pub kind: DripKind,
+    /// Velocity vector (primarily downward).
+    pub velocity: Vec3,
+    /// Time remaining before despawn (seconds).
+    pub lifetime: f32,
+    /// Initial lifetime for shrink calculation.
+    pub initial_lifetime: f32,
 }
 
 /// Visual effect spawned on the dispeller the frame UA backlash fires.
