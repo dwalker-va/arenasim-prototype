@@ -1868,22 +1868,26 @@ pub fn spawn_drip_visuals(
     new_drips: Query<(Entity, &DotDrip), (Added<DotDrip>, Without<Mesh3d>)>,
 ) {
     for (drip_entity, drip) in new_drips.iter() {
+        // Opaque, not additive: drops are liquid, not glow. Additive blending
+        // can only add light, so it can never produce a deep saturated color;
+        // opaque unlit gives true deep green/red and depth-sorts like any
+        // solid geometry (the documented Z-fighting pitfall is Blend-specific).
+        // A whisper of emissive keeps drops readable in arena shadow.
         let (base, emissive) = match drip.kind {
             DripKind::Poison => (
-                Color::srgba(0.30, 0.90, 0.20, 0.90),
-                LinearRgba::new(0.90, 3.00, 0.60, 1.0),
+                Color::srgb(0.04, 0.45, 0.07),
+                LinearRgba::new(0.02, 0.35, 0.04, 1.0),
             ),
             DripKind::Bleed => (
-                Color::srgba(0.85, 0.10, 0.10, 0.90),
-                LinearRgba::new(2.50, 0.30, 0.20, 1.0),
+                Color::srgb(0.50, 0.03, 0.03),
+                LinearRgba::new(0.40, 0.02, 0.02, 1.0),
             ),
         };
 
-        let mesh = meshes.add(Sphere::new(0.10));
+        let mesh = meshes.add(Sphere::new(0.13));
         let material = materials.add(StandardMaterial {
             base_color: base,
             emissive,
-            alpha_mode: AlphaMode::Add,
             unlit: true,
             ..default()
         });
