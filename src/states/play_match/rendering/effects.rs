@@ -1789,18 +1789,21 @@ pub fn spawn_venom_pulse_visuals(
             continue;
         };
 
-        let mesh = meshes.add(Sphere::new(0.45));
-        // Spawn at the update formula's phase-0 values (beat 0.5 → alpha 0.30,
+        // Radius must exceed the body capsule's 0.5 radius (Capsule3d::new(0.5, 1.5))
+        // or the sphere sits entirely inside the opaque body and is depth-rejected —
+        // invisible. 0.65 pokes through as a venom band around the lower torso.
+        let mesh = meshes.add(Sphere::new(0.65));
+        // Spawn at the update formula's phase-0 values (beat 0.5 → alpha 0.375,
         // intensity 0.75) so the first update frame doesn't visibly snap.
         let material = materials.add(StandardMaterial {
-            base_color: Color::srgba(0.15, 0.50, 0.10, 0.30),
+            base_color: Color::srgba(0.15, 0.50, 0.10, 0.375),
             emissive: LinearRgba::new(0.225, 0.75, 0.15, 1.0),
             alpha_mode: AlphaMode::Add,
             unlit: true,
             ..default()
         });
 
-        let position = target_transform.translation + Vec3::Y * 0.5;
+        let position = target_transform.translation + Vec3::Y * 0.4;
         commands.entity(pulse_entity).try_insert((
             Mesh3d(mesh),
             MeshMaterial3d(material),
@@ -1821,12 +1824,12 @@ pub fn update_venom_pulse(
         pulse.phase += dt;
 
         if let Ok(target_transform) = transforms.get(pulse.target) {
-            pulse_transform.translation = target_transform.translation + Vec3::Y * 0.5;
+            pulse_transform.translation = target_transform.translation + Vec3::Y * 0.4;
         }
 
         // 1.5 Hz pulse — period ~0.67s, 3x UA's cadence so the two read apart.
         let beat = (pulse.phase * std::f32::consts::TAU * 1.5).sin() * 0.5 + 0.5; // [0,1]
-        let alpha = 0.15 + 0.30 * beat;
+        let alpha = 0.20 + 0.35 * beat;
         let intensity = 0.50 + 0.50 * beat;
 
         if let Some(material) = materials.get_mut(&material_handle.0) {
