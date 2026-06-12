@@ -222,15 +222,15 @@ impl Plugin for StatesPlugin {
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_state(GameState::PlayMatch)),
             )
-            // Serpent Sting visuals: venom pulse on stung targets
-            // (graphical only — never registered in headless systems.rs).
+            // DoT drip indicators: green poison / red bleed drops on afflicted
+            // targets (graphical only — never registered in headless systems.rs).
             .add_systems(
                 Update,
                 (
-                    play_match::spawn_venom_pulse_for_stung, // Detect sting aura and spawn pulse
-                    play_match::spawn_venom_pulse_visuals,   // Build mesh for new pulses
-                    play_match::update_venom_pulse,          // Pulse and follow target
-                    play_match::cleanup_venom_pulse,         // Despawn when sting is gone
+                    play_match::spawn_drip_emitters_for_afflicted, // Detect mapped DoTs, spawn emitters
+                    play_match::update_drip_emitters,              // Tick emitters, spawn drips, cleanup
+                    play_match::spawn_drip_visuals,                // Build mesh for new drips
+                    play_match::update_drips,                      // Fall, shrink, despawn
                 )
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_state(GameState::PlayMatch)),
