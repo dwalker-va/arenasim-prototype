@@ -1794,10 +1794,10 @@ pub fn spawn_venom_pulse_visuals(
         // invisible. 0.65 pokes through as a venom band around the lower torso.
         let mesh = meshes.add(Sphere::new(0.65));
         // Spawn at the update formula's phase-0 values (beat 0.5 → alpha 0.375,
-        // intensity 0.75) so the first update frame doesn't visibly snap.
+        // intensity 0.75, scale 1.1) so the first update frame doesn't visibly snap.
         let material = materials.add(StandardMaterial {
             base_color: Color::srgba(0.15, 0.50, 0.10, 0.375),
-            emissive: LinearRgba::new(0.225, 0.75, 0.15, 1.0),
+            emissive: LinearRgba::new(0.3375, 1.125, 0.225, 1.0),
             alpha_mode: AlphaMode::Add,
             unlit: true,
             ..default()
@@ -1807,7 +1807,7 @@ pub fn spawn_venom_pulse_visuals(
         commands.entity(pulse_entity).try_insert((
             Mesh3d(mesh),
             MeshMaterial3d(material),
-            Transform::from_translation(position),
+            Transform::from_translation(position).with_scale(Vec3::splat(1.1)),
         ));
     }
 }
@@ -1828,13 +1828,16 @@ pub fn update_venom_pulse(
         }
 
         // 1.5 Hz pulse — period ~0.67s, 3x UA's cadence so the two read apart.
+        // The scale breathing (1.0 → 1.2) is the noticeability carrier: motion
+        // reads at a glance where a brightness wobble alone gets lost.
         let beat = (pulse.phase * std::f32::consts::TAU * 1.5).sin() * 0.5 + 0.5; // [0,1]
         let alpha = 0.20 + 0.35 * beat;
         let intensity = 0.50 + 0.50 * beat;
+        pulse_transform.scale = Vec3::splat(1.0 + 0.2 * beat);
 
         if let Some(material) = materials.get_mut(&material_handle.0) {
             material.base_color = Color::srgba(0.15, 0.50, 0.10, alpha);
-            material.emissive = LinearRgba::new(0.30 * intensity, 1.00 * intensity, 0.20 * intensity, 1.0);
+            material.emissive = LinearRgba::new(0.45 * intensity, 1.50 * intensity, 0.30 * intensity, 1.0);
         }
     }
 }
