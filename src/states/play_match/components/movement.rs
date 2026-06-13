@@ -73,6 +73,12 @@ pub enum Posture {
     /// Paladin only: committed walk to the enemy healer for Hammer of
     /// Justice.
     Dip,
+    /// Mage only: holding cast position (no directive — falls through to
+    /// normal pursuit to preferred range, then stands and casts).
+    Engage,
+    /// Mage only: kiting a melee threat impaired by the Mage's own root/slow,
+    /// orbiting the kill target at `range_band` distance.
+    Kite,
 }
 
 /// Persistent posture state for a healer. Survives directive expiry.
@@ -128,6 +134,38 @@ impl HealerPosture {
             last_point: None,
             dip_target: None,
             dip_until: 0.0,
+        }
+    }
+}
+
+/// Persistent Mage movement posture (ENGAGE/KITE). Far simpler than
+/// `HealerPosture` — the Mage has no heal-range anchor, no DIP target, and no
+/// ESCAPE window, so it carries only the state the two-posture machine needs.
+/// Survives directive expiry and CC, like `HealerPosture`.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct MagePosture {
+    /// Current posture (ENGAGE or KITE).
+    pub posture: Posture,
+    /// Absolute sim-time of the last posture transition.
+    pub since: f32,
+    /// Hysteresis floor: KITE may not exit before this sim-time even if the
+    /// sustaining aura breaks, preventing KITE↔ENGAGE strobing on fast root
+    /// breaks. `0.0` = no hold.
+    pub hold_until: f32,
+    /// Last committed scorer direction (unit XZ), input to the commitment
+    /// bonus at the next re-evaluation. `None` before the first directional
+    /// decision and after posture transitions.
+    pub last_direction: Option<Vec2>,
+}
+
+impl MagePosture {
+    /// Fresh posture state at sim-time `now` (ENGAGE, no hold).
+    pub fn new(now: f32) -> Self {
+        Self {
+            posture: Posture::Engage,
+            since: now,
+            hold_until: 0.0,
+            last_direction: None,
         }
     }
 }

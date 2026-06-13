@@ -46,6 +46,9 @@ pub struct MovementWeights {
     /// Low-weight pull toward wand range of the kill target (Priest;
     /// 0.0 disables for Paladin).
     pub wand_pull: f32,
+    /// Ring-attraction toward the kill target's `[min, max]` band (Mage
+    /// kiting). `0.0` disables for the healers, which have no kill-target ring.
+    pub range_band: f32,
     /// Bonus toward the previously committed direction, applied only AT
     /// re-evaluation while the commitment window is open (R11).
     pub commitment_bonus: f32,
@@ -61,6 +64,7 @@ impl Default for MovementWeights {
             // divergence from the RON, now aligned (P3 residual).
             corner_penalty: 6.0,
             wand_pull: 0.5,
+            range_band: 0.0,
             commitment_bonus: 1.5,
         }
     }
@@ -224,7 +228,53 @@ impl Default for MeleeMovementConfig {
     }
 }
 
-/// Resource containing all healer-movement weights and thresholds.
+/// Mage movement tuning (the ENGAGE/KITE pilot). `range_band_min`/`max` bound
+/// the kiting orbit ring; `kite_hold` is the hysteresis floor; `directive_ttl`
+/// must cover a Frostbolt cast so the Mage can act post-cast; `commit_window`
+/// is the anti-zigzag window. Validation rules land in U6.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MageMovementConfig {
+    pub weights: MovementWeights,
+    /// Inner ring radius — the orbit stays outside this of the kill target
+    /// (keeps the Mage out of melee of a target that is also a threat).
+    pub range_band_min: f32,
+    /// Outer ring radius — the orbit stays inside this of the kill target
+    /// (keeps the kill target in cast range).
+    pub range_band_max: f32,
+    /// Hysteresis floor: minimum seconds KITE holds after entry before it may
+    /// exit, even if the sustaining aura breaks (anti-strobe).
+    pub kite_hold: f32,
+    /// MovementDirective TTL — must cover the longest Mage cast so movement
+    /// survives a Frostbolt.
+    pub directive_ttl: f32,
+    /// Committed-direction window (anti-zigzag).
+    pub commit_window: f32,
+}
+
+impl Default for MageMovementConfig {
+    fn default() -> Self {
+        Self {
+            weights: MovementWeights {
+                // Kiter profile: strong repulsion, ring attraction on, no
+                // healer terms (formation/wand) and a light corner penalty.
+                threat_repulsion: 3.0,
+                formation_pull: 0.0,
+                corner_penalty: 4.0,
+                wand_pull: 0.0,
+                range_band: 2.0,
+                commitment_bonus: 1.5,
+            },
+            range_band_min: 8.0,   // SAFE_KITING_DISTANCE
+            range_band_max: 30.0,  // within AUTO_SHOT_RANGE
+            kite_hold: 1.0,
+            directive_ttl: 3.0,    // covers a Frostbolt cast
+            commit_window: 0.6,
+        }
+    }
+}
+
+/// Resource containing all movement weights and thresholds.
 ///
 /// Loaded from `assets/config/movement.ron` at startup (both modes).
 /// Access via `Res<MovementConfig>` in systems.
@@ -235,6 +285,7 @@ pub struct MovementConfig {
     pub priest: PriestMovementConfig,
     pub paladin: PaladinMovementConfig,
     pub melee: MeleeMovementConfig,
+    pub mage: MageMovementConfig,
 }
 
 impl MovementConfig {
@@ -339,6 +390,7 @@ impl MovementConfig {
                 ("formation_pull", weights.formation_pull),
                 ("corner_penalty", weights.corner_penalty),
                 ("wand_pull", weights.wand_pull),
+                ("range_band", weights.range_band),
                 ("commitment_bonus", weights.commitment_bonus),
             ];
             for (name, value) in terms {

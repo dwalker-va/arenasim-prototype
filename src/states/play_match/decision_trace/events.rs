@@ -185,9 +185,9 @@ pub enum EventPayload {
     },
 }
 
-/// Healer movement posture (the FREE/PRESSURED/ESCAPE/DIP state machine).
-/// Serializes snake_case (`"free"`, `"pressured"`, ...) to match the
-/// `kind`/`status` convention.
+/// Movement posture: the healer FREE/PRESSURED/ESCAPE/DIP machine plus the
+/// Mage ENGAGE/KITE machine. Serializes snake_case (`"free"`, `"kite"`, ...)
+/// to match the `kind`/`status` convention.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Posture {
@@ -195,6 +195,8 @@ pub enum Posture {
     Pressured,
     Escape,
     Dip,
+    Engage,
+    Kite,
 }
 
 /// The gameplay-side posture (`components::movement::Posture`, carried by the
@@ -209,6 +211,8 @@ impl From<crate::states::play_match::components::Posture> for Posture {
             GamePosture::Pressured => Posture::Pressured,
             GamePosture::Escape => Posture::Escape,
             GamePosture::Dip => Posture::Dip,
+            GamePosture::Engage => Posture::Engage,
+            GamePosture::Kite => Posture::Kite,
         }
     }
 }
@@ -247,6 +251,12 @@ pub enum MovementTrigger {
     /// FREE formation goal moved enough to re-commit (engaged-ally centroid
     /// shifted) within the same posture.
     FormationShift,
+    /// Mage ENGAGE → KITE: a melee-range threat now carries the Mage's own
+    /// root/slow aura (the kiting window opened).
+    KiteEnter,
+    /// Mage KITE → ENGAGE: no visible enemy carries a Mage-owned root/slow
+    /// aura and the hysteresis hold has elapsed (the kiting window closed).
+    KiteExit,
 }
 
 /// Shape of the movement goal carried by the directive this decision issued.

@@ -228,6 +228,7 @@ pub(super) fn escape_tick(
         // pull toward any enemy would shrink the separation the window buys.
         wand_target: None,
         wand_range: shared.wand_range,
+        range_band: None,
         committed_direction: None,
     };
     let chosen = score_directions(&compass_directions_16(), &inputs, weights);
@@ -379,6 +380,7 @@ pub(super) fn healer_pressured_tick_shared(
         formation_point: None,
         wand_target,
         wand_range: shared.wand_range,
+        range_band: None,
         // Committed direction is passed as-is. No mask guard is needed: a
         // masked committed bearing already loses (it is removed from the pool),
         // and commitment_bonus on the SURVIVING candidates is computed per

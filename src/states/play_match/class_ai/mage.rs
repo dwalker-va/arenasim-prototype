@@ -472,7 +472,14 @@ fn try_frost_nova(
         }
     }
 
-    combatant.kiting_timer = nova_def.applies_aura.as_ref().unwrap().duration;
+    // Movement after Frost Nova is owned by the ENGAGE/KITE posture machine
+    // (mage_postures.rs): a melee-range threat now carrying the Mage's root
+    // triggers KITE on the next posture evaluation. The Mage no longer writes
+    // `kiting_timer` (the legacy kiting branch is Hunter-only now).
+    debug_assert_eq!(
+        combatant.kiting_timer, 0.0,
+        "Mage must not set kiting_timer — movement is posture-driven (U5)"
+    );
 
     info!(
         "Team {} {} casts Frost Nova! (AOE root) - {} enemies affected",
@@ -644,8 +651,23 @@ fn try_frostbolt(
 
     let distance_to_target = my_pos.distance(target_pos);
 
-    // While kiting, only cast if at safe distance.
-    if combatant.kiting_timer > 0.0 && distance_to_target < SAFE_KITING_DISTANCE {
+    // While kiting, only cast if at safe distance. Kiting is now posture-state
+    // (mage_postures.rs) rather than the legacy `kiting_timer`; the equivalent
+    // world-state condition is "the Mage has a live root/slow out on an enemy"
+    // (the same signal that sustains KITE). Replaces the removed timer guard
+    // so the Mage doesn't root itself hard-casting Frostbolt in melee.
+    let kiting = ctx.combatants.values().any(|info| {
+        !info.is_pet
+            && info.is_alive
+            && info.team != combatant.team
+            && ctx.active_auras.get(&info.entity).is_some_and(|auras| {
+                auras.iter().any(|a| {
+                    a.caster == Some(entity)
+                        && matches!(a.effect_type, AuraType::Root | AuraType::MovementSpeedSlow)
+                })
+            })
+    });
+    if kiting && distance_to_target < SAFE_KITING_DISTANCE {
         builder.reject(
             ability,
             RejectionReason::PreconditionUnmet {

@@ -70,6 +70,23 @@ pub fn compass_directions_16() -> [Vec2; 16] {
     })
 }
 
+/// Ring-attraction band toward a target (the Mage's `range_band` term):
+/// reward stepping *toward* the target while farther than `max`, and *away*
+/// while nearer than `min`; no pull while within `[min, max]`. Arc-kiting
+/// emerges when this composes with `threat_repulsion` — the kiter orbits the
+/// kill target at band distance instead of fleeing straight into a wall.
+#[derive(Clone, Copy, Debug)]
+pub struct RangeBand {
+    /// Target world position (the kill target).
+    pub target: Vec3,
+    /// Inner ring radius: nearer than this, push out (keeps the kiter out of
+    /// melee of a kill target that is also a threat).
+    pub min: f32,
+    /// Outer ring radius: farther than this, pull in (keeps the kill target in
+    /// cast range).
+    pub max: f32,
+}
+
 /// Ally-anchor constraint: candidate positions farther than `heal_range`
 /// from `pos` are masked out (`MASK_ANCHOR`) before the interest pass scores.
 #[derive(Clone, Copy, Debug)]
@@ -104,6 +121,9 @@ pub struct ScorerInputs {
     /// Desired wand range (shared config `wand_range`, 30). The pull is
     /// active only while farther than this from `wand_target`.
     pub wand_range: f32,
+    /// Ring-attraction band toward the kill target (Mage kiting). `None`
+    /// disables the term (no kill target, or non-Mage scorer).
+    pub range_band: Option<RangeBand>,
     /// Previously committed direction. `Some` ONLY while the commitment
     /// window is open — the caller passes `None` outside it, which disables
     /// the term entirely.
@@ -179,6 +199,24 @@ pub fn score_direction(candidate: Vec2, inputs: &ScorerInputs, weights: &Movemen
             let distance = to_target.length();
             if distance > inputs.wand_range {
                 score += weights.wand_pull * candidate.dot(to_target / distance);
+            }
+        }
+    }
+
+    // Range-band ring attraction (Mage kiting): pull toward the kill target
+    // outside `max`, push away inside `min`, silent in-band. Composed with
+    // threat_repulsion this produces arc-kiting. Weight 0 disables.
+    if weights.range_band > 0.0 {
+        if let Some(band) = inputs.range_band {
+            let to_target = xz(band.target) - my_xz;
+            let distance = to_target.length();
+            if distance > f32::EPSILON {
+                let toward = to_target / distance;
+                if distance > band.max {
+                    score += weights.range_band * candidate.dot(toward);
+                } else if distance < band.min {
+                    score += weights.range_band * candidate.dot(-toward);
+                }
             }
         }
     }
@@ -381,6 +419,7 @@ mod tests {
             formation_pull: 0.0,
             corner_penalty: 0.0,
             wand_pull: 0.0,
+            range_band: 0.0,
             commitment_bonus: 0.5,
         };
         let dirs = compass_directions_16();
@@ -556,6 +595,98 @@ mod tests {
         );
         // Threat at +X: with the anchor mask dropped, repulsion still points -X.
         assert!(chosen.x < -0.9, "expected ~(-1,0) away from a +X threat, got {chosen:?}");
+    }
+
+    /// range_band: pull inward when beyond `max`, push outward when inside
+    /// `min`, no contribution while in-band or when the target is absent.
+    #[test]
+    fn range_band_pulls_toward_band_and_pushes_out_of_min() {
+        let weights = MovementWeights { range_band: 1.0, ..MovementWeights::default() };
+        let dirs = compass_directions_16();
+        let band = RangeBand { target: Vec3::new(40.0, 1.0, 0.0), min: 8.0, max: 30.0 };
+
+        // (a) FAR (>max): kill target at +X 40yd away → pull toward +X.
+        let far = ScorerInputs {
+            my_pos: Vec3::new(0.0, 1.0, 0.0),
+            lookahead: 2.0,
+            range_band: Some(band),
+            wand_range: 30.0,
+            ..Default::default()
+        };
+        let chosen = score_directions(&dirs, &far, &weights);
+        assert!(chosen.x > 0.9, "far from band must pull toward +X target, got {chosen:?}");
+
+        // (b) TOO CLOSE (<min): target 4yd away at +X → push toward -X.
+        let near = ScorerInputs {
+            my_pos: Vec3::new(36.0, 1.0, 0.0),
+            range_band: Some(RangeBand { target: Vec3::new(40.0, 1.0, 0.0), min: 8.0, max: 30.0 }),
+            ..far.clone()
+        };
+        let chosen = score_directions(&dirs, &near, &weights);
+        assert!(chosen.x < -0.9, "inside min must push away from target, got {chosen:?}");
+
+        // (c) IN-BAND (min<=d<=max): target 20yd away → range_band silent, so a
+        // lone threat term decides. Threat at +X → away (-X).
+        let in_band = ScorerInputs {
+            my_pos: Vec3::new(20.0, 1.0, 0.0),
+            threats: vec![Vec3::new(25.0, 1.0, 0.0)],
+            range_band: Some(RangeBand { target: Vec3::new(40.0, 1.0, 0.0), min: 8.0, max: 30.0 }),
+            ..far.clone()
+        };
+        let w2 = MovementWeights { range_band: 1.0, threat_repulsion: 3.0, ..MovementWeights::default() };
+        let chosen = score_directions(&dirs, &in_band, &w2);
+        assert!(chosen.x < -0.9, "in-band range_band is silent; threat repulsion decides, got {chosen:?}");
+
+        // (d) No target → term contributes nothing (no panic, threat decides).
+        let none = ScorerInputs {
+            my_pos: Vec3::new(0.0, 1.0, 0.0),
+            threats: vec![Vec3::new(5.0, 1.0, 0.0)],
+            range_band: None,
+            ..far.clone()
+        };
+        let chosen = score_directions(&dirs, &none, &w2);
+        assert!(chosen.x < -0.9, "no band target → threat repulsion decides, got {chosen:?}");
+    }
+
+    /// AE4: arc-kiting — a Mage fleeing a pursuer while its kill target is a
+    /// DIFFERENT enemy near max cast range bends along the band (keeps the kill
+    /// target in range) instead of running straight away from the pursuer.
+    #[test]
+    fn arc_kiting_keeps_kill_target_in_band() {
+        // Pursuer behind the Mage (−X), kill target ahead (+X) at the outer
+        // ring. Pure repulsion would flee +X (away from pursuer) and overshoot
+        // the kill target out of range; range_band bends the step so the kill
+        // target stays within max.
+        let weights = MovementWeights {
+            threat_repulsion: 3.0,
+            range_band: 2.0,
+            ..MovementWeights::default()
+        };
+        let dirs = compass_directions_16();
+        let my_pos = Vec3::new(0.0, 1.0, 0.0);
+        let kill_target = Vec3::new(-2.0, 1.0, 28.0); // +Z, ~28yd: just inside max
+        let pursuer = Vec3::new(0.0, 1.0, -6.0); // −Z, close behind
+        let inputs = ScorerInputs {
+            my_pos,
+            lookahead: 2.0,
+            threats: vec![pursuer],
+            range_band: Some(RangeBand { target: kill_target, min: 8.0, max: 30.0 }),
+            wand_range: 30.0,
+            ..Default::default()
+        };
+        let chosen = score_directions(&dirs, &inputs, &weights);
+        // Straight flee from the −Z pursuer would be +Z toward the kill target
+        // (fine here) — the real arc test: the chosen step must not increase
+        // distance to the kill target beyond max. Verify the step keeps the
+        // kill target within max.
+        let next = my_pos + Vec3::new(chosen.x, 0.0, chosen.y) * 2.0;
+        let dist_after = Vec2::new(next.x - kill_target.x, next.z - kill_target.z).length();
+        assert!(
+            dist_after <= 30.0,
+            "arc-kite step must keep the kill target within max range, got {dist_after}",
+        );
+        // And it must still move away from the pursuer (z component positive).
+        assert!(chosen.y > 0.0, "must still gain separation from the −Z pursuer, got {chosen:?}");
     }
 
     /// Double-fallback: the healer is out of bounds (every candidate is

@@ -493,9 +493,15 @@ pub fn decide_abilities(
     casting_auras: Query<(Entity, &Combatant, &Transform, Option<&ActiveAuras>), With<CastingState>>,
     channeling_auras: Query<(Entity, &Combatant, &Transform, Option<&ActiveAuras>), (With<ChannelingState>, Without<CastingState>)>,
     dr_tracker_query: Query<(Entity, &DRTracker)>,
-    // Healer posture state + standing directive read-back (movement AI).
-    // Disjoint from `combatants` component-wise, so the two queries coexist.
-    mut healer_movement: Query<(Option<&mut HealerPosture>, Option<&MovementDirective>)>,
+    // Posture state + standing directive read-back (movement AI). One query
+    // for both healer (HealerPosture) and Mage (MagePosture) postures — kept
+    // single to stay under Bevy's 16 system-param limit. Disjoint from
+    // `combatants` component-wise, so the two coexist.
+    mut posture_movement: Query<(
+        Option<&mut HealerPosture>,
+        Option<&mut MagePosture>,
+        Option<&MovementDirective>,
+    )>,
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
     pet_query: Query<&Pet>,
@@ -628,20 +634,44 @@ pub fn decide_abilities(
         // shielded_this_frame, etc.) explicitly rather than threading a bag
         // through every class.
         let acted = match combatant.class {
-            match_config::CharacterClass::Mage => class_ai::mage::decide_mage_action(
-                &mut commands,
-                &mut combat_log,
-                &mut game_rng,
-                &abilities,
-                entity,
-                &mut combatant,
-                my_pos,
-                auras.as_deref(),
-                &ctx,
-                &mut frost_nova_damage,
-                &mut same_frame_cc_queue,
-                &mut decision_trace,
-            ),
+            match_config::CharacterClass::Mage => {
+                // Posture evaluation (ENGAGE/KITE, U5) runs BEFORE the ability
+                // pass and OUTSIDE decide_mage_action's GCD short-circuit so the
+                // directive refreshes during a cast. Gated on gates_opened: no
+                // pre-match directives/trace. Casting Mages are excluded by the
+                // `combatants` query filter, so KITE exit can lag one GCD — an
+                // accepted pilot simplification.
+                if countdown.gates_opened {
+                    if let Ok((_healer, mage_posture, directive)) = posture_movement.get_mut(entity) {
+                        class_ai::mage_postures::evaluate_mage_posture(
+                            &mut commands,
+                            entity,
+                            my_pos,
+                            combatant.target,
+                            &ctx,
+                            mage_posture.map(bevy::prelude::Mut::into_inner),
+                            directive,
+                            &movement_config.mage,
+                            time.elapsed_secs(),
+                            &mut decision_trace,
+                        );
+                    }
+                }
+                class_ai::mage::decide_mage_action(
+                    &mut commands,
+                    &mut combat_log,
+                    &mut game_rng,
+                    &abilities,
+                    entity,
+                    &mut combatant,
+                    my_pos,
+                    auras.as_deref(),
+                    &ctx,
+                    &mut frost_nova_damage,
+                    &mut same_frame_cc_queue,
+                    &mut decision_trace,
+                )
+            }
             match_config::CharacterClass::Priest => {
                 // Posture evaluation (healer movement AI, U6/U7) runs BEFORE
                 // the ability pass and OUTSIDE the GCD short-circuit inside
@@ -657,14 +687,14 @@ pub fn decide_abilities(
                 // window.
                 let mut escape_defer: Option<f32> = None;
                 if countdown.gates_opened {
-                    if let Ok((posture, directive)) = healer_movement.get_mut(entity) {
+                    if let Ok((healer_posture, _mage, directive)) = posture_movement.get_mut(entity) {
                         escape_defer = class_ai::priest::evaluate_priest_posture(
                             &mut commands,
                             entity,
                             &combatant,
                             my_pos,
                             &ctx,
-                            posture.map(bevy::prelude::Mut::into_inner),
+                            healer_posture.map(bevy::prelude::Mut::into_inner),
                             directive,
                             &movement_config,
                             time.elapsed_secs(),
@@ -738,7 +768,7 @@ pub fn decide_abilities(
                 // enemy-healer dip; `DipCast` on dip arrival).
                 let mut plan = class_ai::paladin::PaladinMovementPlan::default();
                 if countdown.gates_opened {
-                    if let Ok((posture, directive)) = healer_movement.get_mut(entity) {
+                    if let Ok((healer_posture, _mage, directive)) = posture_movement.get_mut(entity) {
                         plan = class_ai::paladin::evaluate_paladin_posture(
                             &mut commands,
                             &abilities,
@@ -747,7 +777,7 @@ pub fn decide_abilities(
                             my_pos,
                             auras.as_deref(),
                             &ctx,
-                            posture.map(bevy::prelude::Mut::into_inner),
+                            healer_posture.map(bevy::prelude::Mut::into_inner),
                             directive,
                             &movement_config,
                             time.elapsed_secs(),
