@@ -104,19 +104,23 @@
         kite_entry_radius: 20.0,   // (unused: Mage is aura-gated)
         kite_sustain_radius: 24.0, // (unused: Mage is aura-gated)
     ),
-    // Hunter ENGAGE/KITE (proximity-gated): kites whatever melee is closing,
-    // holds the kill target in shot range, and stays out of the 8yd dead zone.
+    // Hunter ENGAGE/KITE (proximity-gated): kites an un-rooted melee, so unlike
+    // the Mage's orbit it must be FLEE-DOMINANT — strong threat_repulsion drives
+    // the escape, and a weak range_band with a near-shot-range max only bends
+    // the flee to keep the target shootable (matching the legacy "flee unless
+    // leaving shot range"). Stays out of the 8yd dead zone.
     hunter: (
         weights: (
-            threat_repulsion: 3.0,
+            threat_repulsion: 1.0,  // minor; flee does the heavy lifting
             formation_pull: 0.0,
-            corner_penalty: 4.0,   // bend escapes along walls (fixes legacy corner-stuck)
+            corner_penalty: 4.0,    // bend escapes along walls (fixes legacy corner-stuck)
             wand_pull: 0.0,
-            range_band: 2.0,
+            range_band: 0.5,        // gentle keep-in-range, not an orbit
+            flee: 6.0,              // distance-max flee from the nearest chaser (the kiter's core)
             commitment_bonus: 1.5,
         ),
         range_band_min: 8.0,       // HUNTER_DEAD_ZONE — can't shoot inside this
-        range_band_max: 30.0,      // within AUTO_SHOT_RANGE (35) — keep the target shootable
+        range_band_max: 34.0,      // ~AUTO_SHOT_RANGE — only pull in near the shot-range edge
         kite_hold: 1.0,
         directive_ttl: 3.0,        // covers an Aimed Shot cast
         commit_window: 0.6,

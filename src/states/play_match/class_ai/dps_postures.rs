@@ -216,6 +216,18 @@ pub fn evaluate_dps_posture(
         .map(|i| i.position)
         .collect();
 
+    // Nearest threat for the distance-max `flee` term (Hunter). Deterministic:
+    // threats are collected from a BTreeMap, so equal distances tie-break by
+    // entity order.
+    let nearest_threat = threats
+        .iter()
+        .copied()
+        .min_by(|a, b| {
+            a.distance(my_pos)
+                .partial_cmp(&b.distance(my_pos))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
     let range_band = kill_target
         .and_then(|t| ctx.combatants.get(&t))
         .filter(|i| i.is_alive)
@@ -238,6 +250,7 @@ pub fn evaluate_dps_posture(
         wand_target: None,
         wand_range: 0.0,
         range_band,
+        nearest_threat,
         committed_direction,
     };
     let chosen = score_directions(&compass_directions_16(), &inputs, &config.weights);

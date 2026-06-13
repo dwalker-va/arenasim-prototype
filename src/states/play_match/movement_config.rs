@@ -50,6 +50,12 @@ pub struct MovementWeights {
     /// Ring-attraction toward the kill target's `[min, max]` band (Mage
     /// kiting). `0.0` disables for the healers, which have no kill-target ring.
     pub range_band: f32,
+    /// Constant pull away from the nearest threat, NOT proximity-weighted —
+    /// the distance-maximization "flee" a chased ranged DPS (Hunter) needs to
+    /// outrun an un-impaired chaser. Unlike `threat_repulsion` (which fades
+    /// with distance, right for healers), `flee` is strong at all ranges.
+    /// `0.0` disables for healers and the Mage (whose KITE target is rooted).
+    pub flee: f32,
     /// Bonus toward the previously committed direction, applied only AT
     /// re-evaluation while the commitment window is open (R11).
     pub commitment_bonus: f32,
@@ -66,6 +72,7 @@ impl Default for MovementWeights {
             corner_penalty: 6.0,
             wand_pull: 0.5,
             range_band: 0.0,
+            flee: 0.0,
             commitment_bonus: 1.5,
         }
     }
@@ -270,8 +277,11 @@ impl Default for DpsMovementConfig {
             weights: MovementWeights {
                 // Kiter profile: strong repulsion, ring attraction on, no
                 // healer terms (formation/wand) and a light corner penalty.
+                // `flee` defaults off (Mage orbits a rooted target); the Hunter
+                // block in movement.ron turns it up for distance-max kiting.
                 threat_repulsion: 3.0,
                 formation_pull: 0.0,
+                flee: 0.0,
                 corner_penalty: 4.0,
                 wand_pull: 0.0,
                 range_band: 2.0,
@@ -411,6 +421,7 @@ impl MovementConfig {
                 ("corner_penalty", weights.corner_penalty),
                 ("wand_pull", weights.wand_pull),
                 ("range_band", weights.range_band),
+                ("flee", weights.flee),
                 ("commitment_bonus", weights.commitment_bonus),
             ];
             for (name, value) in terms {

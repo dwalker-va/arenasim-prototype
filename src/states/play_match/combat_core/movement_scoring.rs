@@ -25,6 +25,10 @@
 //!   target (weight 0 disables; Paladin).
 //! - **Range-band** — ring-attraction toward the kill target's `[min, max]`
 //!   band (Mage kiting; weight 0 disables for healers).
+//! - **Flee** — constant pull away from the nearest threat, NOT
+//!   proximity-weighted (distance-maximization), so a chased ranged DPS
+//!   (Hunter) outruns an un-impaired chaser at all ranges where
+//!   `threat_repulsion` fades. Weight 0 disables for healers and the Mage.
 //! - **Commitment bonus** — toward the previously committed direction,
 //!   applied only AT re-evaluation while the commitment window is open. The
 //!   hard `committed_until` window on `MovementDirective` decides WHEN
@@ -127,6 +131,9 @@ pub struct ScorerInputs {
     /// Ring-attraction band toward the kill target (Mage kiting). `None`
     /// disables the term (no kill target, or non-Mage scorer).
     pub range_band: Option<RangeBand>,
+    /// Nearest threat position, for the distance-maximization `flee` term
+    /// (Hunter). `None` disables it (no threats, or non-fleeing scorer).
+    pub nearest_threat: Option<Vec3>,
     /// Previously committed direction. `Some` ONLY while the commitment
     /// window is open — the caller passes `None` outside it, which disables
     /// the term entirely.
@@ -221,6 +228,17 @@ pub fn score_direction(candidate: Vec2, inputs: &ScorerInputs, weights: &Movemen
                     score += weights.range_band * candidate.dot(-toward);
                 }
             }
+        }
+    }
+
+    // Flee (Hunter): constant pull away from the nearest threat, NOT weighted
+    // by proximity — a chased ranged DPS must outrun an un-impaired chaser at
+    // all ranges, where `threat_repulsion` (proximity-weighted) fades. Weight 0
+    // disables for healers and the Mage.
+    if weights.flee > 0.0 {
+        if let Some(threat) = inputs.nearest_threat {
+            let away = (my_xz - xz(threat)).normalize_or_zero();
+            score += weights.flee * candidate.dot(away);
         }
     }
 
@@ -423,6 +441,7 @@ mod tests {
             corner_penalty: 0.0,
             wand_pull: 0.0,
             range_band: 0.0,
+            flee: 0.0,
             commitment_bonus: 0.5,
         };
         let dirs = compass_directions_16();
