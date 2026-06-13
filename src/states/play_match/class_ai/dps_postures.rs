@@ -1,20 +1,23 @@
-//! Mage movement posture machine (ENGAGE/KITE) — the Part B pilot of the
-//! context-steering scorer for a DPS class.
+//! Shared DPS-kiter movement posture machine (ENGAGE/KITE) on the
+//! context-steering scorer. Used by the Mage and the Hunter.
 //!
 //! Two postures on the shared `score_directions` machinery:
-//! - **ENGAGE** — no directive; the Mage falls through to normal pursuit
-//!   (`move_to_target`) to preferred range, then stands and casts.
-//! - **KITE** — a melee-range threat carries the Mage's own root/slow aura, so
-//!   the Mage orbits its kill target at `range_band` distance while repelling
-//!   from threats (arc-kiting). Issues a `MovementDirective` the executor runs
-//!   ahead of the legacy `kiting_timer` branch.
+//! - **ENGAGE** — no directive; the kiter falls through to normal pursuit
+//!   (`move_to_target`) to preferred range, then stands and shoots/casts.
+//! - **KITE** — orbit the kill target at `range_band` distance while repelling
+//!   threats (arc-kiting). Issues a `MovementDirective` the executor runs ahead
+//!   of the legacy `kiting_timer` branch.
 //!
-//! KITE entry is aura-only (a melee-range threat the Mage rooted/slowed);
-//! sustain is broader (any visible enemy still carrying a Mage-owned root or
-//! slow). A `kite_hold` hysteresis floor blocks exit for a minimum window so a
-//! fast Frost Nova break doesn't strobe the posture. Evaluated at
-//! ability-decision time (not a per-frame system), so KITE exit can lag up to
-//! one GCD after the sustaining aura ends — an accepted pilot simplification.
+//! `evaluate_dps_posture` is the shared transition + scoring machine; the
+//! caller supplies the class-specific entry/sustain predicate:
+//! - **Mage** — aura-gated: KITE when a melee enemy carries the Mage's own
+//!   root/slow (`mage_kite_entry` / `mage_kite_sustain`).
+//! - **Hunter** — proximity-gated: KITE when a melee threat is within closing
+//!   range (`enemy_within`), matching its legacy three-band behavior.
+//!
+//! A `kite_hold` hysteresis floor blocks exit for a minimum window (anti-strobe).
+//! Evaluated at ability-decision time (not a per-frame system), so KITE exit can
+//! lag up to one GCD after the sustain condition lapses — accepted.
 
 use bevy::prelude::*;
 
@@ -28,7 +31,7 @@ use crate::states::play_match::constants::MELEE_RANGE;
 use crate::states::play_match::decision_trace::{
     ActorView, DecisionTrace, MovementGoalKind, MovementTrigger, Posture as TracePosture,
 };
-use crate::states::play_match::movement_config::MageMovementConfig;
+use crate::states::play_match::movement_config::DpsMovementConfig;
 
 use super::CombatContext;
 
@@ -94,13 +97,41 @@ fn self_team(ctx: &CombatContext, me: Entity) -> u8 {
     ctx.combatants.get(&me).map_or(u8::MAX, |i| i.team)
 }
 
-/// Evaluate the Mage's ENGAGE/KITE posture and (in KITE) issue a movement
-/// directive. Runs before the ability pass, outside the GCD short-circuit (so
-/// a directive refreshes while only the GCD is up). A *casting* Mage is
-/// excluded from the dispatch query, so KITE does not re-evaluate mid-cast;
-/// `directive_ttl` is sized to outlast a Frostbolt so the pre-cast directive
-/// survives and resumes post-cast. Gated on gates-open by the caller.
-pub fn evaluate_mage_posture(
+/// Aura-gated KITE entry (Mage): a melee-range enemy carries a Mage-owned
+/// root/slow.
+pub fn mage_kite_entry(ctx: &CombatContext, me: Entity, my_pos: Vec3) -> bool {
+    mage_impaired_enemy(ctx, me, my_pos, Some(MELEE_RANGE))
+}
+
+/// Aura-gated KITE sustain (Mage): a rooted enemy at any range, or a slowed
+/// enemy still within `ring` (so Frostbolt's never-breaking slow can't pin KITE
+/// on a kited-away enemy).
+pub fn mage_kite_sustain(ctx: &CombatContext, me: Entity, my_pos: Vec3, ring: f32) -> bool {
+    kite_sustained(ctx, me, my_pos, ring)
+}
+
+/// Proximity-gated KITE entry/sustain (Hunter): is any alive enemy within
+/// `radius`? Entry uses the closing-range radius; sustain a slightly larger one
+/// so KITE doesn't strobe at the boundary. Class-agnostic by design — the
+/// Hunter kites whatever is closing, matching its legacy three-band behavior.
+pub fn enemy_within(ctx: &CombatContext, me: Entity, my_pos: Vec3, radius: f32) -> bool {
+    let team = self_team(ctx, me);
+    ctx.combatants.values().any(|info| {
+        !info.is_pet && info.team != team && info.is_alive && info.position.distance(my_pos) <= radius
+    })
+}
+
+/// Evaluate a DPS kiter's ENGAGE/KITE posture and (in KITE) issue a movement
+/// directive. Shared by the Mage (aura-gated) and Hunter (proximity-gated) —
+/// the caller computes `entry_trigger`/`sustain` with the class-specific
+/// predicate above; this drives the common transition + scoring machine. Runs
+/// before the ability pass, outside the GCD short-circuit (so a directive
+/// refreshes while only the GCD is up). A *casting* kiter is excluded from the
+/// dispatch query, so KITE does not re-evaluate mid-cast; `directive_ttl` is
+/// sized to outlast the longest cast so the pre-cast directive survives and
+/// resumes post-cast. Gated on gates-open by the caller.
+#[allow(clippy::too_many_arguments)]
+pub fn evaluate_dps_posture(
     commands: &mut Commands,
     entity: Entity,
     my_pos: Vec3,
@@ -108,7 +139,9 @@ pub fn evaluate_mage_posture(
     ctx: &CombatContext,
     posture: Option<&mut KitePosture>,
     directive: Option<&MovementDirective>,
-    config: &MageMovementConfig,
+    config: &DpsMovementConfig,
+    entry_trigger: bool,
+    sustain: bool,
     now: f32,
     decision_trace: &mut DecisionTrace,
 ) {
@@ -121,12 +154,6 @@ pub fn evaluate_mage_posture(
     };
 
     let prev = state.posture;
-
-    // Entry: a melee-range enemy carries a Mage-owned root/slow. Sustain: a
-    // rooted enemy at any range, or a slowed enemy still within the kite ring
-    // (so Frostbolt's permanent slow can't pin KITE on a kited-away enemy).
-    let entry_trigger = mage_impaired_enemy(ctx, entity, my_pos, Some(MELEE_RANGE));
-    let sustain = kite_sustained(ctx, entity, my_pos, config.range_band_max);
 
     let next = match prev {
         DpsPosture::Kite if now < state.hold_until => DpsPosture::Kite, // hysteresis hold

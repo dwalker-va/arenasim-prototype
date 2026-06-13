@@ -643,7 +643,12 @@ pub fn decide_abilities(
                 // accepted pilot simplification.
                 if countdown.gates_opened {
                     if let Ok((_healer, mage_posture, directive)) = posture_movement.get_mut(entity) {
-                        class_ai::mage_postures::evaluate_mage_posture(
+                        // Mage: aura-gated KITE (a melee enemy it rooted/slowed).
+                        let cfg = &movement_config.mage;
+                        let entry = class_ai::dps_postures::mage_kite_entry(&ctx, entity, my_pos);
+                        let sustain =
+                            class_ai::dps_postures::mage_kite_sustain(&ctx, entity, my_pos, cfg.range_band_max);
+                        class_ai::dps_postures::evaluate_dps_posture(
                             &mut commands,
                             entity,
                             my_pos,
@@ -651,7 +656,9 @@ pub fn decide_abilities(
                             &ctx,
                             mage_posture.map(bevy::prelude::Mut::into_inner),
                             directive,
-                            &movement_config.mage,
+                            cfg,
+                            entry,
+                            sustain,
                             time.elapsed_secs(),
                             &mut decision_trace,
                         );

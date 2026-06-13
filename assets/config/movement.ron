@@ -101,5 +101,26 @@
         kite_hold: 1.0,            // hysteresis floor against KITE<->ENGAGE strobing
         directive_ttl: 3.0,        // covers a Frostbolt cast so movement survives the cast
         commit_window: 0.6,        // anti-zigzag committed-direction window
+        kite_entry_radius: 20.0,   // (unused: Mage is aura-gated)
+        kite_sustain_radius: 24.0, // (unused: Mage is aura-gated)
+    ),
+    // Hunter ENGAGE/KITE (proximity-gated): kites whatever melee is closing,
+    // holds the kill target in shot range, and stays out of the 8yd dead zone.
+    hunter: (
+        weights: (
+            threat_repulsion: 3.0,
+            formation_pull: 0.0,
+            corner_penalty: 4.0,   // bend escapes along walls (fixes legacy corner-stuck)
+            wand_pull: 0.0,
+            range_band: 2.0,
+            commitment_bonus: 1.5,
+        ),
+        range_band_min: 8.0,       // HUNTER_DEAD_ZONE — can't shoot inside this
+        range_band_max: 30.0,      // within AUTO_SHOT_RANGE (35) — keep the target shootable
+        kite_hold: 1.0,
+        directive_ttl: 3.0,        // covers an Aimed Shot cast
+        commit_window: 0.6,
+        kite_entry_radius: 20.0,   // closing-range band — a melee within this opens KITE
+        kite_sustain_radius: 24.0, // hold KITE a touch past entry (anti-strobe)
     ),
 )

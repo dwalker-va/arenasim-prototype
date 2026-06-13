@@ -657,7 +657,7 @@ fn try_frostbolt(
     // safe-kiting distance" — proximity-gated so Frostbolt's own never-breaking
     // slow on a kited-away enemy doesn't permanently suppress hard-casts.
     let kiting =
-        super::mage_postures::mage_impaired_enemy(ctx, entity, my_pos, Some(SAFE_KITING_DISTANCE));
+        super::dps_postures::mage_impaired_enemy(ctx, entity, my_pos, Some(SAFE_KITING_DISTANCE));
     if kiting && distance_to_target < SAFE_KITING_DISTANCE {
         builder.reject(
             ability,
