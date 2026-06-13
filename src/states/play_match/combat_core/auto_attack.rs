@@ -67,6 +67,49 @@ pub fn combat_auto_attack(
         })
         .collect();
 
+    // Auto-attacks must not shatter friendly crowd control. The AI ability path
+    // already guards casts via `pre_cast_ok(check_friendly_cc)`, but
+    // auto-attacks bypass that guard. Two tiers, each mapping a target entity to
+    // the team of the caster who placed the CC (only one caster team recorded
+    // per target — a target carrying the same CC class from two teams at once
+    // does not occur):
+    //  - `incap_cc_team`: break-on-ANY-damage incapacitates (Freezing Trap /
+    //    Polymorph, threshold 0.0). NO attacker may break these — most visibly a
+    //    Hunter's melee pet sitting on a trapped target.
+    //  - `root_cc_team`: damage-breakable Roots (Spider Web, Frost Nova). A PET
+    //    must not break these: it webs a target to peel it off the owner, and
+    //    meleeing through the Web both defeats the peel and shatters it. A ranged
+    //    player legitimately nukes a rooted target (root + nuke), so this tier is
+    //    pet-only. Stuns/Fears are excluded — those are offensive setups the pet
+    //    should keep attacking through.
+    let caster_team = |a: &Aura| a.caster.and_then(|c| combatant_info.get(&c)).map(|info| info.0);
+    let incap_cc_team: std::collections::HashMap<Entity, u8> = combatants
+        .iter()
+        .filter_map(|(entity, _, _, _, _, auras)| {
+            let auras = auras?;
+            auras
+                .auras
+                .iter()
+                .find_map(|a| (a.break_on_damage_threshold == 0.0).then(|| caster_team(a)).flatten())
+                .map(|team| (entity, team))
+        })
+        .collect();
+    let root_cc_team: std::collections::HashMap<Entity, u8> = combatants
+        .iter()
+        .filter_map(|(entity, _, _, _, _, auras)| {
+            let auras = auras?;
+            auras
+                .auras
+                .iter()
+                .find_map(|a| {
+                    (a.effect_type == AuraType::Root && a.break_on_damage_threshold >= 0.0)
+                        .then(|| caster_team(a))
+                        .flatten()
+                })
+                .map(|team| (entity, team))
+        })
+        .collect();
+
     // Collect attacks that will happen this frame (attacker, target, damage)
     let mut attacks = Vec::new();
 
@@ -127,6 +170,17 @@ pub fn combat_auto_attack(
             if let Some(target_entity) = combatant.target {
                 // Skip if target is dead (will be retargeted next frame)
                 if !combatant_info.get(&target_entity).map_or(false, |info| info.4) {
+                    continue;
+                }
+                // Don't shatter our own team's CC. The timer keeps building so
+                // the attack resumes the instant the CC ends.
+                //  - incapacitates (Freezing Trap / Polymorph): no attacker.
+                //  - Roots (Spider Web): pets only — a ranged owner still nukes
+                //    a rooted target.
+                let attacker_is_pet = auto_attack_pet_query.get(attacker_entity).is_ok();
+                if incap_cc_team.get(&target_entity) == Some(&combatant.team)
+                    || (attacker_is_pet && root_cc_team.get(&target_entity) == Some(&combatant.team))
+                {
                     continue;
                 }
                 // Check if target is in range before attacking
