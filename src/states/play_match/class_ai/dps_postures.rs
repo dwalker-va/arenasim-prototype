@@ -12,8 +12,9 @@
 //! caller supplies the class-specific entry/sustain predicate:
 //! - **Mage** — aura-gated: KITE when a melee enemy carries the Mage's own
 //!   root/slow (`mage_kite_entry` / `mage_kite_sustain`).
-//! - **Hunter** — proximity-gated: KITE when a melee threat is within closing
-//!   range (`enemy_within`), matching its legacy three-band behavior.
+//! - **Hunter** — proximity-gated: KITE when a melee-DPS threat (Warrior/Rogue)
+//!   is within closing range (`melee_within`); ranged classes are excluded so
+//!   the Hunter holds and shoots a caster rather than fleeing it.
 //!
 //! A `kite_hold` hysteresis floor blocks exit for a minimum window (anti-strobe).
 //! Evaluated at ability-decision time (not a per-frame system), so KITE exit can
@@ -28,6 +29,7 @@ use crate::states::play_match::components::{
     AuraType, DpsPosture, KitePosture, MovementDirective, MovementGoal,
 };
 use crate::states::play_match::constants::MELEE_RANGE;
+use crate::states::play_match::match_config::CharacterClass;
 use crate::states::play_match::decision_trace::{
     ActorView, DecisionTrace, MovementGoalKind, MovementTrigger, Posture as TracePosture,
 };
@@ -110,21 +112,36 @@ pub fn mage_kite_sustain(ctx: &CombatContext, me: Entity, my_pos: Vec3, ring: f3
     kite_sustained(ctx, me, my_pos, ring)
 }
 
-/// Proximity-gated KITE entry/sustain (Hunter): is any alive, NON-STEALTHED
-/// enemy within `radius`? Entry uses the closing-range radius; sustain a
-/// slightly larger one so KITE doesn't strobe at the boundary. Stealthed
-/// enemies are excluded — the kiter can't see a stealthed Rogue, so it must not
-/// react to its position until stealth breaks. Class-agnostic by design — the
-/// Hunter kites whatever visible melee is closing.
-pub fn enemy_within(ctx: &CombatContext, me: Entity, my_pos: Vec3, radius: f32) -> bool {
+/// Proximity-gated KITE entry/sustain (Hunter): is a melee-DPS threat closing
+/// within `radius`? Entry uses the closing-range radius; sustain a slightly
+/// larger one so KITE doesn't strobe at the boundary.
+///
+/// Only a class whose melee damage warrants kiting counts (`is_kite_threat` —
+/// Warrior, Rogue). Ranged classes (Mage, Warlock, Priest, Hunter) are
+/// excluded: against them the Hunter holds at shot range and trades shots, it
+/// does NOT flee — fleeing a caster just forfeits its own DPS. The Paladin is
+/// excluded too: its melee damage isn't meaningful pressure, and avoiding its
+/// Hammer of Justice is a separate "avoid CC" movement concern (deferred).
+/// Stealthed enemies are excluded — the kiter can't see a stealthed Rogue, so
+/// it must not react to its position until stealth breaks. Enemy melee *pets*
+/// are excluded for now (the `!is_pet` filter); folding them in is deferred.
+pub fn melee_within(ctx: &CombatContext, me: Entity, my_pos: Vec3, radius: f32) -> bool {
     let team = self_team(ctx, me);
     ctx.combatants.values().any(|info| {
         !info.is_pet
             && info.team != team
             && info.is_alive
             && !info.stealthed
+            && is_kite_threat(info.class)
             && info.position.distance(my_pos) <= radius
     })
+}
+
+/// A class whose melee damage warrants kiting (Warrior, Rogue). Deliberately
+/// narrower than `CharacterClass::is_melee()`, which also counts the Paladin —
+/// the Paladin's melee is not a kiting pressure threat here.
+fn is_kite_threat(class: CharacterClass) -> bool {
+    matches!(class, CharacterClass::Warrior | CharacterClass::Rogue)
 }
 
 /// Evaluate a DPS kiter's ENGAGE/KITE posture and (in KITE) issue a movement

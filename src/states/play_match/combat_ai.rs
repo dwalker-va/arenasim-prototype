@@ -810,17 +810,19 @@ pub fn decide_abilities(
             match_config::CharacterClass::Hunter => {
                 // Hunter movement is the proximity-gated ENGAGE/KITE machine
                 // (the Mage's aura-gating doesn't fit — the Hunter has no
-                // reliable self-root and kites on melee proximity). KITE when a
-                // melee threat is within closing range; the ability AI keeps its
-                // own dead/closing/safe band priorities. Same gates-open +
-                // casting-excluded contract as the Mage.
+                // reliable self-root and kites on melee proximity). KITE only
+                // when a melee-DPS threat (Warrior/Rogue) is within closing
+                // range — `melee_within` excludes ranged classes so the Hunter
+                // holds and shoots a caster instead of fleeing it. The ability
+                // AI keeps its own dead/closing/safe band priorities. Same
+                // gates-open + casting-excluded contract as the Mage.
                 if countdown.gates_opened {
                     if let Ok((_healer, kite_posture, directive)) = posture_movement.get_mut(entity) {
                         let cfg = &movement_config.hunter;
                         let entry =
-                            class_ai::dps_postures::enemy_within(&ctx, entity, my_pos, cfg.kite_entry_radius);
+                            class_ai::dps_postures::melee_within(&ctx, entity, my_pos, cfg.kite_entry_radius);
                         let sustain =
-                            class_ai::dps_postures::enemy_within(&ctx, entity, my_pos, cfg.kite_sustain_radius);
+                            class_ai::dps_postures::melee_within(&ctx, entity, my_pos, cfg.kite_sustain_radius);
                         class_ai::dps_postures::evaluate_dps_posture(
                             &mut commands,
                             entity,
