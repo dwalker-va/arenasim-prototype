@@ -10,9 +10,10 @@
 // every field is stated explicitly here anyway so this file is the single
 // place balance tuning happens.
 //
-// Scorer term weights: ally_anchor and boundary_penalty are HARD penalties
-// (constraints) and must dominate the sum of all soft terms — validate()
-// enforces this.
+// Scorer term weights are all additive interest terms. Hard constraints
+// (boundary, ally-anchor) are boolean masks in the scorer, not weights — the
+// old ally_anchor/boundary_penalty penalty knobs and their dominance invariant
+// were retired with the context-steering mask refactor.
 (
     shared: (
         // PRESSURED proximity condition: a targeting enemy within this
@@ -50,9 +51,7 @@
     priest: (
         weights: (
             threat_repulsion: 3.0,
-            ally_anchor: 1000.0,      // HARD: heal-range constraint
             formation_pull: 2.0,
-            boundary_penalty: 1000.0, // HARD: never score an out-of-bounds step
             corner_penalty: 6.0,
             wand_pull: 0.5,
             commitment_bonus: 1.5,
@@ -65,9 +64,7 @@
     paladin: (
         weights: (
             threat_repulsion: 3.0,
-            ally_anchor: 1000.0,      // HARD: heal-range constraint
             formation_pull: 0.0,      // Paladin keeps melee identity — no backline point
-            boundary_penalty: 1000.0, // HARD: never score an out-of-bounds step
             corner_penalty: 4.0,
             wand_pull: 0.0,           // Paladin has no wand
             commitment_bonus: 1.5,

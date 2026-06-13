@@ -29,22 +29,18 @@ use serde::{Deserialize, Serialize};
 ///
 /// Consumed by `combat_core::movement_scoring::score_directions`. A weight of
 /// `0.0` disables its term (e.g., `wand_pull: 0.0` for the Paladin, which has
-/// no wand). `ally_anchor` and `boundary_penalty` are HARD penalties — they
-/// must dominate the sum of all soft terms so a violating candidate can never
-/// outscore a non-violating one (enforced by `validate()`).
+/// no wand). All terms here are additive *interest* terms; the hard
+/// constraints (boundary, ally-anchor) are boolean masks in the scorer, not
+/// weights — the retired `ally_anchor` / `boundary_penalty` penalty fields and
+/// the dominance invariant that policed them are gone.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MovementWeights {
     /// Per visible threat: pull away, weighted by proximity (PRESSURED).
     pub threat_repulsion: f32,
-    /// Hard penalty for candidate positions outside heal range of the anchor
-    /// ally (PRESSURED constraint).
-    pub ally_anchor: f32,
     /// Pull toward the formation point behind the engaged-ally centroid
     /// (FREE, Priest only).
     pub formation_pull: f32,
-    /// Hard penalty for candidate positions outside the arena bounds.
-    pub boundary_penalty: f32,
     /// Graded penalty for candidate positions approaching arena corners.
     pub corner_penalty: f32,
     /// Low-weight pull toward wand range of the kill target (Priest;
@@ -59,9 +55,7 @@ impl Default for MovementWeights {
     fn default() -> Self {
         Self {
             threat_repulsion: 3.0,
-            ally_anchor: 1000.0,
             formation_pull: 2.0,
-            boundary_penalty: 1000.0,
             // Matches the shipped Priest value in movement.ron (the Paladin
             // block explicitly overrides to 4.0). Was 4.0 here — a silent
             // divergence from the RON, now aligned (P3 residual).
@@ -342,9 +336,7 @@ impl MovementConfig {
         for (class, weights) in [("priest", &self.priest.weights), ("paladin", &self.paladin.weights)] {
             let terms = [
                 ("threat_repulsion", weights.threat_repulsion),
-                ("ally_anchor", weights.ally_anchor),
                 ("formation_pull", weights.formation_pull),
-                ("boundary_penalty", weights.boundary_penalty),
                 ("corner_penalty", weights.corner_penalty),
                 ("wand_pull", weights.wand_pull),
                 ("commitment_bonus", weights.commitment_bonus),
@@ -354,24 +346,6 @@ impl MovementConfig {
                     issues.push(format!(
                         "{}.weights.{} must be non-negative and finite, got {}",
                         class, name, value
-                    ));
-                }
-            }
-            // Hard penalties must dominate the soft terms so a violating
-            // candidate can never outscore a non-violating one. Soft-term
-            // ceiling: ~3 visible threats at dot/proximity <= 1 each, plus
-            // formation/wand/commitment at dot <= 1 each.
-            let soft_ceiling = weights.threat_repulsion * 3.0
-                + weights.formation_pull
-                + weights.wand_pull
-                + weights.commitment_bonus
-                + weights.corner_penalty;
-            for (name, value) in [("ally_anchor", weights.ally_anchor), ("boundary_penalty", weights.boundary_penalty)] {
-                if value <= soft_ceiling {
-                    issues.push(format!(
-                        "{}.weights.{} ({}) is a HARD penalty and must exceed the soft-term \
-                         ceiling ({:.1}) to act as a constraint",
-                        class, name, value, soft_ceiling
                     ));
                 }
             }
@@ -485,20 +459,6 @@ mod tests {
         assert!(
             issues.iter().any(|i| i.contains("shared.heal_range")),
             "issues should name heal_range: {:?}",
-            issues
-        );
-    }
-
-    #[test]
-    fn validate_rejects_soft_hard_penalty() {
-        let mut config = MovementConfig::default();
-        // A "hard" penalty smaller than the soft-term ceiling is a config
-        // bug: the anchor constraint would stop being a constraint.
-        config.priest.weights.ally_anchor = 1.0;
-        let issues = config.validate().expect_err("weak ally_anchor must fail");
-        assert!(
-            issues.iter().any(|i| i.contains("priest.weights.ally_anchor")),
-            "issues should name the weak hard penalty: {:?}",
             issues
         );
     }

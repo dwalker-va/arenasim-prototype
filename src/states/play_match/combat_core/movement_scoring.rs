@@ -71,7 +71,7 @@ pub fn compass_directions_16() -> [Vec2; 16] {
 }
 
 /// Ally-anchor constraint: candidate positions farther than `heal_range`
-/// from `pos` take the hard `ally_anchor` penalty.
+/// from `pos` are masked out (`MASK_ANCHOR`) before the interest pass scores.
 #[derive(Clone, Copy, Debug)]
 pub struct AnchorConstraint {
     /// Anchor ally world position.
@@ -364,9 +364,7 @@ mod tests {
         // Isolate the interaction: only threat repulsion + commitment active.
         let weights = MovementWeights {
             threat_repulsion: 1.0,
-            ally_anchor: 0.0,
             formation_pull: 0.0,
-            boundary_penalty: 0.0,
             corner_penalty: 0.0,
             wand_pull: 0.0,
             commitment_bonus: 0.5,
@@ -417,16 +415,20 @@ mod tests {
         inputs: &ScorerInputs,
         weights: &MovementWeights,
     ) -> Vec2 {
+        // The old scheme's dominant penalty (shipped `ally_anchor` /
+        // `boundary_penalty` were both 1000.0, retired in U3). Hardcoded here so
+        // the oracle reproduces the old behavior independent of the live config.
+        const DOMINANT_PENALTY: f32 = 1000.0;
         let mut best_direction = Vec2::ZERO;
         let mut best_score = f32::MIN;
         for &candidate in candidates {
             let mut score = score_direction(candidate, inputs, weights);
             let mask = candidate_mask(candidate, inputs);
             if mask & MASK_ANCHOR != 0 {
-                score -= weights.ally_anchor;
+                score -= DOMINANT_PENALTY;
             }
             if mask & MASK_BOUNDARY != 0 {
-                score -= weights.boundary_penalty;
+                score -= DOMINANT_PENALTY;
             }
             if score > best_score {
                 best_score = score;
