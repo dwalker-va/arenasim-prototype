@@ -473,13 +473,8 @@ fn try_frost_nova(
     }
 
     // Movement after Frost Nova is owned by the ENGAGE/KITE posture machine
-    // (mage_postures.rs): a melee-range threat now carrying the Mage's root
-    // triggers KITE on the next posture evaluation. The Mage no longer writes
-    // `kiting_timer` (the legacy kiting branch is Hunter-only now).
-    debug_assert_eq!(
-        combatant.kiting_timer, 0.0,
-        "Mage must not set kiting_timer — movement is posture-driven (U5)"
-    );
+    // (dps_postures.rs): a melee-range threat now carrying the Mage's root
+    // triggers KITE on the next posture evaluation.
 
     info!(
         "Team {} {} casts Frost Nova! (AOE root) - {} enemies affected",

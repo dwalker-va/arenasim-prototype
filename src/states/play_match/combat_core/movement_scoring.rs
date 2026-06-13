@@ -1,8 +1,10 @@
-//! Pure position scorer for healer movement directives (U5).
+//! Pure position scorer for movement directives (healer postures + the
+//! Mage/Hunter ENGAGE/KITE machine).
 //!
-//! Extends the shape of `find_best_kiting_direction` (16-direction argmax)
-//! into a multi-term scorer with named, RON-tunable weights
-//! (`assets/config/movement.ron` → `MovementWeights`). Pure free functions
+//! A 16-direction argmax over named, RON-tunable weighted terms
+//! (`assets/config/movement.ron` → `MovementWeights`). It replaced the legacy
+//! `find_best_kiting_direction` (now deleted) as the sole kiting/positioning
+//! path. Pure free functions
 //! over caller-built inputs: no Bevy world, no queries — unit-testable in
 //! isolation, and deterministic as long as callers build `ScorerInputs` from
 //! BTree-ordered snapshots (floating-point summation order follows input
@@ -45,10 +47,6 @@
 //! dominated every soft-term sum, so the old argmax winner was always an
 //! unmasked candidate too. When every candidate is masked, the fallback
 //! ladder below applies.
-//!
-//! `find_best_kiting_direction` and the kiting branch are deliberately NOT
-//! touched here; Mage/Hunter kiting migration is tracked separately (see the
-//! Scope Boundaries of the context-steering plan).
 
 use bevy::prelude::*;
 
@@ -67,9 +65,8 @@ pub const MASK_ANCHOR: u16 = 1 << 1;
 /// penalty-free.
 pub const CORNER_PENALTY_ONSET: f32 = ARENA_CORNER_SUM * 0.7;
 
-/// The 16 compass candidate directions (unit XZ vectors, TAU/16 apart),
-/// matching `find_best_kiting_direction`'s candidate scan. Index order is
-/// fixed, so argmax tie-breaks are deterministic.
+/// The 16 compass candidate directions (unit XZ vectors, TAU/16 apart). Index
+/// order is fixed, so argmax tie-breaks are deterministic.
 pub fn compass_directions_16() -> [Vec2; 16] {
     std::array::from_fn(|i| {
         let angle = (i as f32) * std::f32::consts::TAU / 16.0;

@@ -176,8 +176,6 @@ pub struct Combatant {
     pub ability_cooldowns: std::collections::HashMap<AbilityType, f32>,
     /// Global cooldown timer - prevents ability spam (1.5s standard GCD in WoW)
     pub global_cooldown: f32,
-    /// When > 0, combatant will move away from enemies (kiting). Decrements over time.
-    pub kiting_timer: f32,
     /// Bucket A target-swap: sim-time of this combatant's last kill-target swap
     /// (the anti-ping-pong hysteresis floor). 0.0 = never swapped.
     pub last_target_swap_time: f32,
@@ -264,7 +262,6 @@ impl Combatant {
             original_color: Color::WHITE, // Will be set correctly when spawning the visual mesh
             ability_cooldowns: std::collections::HashMap::new(),
             global_cooldown: 0.0,
-            kiting_timer: 0.0,
             last_target_swap_time: 0.0,
             last_kill_target: None,
             rogue_opener: RogueOpener::default(),
