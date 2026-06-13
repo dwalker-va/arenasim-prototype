@@ -708,6 +708,70 @@ mod tests {
         assert!(chosen.y > 0.0, "must still gain separation from the −Z pursuer, got {chosen:?}");
     }
 
+    /// Corner-escape (the Hunter migration's load-bearing fix): a kiter pinned
+    /// near a corner with the threat between it and open space must bend OUT of
+    /// the corner, not pin into it. The legacy `find_best_kiting_direction` fled
+    /// straight away (into the corner, then hugged the wall); here the boundary
+    /// mask removes the corner-ward steps, `corner_penalty` discourages the
+    /// remaining wall-ward ones, and `flee` + the surviving directions push the
+    /// kiter back toward center — the chosen step reduces |x|+|z|.
+    #[test]
+    fn cornered_kiter_bends_out_of_the_corner() {
+        // Hunter flee profile (matches the shipped hunter block). corner_penalty
+        // must exceed flee so the corner term wins near the octagon wall —
+        // otherwise the kiter flees straight into the corner.
+        let weights = MovementWeights {
+            threat_repulsion: 1.0,
+            formation_pull: 0.0,
+            corner_penalty: 8.0,
+            wand_pull: 0.0,
+            range_band: 0.0,
+            flee: 6.0,
+            commitment_bonus: 0.0,
+        };
+        let dirs = compass_directions_16();
+        // Near the +X/+Z corner (|x|+|z| = 48, just inside ARENA_CORNER_SUM),
+        // threat on the diagonal between the Hunter and center — so "flee away
+        // from threat" points deeper into the corner (out of bounds).
+        // Arena is 36.5 (x) × 21.5 (z) with octagon corners at |x|+|z| ≤ 48.88.
+        // Place the kiter near the +X/+Z octagon corner (in bounds), threat on
+        // the diagonal between it and center — so "flee away" points into the
+        // corner, where the octagon boundary mask removes the deepest steps.
+        let threat = Vec3::new(22.0, 1.0, 13.0);
+        // Walk a few steps under the scorer; the kiter should round the corner
+        // (perpendicular slide) and end with a SMALLER |x|+|z| — i.e. escape,
+        // not pin. A single frame can be a lateral slide (corner-distance flat);
+        // over the walk it must actually decrease.
+        let mut pos = Vec3::new(28.0, 1.0, 19.0);
+        let corner_before = pos.x.abs() + pos.z.abs();
+        for step in 0..10 {
+            let inputs = ScorerInputs {
+                my_pos: pos,
+                lookahead: 2.0,
+                threats: vec![threat],
+                nearest_threat: Some(threat),
+                wand_range: 30.0,
+                ..Default::default()
+            };
+            let chosen = score_directions(&dirs, &inputs, &weights);
+            assert_ne!(chosen, Vec2::ZERO, "step {step}: must pick a direction, not pin");
+            pos += Vec3::new(chosen.x, 0.0, chosen.y) * 2.0;
+            // Never pinned against the octagon wall (the corner-stuck symptom).
+            assert!(
+                pos.x.abs() + pos.z.abs() <= super::ARENA_CORNER_SUM + 1e-3,
+                "step {step}: pinned past the octagon wall, |x|+|z|={}",
+                pos.x.abs() + pos.z.abs()
+            );
+        }
+        // Over the walk the kiter rounds the corner and ends meaningfully out of
+        // it — not pinned. (Single steps may slide laterally; the walk escapes.)
+        let corner_after = pos.x.abs() + pos.z.abs();
+        assert!(
+            corner_after < corner_before - 2.0,
+            "cornered kiter must escape the corner over the walk (|x|+|z| {corner_before} -> {corner_after})",
+        );
+    }
+
     /// Double-fallback: the healer is out of bounds (every candidate is
     /// boundary-masked even after the anchor mask drops). Rung 2 lifts the
     /// boundary mask and returns a finite, non-zero direction for the executor

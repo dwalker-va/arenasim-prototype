@@ -113,7 +113,7 @@
         weights: (
             threat_repulsion: 1.0,  // minor; flee does the heavy lifting
             formation_pull: 0.0,
-            corner_penalty: 4.0,    // bend escapes along walls (fixes legacy corner-stuck)
+            corner_penalty: 8.0,    // MUST exceed flee — bends escapes out of corners (corner-stuck fix)
             wand_pull: 0.0,
             range_band: 0.5,        // gentle keep-in-range, not an orbit
             flee: 6.0,              // distance-max flee from the nearest chaser (the kiter's core)
