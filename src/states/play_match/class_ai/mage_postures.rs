@@ -35,10 +35,11 @@ use super::CombatContext;
 /// One scorer-lookahead step distance (matches the healer scorer).
 const SCORER_LOOKAHEAD: f32 = 2.0;
 
-/// Does any alive enemy carry an aura the Mage itself applied of the given
-/// movement-impairing kind, optionally restricted to within `max_dist` of
-/// `my_pos`? Used for both KITE entry (melee-range) and sustain (any range).
-fn mage_impaired_enemy(
+/// Does any alive enemy carry an aura the Mage itself applied of a
+/// movement-impairing kind (Root / MovementSpeedSlow), optionally restricted to
+/// within `max_dist` of `my_pos`? Used for KITE entry (melee-range) and sustain
+/// (any range), and by the Mage's Frostbolt close-range guard (any range).
+pub(super) fn mage_impaired_enemy(
     ctx: &CombatContext,
     me: Entity,
     my_pos: Vec3,

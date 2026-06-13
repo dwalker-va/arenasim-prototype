@@ -656,17 +656,7 @@ fn try_frostbolt(
     // world-state condition is "the Mage has a live root/slow out on an enemy"
     // (the same signal that sustains KITE). Replaces the removed timer guard
     // so the Mage doesn't root itself hard-casting Frostbolt in melee.
-    let kiting = ctx.combatants.values().any(|info| {
-        !info.is_pet
-            && info.is_alive
-            && info.team != combatant.team
-            && ctx.active_auras.get(&info.entity).is_some_and(|auras| {
-                auras.iter().any(|a| {
-                    a.caster == Some(entity)
-                        && matches!(a.effect_type, AuraType::Root | AuraType::MovementSpeedSlow)
-                })
-            })
-    });
+    let kiting = super::mage_postures::mage_impaired_enemy(ctx, entity, my_pos, None);
     if kiting && distance_to_target < SAFE_KITING_DISTANCE {
         builder.reject(
             ability,
