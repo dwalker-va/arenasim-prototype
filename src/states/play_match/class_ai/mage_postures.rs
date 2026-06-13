@@ -37,8 +37,8 @@ const SCORER_LOOKAHEAD: f32 = 2.0;
 
 /// Does any alive enemy carry an aura the Mage itself applied of a
 /// movement-impairing kind (Root / MovementSpeedSlow), optionally restricted to
-/// within `max_dist` of `my_pos`? Used for KITE entry (melee-range) and sustain
-/// (any range), and by the Mage's Frostbolt close-range guard (any range).
+/// within `max_dist` of `my_pos`? Used for KITE entry (melee-range) and the
+/// Mage's Frostbolt close-range guard (within safe-kiting distance).
 pub(super) fn mage_impaired_enemy(
     ctx: &CombatContext,
     me: Entity,
@@ -58,6 +58,33 @@ pub(super) fn mage_impaired_enemy(
             auras.iter().any(|a| {
                 a.caster == Some(me)
                     && matches!(a.effect_type, AuraType::Root | AuraType::MovementSpeedSlow)
+            })
+        })
+    })
+}
+
+/// KITE sustain: a Mage-owned **Root** on any enemy at any range (a rooted
+/// enemy is a committed kite window), OR a Mage-owned **slow** on an enemy
+/// within `slow_radius` (the kite ring). The proximity gate on slows is
+/// load-bearing: Frostbolt applies a never-breaking 5s slow on every cast, so
+/// an unbounded slow-sustain would pin KITE forever on a distant slowed enemy
+/// (e.g. a kited-away caster in 2v2). Gating slows to the ring lets KITE return
+/// to ENGAGE once the threat has actually been kited out.
+fn kite_sustained(ctx: &CombatContext, me: Entity, my_pos: Vec3, slow_radius: f32) -> bool {
+    let team = self_team(ctx, me);
+    ctx.combatants.values().any(|info| {
+        if info.is_pet || info.team == team || !info.is_alive {
+            return false;
+        }
+        let dist = info.position.distance(my_pos);
+        ctx.active_auras.get(&info.entity).is_some_and(|auras| {
+            auras.iter().any(|a| {
+                a.caster == Some(me)
+                    && match a.effect_type {
+                        AuraType::Root => true,
+                        AuraType::MovementSpeedSlow => dist <= slow_radius,
+                        _ => false,
+                    }
             })
         })
     })
@@ -95,10 +122,11 @@ pub fn evaluate_mage_posture(
 
     let prev = state.posture;
 
-    // Entry: a melee-range enemy carries a Mage-owned root/slow. Sustain: any
-    // visible enemy still does.
+    // Entry: a melee-range enemy carries a Mage-owned root/slow. Sustain: a
+    // rooted enemy at any range, or a slowed enemy still within the kite ring
+    // (so Frostbolt's permanent slow can't pin KITE on a kited-away enemy).
     let entry_trigger = mage_impaired_enemy(ctx, entity, my_pos, Some(MELEE_RANGE));
-    let sustain = mage_impaired_enemy(ctx, entity, my_pos, None);
+    let sustain = kite_sustained(ctx, entity, my_pos, config.range_band_max);
 
     let next = match prev {
         Posture::Kite if now < state.hold_until => Posture::Kite, // hysteresis hold

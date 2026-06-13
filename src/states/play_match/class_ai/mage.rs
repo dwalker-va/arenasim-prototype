@@ -653,10 +653,11 @@ fn try_frostbolt(
 
     // While kiting, only cast if at safe distance. Kiting is now posture-state
     // (mage_postures.rs) rather than the legacy `kiting_timer`; the equivalent
-    // world-state condition is "the Mage has a live root/slow out on an enemy"
-    // (the same signal that sustains KITE). Replaces the removed timer guard
-    // so the Mage doesn't root itself hard-casting Frostbolt in melee.
-    let kiting = super::mage_postures::mage_impaired_enemy(ctx, entity, my_pos, None);
+    // world-state condition is "a Mage-owned root/slow is on an enemy within
+    // safe-kiting distance" — proximity-gated so Frostbolt's own never-breaking
+    // slow on a kited-away enemy doesn't permanently suppress hard-casts.
+    let kiting =
+        super::mage_postures::mage_impaired_enemy(ctx, entity, my_pos, Some(SAFE_KITING_DISTANCE));
     if kiting && distance_to_target < SAFE_KITING_DISTANCE {
         builder.reject(
             ability,
