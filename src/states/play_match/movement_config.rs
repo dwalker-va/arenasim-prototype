@@ -25,6 +25,8 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use super::{AUTO_SHOT_RANGE, SAFE_KITING_DISTANCE};
+
 /// Position-scorer term weights (one block per healer class in movement.ron).
 ///
 /// Consumed by `combat_core::movement_scoring::score_directions`. A weight of
@@ -384,7 +386,11 @@ impl MovementConfig {
             ));
         }
 
-        for (class, weights) in [("priest", &self.priest.weights), ("paladin", &self.paladin.weights)] {
+        for (class, weights) in [
+            ("priest", &self.priest.weights),
+            ("paladin", &self.paladin.weights),
+            ("mage", &self.mage.weights),
+        ] {
             let terms = [
                 ("threat_repulsion", weights.threat_repulsion),
                 ("formation_pull", weights.formation_pull),
@@ -401,6 +407,48 @@ impl MovementConfig {
                     ));
                 }
             }
+        }
+
+        // Mage ENGAGE/KITE block (U6).
+        let m = &self.mage;
+        if !(m.range_band_min < m.range_band_max) {
+            issues.push(format!(
+                "mage.range_band_min ({}) must be strictly less than range_band_max ({})",
+                m.range_band_min, m.range_band_max
+            ));
+        }
+        if m.range_band_min < SAFE_KITING_DISTANCE {
+            issues.push(format!(
+                "mage.range_band_min ({}) must be >= SAFE_KITING_DISTANCE ({}) so the orbit \
+                 stays out of melee of a kill target that is also a threat",
+                m.range_band_min, SAFE_KITING_DISTANCE
+            ));
+        }
+        if m.range_band_max > AUTO_SHOT_RANGE {
+            issues.push(format!(
+                "mage.range_band_max ({}) must be <= AUTO_SHOT_RANGE ({}) — a ring beyond cast \
+                 range is config noise",
+                m.range_band_max, AUTO_SHOT_RANGE
+            ));
+        }
+        if m.kite_hold <= 0.0 || !m.kite_hold.is_finite() {
+            issues.push(format!(
+                "mage.kite_hold must be a positive finite number, got {}",
+                m.kite_hold
+            ));
+        }
+        if m.directive_ttl < m.commit_window {
+            issues.push(format!(
+                "mage.directive_ttl ({}) must be >= commit_window ({}) so a committed direction \
+                 does not outlive its directive",
+                m.directive_ttl, m.commit_window
+            ));
+        }
+        if m.commit_window <= 0.0 || !m.commit_window.is_finite() {
+            issues.push(format!(
+                "mage.commit_window must be a positive finite number, got {}",
+                m.commit_window
+            ));
         }
 
         if issues.is_empty() {
@@ -569,6 +617,68 @@ mod tests {
         MovementConfig::default()
             .validate()
             .expect("built-in defaults must be internally consistent");
+    }
+
+    #[test]
+    fn validate_rejects_inverted_mage_range_band() {
+        let mut config = MovementConfig::default();
+        config.mage.range_band_min = 30.0;
+        config.mage.range_band_max = 8.0;
+        let issues = config.validate().expect_err("min >= max must fail");
+        assert!(
+            issues.iter().any(|i| i.contains("mage.range_band_min")),
+            "issues should name range_band_min: {:?}",
+            issues
+        );
+    }
+
+    #[test]
+    fn validate_rejects_mage_range_band_max_beyond_shot_range() {
+        let mut config = MovementConfig::default();
+        config.mage.range_band_max = AUTO_SHOT_RANGE + 5.0;
+        let issues = config.validate().expect_err("max > AUTO_SHOT_RANGE must fail");
+        assert!(
+            issues.iter().any(|i| i.contains("mage.range_band_max")),
+            "issues should name range_band_max: {:?}",
+            issues
+        );
+    }
+
+    #[test]
+    fn validate_rejects_mage_range_band_min_below_safe_distance() {
+        let mut config = MovementConfig::default();
+        config.mage.range_band_min = SAFE_KITING_DISTANCE - 1.0;
+        let issues = config.validate().expect_err("min < SAFE_KITING_DISTANCE must fail");
+        assert!(
+            issues.iter().any(|i| i.contains("mage.range_band_min")),
+            "issues should name range_band_min: {:?}",
+            issues
+        );
+    }
+
+    #[test]
+    fn validate_rejects_nonpositive_mage_kite_hold() {
+        let mut config = MovementConfig::default();
+        config.mage.kite_hold = 0.0;
+        let issues = config.validate().expect_err("kite_hold 0 must fail");
+        assert!(
+            issues.iter().any(|i| i.contains("mage.kite_hold")),
+            "issues should name kite_hold: {:?}",
+            issues
+        );
+    }
+
+    #[test]
+    fn validate_rejects_mage_directive_ttl_below_commit_window() {
+        let mut config = MovementConfig::default();
+        config.mage.commit_window = 0.6;
+        config.mage.directive_ttl = 0.3;
+        let issues = config.validate().expect_err("ttl < commit_window must fail");
+        assert!(
+            issues.iter().any(|i| i.contains("mage.directive_ttl")),
+            "issues should name mage.directive_ttl: {:?}",
+            issues
+        );
     }
 
     /// Partial RON files fill missing fields from the struct defaults

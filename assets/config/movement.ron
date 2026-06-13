@@ -85,4 +85,21 @@
         swap_hysteresis: 2.0,  // min seconds between swaps (anti-ping-pong)
         swap_hp_margin: 0.15,  // softer target must be this HP fraction below the kill target
     ),
+    // Mage ENGAGE/KITE pilot (Part B). Kiting orbits the kill target between
+    // range_band_min and range_band_max while repelling melee threats.
+    mage: (
+        weights: (
+            threat_repulsion: 3.0,
+            formation_pull: 0.0,   // Mage has no backline formation point
+            corner_penalty: 4.0,
+            wand_pull: 0.0,        // Mage has no wand
+            range_band: 2.0,       // ring attraction toward the kill target
+            commitment_bonus: 1.5,
+        ),
+        range_band_min: 8.0,       // SAFE_KITING_DISTANCE — stay out of melee of the kill target
+        range_band_max: 30.0,      // within AUTO_SHOT_RANGE — keep the kill target in cast range
+        kite_hold: 1.0,            // hysteresis floor against KITE<->ENGAGE strobing
+        directive_ttl: 3.0,        // covers a Frostbolt cast so movement survives the cast
+        commit_window: 0.6,        // anti-zigzag committed-direction window
+    ),
 )
