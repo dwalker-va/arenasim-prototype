@@ -110,14 +110,20 @@ pub fn mage_kite_sustain(ctx: &CombatContext, me: Entity, my_pos: Vec3, ring: f3
     kite_sustained(ctx, me, my_pos, ring)
 }
 
-/// Proximity-gated KITE entry/sustain (Hunter): is any alive enemy within
-/// `radius`? Entry uses the closing-range radius; sustain a slightly larger one
-/// so KITE doesn't strobe at the boundary. Class-agnostic by design — the
-/// Hunter kites whatever is closing, matching its legacy three-band behavior.
+/// Proximity-gated KITE entry/sustain (Hunter): is any alive, NON-STEALTHED
+/// enemy within `radius`? Entry uses the closing-range radius; sustain a
+/// slightly larger one so KITE doesn't strobe at the boundary. Stealthed
+/// enemies are excluded — the kiter can't see a stealthed Rogue, so it must not
+/// react to its position until stealth breaks. Class-agnostic by design — the
+/// Hunter kites whatever visible melee is closing.
 pub fn enemy_within(ctx: &CombatContext, me: Entity, my_pos: Vec3, radius: f32) -> bool {
     let team = self_team(ctx, me);
     ctx.combatants.values().any(|info| {
-        !info.is_pet && info.team != team && info.is_alive && info.position.distance(my_pos) <= radius
+        !info.is_pet
+            && info.team != team
+            && info.is_alive
+            && !info.stealthed
+            && info.position.distance(my_pos) <= radius
     })
 }
 
@@ -209,10 +215,12 @@ pub fn evaluate_dps_posture(
     }
 
     let self_team = self_team(ctx, entity);
+    // Stealthed enemies are excluded — the kiter can't see them, so it must not
+    // flee from a stealthed Rogue's position until stealth breaks.
     let threats: Vec<Vec3> = ctx
         .combatants
         .values()
-        .filter(|i| !i.is_pet && i.team != self_team && i.is_alive)
+        .filter(|i| !i.is_pet && i.team != self_team && i.is_alive && !i.stealthed)
         .map(|i| i.position)
         .collect();
 
