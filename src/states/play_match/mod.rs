@@ -76,6 +76,9 @@ pub use selection::{
 };
 
 use bevy::prelude::*;
+use bevy::core_pipeline::bloom::Bloom;
+use bevy::core_pipeline::tonemapping::Tonemapping;
+use bevy::pbr::CascadeShadowConfigBuilder;
 use super::match_config::{self, MatchConfig};
 use super::GameState;
 use crate::combat::log::{CombatLog, CombatLogEventType};
@@ -171,32 +174,55 @@ pub fn setup_play_match(
     commands.insert_resource(SpellIcons::default());
     commands.insert_resource(SpellIconHandles::default());
 
-    // Spawn 3D camera with isometric-ish view
+    // Spawn 3D camera with isometric-ish view.
+    // HDR + tonemapping + bloom let the pre-scaled emissive effects (shields,
+    // heal columns, traps, drain beams — all authored at 2-4x) actually glow
+    // instead of clipping to flat white.
     commands.spawn((
         Camera3d::default(),
+        Camera {
+            hdr: true,
+            ..default()
+        },
+        Tonemapping::TonyMcMapface,
+        Bloom::NATURAL,
         Transform::from_xyz(0.0, 40.0, 50.0).looking_at(Vec3::ZERO, Vec3::Y),
         ArenaCamera,
         PlayMatchEntity,
     ));
 
-    // Add directional light (sun-like) - warm golden sunlight
+    // Add directional light (sun-like) - warm golden sunlight.
+    // Shadows grounded to the ~76-unit arena via a 2-cascade config so units
+    // cast contact shadows that anchor them to the floor.
     commands.spawn((
         DirectionalLight {
             illuminance: 25000.0,
             color: Color::srgb(1.0, 0.95, 0.85), // Warm golden sunlight
-            shadows_enabled: false,
+            shadows_enabled: true,
             ..default()
         },
+        CascadeShadowConfigBuilder {
+            num_cascades: 2,
+            maximum_distance: 120.0,
+            ..default()
+        }
+        .build(),
         Transform::from_xyz(4.0, 8.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
         PlayMatchEntity,
     ));
 
-    // Add ambient light for overall scene brightness - warm atmospheric glow
+    // Add ambient light for overall scene brightness - warm atmospheric glow.
+    // Kept low so the directional light + shadows carry the contrast and the
+    // emissive effects pop under bloom (was 400.0, which flattened everything).
     commands.insert_resource(AmbientLight {
         color: Color::srgb(0.9, 0.85, 0.7), // Warm peachy ambient light
-        brightness: 400.0,
+        brightness: 250.0,
         affects_lightmapped_meshes: true,
     });
+
+    // Deep cool background so the warm sandy arena reads against a cohesive
+    // backdrop instead of Bevy's default flat gray.
+    commands.insert_resource(ClearColor(Color::srgb(0.05, 0.06, 0.09)));
     
     // Initialize simulation speed control
     commands.insert_resource(SimulationSpeed { multiplier: 1.0 });
