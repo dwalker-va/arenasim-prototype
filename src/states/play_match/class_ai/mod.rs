@@ -15,6 +15,7 @@
 //! live in this module and are used by all class AI files.
 
 pub mod mage;
+pub mod mage_postures;
 pub mod priest;
 pub mod warrior;
 pub mod rogue;

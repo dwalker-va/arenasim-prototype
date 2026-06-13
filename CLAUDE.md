@@ -268,13 +268,16 @@ fractions in 0..1; values below are the shipped defaults):
 - `wand_range: 30.0` — wand-range pull target distance (Priest)
 
 **Per-class scorer weights** (`priest.weights:` / `paladin.weights:` —
-`score_directions` term weights; `0.0` disables a term):
+`score_directions` term weights; `0.0` disables a term). All terms here are
+additive *interest* terms; the hard constraints (boundary, ally-anchor) are
+boolean masks in the scorer, not weights — the old `ally_anchor` /
+`boundary_penalty` penalty knobs and their dominance invariant were retired
+with the context-steering mask refactor.
 - `threat_repulsion` (3.0/3.0) — pull away per visible threat, weighted by proximity
-- `ally_anchor` (1000.0) — HARD constraint: outside heal range of the anchor ally; must dominate all soft terms (enforced by `validate()`)
 - `formation_pull` (Priest 2.0 / Paladin 0.0) — pull toward the FREE backline point (Paladin keeps its melee identity, so 0 disables it)
-- `boundary_penalty` (1000.0) — HARD constraint: never score an out-of-bounds step
 - `corner_penalty` (Priest 6.0 / Paladin 4.0) — graded penalty approaching arena corners
 - `wand_pull` (Priest 0.5 / Paladin 0.0) — low-weight pull toward wand range of the kill target (`0.0` disables it for the wandless Paladin)
+- `range_band` (0.0 for healers; Mage `mage.weights` 2.0) — ring-attraction toward the kill target's `[min, max]` band (Mage kiting); disabled for healers
 - `commitment_bonus` (1.5/1.5) — bonus toward the committed direction during the commit window
 
 **Paladin-only block** (`paladin:` — alongside its `weights:`):
@@ -388,6 +391,14 @@ jq -c 'select(.kind == "movement_decision" and .actor.entity_id == 7) | {t: .sim
 # direction? (`scorer_terms` is a {name: value} map, present only when the
 # decision ran the scorer; re-commits / Point goals omit it.)
 jq -c 'select(.kind == "movement_decision" and .actor.class == "Priest" and .scorer_terms != null) | {t: .sim_time, posture, dir: .chosen_direction, terms: .scorer_terms}' $T
+
+# Masked candidates — the `masked` field is a u16 bitmask over the 16 compass
+# directions (bit i set when candidate i was eliminated by the boundary or
+# ally-anchor mask). Present only when the scorer ran. A value of 65535
+# (0xFFFF) is an all-masked frame, where the fallback ladder fired — the ONLY
+# legitimate source of Part A behavior divergence from the old penalty scheme,
+# so this is the query R6 byte-identity attribution uses on a divergent cell.
+jq -c 'select(.kind == "movement_decision" and .masked == 65535) | {t: .sim_time, class: .actor.class, entity: .actor.entity_id, posture}' $T
 
 # Paladin HoJ dips: DipEnter carries the goal entity (the enemy healer) in
 # the event's `target` view; DipComplete fires when HoJ lands, DipAbort when

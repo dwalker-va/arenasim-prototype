@@ -2869,3 +2869,161 @@ mod bucket_a_unit {
         assert_eq!(rev, Some(lo), "tie-break is order-independent");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Mage ENGAGE/KITE posture probes (Part B pilot, U7)
+// ---------------------------------------------------------------------------
+
+mod mage_postures {
+    use super::*;
+    use arenasim::headless::runner::TraceConfig;
+    use arenasim::states::play_match::constants::AUTO_SHOT_RANGE;
+
+    /// Fixed seed for the Mage pilot probes (ascii "mage").
+    const SEED: u64 = 0x6D61_6765;
+
+    /// One parsed Mage movement_decision event (combat-time clock).
+    struct MageEvent {
+        sim_time: f32,
+        trigger: String,
+    }
+
+    fn run_traced(config: HeadlessMatchConfig) -> (MatchResult, Timeline, Vec<serde_json::Value>) {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+        drop(tmp);
+        let mut timeline = Timeline::default();
+        let result = run_headless_match_observed(
+            config,
+            true,
+            Some(TraceConfig { output_path: path.clone() }),
+            |frame| timeline.record(frame),
+        )
+        .expect("observed traced match failed");
+        let body = std::fs::read_to_string(&path).expect("read trace");
+        let events: Vec<serde_json::Value> =
+            body.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+        let _ = std::fs::remove_file(path);
+        (result, timeline, events)
+    }
+
+    /// Mage (team 1, slot 0) movement events in combat-time order.
+    fn mage_events(trace: &[serde_json::Value]) -> Vec<MageEvent> {
+        trace
+            .iter()
+            .filter(|v| v["kind"] == "movement_decision" && v["actor"]["class"] == "Mage")
+            .map(|v| MageEvent {
+                sim_time: v["sim_time"].as_f64().unwrap() as f32,
+                trigger: v["trigger"].as_str().unwrap_or_default().to_string(),
+            })
+            .collect()
+    }
+
+    /// KITE windows (combat-time) from KiteEnter/KiteExit; an unclosed window
+    /// ends at `end`.
+    fn kite_windows(events: &[MageEvent], end: f32) -> Vec<(f32, f32)> {
+        let mut windows = Vec::new();
+        let mut open: Option<f32> = None;
+        for e in events {
+            match e.trigger.as_str() {
+                "KiteEnter" => open = Some(e.sim_time),
+                "KiteExit" => {
+                    if let Some(start) = open.take() {
+                        windows.push((start, e.sim_time));
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let Some(start) = open {
+            windows.push((start, end));
+        }
+        windows
+    }
+
+    /// Frost Nova roots a melee Warrior → the Mage enters KITE, and the window
+    /// later closes (KITE is not a one-way trap). Honors the kite_hold floor
+    /// and bounds the exit lag so a stuck-KITE regression fails loudly.
+    #[test]
+    fn mage_enters_kite_after_nova_and_exits() {
+        let cfg = create_config(vec!["Mage"], vec!["Warrior"], Some(SEED));
+        let (result, _timeline, trace) = run_traced(cfg);
+        let events = mage_events(&trace);
+
+        let enters = events.iter().filter(|e| e.trigger == "KiteEnter").count();
+        assert_min_occurrences("Mage KITE entries", enters, 1);
+        // Pin that the exit TRANSITION actually fires — kite_windows() would
+        // otherwise close an open window at match end (e.g. the Warrior dies
+        // mid-KITE), satisfying the dwell bounds below without a real exit.
+        let exits = events.iter().filter(|e| e.trigger == "KiteExit").count();
+        assert_min_occurrences("Mage KITE exits", exits, 1);
+
+        let windows = kite_windows(&events, result.match_time);
+        assert_min_occurrences("Mage KITE windows", windows.len(), 1);
+        for (start, end) in &windows {
+            let dwell = end - start;
+            // Hysteresis floor (kite_hold = 1.0) is honored, and KITE is not
+            // stuck on forever (one-GCD exit lag, not minutes).
+            assert!(
+                dwell >= 1.0 - 1e-3,
+                "KITE dwell {dwell:.2}s shorter than the kite_hold floor (1.0s)"
+            );
+            assert!(
+                dwell <= 30.0,
+                "KITE dwell {dwell:.2}s — KITE appears stuck (exit predicate not firing)"
+            );
+        }
+    }
+
+    /// KITE does not strobe: the entry count over a full 1v1 is bounded.
+    #[test]
+    fn mage_kite_does_not_strobe() {
+        let cfg = create_config(vec!["Mage"], vec!["Warrior"], Some(SEED));
+        let (_result, _timeline, trace) = run_traced(cfg);
+        let enters = mage_events(&trace).iter().filter(|e| e.trigger == "KiteEnter").count();
+        assert!(
+            enters <= 10,
+            "Mage entered KITE {enters} times in one 1v1 — strobing (kite_hold not holding)"
+        );
+    }
+
+    /// While kiting (range_band on), the Mage keeps its kill target — the
+    /// Warrior — within cast range for the bulk of post-gate time, instead of
+    /// fleeing it out of range (the legacy kiting bug) or face-tanking.
+    #[test]
+    fn mage_keeps_kill_target_in_shot_range() {
+        let cfg = create_config(vec!["Mage"], vec!["Warrior"], Some(SEED));
+        let (result, timeline, _trace) = run_traced(cfg);
+        let gate = timeline.gates_open_time.expect("gates opened");
+
+        let mage = timeline.find(1, CharacterClass::Mage, false);
+        let warrior = timeline.find(2, CharacterClass::Warrior, false);
+        let mage_s = timeline.samples.get(&mage).cloned().unwrap_or_default();
+        let warrior_s = timeline.samples.get(&warrior).cloned().unwrap_or_default();
+
+        let in_range = time_within_range_of(&mage_s, &warrior_s, AUTO_SHOT_RANGE);
+        let post_gate = (result.match_time - gate).max(1e-3);
+        let frac = in_range / post_gate;
+        assert!(
+            frac > 0.5,
+            "Mage kept the Warrior in shot range only {:.0}% of the match — range_band is not \
+             holding the kill target in range",
+            frac * 100.0
+        );
+    }
+
+    /// Non-perturbation extends to a Mage-directive match: an observed run is
+    /// bit-identical to an unobserved run at the same seed, so the Mage posture
+    /// machinery (which issues MovementDirectives) is observer-safe.
+    #[test]
+    fn mage_directive_run_does_not_perturb_outcomes() {
+        let seed = SEED;
+        let make = || create_config(vec!["Mage"], vec!["Warrior"], Some(seed));
+        let unobserved = run_headless_match_with(make(), true, None).expect("unobserved");
+        let mut frames = 0usize;
+        let observed = run_headless_match_observed(make(), true, None, |_f| frames += 1)
+            .expect("observed");
+        assert!(frames > 0, "observer never invoked");
+        assert_results_identical(&observed, &unobserved, "mage observed vs unobserved");
+    }
+}

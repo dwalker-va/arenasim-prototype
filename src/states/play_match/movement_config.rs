@@ -9,10 +9,9 @@
 //! is the most-burned-by bug in this repo's history.
 //!
 //! All scorer weights, radii, thresholds, and commitment windows for the
-//! healer posture state machine (FREE/PRESSURED/ESCAPE/DIP) live in
-//! `assets/config/movement.ron` (R9). As of U5 the config is loaded and
-//! validated but not yet consumed by any system — posture emitters arrive in
-//! U6–U8.
+//! healer posture state machine (FREE/PRESSURED/ESCAPE/DIP) and the Mage
+//! ENGAGE/KITE pilot live in `assets/config/movement.ron` (R9). The config is
+//! consumed by the class AI (Priest/Paladin posture eval, Mage posture eval).
 //!
 //! ## Usage
 //! ```ignore
@@ -25,31 +24,32 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use super::{AUTO_SHOT_RANGE, SAFE_KITING_DISTANCE};
+
 /// Position-scorer term weights (one block per healer class in movement.ron).
 ///
 /// Consumed by `combat_core::movement_scoring::score_directions`. A weight of
 /// `0.0` disables its term (e.g., `wand_pull: 0.0` for the Paladin, which has
-/// no wand). `ally_anchor` and `boundary_penalty` are HARD penalties — they
-/// must dominate the sum of all soft terms so a violating candidate can never
-/// outscore a non-violating one (enforced by `validate()`).
+/// no wand). All terms here are additive *interest* terms; the hard
+/// constraints (boundary, ally-anchor) are boolean masks in the scorer, not
+/// weights — the retired `ally_anchor` / `boundary_penalty` penalty fields and
+/// the dominance invariant that policed them are gone.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MovementWeights {
     /// Per visible threat: pull away, weighted by proximity (PRESSURED).
     pub threat_repulsion: f32,
-    /// Hard penalty for candidate positions outside heal range of the anchor
-    /// ally (PRESSURED constraint).
-    pub ally_anchor: f32,
     /// Pull toward the formation point behind the engaged-ally centroid
     /// (FREE, Priest only).
     pub formation_pull: f32,
-    /// Hard penalty for candidate positions outside the arena bounds.
-    pub boundary_penalty: f32,
     /// Graded penalty for candidate positions approaching arena corners.
     pub corner_penalty: f32,
     /// Low-weight pull toward wand range of the kill target (Priest;
     /// 0.0 disables for Paladin).
     pub wand_pull: f32,
+    /// Ring-attraction toward the kill target's `[min, max]` band (Mage
+    /// kiting). `0.0` disables for the healers, which have no kill-target ring.
+    pub range_band: f32,
     /// Bonus toward the previously committed direction, applied only AT
     /// re-evaluation while the commitment window is open (R11).
     pub commitment_bonus: f32,
@@ -59,14 +59,13 @@ impl Default for MovementWeights {
     fn default() -> Self {
         Self {
             threat_repulsion: 3.0,
-            ally_anchor: 1000.0,
             formation_pull: 2.0,
-            boundary_penalty: 1000.0,
             // Matches the shipped Priest value in movement.ron (the Paladin
             // block explicitly overrides to 4.0). Was 4.0 here — a silent
             // divergence from the RON, now aligned (P3 residual).
             corner_penalty: 6.0,
             wand_pull: 0.5,
+            range_band: 0.0,
             commitment_bonus: 1.5,
         }
     }
@@ -230,7 +229,53 @@ impl Default for MeleeMovementConfig {
     }
 }
 
-/// Resource containing all healer-movement weights and thresholds.
+/// Mage movement tuning (the ENGAGE/KITE pilot). `range_band_min`/`max` bound
+/// the kiting orbit ring; `kite_hold` is the hysteresis floor; `directive_ttl`
+/// must cover a Frostbolt cast so the Mage can act post-cast; `commit_window`
+/// is the anti-zigzag window.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MageMovementConfig {
+    pub weights: MovementWeights,
+    /// Inner ring radius — the orbit stays outside this of the kill target
+    /// (keeps the Mage out of melee of a target that is also a threat).
+    pub range_band_min: f32,
+    /// Outer ring radius — the orbit stays inside this of the kill target
+    /// (keeps the kill target in cast range).
+    pub range_band_max: f32,
+    /// Hysteresis floor: minimum seconds KITE holds after entry before it may
+    /// exit, even if the sustaining aura breaks (anti-strobe).
+    pub kite_hold: f32,
+    /// MovementDirective TTL — must cover the longest Mage cast so movement
+    /// survives a Frostbolt.
+    pub directive_ttl: f32,
+    /// Committed-direction window (anti-zigzag).
+    pub commit_window: f32,
+}
+
+impl Default for MageMovementConfig {
+    fn default() -> Self {
+        Self {
+            weights: MovementWeights {
+                // Kiter profile: strong repulsion, ring attraction on, no
+                // healer terms (formation/wand) and a light corner penalty.
+                threat_repulsion: 3.0,
+                formation_pull: 0.0,
+                corner_penalty: 4.0,
+                wand_pull: 0.0,
+                range_band: 2.0,
+                commitment_bonus: 1.5,
+            },
+            range_band_min: 8.0,   // SAFE_KITING_DISTANCE
+            range_band_max: 30.0,  // within AUTO_SHOT_RANGE
+            kite_hold: 1.0,
+            directive_ttl: 3.0,    // covers a Frostbolt cast
+            commit_window: 0.6,
+        }
+    }
+}
+
+/// Resource containing all movement weights and thresholds.
 ///
 /// Loaded from `assets/config/movement.ron` at startup (both modes).
 /// Access via `Res<MovementConfig>` in systems.
@@ -241,6 +286,7 @@ pub struct MovementConfig {
     pub priest: PriestMovementConfig,
     pub paladin: PaladinMovementConfig,
     pub melee: MeleeMovementConfig,
+    pub mage: MageMovementConfig,
 }
 
 impl MovementConfig {
@@ -339,14 +385,17 @@ impl MovementConfig {
             ));
         }
 
-        for (class, weights) in [("priest", &self.priest.weights), ("paladin", &self.paladin.weights)] {
+        for (class, weights) in [
+            ("priest", &self.priest.weights),
+            ("paladin", &self.paladin.weights),
+            ("mage", &self.mage.weights),
+        ] {
             let terms = [
                 ("threat_repulsion", weights.threat_repulsion),
-                ("ally_anchor", weights.ally_anchor),
                 ("formation_pull", weights.formation_pull),
-                ("boundary_penalty", weights.boundary_penalty),
                 ("corner_penalty", weights.corner_penalty),
                 ("wand_pull", weights.wand_pull),
+                ("range_band", weights.range_band),
                 ("commitment_bonus", weights.commitment_bonus),
             ];
             for (name, value) in terms {
@@ -357,24 +406,48 @@ impl MovementConfig {
                     ));
                 }
             }
-            // Hard penalties must dominate the soft terms so a violating
-            // candidate can never outscore a non-violating one. Soft-term
-            // ceiling: ~3 visible threats at dot/proximity <= 1 each, plus
-            // formation/wand/commitment at dot <= 1 each.
-            let soft_ceiling = weights.threat_repulsion * 3.0
-                + weights.formation_pull
-                + weights.wand_pull
-                + weights.commitment_bonus
-                + weights.corner_penalty;
-            for (name, value) in [("ally_anchor", weights.ally_anchor), ("boundary_penalty", weights.boundary_penalty)] {
-                if value <= soft_ceiling {
-                    issues.push(format!(
-                        "{}.weights.{} ({}) is a HARD penalty and must exceed the soft-term \
-                         ceiling ({:.1}) to act as a constraint",
-                        class, name, value, soft_ceiling
-                    ));
-                }
-            }
+        }
+
+        // Mage ENGAGE/KITE block (U6).
+        let m = &self.mage;
+        if !(m.range_band_min < m.range_band_max) {
+            issues.push(format!(
+                "mage.range_band_min ({}) must be strictly less than range_band_max ({})",
+                m.range_band_min, m.range_band_max
+            ));
+        }
+        if m.range_band_min < SAFE_KITING_DISTANCE {
+            issues.push(format!(
+                "mage.range_band_min ({}) must be >= SAFE_KITING_DISTANCE ({}) so the orbit \
+                 stays out of melee of a kill target that is also a threat",
+                m.range_band_min, SAFE_KITING_DISTANCE
+            ));
+        }
+        if m.range_band_max > AUTO_SHOT_RANGE {
+            issues.push(format!(
+                "mage.range_band_max ({}) must be <= AUTO_SHOT_RANGE ({}) — a ring beyond cast \
+                 range is config noise",
+                m.range_band_max, AUTO_SHOT_RANGE
+            ));
+        }
+        if m.kite_hold <= 0.0 || !m.kite_hold.is_finite() {
+            issues.push(format!(
+                "mage.kite_hold must be a positive finite number, got {}",
+                m.kite_hold
+            ));
+        }
+        if m.directive_ttl < m.commit_window {
+            issues.push(format!(
+                "mage.directive_ttl ({}) must be >= commit_window ({}) so a committed direction \
+                 does not outlive its directive",
+                m.directive_ttl, m.commit_window
+            ));
+        }
+        if m.commit_window <= 0.0 || !m.commit_window.is_finite() {
+            issues.push(format!(
+                "mage.commit_window must be a positive finite number, got {}",
+                m.commit_window
+            ));
         }
 
         if issues.is_empty() {
@@ -490,20 +563,6 @@ mod tests {
     }
 
     #[test]
-    fn validate_rejects_soft_hard_penalty() {
-        let mut config = MovementConfig::default();
-        // A "hard" penalty smaller than the soft-term ceiling is a config
-        // bug: the anchor constraint would stop being a constraint.
-        config.priest.weights.ally_anchor = 1.0;
-        let issues = config.validate().expect_err("weak ally_anchor must fail");
-        assert!(
-            issues.iter().any(|i| i.contains("priest.weights.ally_anchor")),
-            "issues should name the weak hard penalty: {:?}",
-            issues
-        );
-    }
-
-    #[test]
     fn validate_rejects_out_of_range_center_bias() {
         // center_bias is a [0.0, 1.0] fraction — a value above 1.0 is a config
         // bug (the FREE formation point would over-pull past arena center).
@@ -557,6 +616,68 @@ mod tests {
         MovementConfig::default()
             .validate()
             .expect("built-in defaults must be internally consistent");
+    }
+
+    #[test]
+    fn validate_rejects_inverted_mage_range_band() {
+        let mut config = MovementConfig::default();
+        config.mage.range_band_min = 30.0;
+        config.mage.range_band_max = 8.0;
+        let issues = config.validate().expect_err("min >= max must fail");
+        assert!(
+            issues.iter().any(|i| i.contains("mage.range_band_min")),
+            "issues should name range_band_min: {:?}",
+            issues
+        );
+    }
+
+    #[test]
+    fn validate_rejects_mage_range_band_max_beyond_shot_range() {
+        let mut config = MovementConfig::default();
+        config.mage.range_band_max = AUTO_SHOT_RANGE + 5.0;
+        let issues = config.validate().expect_err("max > AUTO_SHOT_RANGE must fail");
+        assert!(
+            issues.iter().any(|i| i.contains("mage.range_band_max")),
+            "issues should name range_band_max: {:?}",
+            issues
+        );
+    }
+
+    #[test]
+    fn validate_rejects_mage_range_band_min_below_safe_distance() {
+        let mut config = MovementConfig::default();
+        config.mage.range_band_min = SAFE_KITING_DISTANCE - 1.0;
+        let issues = config.validate().expect_err("min < SAFE_KITING_DISTANCE must fail");
+        assert!(
+            issues.iter().any(|i| i.contains("mage.range_band_min")),
+            "issues should name range_band_min: {:?}",
+            issues
+        );
+    }
+
+    #[test]
+    fn validate_rejects_nonpositive_mage_kite_hold() {
+        let mut config = MovementConfig::default();
+        config.mage.kite_hold = 0.0;
+        let issues = config.validate().expect_err("kite_hold 0 must fail");
+        assert!(
+            issues.iter().any(|i| i.contains("mage.kite_hold")),
+            "issues should name kite_hold: {:?}",
+            issues
+        );
+    }
+
+    #[test]
+    fn validate_rejects_mage_directive_ttl_below_commit_window() {
+        let mut config = MovementConfig::default();
+        config.mage.commit_window = 0.6;
+        config.mage.directive_ttl = 0.3;
+        let issues = config.validate().expect_err("ttl < commit_window must fail");
+        assert!(
+            issues.iter().any(|i| i.contains("mage.directive_ttl")),
+            "issues should name mage.directive_ttl: {:?}",
+            issues
+        );
     }
 
     /// Partial RON files fill missing fields from the struct defaults

@@ -159,6 +159,7 @@ pub(super) struct MovementDecisionDetails {
     pub goal_kind: MovementGoalKind,
     pub chosen_direction: Option<[f32; 2]>,
     pub scorer_terms: Option<std::collections::BTreeMap<std::borrow::Cow<'static, str>, f32>>,
+    pub masked: Option<u16>,
 }
 
 impl<'a> MovementEventBuilder<'a> {
@@ -178,6 +179,7 @@ impl<'a> MovementEventBuilder<'a> {
             goal_kind,
             chosen_direction: None,
             scorer_terms: None,
+            masked: None,
         });
     }
 
@@ -198,6 +200,7 @@ impl<'a> MovementEventBuilder<'a> {
             goal_kind,
             chosen_direction: None,
             scorer_terms: None,
+            masked: None,
         });
     }
 
@@ -206,6 +209,16 @@ impl<'a> MovementEventBuilder<'a> {
     pub fn chosen_direction(&mut self, direction: [f32; 2]) {
         if let Some(decision) = self.decision.as_mut() {
             decision.chosen_direction = Some(direction);
+        }
+    }
+
+    /// Attach the hard-constraint mask bitmask over the 16 compass candidates
+    /// (bit `i` set when candidate `i` was masked out before the interest
+    /// pass). No-op until a decision has been recorded. `0xFFFF` marks an
+    /// all-masked frame — the R6 byte-identity attribution signal.
+    pub fn masked(&mut self, mask: u16) {
+        if let Some(decision) = self.decision.as_mut() {
+            decision.masked = Some(mask);
         }
     }
 
@@ -245,6 +258,7 @@ impl<'a> MovementEventBuilder<'a> {
                 chosen_direction: decision.chosen_direction,
                 position,
                 scorer_terms: decision.scorer_terms,
+                masked: decision.masked,
             },
         };
         self.trace.pending_events.push(event);

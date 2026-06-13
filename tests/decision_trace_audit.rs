@@ -108,6 +108,8 @@ const EXPECTED_MOVEMENT_TRIGGERS: &[&str] = &[
     "DipComplete",
     "CommitExpired",
     "FormationShift",
+    "KiteEnter",
+    "KiteExit",
 ];
 
 /// One reference matchup: team configs + seed + label for error messages.
