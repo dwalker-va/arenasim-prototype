@@ -144,8 +144,15 @@ pub fn combat_auto_attack(
                         WAND_RANGE
                     };
                     let distance = my_pos.distance(target_pos);
-                    // Hunter dead zone: can't auto-attack within 8 yards
-                    if attacker_class == match_config::CharacterClass::Hunter && distance < HUNTER_DEAD_ZONE {
+                    // Hunter dead zone: the ranged Auto Shot can't fire within 8
+                    // yards. This applies ONLY to the ranged Hunter — a melee pet
+                    // (Spider/Boar) inherits the Hunter class but attacks in melee,
+                    // so without the `!attacker_is_melee` guard it would skip every
+                    // swing (it is always inside the dead zone while meleeing).
+                    if attacker_class == match_config::CharacterClass::Hunter
+                        && !attacker_is_melee
+                        && distance < HUNTER_DEAD_ZONE
+                    {
                         continue;
                     }
                     if distance <= attack_range {
