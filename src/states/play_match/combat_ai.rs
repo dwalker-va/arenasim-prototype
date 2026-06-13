@@ -494,12 +494,12 @@ pub fn decide_abilities(
     channeling_auras: Query<(Entity, &Combatant, &Transform, Option<&ActiveAuras>), (With<ChannelingState>, Without<CastingState>)>,
     dr_tracker_query: Query<(Entity, &DRTracker)>,
     // Posture state + standing directive read-back (movement AI). One query
-    // for both healer (HealerPosture) and Mage (MagePosture) postures — kept
-    // single to stay under Bevy's 16 system-param limit. Disjoint from
+    // for both healer (HealerPosture) and DPS-kiter (KitePosture) postures —
+    // kept single to stay under Bevy's 16 system-param limit. Disjoint from
     // `combatants` component-wise, so the two coexist.
     mut posture_movement: Query<(
         Option<&mut HealerPosture>,
-        Option<&mut MagePosture>,
+        Option<&mut KitePosture>,
         Option<&MovementDirective>,
     )>,
     mut fct_states: Query<&mut FloatingTextState>,

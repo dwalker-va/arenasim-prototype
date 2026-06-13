@@ -22,7 +22,7 @@ use crate::states::play_match::combat_core::{
     compass_directions_16, mask_bitmask, score_directions, RangeBand, ScorerInputs,
 };
 use crate::states::play_match::components::{
-    AuraType, MagePosture, MovementDirective, MovementGoal, Posture,
+    AuraType, DpsPosture, KitePosture, MovementDirective, MovementGoal,
 };
 use crate::states::play_match::constants::MELEE_RANGE;
 use crate::states::play_match::decision_trace::{
@@ -106,16 +106,16 @@ pub fn evaluate_mage_posture(
     my_pos: Vec3,
     kill_target: Option<Entity>,
     ctx: &CombatContext,
-    posture: Option<&mut MagePosture>,
+    posture: Option<&mut KitePosture>,
     directive: Option<&MovementDirective>,
     config: &MageMovementConfig,
     now: f32,
     decision_trace: &mut DecisionTrace,
 ) {
     // Persistent state (local fallback if the component isn't inserted yet).
-    let mut local = MagePosture::new(now);
+    let mut local = KitePosture::new(now);
     let needs_insert = posture.is_none();
-    let state: &mut MagePosture = match posture {
+    let state: &mut KitePosture = match posture {
         Some(p) => p,
         None => &mut local,
     };
@@ -129,11 +129,11 @@ pub fn evaluate_mage_posture(
     let sustain = kite_sustained(ctx, entity, my_pos, config.range_band_max);
 
     let next = match prev {
-        Posture::Kite if now < state.hold_until => Posture::Kite, // hysteresis hold
-        Posture::Kite if sustain => Posture::Kite,
-        Posture::Kite => Posture::Engage,
-        _ if entry_trigger => Posture::Kite, // ENGAGE (or any) → KITE
-        _ => Posture::Engage,
+        DpsPosture::Kite if now < state.hold_until => DpsPosture::Kite, // hysteresis hold
+        DpsPosture::Kite if sustain => DpsPosture::Kite,
+        DpsPosture::Kite => DpsPosture::Engage,
+        _ if entry_trigger => DpsPosture::Kite, // ENGAGE (or any) → KITE
+        _ => DpsPosture::Engage,
     };
 
     let transitioned = next != prev;
@@ -141,10 +141,10 @@ pub fn evaluate_mage_posture(
         state.posture = next;
         state.since = now;
         state.last_direction = None;
-        state.hold_until = if next == Posture::Kite { now + config.kite_hold } else { 0.0 };
+        state.hold_until = if next == DpsPosture::Kite { now + config.kite_hold } else { 0.0 };
     }
 
-    if next == Posture::Engage {
+    if next == DpsPosture::Engage {
         // ENGAGE: no directive — clear any stale kite vector so the Mage closes
         // to preferred range via normal pursuit instead of coasting.
         if directive.is_some() {
