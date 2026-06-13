@@ -268,13 +268,16 @@ fractions in 0..1; values below are the shipped defaults):
 - `wand_range: 30.0` — wand-range pull target distance (Priest)
 
 **Per-class scorer weights** (`priest.weights:` / `paladin.weights:` —
-`score_directions` term weights; `0.0` disables a term):
+`score_directions` term weights; `0.0` disables a term). All terms here are
+additive *interest* terms; the hard constraints (boundary, ally-anchor) are
+boolean masks in the scorer, not weights — the old `ally_anchor` /
+`boundary_penalty` penalty knobs and their dominance invariant were retired
+with the context-steering mask refactor.
 - `threat_repulsion` (3.0/3.0) — pull away per visible threat, weighted by proximity
-- `ally_anchor` (1000.0) — HARD constraint: outside heal range of the anchor ally; must dominate all soft terms (enforced by `validate()`)
 - `formation_pull` (Priest 2.0 / Paladin 0.0) — pull toward the FREE backline point (Paladin keeps its melee identity, so 0 disables it)
-- `boundary_penalty` (1000.0) — HARD constraint: never score an out-of-bounds step
 - `corner_penalty` (Priest 6.0 / Paladin 4.0) — graded penalty approaching arena corners
 - `wand_pull` (Priest 0.5 / Paladin 0.0) — low-weight pull toward wand range of the kill target (`0.0` disables it for the wandless Paladin)
+- `range_band` (0.0 for healers; Mage `mage.weights` 2.0) — ring-attraction toward the kill target's `[min, max]` band (Mage kiting); disabled for healers
 - `commitment_bonus` (1.5/1.5) — bonus toward the committed direction during the commit window
 
 **Paladin-only block** (`paladin:` — alongside its `weights:`):

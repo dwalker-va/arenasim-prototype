@@ -2952,6 +2952,11 @@ mod mage_postures {
 
         let enters = events.iter().filter(|e| e.trigger == "KiteEnter").count();
         assert_min_occurrences("Mage KITE entries", enters, 1);
+        // Pin that the exit TRANSITION actually fires — kite_windows() would
+        // otherwise close an open window at match end (e.g. the Warrior dies
+        // mid-KITE), satisfying the dwell bounds below without a real exit.
+        let exits = events.iter().filter(|e| e.trigger == "KiteExit").count();
+        assert_min_occurrences("Mage KITE exits", exits, 1);
 
         let windows = kite_windows(&events, result.match_time);
         assert_min_occurrences("Mage KITE windows", windows.len(), 1);

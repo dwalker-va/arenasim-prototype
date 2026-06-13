@@ -68,8 +68,11 @@ fn self_team(ctx: &CombatContext, me: Entity) -> u8 {
 }
 
 /// Evaluate the Mage's ENGAGE/KITE posture and (in KITE) issue a movement
-/// directive. Runs before the ability pass, outside the GCD short-circuit, so
-/// directives refresh during a cast. Gated on gates-open by the caller.
+/// directive. Runs before the ability pass, outside the GCD short-circuit (so
+/// a directive refreshes while only the GCD is up). A *casting* Mage is
+/// excluded from the dispatch query, so KITE does not re-evaluate mid-cast;
+/// `directive_ttl` is sized to outlast a Frostbolt so the pre-cast directive
+/// survives and resumes post-cast. Gated on gates-open by the caller.
 pub fn evaluate_mage_posture(
     commands: &mut Commands,
     entity: Entity,

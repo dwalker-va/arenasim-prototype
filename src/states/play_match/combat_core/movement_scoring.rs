@@ -11,17 +11,20 @@
 //! Terms (see the plan's scorer-terms table):
 //! - **Threat repulsion** — away from each visible threat, proximity-weighted
 //!   (PRESSURED).
-//! - **Ally-anchor constraint** — HARD penalty for candidate positions
-//!   outside heal range of the anchor ally (PRESSURED).
+//! - **Ally-anchor constraint** — boolean mask (`MASK_ANCHOR`): candidate
+//!   positions outside heal range of the anchor ally are removed before
+//!   scoring (PRESSURED).
 //! - **Formation pull** — toward the formation point behind the engaged-ally
 //!   centroid (FREE, Priest).
-//! - **Boundary penalty** — HARD penalty for out-of-bounds candidate
-//!   positions (reuses `is_in_arena_bounds`, like the kiting branch).
+//! - **Boundary mask** — boolean mask (`MASK_BOUNDARY`): out-of-bounds
+//!   candidate positions are removed (reuses `is_in_arena_bounds`).
 //! - **Corner penalty** — graded penalty approaching the octagon's corners
 //!   (the |x|+|z| diagonal walls), so escapes bend along walls instead of
 //!   pinning into corners.
 //! - **Wand-range pull** — low-weight pull toward wand range of the kill
 //!   target (weight 0 disables; Paladin).
+//! - **Range-band** — ring-attraction toward the kill target's `[min, max]`
+//!   band (Mage kiting; weight 0 disables for healers).
 //! - **Commitment bonus** — toward the previously committed direction,
 //!   applied only AT re-evaluation while the commitment window is open. The
 //!   hard `committed_until` window on `MovementDirective` decides WHEN

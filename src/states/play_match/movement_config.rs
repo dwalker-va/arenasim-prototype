@@ -9,10 +9,9 @@
 //! is the most-burned-by bug in this repo's history.
 //!
 //! All scorer weights, radii, thresholds, and commitment windows for the
-//! healer posture state machine (FREE/PRESSURED/ESCAPE/DIP) live in
-//! `assets/config/movement.ron` (R9). As of U5 the config is loaded and
-//! validated but not yet consumed by any system — posture emitters arrive in
-//! U6–U8.
+//! healer posture state machine (FREE/PRESSURED/ESCAPE/DIP) and the Mage
+//! ENGAGE/KITE pilot live in `assets/config/movement.ron` (R9). The config is
+//! consumed by the class AI (Priest/Paladin posture eval, Mage posture eval).
 //!
 //! ## Usage
 //! ```ignore
@@ -233,7 +232,7 @@ impl Default for MeleeMovementConfig {
 /// Mage movement tuning (the ENGAGE/KITE pilot). `range_band_min`/`max` bound
 /// the kiting orbit ring; `kite_hold` is the hysteresis floor; `directive_ttl`
 /// must cover a Frostbolt cast so the Mage can act post-cast; `commit_window`
-/// is the anti-zigzag window. Validation rules land in U6.
+/// is the anti-zigzag window.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MageMovementConfig {

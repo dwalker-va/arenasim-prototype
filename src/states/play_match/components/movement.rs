@@ -1,9 +1,11 @@
-//! Movement-directive and healer-posture components (healer movement plan, U5).
+//! Movement-directive and posture components (movement AI).
 //!
 //! `MovementDirective` is the decision-to-execution handoff for posture-based
-//! movement: class AI (Priest/Paladin posture evaluation, U6–U8) writes a
-//! directive; `combat_core/movement.rs::move_to_target` executes it in the
-//! movement ladder between Disengage and kiting. Casting/channeling/root/stun
+//! movement: class AI (Priest/Paladin posture evaluation, plus the Mage
+//! ENGAGE/KITE pilot) writes a directive; `combat_core/movement.rs::move_to_target`
+//! executes it in the movement ladder between Disengage and kiting. The Mage's
+//! directive takes that slot ahead of the legacy `kiting_timer` branch (now
+//! Hunter-only). Casting/channeling/root/stun
 //! still block execution (their early-continues sit above the directive
 //! branch); only the EXPIRY check runs before them, so a directive issued
 //! pre-stun is removed — never executed — on the first post-stun frame.
@@ -14,9 +16,9 @@
 //! must survive — hysteresis and trace transition events key off real posture
 //! changes, never expiry artifacts.
 //!
-//! As of U5 nothing issues directives or postures yet — the components,
-//! executor branch, scorer, and config land behavior-neutral; emitters arrive
-//! in U6 (Priest), U7 (ESCAPE), and U8 (Paladin).
+//! `MagePosture` is the simpler ENGAGE/KITE state for the Mage pilot — no
+//! anchor, DIP, or ESCAPE window, just the two-posture machine and its
+//! hysteresis hold.
 
 use bevy::prelude::*;
 
