@@ -14,7 +14,7 @@
 use bevy::prelude::*;
 
 use crate::states::play_match::combat_core::{
-    compass_directions_16, score_directions, AnchorConstraint, ScorerInputs,
+    compass_directions_16, mask_bitmask, score_directions, AnchorConstraint, ScorerInputs,
 };
 use crate::states::play_match::components::{HealerPosture, MovementDirective, MovementGoal, Posture};
 use crate::states::play_match::decision_trace::{
@@ -250,6 +250,7 @@ pub(super) fn escape_tick(
             MovementGoalKind::Direction,
         );
         builder.chosen_direction([chosen.x, chosen.y]);
+        builder.masked(mask_bitmask(&compass_directions_16(), &inputs));
         builder.finish();
     }
 }
@@ -430,6 +431,7 @@ pub(super) fn healer_pressured_tick_shared(
                 );
             }
             builder.chosen_direction([chosen.x, chosen.y]);
+            builder.masked(mask_bitmask(&compass_directions_16(), &inputs));
             builder.finish();
         }
     }

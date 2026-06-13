@@ -389,6 +389,14 @@ jq -c 'select(.kind == "movement_decision" and .actor.entity_id == 7) | {t: .sim
 # decision ran the scorer; re-commits / Point goals omit it.)
 jq -c 'select(.kind == "movement_decision" and .actor.class == "Priest" and .scorer_terms != null) | {t: .sim_time, posture, dir: .chosen_direction, terms: .scorer_terms}' $T
 
+# Masked candidates — the `masked` field is a u16 bitmask over the 16 compass
+# directions (bit i set when candidate i was eliminated by the boundary or
+# ally-anchor mask). Present only when the scorer ran. A value of 65535
+# (0xFFFF) is an all-masked frame, where the fallback ladder fired — the ONLY
+# legitimate source of Part A behavior divergence from the old penalty scheme,
+# so this is the query R6 byte-identity attribution uses on a divergent cell.
+jq -c 'select(.kind == "movement_decision" and .masked == 65535) | {t: .sim_time, class: .actor.class, entity: .actor.entity_id, posture}' $T
+
 # Paladin HoJ dips: DipEnter carries the goal entity (the enemy healer) in
 # the event's `target` view; DipComplete fires when HoJ lands, DipAbort when
 # the dip bails without casting (teammate HP dive / target dead-or-immune /

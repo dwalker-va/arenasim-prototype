@@ -394,6 +394,38 @@ fn movement_builder_direction_change_omits_previous_posture() {
 }
 
 #[test]
+fn movement_builder_masked_field_present_when_set_absent_otherwise() {
+    // When the scorer ran, `masked` carries the candidate bitmask; an
+    // all-masked frame serializes 0xFFFF (65535) — the R6 attribution signal.
+    let mut trace = DecisionTrace::default();
+    let mut builder = trace.start_movement_decision(priest_actor(), None);
+    builder.transition(
+        Posture::Free,
+        Posture::Pressured,
+        MovementTrigger::PressuredEnter,
+        MovementGoalKind::Direction,
+    );
+    builder.masked(0xFFFF);
+    builder.finish();
+    let json = serde_json::to_string(&trace.pending_events[0]).unwrap();
+    assert!(json.contains("\"masked\":65535"), "all-masked bitmask present: {}", json);
+
+    // When the emitter does not attach a mask (non-scorer transition), the
+    // field is skipped entirely.
+    let mut trace2 = DecisionTrace::default();
+    let mut b2 = trace2.start_movement_decision(priest_actor(), None);
+    b2.transition(
+        Posture::Free,
+        Posture::Pressured,
+        MovementTrigger::PressuredEnter,
+        MovementGoalKind::Direction,
+    );
+    b2.finish();
+    let json2 = serde_json::to_string(&trace2.pending_events[0]).unwrap();
+    assert!(!json2.contains("masked"), "masked omitted when unset (skip_serializing_if): {}", json2);
+}
+
+#[test]
 fn movement_builder_emission_gate_drops_event_with_no_decision() {
     let mut trace = DecisionTrace::default();
 
@@ -472,6 +504,7 @@ fn movement_payload_roundtrips_to_movement_variant_via_untagged_deserialize() {
             chosen_direction,
             position,
             scorer_terms,
+            masked,
         } => {
             assert_eq!(posture, Posture::Escape);
             assert_eq!(previous_posture, Some(Posture::Pressured));
@@ -480,6 +513,7 @@ fn movement_payload_roundtrips_to_movement_variant_via_untagged_deserialize() {
             assert_eq!(chosen_direction, Some([1.0, 0.0]));
             assert_eq!(position, [3.0, 0.5, -7.0]);
             assert!(scorer_terms.is_none());
+            assert!(masked.is_none());
         }
         other => panic!("expected EventPayload::Movement, got {:?}", other),
     }

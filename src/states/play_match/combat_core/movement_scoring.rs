@@ -217,6 +217,20 @@ fn argmax_interest(
     best.map(|(dir, _)| dir)
 }
 
+/// Bitmask over `candidates` (≤16): bit `i` is set when candidate `i` is
+/// eliminated by any hard constraint. Feeds the `masked` trace field; a value
+/// of `0xFFFF` over the full compass means an all-masked frame (the R6
+/// byte-identity attribution signal).
+pub fn mask_bitmask(candidates: &[Vec2], inputs: &ScorerInputs) -> u16 {
+    candidates.iter().enumerate().fold(0u16, |acc, (i, &c)| {
+        if candidate_mask(c, inputs) != 0 {
+            acc | (1u16 << i)
+        } else {
+            acc
+        }
+    })
+}
+
 /// Pick a movement direction by argmax of the interest pass over candidates
 /// that survive the hard-constraint mask pass (typically
 /// [`compass_directions_16`]).

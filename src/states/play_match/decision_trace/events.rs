@@ -26,14 +26,14 @@
 //!   query already written against the schema.
 //! - **`movement_decision` events flatten the same way.** `posture`,
 //!   `previous_posture`, `trigger`, `goal_kind`, `chosen_direction`,
-//!   `position`, and `scorer_terms` are top-level keys. `posture` /
+//!   `position`, `scorer_terms`, and `masked` are top-level keys. `posture` /
 //!   `goal_kind` serialize snake_case (`"pressured"`, `"direction"`);
 //!   `trigger` variants are unit-only and serialize as bare PascalCase
 //!   strings (`"PressuredEnter"`) — same convention as unit
 //!   `RejectionReason` variants, so `jq -r .trigger` needs no object
 //!   unwrapping. `previous_posture` is present only on posture transitions;
-//!   `scorer_terms` is present only when the emitter attached a score
-//!   breakdown.
+//!   `scorer_terms` and `masked` are present only when the position scorer
+//!   ran. `masked` is a u16 candidate bitmask (`0xFFFF` = all-masked frame).
 //!
 //! ## Truncated last line on abort/SIGKILL
 //!
@@ -174,6 +174,14 @@ pub enum EventPayload {
         /// avoid per-event allocation.
         #[serde(skip_serializing_if = "Option::is_none")]
         scorer_terms: Option<BTreeMap<Cow<'static, str>, f32>>,
+        /// Optional bitmask over the 16 compass candidates: bit `i` set when
+        /// candidate `i` was eliminated by the hard-constraint mask pass
+        /// (boundary or ally-anchor). `Some(0xFFFF)` marks an all-masked frame
+        /// — the only legitimate source of Part A behavior divergence from the
+        /// pre-mask penalty scheme, so R6 byte-identity attribution greps this
+        /// field. Present only when the scorer ran.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        masked: Option<u16>,
     },
 }
 
