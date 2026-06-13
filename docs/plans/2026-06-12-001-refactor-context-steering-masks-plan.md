@@ -1,7 +1,7 @@
 ---
 title: "refactor: Context-steering masks + Mage movement pilot"
 type: refactor
-status: active
+status: completed
 date: 2026-06-12
 origin: docs/brainstorms/2026-06-12-context-steering-masks-requirements.md
 ---
