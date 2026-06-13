@@ -509,4 +509,61 @@ mod tests {
         // old -1000 penalty" risk: the argmax winner is always a survivor, so
         // dropping the tied losers never changes it.
     }
+
+    /// AE1: every candidate leaves heal range of the anchor, but the healer
+    /// is in open space — fallback rung 1 drops the anchor mask and returns an
+    /// in-bounds direction (never `Vec2::ZERO`, never a directive drop).
+    #[test]
+    fn all_anchor_masked_drops_anchor_and_picks_in_bounds() {
+        let weights = priest_weights();
+        let dirs = compass_directions_16();
+        // Anchor 50yd away with a 10yd heal range: every candidate is
+        // anchor-masked, none boundary-masked (open center).
+        let inputs = ScorerInputs {
+            my_pos: Vec3::new(0.0, 1.0, 0.0),
+            lookahead: 2.0,
+            threats: vec![Vec3::new(5.0, 1.0, 0.0)],
+            anchor: Some(AnchorConstraint { pos: Vec3::new(0.0, 1.0, -50.0), heal_range: 10.0 }),
+            wand_range: 30.0,
+            ..Default::default()
+        };
+        assert!(
+            dirs.iter().all(|&d| candidate_mask(d, &inputs) & MASK_ANCHOR != 0),
+            "setup: every candidate must be anchor-masked",
+        );
+        let chosen = score_directions(&dirs, &inputs, &weights);
+        assert_ne!(chosen, Vec2::ZERO, "anchor-drop fallback must return a direction");
+        assert_eq!(
+            candidate_mask(chosen, &inputs) & MASK_BOUNDARY,
+            0,
+            "chosen direction must remain in bounds",
+        );
+        // Threat at +X: with the anchor mask dropped, repulsion still points -X.
+        assert!(chosen.x < -0.9, "expected ~(-1,0) away from a +X threat, got {chosen:?}");
+    }
+
+    /// Double-fallback: the healer is out of bounds (every candidate is
+    /// boundary-masked even after the anchor mask drops). Rung 2 lifts the
+    /// boundary mask and returns a finite, non-zero direction for the executor
+    /// to clamp — the directive is never silently dropped.
+    #[test]
+    fn all_boundary_masked_lifts_boundary_and_returns_finite() {
+        let weights = priest_weights();
+        let dirs = compass_directions_16();
+        // Far outside the arena: every lookahead step is still out of bounds.
+        let inputs = ScorerInputs {
+            my_pos: Vec3::new(500.0, 1.0, 500.0),
+            lookahead: 2.0,
+            threats: vec![Vec3::new(0.0, 1.0, 0.0)],
+            wand_range: 30.0,
+            ..Default::default()
+        };
+        assert!(
+            dirs.iter().all(|&d| candidate_mask(d, &inputs) & MASK_BOUNDARY != 0),
+            "setup: every candidate must be boundary-masked",
+        );
+        let chosen = score_directions(&dirs, &inputs, &weights);
+        assert_ne!(chosen, Vec2::ZERO, "boundary-lift fallback must return a direction");
+        assert!(chosen.is_finite(), "chosen direction must be finite, got {chosen:?}");
+    }
 }

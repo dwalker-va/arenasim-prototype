@@ -378,6 +378,13 @@ pub(super) fn healer_pressured_tick_shared(
         formation_point: None,
         wand_target,
         wand_range: shared.wand_range,
+        // Committed direction is passed as-is. No mask guard is needed: a
+        // masked committed bearing already loses (it is removed from the pool),
+        // and commitment_bonus on the SURVIVING candidates is computed per
+        // candidate from alignment with this reference vector — unaffected by
+        // whether the reference's own candidate is masked. The mask refactor is
+        // therefore identical to the old penalty scheme here, with or without a
+        // guard; adding one would only inject a real (unwanted) trajectory delta.
         committed_direction: state.last_direction,
     };
     let chosen = score_directions(&compass_directions_16(), &inputs, weights);
