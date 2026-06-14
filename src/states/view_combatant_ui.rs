@@ -304,6 +304,7 @@ fn get_ability_name(ability: AbilityType) -> &'static str {
         AbilityType::Charge => "Charge",
         AbilityType::KidneyShot => "Kidney Shot",
         AbilityType::PowerWordFortitude => "Power Word: Fortitude",
+        AbilityType::PsychicScream => "Psychic Scream",
         AbilityType::Rend => "Rend",
         AbilityType::MortalStrike => "Mortal Strike",
         AbilityType::Pummel => "Pummel",

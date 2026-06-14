@@ -287,6 +287,7 @@ impl AbilityDefinitions {
             AbilityType::Charge,
             AbilityType::KidneyShot,
             AbilityType::PowerWordFortitude,
+            AbilityType::PsychicScream,
             AbilityType::Rend,
             AbilityType::MortalStrike,
             AbilityType::Pummel,
