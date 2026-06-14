@@ -187,7 +187,7 @@ pub fn decide_priest_action(
         return true;
     }
 
-    // Priority 4: Flash Heal
+    // Priority 5: Flash Heal
     if try_flash_heal(
         commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
         escape_defer, &mut builder,
@@ -196,7 +196,7 @@ pub fn decide_priest_action(
         return true;
     }
 
-    // Priority 5: Dispel Magic - Maintenance (only when team healthy)
+    // Priority 6: Dispel Magic - Maintenance (only when team healthy)
     if ctx.is_team_healthy(0.70, my_pos) {
         if try_dispel_magic(
             commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
@@ -207,7 +207,7 @@ pub fn decide_priest_action(
         }
     }
 
-    // Priority 6: Mind Blast
+    // Priority 7: Mind Blast
     if try_mind_blast(
         commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
         escape_defer, &mut builder,
@@ -287,7 +287,14 @@ fn try_psychic_scream(
     }
 
     let targets = scream_targets(ctx, entity, my_pos, scream_def.range);
-    if targets.is_empty() {
+    // Require a real (non-pet) threat in radius before spending the 30s CD: a
+    // lone enemy pet trips the pressure gate but isn't worth the panic button
+    // (mirrors Frost Nova's non-pet entry requirement). Pets caught alongside a
+    // real threat are still feared — this only blocks a pet-only cast.
+    let has_real_threat = targets
+        .iter()
+        .any(|(e, _, _)| ctx.combatants.get(e).map_or(false, |i| !i.is_pet));
+    if !has_real_threat {
         builder.reject(scream, RejectionReason::NoValidTarget);
         return false;
     }
@@ -896,17 +903,24 @@ fn evaluate_scream_dip_entry(
         return None;
     }
 
-    // Deferral (R12): aggressive by default, but if any living teammate is in
-    // trouble (below healing_heavy_hp), stay back and heal rather than dip.
-    let teammate = ctx
+    // Deferral (R12): aggressive by default, but if any living non-pet team
+    // member (self included) is in trouble (below healing_heavy_hp), stay back
+    // and heal rather than dip — a low Priest must not walk into the enemy.
+    if ctx
+        .alive_allies()
+        .iter()
+        .any(|a| a.health_pct() < movement.priest.healing_heavy_hp)
+    {
+        return None;
+    }
+    // The anchor teammate (most-injured ally, excluding self) must not be CC'd
+    // mid-walk — it may need us back, and a CC'd anchor can't reposition.
+    if let Some(t) = ctx
         .alive_allies()
         .into_iter()
         .filter(|a| a.entity != entity)
-        .min_by(|a, b| a.health_pct().partial_cmp(&b.health_pct()).unwrap());
-    if let Some(t) = teammate {
-        if t.health_pct() < movement.priest.healing_heavy_hp {
-            return None;
-        }
+        .min_by(|a, b| a.health_pct().partial_cmp(&b.health_pct()).unwrap())
+    {
         if ctx.is_ccd(t.entity) {
             return None;
         }
