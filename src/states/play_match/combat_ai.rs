@@ -721,6 +721,8 @@ pub fn decide_abilities(
                     &mut shielded_this_frame,
                     &mut fortified_this_frame,
                     escape_defer,
+                    &movement_config,
+                    &mut same_frame_cc_queue,
                     &mut decision_trace,
                 )
             },

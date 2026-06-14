@@ -25,8 +25,8 @@ use crate::states::play_match::decision_trace::{
     DecisionEventBuilder, DecisionTrace, MovementGoalKind, MovementTrigger,
     Posture as TracePosture, RejectionReason,
 };
-use crate::states::play_match::movement_config::MovementConfig;
-use crate::states::play_match::utils::log_ability_use;
+use crate::states::play_match::movement_config::{MovementConfig, SharedMovementConfig};
+use crate::states::play_match::utils::{combatant_id, log_ability_use, spawn_speech_bubble};
 
 use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
 use super::healer_postures::{
@@ -63,6 +63,8 @@ pub fn decide_priest_action(
     shielded_this_frame: &mut HashSet<Entity>,
     fortified_this_frame: &mut HashSet<Entity>,
     escape_defer: Option<f32>,
+    movement: &MovementConfig,
+    same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
     decision_trace: &mut DecisionTrace,
 ) -> bool {
     // GCD short-circuit — no event (emission gate).
@@ -92,7 +94,16 @@ pub fn decide_priest_action(
         return true;
     }
 
-    // Priority 3: Power Word: Shield
+    // Priority 3: Psychic Scream (defensive AoE fear peel / escape opener)
+    if try_psychic_scream(
+        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
+        &movement.shared, same_frame_cc_queue, &mut builder,
+    ) {
+        builder.finish();
+        return true;
+    }
+
+    // Priority 4: Power Word: Shield
     if try_power_word_shield(
         commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
         shielded_this_frame, &mut builder,
@@ -132,6 +143,129 @@ pub fn decide_priest_action(
 
     builder.finish();
     false
+}
+
+/// Try to cast Psychic Scream — instant self-centered AoE Fear (R1/R2/R5/R9/R10).
+///
+/// Defensive self-peel / escape opener: fires only when the Priest is genuinely
+/// pressured (`compound_pressure_trigger`) AND at least one fear-eligible enemy
+/// is inside the scream's radius. Because the radius (~8yd) is point-blank for a
+/// cloth healer, this single gate covers both the surrounded case and the
+/// chased-into-melee escape-opener case — the fear sends chasers running away,
+/// compounding the escape. Mirrors the Frost Nova self-AoE shape
+/// (`mage.rs::try_frost_nova`) minus the damage half. The not-pressured
+/// (offensive dip) use is owned by the posture machine (U4), not this function.
+///
+/// AoE target filtering is the caller's responsibility: `pre_cast_ok` guards a
+/// single target, so per-target immunity / Fear-DR filtering happens here.
+fn try_psychic_scream(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
+    shared: &SharedMovementConfig,
+    same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    let scream = AbilityType::PsychicScream;
+    let scream_def = abilities.get_unchecked(&scream);
+
+    let opts = PreCastOpts::default();
+    if !pre_cast_ok(scream, scream_def, combatant, my_pos, auras, None, ctx, opts) {
+        builder.reject(
+            scream,
+            classify_pre_cast_failure(scream, scream_def, combatant, my_pos, auras, None, ctx, opts),
+        );
+        return false;
+    }
+
+    // Defensive gate (R9/R10): only fire under genuine pressure, so the panic
+    // button is never burned on incidental proximity.
+    if !compound_pressure_trigger(entity, my_pos, ctx, shared) {
+        builder.reject(
+            scream,
+            RejectionReason::PreconditionUnmet { note: "not pressured".into() },
+        );
+        return false;
+    }
+
+    // Defer to a critical ally heal: a dying heal target (at/below the urgency
+    // HP threshold, within heal range) must be healed before the peel. The
+    // scream is priority 3 — above Flash Heal — so without this gate it would
+    // burn a GCD and delay a life-saving heal, breaking the critical-heal-wins
+    // invariant (see `try_flash_heal`). The scream still fires next GCD.
+    if ctx
+        .lowest_health_ally_below(shared.urgency_hp_threshold, shared.heal_range, my_pos)
+        .is_some()
+    {
+        builder.reject(
+            scream,
+            RejectionReason::PreconditionUnmet { note: "critical heal pending".into() },
+        );
+        return false;
+    }
+
+    // Fear-eligible enemies inside the scream radius: visible + alive (helper),
+    // not immune, not Fear-DR-immune. AoE filtering is the caller's job (R5).
+    let targets: Vec<(Entity, u8, CharacterClass)> = ctx
+        .visible_enemies_within(entity, my_pos, scream_def.range)
+        .into_iter()
+        .filter(|info| {
+            !ctx.entity_is_immune(info.entity) && !ctx.is_dr_immune(info.entity, DRCategory::Fears)
+        })
+        .map(|info| (info.entity, info.team, info.class))
+        .collect();
+
+    if targets.is_empty() {
+        builder.reject(scream, RejectionReason::NoValidTarget);
+        return false;
+    }
+
+    builder.choose(scream, None, true);
+
+    spawn_speech_bubble(commands, entity, "Psychic Scream");
+    combatant.current_mana -= scream_def.mana_cost;
+    combatant.ability_cooldowns.insert(scream, scream_def.cooldown);
+    combatant.global_cooldown = GCD;
+
+    log_ability_use(combat_log, combatant.team, combatant.class, "Psychic Scream", None, "casts");
+
+    let fear_duration = scream_def.applies_aura.as_ref().map(|a| a.duration).unwrap_or(0.0);
+    for (target_entity, target_team, target_class) in &targets {
+        if let Some(aura_pending) = AuraPending::from_ability(*target_entity, entity, scream_def) {
+            same_frame_cc_queue.push((*target_entity, aura_pending.aura.clone()));
+            commands.spawn(aura_pending);
+        }
+
+        let message = format!(
+            "Team {} {}'s Psychic Scream fears Team {} {} ({:.1}s)",
+            combatant.team,
+            combatant.class.name(),
+            target_team,
+            target_class.name(),
+            fear_duration
+        );
+        combat_log.log_crowd_control(
+            combatant_id(combatant.team, combatant.class),
+            combatant_id(*target_team, *target_class),
+            "Fear".to_string(),
+            fear_duration,
+            message,
+        );
+    }
+
+    info!(
+        "Team {} {} casts Psychic Scream! (AOE fear) - {} enemies feared",
+        combatant.team,
+        combatant.class.name(),
+        targets.len()
+    );
+
+    true
 }
 
 /// Try to cast Power Word: Fortitude on an unbuffed ally.
