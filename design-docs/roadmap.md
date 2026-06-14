@@ -168,8 +168,8 @@ cancelled every melee-pet auto-attack swing. All Hunter baselines in
       2026-06-13 — 8-persona review (commit `0a4a93f`). No code defects; verdict
       Ready with fixes. Applied the safe nits + the 3 missing regression tests
       below. PR still open (see remaining item).
-- [ ] **Open the PR** for `main..HEAD` on `worktree-ai-tuning` (Hunter migration
-      + pet/kite fixes + rebaseline).
+- [x] ~~**Open the PR** for `main..HEAD` on `worktree-ai-tuning` (Hunter migration
+      + pet/kite fixes + rebaseline).~~ DONE 2026-06-13 — PR #71.
 - [x] ~~**Re-sweep** the full 7×7 1v1 + 2v2/3v3 matrices with the pet-damage fix
       live, replacing the stale `design-docs/balance/` Hunter baselines.~~ DONE
       2026-06-13 — `canonical_{1v1_n100,2v2_full_n100,3v3_full_n50}_300s.csv`
