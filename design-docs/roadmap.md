@@ -165,8 +165,11 @@ cancelled every melee-pet auto-attack swing. All Hunter baselines in
 ### D. Ship + re-baseline
 
 - [ ] **Tier-2 review + PR** the `f8f5ff3..HEAD` range on `worktree-ai-tuning`.
-- [ ] **Re-sweep** the full 7×7 1v1 + 2v2/3v3 matrices with the pet-damage fix
-      live, replacing the stale `design-docs/balance/` Hunter baselines.
+- [x] ~~**Re-sweep** the full 7×7 1v1 + 2v2/3v3 matrices with the pet-damage fix
+      live, replacing the stale `design-docs/balance/` Hunter baselines.~~ DONE
+      2026-06-13 — `canonical_{1v1_n100,2v2_full_n100,3v3_full_n50}_300s.csv`
+      regenerated + `canonical_baselines_summary.md` rewritten. Hunter 1v1
+      20.7→59.4; team formats +3-4; Mage+Paladin meta unchanged (Hunter-isolated).
 
 ---
 
