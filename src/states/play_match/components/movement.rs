@@ -1,11 +1,11 @@
 //! Movement-directive and posture components (movement AI).
 //!
 //! `MovementDirective` is the decision-to-execution handoff for posture-based
-//! movement: class AI (Priest/Paladin posture evaluation, plus the Mage
-//! ENGAGE/KITE pilot) writes a directive; `combat_core/movement.rs::move_to_target`
-//! executes it in the movement ladder between Disengage and kiting. The Mage's
-//! directive takes that slot ahead of the legacy `kiting_timer` branch (now
-//! Hunter-only). Casting/channeling/root/stun
+//! movement: class AI (Priest/Paladin posture evaluation, plus the Mage/Hunter
+//! ENGAGE/KITE machine) writes a directive; `combat_core/movement.rs::move_to_target`
+//! executes it in the movement ladder after Disengage. The directive is now the
+//! sole kiting path — the legacy `kiting_timer` branch has been deleted.
+//! Casting/channeling/root/stun
 //! still block execution (their early-continues sit above the directive
 //! branch); only the EXPIRY check runs before them, so a directive issued
 //! pre-stun is removed — never executed — on the first post-stun frame.

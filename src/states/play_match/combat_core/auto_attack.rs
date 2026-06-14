@@ -102,7 +102,10 @@ pub fn combat_auto_attack(
                 .auras
                 .iter()
                 .find_map(|a| {
-                    (a.effect_type == AuraType::Root && a.break_on_damage_threshold >= 0.0)
+                    // `> 0.0` (not `>= 0.0`): a Root at threshold 0.0 is an
+                    // any-damage break and belongs to the incap tier above, which
+                    // blocks ALL attackers — keep the two tiers a clean partition.
+                    (a.effect_type == AuraType::Root && a.break_on_damage_threshold > 0.0)
                         .then(|| caster_team(a))
                         .flatten()
                 })

@@ -5,8 +5,8 @@
 //! - **ENGAGE** — no directive; the kiter falls through to normal pursuit
 //!   (`move_to_target`) to preferred range, then stands and shoots/casts.
 //! - **KITE** — orbit the kill target at `range_band` distance while repelling
-//!   threats (arc-kiting). Issues a `MovementDirective` the executor runs ahead
-//!   of the legacy `kiting_timer` branch.
+//!   threats (arc-kiting). Issues a `MovementDirective` the executor runs — the
+//!   sole kiting path now that the legacy `kiting_timer` branch is deleted.
 //!
 //! `evaluate_dps_posture` is the shared transition + scoring machine; the
 //! caller supplies the class-specific entry/sustain predicate:
@@ -321,5 +321,38 @@ pub fn evaluate_dps_posture(
 
     if needs_insert {
         commands.entity(entity).try_insert(*state);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_kite_threat;
+    use crate::states::play_match::match_config::CharacterClass;
+
+    /// Regression guard for the melee-only kite filter: the Hunter kites ONLY
+    /// melee-DPS threats. Ranged classes are excluded (the Hunter holds at shot
+    /// range and trades instead of fleeing a caster — the bug this fixed), and
+    /// the Paladin is excluded too (its melee isn't pressure; avoiding its
+    /// Hammer of Justice is a separate avoid-CC concern). Pinning the exact set
+    /// catches a regression that re-adds a caster or drops Rogue — which an
+    /// integration probe can't reliably catch, since ranged enemies rarely enter
+    /// the kite radius in a real match.
+    #[test]
+    fn kite_threat_is_warrior_and_rogue_only() {
+        assert!(is_kite_threat(CharacterClass::Warrior), "Warrior is a kite threat");
+        assert!(is_kite_threat(CharacterClass::Rogue), "Rogue is a kite threat");
+        for ranged in [
+            CharacterClass::Mage,
+            CharacterClass::Warlock,
+            CharacterClass::Priest,
+            CharacterClass::Paladin,
+            CharacterClass::Hunter,
+        ] {
+            assert!(
+                !is_kite_threat(ranged),
+                "{:?} must NOT be a kite threat — the Hunter holds and shoots, it does not flee",
+                ranged
+            );
+        }
     }
 }

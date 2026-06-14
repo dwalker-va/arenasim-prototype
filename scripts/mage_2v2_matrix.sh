@@ -97,7 +97,7 @@ fi
 TEMP_DIR=$(mktemp -d -t mage_2v2_XXXXXX)
 trap 'rm -rf "$TEMP_DIR"' EXIT
 
-# Hunter+Priest vs each opposing class + Priest (mirror healer partner)
+# Mage+Priest vs each opposing class + Priest (mirror healer partner)
 HEALER="Priest"
 OPPONENTS=("Warrior" "Rogue" "Priest" "Warlock" "Paladin" "Hunter")
 

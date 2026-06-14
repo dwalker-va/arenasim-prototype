@@ -647,7 +647,7 @@ fn try_frostbolt(
     let distance_to_target = my_pos.distance(target_pos);
 
     // While kiting, only cast if at safe distance. Kiting is now posture-state
-    // (mage_postures.rs) rather than the legacy `kiting_timer`; the equivalent
+    // (dps_postures.rs) rather than the legacy `kiting_timer`; the equivalent
     // world-state condition is "a Mage-owned root/slow is on an enemy within
     // safe-kiting distance" — proximity-gated so Frostbolt's own never-breaking
     // slow on a kited-away enemy doesn't permanently suppress hard-casts.

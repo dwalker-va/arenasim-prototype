@@ -260,11 +260,13 @@ pub enum MovementTrigger {
     /// FREE formation goal moved enough to re-commit (engaged-ally centroid
     /// shifted) within the same posture.
     FormationShift,
-    /// Mage ENGAGE → KITE: a melee-range threat now carries the Mage's own
-    /// root/slow aura (the kiting window opened).
+    /// DPS-kiter ENGAGE → KITE: the entry condition opened (Mage: a melee enemy
+    /// carries the Mage's own root/slow; Hunter: a melee-DPS threat is within
+    /// closing range).
     KiteEnter,
-    /// Mage KITE → ENGAGE: no visible enemy carries a Mage-owned root/slow
-    /// aura and the hysteresis hold has elapsed (the kiting window closed).
+    /// DPS-kiter KITE → ENGAGE: the sustain condition lapsed and the hysteresis
+    /// hold has elapsed (Mage: no Mage-owned root/slow on a visible enemy;
+    /// Hunter: no melee-DPS threat within the sustain radius).
     KiteExit,
 }
 
