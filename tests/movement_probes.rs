@@ -3211,3 +3211,88 @@ mod hunter_postures {
         // the Web — also a pass.
     }
 }
+
+/// Psychic Scream (feat/priest-psychic-scream) behavioral probes — the
+/// dual-mode AoE fear. These pin the new behavior at fixed seeds: the
+/// offensive dip-to-fear-the-enemy-healer and the defensive self-peel.
+mod psychic_scream {
+    use super::priest_postures::{movement_events, run_observed_traced};
+    use super::*;
+
+    /// Sim-times at which `team`'s Priest CHOSE Psychic Scream (any path —
+    /// defensive predicate or offensive dip cast both record a chosen
+    /// candidate). Parsed from the raw ability_decision trace.
+    fn scream_cast_times(trace: &[serde_json::Value], team: u8) -> Vec<f32> {
+        trace
+            .iter()
+            .filter(|v| {
+                v["kind"] == "ability_decision"
+                    && v["actor"]["team"].as_u64() == Some(team as u64)
+                    && v["actor"]["class"] == "Priest"
+            })
+            .filter(|v| {
+                v["candidates"].as_array().map_or(false, |c| {
+                    c.iter()
+                        .any(|cand| cand["ability"] == "PsychicScream" && cand["status"] == "chosen")
+                })
+            })
+            .map(|v| v["sim_time"].as_f64().unwrap() as f32)
+            .collect()
+    }
+
+    /// AE2 / R11 — when the Priest is NOT the focus, it dips to the enemy
+    /// healer and fears it: DipEnter → DipComplete fire and a scream cast
+    /// lands. Seed 42, 2v2 with the enemy team focusing the team-1 Warrior so
+    /// the team-1 Priest is free to dip the team-2 Priest.
+    #[test]
+    fn offensive_dip_fears_enemy_healer() {
+        let mut cfg = create_config(vec!["Priest", "Warrior"], vec!["Warrior", "Priest"], Some(42));
+        cfg.team2_kill_target = Some(1); // focus team-1 Warrior, freeing the Priest to dip
+        let (_result, _timeline, trace) = run_observed_traced(cfg);
+
+        let events = movement_events(&trace);
+        let dip_enters = events
+            .iter()
+            .filter(|e| e.team == 1 && e.trigger == "DipEnter")
+            .count();
+        let dip_completes = events
+            .iter()
+            .filter(|e| e.team == 1 && e.trigger == "DipComplete")
+            .count();
+        eprintln!(
+            "dip probe: team-1 Priest DipEnter={} DipComplete={}",
+            dip_enters, dip_completes
+        );
+        assert_min_occurrences("team-1 Priest DipEnter", dip_enters, 1);
+        assert_min_occurrences("team-1 Priest DipComplete", dip_completes, 1);
+
+        // The completed dip actually cast the scream.
+        let casts = scream_cast_times(&trace, 1);
+        assert_min_occurrences("team-1 Priest scream cast (dip)", casts.len(), 1);
+    }
+
+    /// AE1 / R9 — when the Priest IS being focused by melee, it casts Psychic
+    /// Scream as a defensive self-peel. Seed 7, 2v2 with the enemy team
+    /// focusing the team-1 Priest.
+    #[test]
+    fn defensive_scream_fires_under_pressure() {
+        let mut cfg = create_config(vec!["Priest", "Mage"], vec!["Warrior", "Rogue"], Some(7));
+        cfg.team2_kill_target = Some(0); // focus the team-1 Priest
+        let (_result, _timeline, trace) = run_observed_traced(cfg);
+
+        let casts = scream_cast_times(&trace, 1);
+        eprintln!("defensive probe: team-1 Priest scream casts = {}", casts.len());
+        assert_min_occurrences("team-1 Priest defensive scream cast", casts.len(), 1);
+
+        // No DipComplete: a focused Priest peels defensively, it does not dip.
+        let events = movement_events(&trace);
+        let dip_completes = events
+            .iter()
+            .filter(|e| e.team == 1 && e.trigger == "DipComplete")
+            .count();
+        assert_eq!(
+            dip_completes, 0,
+            "a focused Priest should self-peel, not complete an offensive dip"
+        );
+    }
+}
