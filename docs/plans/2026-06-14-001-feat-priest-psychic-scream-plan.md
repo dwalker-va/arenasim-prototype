@@ -1,6 +1,6 @@
 ---
 title: "feat: Add Psychic Scream to Priest (AoE fear + dual-mode movement AI)"
-status: active
+status: completed
 date: 2026-06-14
 type: feat
 origin: docs/brainstorms/2026-06-14-psychic-scream-priest-requirements.md

@@ -43,9 +43,12 @@ pub struct PriestMovementPlan {
     /// `Some(urgency_hp_threshold)` while an ESCAPE window OR a DIP is live:
     /// the heal ladder defers non-critical movement-locking casts (R7).
     pub escape_defer: Option<f32>,
-    /// Psychic Scream gate for this tick (reservation / dip cast). Always
-    /// `Rotation` until U4 wires the offensive dip.
+    /// Psychic Scream gate for this tick (no dip / dip cast).
     pub scream_dip: ScreamDipPlan,
+    /// The live PRESSURED trigger this tick (`compound_pressure_trigger`),
+    /// computed once in `evaluate_priest_posture` and reused by the defensive
+    /// scream gate so it isn't recomputed (a full combatants scan) per tick.
+    pub pressured: bool,
 }
 
 impl Default for PriestMovementPlan {
@@ -53,20 +56,18 @@ impl Default for PriestMovementPlan {
         Self {
             escape_defer: None,
             scream_dip: ScreamDipPlan::Rotation,
+            pressured: false,
         }
     }
 }
 
-/// How the rotation may use Psychic Scream this tick (mirrors `HojPlan`).
-/// `Reserved` and `DipCast` are constructed in U4 (the offensive dip); U3
-/// scaffolds the type and always returns `Rotation`.
-#[allow(dead_code)]
+/// How this tick uses Psychic Scream. Unlike the Paladin's `HojPlan` there is
+/// no `Reserved` state: Psychic Scream has no rotational use, so the defensive
+/// self-peel (PRESSURED) and the offensive dip (FREE / not pressured) are
+/// mutually exclusive by posture — the pressured gate IS the reservation (R14).
 pub enum ScreamDipPlan {
-    /// No reservation: the defensive scream behaves exactly as in U2.
+    /// No dip this tick — the defensive self-peel governs (gated on pressure).
     Rotation,
-    /// A living enemy healer exists and the Priest is not pressured: the
-    /// defensive scream is suppressed — the cooldown is saved for the dip.
-    Reserved,
     /// Mid-dip and within scream radius of the dip target: cast Psychic
     /// Scream now. On a successful cast the caller installs `completed_state`
     /// (posture back to FREE — DipComplete) and removes the walk directive.
@@ -171,7 +172,7 @@ pub fn decide_priest_action(
     // scream's reservation (no explicit Reserved state needed, R14).
     if try_psychic_scream(
         commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
-        &movement.shared, same_frame_cc_queue, &mut builder,
+        plan.pressured, &movement.shared, same_frame_cc_queue, &mut builder,
     ) {
         builder.finish();
         return true;
@@ -241,6 +242,7 @@ fn try_psychic_scream(
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
+    pressured: bool,
     shared: &SharedMovementConfig,
     same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
     builder: &mut DecisionEventBuilder<'_>,
@@ -258,8 +260,9 @@ fn try_psychic_scream(
     }
 
     // Defensive gate (R9/R10): only fire under genuine pressure, so the panic
-    // button is never burned on incidental proximity.
-    if !compound_pressure_trigger(entity, my_pos, ctx, shared) {
+    // button is never burned on incidental proximity. `pressured` is the live
+    // `compound_pressure_trigger`, computed once in evaluate_priest_posture.
+    if !pressured {
         builder.reject(
             scream,
             RejectionReason::PreconditionUnmet { note: "not pressured".into() },
@@ -1216,6 +1219,7 @@ pub fn evaluate_priest_posture(
     PriestMovementPlan {
         escape_defer,
         scream_dip,
+        pressured: trigger,
     }
 }
 
