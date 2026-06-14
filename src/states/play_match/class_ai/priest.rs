@@ -36,6 +36,46 @@ use super::healer_postures::{
 
 use super::CombatContext;
 
+/// Per-tick output of [`evaluate_priest_posture`], threaded into
+/// [`decide_priest_action`] (mirrors the Paladin's `PaladinMovementPlan`):
+/// the escape-defer urgency input plus the Psychic Scream dip gate.
+pub struct PriestMovementPlan {
+    /// `Some(urgency_hp_threshold)` while an ESCAPE window OR a DIP is live:
+    /// the heal ladder defers non-critical movement-locking casts (R7).
+    pub escape_defer: Option<f32>,
+    /// Psychic Scream gate for this tick (reservation / dip cast). Always
+    /// `Rotation` until U4 wires the offensive dip.
+    pub scream_dip: ScreamDipPlan,
+}
+
+impl Default for PriestMovementPlan {
+    fn default() -> Self {
+        Self {
+            escape_defer: None,
+            scream_dip: ScreamDipPlan::Rotation,
+        }
+    }
+}
+
+/// How the rotation may use Psychic Scream this tick (mirrors `HojPlan`).
+/// `Reserved` and `DipCast` are constructed in U4 (the offensive dip); U3
+/// scaffolds the type and always returns `Rotation`.
+#[allow(dead_code)]
+pub enum ScreamDipPlan {
+    /// No reservation: the defensive scream behaves exactly as in U2.
+    Rotation,
+    /// A living enemy healer exists and the Priest is not pressured: the
+    /// defensive scream is suppressed — the cooldown is saved for the dip.
+    Reserved,
+    /// Mid-dip and within scream radius of the dip target: cast Psychic
+    /// Scream now. On a successful cast the caller installs `completed_state`
+    /// (posture back to FREE — DipComplete) and removes the walk directive.
+    DipCast {
+        target: Entity,
+        completed_state: HealerPosture,
+    },
+}
+
 /// Priest AI: Decides and executes abilities for a Priest combatant.
 ///
 /// `escape_defer` is the cast-vs-move urgency input (R7/AE1), returned by
@@ -62,11 +102,12 @@ pub fn decide_priest_action(
     ctx: &CombatContext,
     shielded_this_frame: &mut HashSet<Entity>,
     fortified_this_frame: &mut HashSet<Entity>,
-    escape_defer: Option<f32>,
+    plan: &PriestMovementPlan,
     movement: &MovementConfig,
     same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
     decision_trace: &mut DecisionTrace,
 ) -> bool {
+    let escape_defer = plan.escape_defer;
     // GCD short-circuit — no event (emission gate).
     if combatant.global_cooldown > 0.0 {
         return false;
@@ -702,12 +743,18 @@ pub fn evaluate_priest_posture(
     combatant: &Combatant,
     my_pos: Vec3,
     ctx: &CombatContext,
+    // `abilities` / `auras` are wired for the U4 offensive dip (the dip-entry
+    // predicate needs the Psychic Scream def for reach/eligibility and auras
+    // for pre_cast_ok). Inert in U3 — the posture machine returns Rotation.
+    abilities: &AbilityDefinitions,
+    auras: Option<&ActiveAuras>,
     posture: Option<&mut HealerPosture>,
     directive: Option<&MovementDirective>,
     movement: &MovementConfig,
     now: f32,
     decision_trace: &mut DecisionTrace,
-) -> Option<f32> {
+) -> PriestMovementPlan {
+    let _ = (abilities, auras); // consumed by the U4 dip-entry predicate
     // First evaluation inserts the persistent component via Commands
     // (visible to this tick's executor through the existing apply_deferred,
     // and to next tick's query).
@@ -805,10 +852,16 @@ pub fn evaluate_priest_posture(
     }
 
     // Cast-vs-move urgency: live ESCAPE window → defer non-critical casts.
-    if state.posture == Posture::Escape {
+    let escape_defer = if state.posture == Posture::Escape {
         Some(shared.urgency_hp_threshold)
     } else {
         None
+    };
+
+    // U3: dip is inert (always Rotation). U4 returns Reserved / DipCast here.
+    PriestMovementPlan {
+        escape_defer,
+        scream_dip: ScreamDipPlan::Rotation,
     }
 }
 

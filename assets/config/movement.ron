@@ -60,6 +60,8 @@
         formation_shift_threshold: 3.0, // re-target the formation point past this XZ move
         formation_deadzone: 1.5,        // no Point directive issued within this of the point
         directive_refresh_margin: 0.25, // refresh the standing walk below this remaining TTL
+        dip_budget: 6.0,                // Psychic Scream dip walk-stun-return budget (U4)
+        healing_heavy_hp: 0.6,          // defer the offensive dip below this team HP fraction (U4)
     ),
     paladin: (
         weights: (

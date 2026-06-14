@@ -692,15 +692,17 @@ pub fn decide_abilities(
                 // ESCAPE window is live (U7 cast-vs-move urgency): the heal
                 // ladder defers non-critical movement-locking casts for the
                 // window.
-                let mut escape_defer: Option<f32> = None;
+                let mut plan = class_ai::priest::PriestMovementPlan::default();
                 if countdown.gates_opened {
                     if let Ok((healer_posture, _mage, directive)) = posture_movement.get_mut(entity) {
-                        escape_defer = class_ai::priest::evaluate_priest_posture(
+                        plan = class_ai::priest::evaluate_priest_posture(
                             &mut commands,
                             entity,
                             &combatant,
                             my_pos,
                             &ctx,
+                            &abilities,
+                            auras.as_deref(),
                             healer_posture.map(bevy::prelude::Mut::into_inner),
                             directive,
                             &movement_config,
@@ -720,7 +722,7 @@ pub fn decide_abilities(
                     &ctx,
                     &mut shielded_this_frame,
                     &mut fortified_this_frame,
-                    escape_defer,
+                    &plan,
                     &movement_config,
                     &mut same_frame_cc_queue,
                     &mut decision_trace,
