@@ -330,6 +330,17 @@ fn fire_psychic_scream(
     builder.choose(AbilityType::PsychicScream, None, true);
 
     spawn_speech_bubble(commands, entity, "Psychic Scream");
+    // Self-centered AoE burst visual. The marker is spawned in both modes (like
+    // DispelBurst / speech bubbles); the mesh + animation are attached only by
+    // the graphical-only systems in states/mod.rs, so headless is unaffected.
+    commands.spawn((
+        ScreamBurst {
+            caster: entity,
+            lifetime: 0.6,
+            initial_lifetime: 0.6,
+        },
+        PlayMatchEntity,
+    ));
     combatant.current_mana -= scream_def.mana_cost;
     combatant
         .ability_cooldowns

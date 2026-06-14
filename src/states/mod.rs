@@ -204,6 +204,17 @@ impl Plugin for StatesPlugin {
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_state(GameState::PlayMatch)),
             )
+            // Psychic Scream burst visuals (separate group to avoid tuple size limits)
+            .add_systems(
+                Update,
+                (
+                    play_match::spawn_scream_burst,            // Attach mesh when a scream marker appears
+                    play_match::update_scream_bursts,          // Expand the AoE ring and fade
+                    play_match::cleanup_expired_scream_bursts, // Remove expired bursts
+                )
+                    .after(CombatSystemPhase::CombatResolution)
+                    .run_if(in_state(GameState::PlayMatch)),
+            )
             // Unstable Affliction visuals: DoT glow, backlash burst, silenced text
             // (graphical only — never registered in headless systems.rs).
             .add_systems(

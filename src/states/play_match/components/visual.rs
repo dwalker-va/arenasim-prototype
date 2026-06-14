@@ -153,6 +153,21 @@ pub struct DispelBurst {
     pub initial_lifetime: f32,
 }
 
+/// Visual effect for Psychic Scream — a self-centered expanding shadow burst
+/// around the caster that conveys the AoE fear radius. Spawned on cast, expands
+/// outward to roughly the scream radius and fades over its lifetime. Distinct
+/// from `DispelBurst`: centered on the caster (not a dispelled target), larger
+/// terminal scale, and shadow-violet to read as the Shadow-school AoE fear.
+#[derive(Component)]
+pub struct ScreamBurst {
+    /// The caster — the burst follows this entity for its short life.
+    pub caster: Entity,
+    /// Time remaining before despawn (seconds).
+    pub lifetime: f32,
+    /// Initial lifetime for the expand/fade curve.
+    pub initial_lifetime: f32,
+}
+
 /// Visual effect indicating a combatant has Unstable Affliction active.
 /// Pulses at ~0.5Hz (every 2s) in deep violet so it reads independently from
 /// Corruption's faster green tendrils when both DoTs are stacked on the target.
