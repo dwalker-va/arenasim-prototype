@@ -103,6 +103,101 @@ Residuals table + `/tmp` review artifact (now only here).
 
 ---
 
+## Follow-ups from Hunter movement migration + pet fixes (worktree-ai-tuning, 2026-06-13)
+
+The Hunter ENGAGE/KITE migration (commits `fe9acac..f8f5ff3`) and three
+follow-on fixes — `03387f4` (melee-only kite filter), `1a41deb` (melee-pet
+dead-zone), `c0dc2af` (pets don't break friendly CC) — are on branch
+`worktree-ai-tuning`, NOT yet PR'd. The mask refactor + Mage pilot from the same
+plan already shipped as PR #69. Plan:
+`docs/plans/2026-06-12-001-refactor-context-steering-masks-plan.md`.
+
+Headline post-fix Hunter winrates (symmetrized, N=50/side):
+- **1v1**: Warrior 100, Rogue 84, Warlock 92, Priest 92, Mage 0, Paladin 0.
+- **2v2 (Hunter+Priest vs each+Priest)**: Priest 100, Paladin 61 (39 draw),
+  Rogue 50, Warrior 2, Mage 0, Warlock 0.
+
+**Critical context for ANY Hunter balance work:** every Hunter matrix predating
+`1a41deb` was computed with a damage-dead pet — the ranged dead-zone silently
+cancelled every melee-pet auto-attack swing. All Hunter baselines in
+`design-docs/balance/` are stale; re-sweep before tuning.
+
+### A. Hunter 2v2 holes (diagnosed, NOT pet-related)
+
+- [ ] **Warrior 2v2 ~0%** — the Hunter's own Priest heals *itself* instead of
+      peeling the focused Hunter when it is trained through Mortal Wounds
+      (healing reduction). A healer anchor/target-selection problem, not Hunter
+      movement; generalizes to any squishy DPS focused under MS. Highest-leverage
+      fix for the comp.
+- [ ] **Mage 2v2 0%** — control matchup (Polymorph / Frost Nova / kiting).
+      LoS / pillar play is the structural counter (see healer bucket C — shared
+      scorer term).
+- [ ] **Warlock 2v2 0%** — dispel-war + DoT/Fear sustain out-grinds Hunter+Priest
+      (confirmed in the graphical client 2026-06-13: Hunter dies ~27s in to Fear
+      + Corruption/UA/Agony while the two Priests trade dispels).
+
+### B. Hunter movement refinements (deferred from the melee-only kite filter)
+
+- [ ] **Enemy melee-pet kiting** — `melee_within` (`class_ai/dps_postures.rs`)
+      excludes pets (`!is_pet`), so the Hunter does not kite an enemy
+      Voidwalker / Felhunter / Spider chasing it. Fold enemy melee pets into the
+      kite-threat predicate. (Surfaced as the survivability gap vs Warlock+Priest,
+      whose pet beats on a now-stationary Hunter.)
+- [ ] **"Avoid CC" movement input** — the Paladin is excluded from kite threats
+      (its melee isn't pressure), but its Hammer of Justice is; avoiding incoming
+      stuns/HoJ is a cooldown-aware CC-danger-radius / cast-juke scorer term
+      (overlaps healer bucket C).
+- [ ] **Strategic "plant when safe"** — match-state-aware planting for Hunter
+      damage uptime (root-duration vs re-engage-time, team HP delta). A naive
+      root-aware plant regressed Rogue 1v1 9→1 and was reverted; this needs the
+      strategic layer, not a reactive predicate.
+
+### C. Pet AI (surfaced by the pet-damage fix)
+
+- [ ] **Pet retarget under friendly CC** — the new guard (`c0dc2af`) makes the
+      pet hold fire on a target carrying its own team's Freezing Trap / Web, so it
+      idles in melee through the CC window instead of switching to a valid
+      secondary target. Add retargeting so the pet stays useful during the peel.
+- [ ] **Pet melee-commitment pass** — committing to melee was the original
+      Web-self-break source and pulls the Hunter's formation inward. Revisit when
+      a pet should commit vs hang back (hybrid hold/peel behavior).
+
+### D. Ship + re-baseline
+
+- [x] ~~**Tier-2 review** the `main..HEAD` range on `worktree-ai-tuning`.~~ DONE
+      2026-06-13 — 8-persona review (commit `0a4a93f`). No code defects; verdict
+      Ready with fixes. Applied the safe nits + the 3 missing regression tests
+      below. PR still open (see remaining item).
+- [x] ~~**Open the PR** for `main..HEAD` on `worktree-ai-tuning` (Hunter migration
+      + pet/kite fixes + rebaseline).~~ DONE 2026-06-13 — PR #71.
+- [x] ~~**Re-sweep** the full 7×7 1v1 + 2v2/3v3 matrices with the pet-damage fix
+      live, replacing the stale `design-docs/balance/` Hunter baselines.~~ DONE
+      2026-06-13 — `canonical_{1v1_n100,2v2_full_n100,3v3_full_n50}_300s.csv`
+      regenerated + `canonical_baselines_summary.md` rewritten. Hunter 1v1
+      20.7→59.4; team formats +3-4; Mage+Paladin meta unchanged (Hunter-isolated).
+
+### E. Code-review residuals (from the 2026-06-13 Tier-2 review)
+
+Deferred from the review — none block the PR. The 3 P1 regression-test gaps were
+fixed in `0a4a93f`; these are the lower-priority remainder.
+
+- [ ] **P2 `combat_ai.rs` crossed 1k lines (1,313)** — the Mage and Hunter
+      `evaluate_dps_posture` dispatch arms are near-identical 10-line scaffolds.
+      Extract a `dispatch_dps_posture(...)` helper and call it from both.
+- [ ] **Doc: name the auto-attack CC-guard site** — update
+      `docs/solutions/ai-decision-patterns/friendly-cc-break-prevention.md` to
+      list `combat_core/auto_attack.rs` as a second guard site alongside
+      `pre_cast_ok` (the doc predates the auto-attack path).
+- [ ] **Agent-native: pet CC-suppressed swing is untraced** — when the friendly-CC
+      guard makes a pet hold fire, no trace event records it; an agent diagnosing
+      "why did the pet stop swinging?" must infer it. Consider a `suppressed_by_cc`
+      field on `pet_decision`.
+- [ ] **Nit: `incap_cc_team`/`root_cc_team` use `HashMap`** where the surrounding
+      determinism-sensitive maps use `BTreeMap`. Lookup-only today so it's safe;
+      switch for consistency if iteration is ever added.
+
+---
+
 ## Milestone 2: Visual Polish
 
 - [ ] Procedural character meshes (distinct silhouettes per class)

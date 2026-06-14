@@ -139,9 +139,6 @@ pub const HUNTER_DEAD_ZONE: f32 = 8.0;
 /// Auto Shot range for Hunter ranged auto-attacks.
 pub const AUTO_SHOT_RANGE: f32 = 35.0;
 
-/// Range at which Hunter proactively kites to maintain distance.
-pub const HUNTER_KITE_RANGE: f32 = 30.0;
-
 /// Delay in seconds before a placed trap becomes armed and can be triggered.
 pub const TRAP_ARM_DELAY: f32 = 1.5;
 

@@ -494,12 +494,12 @@ pub fn decide_abilities(
     channeling_auras: Query<(Entity, &Combatant, &Transform, Option<&ActiveAuras>), (With<ChannelingState>, Without<CastingState>)>,
     dr_tracker_query: Query<(Entity, &DRTracker)>,
     // Posture state + standing directive read-back (movement AI). One query
-    // for both healer (HealerPosture) and Mage (MagePosture) postures — kept
-    // single to stay under Bevy's 16 system-param limit. Disjoint from
+    // for both healer (HealerPosture) and DPS-kiter (KitePosture) postures —
+    // kept single to stay under Bevy's 16 system-param limit. Disjoint from
     // `combatants` component-wise, so the two coexist.
     mut posture_movement: Query<(
         Option<&mut HealerPosture>,
-        Option<&mut MagePosture>,
+        Option<&mut KitePosture>,
         Option<&MovementDirective>,
     )>,
     mut fct_states: Query<&mut FloatingTextState>,
@@ -643,7 +643,12 @@ pub fn decide_abilities(
                 // accepted pilot simplification.
                 if countdown.gates_opened {
                     if let Ok((_healer, mage_posture, directive)) = posture_movement.get_mut(entity) {
-                        class_ai::mage_postures::evaluate_mage_posture(
+                        // Mage: aura-gated KITE (a melee enemy it rooted/slowed).
+                        let cfg = &movement_config.mage;
+                        let entry = class_ai::dps_postures::mage_kite_entry(&ctx, entity, my_pos);
+                        let sustain =
+                            class_ai::dps_postures::mage_kite_sustain(&ctx, entity, my_pos, cfg.range_band_max);
+                        class_ai::dps_postures::evaluate_dps_posture(
                             &mut commands,
                             entity,
                             my_pos,
@@ -651,7 +656,9 @@ pub fn decide_abilities(
                             &ctx,
                             mage_posture.map(bevy::prelude::Mut::into_inner),
                             directive,
-                            &movement_config.mage,
+                            cfg,
+                            entry,
+                            sustain,
                             time.elapsed_secs(),
                             &mut decision_trace,
                         );
@@ -800,19 +807,52 @@ pub fn decide_abilities(
                     &mut decision_trace,
                 )
             },
-            match_config::CharacterClass::Hunter => class_ai::hunter::decide_hunter_action(
-                &mut commands,
-                &mut combat_log,
-                &mut game_rng,
-                &abilities,
-                entity,
-                &mut combatant,
-                my_pos,
-                auras.as_deref(),
-                &ctx,
-                &mut instant_attacks,
-                &mut decision_trace,
-            ),
+            match_config::CharacterClass::Hunter => {
+                // Hunter movement is the proximity-gated ENGAGE/KITE machine
+                // (the Mage's aura-gating doesn't fit — the Hunter has no
+                // reliable self-root and kites on melee proximity). KITE only
+                // when a melee-DPS threat (Warrior/Rogue) is within closing
+                // range — `melee_within` excludes ranged classes so the Hunter
+                // holds and shoots a caster instead of fleeing it. The ability
+                // AI keeps its own dead/closing/safe band priorities. Same
+                // gates-open + casting-excluded contract as the Mage.
+                if countdown.gates_opened {
+                    if let Ok((_healer, kite_posture, directive)) = posture_movement.get_mut(entity) {
+                        let cfg = &movement_config.hunter;
+                        let entry =
+                            class_ai::dps_postures::melee_within(&ctx, entity, my_pos, cfg.kite_entry_radius);
+                        let sustain =
+                            class_ai::dps_postures::melee_within(&ctx, entity, my_pos, cfg.kite_sustain_radius);
+                        class_ai::dps_postures::evaluate_dps_posture(
+                            &mut commands,
+                            entity,
+                            my_pos,
+                            combatant.target,
+                            &ctx,
+                            kite_posture.map(bevy::prelude::Mut::into_inner),
+                            directive,
+                            cfg,
+                            entry,
+                            sustain,
+                            time.elapsed_secs(),
+                            &mut decision_trace,
+                        );
+                    }
+                }
+                class_ai::hunter::decide_hunter_action(
+                    &mut commands,
+                    &mut combat_log,
+                    &mut game_rng,
+                    &abilities,
+                    entity,
+                    &mut combatant,
+                    my_pos,
+                    auras.as_deref(),
+                    &ctx,
+                    &mut instant_attacks,
+                    &mut decision_trace,
+                )
+            }
         };
         if acted {
             continue;

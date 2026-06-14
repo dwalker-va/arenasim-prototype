@@ -1,8 +1,10 @@
-//! Pure position scorer for healer movement directives (U5).
+//! Pure position scorer for movement directives (healer postures + the
+//! Mage/Hunter ENGAGE/KITE machine).
 //!
-//! Extends the shape of `find_best_kiting_direction` (16-direction argmax)
-//! into a multi-term scorer with named, RON-tunable weights
-//! (`assets/config/movement.ron` → `MovementWeights`). Pure free functions
+//! A 16-direction argmax over named, RON-tunable weighted terms
+//! (`assets/config/movement.ron` → `MovementWeights`). It replaced the legacy
+//! `find_best_kiting_direction` (now deleted) as the sole kiting/positioning
+//! path. Pure free functions
 //! over caller-built inputs: no Bevy world, no queries — unit-testable in
 //! isolation, and deterministic as long as callers build `ScorerInputs` from
 //! BTree-ordered snapshots (floating-point summation order follows input
@@ -25,6 +27,10 @@
 //!   target (weight 0 disables; Paladin).
 //! - **Range-band** — ring-attraction toward the kill target's `[min, max]`
 //!   band (Mage kiting; weight 0 disables for healers).
+//! - **Flee** — constant pull away from the nearest threat, NOT
+//!   proximity-weighted (distance-maximization), so a chased ranged DPS
+//!   (Hunter) outruns an un-impaired chaser at all ranges where
+//!   `threat_repulsion` fades. Weight 0 disables for healers and the Mage.
 //! - **Commitment bonus** — toward the previously committed direction,
 //!   applied only AT re-evaluation while the commitment window is open. The
 //!   hard `committed_until` window on `MovementDirective` decides WHEN
@@ -41,10 +47,6 @@
 //! dominated every soft-term sum, so the old argmax winner was always an
 //! unmasked candidate too. When every candidate is masked, the fallback
 //! ladder below applies.
-//!
-//! `find_best_kiting_direction` and the kiting branch are deliberately NOT
-//! touched here; Mage/Hunter kiting migration is tracked separately (see the
-//! Scope Boundaries of the context-steering plan).
 
 use bevy::prelude::*;
 
@@ -63,9 +65,8 @@ pub const MASK_ANCHOR: u16 = 1 << 1;
 /// penalty-free.
 pub const CORNER_PENALTY_ONSET: f32 = ARENA_CORNER_SUM * 0.7;
 
-/// The 16 compass candidate directions (unit XZ vectors, TAU/16 apart),
-/// matching `find_best_kiting_direction`'s candidate scan. Index order is
-/// fixed, so argmax tie-breaks are deterministic.
+/// The 16 compass candidate directions (unit XZ vectors, TAU/16 apart). Index
+/// order is fixed, so argmax tie-breaks are deterministic.
 pub fn compass_directions_16() -> [Vec2; 16] {
     std::array::from_fn(|i| {
         let angle = (i as f32) * std::f32::consts::TAU / 16.0;
@@ -127,6 +128,9 @@ pub struct ScorerInputs {
     /// Ring-attraction band toward the kill target (Mage kiting). `None`
     /// disables the term (no kill target, or non-Mage scorer).
     pub range_band: Option<RangeBand>,
+    /// Nearest threat position, for the distance-maximization `flee` term
+    /// (Hunter). `None` disables it (no threats, or non-fleeing scorer).
+    pub nearest_threat: Option<Vec3>,
     /// Previously committed direction. `Some` ONLY while the commitment
     /// window is open — the caller passes `None` outside it, which disables
     /// the term entirely.
@@ -221,6 +225,17 @@ pub fn score_direction(candidate: Vec2, inputs: &ScorerInputs, weights: &Movemen
                     score += weights.range_band * candidate.dot(-toward);
                 }
             }
+        }
+    }
+
+    // Flee (Hunter): constant pull away from the nearest threat, NOT weighted
+    // by proximity — a chased ranged DPS must outrun an un-impaired chaser at
+    // all ranges, where `threat_repulsion` (proximity-weighted) fades. Weight 0
+    // disables for healers and the Mage.
+    if weights.flee > 0.0 {
+        if let Some(threat) = inputs.nearest_threat {
+            let away = (my_xz - xz(threat)).normalize_or_zero();
+            score += weights.flee * candidate.dot(away);
         }
     }
 
@@ -423,6 +438,7 @@ mod tests {
             corner_penalty: 0.0,
             wand_pull: 0.0,
             range_band: 0.0,
+            flee: 0.0,
             commitment_bonus: 0.5,
         };
         let dirs = compass_directions_16();
@@ -690,6 +706,70 @@ mod tests {
         );
         // And it must still move away from the pursuer (z component positive).
         assert!(chosen.y > 0.0, "must still gain separation from the −Z pursuer, got {chosen:?}");
+    }
+
+    /// Corner-escape (the Hunter migration's load-bearing fix): a kiter pinned
+    /// near a corner with the threat between it and open space must bend OUT of
+    /// the corner, not pin into it. The legacy `find_best_kiting_direction` fled
+    /// straight away (into the corner, then hugged the wall); here the boundary
+    /// mask removes the corner-ward steps, `corner_penalty` discourages the
+    /// remaining wall-ward ones, and `flee` + the surviving directions push the
+    /// kiter back toward center — the chosen step reduces |x|+|z|.
+    #[test]
+    fn cornered_kiter_bends_out_of_the_corner() {
+        // Hunter flee profile (matches the shipped hunter block). corner_penalty
+        // must exceed flee so the corner term wins near the octagon wall —
+        // otherwise the kiter flees straight into the corner.
+        let weights = MovementWeights {
+            threat_repulsion: 1.0,
+            formation_pull: 0.0,
+            corner_penalty: 8.0,
+            wand_pull: 0.0,
+            range_band: 0.0,
+            flee: 6.0,
+            commitment_bonus: 0.0,
+        };
+        let dirs = compass_directions_16();
+        // Near the +X/+Z corner (|x|+|z| = 48, just inside ARENA_CORNER_SUM),
+        // threat on the diagonal between the Hunter and center — so "flee away
+        // from threat" points deeper into the corner (out of bounds).
+        // Arena is 36.5 (x) × 21.5 (z) with octagon corners at |x|+|z| ≤ 48.88.
+        // Place the kiter near the +X/+Z octagon corner (in bounds), threat on
+        // the diagonal between it and center — so "flee away" points into the
+        // corner, where the octagon boundary mask removes the deepest steps.
+        let threat = Vec3::new(22.0, 1.0, 13.0);
+        // Walk a few steps under the scorer; the kiter should round the corner
+        // (perpendicular slide) and end with a SMALLER |x|+|z| — i.e. escape,
+        // not pin. A single frame can be a lateral slide (corner-distance flat);
+        // over the walk it must actually decrease.
+        let mut pos = Vec3::new(28.0, 1.0, 19.0);
+        let corner_before = pos.x.abs() + pos.z.abs();
+        for step in 0..10 {
+            let inputs = ScorerInputs {
+                my_pos: pos,
+                lookahead: 2.0,
+                threats: vec![threat],
+                nearest_threat: Some(threat),
+                wand_range: 30.0,
+                ..Default::default()
+            };
+            let chosen = score_directions(&dirs, &inputs, &weights);
+            assert_ne!(chosen, Vec2::ZERO, "step {step}: must pick a direction, not pin");
+            pos += Vec3::new(chosen.x, 0.0, chosen.y) * 2.0;
+            // Never pinned against the octagon wall (the corner-stuck symptom).
+            assert!(
+                pos.x.abs() + pos.z.abs() <= super::ARENA_CORNER_SUM + 1e-3,
+                "step {step}: pinned past the octagon wall, |x|+|z|={}",
+                pos.x.abs() + pos.z.abs()
+            );
+        }
+        // Over the walk the kiter rounds the corner and ends meaningfully out of
+        // it — not pinned. (Single steps may slide laterally; the walk escapes.)
+        let corner_after = pos.x.abs() + pos.z.abs();
+        assert!(
+            corner_after < corner_before - 2.0,
+            "cornered kiter must escape the corner over the walk (|x|+|z| {corner_before} -> {corner_after})",
+        );
     }
 
     /// Double-fallback: the healer is out of bounds (every candidate is

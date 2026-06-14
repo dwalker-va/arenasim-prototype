@@ -42,12 +42,6 @@ pub fn decide_hunter_action(
     let (nearest_enemy, nearest_distance) = find_nearest_enemy(entity, combatant.team, my_pos, ctx);
 
     let nearest_dist = nearest_distance.unwrap_or(40.0);
-    let nearest_is_melee = nearest_enemy
-        .and_then(|(e, _)| ctx.combatants.get(&e))
-        .map_or(false, |info| info.class.is_melee());
-    if nearest_is_melee && nearest_dist < HUNTER_KITE_RANGE {
-        combatant.kiting_timer = combatant.kiting_timer.max(0.5);
-    }
 
     // U4: Hunter-side pet dispatch. Runs independent of Hunter's own GCD —
     // pets have their own GCD pool, and Master's Call can self-cleanse even
@@ -148,8 +142,8 @@ pub fn decide_hunter_action(
             return true;
         }
 
-        // Priority 3: Set kiting timer to flee
-        combatant.kiting_timer = 3.0;
+        // Priority 3: no ability this tick — the ENGAGE/KITE posture machine
+        // owns the flee movement now (proximity-gated KITE).
         builder.finish();
         return false;
     }
@@ -161,7 +155,6 @@ pub fn decide_hunter_action(
                 commands, combat_log, abilities, entity, combatant, my_pos,
                 enemy_entity, ctx, &mut builder,
             ) {
-                combatant.kiting_timer = 3.0;
                 builder.finish();
                 return true;
             }
@@ -174,7 +167,6 @@ pub fn decide_hunter_action(
                     commands, combat_log, abilities, entity, combatant, my_pos, midpoint,
                     TrapType::Frost, &mut builder,
                 ) {
-                    combatant.kiting_timer = 3.0;
                     builder.finish();
                     return true;
                 }
@@ -190,12 +182,11 @@ pub fn decide_hunter_action(
             commands, combat_log, game_rng, abilities, entity, combatant, my_pos,
             target_entity, target_info, ctx, instant_attacks, auras, &mut builder,
         ) {
-            combatant.kiting_timer = 3.0;
             builder.finish();
             return true;
         }
 
-        combatant.kiting_timer = 3.0;
+        // No ability this tick — KITE movement handles the kite.
         builder.finish();
         return false;
     }

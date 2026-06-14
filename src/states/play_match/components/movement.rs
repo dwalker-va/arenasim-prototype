@@ -1,11 +1,11 @@
 //! Movement-directive and posture components (movement AI).
 //!
 //! `MovementDirective` is the decision-to-execution handoff for posture-based
-//! movement: class AI (Priest/Paladin posture evaluation, plus the Mage
-//! ENGAGE/KITE pilot) writes a directive; `combat_core/movement.rs::move_to_target`
-//! executes it in the movement ladder between Disengage and kiting. The Mage's
-//! directive takes that slot ahead of the legacy `kiting_timer` branch (now
-//! Hunter-only). Casting/channeling/root/stun
+//! movement: class AI (Priest/Paladin posture evaluation, plus the Mage/Hunter
+//! ENGAGE/KITE machine) writes a directive; `combat_core/movement.rs::move_to_target`
+//! executes it in the movement ladder after Disengage. The directive is now the
+//! sole kiting path — the legacy `kiting_timer` branch has been deleted.
+//! Casting/channeling/root/stun
 //! still block execution (their early-continues sit above the directive
 //! branch); only the EXPIRY check runs before them, so a directive issued
 //! pre-stun is removed — never executed — on the first post-stun frame.
@@ -16,7 +16,8 @@
 //! must survive — hysteresis and trace transition events key off real posture
 //! changes, never expiry artifacts.
 //!
-//! `MagePosture` is the simpler ENGAGE/KITE state for the Mage pilot — no
+//! `KitePosture` (with `DpsPosture`) is the simpler ENGAGE/KITE state shared by
+//! the Mage and Hunter kiters — no
 //! anchor, DIP, or ESCAPE window, just the two-posture machine and its
 //! hysteresis hold.
 
@@ -75,11 +76,19 @@ pub enum Posture {
     /// Paladin only: committed walk to the enemy healer for Hammer of
     /// Justice.
     Dip,
-    /// Mage only: holding cast position (no directive — falls through to
-    /// normal pursuit to preferred range, then stands and casts).
+}
+
+/// DPS movement posture (the ENGAGE/KITE machine shared by the Mage and Hunter
+/// kiters). Separate from the healer `Posture` so the two state machines can't
+/// cross-pollinate variants — a kiter is never PRESSURED, a healer never KITEs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DpsPosture {
+    /// Holding firing position: no directive — falls through to normal pursuit
+    /// to preferred range, then stands and shoots/casts.
+    #[default]
     Engage,
-    /// Mage only: kiting a melee threat impaired by the Mage's own root/slow,
-    /// orbiting the kill target at `range_band` distance.
+    /// Kiting a melee threat: orbiting the kill target at `range_band` distance
+    /// while repelling the threat (arc-kiting).
     Kite,
 }
 
@@ -140,19 +149,19 @@ impl HealerPosture {
     }
 }
 
-/// Persistent Mage movement posture (ENGAGE/KITE). Far simpler than
-/// `HealerPosture` — the Mage has no heal-range anchor, no DIP target, and no
-/// ESCAPE window, so it carries only the state the two-posture machine needs.
-/// Survives directive expiry and CC, like `HealerPosture`.
+/// Persistent DPS kiter posture (ENGAGE/KITE), shared by the Mage and Hunter.
+/// Far simpler than `HealerPosture` — a kiter has no heal-range anchor, no DIP
+/// target, and no ESCAPE window, so it carries only the two-posture machine's
+/// state. Survives directive expiry and CC, like `HealerPosture`.
 #[derive(Component, Clone, Copy, Debug)]
-pub struct MagePosture {
+pub struct KitePosture {
     /// Current posture (ENGAGE or KITE).
-    pub posture: Posture,
+    pub posture: DpsPosture,
     /// Absolute sim-time of the last posture transition.
     pub since: f32,
-    /// Hysteresis floor: KITE may not exit before this sim-time even if the
-    /// sustaining aura breaks, preventing KITE↔ENGAGE strobing on fast root
-    /// breaks. `0.0` = no hold.
+    /// Hysteresis floor: KITE may not exit before this sim-time even if its
+    /// sustain condition lapses, preventing KITE↔ENGAGE strobing. `0.0` = no
+    /// hold.
     pub hold_until: f32,
     /// Last committed scorer direction (unit XZ), input to the commitment
     /// bonus at the next re-evaluation. `None` before the first directional
@@ -160,11 +169,11 @@ pub struct MagePosture {
     pub last_direction: Option<Vec2>,
 }
 
-impl MagePosture {
+impl KitePosture {
     /// Fresh posture state at sim-time `now` (ENGAGE, no hold).
     pub fn new(now: f32) -> Self {
         Self {
-            posture: Posture::Engage,
+            posture: DpsPosture::Engage,
             since: now,
             hold_until: 0.0,
             last_direction: None,

@@ -3027,3 +3027,160 @@ mod mage_postures {
         assert_results_identical(&observed, &unobserved, "mage observed vs unobserved");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Hunter ENGAGE/KITE posture probes (proximity-gated migration, H5)
+// ---------------------------------------------------------------------------
+
+mod hunter_postures {
+    use super::*;
+    use arenasim::headless::runner::TraceConfig;
+
+    const SEED: u64 = 0x68_75_6e_74; // ascii "hunt"
+
+    fn run_traced(config: HeadlessMatchConfig) -> (MatchResult, Timeline, Vec<serde_json::Value>) {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+        drop(tmp);
+        let mut timeline = Timeline::default();
+        let result = run_headless_match_observed(
+            config,
+            true,
+            Some(TraceConfig { output_path: path.clone() }),
+            |frame| timeline.record(frame),
+        )
+        .expect("observed traced match failed");
+        let body = std::fs::read_to_string(&path).expect("read trace");
+        let events: Vec<serde_json::Value> =
+            body.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+        let _ = std::fs::remove_file(path);
+        (result, timeline, events)
+    }
+
+    /// A melee Warrior closing on the Hunter opens KITE (proximity-gated) — the
+    /// Hunter is now posture-driven, not on the deleted kiting_timer branch.
+    /// (No exit assertion: a Warrior that stays glued within the sustain radius
+    /// keeps the Hunter in KITE for the whole match, so KiteExit is not a valid
+    /// invariant for this matchup — the Mage's root-expiry exit is the case
+    /// where exit is asserted.)
+    #[test]
+    fn hunter_enters_kite_on_proximity() {
+        let cfg = create_config(vec!["Hunter"], vec!["Warrior"], Some(SEED));
+        let (_result, _timeline, trace) = run_traced(cfg);
+        let enters = trace
+            .iter()
+            .filter(|v| v["kind"] == "movement_decision"
+                && v["actor"]["class"] == "Hunter"
+                && v["trigger"] == "KiteEnter")
+            .count();
+        assert_min_occurrences("Hunter KITE entries", enters, 1);
+    }
+
+    /// The Hunter keeps its kill target within shot range for the bulk of the
+    /// match (flee + gentle range_band), instead of being run down or fleeing
+    /// out of range — guards the kiting effectiveness the flee term restored.
+    #[test]
+    fn hunter_keeps_warrior_in_shot_range() {
+        use arenasim::states::play_match::constants::AUTO_SHOT_RANGE;
+        let cfg = create_config(vec!["Hunter"], vec!["Warrior"], Some(SEED));
+        let (result, timeline, _trace) = run_traced(cfg);
+        let gate = timeline.gates_open_time.expect("gates opened");
+        let hunter = timeline.find(1, CharacterClass::Hunter, false);
+        let warrior = timeline.find(2, CharacterClass::Warrior, false);
+        let hs = timeline.samples.get(&hunter).cloned().unwrap_or_default();
+        let ws = timeline.samples.get(&warrior).cloned().unwrap_or_default();
+        let in_range = time_within_range_of(&hs, &ws, AUTO_SHOT_RANGE);
+        let post_gate = (result.match_time - gate).max(1e-3);
+        assert!(
+            in_range / post_gate > 0.5,
+            "Hunter kept the Warrior in shot range only {:.0}% of the match",
+            in_range / post_gate * 100.0
+        );
+    }
+
+    /// Non-perturbation extends to a Hunter-directive match.
+    #[test]
+    fn hunter_directive_run_does_not_perturb_outcomes() {
+        let make = || create_config(vec!["Hunter"], vec!["Warrior"], Some(SEED));
+        let unobserved = run_headless_match_with(make(), true, None).expect("unobserved");
+        let mut frames = 0usize;
+        let observed = run_headless_match_observed(make(), true, None, |_f| frames += 1)
+            .expect("observed");
+        assert!(frames > 0, "observer never invoked");
+        assert_results_identical(&observed, &unobserved, "hunter observed vs unobserved");
+    }
+
+    /// Run a match with the combat log captured to a temp file and return its
+    /// contents. The log carries per-attack `[DMG]` and `[CC]` lines the
+    /// structured timeline/trace do not expose (e.g. pet auto-attacks).
+    fn run_capturing_log(team1: Vec<&str>, team2: Vec<&str>) -> String {
+        // Unique per-call path so parallel tests can't race on the same file.
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let log = tmp.path().to_path_buf();
+        drop(tmp);
+        let mut cfg = create_config(team1, team2, Some(SEED));
+        cfg.output_path = Some(log.to_string_lossy().into_owned());
+        // suppress_log MUST be false: the combat log is only written to
+        // output_path when logging is not suppressed (run_traced suppresses it).
+        run_headless_match_with(cfg, false, None).expect("headless match for log capture");
+        let body = std::fs::read_to_string(&log).expect("read captured combat log");
+        let _ = std::fs::remove_file(&log);
+        body
+    }
+
+    /// Parse the leading `[ T.TTs]` sim timestamp from a combat-log line.
+    fn log_timestamp(line: &str) -> Option<f32> {
+        let open = line.find('[')?;
+        let close = line[open..].find("s]")? + open;
+        line.get(open + 1..close)?.trim().parse::<f32>().ok()
+    }
+
+    /// Regression for the melee-pet dead-zone fix: a Hunter pet inherits the
+    /// Hunter class and was silently cancelled by the ranged Auto-Shot dead-zone
+    /// guard, dealing ZERO auto-attack damage for the entire history of the pet
+    /// system. The `!attacker_is_melee` exemption restored it. The fix was a
+    /// two-token change that regressed invisibly to `cargo test` — this is its
+    /// guard.
+    #[test]
+    fn hunter_pet_deals_auto_attack_damage() {
+        let log = run_capturing_log(vec!["Hunter"], vec!["Warrior"]);
+        let spider_hits = log
+            .lines()
+            .filter(|l| l.contains("Spider's Auto Attack hits"))
+            .count();
+        assert_min_occurrences("Spider auto-attack hits on the enemy", spider_hits, 1);
+    }
+
+    /// Regression for the friendly-CC auto-attack guard (root tier): enabling
+    /// pet damage exposed that the Spider auto-attacked through its OWN Spider
+    /// Web (a Root it casts to peel the target off the Hunter), shattering the
+    /// peel on the first swing. The pet-only root tier makes it hold fire while
+    /// its Web is up. Pre-fix the Spider attacked within ~0.8s of webbing;
+    /// post-fix the next swing only lands after the ~4s root window.
+    #[test]
+    fn hunter_pet_does_not_break_own_web() {
+        let log = run_capturing_log(vec!["Hunter"], vec!["Warrior"]);
+        // First time the Spider's Web is APPLIED (not merely cast) to the enemy.
+        let web_applied = log
+            .lines()
+            .find(|l| l.contains("[CC] Web on Team 2"))
+            .and_then(log_timestamp)
+            .expect("the Spider should land a Web on the enemy at this seed");
+        // The next Spider auto-attack on the enemy after the Web lands.
+        let next_spider_hit = log
+            .lines()
+            .filter(|l| l.contains("Spider's Auto Attack hits Team 2"))
+            .filter_map(log_timestamp)
+            .find(|&t| t >= web_applied);
+        if let Some(t) = next_spider_hit {
+            assert!(
+                t - web_applied >= 3.0,
+                "Spider auto-attacked its own Web {:.2}s after it landed — it broke its own \
+                 root peel; expected it to hold fire through the ~4s window",
+                t - web_applied
+            );
+        }
+        // If the Spider never attacks the target again, it trivially never broke
+        // the Web — also a pass.
+    }
+}

@@ -50,6 +50,12 @@ pub struct MovementWeights {
     /// Ring-attraction toward the kill target's `[min, max]` band (Mage
     /// kiting). `0.0` disables for the healers, which have no kill-target ring.
     pub range_band: f32,
+    /// Constant pull away from the nearest threat, NOT proximity-weighted —
+    /// the distance-maximization "flee" a chased ranged DPS (Hunter) needs to
+    /// outrun an un-impaired chaser. Unlike `threat_repulsion` (which fades
+    /// with distance, right for healers), `flee` is strong at all ranges.
+    /// `0.0` disables for healers and the Mage (whose KITE target is rooted).
+    pub flee: f32,
     /// Bonus toward the previously committed direction, applied only AT
     /// re-evaluation while the commitment window is open (R11).
     pub commitment_bonus: f32,
@@ -66,6 +72,7 @@ impl Default for MovementWeights {
             corner_penalty: 6.0,
             wand_pull: 0.5,
             range_band: 0.0,
+            flee: 0.0,
             commitment_bonus: 1.5,
         }
     }
@@ -229,48 +236,64 @@ impl Default for MeleeMovementConfig {
     }
 }
 
-/// Mage movement tuning (the ENGAGE/KITE pilot). `range_band_min`/`max` bound
-/// the kiting orbit ring; `kite_hold` is the hysteresis floor; `directive_ttl`
-/// must cover a Frostbolt cast so the Mage can act post-cast; `commit_window`
-/// is the anti-zigzag window.
+/// DPS kiter movement tuning (the shared ENGAGE/KITE machine — Mage, Hunter).
+/// `range_band_min`/`max` bound the kiting orbit ring; `kite_hold` is the
+/// hysteresis floor; `directive_ttl` must cover the longest cast so the kiter
+/// can act post-cast; `commit_window` is the anti-zigzag window.
+/// `kite_entry_radius`/`kite_sustain_radius` are used only by **proximity-gated**
+/// kiters (Hunter): enter KITE when a melee threat is within entry range, exit
+/// when no threat remains within sustain range. Aura-gated kiters (Mage) ignore
+/// them — KITE keys off the Mage's own root/slow instead.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(default)]
-pub struct MageMovementConfig {
+pub struct DpsMovementConfig {
     pub weights: MovementWeights,
     /// Inner ring radius — the orbit stays outside this of the kill target
-    /// (keeps the Mage out of melee of a target that is also a threat).
+    /// (keeps the kiter out of melee, and out of the Hunter's dead zone).
     pub range_band_min: f32,
     /// Outer ring radius — the orbit stays inside this of the kill target
-    /// (keeps the kill target in cast range).
+    /// (keeps the kill target in shot/cast range).
     pub range_band_max: f32,
     /// Hysteresis floor: minimum seconds KITE holds after entry before it may
-    /// exit, even if the sustaining aura breaks (anti-strobe).
+    /// exit, even if the sustain condition lapses (anti-strobe).
     pub kite_hold: f32,
-    /// MovementDirective TTL — must cover the longest Mage cast so movement
-    /// survives a Frostbolt.
+    /// MovementDirective TTL — must cover the longest cast so movement survives
+    /// it (Frostbolt / Aimed Shot).
     pub directive_ttl: f32,
     /// Committed-direction window (anti-zigzag).
     pub commit_window: f32,
+    /// Proximity-gated entry (Hunter): a melee threat within this radius opens
+    /// KITE. Ignored by aura-gated kiters.
+    pub kite_entry_radius: f32,
+    /// Proximity-gated sustain (Hunter): KITE holds while a melee threat is
+    /// within this radius, exits once all are kited beyond it. Slightly larger
+    /// than entry for hysteresis. Ignored by aura-gated kiters.
+    pub kite_sustain_radius: f32,
 }
 
-impl Default for MageMovementConfig {
+impl Default for DpsMovementConfig {
     fn default() -> Self {
         Self {
             weights: MovementWeights {
                 // Kiter profile: strong repulsion, ring attraction on, no
                 // healer terms (formation/wand) and a light corner penalty.
+                // `flee` defaults off (Mage orbits a rooted target); the Hunter
+                // block in movement.ron turns it up for distance-max kiting.
                 threat_repulsion: 3.0,
                 formation_pull: 0.0,
+                flee: 0.0,
                 corner_penalty: 4.0,
                 wand_pull: 0.0,
                 range_band: 2.0,
                 commitment_bonus: 1.5,
             },
-            range_band_min: 8.0,   // SAFE_KITING_DISTANCE
+            range_band_min: 8.0,   // SAFE_KITING_DISTANCE / HUNTER_DEAD_ZONE
             range_band_max: 30.0,  // within AUTO_SHOT_RANGE
             kite_hold: 1.0,
-            directive_ttl: 3.0,    // covers a Frostbolt cast
+            directive_ttl: 3.0,    // covers a Frostbolt / Aimed Shot cast
             commit_window: 0.6,
+            kite_entry_radius: 20.0,   // Hunter closing-range band
+            kite_sustain_radius: 24.0, // hold a touch past entry
         }
     }
 }
@@ -286,7 +309,8 @@ pub struct MovementConfig {
     pub priest: PriestMovementConfig,
     pub paladin: PaladinMovementConfig,
     pub melee: MeleeMovementConfig,
-    pub mage: MageMovementConfig,
+    pub mage: DpsMovementConfig,
+    pub hunter: DpsMovementConfig,
 }
 
 impl MovementConfig {
@@ -389,6 +413,7 @@ impl MovementConfig {
             ("priest", &self.priest.weights),
             ("paladin", &self.paladin.weights),
             ("mage", &self.mage.weights),
+            ("hunter", &self.hunter.weights),
         ] {
             let terms = [
                 ("threat_repulsion", weights.threat_repulsion),
@@ -396,6 +421,7 @@ impl MovementConfig {
                 ("corner_penalty", weights.corner_penalty),
                 ("wand_pull", weights.wand_pull),
                 ("range_band", weights.range_band),
+                ("flee", weights.flee),
                 ("commitment_bonus", weights.commitment_bonus),
             ];
             for (name, value) in terms {
@@ -408,46 +434,49 @@ impl MovementConfig {
             }
         }
 
-        // Mage ENGAGE/KITE block (U6).
-        let m = &self.mage;
-        if !(m.range_band_min < m.range_band_max) {
-            issues.push(format!(
-                "mage.range_band_min ({}) must be strictly less than range_band_max ({})",
-                m.range_band_min, m.range_band_max
-            ));
-        }
-        if m.range_band_min < SAFE_KITING_DISTANCE {
-            issues.push(format!(
-                "mage.range_band_min ({}) must be >= SAFE_KITING_DISTANCE ({}) so the orbit \
-                 stays out of melee of a kill target that is also a threat",
-                m.range_band_min, SAFE_KITING_DISTANCE
-            ));
-        }
-        if m.range_band_max > AUTO_SHOT_RANGE {
-            issues.push(format!(
-                "mage.range_band_max ({}) must be <= AUTO_SHOT_RANGE ({}) — a ring beyond cast \
-                 range is config noise",
-                m.range_band_max, AUTO_SHOT_RANGE
-            ));
-        }
-        if m.kite_hold <= 0.0 || !m.kite_hold.is_finite() {
-            issues.push(format!(
-                "mage.kite_hold must be a positive finite number, got {}",
-                m.kite_hold
-            ));
-        }
-        if m.directive_ttl < m.commit_window {
-            issues.push(format!(
-                "mage.directive_ttl ({}) must be >= commit_window ({}) so a committed direction \
-                 does not outlive its directive",
-                m.directive_ttl, m.commit_window
-            ));
-        }
-        if m.commit_window <= 0.0 || !m.commit_window.is_finite() {
-            issues.push(format!(
-                "mage.commit_window must be a positive finite number, got {}",
-                m.commit_window
-            ));
+        // DPS kiter ENGAGE/KITE blocks (Mage, Hunter).
+        for (class, m) in [("mage", &self.mage), ("hunter", &self.hunter)] {
+            if !(m.range_band_min < m.range_band_max) {
+                issues.push(format!(
+                    "{class}.range_band_min ({}) must be strictly less than range_band_max ({})",
+                    m.range_band_min, m.range_band_max
+                ));
+            }
+            if m.range_band_min < SAFE_KITING_DISTANCE {
+                issues.push(format!(
+                    "{class}.range_band_min ({}) must be >= SAFE_KITING_DISTANCE ({}) so the orbit \
+                     stays out of melee of a kill target that is also a threat",
+                    m.range_band_min, SAFE_KITING_DISTANCE
+                ));
+            }
+            if m.range_band_max > AUTO_SHOT_RANGE {
+                issues.push(format!(
+                    "{class}.range_band_max ({}) must be <= AUTO_SHOT_RANGE ({}) — a ring beyond \
+                     shot range is config noise",
+                    m.range_band_max, AUTO_SHOT_RANGE
+                ));
+            }
+            if m.kite_hold <= 0.0 || !m.kite_hold.is_finite() {
+                issues.push(format!("{class}.kite_hold must be a positive finite number, got {}", m.kite_hold));
+            }
+            if m.directive_ttl < m.commit_window {
+                issues.push(format!(
+                    "{class}.directive_ttl ({}) must be >= commit_window ({}) so a committed \
+                     direction does not outlive its directive",
+                    m.directive_ttl, m.commit_window
+                ));
+            }
+            if m.commit_window <= 0.0 || !m.commit_window.is_finite() {
+                issues.push(format!("{class}.commit_window must be a positive finite number, got {}", m.commit_window));
+            }
+            // Proximity-gate sanity (Hunter): sustain radius must not be smaller
+            // than entry, or KITE would exit the instant it enters.
+            if m.kite_sustain_radius < m.kite_entry_radius {
+                issues.push(format!(
+                    "{class}.kite_sustain_radius ({}) must be >= kite_entry_radius ({})",
+                    m.kite_sustain_radius, m.kite_entry_radius
+                ));
+            }
         }
 
         if issues.is_empty() {

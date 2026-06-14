@@ -199,10 +199,11 @@ pub enum Posture {
     Kite,
 }
 
-/// The gameplay-side posture (`components::movement::Posture`, carried by the
-/// `HealerPosture` component) converts losslessly into the trace enum.
-/// Conversion lives here — events.rs already depends on `components` — so the
-/// gameplay component stays free of trace-schema concerns.
+/// The gameplay-side postures convert losslessly into the unified trace enum
+/// (the wire format keeps all variants; gameplay splits healer vs DPS so the
+/// two state machines can't share variants). Conversion lives here — events.rs
+/// already depends on `components` — so the gameplay components stay free of
+/// trace-schema concerns.
 impl From<crate::states::play_match::components::Posture> for Posture {
     fn from(p: crate::states::play_match::components::Posture) -> Self {
         use crate::states::play_match::components::Posture as GamePosture;
@@ -211,8 +212,16 @@ impl From<crate::states::play_match::components::Posture> for Posture {
             GamePosture::Pressured => Posture::Pressured,
             GamePosture::Escape => Posture::Escape,
             GamePosture::Dip => Posture::Dip,
-            GamePosture::Engage => Posture::Engage,
-            GamePosture::Kite => Posture::Kite,
+        }
+    }
+}
+
+impl From<crate::states::play_match::components::DpsPosture> for Posture {
+    fn from(p: crate::states::play_match::components::DpsPosture) -> Self {
+        use crate::states::play_match::components::DpsPosture as GameDps;
+        match p {
+            GameDps::Engage => Posture::Engage,
+            GameDps::Kite => Posture::Kite,
         }
     }
 }
@@ -251,11 +260,13 @@ pub enum MovementTrigger {
     /// FREE formation goal moved enough to re-commit (engaged-ally centroid
     /// shifted) within the same posture.
     FormationShift,
-    /// Mage ENGAGE → KITE: a melee-range threat now carries the Mage's own
-    /// root/slow aura (the kiting window opened).
+    /// DPS-kiter ENGAGE → KITE: the entry condition opened (Mage: a melee enemy
+    /// carries the Mage's own root/slow; Hunter: a melee-DPS threat is within
+    /// closing range).
     KiteEnter,
-    /// Mage KITE → ENGAGE: no visible enemy carries a Mage-owned root/slow
-    /// aura and the hysteresis hold has elapsed (the kiting window closed).
+    /// DPS-kiter KITE → ENGAGE: the sustain condition lapsed and the hysteresis
+    /// hold has elapsed (Mage: no Mage-owned root/slow on a visible enemy;
+    /// Hunter: no melee-DPS threat within the sustain radius).
     KiteExit,
 }
 

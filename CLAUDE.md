@@ -277,8 +277,13 @@ with the context-steering mask refactor.
 - `formation_pull` (Priest 2.0 / Paladin 0.0) — pull toward the FREE backline point (Paladin keeps its melee identity, so 0 disables it)
 - `corner_penalty` (Priest 6.0 / Paladin 4.0) — graded penalty approaching arena corners
 - `wand_pull` (Priest 0.5 / Paladin 0.0) — low-weight pull toward wand range of the kill target (`0.0` disables it for the wandless Paladin)
-- `range_band` (0.0 for healers; Mage `mage.weights` 2.0) — ring-attraction toward the kill target's `[min, max]` band (Mage kiting); disabled for healers
+- `range_band` (0.0 for healers; Mage/Hunter 2.0 / 0.5) — ring-attraction toward the kill target's `[min, max]` band; disabled for healers
+- `flee` (0.0 for healers + Mage; Hunter 6.0) — constant pull away from the nearest threat, NOT proximity-weighted (distance-maximization), so a chased ranged DPS outruns an un-impaired chaser at all ranges. Hunter's `corner_penalty` (8.0) must EXCEED `flee` or the kiter flees into corners.
 - `commitment_bonus` (1.5/1.5) — bonus toward the committed direction during the commit window
+
+**DPS kiter blocks** (`mage:` / `hunter:` — the shared ENGAGE/KITE machine, `DpsMovementConfig`):
+- `weights:` (above) plus `range_band_min`/`max` (orbit ring; min = SAFE_KITING_DISTANCE / HUNTER_DEAD_ZONE 8), `kite_hold` (anti-strobe hysteresis), `directive_ttl` (must cover the longest cast), `commit_window`.
+- `kite_entry_radius`/`kite_sustain_radius` — proximity-gated kiters only (Hunter: KITE when a melee is within entry, exit when kited past sustain). The Mage is aura-gated (KITE keys off its own root/slow), so it ignores these.
 
 **Paladin-only block** (`paladin:` — alongside its `weights:`):
 - `fallback_range: 15.0` — PRESSURED retreat range (instead of face-tanking at melee)

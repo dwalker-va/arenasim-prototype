@@ -53,14 +53,6 @@ pub fn regenerate_resources(
                 combatant.global_cooldown = 0.0;
             }
         }
-
-        // Tick down kiting timer
-        if combatant.kiting_timer > 0.0 {
-            combatant.kiting_timer -= dt;
-            if combatant.kiting_timer < 0.0 {
-                combatant.kiting_timer = 0.0;
-            }
-        }
     }
 }
 
