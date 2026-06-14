@@ -164,12 +164,37 @@ cancelled every melee-pet auto-attack swing. All Hunter baselines in
 
 ### D. Ship + re-baseline
 
-- [ ] **Tier-2 review + PR** the `f8f5ff3..HEAD` range on `worktree-ai-tuning`.
+- [x] ~~**Tier-2 review** the `main..HEAD` range on `worktree-ai-tuning`.~~ DONE
+      2026-06-13 — 8-persona review (commit `0a4a93f`). No code defects; verdict
+      Ready with fixes. Applied the safe nits + the 3 missing regression tests
+      below. PR still open (see remaining item).
+- [ ] **Open the PR** for `main..HEAD` on `worktree-ai-tuning` (Hunter migration
+      + pet/kite fixes + rebaseline).
 - [x] ~~**Re-sweep** the full 7×7 1v1 + 2v2/3v3 matrices with the pet-damage fix
       live, replacing the stale `design-docs/balance/` Hunter baselines.~~ DONE
       2026-06-13 — `canonical_{1v1_n100,2v2_full_n100,3v3_full_n50}_300s.csv`
       regenerated + `canonical_baselines_summary.md` rewritten. Hunter 1v1
       20.7→59.4; team formats +3-4; Mage+Paladin meta unchanged (Hunter-isolated).
+
+### E. Code-review residuals (from the 2026-06-13 Tier-2 review)
+
+Deferred from the review — none block the PR. The 3 P1 regression-test gaps were
+fixed in `0a4a93f`; these are the lower-priority remainder.
+
+- [ ] **P2 `combat_ai.rs` crossed 1k lines (1,313)** — the Mage and Hunter
+      `evaluate_dps_posture` dispatch arms are near-identical 10-line scaffolds.
+      Extract a `dispatch_dps_posture(...)` helper and call it from both.
+- [ ] **Doc: name the auto-attack CC-guard site** — update
+      `docs/solutions/ai-decision-patterns/friendly-cc-break-prevention.md` to
+      list `combat_core/auto_attack.rs` as a second guard site alongside
+      `pre_cast_ok` (the doc predates the auto-attack path).
+- [ ] **Agent-native: pet CC-suppressed swing is untraced** — when the friendly-CC
+      guard makes a pet hold fire, no trace event records it; an agent diagnosing
+      "why did the pet stop swinging?" must infer it. Consider a `suppressed_by_cc`
+      field on `pet_decision`.
+- [ ] **Nit: `incap_cc_team`/`root_cc_team` use `HashMap`** where the surrounding
+      determinism-sensitive maps use `BTreeMap`. Lookup-only today so it's safe;
+      switch for consistency if iteration is ever added.
 
 ---
 
