@@ -255,6 +255,7 @@ fn get_class_abilities(class: CharacterClass) -> Vec<AbilityType> {
             AbilityType::PowerWordFortitude,
             AbilityType::PowerWordShield,
             AbilityType::DispelMagic,
+            AbilityType::PsychicScream,
         ],
         CharacterClass::Warlock => vec![
             AbilityType::Corruption,
