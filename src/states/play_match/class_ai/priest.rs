@@ -857,18 +857,38 @@ fn scream_dip_target_eligible(ctx: &CombatContext, my_team: u8, target: Entity) 
         && !ctx.is_dr_immune(target, DRCategory::Fears)
 }
 
-/// Nearest fear-eligible enemy healer within `reach` (mirrors
-/// `dip_target_candidate`). Drives only the dip walk goal; the self-centered
-/// AoE cast on arrival fears every enemy in radius, not just this target.
+/// Enemies the Priest's team is actively attacking — the `target` of every
+/// living non-pet ally (excluding self), i.e. the team's kill target(s). The
+/// offensive dip must NOT fear one of these: the team's own damage on a feared
+/// enemy breaks the ~100-damage Fear instantly, so dipping to fear the target
+/// the team is killing is self-defeating (it scatters the kill and pulls the
+/// Priest out of position for nothing). Respecting this is the team
+/// coordination the dip needs — fear the enemy healer only when the team is
+/// committing elsewhere (e.g. kill_target is a DPS), so the fear actually buys
+/// a kill window. `BTreeSet` keeps iteration deterministic.
+fn team_focus(ctx: &CombatContext, entity: Entity) -> std::collections::BTreeSet<Entity> {
+    ctx.alive_allies()
+        .into_iter()
+        .filter(|a| a.entity != entity && !a.is_pet)
+        .filter_map(|a| a.target)
+        .collect()
+}
+
+/// Nearest fear-eligible enemy healer within `reach` that the team is NOT
+/// killing (mirrors `dip_target_candidate`, plus the kill-target guard). Drives
+/// only the dip walk goal; the self-centered AoE cast on arrival fears every
+/// enemy in radius, not just this target.
 fn scream_dip_target_candidate(
     ctx: &CombatContext,
     my_team: u8,
     my_pos: Vec3,
     reach: f32,
+    focused: &std::collections::BTreeSet<Entity>,
 ) -> Option<Entity> {
     ctx.alive_enemies()
         .into_iter()
         .filter(|e| e.class.is_healer())
+        .filter(|e| !focused.contains(&e.entity)) // respect the kill target
         .filter(|e| scream_dip_target_eligible(ctx, my_team, e.entity))
         .filter(|e| my_pos.distance(e.position) <= reach)
         .min_by(|a, b| {
@@ -930,7 +950,10 @@ fn evaluate_scream_dip_entry(
         + movement.priest.dip_budget
             * combatant.base_movement_speed
             * ctx.movement_slow_multiplier(entity);
-    scream_dip_target_candidate(ctx, combatant.team, my_pos, reach)
+    // Respect the kill target: never dip to fear an enemy the team is already
+    // attacking (the team's damage would break the fear instantly).
+    let focused = team_focus(ctx, entity);
+    scream_dip_target_candidate(ctx, combatant.team, my_pos, reach, &focused)
 }
 
 /// Mid-dip abort (U4, mirrors `dip_should_abort`): budget exceeded, the dip

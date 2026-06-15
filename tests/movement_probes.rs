@@ -993,12 +993,6 @@ mod priest_postures {
     /// (e) CORNER PROBE — under sustained melee pressure the Priest never
     /// sits inside the scorer's corner geometry (|x|+|z| >=
     /// CORNER_PENALTY_ONSET) for more than 5 consecutive seconds.
-    // RECALIBRATE IN U6: the U4 offensive dip walks the Priest to the enemy
-    // healer via an Entity-goal directive that bypasses the corner-penalty
-    // scorer, so a dip toward a corner-hugging healer can sit in the corner
-    // band marginally past the 5s ceiling (5.47s observed). U6 decides whether
-    // to add corner-awareness to the dip walk or accept it after the sweep.
-    #[ignore = "recalibrate in U6 after Psychic Scream dip tuning (dip bypasses corner scorer)"]
     #[test]
     fn pressured_priest_does_not_pin_into_corners() {
         let (_result, timeline, _trace) = run_observed_traced(statue_config());
@@ -3240,14 +3234,19 @@ mod psychic_scream {
             .collect()
     }
 
-    /// AE2 / R11 — when the Priest is NOT the focus, it dips to the enemy
-    /// healer and fears it: DipEnter → DipComplete fire and a scream cast
-    /// lands. Seed 42, 2v2 with the enemy team focusing the team-1 Warrior so
-    /// the team-1 Priest is free to dip the team-2 Priest.
+    /// AE2 / R11 — when the Priest is NOT the focus AND the team is killing
+    /// someone other than the enemy healer, the Priest dips to fear the free
+    /// healer (the kill-target guard keeps it from fearing an enemy the team is
+    /// already breaking the fear on): DipEnter → DipComplete fire and a scream
+    /// cast lands. Seed 42, 2v2. The enemy team focuses the team-1 Warrior
+    /// (freeing the team-1 Priest); the team-1 team focuses the enemy Warrior
+    /// (kill_target 0), leaving the enemy Priest unfocused so the dip permits
+    /// fearing it.
     #[test]
     fn offensive_dip_fears_enemy_healer() {
         let mut cfg = create_config(vec!["Priest", "Warrior"], vec!["Warrior", "Priest"], Some(42));
         cfg.team2_kill_target = Some(1); // focus team-1 Warrior, freeing the Priest to dip
+        cfg.team1_kill_target = Some(0); // team kills the enemy Warrior, leaving the healer free
         let (_result, _timeline, trace) = run_observed_traced(cfg);
 
         let events = movement_events(&trace);
