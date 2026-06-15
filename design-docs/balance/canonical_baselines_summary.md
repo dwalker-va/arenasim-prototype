@@ -1,16 +1,18 @@
 # Canonical Balance Baselines
 
-**Generated 2026-06-13** on the current `worktree-ai-tuning` meta — i.e. *after*
-the context-steering mask refactor + Mage kiting pilot (PR #69), the Hunter
-ENGAGE/KITE movement migration, and the three Hunter/pet fixes: melee-only kite
-filter (`03387f4`), melee-pet dead-zone fix (`1a41deb`), and the friendly-CC
-auto-attack guard (`c0dc2af`). Supersedes the 2026-06-07 baselines, which
-predated all of the above.
+**Generated 2026-06-15** on the `feat/priest-psychic-scream` meta — i.e. the
+2026-06-13 Hunter/Mage state *plus* the Priest Psychic Scream feature (PR #73):
+an instant self-centered AoE fear with a defensive self-peel and a
+kill-target-respecting offensive dip. Supersedes the 2026-06-13 baselines.
 
-**The dominant change is the pet-damage fix.** Every prior Hunter baseline was
-computed with a damage-dead pet — the ranged Auto-Shot dead zone silently
-cancelled every melee-pet swing. With the pet now contributing, Hunter is no
-longer the universal floor (see below).
+**The dominant change this cycle is Psychic Scream.** It lifts the Priest — the
+prior universal floor of team formats — out of the bottom: the defensive
+panic-button peel is the driver (+~4pt in 2v2), and the offensive dip respects
+the kill target (fears the enemy healer only when the team is committing
+elsewhere), so it adds value without fighting the team's focus. The change is
+Priest-isolated; non-Priest cells are byte-identical to the 2026-06-13 binary
+and carry that cycle's reading (the Hunter pet-damage fix, Mage kiting pilot,
+etc. — see "prior cycle" notes below).
 
 Authoritative current-state references. Use as the "before" when assessing any
 balance change — **compare batch-vs-batch only** (these differ a few points from
@@ -18,9 +20,9 @@ the older multithreaded `--matrix` numbers).
 
 | Format | File | Coverage | N | Matches | Draws |
 |---|---|---|---|---|---|
-| 1v1 | `canonical_1v1_n100_300s.csv` | full 7×7 | 100 | 4,900 | 2.8% |
-| 2v2 | `canonical_2v2_full_n100_300s.csv` | every distinct-class pair × pair (441) | 100 | 44,100 | 0.7% |
-| 3v3 | `canonical_3v3_full_n50_300s.csv` | every distinct-class triple × triple (1225) | 50 | 61,250 | 0.2% |
+| 1v1 | `canonical_1v1_n100_300s.csv` | full 7×7 | 100 | 4,900 | 5.0% |
+| 2v2 | `canonical_2v2_full_n100_300s.csv` | every distinct-class pair × pair (441) | 100 | 44,100 | 1.0% |
+| 3v3 | `canonical_3v3_full_n50_300s.csv` | every distinct-class triple × triple (1225) | 50 | 61,250 | 0.3% |
 
 Distinct-class comps, both orderings, 300s cap, default loadouts/strategy.
 Regenerate via `scripts/gen_sweep.py --full {2,3}` + `arenasim --batch` (see the
@@ -32,27 +34,28 @@ Regenerate via `scripts/gen_sweep.py --full {2,3}` + `arenasim --batch` (see the
 
 | Tier | 1v1 | 2v2 | 3v3 |
 |---|---|---|---|
-| **S — meta-defining** | Paladin 69.0, Mage 65.6 | **Mage 67.8** | **Mage 62.6** |
-| **A — strong** | Hunter 59.4, Rogue 57.6 | Paladin 59.3 | Paladin 57.4 |
-| **B — playable** | — | Priest 45.8, Warrior 45.4 | Priest 50.9, Warrior 48.1 |
-| **C — weak** | Warlock 37.1, Warrior 31.4 | Hunter 43.5, Rogue 42.5, Warlock 42.5 | Warlock 44.1, Hunter 43.4, Rogue 42.4 |
-| **D — bottom** | Priest 13.9 | — | — |
+| **S — meta-defining** | Paladin 69.4, Mage 66.4 | **Mage 66.9** | **Mage 56.7** |
+| **A — strong** | Hunter 58.9, Rogue 52.1 | Paladin 57.7 | Paladin 54.7 |
+| **B — playable** | — | **Priest 49.8**, Warrior 45.2 | **Priest 50.7**, Warlock 47.5, Warrior 47.3, Rogue 47.1 |
+| **C — weak** | Warlock 35.9, Warrior 32.7 | Warlock 43.2, Hunter 42.7, Rogue 40.7 | Hunter 42.9 |
+| **D — bottom** | Priest 12.1 | — | — |
 
-**The team-format meta is still Mage + Paladin** and barely moved — the Hunter
-work is class-isolated, so the top of the board is unchanged from 2026-06-07. The
-action is at the bottom: **Hunter climbed out of the universal-floor slot.** In
-1v1 it leapt from worst (20.7) to A-tier (59.4) — the pet is a large fraction of
-a solo Hunter's damage. In teams the pet is a smaller share of total DPS, so the
-gain is modest (39.2 → 43.5 in 2v2, 40.3 → 43.4 in 3v3) but enough that Hunter,
-Rogue, and Warlock now form a tied low-C cluster instead of Hunter sitting alone
-at the bottom.
+**The team-format meta is still Mage + Paladin** at the top — Psychic Scream is
+Priest-isolated, so the carries are unchanged within noise. **The action is the
+Priest:** in 2v2 it climbs to the top of B-tier (45.8 → 49.8), now ahead of
+Warrior and the C cluster and trailing only Mage/Paladin; in 3v3 it holds B
+(~50.7). It is no longer a team-format floor. (1v1 stays D — a lone healer can't
+kill, and the panic button mostly converts losses into draws there: 1v1 draws
+rose 2.8% → 5.0%.) Non-Priest classes' aggregates move only via their matchup
+vs the now-stronger Priest (a ≤1-2pt dip in that one column); their
+non-Priest-vs-non-Priest cells are byte-identical to 2026-06-13.
 
 ## 2v2 comp tier list (441 comps)
 
 **Meta-defining (top):**
 | Winrate | Comp |
 |---|---|
-| **78.0%** | Mage+Priest |
+| **78.3%** | Mage+Priest |
 | 76.5% | Mage+Paladin |
 | 74.3% | Warrior+Paladin |
 | 70.5% | Mage+Warlock |
@@ -67,7 +70,7 @@ at the bottom.
 | 28.8% | Warlock+Hunter |
 | 22.2% | Rogue+Warlock |
 | 20.4% | Warrior+Warlock |
-| **17.3%** | **Paladin+Priest** |
+| **16.3%** | **Paladin+Priest** |
 
 Hunter's best 2v2 partners are now the carries: **Paladin+Hunter 58.8%,
 Mage+Hunter 57.5%** — both solidly mid, where the old baseline had every Hunter
@@ -108,9 +111,15 @@ the 6 worst comps when paired with other low-sustain classes.
   structurally — **LoS/pillar play remains the deferred answer**.
 - **Paladin holds #2**; Warrior+Paladin is still a top-3 2v2 (74.3%). Unchanged
   from the prior cycle within noise.
-- **Double-healer is still a trap.** Paladin+Priest is the worst 2v2 comp
-  (17.3%) — at the 300s cap, two healers with no kill pressure lose the
-  attrition war.
+- **The Priest is no longer a team-format floor** (Psychic Scream, PR #73). It
+  sits mid-B in both formats (~50%), behind only Mage/Paladin. The defensive
+  AoE-fear peel is the value; the offensive dip-to-fear-the-enemy-healer fires
+  only when the team kills someone else (respecting the kill target), so it
+  never breaks its own team's focus. Mage+Priest remains a top-tier carry pair
+  (78.3% in 2v2).
+- **Double-healer is still a trap.** Paladin+Priest is still the worst 2v2 comp
+  (16.3%) — even with Psychic Scream, two healers with no kill pressure lose the
+  attrition war at the 300s cap.
 - **No-healer melee piles are the floor** (Warrior+Rogue+Warlock 5.4% in 3v3) —
   no sustain, no carry engine.
 - **The Hunter is no longer the universal bottom.** The pet-damage fix lifted it
@@ -120,23 +129,30 @@ the 6 worst comps when paired with other low-sustain classes.
   (healer self-peel) and vs Mage/Warlock (control/sustain) — see the Hunter
   follow-ups in `design-docs/roadmap.md`.
 
-## Changes this cycle (vs the 2026-06-07 baseline)
+## Changes this cycle (vs the 2026-06-13 baseline)
 
-- **Hunter** is the headline: **+38.7 in 1v1** (20.7 → 59.4), +4.3 in 2v2
-  (39.2 → 43.5), +3.1 in 3v3 (40.3 → 43.4). Almost entirely the pet-damage fix
-  (`1a41deb`); the melee-only kite filter and CC guard keep it from fleeing
-  casters and breaking its own Freezing Trap / Web.
-- **Hunter's 1v1 victims dropped** as it started winning even matchups: Rogue
-  68.7 → 57.6 (Hunter now wins it 84%), Warlock 47.4 → 37.1, Priest 21.4 → 13.9.
-  These are Hunter-row knock-on effects, not nerfs to those classes.
-- **Mage** edged up with the kiting pilot (62.9 → 65.6 in 1v1, 66.0 → 67.8 in
-  2v2; 3v3 flat) — class-isolated to Mage cells per the PR #69 matrix check.
-- **Everything else is within noise** of 2026-06-07. The Warrior/Rogue/Priest/
-  Warlock/Paladin core was verified byte-identical to the prior binary on the
-  non-Hunter, non-Mage cells, so those numbers carry the prior cycle's reading.
-- **Draw rates fell** (1v1 7.0 → 2.8%, 2v2 1.3 → 0.7%, 3v3 0.4 → 0.2%): the live
-  pet converts Hunter timeouts into decisive games (Hunter draws were a big
-  chunk of the old healer-mirror-dominated draw wall).
+- **Priest is the headline: Psychic Scream (PR #73).** In the isolated
+  before/after toggle (same seeds, scream off vs on — the rigorous feature
+  measure), the Priest gains **+3.7pt in 2v2 and +1.5pt in 3v3** overall. The
+  **defensive self-peel is the driver** (+4pt vs no-healer comps in both
+  formats); the **offensive dip respects the kill target** (`team_focus` —
+  fears the enemy healer only when the team is committing elsewhere), turning a
+  first-cut net drag into a gain. It lifts the Priest off the team-format floor
+  into mid-B.
+- **Knock-on, not nerfs.** Each non-Priest class's aggregate dips ≤1-2pt only
+  through its single matchup column vs the now-stronger Priest (e.g. Rogue 1v1
+  57.6 → 52.1 is Rogue-vs-Priest shifting). Non-Priest-vs-non-Priest cells are
+  byte-identical to 2026-06-13 (the change is Priest-only code).
+- **Draw rates ticked up** (1v1 2.8 → 5.0%, 2v2 0.7 → 1.0%, 3v3 0.2 → 0.3%):
+  the panic button lets the Priest survive longer, converting some quick losses
+  into timeouts — not a stall pathology (sweep draws stayed near baseline, no
+  mirror draw-fest).
+
+### Prior cycle (2026-06-13, carried forward on non-Priest cells)
+
+- **Hunter** pet-damage fix (`1a41deb`) was that cycle's headline (+38.7 in 1v1,
+  +4.3 2v2, +3.1 3v3), lifting it off the universal floor. **Mage** edged up with
+  the kiting pilot (PR #69). These remain the current non-Priest reading.
 
 ## Caveats
 

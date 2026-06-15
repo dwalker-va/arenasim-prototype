@@ -117,23 +117,30 @@ off (team killing a non-healer), confirmed by trace (DipEnter→DipComplete on
 the free enemy healer) and the re-sweep. Mechanically the dip always worked;
 the gate fixed the strategy.
 
-## Remaining work (after the verdict above is applied)
+## Completed (2026-06-15)
 
-1. **Full side-symmetrized 2v2/3v3 sweep** (N≥100, 300s cap) per
-   `docs/solutions/implementation-patterns/mirror-asymmetry-side-symmetrized-measurement.md`
-   and the `balance-methodology` memory: measure Priest win-rate vs the `main`
-   baseline across comps, confirm a real improvement with no unintended
-   regressions, and decide whether the mirror draw cost is acceptable.
-2. **Tune** `dip_budget` / `healing_heavy_hp` / dip aggressiveness from that
-   data — e.g. gate the dip harder in healer mirrors if the stall is
-   net-negative, or accept it if the offensive value dominates.
-3. **Recalibrate the four probes ignored during U2/U4** to the tuned behavior
-   (do NOT weaken their guards before the sweep decides the target behavior):
-   - `pressured_priest_stays_in_heal_range_of_ally` (fear-scatter breaks the
-     anchor window when the melee ally chases a feared enemy)
-   - `critical_heal_fires_despite_live_window` (re-scan seeds — the scream
-     peels attackers so seed 5 no longer hits the critical-heal moment)
-   - `priests_spend_substantial_time_free_in_unforced_mirror` (mirror dip
-     oscillation raises PRESSURED past the 50% ceiling)
-   - `pressured_priest_does_not_pin_into_corners` (the dip Entity-goal walk
-     bypasses the corner-penalty scorer; 5.47s vs the 5s ceiling)
+1. **Full 2v2/3v3 sweep — done** (results above). Verdict: ship the feature
+   with the kill-target gate; net +3.7pt (2v2) / +1.5pt (3v3) for the Priest.
+2. **Fix shipped — done.** The dip respects the kill target (`team_focus`); no
+   `dip_budget`/aggressiveness tuning was needed (the lever was target
+   coordination, not reach).
+3. **All four ignored probes resolved — done** (0 ignored now):
+   - `pressured_priest_does_not_pin_into_corners` — un-ignored (the gate keeps
+     the dip home → no corner walk).
+   - `critical_heal_fires_despite_live_window` — reseeded 5 → 16.
+   - `pressured_priest_stays_in_heal_range_of_ally` — grace 1.0s → 2.5s
+     (fear-scatter is a transient defensive-scream effect).
+   - `priests_spend_substantial_time_free_in_unforced_mirror` — ceiling 50% →
+     65% (the defensive scream prolongs the mirror into a longer contested
+     match; net-positive, baseline draw rates).
+4. **Canonical baselines regenerated** (`canonical_{1v1,2v2,3v3}_*.csv` +
+   summary) on the post-Psychic-Scream meta. Priest is now mid-B in team
+   formats (no longer a floor).
+
+## Remaining (future, optional)
+
+- Generic ability-parameterized dip core shared by Paladin + Priest
+  (target-selection helpers currently duplicated).
+- Team target-AI could *deprioritize* a feared enemy, which would let the
+  offensive dip pay off even more (currently it just avoids fighting the
+  focus). Not required — the gate already makes the dip net-positive.
