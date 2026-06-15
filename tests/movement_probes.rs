@@ -830,13 +830,12 @@ mod priest_postures {
 
     /// (b) ANCHOR PROBE — while PRESSURED, the Priest never exits heal range
     /// (40) of its ally for more than a 1s grace (R6 anchor constraint).
-    // RECALIBRATE IN U6: Psychic Scream (feat/priest-psychic-scream) is a meta
-    // shift — both Priests now AoE-fear, scattering the fight (the melee ally
-    // chases feared enemies, so the focused Priest can't always hold the 40yd
-    // anchor window). The anchor invariant must be re-expressed against the
-    // dual-mode behavior (after U4's offensive dip), so this probe is ignored
-    // until U6 reseeds/recalibrates it with the new behavior settled.
-    #[ignore = "recalibrate in U6 after Psychic Scream dual-mode behavior lands"]
+    /// Grace widened 1.0s → 2.5s (2026-06-14) for Psychic Scream: when the
+    /// Priest fears an attacker, the melee ally chases the feared enemy out of
+    /// the Priest's 40yd heal range for a beat while the Priest re-anchors
+    /// (~2s observed). The invariant the probe protects — the Priest does not
+    /// ABANDON its ally — still holds; the wider grace tolerates the transient
+    /// fear-scatter without masking a sustained walk-off.
     #[test]
     fn pressured_priest_stays_in_heal_range_of_ally() {
         let (_result, timeline, trace) = run_observed_traced(statue_config());
@@ -867,9 +866,9 @@ mod priest_postures {
                 w0, w1, out_of_range
             );
             assert!(
-                out_of_range <= 1.0,
+                out_of_range <= 2.5,
                 "PRESSURED Priest left heal range (40) of its ally for {:.2}s \
-                 (grace 1.0s) during window [{:.1},{:.1}]",
+                 (grace 2.5s) during window [{:.1},{:.1}]",
                 out_of_range,
                 w0,
                 w1
@@ -942,13 +941,15 @@ mod priest_postures {
     /// repulsion, which raised the symmetrized rate from ~40% to ~49.5%; the
     /// 50% ceiling still guards genuine over-firing. The consolidated matrix
     /// pass is the authoritative balance check on that shift.
-    // RECALIBRATE IN U6: the U4 offensive dip makes both Priests in a mirror
-    // dip toward each other; a *closing* enemy trips compound_pressure_trigger,
-    // so they oscillate dip↔pressured and PRESSURED time rises above the 50%
-    // ceiling. The U6 balance sweep evaluates whether this dip dynamic is
-    // net-positive and tunes it (dip_budget / aggressiveness); recalibrate this
-    // ceiling against the settled behavior then.
-    #[ignore = "recalibrate in U6 after Psychic Scream dip tuning (mirror dip oscillation)"]
+    /// Ceiling raised 50% → 65% (2026-06-14) for Psychic Scream. The driver is
+    /// the DEFENSIVE scream, not the dip (the dip stays home in an unforced
+    /// mirror — it respects the kill target, which is the enemy healer here):
+    /// without the scream this seed-11 mirror resolves in <20s, but the panic
+    /// button lets both healers survive into a long contested ~44s match, so
+    /// the PRESSURED *fraction* rises (62% observed). The 2v2/3v3 sweep
+    /// validated this as net-positive with baseline draw rates, so the mirror
+    /// is more contested, not stalled. The guard still catches egregious
+    /// over-firing (>65%).
     #[test]
     fn priests_spend_substantial_time_free_in_unforced_mirror() {
         let cfg = create_config(
@@ -983,9 +984,9 @@ mod priest_postures {
             symmetrized * 100.0
         );
         assert!(
-            symmetrized < 0.5,
+            symmetrized < 0.65,
             "Priest spent {:.0}% of the match PRESSURED (side-symmetrized) in an \
-             unforced mirror (ceiling 50% — the trigger is over-firing)",
+             unforced mirror (ceiling 65% — the trigger is over-firing)",
             symmetrized * 100.0
         );
     }
@@ -1392,13 +1393,12 @@ mod escape_windows {
     /// the whole enemy team is on it) goes sub-threshold mid-window with
     /// Holy unlocked, twice. The scenario is near-universal in this comp
     /// (48/60 scanned seeds) — seed 5 was picked for its 2-occurrence margin.
-    // RECALIBRATE IN U6: Psychic Scream peels the focused Priest's attackers,
-    // so at seed 5 it no longer reliably hits the sub-threshold-during-escape
-    // moment this probe pins (it went vacuous — the scream prevented the
-    // critical situation). Re-scan seeds in U6 once the dual-mode behavior is
-    // settled (the critical-heal-wins invariant is preserved by the scream's
-    // critical-heal-pending defer gate in `try_psychic_scream`).
-    #[ignore = "recalibrate in U6 after Psychic Scream dual-mode behavior lands"]
+    /// Seed re-scanned to 16 (2026-06-14, 2-occurrence margin) after Psychic
+    /// Scream landed: the scream peels the focused Priest's attackers, so the
+    /// old seed 5 no longer reached the sub-threshold-during-escape moment (it
+    /// went vacuous). The critical-heal-wins invariant itself is preserved by
+    /// the scream's critical-heal-pending defer gate in `try_psychic_scream`;
+    /// this probe still pins that a dying ally is healed even mid-escape.
     #[test]
     fn critical_heal_fires_despite_live_window() {
         let threshold = load_movement_config()
@@ -1409,7 +1409,7 @@ mod escape_windows {
         let mut cfg = create_config(
             vec!["Priest", "Paladin"],
             vec!["Rogue", "Mage"],
-            Some(5),
+            Some(16),
         );
         cfg.team1_kill_target = Some(0);
         cfg.team2_kill_target = Some(0);
