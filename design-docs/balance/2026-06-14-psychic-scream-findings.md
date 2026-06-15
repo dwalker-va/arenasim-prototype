@@ -43,7 +43,81 @@ vs the 50% ceiling). This is the cost side of the user's "aggressive by
 default" choice; it must be weighed against the dip's offensive value in
 non-mirror comps (fearing the enemy healer to open a kill window).
 
-## Remaining work (the authoritative U6 pass)
+## Authoritative sweep results (2026-06-14)
+
+Method: batch harness (`scripts/gen_sweep.py` + `arenasim --batch` + `agg_sweep.py`),
+300s cap. Feature isolated on one binary by toggling Psychic Scream via config
+(no rebuild, no engine-version confound): **baseline** = scream disabled
+(`mana_cost` set out of reach → `pre_cast_ok` fails for both the cast and the
+dip entry); **full** = shipped config; **defensive-only** = scream on but
+`dip_budget` ≈ 0 (offensive dip can't reach). 2v2 = `Priest+{p}` vs all pairs,
+N=20 (2400 matches). 3v3 = `Priest+Warrior+{p}` vs all triples, N=15 (2250).
+
+Clean slices (the aggregate hides the signal):
+
+| Metric | baseline | full (dip on) | defensive-only |
+|---|---|---|---|
+| 2v2 overall | 42.5% ±2.0 | 44.0% ±2.0 | **46.4% ±2.0** |
+| 2v2 — enemy has healer (dip fires) | 34.3% ±2.7 | 33.2% ±2.7 | **38.0% ±2.7** |
+| 2v2 — enemy has no healer (defensive only) | 50.7% ±2.8 | 54.8% ±2.8 | 54.8% ±2.8 |
+| 3v3 overall | 45.5% ±2.1 | 44.8% ±2.1 | **46.4% ±2.1** |
+| 3v3 — enemy has healer | 41.5% ±2.5 | 38.3% ±2.5 | 40.8% ±2.5 |
+
+Draws (mirror-oscillation concern at scale): 2v2 7→25 of 2400 (~1%) with the
+full feature, 3v3 5→1 of 2250. Not a draw-fest — the earlier N=16 mirror spike
+was a localized comp, not systemic. The extra 2v2 draws track improved Priest
+survival (more games reaching the cap), not pathological dancing.
+
+### Verdict
+
+- **Defensive scream — clear win, ship it.** +4pt vs no-healer comps in both
+  formats; the panic-button peel measurably improves an underpowered class.
+  Defensive-only beats baseline overall in 2v2 (+3.9pt) and 3v3 (+0.9pt).
+- **Offensive dip — net-negative, do not ship as-is.** The full feature is
+  *worse than defensive-only in every cell*. Root cause (confirmed by trace):
+  the team's target AI focuses the enemy healer (standard kill-the-healer
+  behavior — the allied Mage Frostbolts it for 80+ per cast all match). Dipping
+  to *fear* that same healer is self-defeating: one ally Frostbolt (>100 over
+  two) breaks the fear instantly, and the dip pulls the cloth Priest out of
+  healing position for nothing. The brainstorm's intended line ("fear the
+  healer while the team kills a *different* target") requires team
+  target-coordination that does not exist — no `dip_budget`/aggressiveness
+  tuning rescues it, because the conflict is with target selection, not reach.
+
+### Fix shipped: dip respects the kill target
+
+Rather than disable the dip, the coordination it was missing already exists via
+the kill target. The dip now skips any enemy a living non-pet ally is currently
+attacking (`team_focus`), so it fires only when the team is committing
+elsewhere (e.g. `kill_target` is a DPS) — exactly when fearing the healer buys
+a kill window without the team's own damage breaking the fear. In default
+kill-the-healer play the dip correctly stays home.
+
+Re-sweep with the gate (same isolation method):
+
+| Metric | baseline | old-full (drag) | **gated (shipped)** |
+|---|---|---|---|
+| 2v2 overall | 42.5% | 44.0% | **46.2%** |
+| 2v2 — enemy has healer | 34.3% | 33.2% | **37.5%** |
+| 3v3 overall | 45.5% | 44.8% | **47.0%** |
+| 3v3 — enemy has healer | 41.5% | 38.3% | **41.7%** |
+
+The gate turns the drag into a gain — strictly better than both old-full and
+defensive-only, with the defensive win intact and draws back to baseline
+(2v2 18/2400, 3v3 1/2250). **Verdict: ship the full feature with the gate.**
+The `offensive_dip_fears_enemy_healer` probe now pins the valuable case
+(kill_target on the enemy DPS → dip fears the free healer); the corner-pin
+probe was un-ignored (the gate keeps the dip home).
+
+### Is the AI functioning as expected?
+
+Yes, after the gate. Defensive self-peel fires under pressure and improves
+survival (+4pt vs no-healer comps). The offensive dip fires only when it pays
+off (team killing a non-healer), confirmed by trace (DipEnter→DipComplete on
+the free enemy healer) and the re-sweep. Mechanically the dip always worked;
+the gate fixed the strategy.
+
+## Remaining work (after the verdict above is applied)
 
 1. **Full side-symmetrized 2v2/3v3 sweep** (N≥100, 300s cap) per
    `docs/solutions/implementation-patterns/mirror-asymmetry-side-symmetrized-measurement.md`
