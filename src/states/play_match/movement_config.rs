@@ -159,6 +159,13 @@ pub struct PriestMovementConfig {
     /// this — keeps a walk alive across decide ticks without re-scoring or
     /// emitting (refreshes are not decisions).
     pub directive_refresh_margin: f32,
+    /// DIP duration budget in seconds — the Psychic Scream walk-stun-return
+    /// cycle aborts when exceeded (U4 offensive dip; mirrors the Paladin).
+    pub dip_budget: f32,
+    /// Healing-heavy deferral trigger (U4): the Priest defers the offensive
+    /// dip while the lowest HP fraction across living non-pet team members
+    /// (self included) is below this. Observable, deterministic state.
+    pub healing_heavy_hp: f32,
 }
 
 impl Default for PriestMovementConfig {
@@ -168,6 +175,8 @@ impl Default for PriestMovementConfig {
             formation_shift_threshold: 3.0,
             formation_deadzone: 1.5,
             directive_refresh_margin: 0.25,
+            dip_budget: 6.0,
+            healing_heavy_hp: 0.6,
         }
     }
 }
@@ -329,6 +338,7 @@ impl MovementConfig {
             ("shared.wand_range", s.wand_range),
             ("paladin.fallback_range", self.paladin.fallback_range),
             ("paladin.dip_budget", self.paladin.dip_budget),
+            ("priest.dip_budget", self.priest.dip_budget),
         ];
         for (name, value) in positives {
             if !(value > 0.0) || !value.is_finite() {
@@ -354,6 +364,7 @@ impl MovementConfig {
             ("shared.center_bias", s.center_bias),
             ("shared.urgency_hp_threshold", s.urgency_hp_threshold),
             ("paladin.healing_heavy_hp", self.paladin.healing_heavy_hp),
+            ("priest.healing_heavy_hp", self.priest.healing_heavy_hp),
         ];
         for (name, value) in fractions {
             if !(0.0..=1.0).contains(&value) {

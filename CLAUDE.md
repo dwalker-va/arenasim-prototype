@@ -187,7 +187,13 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
 6. **Add special handling** in `combat_core.rs` if the ability has unique mechanics
    (most abilities work automatically via the config)
 
-7. **Test with headless simulation**:
+7. **Add to the class's `get_class_abilities()` list** in `src/states/view_combatant_ui.rs`
+   so the ability shows in the View Combatant screen's abilities section. This is a
+   hardcoded per-class `Vec` and is NOT exhaustiveness-checked — omitting it compiles
+   fine but silently drops the ability from that UI (unlike the `get_ability_name`
+   match right below it, which the compiler forces you to update).
+
+8. **Test with headless simulation**:
    ```bash
    cargo run --release -- --headless /tmp/test.json
    ```

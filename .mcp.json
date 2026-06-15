@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "wowhead-classic": {
+      "command": "node",
+      "args": ["tools/wowhead-mcp/dist/index.js"]
+    }
+  }
+}

@@ -17,7 +17,7 @@ use std::collections::HashSet;
 use crate::combat::log::CombatLog;
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
-use crate::states::play_match::ability_config::AbilityDefinitions;
+use crate::states::play_match::ability_config::{AbilityConfig, AbilityDefinitions};
 use crate::states::play_match::components::*;
 use crate::states::play_match::combat_core::{calculate_cast_time, clamp_to_arena};
 use crate::states::play_match::constants::GCD;
@@ -25,16 +25,57 @@ use crate::states::play_match::decision_trace::{
     DecisionEventBuilder, DecisionTrace, MovementGoalKind, MovementTrigger,
     Posture as TracePosture, RejectionReason,
 };
-use crate::states::play_match::movement_config::MovementConfig;
-use crate::states::play_match::utils::log_ability_use;
+use crate::states::play_match::movement_config::{MovementConfig, SharedMovementConfig};
+use crate::states::play_match::utils::{combatant_id, log_ability_use, spawn_speech_bubble};
 
 use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
 use super::healer_postures::{
     compound_pressure_trigger, escape_tick, escape_window_from, healer_pressured_tick_shared,
-    start_movement_event,
+    start_movement_event, start_movement_event_with_target,
 };
 
 use super::CombatContext;
+
+/// Per-tick output of [`evaluate_priest_posture`], threaded into
+/// [`decide_priest_action`] (mirrors the Paladin's `PaladinMovementPlan`):
+/// the escape-defer urgency input plus the Psychic Scream dip gate.
+pub struct PriestMovementPlan {
+    /// `Some(urgency_hp_threshold)` while an ESCAPE window OR a DIP is live:
+    /// the heal ladder defers non-critical movement-locking casts (R7).
+    pub escape_defer: Option<f32>,
+    /// Psychic Scream gate for this tick (no dip / dip cast).
+    pub scream_dip: ScreamDipPlan,
+    /// The live PRESSURED trigger this tick (`compound_pressure_trigger`),
+    /// computed once in `evaluate_priest_posture` and reused by the defensive
+    /// scream gate so it isn't recomputed (a full combatants scan) per tick.
+    pub pressured: bool,
+}
+
+impl Default for PriestMovementPlan {
+    fn default() -> Self {
+        Self {
+            escape_defer: None,
+            scream_dip: ScreamDipPlan::Rotation,
+            pressured: false,
+        }
+    }
+}
+
+/// How this tick uses Psychic Scream. Unlike the Paladin's `HojPlan` there is
+/// no `Reserved` state: Psychic Scream has no rotational use, so the defensive
+/// self-peel (PRESSURED) and the offensive dip (FREE / not pressured) are
+/// mutually exclusive by posture — the pressured gate IS the reservation (R14).
+pub enum ScreamDipPlan {
+    /// No dip this tick — the defensive self-peel governs (gated on pressure).
+    Rotation,
+    /// Mid-dip and within scream radius of the dip target: cast Psychic
+    /// Scream now. On a successful cast the caller installs `completed_state`
+    /// (posture back to FREE — DipComplete) and removes the walk directive.
+    DipCast {
+        target: Entity,
+        completed_state: HealerPosture,
+    },
+}
 
 /// Priest AI: Decides and executes abilities for a Priest combatant.
 ///
@@ -62,9 +103,12 @@ pub fn decide_priest_action(
     ctx: &CombatContext,
     shielded_this_frame: &mut HashSet<Entity>,
     fortified_this_frame: &mut HashSet<Entity>,
-    escape_defer: Option<f32>,
+    plan: &PriestMovementPlan,
+    movement: &MovementConfig,
+    same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
     decision_trace: &mut DecisionTrace,
 ) -> bool {
+    let escape_defer = plan.escape_defer;
     // GCD short-circuit — no event (emission gate).
     if combatant.global_cooldown > 0.0 {
         return false;
@@ -92,7 +136,49 @@ pub fn decide_priest_action(
         return true;
     }
 
-    // Priority 3: Power Word: Shield
+    // Priority 2.5: DIP Psychic Scream (U4 offensive dip). The dip walked up to
+    // dip_budget seconds for exactly this AoE fear on the enemy healer — it
+    // outranks everything below the urgent dispel. On success the posture
+    // returns to FREE (DipComplete) and the walk directive dies with it; the
+    // return to backline happens naturally via FREE formation.
+    if let ScreamDipPlan::DipCast { target, completed_state } = &plan.scream_dip {
+        if try_dip_psychic_scream(
+            commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
+            same_frame_cc_queue, &mut builder,
+        ) {
+            // `builder` exclusively borrows the trace; finish it before
+            // emitting the DipComplete movement event.
+            builder.finish();
+            commands.entity(entity).try_insert(*completed_state);
+            commands.entity(entity).remove::<MovementDirective>();
+            if let Some(mut mbuilder) =
+                start_movement_event_with_target(decision_trace, ctx, *target, my_pos)
+            {
+                mbuilder.transition(
+                    TracePosture::Dip,
+                    TracePosture::Free,
+                    MovementTrigger::DipComplete,
+                    MovementGoalKind::Entity,
+                );
+                mbuilder.finish();
+            }
+            return true;
+        }
+    }
+
+    // Priority 3: Psychic Scream (defensive AoE fear peel / escape opener).
+    // The defensive use only fires under pressure; a dip runs only when NOT
+    // pressured, so the two are mutually exclusive — the pressured gate is the
+    // scream's reservation (no explicit Reserved state needed, R14).
+    if try_psychic_scream(
+        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
+        plan.pressured, &movement.shared, same_frame_cc_queue, &mut builder,
+    ) {
+        builder.finish();
+        return true;
+    }
+
+    // Priority 4: Power Word: Shield
     if try_power_word_shield(
         commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
         shielded_this_frame, &mut builder,
@@ -101,7 +187,7 @@ pub fn decide_priest_action(
         return true;
     }
 
-    // Priority 4: Flash Heal
+    // Priority 5: Flash Heal
     if try_flash_heal(
         commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
         escape_defer, &mut builder,
@@ -110,7 +196,7 @@ pub fn decide_priest_action(
         return true;
     }
 
-    // Priority 5: Dispel Magic - Maintenance (only when team healthy)
+    // Priority 6: Dispel Magic - Maintenance (only when team healthy)
     if ctx.is_team_healthy(0.70, my_pos) {
         if try_dispel_magic(
             commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
@@ -121,7 +207,7 @@ pub fn decide_priest_action(
         }
     }
 
-    // Priority 6: Mind Blast
+    // Priority 7: Mind Blast
     if try_mind_blast(
         commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
         escape_defer, &mut builder,
@@ -132,6 +218,219 @@ pub fn decide_priest_action(
 
     builder.finish();
     false
+}
+
+/// Try to cast Psychic Scream — instant self-centered AoE Fear (R1/R2/R5/R9/R10).
+///
+/// Defensive self-peel / escape opener: fires only when the Priest is genuinely
+/// pressured (`compound_pressure_trigger`) AND at least one fear-eligible enemy
+/// is inside the scream's radius. Because the radius (~8yd) is point-blank for a
+/// cloth healer, this single gate covers both the surrounded case and the
+/// chased-into-melee escape-opener case — the fear sends chasers running away,
+/// compounding the escape. Mirrors the Frost Nova self-AoE shape
+/// (`mage.rs::try_frost_nova`) minus the damage half. The not-pressured
+/// (offensive dip) use is owned by the posture machine (U4), not this function.
+///
+/// AoE target filtering is the caller's responsibility: `pre_cast_ok` guards a
+/// single target, so per-target immunity / Fear-DR filtering happens here.
+fn try_psychic_scream(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
+    pressured: bool,
+    shared: &SharedMovementConfig,
+    same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    let scream = AbilityType::PsychicScream;
+    let scream_def = abilities.get_unchecked(&scream);
+
+    let opts = PreCastOpts::default();
+    if !pre_cast_ok(scream, scream_def, combatant, my_pos, auras, None, ctx, opts) {
+        builder.reject(
+            scream,
+            classify_pre_cast_failure(scream, scream_def, combatant, my_pos, auras, None, ctx, opts),
+        );
+        return false;
+    }
+
+    // Defensive gate (R9/R10): only fire under genuine pressure, so the panic
+    // button is never burned on incidental proximity. `pressured` is the live
+    // `compound_pressure_trigger`, computed once in evaluate_priest_posture.
+    if !pressured {
+        builder.reject(
+            scream,
+            RejectionReason::PreconditionUnmet { note: "not pressured".into() },
+        );
+        return false;
+    }
+
+    // Defer to a critical ally heal: a dying heal target (at/below the urgency
+    // HP threshold, within heal range) must be healed before the peel. The
+    // scream is priority 3 — above Flash Heal — so without this gate it would
+    // burn a GCD and delay a life-saving heal, breaking the critical-heal-wins
+    // invariant (see `try_flash_heal`). The scream still fires next GCD.
+    if ctx
+        .lowest_health_ally_below(shared.urgency_hp_threshold, shared.heal_range, my_pos)
+        .is_some()
+    {
+        builder.reject(
+            scream,
+            RejectionReason::PreconditionUnmet { note: "critical heal pending".into() },
+        );
+        return false;
+    }
+
+    let targets = scream_targets(ctx, entity, my_pos, scream_def.range);
+    // Require a real (non-pet) threat in radius before spending the 30s CD: a
+    // lone enemy pet trips the pressure gate but isn't worth the panic button
+    // (mirrors Frost Nova's non-pet entry requirement). Pets caught alongside a
+    // real threat are still feared — this only blocks a pet-only cast.
+    let has_real_threat = targets
+        .iter()
+        .any(|(e, _, _)| ctx.combatants.get(e).map_or(false, |i| !i.is_pet));
+    if !has_real_threat {
+        builder.reject(scream, RejectionReason::NoValidTarget);
+        return false;
+    }
+
+    fire_psychic_scream(
+        commands, combat_log, scream_def, entity, combatant, same_frame_cc_queue, &targets, builder,
+    );
+    true
+}
+
+/// Fear-eligible enemies within `radius` of `my_pos`: visible + alive (helper),
+/// not immune, not Fear-DR-immune. Shared by the defensive predicate and the
+/// offensive dip cast. AoE filtering is the caller's job (R5).
+fn scream_targets(
+    ctx: &CombatContext,
+    entity: Entity,
+    my_pos: Vec3,
+    radius: f32,
+) -> Vec<(Entity, u8, CharacterClass)> {
+    ctx.visible_enemies_within(entity, my_pos, radius)
+        .into_iter()
+        .filter(|info| {
+            !ctx.entity_is_immune(info.entity) && !ctx.is_dr_immune(info.entity, DRCategory::Fears)
+        })
+        .map(|info| (info.entity, info.team, info.class))
+        .collect()
+}
+
+/// Apply Psychic Scream: record the choice, spend GCD/mana/cooldown, queue Fear
+/// on each target (same-frame CC visible), and log. Assumes `targets` is
+/// non-empty and readiness is already checked by the caller.
+#[allow(clippy::too_many_arguments)]
+fn fire_psychic_scream(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    scream_def: &AbilityConfig,
+    entity: Entity,
+    combatant: &mut Combatant,
+    same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
+    targets: &[(Entity, u8, CharacterClass)],
+    builder: &mut DecisionEventBuilder<'_>,
+) {
+    builder.choose(AbilityType::PsychicScream, None, true);
+
+    spawn_speech_bubble(commands, entity, "Psychic Scream");
+    // Self-centered AoE burst visual. The marker is spawned in both modes (like
+    // DispelBurst / speech bubbles); the mesh + animation are attached only by
+    // the graphical-only systems in states/mod.rs, so headless is unaffected.
+    commands.spawn((
+        ScreamBurst {
+            caster: entity,
+            lifetime: 0.6,
+            initial_lifetime: 0.6,
+        },
+        PlayMatchEntity,
+    ));
+    combatant.current_mana -= scream_def.mana_cost;
+    combatant
+        .ability_cooldowns
+        .insert(AbilityType::PsychicScream, scream_def.cooldown);
+    combatant.global_cooldown = GCD;
+
+    log_ability_use(combat_log, combatant.team, combatant.class, "Psychic Scream", None, "casts");
+
+    let fear_duration = scream_def.applies_aura.as_ref().map(|a| a.duration).unwrap_or(0.0);
+    for (target_entity, target_team, target_class) in targets {
+        if let Some(aura_pending) = AuraPending::from_ability(*target_entity, entity, scream_def) {
+            same_frame_cc_queue.push((*target_entity, aura_pending.aura.clone()));
+            commands.spawn(aura_pending);
+        }
+
+        let message = format!(
+            "Team {} {}'s Psychic Scream fears Team {} {} ({:.1}s)",
+            combatant.team,
+            combatant.class.name(),
+            target_team,
+            target_class.name(),
+            fear_duration
+        );
+        combat_log.log_crowd_control(
+            combatant_id(combatant.team, combatant.class),
+            combatant_id(*target_team, *target_class),
+            "Fear".to_string(),
+            fear_duration,
+            message,
+        );
+    }
+
+    info!(
+        "Team {} {} casts Psychic Scream! (AOE fear) - {} enemies feared",
+        combatant.team,
+        combatant.class.name(),
+        targets.len()
+    );
+}
+
+/// Offensive dip cast (U4): on dip arrival, fire Psychic Scream as a
+/// self-centered AoE. The dip target only drove the walk — the cast fears every
+/// fear-eligible enemy in radius (the enemy healer plus anyone else caught).
+/// Readiness is re-checked (mana/cooldown can shift across the walk); the
+/// pressured gate is intentionally absent (a dip runs only when NOT pressured).
+/// Returns true iff the scream fired (≥1 enemy in radius).
+fn try_dip_psychic_scream(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
+    same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    let scream = AbilityType::PsychicScream;
+    let scream_def = abilities.get_unchecked(&scream);
+
+    let opts = PreCastOpts::default();
+    if !pre_cast_ok(scream, scream_def, combatant, my_pos, auras, None, ctx, opts) {
+        builder.reject(
+            scream,
+            classify_pre_cast_failure(scream, scream_def, combatant, my_pos, auras, None, ctx, opts),
+        );
+        return false;
+    }
+
+    let targets = scream_targets(ctx, entity, my_pos, scream_def.range);
+    if targets.is_empty() {
+        builder.reject(scream, RejectionReason::NoValidTarget);
+        return false;
+    }
+
+    fire_psychic_scream(
+        commands, combat_log, scream_def, entity, combatant, same_frame_cc_queue, &targets, builder,
+    );
+    true
 }
 
 /// Try to cast Power Word: Fortitude on an unbuffed ally.
@@ -543,6 +842,223 @@ pub use super::healer_postures::{escape_distance_gained, escape_window};
 // `PriestMovementConfig` in movement_config.rs and the priest block in
 // assets/config/movement.ron (RON-first policy).
 
+/// Per-target Psychic Scream dip eligibility (mirrors `hoj_target_eligible`,
+/// keyed to Fear-DR): alive enemy non-pet, not stealthed, not immune, not
+/// Fear-DR-immune.
+fn scream_dip_target_eligible(ctx: &CombatContext, my_team: u8, target: Entity) -> bool {
+    let Some(info) = ctx.combatants.get(&target) else {
+        return false;
+    };
+    info.team != my_team
+        && info.current_health > 0.0
+        && !info.stealthed
+        && !info.is_pet
+        && !ctx.entity_is_immune(target)
+        && !ctx.is_dr_immune(target, DRCategory::Fears)
+}
+
+/// Enemies the Priest's team is actively attacking — the `target` of every
+/// living non-pet ally (excluding self), i.e. the team's kill target(s). The
+/// offensive dip must NOT fear one of these: the team's own damage on a feared
+/// enemy breaks the ~100-damage Fear instantly, so dipping to fear the target
+/// the team is killing is self-defeating (it scatters the kill and pulls the
+/// Priest out of position for nothing). Respecting this is the team
+/// coordination the dip needs — fear the enemy healer only when the team is
+/// committing elsewhere (e.g. kill_target is a DPS), so the fear actually buys
+/// a kill window. `BTreeSet` keeps iteration deterministic.
+fn team_focus(ctx: &CombatContext, entity: Entity) -> std::collections::BTreeSet<Entity> {
+    ctx.alive_allies()
+        .into_iter()
+        .filter(|a| a.entity != entity && !a.is_pet)
+        .filter_map(|a| a.target)
+        .collect()
+}
+
+/// Nearest fear-eligible enemy healer within `reach` that the team is NOT
+/// killing (mirrors `dip_target_candidate`, plus the kill-target guard). Drives
+/// only the dip walk goal; the self-centered AoE cast on arrival fears every
+/// enemy in radius, not just this target.
+fn scream_dip_target_candidate(
+    ctx: &CombatContext,
+    my_team: u8,
+    my_pos: Vec3,
+    reach: f32,
+    focused: &std::collections::BTreeSet<Entity>,
+) -> Option<Entity> {
+    ctx.alive_enemies()
+        .into_iter()
+        .filter(|e| e.class.is_healer())
+        .filter(|e| !focused.contains(&e.entity)) // respect the kill target
+        .filter(|e| scream_dip_target_eligible(ctx, my_team, e.entity))
+        .filter(|e| my_pos.distance(e.position) <= reach)
+        .min_by(|a, b| {
+            my_pos
+                .distance(a.position)
+                .partial_cmp(&my_pos.distance(b.position))
+                .unwrap()
+        })
+        .map(|e| e.entity)
+}
+
+/// DIP entry predicate (U4, mirrors `evaluate_dip_entry`): scream ready (the
+/// rotation `pre_cast_ok` gate), no teammate in trouble (deferral — any living
+/// non-pet teammate below `healing_heavy_hp` blocks the dip so the Priest heals
+/// instead), the anchor teammate not CC'd, and an eligible enemy healer within
+/// `scream radius + dip_budget × effective speed`. Returns the dip target.
+fn evaluate_scream_dip_entry(
+    entity: Entity,
+    combatant: &Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
+    movement: &MovementConfig,
+    abilities: &AbilityDefinitions,
+) -> Option<Entity> {
+    let def = abilities.get_unchecked(&AbilityType::PsychicScream);
+
+    if !pre_cast_ok(
+        AbilityType::PsychicScream, def, combatant, my_pos, auras, None, ctx,
+        PreCastOpts::default(),
+    ) {
+        return None;
+    }
+
+    // Deferral (R12): aggressive by default, but if any living non-pet team
+    // member (self included) is in trouble (below healing_heavy_hp), stay back
+    // and heal rather than dip — a low Priest must not walk into the enemy.
+    if ctx
+        .alive_allies()
+        .iter()
+        .any(|a| a.health_pct() < movement.priest.healing_heavy_hp)
+    {
+        return None;
+    }
+    // The anchor teammate (most-injured ally, excluding self) must not be CC'd
+    // mid-walk — it may need us back, and a CC'd anchor can't reposition.
+    if let Some(t) = ctx
+        .alive_allies()
+        .into_iter()
+        .filter(|a| a.entity != entity)
+        .min_by(|a, b| a.health_pct().partial_cmp(&b.health_pct()).unwrap())
+    {
+        if ctx.is_ccd(t.entity) {
+            return None;
+        }
+    }
+
+    let reach = def.range
+        + movement.priest.dip_budget
+            * combatant.base_movement_speed
+            * ctx.movement_slow_multiplier(entity);
+    // Respect the kill target: never dip to fear an enemy the team is already
+    // attacking (the team's damage would break the fear instantly).
+    let focused = team_focus(ctx, entity);
+    scream_dip_target_candidate(ctx, combatant.team, my_pos, reach, &focused)
+}
+
+/// Mid-dip abort (U4, mirrors `dip_should_abort`): budget exceeded, the dip
+/// target no longer fear-eligible (dead / immune / DR-immune / stealthed), or a
+/// teammate's HP at/below the urgency threshold (abort WITHOUT casting — the
+/// heal fires un-deferred the same tick because the abort clears `cast_defer`).
+fn scream_dip_should_abort(
+    state: &HealerPosture,
+    combatant: &Combatant,
+    ctx: &CombatContext,
+    shared: &SharedMovementConfig,
+    now: f32,
+) -> bool {
+    let Some(target) = state.dip_target else {
+        return true; // defensive — DIP always carries a target
+    };
+    if now >= state.dip_until {
+        return true; // budget exceeded
+    }
+    if !scream_dip_target_eligible(ctx, combatant.team, target) {
+        return true; // target dead / immune / DR-immune / stealthed
+    }
+    ctx.alive_allies()
+        .into_iter()
+        .filter(|a| a.entity != ctx.self_entity)
+        .any(|a| a.health_pct() <= shared.urgency_hp_threshold)
+}
+
+/// DIP tick (U4, mirrors `paladin_dip_tick`): keep the Entity-goal walk alive
+/// for the whole budget; on arrival (dip target within scream radius of me)
+/// hand the cast to the ability pass via [`ScreamDipPlan::DipCast`]. The
+/// directive expires at the budget deadline, so a CC'd Priest's stale dip walk
+/// dies with it (executor-side expiry).
+#[allow(clippy::too_many_arguments)]
+fn priest_dip_tick(
+    commands: &mut Commands,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    my_pos: Vec3,
+    ctx: &CombatContext,
+    state: &mut HealerPosture,
+    directive: Option<&MovementDirective>,
+    now: f32,
+    decision_trace: &mut DecisionTrace,
+    transitioned: bool,
+    prev: Posture,
+) -> ScreamDipPlan {
+    let Some(target) = state.dip_target else {
+        return ScreamDipPlan::Rotation; // defensive — DIP always carries a target
+    };
+
+    let issue = |commands: &mut Commands| {
+        commands.entity(entity).try_insert(MovementDirective {
+            goal: MovementGoal::Entity(target),
+            expires: state.dip_until,
+            committed_until: state.dip_until,
+        });
+    };
+
+    if transitioned {
+        issue(commands);
+        // DipEnter carries the goal entity (enemy healer) via the target view.
+        if let Some(mut builder) =
+            start_movement_event_with_target(decision_trace, ctx, target, my_pos)
+        {
+            builder.transition(
+                prev.into(),
+                TracePosture::Dip,
+                MovementTrigger::DipEnter,
+                MovementGoalKind::Entity,
+            );
+            builder.finish();
+        }
+    } else if directive.is_none() {
+        // Defensive re-issue (directive died across a short CC) — not a decision.
+        issue(commands);
+    }
+
+    // Arrival: dip target within scream radius → command the AoE cast. The
+    // ability pass re-checks readiness (try_dip_psychic_scream) and on success
+    // installs `completed_state` (DipComplete → FREE).
+    let def = abilities.get_unchecked(&AbilityType::PsychicScream);
+    let in_range = ctx
+        .combatants
+        .get(&target)
+        .map_or(false, |t| my_pos.distance(t.position) <= def.range);
+    if in_range {
+        let mut completed = *state;
+        completed.posture = Posture::Free;
+        completed.since = now;
+        completed.hold_until = 0.0;
+        completed.anchor = None;
+        completed.dip_target = None;
+        completed.dip_until = 0.0;
+        completed.last_direction = None;
+        completed.last_point = None;
+        ScreamDipPlan::DipCast {
+            target,
+            completed_state: completed,
+        }
+    } else {
+        ScreamDipPlan::Rotation
+    }
+}
+
 /// Evaluate the Priest's movement posture (FREE/PRESSURED/ESCAPE) and
 /// issue/refresh a [`MovementDirective`] accordingly. Runs at the top of the
 /// Priest's decide tick, BEFORE the GCD short-circuit (the GCD locks casts,
@@ -568,12 +1084,17 @@ pub fn evaluate_priest_posture(
     combatant: &Combatant,
     my_pos: Vec3,
     ctx: &CombatContext,
+    // `abilities` / `auras` are wired for the U4 offensive dip (the dip-entry
+    // predicate needs the Psychic Scream def for reach/eligibility and auras
+    // for pre_cast_ok). Inert in U3 — the posture machine returns Rotation.
+    abilities: &AbilityDefinitions,
+    auras: Option<&ActiveAuras>,
     posture: Option<&mut HealerPosture>,
     directive: Option<&MovementDirective>,
     movement: &MovementConfig,
     now: f32,
     decision_trace: &mut DecisionTrace,
-) -> Option<f32> {
+) -> PriestMovementPlan {
     // First evaluation inserts the persistent component via Commands
     // (visible to this tick's executor through the existing apply_deferred,
     // and to next tick's query).
@@ -611,6 +1132,18 @@ pub fn evaluate_priest_posture(
         None
     };
 
+    // --- DIP abort check (only while mid-dip and not being preempted) ---
+    let dip_aborts = prev == Posture::Dip
+        && !trigger
+        && scream_dip_should_abort(state, combatant, ctx, shared, now);
+
+    // --- DIP entry (FREE only, no pressure): the offensive scream dip ---
+    let dip_entry = if prev == Posture::Free && !trigger {
+        evaluate_scream_dip_entry(entity, combatant, my_pos, auras, ctx, movement, abilities)
+    } else {
+        None
+    };
+
     let next = match prev {
         // ESCAPE is committed for the whole window (no re-evaluation churn
         // mid-escape); the window end is an absolute sim-time deadline.
@@ -624,8 +1157,15 @@ pub fn evaluate_priest_posture(
         Posture::Pressured if !trigger && now >= state.hold_until => Posture::Free,
         Posture::Pressured if escape_window_secs.is_some() => Posture::Escape,
         Posture::Pressured => Posture::Pressured,
-        // DIP is Paladin-only (U8); Priest FREE transitions on the trigger.
+        // DIP (U4): becoming focused preempts UNCONDITIONALLY (→ PRESSURED,
+        // never DipAbort — the defensive self-peel takes over). Otherwise the
+        // abort conditions apply; else hold the dip.
+        Posture::Dip if trigger => Posture::Pressured,
+        Posture::Dip if dip_aborts => Posture::Free,
+        Posture::Dip => Posture::Dip,
+        // FREE: pressure first, then the offensive dip opportunity.
         _ if trigger => Posture::Pressured,
+        _ if dip_entry.is_some() => Posture::Dip,
         _ => Posture::Free,
     };
 
@@ -636,7 +1176,11 @@ pub fn evaluate_priest_posture(
         state.last_direction = None;
         state.last_point = None;
         match next {
-            Posture::Pressured => state.hold_until = now + shared.pressured_hold,
+            Posture::Pressured => {
+                state.hold_until = now + shared.pressured_hold;
+                state.dip_target = None;
+                state.dip_until = 0.0;
+            }
             Posture::Escape => {
                 // Hold ESCAPE (and the committed directive, and the heal
                 // deferral) until the first impaired attacker breaks free.
@@ -644,13 +1188,38 @@ pub fn evaluate_priest_posture(
                 // PRESSURED must not restart from scratch.
                 state.escape_until = now + escape_window_secs.unwrap_or(0.0);
             }
+            Posture::Dip => {
+                state.dip_target = dip_entry;
+                state.dip_until = now + movement.priest.dip_budget;
+                state.hold_until = 0.0;
+                state.anchor = None;
+            }
             _ => {
                 state.hold_until = 0.0;
                 state.anchor = None;
+                state.dip_target = None;
+                state.dip_until = 0.0;
+            }
+        }
+
+        // Dip → Free is always an abort (DipComplete exits go through the
+        // dip-cast path in decide_priest_action). Stop the walk and trace it;
+        // free_tick re-commits the formation directive below.
+        if prev == Posture::Dip && next == Posture::Free {
+            commands.entity(entity).remove::<MovementDirective>();
+            if let Some(mut b) = start_movement_event(decision_trace, ctx) {
+                b.transition(
+                    TracePosture::Dip,
+                    TracePosture::Free,
+                    MovementTrigger::DipAbort,
+                    MovementGoalKind::Entity,
+                );
+                b.finish();
             }
         }
     }
 
+    let mut scream_dip = ScreamDipPlan::Rotation;
     match next {
         Posture::Escape => escape_tick(
             commands, entity, my_pos, ctx, state, directive, shared,
@@ -660,6 +1229,12 @@ pub fn evaluate_priest_posture(
             commands, entity, combatant, my_pos, ctx, state, directive, movement, now,
             decision_trace, transitioned, prev,
         ),
+        Posture::Dip => {
+            scream_dip = priest_dip_tick(
+                commands, abilities, entity, my_pos, ctx, state, directive, now,
+                decision_trace, transitioned, prev,
+            );
+        }
         _ => free_tick(
             commands, entity, combatant, my_pos, ctx, state, directive, movement, now,
             decision_trace, transitioned, prev,
@@ -670,11 +1245,18 @@ pub fn evaluate_priest_posture(
         commands.entity(entity).try_insert(*state);
     }
 
-    // Cast-vs-move urgency: live ESCAPE window → defer non-critical casts.
-    if state.posture == Posture::Escape {
+    // Cast-vs-move urgency: a live ESCAPE window OR a DIP defers non-critical
+    // movement-locking casts (an undeferred heal mid-dip would stall the walk).
+    let escape_defer = if matches!(state.posture, Posture::Escape | Posture::Dip) {
         Some(shared.urgency_hp_threshold)
     } else {
         None
+    };
+
+    PriestMovementPlan {
+        escape_defer,
+        scream_dip,
+        pressured: trigger,
     }
 }
 

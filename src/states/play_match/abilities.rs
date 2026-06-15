@@ -78,6 +78,7 @@ pub enum AbilityType {
     Polymorph, // Mage CC - transforms target into sheep, breaks on any damage
     // Dispel abilities
     DispelMagic, // Priest - removes one magic debuff from ally
+    PsychicScream, // Priest - instant self-centered AoE fear, breaks on damage
     // Paladin abilities
     FlashOfLight,     // Paladin fast heal
     HolyLight,        // Paladin big heal (2.5s cast)
