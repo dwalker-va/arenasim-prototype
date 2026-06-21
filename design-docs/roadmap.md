@@ -124,25 +124,12 @@ cancelled every melee-pet auto-attack swing. All Hunter baselines in
 
 ### A. Hunter 2v2 holes (diagnosed, NOT pet-related)
 
-- [ ] **Warrior 2v2 ~19%** — re-diagnosed 2026-06-20 against the Psychic Scream
-      build (PR #73). The original framing ("Priest heals *itself* instead of
-      peeling the focused Hunter", target-selection bug) does **not** hold: the
-      Warrior trains the *enemy Priest*, not the Hunter — across 16 seeds the
-      first Mortal Strike always lands on the team1 Priest, which dies first
-      (~47s), then the Hunter loses 1v2. Self-healing is therefore *correct*
-      targeting. The real loss mechanism (matches the [[hunter-2v2-warrior-loss]]
-      memory note): (1) the focused Priest can't out-sustain Mortal Wounds
-      healing reduction (Flash Heals decay 66→43) under repeated interrupt
-      lockouts (Holy locked 4s ×3); (2) the Hunter generates near-zero kill
-      pressure (~609 dmg/match, never lands Aimed Shot — all GCDs spent on peels
-      Freezing Trap/Concussive/Frost Trap/Disengage that get DR'd and out-paced).
-      Psychic Scream is a real but *capped* lever: the defensive scream fires
-      reliably (~17s, once PRESSURED) but the enemy double-healer comp dispels the
-      Fear within ~1.7s every time (16/16 casts dispelled), and the 30s CD makes
-      it once-per-fight — it lifts the comp 0%→~19%, not a fix. **Leverage is on
-      Hunter offensive uptime (the kill-race lever, see bucket B "plant when
-      safe" + Hunter burst-during-CC), not healer target-selection.** Repro:
-      `{"team1":["Hunter","Priest"],"team2":["Warrior","Priest"],"random_seed":N}`.
+- [ ] **Warrior 2v2 ~19%** — NOT a healer target-selection bug (the old framing
+      was wrong: the Warrior trains the enemy Priest, so self-healing is correct).
+      The hole is zero Hunter kill pressure — it never lands Aimed Shot. Fix lever
+      is Hunter offensive uptime (bucket B "plant when safe" + burst-during-CC),
+      not the healer. Full re-diagnosis:
+      `design-docs/balance/2026-06-20-warrior-2v2-rediagnosis.md`.
 - [ ] **Mage 2v2 0%** — control matchup (Polymorph / Frost Nova / kiting).
       LoS / pillar play is the structural counter (see healer bucket C — shared
       scorer term).
