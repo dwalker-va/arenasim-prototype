@@ -1,34 +1,41 @@
 # Canonical Balance Baselines
 
-**Generated 2026-06-22** on the Hunter mana-economy + trap/Concussive-AI meta —
-i.e. the 2026-06-15 Psychic Scream state *plus* the Hunter rebalance (PR #74): a
-gear-mana itemization fix (the Hunter got zero mana from gear), Freezing Trap
-cost cut, and smarter Concussive/trap targeting. Supersedes the 2026-06-15
-Psychic Scream baselines.
+**Generated 2026-06-22** on the Rogue Kidney Shot chain meta — i.e. the Hunter
+mana-economy + trap/Concussive state (PR #74) *plus* the Rogue rework: Kidney
+Shot moved onto its own diminishing-returns category, a Cheap Shot → Kidney Shot
+opener that chains a ~10s undiminished stun on the kill target, and a
+Kick→hold→Kidney denial chain against caster targets. Supersedes the earlier
+2026-06-22 Hunter-rebalance baselines.
 
-**The dominant change this cycle is the Hunter rebalance.** Its binding
-constraint was a hidden itemization gap — every Hunter (mail) item had zero
-`max_mana`, giving it the *smallest* effective mana pool of any mana class
-despite the largest base. +60 gear mana (→ pool 240→300) plus a Freezing Trap
-cost cut and smarter Concussive/trap AI lift the Hunter from the C-tier floor to
-mid-B in 2v2 and toward the middle in 3v3, **without overshooting 50%.** The
-change is Hunter-isolated; non-Hunter-vs-non-Hunter cells are byte-identical to
-the 2026-06-15 binary (verified) and carry that cycle's reading (Priest Psychic
-Scream, the Mage kiting pilot, etc. — see "prior cycle" notes below).
+**The dominant change this cycle is the Rogue Kidney Shot chain.** It is a large
+**1v1** control buff and a heavy **team-format redistribution that nets small.**
+Sticking a stun chain wins 1v1s (Rogue **56.6 → 64.9**, now the #2 1v1 class),
+but in teams the Rogue's binding constraint is damage/sustain against kiting and
+peels, which better *control* does not fix: 2v2 **39.2 → 40.3 (+1.1)**, 3v3
+**40.5 → 41.5 (+1.0)** — the Rogue stays the **bottom class in both team
+formats.** The redistribution underneath is enormous (37% of 2v2 and 52% of 3v3
+matches flip outcome) but bidirectional, so the aggregate barely moves. The
+change is Rogue-isolated code + Rogue-only behavior: each other class's aggregate
+shifts ≤1.5pt, and only through its own matchup column vs the Rogue (e.g. 1v1
+Mage 65.6 → 57.4 is the Mage-vs-Rogue cell; 3v3 Mage 61.7 → 63.2 is the *ally*
+Mage+Rogue comps improving). Non-Rogue-vs-non-Rogue cells are unchanged.
 
 Authoritative current-state references. Use as the "before" when assessing any
 balance change — **compare batch-vs-batch only** (these differ a few points from
-the older multithreaded `--matrix` numbers).
+the older multithreaded `--matrix` numbers), and **full-canonical vs
+full-canonical** (a focused `--t1` slice compared against a label subset of the
+canonical is biased — it cost this cycle a wrong first read).
 
 | Format | File | Coverage | N | Matches | Draws |
 |---|---|---|---|---|---|
 | 1v1 | `canonical_1v1_n100_300s.csv` | full 7×7 | 100 | 4,900 | 5.1% |
-| 2v2 | `canonical_2v2_full_n100_300s.csv` | every distinct-class pair × pair (441) | 100 | 44,100 | 0.8% |
+| 2v2 | `canonical_2v2_full_n100_300s.csv` | every distinct-class pair × pair (441) | 100 | 44,100 | 0.9% |
 | 3v3 | `canonical_3v3_full_n50_300s.csv` | every distinct-class triple × triple (1225) | 50 | 61,250 | 0.4% |
 
-Distinct-class comps, both orderings, 300s cap, default loadouts/strategy.
-Regenerate via `scripts/gen_sweep.py --full {2,3}` + `arenasim --batch` (see the
-`balance-sweep` skill).
+Distinct-class comps, both orderings, 300s cap, default loadouts/strategy
+(Rogue opener defaults to Cheap Shot). Regenerate via `scripts/gen_sweep.py
+--full {2,3}` (and `--t1 '{p}' --t2-size 1` for 1v1) + `arenasim --batch` (see
+the `balance-sweep` skill).
 
 ---
 
@@ -36,138 +43,135 @@ Regenerate via `scripts/gen_sweep.py --full {2,3}` + `arenasim --batch` (see the
 
 | Tier | 1v1 | 2v2 | 3v3 |
 |---|---|---|---|
-| **S — meta-defining** | Paladin 69.2, Mage 65.6 | **Mage 64.6** | **Mage 61.7** |
-| **A — strong** | Hunter 58.1, Rogue 56.6 | Paladin 56.9 | Paladin 56.2 |
-| **B — playable** | — | **Hunter 50.9**, Priest 47.8, Warlock 45.0, Warrior 42.7 | Priest 52.6, **Hunter 46.5**, Warrior 46.2, Warlock 45.0 |
-| **C — weak** | Warlock 38.9, Warrior 32.6 | Rogue 39.2 | Rogue 40.5 |
-| **D — bottom** | Priest 11.3 | — | — |
+| **S — meta-defining** | Paladin 68.6, **Rogue 64.9** | **Mage 63.2** | **Mage 63.2** |
+| **A — strong** | Hunter 60.4, Mage 57.4 | Paladin 57.6 | Paladin 55.9 |
+| **B — playable** | — | Hunter 51.6, Priest 46.5, Warrior 44.0, Warlock 43.8 | Priest 51.9, Hunter 46.9, Warrior 45.0, Warlock 44.2 |
+| **C — weak** | Warlock 38.9, Warrior 32.3 | **Rogue 40.3** | **Rogue 41.5** |
+| **D — bottom** | Priest 9.9 | — | — |
 
-**The team-format meta is still Mage + Paladin** at the top — the Hunter change
-is Hunter-isolated, so the carries are unchanged in ordering (Mage dips ~2pt in
-2v2 because its Hunter matchups got harder, but stays clear #1). **The action is
-the Hunter:** in 2v2 it jumps from the C-tier floor to mid-B (**42.8 → 50.9**),
-now ahead of Priest/Warlock/Warrior/Rogue and trailing only Mage/Paladin; in 3v3
-it climbs out of the bottom into B (**43.0 → 46.5**). It is no longer a
-team-format floor. (1v1 dips slightly, 59.4 → 58.1, holding A-tier — the mana
-buff de-skews an over-tuned Hunter-v-Warlock matchup; see below.) Other classes'
-aggregates move only via their matchup column vs the now-stronger Hunter (a
-≤1-3pt shift in that one column); their non-Hunter-vs-non-Hunter cells are
-byte-identical to 2026-06-15.
+**The team-format meta is still Mage + Paladin.** The Rogue change is
+Rogue-isolated, so the carries are unchanged in ordering. **The action is the
+Rogue, and it is mostly a 1v1 story:** it leaps to the #2 1v1 class (64.9, behind
+only Paladin) because a Cheap Shot → Kidney Shot lockdown plus a Kick/Kidney
+denial chain lets it stick and kill before a lone target escapes. In teams the
+same control redistributes matchups massively but nets only +1.1 (2v2) / +1.0
+(3v3): the Rogue is still the worst class in both, because control quality
+doesn't solve its team problem (it gets peeled and kited off, and lacks a burst
+finisher). Other classes' aggregates move only via their Rogue matchup column
+(≤1.5pt); their non-Rogue-vs-non-Rogue cells are unchanged.
 
 ## 2v2 comp tier list (441 comps)
 
 **Meta-defining (top):**
 | Winrate | Comp |
 |---|---|
-| **75.7%** | Mage+Priest |
-| 75.3% | Mage+Paladin |
-| 71.7% | Mage+Warlock |
-| 69.3% | Warrior+Paladin |
-| **63.4%** | **Hunter+Paladin** |
-| 63.3% | Warlock+Paladin |
+| **76.4%** | Mage+Paladin |
+| 74.9% | Mage+Priest |
+| 70.6% | Paladin+Warrior |
+| 66.3% | Mage+Warlock |
+| 64.0% | Paladin+Warlock |
+| 63.4% | Hunter+Paladin |
 
 **Unplayable (bottom):**
 | Winrate | Comp |
 |---|---|
-| 36.4% | Priest+Rogue |
-| 29.1% | Rogue+Warrior |
-| 19.1% | Rogue+Warlock |
-| 18.1% | Warlock+Warrior |
-| **14.1%** | **Paladin+Priest** |
+| 40.8% | Hunter+Warrior |
+| 38.7% | Priest+Rogue |
+| 32.7% | Rogue+Warrior |
+| 20.6% | Rogue+Warlock |
+| 19.4% | Warlock+Warrior |
+| **13.0%** | **Paladin+Priest** |
 
-Hunter's best 2v2 partners are now the carries: **Hunter+Paladin 63.4%
-(top-5 overall), Hunter+Mage 61.5%** — and even its weak pairings climbed out of
-the cellar (Hunter+Warlock 28.7 → 40.9, Hunter+Warrior 33.0 → 41.0, Hunter+Rogue
-33.9 → 42.5). **No Hunter comp is in the bottom-5 anymore** (its floor,
-Hunter+Warlock 40.9%, is now mid-pack). Hunter+Priest 47.7 → 55.9.
+Rogue's worst pairings ticked up but stayed in the cellar (Priest+Rogue
+36.4 → 38.7, Rogue+Warrior 29.1 → 32.7, Rogue+Warlock 19.1 → 20.6). **No Rogue
+comp reaches the top tier in 2v2** — its best partners are still the carries
+(Rogue+Mage, Rogue+Paladin) and even those sit mid-pack. The bottom of the format
+is still double-melee-no-sustain and double-healer (Paladin+Priest 13.0%).
 
 ## 3v3 comp tier list (1225 comps)
 
 **Meta-defining (top):**
 | Winrate | Comp |
 |---|---|
-| **84.1%** | Warrior+Mage+Paladin |
-| 84.0% | Mage+Warlock+Paladin |
-| 83.2% | Mage+Priest+Warlock |
-| **78.2%** | **Hunter+Mage+Paladin** |
-| 75.7% | Warrior+Mage+Priest |
-| **75.0%** | **Hunter+Mage+Priest** |
+| **83.7%** | Mage+Paladin+Warlock |
+| 80.3% | Mage+Priest+Warlock |
+| 79.4% | Mage+Paladin+Warrior |
+| **79.1%** | **Hunter+Mage+Paladin** |
+| **75.1%** | **Mage+Paladin+Rogue** |
+| 74.9% | Hunter+Mage+Priest |
 
 **Unplayable (bottom):**
 | Winrate | Comp |
 |---|---|
-| 29.4% | Mage+Rogue+Warlock |
-| 26.0% | Paladin+Priest+Warlock |
-| 22.0% | Rogue+Warlock+Hunter |
-| 21.6% | Warrior+Warlock+Hunter |
-| **6.0%** | **Warrior+Rogue+Warlock** |
+| 31.6% | Priest+Warlock+Warrior |
+| 28.3% | Paladin+Priest+Warlock |
+| 22.8% | Hunter+Rogue+Warlock |
+| 22.7% | Hunter+Warlock+Warrior |
+| 15.9% | Hunter+Rogue+Warrior |
+| **8.5%** | **Rogue+Warlock+Warrior** |
 
-Hunter+carry+carry now reaches the top third (**Hunter+Mage+Paladin 78.2%,
-Hunter+Mage+Priest 75.0%** — both up ~+4 to +11), and Hunter+Priest+Warlock
-52.3 → 60.7. No-healer melee piles remain the floor — Warrior+Rogue+Warlock 6.0%
-is still the worst comp in the game — and Hunter still appears in the bottom when
-paired with two other low-sustain classes (Hunter+Rogue+Warrior 15.9%): those
-are comp-composition problems, not a Hunter stat deficit.
+The headline for the Rogue in 3v3: **Rogue-with-two-carries now reaches the top**
+(Mage+Paladin+Rogue 75.1%, Mage+Priest+Rogue 72.4%) — the chain's lockdown is
+genuinely strong when a carry converts the window. But no-carry Rogue piles are
+still the floor — Rogue+Warlock+Warrior 8.5% remains the single worst comp in the
+game — so the Rogue's aggregate stays last. Those are comp-composition problems,
+not a Rogue stat surplus.
 
 ## What's meta-defining vs unplayable — the read
 
-- **Mage is still clear #1 in teams** (64.6 / 61.7) and anchors the top 3v3
-  comps. Its kiting (on the shared ENGAGE/KITE machine, PR #69) is still the only
-  movement intelligence among DPS and nothing counters it structurally —
-  **LoS/pillar play remains the deferred answer.** It dips ~2pt in 2v2 this cycle
-  only because Hunter comps now contest it better.
-- **Paladin holds #2**; Warrior+Paladin is still a top-4 2v2 (69.3%).
-- **The Hunter is no longer a team-format floor** (mana economy + trap/Concussive
-  AI, PR #74). It sits mid-B in 2v2 (50.9, above four classes) and climbs into B
-  in 3v3 (46.5). Root cause was the gear-mana gap; the fix is Hunter-isolated and
-  doesn't overshoot. Hunter+Paladin (63.4) is now a top-5 2v2 comp. Remaining
-  holes are matchup-structural, not stat deficits: it still can't kill through
-  Paladin/Mage sustain+control 1v1 (Hunter-v-Mage / -Paladin 0%), and Hunter+Mage
-  control comps lag.
-- **The Priest is mid-B** (Psychic Scream, PR #73 — prior cycle). Mage+Priest is
-  still the top 2v2 carry pair (75.7%).
-- **Double-healer is still a trap.** Paladin+Priest is still the worst 2v2 comp
-  (14.1%) — two healers with no kill pressure lose the attrition war at the cap.
-- **No-healer melee piles are the floor** (Warrior+Rogue+Warlock 6.0% in 3v3) —
-  no sustain, no carry engine.
+- **Mage is still clear #1 in teams** (63.2 / 63.2) and anchors the top comps;
+  nothing counters its kiting structurally. **LoS/pillar play remains the
+  deferred answer.**
+- **Paladin holds #2**; Mage+Paladin is the top 2v2 (76.4%).
+- **The Rogue is now an S-tier 1v1 bully** (64.9, the Kidney Shot chain) but
+  **still the bottom team-format class** (40.3 / 41.5). The chain change is a
+  control-quality buff, not a power buff: it does not address why the Rogue
+  craters in teams (peeled/kited off the kill target, no burst finisher). Its
+  best team comps (Rogue + two carries, e.g. Mage+Paladin+Rogue 75.1% in 3v3) are
+  now strong, but its floor comps remain the worst in the game.
+- **Double-healer is still a trap** (Paladin+Priest 13.0% — worst 2v2).
+- **No-sustain melee piles are the floor** (Rogue+Warlock+Warrior 8.5% in 3v3).
 
-## Changes this cycle (vs the 2026-06-15 baseline)
+## Changes this cycle (vs the prior 2026-06-22 Hunter-rebalance baseline)
 
-- **Hunter is the headline: mana economy + trap/Concussive AI (PR #74).**
-  Root cause: the Hunter got **zero mana from gear** (mail itemization),
-  effective pool 240 (smallest of any mana class) vs casters 255–316 — the
-  May-2026 mana fix set base=240 but compared base pools and missed the gear gap.
-  Fix: **+60 max_mana** across the 9 Hunter-only items (effective pool → 300),
-  **Freezing Trap 43→26**, and smarter AI (Concussive peels the nearest melee and
-  skips stationary/casting targets; Freezing Trap aims at the off-target, leads
-  movers, and dips to set it; burst-during-CC prefers Aimed Shot while the enemy
-  healer is CC'd).
-- **Effect: Hunter 2v2 42.8 → 50.9 (+8.1), 3v3 43.0 → 46.5 (+3.5)**, broad across
-  comps (every Hunter 2v2 comp +4 to +12, biggest gains on the old floor:
-  Hunter+Warlock +12.2, Hunter+Rogue +8.6, Hunter+Warrior +8.0). 1v1 ~flat
-  (59.4 → 58.1): the buff de-skews the over-tuned Hunter-v-Warlock matchup
-  (96 → 81), which the Concussive heuristic partly recovers; Hunter stays A-tier.
-- **Knock-on, not nerfs.** Each non-Hunter class's aggregate shifts ≤1-3pt only
-  through its single matchup column vs the now-stronger Hunter (Mage 2v2 67.0 →
-  64.6 is Mage-vs-Hunter shifting). Non-Hunter-vs-non-Hunter cells are
-  byte-identical to 2026-06-15 (the change is Hunter-only code + Hunter-only gear).
-- **Draw rates ~flat** (1v1 5.0 → 5.1%, 2v2 1.0 → 0.8%, 3v3 0.3 → 0.4%): no stall
-  pathology.
+- **Rogue Kidney Shot chain (this PR).** Kidney Shot moved to its own
+  `KidneyShotStun` DR category (a Cheap Shot opener now chains into an
+  undiminished Kidney Shot — a ~10s lockdown on the kill target); default opener
+  changed Ambush → Cheap Shot; in-combat Kidney Shot AI rewritten as a planner:
+  opener-extend on the kill target, a Kick→hold→Kidney denial chain vs casters
+  (no double-spend; extend an active lockout; stun an un-locked second-school
+  cast immediately), aggressive opportunistic stuns vs Warrior/Rogue/Hunter, and
+  proactive stuns when no lockout is active (an early "wait indefinitely for
+  Kick" reservation wasted Kidney vs kiting healers and was removed).
+- **Effect: Rogue 1v1 56.6 → 64.9 (+8.3), 2v2 39.2 → 40.3 (+1.1), 3v3 40.5 →
+  41.5 (+1.0).** The team-format aggregate barely moves despite 37% (2v2) / 52%
+  (3v3) of matches flipping outcome — a large, bidirectional matchup
+  redistribution. The Rogue remains last in both team formats.
+- **Knock-on, not nerfs.** Each non-Rogue class's aggregate shifts ≤1.5pt and
+  only through its Rogue matchup column: 1v1 Mage 65.6 → 57.4 and Hunter
+  58.1 → 60.4 are the enemy-Rogue cells; 3v3 Mage 61.7 → 63.2 is the *ally*
+  Mage+Rogue comps improving. Non-Rogue-vs-non-Rogue cells are unchanged.
+- **Draw rates ~flat** (1v1 5.1%, 2v2 0.8 → 0.9%, 3v3 0.4%): no stall pathology;
+  the longer Rogue stun-lockdowns resolve within the cap.
 
-### Prior cycle (2026-06-15, carried forward on non-Hunter cells)
+### Methodology note (this cycle's correction)
 
-- **Priest** Psychic Scream (PR #73) lifted it off the team-format floor into
-  mid-B (+3.7pt 2v2 / +1.5pt 3v3; defensive AoE-fear peel is the driver, the
-  offensive dip respects the kill target). **Hunter** pet-damage fix (2026-06-13)
-  and **Mage** kiting pilot (PR #69) remain in the non-Hunter reading.
+An initial read used a focused `--t1 'Rogue+{p}'` sweep compared against the
+*subset* of canonical labels it happened to overlap (80 of 441), which reported a
+spurious +5–8pt 2v2 lift. The true effect (+1.1) only appeared on a
+**full-canonical vs full-canonical** comparison. Always regenerate the full
+matrix for an aggregate verdict; reserve `--t1` slices for per-matchup diagnosis.
 
 ## Caveats
 
 - **Spawn-side asymmetry** up to ~18% in some matchups; the full matrix runs both
   orderings so tier lists average it out, but don't read a single ordered cell as
-  definitive. Mechanism in `docs/reports/2026-06-mirror-asymmetry-diagnostic.md`;
-  fix deferred.
+  definitive. The Rogue's now-deterministic Cheap Shot opener *amplifies* this in
+  Rogue-vs-Rogue mirrors (a mirror can swing to one side at n=100). Mechanism in
+  `docs/reports/2026-06-mirror-asymmetry-diagnostic.md`; fix deferred.
 - **Batch harness order-sensitivity** (deferred): a few points off the historical
   multithreaded `--matrix` numbers. Compare batch-vs-batch only.
 - **Default loadouts & strategy.** Strategy-var sweeps (pets, openers, curses…)
-  are a separate axis — see the `balance-sweep` skill.
+  are a separate axis — see the `balance-sweep` skill. Note the Rogue opener
+  default is now Cheap Shot; Ambush remains selectable and is the stronger opener
+  in sustain matchups (it keeps the opening burst).

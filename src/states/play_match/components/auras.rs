@@ -150,9 +150,26 @@ pub struct Aura {
     /// Stored on the aura (rather than recomputed at dispel time) so caster death or stat
     /// changes after application do not change the backlash amount. None for all non-UA auras.
     pub backlash_damage: Option<f32>,
+    /// Per-aura diminishing-returns category override. When `Some`, this wins over the
+    /// category derived from `effect_type` (see [`Aura::dr_category`]). Used so two abilities
+    /// that apply the same `AuraType::Stun` can land in different DR buckets — Kidney Shot
+    /// carries `Some(DRCategory::KidneyShotStun)` so it does not share DR with Cheap Shot or
+    /// other stuns. `None` for every other aura (they fall back to `from_aura_type`).
+    pub dr_category_override: Option<DRCategory>,
 }
 
 impl Aura {
+    /// Resolved diminishing-returns category for this aura: the per-aura
+    /// `dr_category_override` if set, otherwise derived from `effect_type`.
+    /// Returns `None` for non-CC auras. This is the single source of truth for
+    /// an aura's DR bucket — all DR-application and CC-replacement logic must go
+    /// through here so per-ability overrides (e.g. Kidney Shot's dedicated
+    /// `KidneyShotStun` bucket) are honored consistently.
+    pub fn dr_category(&self) -> Option<DRCategory> {
+        self.dr_category_override
+            .or_else(|| DRCategory::from_aura_type(&self.effect_type))
+    }
+
     /// Returns true if this aura can be removed by Dispel Magic.
     /// Magic-dispellable aura types (slows, roots, fear, polymorph) are always dispellable.
     /// DoTs are dispellable only if they have a magic spell school (Corruption, Immolate)
@@ -234,6 +251,7 @@ impl AuraPending {
                 spell_school,
                 applied_this_frame: false,
                 backlash_damage: None,
+                dr_category_override: aura_effect.dr_category,
             },
         })
     }
@@ -272,6 +290,7 @@ impl AuraPending {
                 spell_school,
                 applied_this_frame: false,
                 backlash_damage: None,
+                dr_category_override: aura_effect.dr_category,
             },
         })
     }
@@ -310,6 +329,7 @@ impl AuraPending {
                 spell_school,
                 applied_this_frame: false,
                 backlash_damage: None,
+                dr_category_override: aura_effect.dr_category,
             },
         })
     }
@@ -332,10 +352,15 @@ pub enum DRCategory {
     Roots = 3,
     Slows = 4,
     Silence = 5,
+    /// Kidney Shot's dedicated stun DR bucket. Unique in this game — nothing
+    /// else shares it — so a Cheap Shot opener into an immediate Kidney Shot
+    /// lands two undiminished stuns back-to-back. Set only via an aura's
+    /// `dr_category_override`, never returned by `from_aura_type`.
+    KidneyShotStun = 6,
 }
 
 impl DRCategory {
-    pub const COUNT: usize = 6;
+    pub const COUNT: usize = 7;
 
     #[inline]
     pub fn index(self) -> usize {

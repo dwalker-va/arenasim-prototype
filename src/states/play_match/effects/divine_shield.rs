@@ -56,6 +56,7 @@ pub fn process_divine_shield(
                 spell_school: None,
                 applied_this_frame: false,
                 backlash_damage: None,
+                dr_category_override: None,
             };
 
             let debuffs_removed = if let Some(mut active_auras) = active_auras_opt {

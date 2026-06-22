@@ -182,6 +182,7 @@ pub fn check_orb_pickups(
                         spell_school: None, // Shadow Sight is not dispellable
                         applied_this_frame: false,
                         backlash_damage: None,
+                        dr_category_override: None,
                     },
                 });
 

@@ -67,6 +67,12 @@ pub struct CombatantInfo {
     pub stealthed: bool,
     pub target: Option<Entity>,
     pub is_pet: bool,
+    /// The ability this combatant is currently casting or channeling, if any.
+    /// `Some` iff the entity has a live `CastingState`/`ChannelingState` this
+    /// frame. Consumers map it to a `SpellSchool` (via `AbilityDefinitions`) to
+    /// reason about interruptibility — e.g. the Rogue's Kidney Shot chain firing
+    /// on a cast whose school is NOT covered by an active lockout.
+    pub casting_ability: Option<AbilityType>,
     pub pet_type: Option<PetType>,
     /// Owner→pet reverse lookup. For pet-owning combatants (Hunter, Warlock)
     /// this is `Some(pet_entity)`. For pets themselves and non-owners, `None`.

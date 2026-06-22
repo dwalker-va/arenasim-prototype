@@ -476,6 +476,7 @@ pub fn combat_auto_attack(
                 spell_school: Some(SpellSchool::Frost),
                 applied_this_frame: false,
                 backlash_damage: None,
+                dr_category_override: None,
             },
         });
         // Apply AttackSpeedSlow (25% slower attacks) for 5 seconds
@@ -496,6 +497,7 @@ pub fn combat_auto_attack(
                 spell_school: Some(SpellSchool::Frost),
                 applied_this_frame: false,
                 backlash_damage: None,
+                dr_category_override: None,
             },
         });
     }

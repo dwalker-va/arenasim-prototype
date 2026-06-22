@@ -13,9 +13,11 @@ use crate::states::play_match::equipment::{ItemId, ItemSlot};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum RogueOpener {
     /// High damage opener from stealth
-    #[default]
     Ambush,
-    /// 4 second stun opener from stealth
+    /// 4 second stun opener from stealth. Default: it chains into Kidney Shot
+    /// on the kill target for a ~10s stun lockdown (Kidney Shot has its own DR
+    /// category, so the two stuns do not diminish each other).
+    #[default]
     CheapShot,
 }
 

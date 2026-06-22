@@ -35,6 +35,7 @@ fn target_info(entity: Entity, team: u8, class: CharacterClass) -> CombatantInfo
         stealthed: false,
         target: None,
         is_pet: false,
+        casting_ability: None,
         pet_type: None,
         pet: None,
     }
@@ -57,6 +58,7 @@ fn make_aura(effect_type: AuraType, ability_name: &str, caster: Option<Entity>) 
         spell_school: None,
         applied_this_frame: false,
         backlash_damage: None,
+        dr_category_override: None,
     }
 }
 

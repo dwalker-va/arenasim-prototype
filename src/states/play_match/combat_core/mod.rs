@@ -173,6 +173,7 @@ mod tests {
             spell_school: None,
             applied_this_frame: false,
             backlash_damage: None,
+            dr_category_override: None,
         }
     }
 
@@ -430,6 +431,7 @@ mod tests {
                 spell_school: None,
                 applied_this_frame: false,
                 backlash_damage: None,
+                dr_category_override: None,
             }],
         };
 
@@ -480,6 +482,7 @@ mod tests {
                 spell_school: Some(SpellSchool::Shadow),
                 applied_this_frame: false,
                 backlash_damage: None,
+                dr_category_override: None,
             }],
         };
 
@@ -561,6 +564,7 @@ mod tests {
                 spell_school: None,
                 applied_this_frame: false,
                 backlash_damage: None,
+                dr_category_override: None,
             }],
         };
         assert!(!has_absorb_shield(Some(&auras)));
@@ -593,6 +597,7 @@ mod tests {
                 spell_school: None,
                 applied_this_frame: false,
                 backlash_damage: None,
+                dr_category_override: None,
             }],
         };
         assert!(has_weakened_soul(Some(&auras)));
@@ -720,6 +725,7 @@ mod tests {
             spell_school: None,
             applied_this_frame: false,
             backlash_damage: None,
+            dr_category_override: None,
         }
     }
 

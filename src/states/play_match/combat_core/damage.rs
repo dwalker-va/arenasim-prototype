@@ -310,18 +310,10 @@ fn apply_interrupt_lockout(
         (0, "Unknown".to_string()) // Fallback
     };
 
-    // Apply spell school lockout aura
-    // Store the locked school as the magnitude (cast to f32)
-    let locked_school_value = match interrupted_school {
-        SpellSchool::Physical => 0.0,
-        SpellSchool::Frost => 1.0,
-        SpellSchool::Holy => 2.0,
-        SpellSchool::Shadow => 3.0,
-        SpellSchool::Arcane => 4.0,
-        SpellSchool::Fire => 5.0,
-        SpellSchool::Nature => 6.0,
-        SpellSchool::None => 7.0,
-    };
+    // Apply spell school lockout aura. The locked school is stored in the aura's
+    // `magnitude` (the lockout aura has no dedicated school slot); the AI decodes
+    // it via `SpellSchool::from_lockout_magnitude`.
+    let locked_school_value = interrupted_school.to_lockout_magnitude();
 
     // Apply lockout duration reduction (e.g., Concentration Aura reduces by 50%)
     let effective_lockout = interrupt.lockout_duration * (1.0 - lockout_reduction);
@@ -343,6 +335,7 @@ fn apply_interrupt_lockout(
             spell_school: None, // Lockouts are not dispellable
             applied_this_frame: false,
             backlash_damage: None,
+            dr_category_override: None,
         },
     });
 

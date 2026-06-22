@@ -915,6 +915,7 @@ fn cast_hammer_of_justice(
             spell_school: Some(def.spell_school),
             applied_this_frame: false,
             backlash_damage: None,
+            dr_category_override: None,
         };
         same_frame_cc_queue.push((target_entity, hoj_aura.clone()));
         commands.spawn(AuraPending {

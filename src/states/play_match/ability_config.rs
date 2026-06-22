@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use super::abilities::{AbilityType, ScalingStat, SpellSchool};
-use super::components::AuraType;
+use super::components::{AuraType, DRCategory};
 
 /// Default value for break_on_damage: -1.0 means the aura doesn't break on damage.
 fn default_break_on_damage() -> f32 {
@@ -53,6 +53,13 @@ pub struct AuraEffect {
     /// Tick interval for DoT effects in seconds (0.0 = no ticks)
     #[serde(default)]
     pub tick_interval: f32,
+    /// Optional diminishing-returns category override for the applied aura. When
+    /// omitted (the default), the DR bucket is derived from `aura_type`. Set this
+    /// only when an ability needs its own bucket distinct from others sharing the
+    /// same aura type — currently just Kidney Shot (`Some(KidneyShotStun)`), which
+    /// must not share stun DR with Cheap Shot.
+    #[serde(default)]
+    pub dr_category: Option<DRCategory>,
 }
 
 /// Projectile visual configuration.

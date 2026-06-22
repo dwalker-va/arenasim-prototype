@@ -490,8 +490,8 @@ pub fn decide_abilities(
     time: Res<Time>,
     movement_config: Res<crate::states::play_match::movement_config::MovementConfig>,
     mut combatants: Query<(Entity, &mut Combatant, &Transform, Option<&mut ActiveAuras>), (Without<CastingState>, Without<ChannelingState>)>,
-    casting_auras: Query<(Entity, &Combatant, &Transform, Option<&ActiveAuras>), With<CastingState>>,
-    channeling_auras: Query<(Entity, &Combatant, &Transform, Option<&ActiveAuras>), (With<ChannelingState>, Without<CastingState>)>,
+    casting_auras: Query<(Entity, &Combatant, &Transform, Option<&ActiveAuras>, &CastingState), With<CastingState>>,
+    channeling_auras: Query<(Entity, &Combatant, &Transform, Option<&ActiveAuras>, &ChannelingState), (With<ChannelingState>, Without<CastingState>)>,
     dr_tracker_query: Query<(Entity, &DRTracker)>,
     // Posture state + standing directive read-back (movement AI). One query
     // for both healer (HealerPosture) and DPS-kiter (KitePosture) postures —

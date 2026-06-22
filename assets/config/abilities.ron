@@ -339,6 +339,10 @@
                 aura_type: Stun,
                 duration: 6.0,
                 magnitude: 1.0,
+                // Kidney Shot sits on its own DR category (unique in this game),
+                // so a Cheap Shot opener chains straight into an undiminished
+                // Kidney Shot for a full ~10s of stun.
+                dr_category: Some(KidneyShotStun),
             )),
             spell_school: Physical,
         ),
