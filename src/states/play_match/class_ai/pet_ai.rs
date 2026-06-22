@@ -80,6 +80,7 @@ pub fn pet_ai_system(
                 current_mana: combatant.current_mana,
                 max_mana: combatant.max_mana,
                 position: transform.translation,
+                velocity: Vec3::ZERO,
                 is_alive: combatant.is_alive(),
                 stealthed: combatant.stealthed,
                 target: combatant.target,

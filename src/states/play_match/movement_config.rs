@@ -278,6 +278,12 @@ pub struct DpsMovementConfig {
     /// within this radius, exits once all are kited beyond it. Slightly larger
     /// than entry for hysteresis. Ignored by aura-gated kiters.
     pub kite_sustain_radius: f32,
+    /// Freezing Trap DIP budget (Hunter only): max seconds the Hunter will walk
+    /// toward an out-of-range enemy healer to set a trap on it, before aborting.
+    /// `0.0` disables the dip entirely (the Hunter still places opportunistic
+    /// in-range traps on the healer). Mirrors the Paladin/Priest `dip_budget`.
+    /// Ignored by the Mage.
+    pub dip_budget: f32,
 }
 
 impl Default for DpsMovementConfig {
@@ -303,6 +309,7 @@ impl Default for DpsMovementConfig {
             commit_window: 0.6,
             kite_entry_radius: 20.0,   // Hunter closing-range band
             kite_sustain_radius: 24.0, // hold a touch past entry
+            dip_budget: 0.0,           // Mage default off; Hunter ron turns it on
         }
     }
 }

@@ -144,6 +144,35 @@ fn is_kite_threat(class: CharacterClass) -> bool {
     matches!(class, CharacterClass::Warrior | CharacterClass::Rogue)
 }
 
+/// Nearest kite-threat melee enemy (Warrior/Rogue) to `my_pos`, if any. The
+/// Hunter's preferred Frost Trap peel target: a slow zone is most valuable under
+/// the melee that's pressuring it, not on a pet or a stray-closest caster.
+/// Stealthed and pet enemies are excluded (same visibility rules as
+/// `melee_within`).
+pub fn nearest_melee_threat(
+    ctx: &CombatContext,
+    me: Entity,
+    my_pos: Vec3,
+) -> Option<(Entity, Vec3)> {
+    let team = self_team(ctx, me);
+    ctx.combatants
+        .values()
+        .filter(|i| {
+            !i.is_pet
+                && i.team != team
+                && i.is_alive
+                && !i.stealthed
+                && is_kite_threat(i.class)
+        })
+        .min_by(|a, b| {
+            a.position
+                .distance(my_pos)
+                .partial_cmp(&b.position.distance(my_pos))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|i| (i.entity, i.position))
+}
+
 /// Evaluate a DPS kiter's ENGAGE/KITE posture and (in KITE) issue a movement
 /// directive. Shared by the Mage (aura-gated) and Hunter (proximity-gated) —
 /// the caller computes `entry_trigger`/`sustain` with the class-specific

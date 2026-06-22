@@ -33,6 +33,7 @@ fn info(entity: Entity, team: u8, class: CharacterClass) -> CombatantInfo {
         current_mana: 100.0,
         max_mana: 100.0,
         position: Vec3::ZERO,
+        velocity: Vec3::ZERO,
         is_alive: true,
         stealthed: false,
         target: None,

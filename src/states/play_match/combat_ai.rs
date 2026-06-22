@@ -820,27 +820,52 @@ pub fn decide_abilities(
                 // holds and shoots a caster instead of fleeing it. The ability
                 // AI keeps its own dead/closing/safe band priorities. Same
                 // gates-open + casting-excluded contract as the Mage.
+                // Freezing Trap DIP (committed walk to set a trap on the enemy
+                // healer) is evaluated BEFORE the ENGAGE/KITE machine. While the
+                // dip owns movement (walking toward / arrived at the healer) the
+                // KITE evaluation is skipped so its kite vector doesn't overwrite
+                // the dip's Entity directive. Outside a dip it returns Rotation
+                // and KITE runs unchanged.
+                let mut dip_plan = class_ai::hunter_dip::HunterDipPlan::Rotation;
                 if countdown.gates_opened {
-                    if let Ok((_healer, kite_posture, directive)) = posture_movement.get_mut(entity) {
+                    if let Ok((_healer, mut kite_posture, directive)) = posture_movement.get_mut(entity) {
                         let cfg = &movement_config.hunter;
-                        let entry =
-                            class_ai::dps_postures::melee_within(&ctx, entity, my_pos, cfg.kite_entry_radius);
-                        let sustain =
-                            class_ai::dps_postures::melee_within(&ctx, entity, my_pos, cfg.kite_sustain_radius);
-                        class_ai::dps_postures::evaluate_dps_posture(
+                        dip_plan = class_ai::hunter_dip::evaluate_hunter_dip(
                             &mut commands,
+                            &abilities,
                             entity,
+                            &combatant,
                             my_pos,
-                            combatant.target,
+                            auras.as_deref(),
                             &ctx,
-                            kite_posture.map(bevy::prelude::Mut::into_inner),
+                            kite_posture.as_deref_mut(),
                             directive,
                             cfg,
-                            entry,
-                            sustain,
                             time.elapsed_secs(),
                             &mut decision_trace,
                         );
+                        if !dip_plan.owns_movement() {
+                            let entry = class_ai::dps_postures::melee_within(
+                                &ctx, entity, my_pos, cfg.kite_entry_radius,
+                            );
+                            let sustain = class_ai::dps_postures::melee_within(
+                                &ctx, entity, my_pos, cfg.kite_sustain_radius,
+                            );
+                            class_ai::dps_postures::evaluate_dps_posture(
+                                &mut commands,
+                                entity,
+                                my_pos,
+                                combatant.target,
+                                &ctx,
+                                kite_posture.map(bevy::prelude::Mut::into_inner),
+                                directive,
+                                cfg,
+                                entry,
+                                sustain,
+                                time.elapsed_secs(),
+                                &mut decision_trace,
+                            );
+                        }
                     }
                 }
                 class_ai::hunter::decide_hunter_action(
@@ -854,6 +879,7 @@ pub fn decide_abilities(
                     auras.as_deref(),
                     &ctx,
                     &mut instant_attacks,
+                    dip_plan,
                     &mut decision_trace,
                 )
             }
