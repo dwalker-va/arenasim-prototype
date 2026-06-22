@@ -120,6 +120,7 @@ pub fn trap_system(
                                 applied_this_frame: false,
                                 backlash_damage: None,
                                 dr_category_override: None,
+                                dispel_type: DispelType::Auto,
                             },
                         },
                         PlayMatchEntity,
@@ -248,6 +249,7 @@ pub fn slow_zone_system(
                             applied_this_frame: false,
                             backlash_damage: None,
                             dr_category_override: None,
+                            dispel_type: DispelType::Auto,
                         });
                     }
                 } else {
@@ -269,6 +271,7 @@ pub fn slow_zone_system(
                             applied_this_frame: false,
                             backlash_damage: None,
                             dr_category_override: None,
+                            dispel_type: DispelType::Auto,
                         }],
                     });
                 }

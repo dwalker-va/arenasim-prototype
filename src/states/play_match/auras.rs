@@ -997,7 +997,7 @@ pub fn process_dot_ticks(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::components::auras::{Aura, AuraType, DRCategory, DRTracker};
+    use super::super::components::auras::{Aura, AuraType, DRCategory, DRTracker, DispelType};
     use super::super::abilities::SpellSchool;
     use bevy::prelude::Entity;
     use std::collections::BTreeMap;
@@ -1019,6 +1019,7 @@ mod tests {
             applied_this_frame: false,
             backlash_damage: None,
             dr_category_override: None,
+            dispel_type: DispelType::Auto,
         }
     }
 
@@ -1040,6 +1041,29 @@ mod tests {
         assert_eq!(target_auras.len(), 1);
         assert_eq!(target_auras[0].effect_type, AuraType::Stun);
         assert_eq!(target_auras[0].duration, 4.0);
+    }
+
+    #[test]
+    fn test_poison_debuff_is_cleanse_only_not_magic_dispel() {
+        // Crippling Poison: a MovementSpeedSlow tagged as Poison.
+        let mut crippling = make_cc_aura(AuraType::MovementSpeedSlow, 8.0);
+        crippling.dispel_type = DispelType::Poison;
+        assert!(
+            !crippling.can_be_dispelled(),
+            "a poison debuff must NOT be removable by Dispel Magic"
+        );
+        assert!(
+            crippling.is_cleansable_poison(),
+            "a poison debuff must be removable by a poison cleanse"
+        );
+
+        // A normal (magic) slow — e.g. Frost Nova — is the opposite.
+        let frost_slow = make_cc_aura(AuraType::MovementSpeedSlow, 8.0);
+        assert!(
+            frost_slow.can_be_dispelled(),
+            "a normal slow IS magic-dispellable"
+        );
+        assert!(!frost_slow.is_cleansable_poison());
     }
 
     #[test]

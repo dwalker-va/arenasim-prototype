@@ -496,6 +496,7 @@ pub fn setup_play_match(
 
             // Get rogue opener preference for this slot
             let rogue_opener = config.team1_rogue_openers.get(i).copied().unwrap_or_default();
+            let rogue_poison = config.team1_rogue_poisons.get(i).copied().unwrap_or_default();
 
             // Get warlock curse preferences for this slot (empty vec if none configured)
             let warlock_curse_prefs = config.team1_warlock_curse_prefs.get(i).cloned().unwrap_or_default();
@@ -521,6 +522,7 @@ pub fn setup_play_match(
                 position,
                 count,
                 rogue_opener,
+                rogue_poison,
                 warlock_curse_prefs,
                 warrior_shout,
                 mage_armor,
@@ -585,6 +587,7 @@ pub fn setup_play_match(
 
             // Get rogue opener preference for this slot
             let rogue_opener = config.team2_rogue_openers.get(i).copied().unwrap_or_default();
+            let rogue_poison = config.team2_rogue_poisons.get(i).copied().unwrap_or_default();
 
             // Get warlock curse preferences for this slot (empty vec if none configured)
             let warlock_curse_prefs = config.team2_warlock_curse_prefs.get(i).cloned().unwrap_or_default();
@@ -610,6 +613,7 @@ pub fn setup_play_match(
                 position,
                 count,
                 rogue_opener,
+                rogue_poison,
                 warlock_curse_prefs,
                 warrior_shout,
                 mage_armor,
@@ -740,6 +744,7 @@ fn spawn_combatant(
     position: Vec3,
     duplicate_index: usize,
     rogue_opener: match_config::RogueOpener,
+    rogue_poison: match_config::RoguePoison,
     warlock_curse_prefs: Vec<match_config::WarlockCurse>,
     warrior_shout: match_config::WarriorShout,
     mage_armor: match_config::MageArmor,
@@ -777,12 +782,13 @@ fn spawn_combatant(
         ..default()
     });
 
-    let mut combatant = Combatant::new_with_curse_prefs(team, slot, class, rogue_opener, warlock_curse_prefs);
+    let mut combatant = Combatant::new_with_curse_prefs(team, slot, class, rogue_opener, rogue_poison, warlock_curse_prefs);
     combatant.warrior_shout = warrior_shout;
     combatant.mage_armor = mage_armor;
     combatant.paladin_aura = paladin_aura;
     combatant.apply_equipment(equipment_loadout, item_defs);
     let combatant_clone = combatant.clone();
+    let weapon_poison_buff = combatant.weapon_poison_self_buff();
 
     let entity = commands.spawn((
         Mesh3d(mesh_handle.clone()),
@@ -801,6 +807,9 @@ fn spawn_combatant(
             previous_xz: position.xz(),
         },
     )).id();
+    if let Some(buff) = weapon_poison_buff {
+        commands.entity(entity).insert(ActiveAuras { auras: vec![buff] });
+    }
 
     (entity, combatant_clone)
 }

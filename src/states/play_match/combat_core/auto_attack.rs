@@ -2,10 +2,11 @@
 
 use bevy::prelude::*;
 use bevy_egui::egui;
-use crate::combat::log::CombatLog;
+use crate::combat::log::{CombatLog, CombatLogEventType};
 use super::super::match_config;
 use super::super::components::*;
-use super::super::abilities::SpellSchool;
+use super::super::abilities::{AbilityType, SpellSchool};
+use super::super::ability_config::AbilityDefinitions;
 use super::super::constants::CRIT_DAMAGE_MULTIPLIER;
 use super::super::utils::get_next_fct_offset;
 use super::super::{MELEE_RANGE, WAND_RANGE, HUNTER_DEAD_ZONE, AUTO_SHOT_RANGE, FCT_HEIGHT};
@@ -28,6 +29,7 @@ pub fn combat_auto_attack(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
     mut game_rng: ResMut<GameRng>,
+    abilities: Res<AbilityDefinitions>,
     mut combatants: Query<(Entity, &Transform, &mut Combatant, Option<&CastingState>, Option<&ChannelingState>, Option<&mut ActiveAuras>)>,
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
@@ -64,6 +66,25 @@ pub fn combat_auto_attack(
                 (combatant.class.name().to_string(), combatant.class.is_melee())
             };
             (entity, (combatant.team, combatant.class, display_name, is_melee, combatant.is_alive()))
+        })
+        .collect();
+
+    // Weapon-poison proc table: Rogues coated with Crippling Poison and the
+    // per-swing application chance from the ability config. A successful roll on
+    // a landed swing applies/refreshes the Crippling slow on the target.
+    let crippling_chance: std::collections::HashMap<Entity, f32> = combatants
+        .iter()
+        .filter_map(|(entity, _, combatant, _, _, _)| {
+            if combatant.class == match_config::CharacterClass::Rogue
+                && combatant.rogue_poison == match_config::RoguePoison::Crippling
+            {
+                abilities
+                    .get(&AbilityType::CripplingPoison)
+                    .and_then(|def| def.application_chance)
+                    .map(|chance| (entity, chance))
+            } else {
+                None
+            }
         })
         .collect();
 
@@ -343,6 +364,29 @@ pub fn combat_auto_attack(
                     }
                 }
 
+                // Crippling Poison proc: a coated Rogue's landed swing has a
+                // chance to apply/refresh the slow. Refreshed in place so it
+                // never diminishes (poisons sidestep the slow DR category).
+                if let Some(&chance) = crippling_chance.get(&attacker_entity) {
+                    if game_rng.random_f32() < chance {
+                        let fresh = apply_or_refresh_crippling(
+                            &mut commands,
+                            &abilities,
+                            attacker_entity,
+                            target_entity,
+                            target_auras.as_deref_mut(),
+                        );
+                        if fresh {
+                            if let Some((_, _, tname, _, _)) = combatant_info.get(&target_entity) {
+                                combat_log.log(
+                                    CombatLogEventType::CrowdControl,
+                                    format!("Crippling Poison applied to {} ({:.0}% slow)", tname, 70.0),
+                                );
+                            }
+                        }
+                    }
+                }
+
                 // Track damage for aura breaking (only actual damage, not absorbed)
                 *damage_per_aura_break.entry(target_entity).or_insert(0.0) += actual_damage;
 
@@ -477,6 +521,7 @@ pub fn combat_auto_attack(
                 applied_this_frame: false,
                 backlash_damage: None,
                 dr_category_override: None,
+                dispel_type: DispelType::Auto,
             },
         });
         // Apply AttackSpeedSlow (25% slower attacks) for 5 seconds
@@ -498,6 +543,7 @@ pub fn combat_auto_attack(
                 applied_this_frame: false,
                 backlash_damage: None,
                 dr_category_override: None,
+                dispel_type: DispelType::Auto,
             },
         });
     }
@@ -565,5 +611,40 @@ pub fn combat_auto_attack(
         commands.entity(target_entity).insert(DamageTakenThisFrame {
             amount: total_damage,
         });
+    }
+}
+
+/// Apply or refresh the Crippling Poison slow on `target`. Returns true if it was
+/// freshly applied (vs. just refreshed) — the caller logs only the initial proc.
+///
+/// Refresh-in-place when the debuff is already present (no DR, no stacking);
+/// push directly when the target already has an `ActiveAuras` component;
+/// otherwise defer via `AuraPending` (the rare first-debuff-on-a-fresh-target
+/// case, which respects immunity through the normal aura pipeline).
+fn apply_or_refresh_crippling(
+    commands: &mut Commands,
+    abilities: &AbilityDefinitions,
+    attacker: Entity,
+    target: Entity,
+    target_auras: Option<&mut ActiveAuras>,
+) -> bool {
+    let def = abilities.get_unchecked(&AbilityType::CripplingPoison);
+    let refresh_to = def.applies_aura.as_ref().map(|a| a.duration).unwrap_or(8.0);
+    if let Some(auras) = target_auras {
+        if let Some(existing) = auras.auras.iter_mut().find(|a| {
+            a.effect_type == AuraType::MovementSpeedSlow && a.ability_name == "Crippling Poison"
+        }) {
+            existing.duration = refresh_to;
+            return false;
+        }
+        if let Some(pending) = AuraPending::from_ability(target, attacker, def) {
+            auras.auras.push(pending.aura);
+        }
+        true
+    } else {
+        if let Some(pending) = AuraPending::from_ability(target, attacker, def) {
+            commands.spawn(pending);
+        }
+        true
     }
 }

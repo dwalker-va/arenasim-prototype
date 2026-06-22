@@ -2551,7 +2551,7 @@ mod paladin_unit {
     use arenasim::states::play_match::class_ai::CombatantInfo;
     use arenasim::states::play_match::components::{Combatant, HealerPosture, Posture};
     use arenasim::states::play_match::movement_config::MovementConfig;
-    use arenasim::states::play_match::{Aura, AuraType, DRCategory, DRTracker};
+    use arenasim::states::play_match::{Aura, AuraType, DRCategory, DRTracker, DispelType};
     use bevy::prelude::*;
 
     fn info(entity: Entity, team: u8, class: CharacterClass, pos: Vec3) -> CombatantInfo {
@@ -2774,7 +2774,7 @@ mod bucket_a_unit {
     use arenasim::states::match_config::CharacterClass;
     use arenasim::states::play_match::class_ai::combat_snapshot::CombatSnapshot;
     use arenasim::states::play_match::class_ai::{select_softer_melee_target, CombatantInfo};
-    use arenasim::states::play_match::{Aura, AuraType};
+    use arenasim::states::play_match::{Aura, AuraType, DispelType};
     use bevy::prelude::*;
 
     fn info(entity: Entity, team: u8, class: CharacterClass, hp: f32) -> CombatantInfo {
@@ -2816,6 +2816,7 @@ mod bucket_a_unit {
             applied_this_frame: false,
             backlash_damage: None,
             dr_category_override: None,
+            dispel_type: DispelType::Auto,
         }
     }
 

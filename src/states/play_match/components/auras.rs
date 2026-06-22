@@ -90,6 +90,27 @@ pub enum AuraType {
     /// Applied by Unstable Affliction dispel backlash. Has its own DR category.
     /// Magnitude unused (always 1.0 by convention).
     Silence,
+    /// Marker buff signifying a Rogue has a weapon poison coated (e.g. Crippling
+    /// Poison). Purely informational — drives the buff-bar indicator; the on-hit
+    /// proc logic reads the Rogue's `rogue_poison` config, not this aura.
+    /// Magnitude unused (always 1.0 by convention). Not dispellable, no DR.
+    WeaponPoison,
+}
+
+/// How a debuff is classified for dispel/removal. Orthogonal to `AuraType` so a
+/// single effect (e.g. a `MovementSpeedSlow`) can be magic OR poison.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize, Default)]
+pub enum DispelType {
+    /// Derive removability from the aura type (the historical behavior):
+    /// magic-dispellable types are removable by Dispel Magic, others are not.
+    #[default]
+    Auto,
+    /// A poison debuff — NOT removable by Dispel Magic; removable only by a
+    /// poison cleanse (Paladin Cleanse). Crippling Poison uses this.
+    Poison,
+    /// A disease debuff — reserved for future use; same family as Poison,
+    /// removed by a disease/poison cleanse rather than Dispel Magic.
+    Disease,
 }
 
 impl AuraType {
@@ -156,6 +177,10 @@ pub struct Aura {
     /// carries `Some(DRCategory::KidneyShotStun)` so it does not share DR with Cheap Shot or
     /// other stuns. `None` for every other aura (they fall back to `from_aura_type`).
     pub dr_category_override: Option<DRCategory>,
+    /// Dispel classification (magic-derived `Auto` by default, or `Poison`/`Disease`).
+    /// Decouples removability from `effect_type` so e.g. a poison `MovementSpeedSlow`
+    /// (Crippling Poison) is immune to Dispel Magic but removable by a poison cleanse.
+    pub dispel_type: DispelType,
 }
 
 impl Aura {
@@ -175,6 +200,12 @@ impl Aura {
     /// DoTs are dispellable only if they have a magic spell school (Corruption, Immolate)
     /// but not if they're physical (Rend).
     pub fn can_be_dispelled(&self) -> bool {
+        // Poison/disease debuffs are NOT magic — Dispel Magic cannot touch them
+        // (they are removed by a poison/disease cleanse instead; see `is_cleansable_poison`).
+        if !matches!(self.dispel_type, DispelType::Auto) {
+            return false;
+        }
+
         // Inherently magic-dispellable aura types
         if self.effect_type.is_magic_dispellable() {
             return true;
@@ -189,6 +220,13 @@ impl Aura {
         }
 
         false
+    }
+
+    /// Returns true if this aura is a poison/disease debuff removable by a
+    /// poison cleanse (Paladin Cleanse). Mutually exclusive with
+    /// `can_be_dispelled` (magic).
+    pub fn is_cleansable_poison(&self) -> bool {
+        matches!(self.dispel_type, DispelType::Poison | DispelType::Disease)
     }
 }
 
@@ -252,7 +290,7 @@ impl AuraPending {
                 applied_this_frame: false,
                 backlash_damage: None,
                 dr_category_override: aura_effect.dr_category,
-            },
+                dispel_type: aura_effect.dispel_type,            },
         })
     }
 
@@ -291,7 +329,7 @@ impl AuraPending {
                 applied_this_frame: false,
                 backlash_damage: None,
                 dr_category_override: aura_effect.dr_category,
-            },
+                dispel_type: aura_effect.dispel_type,            },
         })
     }
 
@@ -330,7 +368,7 @@ impl AuraPending {
                 applied_this_frame: false,
                 backlash_damage: None,
                 dr_category_override: aura_effect.dr_category,
-            },
+                dispel_type: aura_effect.dispel_type,            },
         })
     }
 }

@@ -359,6 +359,27 @@
             lockout_duration: 4.0,
         ),
 
+        // Rogue weapon poison (passive). Not cast — auto-attacks roll
+        // `application_chance` to apply/refresh the slow debuff. The slow is a
+        // POISON (dispel_type: Poison) so Dispel Magic can't remove it, only a
+        // cleanse. magnitude 0.3 = 70% slow; refreshed in place (no DR).
+        CripplingPoison: (
+            name: "Crippling Poison",
+            icon: "icons/abilities/ability_poisonsting.jpg",
+            cast_time: 0.0,
+            range: 2.5,
+            mana_cost: 0.0,
+            cooldown: 0.0,
+            application_chance: Some(0.5),
+            applies_aura: Some((
+                aura_type: MovementSpeedSlow,
+                duration: 8.0,
+                magnitude: 0.3,
+                dispel_type: Poison,
+            )),
+            spell_school: Nature,
+        ),
+
         // ============================================================================
         // WARLOCK ABILITIES
         // ============================================================================

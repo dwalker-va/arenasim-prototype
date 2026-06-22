@@ -16,7 +16,7 @@ use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::class_ai::combat_snapshot::CombatSnapshot;
 use arenasim::states::play_match::class_ai::CombatantInfo;
 use arenasim::states::play_match::{
-    ActiveAuras, Aura, AuraType, CastingState, ChannelingState, Combatant, DRCategory, DRTracker,
+    ActiveAuras, Aura, AuraType, CastingState, ChannelingState, Combatant, DRCategory, DRTracker, DispelType,
     Pet,
 };
 
@@ -59,6 +59,7 @@ fn make_aura(effect_type: AuraType, ability_name: &str) -> Aura {
         applied_this_frame: false,
         backlash_damage: None,
         dr_category_override: None,
+        dispel_type: DispelType::Auto,
     }
 }
 

@@ -629,6 +629,9 @@ pub fn try_dispel_ally(
         return false;
     }
 
+    // Cleanse also removes poison/disease; Dispel Magic / Devour Magic do not.
+    let removes_poison = ability_type == AbilityType::PaladinCleanse;
+
     // Find ally with highest priority dispellable debuff
     let mut best_candidate: Option<(Entity, i32)> = None;
 
@@ -651,11 +654,20 @@ pub fn try_dispel_ally(
         // Find highest priority dispellable debuff on this ally
         let mut highest_priority = -1;
         for aura in ally_auras {
-            if !aura.can_be_dispelled() {
+            if !aura.can_be_dispelled() && !(removes_poison && aura.is_cleansable_poison()) {
                 continue;
             }
 
-            let priority = dispel_priority(aura.effect_type);
+            // Cleansable poisons (e.g. Crippling's 70% slow) are worth a
+            // maintenance cleanse — rate them at 50 rather than the bare
+            // MovementSpeedSlow's 20, so a healthy Paladin lifts them, but an
+            // under-pressure Paladin (urgent-only, min_priority 90) still
+            // prioritizes healing over the snare.
+            let priority = if aura.is_cleansable_poison() {
+                50
+            } else {
+                dispel_priority(aura.effect_type)
+            };
 
             if priority > highest_priority {
                 highest_priority = priority;
@@ -698,6 +710,7 @@ pub fn try_dispel_ally(
         caster_class,
         heal_on_success: None,
         aura_type_filter: None,
+        removes_poison,
     });
 
     info!(

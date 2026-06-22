@@ -16,7 +16,7 @@ use bevy::prelude::*;
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::class_ai::combat_snapshot::CombatSnapshot;
 use arenasim::states::play_match::class_ai::{dispel_priority, CombatantInfo};
-use arenasim::states::play_match::{Aura, AuraType, DRCategory, DRTracker, PetType};
+use arenasim::states::play_match::{Aura, AuraType, DRCategory, DRTracker, DispelType, PetType};
 
 // ============================================================================
 // Fixture helpers
@@ -70,6 +70,7 @@ fn aura_with(effect_type: AuraType, caster: Option<Entity>, break_on_damage_thre
         applied_this_frame: false,
         backlash_damage: None,
         dr_category_override: None,
+        dispel_type: DispelType::Auto,
     }
 }
 

@@ -94,6 +94,7 @@ pub enum AbilityType {
     MortalStrike, // Warrior damage + healing reduction
     Pummel,    // Warrior interrupt
     Kick,      // Rogue interrupt
+    CripplingPoison, // Rogue weapon poison: on-hit chance to slow (passive, not cast)
     // Warlock abilities
     Corruption,     // Shadow DoT
     Shadowbolt,     // Shadow projectile

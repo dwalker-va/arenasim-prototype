@@ -336,6 +336,7 @@ fn apply_interrupt_lockout(
             applied_this_frame: false,
             backlash_damage: None,
             dr_category_override: None,
+            dispel_type: DispelType::Auto,
         },
     });
 
