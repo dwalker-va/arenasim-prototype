@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::states::match_config::{ArenaMap, CharacterClass, HunterPetType, MageArmor, MatchConfig, PaladinAura, RogueOpener, WarlockCurse, WarriorShout};
+use crate::states::match_config::{ArenaMap, CharacterClass, HunterPetType, MageArmor, MatchConfig, PaladinAura, RogueOpener, RoguePoison, WarlockCurse, WarriorShout};
 use crate::states::play_match::equipment::{ItemId, ItemSlot};
 
 /// Headless match configuration loaded from JSON
@@ -53,6 +53,12 @@ pub struct HeadlessMatchConfig {
     /// Team 2's rogue opener preferences (one per slot: "Ambush" or "CheapShot")
     #[serde(default)]
     pub team2_rogue_openers: Vec<String>,
+    /// Team 1's rogue weapon-poison preferences (one per slot: "Crippling")
+    #[serde(default)]
+    pub team1_rogue_poisons: Vec<String>,
+    /// Team 2's rogue weapon-poison preferences (one per slot: "Crippling")
+    #[serde(default)]
+    pub team2_rogue_poisons: Vec<String>,
     /// Team 1's warlock curse preferences: outer vec indexed by slot, inner vec indexed by enemy target
     /// Values: "Agony", "Weakness", "Tongues" (defaults to Agony)
     #[serde(default)]
@@ -121,6 +127,8 @@ impl Default for HeadlessMatchConfig {
             random_seed: None,
             team1_rogue_openers: Vec::new(),
             team2_rogue_openers: Vec::new(),
+            team1_rogue_poisons: Vec::new(),
+            team2_rogue_poisons: Vec::new(),
             team1_warlock_curse_prefs: Vec::new(),
             team2_warlock_curse_prefs: Vec::new(),
             team1_hunter_pet_types: Vec::new(),
@@ -250,6 +258,13 @@ impl HeadlessMatchConfig {
         match name {
             "CheapShot" | "Cheap Shot" => RogueOpener::CheapShot,
             _ => RogueOpener::Ambush, // Default to Ambush for unknown values
+        }
+    }
+
+    /// Parse a rogue poison name string into RoguePoison
+    fn parse_rogue_poison(name: &str) -> RoguePoison {
+        match name {
+            _ => RoguePoison::Crippling, // Only Crippling for now
         }
     }
 
@@ -487,6 +502,20 @@ impl HeadlessMatchConfig {
             .collect();
         team2_rogue_openers.resize(team2.len(), RogueOpener::default());
 
+        // Parse rogue poisons, defaulting to Crippling for missing entries
+        let mut team1_rogue_poisons: Vec<RoguePoison> = self
+            .team1_rogue_poisons
+            .iter()
+            .map(|s| Self::parse_rogue_poison(s))
+            .collect();
+        team1_rogue_poisons.resize(team1.len(), RoguePoison::default());
+        let mut team2_rogue_poisons: Vec<RoguePoison> = self
+            .team2_rogue_poisons
+            .iter()
+            .map(|s| Self::parse_rogue_poison(s))
+            .collect();
+        team2_rogue_poisons.resize(team2.len(), RoguePoison::default());
+
         // Parse warlock curse preferences
         let team1_warlock_curse_prefs = Self::parse_warlock_curse_prefs(
             &self.team1_warlock_curse_prefs,
@@ -575,6 +604,8 @@ impl HeadlessMatchConfig {
             team2_cc_target: self.team2_cc_target,
             team1_rogue_openers,
             team2_rogue_openers,
+            team1_rogue_poisons,
+            team2_rogue_poisons,
             team1_warlock_curse_prefs,
             team2_warlock_curse_prefs,
             team1_hunter_pet_types,

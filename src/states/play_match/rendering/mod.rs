@@ -86,6 +86,7 @@ pub fn get_aura_icon_key(aura: &Aura, ability_definitions: &AbilityDefinitions) 
         AuraType::LockoutDurationReduction => "aura_max_health".to_string(), // Buff, reuse buff icon
         AuraType::FrostArmorBuff => "aura_absorb".to_string(), // Self-buff, reuse absorb icon
         AuraType::Silence => "aura_silence".to_string(),
+        AuraType::WeaponPoison => "aura_dot".to_string(), // Poison self-buff, reuse DoT icon
     }
 }
 
@@ -104,7 +105,8 @@ pub fn is_buff_aura(aura_type: &AuraType) -> bool {
         AuraType::ManaRegenIncrease |
         AuraType::LockoutDurationReduction |
         AuraType::FrostArmorBuff |
-        AuraType::SpellResistanceBuff
+        AuraType::SpellResistanceBuff |
+        AuraType::WeaponPoison
     )
 }
 
@@ -141,14 +143,28 @@ pub fn load_spell_icons(
         return; // Wait for next frame to check if loaded
     }
 
-    // Check if all images are loaded
-    let all_loaded = icon_handles.handles.iter().all(|(_, h)| images.contains(h));
-    if !all_loaded {
-        return; // Wait for images to load
+    // Wait while any handle is still resolving, but treat a FAILED load (e.g. a
+    // missing icon file) as resolved — otherwise a single bad path would block
+    // the whole registration forever and blank EVERY in-match icon. Once nothing
+    // is still loading, register only the textures that actually loaded; a
+    // missing icon then degrades to "no icon" instead of breaking the UI.
+    use bevy::asset::LoadState;
+    let still_loading = icon_handles.handles.iter().any(|(_, h)| {
+        matches!(
+            asset_server.load_state(h.id()),
+            LoadState::Loading | LoadState::NotLoaded
+        )
+    });
+    if still_loading {
+        return; // Wait for images to finish loading or fail
     }
 
-    // Register textures with egui
+    // Register textures with egui (skip any that failed to load)
     for (ability_name, handle) in &icon_handles.handles {
+        if !images.contains(handle) {
+            warn!("Spell icon for '{}' failed to load; rendering without it", ability_name);
+            continue;
+        }
         let texture_id = contexts.add_image(handle.clone());
         spell_icons.textures.insert(ability_name.clone(), texture_id);
     }

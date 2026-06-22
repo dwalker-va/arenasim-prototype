@@ -248,6 +248,7 @@ fn get_class_abilities(class: CharacterClass) -> Vec<AbilityType> {
             AbilityType::SinisterStrike,
             AbilityType::KidneyShot,
             AbilityType::Kick,
+            AbilityType::CripplingPoison,
         ],
         CharacterClass::Priest => vec![
             AbilityType::FlashHeal,
@@ -310,6 +311,7 @@ fn get_ability_name(ability: AbilityType) -> &'static str {
         AbilityType::MortalStrike => "Mortal Strike",
         AbilityType::Pummel => "Pummel",
         AbilityType::Kick => "Kick",
+        AbilityType::CripplingPoison => "Crippling Poison",
         AbilityType::Corruption => "Corruption",
         AbilityType::Shadowbolt => "Shadow Bolt",
         AbilityType::Fear => "Fear",
@@ -1453,6 +1455,9 @@ fn build_aura_description(aura: &super::play_match::ability_config::AuraEffect) 
         }
         AuraType::Silence => {
             format!("Silenced for {:.0} sec. Cannot cast mana-cost abilities.", aura.duration)
+        }
+        AuraType::WeaponPoison => {
+            "Weapon coated with poison. Attacks may apply a poison debuff.".to_string()
         }
     }
 }

@@ -6,15 +6,23 @@
 //! 1. Ambush (opener from stealth)
 //!
 //! ## Priority Order (In Combat)
-//! 1. Kidney Shot (stun)
+//! 1. Kidney Shot (stun) — gated by `plan_kidney_shot`:
+//!    - **Opener-extend**: chain Kidney onto an expiring Cheap Shot on the kill
+//!      target for a ~10s lockdown (Kidney Shot has its own DR category, so the
+//!      stuns don't diminish).
+//!    - **Caster chain** (Mage/Priest/Warlock/Paladin): Kick → hold → Kidney.
+//!      Hold the stun while a Kick or school lockout is denying casts (no
+//!      double-spend); fire it to extend the denial as the lockout lapses, or
+//!      immediately if the target casts an un-locked second school.
+//!    - **Aggressive** (Warrior/Rogue/Hunter): opportunistic stun whenever up.
 //! 2. Sinister Strike (combo point builder)
 #![allow(clippy::too_many_arguments)]
 
 use bevy::prelude::*;
 
 use crate::combat::log::CombatLog;
-use crate::states::match_config::RogueOpener;
-use crate::states::play_match::abilities::AbilityType;
+use crate::states::match_config::{CharacterClass, RogueOpener};
+use crate::states::play_match::abilities::{AbilityType, SpellSchool};
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
 use crate::states::play_match::combat_core::{roll_crit, get_attack_power_bonus_from_slice, get_crit_chance_bonus_from_slice};
@@ -83,72 +91,94 @@ pub fn decide_rogue_action(
         return false;
     }
 
-    // Priority 1: Kidney Shot (melee-range CC)
+    // Priority 1: Kidney Shot (melee-range CC), gated by the chain planner.
+    // The planner decides whether to fire the stun now, hold it (so a Kick or an
+    // active school lockout does the denial instead of double-spending), or pool
+    // energy so the stun is ready the instant a control window lapses. See
+    // `plan_kidney_shot` for the full state machine.
     let kidney_shot = AbilityType::KidneyShot;
-    let kidney_shot_target = select_melee_cc_target(
-        combatant.cc_target,
-        combatant.target,
-        my_pos,
-        ctx,
-    );
-    if let Some((ks_target_entity, ks_target_pos)) = kidney_shot_target {
-        let target_already_stunned = ctx.active_auras
-            .get(&ks_target_entity)
-            .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::Stun))
-            .unwrap_or(false);
-
-        if target_already_stunned {
+    match plan_kidney_shot(entity, combatant, ctx, abilities, my_pos) {
+        KidneyPlan::NoTarget => {
+            builder.reject(kidney_shot, RejectionReason::NoValidTarget);
+        }
+        KidneyPlan::Hold(reason) => {
+            // Hold the stun but keep building damage with Sinister Strike.
+            builder.reject(kidney_shot, reason);
+        }
+        KidneyPlan::Pool(reason) => {
+            // Suppress BOTH the stun (not yet) and Sinister Strike (pool energy),
+            // so Kidney Shot is affordable the instant its control window reaches
+            // the chain buffer — a seamless stun chain with no energy-starved gap.
+            builder.reject(kidney_shot, reason);
             builder.reject(
-                kidney_shot,
-                RejectionReason::TargetAlreadyCCd { cc_type: AuraType::Stun },
+                AbilityType::SinisterStrike,
+                RejectionReason::PreconditionUnmet {
+                    note: "pooling energy for Kidney Shot chain".into(),
+                },
             );
-        } else if ctx.is_dr_immune(ks_target_entity, DRCategory::Stuns) {
-            builder.reject(
-                kidney_shot,
-                RejectionReason::DRImmune { category: DRCategory::Stuns },
-            );
-        } else if try_kidney_shot(
-            commands, combat_log, abilities, entity, combatant, my_pos,
-            ks_target_entity, ks_target_pos, ctx, same_frame_cc_queue, &mut builder,
-        ) {
             builder.finish();
-            return true;
-        } else {
-            // ENERGY POOLING: when the ONLY thing stopping Kidney Shot is
-            // energy, do not burn energy on Sinister Strike this tick — hold
-            // until Kidney Shot (60) is affordable. Without this gate, SS
-            // (40) re-drains the pool every tick and energy oscillates in
-            // the 40-59 band, so the stun NEVER fires. Pre-U4.1 this worked
-            // by accident: a target invisible mid-cast made the Rogue skip
-            // whole decision ticks, pooling energy unintentionally; the
-            // snapshot casting-visibility fix removed those idle ticks and
-            // Kidney Shot usage collapsed (86/100 -> 0/100 vs Priest).
-            //
-            // Classifier-order guarantees make this safe: cooldown is
-            // classified before resource, so InsufficientResource implies
-            // the CD is ready; resource precedes range, but Kidney Shot and
-            // SS share MELEE_RANGE, so suppressing SS while out of range
-            // costs nothing. Energy regen ticks passively, so pooling
-            // always terminates.
-            let ks_def = abilities.get_unchecked(&kidney_shot);
-            let reason = classify_pre_cast_failure(
-                kidney_shot, ks_def, combatant, my_pos, None,
-                Some((ks_target_entity, ks_target_pos)), ctx,
-                PreCastOpts::default(),
-            );
-            if matches!(reason, RejectionReason::InsufficientResource { .. }) {
+            return false;
+        }
+        KidneyPlan::Fire { target: ks_target_entity, pos: ks_target_pos, stacking } => {
+            // `stacking` is set only by the opener-extend branch, which
+            // intentionally stacks Kidney onto an about-to-expire Cheap Shot — so
+            // the usual "already stunned" guard must not block it there.
+            let target_already_stunned = ctx.active_auras
+                .get(&ks_target_entity)
+                .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::Stun))
+                .unwrap_or(false);
+
+            if target_already_stunned && !stacking {
                 builder.reject(
-                    AbilityType::SinisterStrike,
-                    RejectionReason::PreconditionUnmet {
-                        note: "pooling energy for Kidney Shot".into(),
-                    },
+                    kidney_shot,
+                    RejectionReason::TargetAlreadyCCd { cc_type: AuraType::Stun },
                 );
+            } else if ctx.is_dr_immune(ks_target_entity, DRCategory::KidneyShotStun) {
+                builder.reject(
+                    kidney_shot,
+                    RejectionReason::DRImmune { category: DRCategory::KidneyShotStun },
+                );
+            } else if try_kidney_shot(
+                commands, combat_log, abilities, entity, combatant, my_pos,
+                ks_target_entity, ks_target_pos, ctx, same_frame_cc_queue, &mut builder,
+            ) {
                 builder.finish();
-                return false;
+                return true;
+            } else {
+                // ENERGY POOLING: when the ONLY thing stopping Kidney Shot is
+                // energy, do not burn energy on Sinister Strike this tick — hold
+                // until Kidney Shot (60) is affordable. Without this gate, SS
+                // (40) re-drains the pool every tick and energy oscillates in
+                // the 40-59 band, so the stun NEVER fires. Pre-U4.1 this worked
+                // by accident: a target invisible mid-cast made the Rogue skip
+                // whole decision ticks, pooling energy unintentionally; the
+                // snapshot casting-visibility fix removed those idle ticks and
+                // Kidney Shot usage collapsed (86/100 -> 0/100 vs Priest).
+                //
+                // Classifier-order guarantees make this safe: cooldown is
+                // classified before resource, so InsufficientResource implies
+                // the CD is ready; resource precedes range, but Kidney Shot and
+                // SS share MELEE_RANGE, so suppressing SS while out of range
+                // costs nothing. Energy regen ticks passively, so pooling
+                // always terminates.
+                let ks_def = abilities.get_unchecked(&kidney_shot);
+                let reason = classify_pre_cast_failure(
+                    kidney_shot, ks_def, combatant, my_pos, None,
+                    Some((ks_target_entity, ks_target_pos)), ctx,
+                    PreCastOpts::default(),
+                );
+                if matches!(reason, RejectionReason::InsufficientResource { .. }) {
+                    builder.reject(
+                        AbilityType::SinisterStrike,
+                        RejectionReason::PreconditionUnmet {
+                            note: "pooling energy for Kidney Shot".into(),
+                        },
+                    );
+                    builder.finish();
+                    return false;
+                }
             }
         }
-    } else {
-        builder.reject(kidney_shot, RejectionReason::NoValidTarget);
     }
 
     // Priority 2: Sinister Strike
@@ -158,6 +188,183 @@ pub fn decide_rogue_action(
     );
     builder.finish();
     acted
+}
+
+/// Buffer (seconds) before a control window expires at which the Rogue chains
+/// the next stun. Firing this early trades ~0.5s of the lockdown for safety
+/// against the target dying / going immune / leaving melee in the final moment.
+const KIDNEY_CHAIN_BUFFER: f32 = 0.5;
+
+/// The planner's verdict for the in-combat Kidney Shot decision.
+enum KidneyPlan {
+    /// No valid melee Kidney Shot target this tick.
+    NoTarget,
+    /// Hold the stun (reject Kidney) but keep doing Sinister Strike damage. The
+    /// carried reason is surfaced in the decision trace.
+    Hold(RejectionReason),
+    /// Hold the stun AND suppress Sinister Strike to pool energy, so Kidney Shot
+    /// is affordable the instant its control window lapses (seamless chain).
+    Pool(RejectionReason),
+    /// Fire Kidney Shot now on `target`. `stacking` is set only for the
+    /// opener-extend (intentionally stacking onto an expiring Cheap Shot), which
+    /// must bypass the "already stunned" guard.
+    Fire { target: Entity, pos: Vec3, stacking: bool },
+}
+
+/// Spellcasting classes — those whose primary threat is interruptible casts, so
+/// the Rogue reserves Kidney Shot for the Kick → hold → Kidney denial chain
+/// against them rather than spending it opportunistically. Warrior/Rogue/Hunter
+/// are excluded: they have no (or only one, low-value) cast, so the Rogue stuns
+/// them aggressively whenever it can. (Hunter's sole cast is Aimed Shot, and a
+/// Physical-school lockout wouldn't even stop its auto/instant shots.)
+fn is_spellcaster(class: CharacterClass) -> bool {
+    matches!(
+        class,
+        CharacterClass::Mage
+            | CharacterClass::Priest
+            | CharacterClass::Warlock
+            | CharacterClass::Paladin
+    )
+}
+
+/// Build a `PreconditionUnmet` rejection with a static note.
+fn hold_reason(note: &'static str) -> RejectionReason {
+    RejectionReason::PreconditionUnmet { note: note.into() }
+}
+
+/// Remaining duration of the longest-lasting stun this Rogue applied to `target`
+/// — i.e. when the Rogue's own stun lockdown on the target ends. `None` if the
+/// Rogue has no active stun on the target. Used to time the opener Cheap Shot →
+/// Kidney Shot chain.
+fn my_stun_lockdown_remaining(ctx: &CombatContext, target: Entity, me: Entity) -> Option<f32> {
+    ctx.active_auras
+        .get(&target)?
+        .iter()
+        .filter(|a| a.effect_type == AuraType::Stun && a.caster == Some(me))
+        .map(|a| a.duration)
+        .max_by(|x, y| x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal))
+}
+
+/// Active spell-school lockout on `target`: `(remaining_seconds, locked_school)`.
+/// `None` if the target has no lockout. The locked school is decoded from the
+/// aura's `magnitude` (see `SpellSchool::from_lockout_magnitude`).
+fn lockout_on(ctx: &CombatContext, target: Entity) -> Option<(f32, SpellSchool)> {
+    ctx.active_auras
+        .get(&target)?
+        .iter()
+        .find(|a| a.effect_type == AuraType::SpellSchoolLockout)
+        .map(|a| (a.duration, SpellSchool::from_lockout_magnitude(a.magnitude)))
+}
+
+/// Decide what to do with Kidney Shot this tick. See module docs for the policy:
+/// opener-extend on the kill target, the Kick→hold→Kidney chain against caster
+/// classes, and aggressive opportunistic stuns against everyone else.
+fn plan_kidney_shot(
+    entity: Entity,
+    combatant: &Combatant,
+    ctx: &CombatContext,
+    abilities: &AbilityDefinitions,
+    my_pos: Vec3,
+) -> KidneyPlan {
+    let kidney_cost = abilities.get_unchecked(&AbilityType::KidneyShot).mana_cost;
+    let energy = combatant.current_mana;
+    let kidney_on_cd = combatant
+        .ability_cooldowns
+        .contains_key(&AbilityType::KidneyShot);
+
+    // 1. OPENER-EXTEND: keep the kill target locked down by chaining Kidney Shot
+    //    onto an expiring Cheap Shot (the default opener). Kidney Shot has its
+    //    own DR category, so the two stuns don't diminish — a clean ~10s window.
+    if let Some(kill) = combatant.target {
+        if let Some(info) = ctx.combatants.get(&kill) {
+            let in_melee = my_pos.distance(info.position) <= MELEE_RANGE;
+            if in_melee && !ctx.entity_is_immune(kill) && !kidney_on_cd {
+                if let Some(rem) = my_stun_lockdown_remaining(ctx, kill, entity) {
+                    if rem <= KIDNEY_CHAIN_BUFFER {
+                        return KidneyPlan::Fire { target: kill, pos: info.position, stacking: true };
+                    }
+                    // Pool through the opener stun so Kidney is guaranteed ready
+                    // at its expiry — a one-time ~3.5s of held Sinister Strikes is
+                    // worth the airtight 10s lockdown.
+                    return KidneyPlan::Pool(hold_reason("pooling Kidney to extend opener Cheap Shot"));
+                }
+            }
+        }
+    }
+
+    // 2. Standard in-combat melee CC target: the Cheap Shot healer (cc_target)
+    //    if it's in melee, else the kill target.
+    let (tgt, tgt_pos) = match select_melee_cc_target(
+        combatant.cc_target,
+        combatant.target,
+        my_pos,
+        ctx,
+    ) {
+        Some(x) => x,
+        None => return KidneyPlan::NoTarget,
+    };
+    let tgt_class = match ctx.combatants.get(&tgt) {
+        Some(i) => i.class,
+        None => return KidneyPlan::NoTarget,
+    };
+
+    // 3. Non-caster (Warrior/Rogue/Hunter): aggressive opportunistic stun.
+    if !is_spellcaster(tgt_class) {
+        return KidneyPlan::Fire { target: tgt, pos: tgt_pos, stacking: false };
+    }
+
+    // 4. Caster (Mage/Priest/Warlock/Paladin): the Kick → hold → Kidney chain.
+    let lockout = lockout_on(ctx, tgt);
+    let casting_school = ctx
+        .combatants
+        .get(&tgt)
+        .and_then(|i| i.casting_ability)
+        .map(|ab| abilities.get_unchecked(&ab).spell_school);
+    let kick_ready = !combatant.ability_cooldowns.contains_key(&AbilityType::Kick)
+        && my_pos.distance(tgt_pos) <= MELEE_RANGE;
+
+    if let Some(cast_school) = casting_school {
+        // Target is casting right now.
+        let covered = lockout.is_some_and(|(_, locked)| locked == cast_school);
+        if covered {
+            // The active lockout already covers this school — nothing to add.
+            return KidneyPlan::Hold(hold_reason("Kidney held: school lockout already covers this cast"));
+        }
+        if kick_ready {
+            // Kick runs later this same frame and will interrupt this cast — don't
+            // double-spend the 30s stun on a cast Kick handles for free.
+            return KidneyPlan::Hold(hold_reason("Kidney held: Kick will interrupt this cast"));
+        }
+        // Unlocked second-school cast and Kick unavailable: the stun is the only
+        // denial left, so spend it.
+        return KidneyPlan::Fire { target: tgt, pos: tgt_pos, stacking: false };
+    }
+
+    // Target not casting.
+    if let Some((rem, _)) = lockout {
+        if rem <= KIDNEY_CHAIN_BUFFER {
+            // Lockout lapsing — extend the denial with the stun.
+            return KidneyPlan::Fire { target: tgt, pos: tgt_pos, stacking: false };
+        }
+        // Lockout still denying. Pool energy if a Kidney isn't yet affordable so
+        // it's ready the instant the lockout reaches the chain buffer.
+        if !kidney_on_cd && energy < kidney_cost {
+            return KidneyPlan::Pool(hold_reason("pooling Kidney to extend school lockout"));
+        }
+        return KidneyPlan::Hold(hold_reason("Kidney held: school lockout still active"));
+    }
+
+    // No active lockout and not casting: do NOT sit on the stun waiting for a
+    // chain that may never start. A kiting healer is only briefly in melee and
+    // rarely casting at that instant, so an indefinite "wait for Kick first"
+    // hold wastes Kidney's 30s cooldown entirely (measured: a Rogue+healer comp
+    // cast Kidney once in a 283s match and cratered 91% -> 14% vs Warrior+Priest).
+    // Stun proactively instead — Kidney-then-Kick denies just as long as
+    // Kick-then-Kidney (6+4 == 4+6) and guarantees the stun lands while the
+    // target is reachable. The chain still extends an ACTIVE lockout (above) and
+    // still avoids double-spending on a cast Kick will catch (the kick_ready
+    // hold above); it just no longer reserves the stun pre-emptively.
+    KidneyPlan::Fire { target: tgt, pos: tgt_pos, stacking: false }
 }
 
 /// Try to use Ambush from stealth.

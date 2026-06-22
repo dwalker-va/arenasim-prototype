@@ -119,6 +119,8 @@ pub fn trap_system(
                                 spell_school: Some(SpellSchool::Frost),
                                 applied_this_frame: false,
                                 backlash_damage: None,
+                                dr_category_override: None,
+                                dispel_type: DispelType::Auto,
                             },
                         },
                         PlayMatchEntity,
@@ -246,6 +248,8 @@ pub fn slow_zone_system(
                             spell_school: Some(SpellSchool::Frost),
                             applied_this_frame: false,
                             backlash_damage: None,
+                            dr_category_override: None,
+                            dispel_type: DispelType::Auto,
                         });
                     }
                 } else {
@@ -266,6 +270,8 @@ pub fn slow_zone_system(
                             spell_school: Some(SpellSchool::Frost),
                             applied_this_frame: false,
                             backlash_damage: None,
+                            dr_category_override: None,
+                            dispel_type: DispelType::Auto,
                         }],
                     });
                 }

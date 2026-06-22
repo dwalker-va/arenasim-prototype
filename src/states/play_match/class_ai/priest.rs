@@ -623,6 +623,8 @@ fn try_power_word_shield(
             spell_school: None,
             applied_this_frame: false,
             backlash_damage: None,
+            dr_category_override: None,
+            dispel_type: DispelType::Auto,
         },
     });
 

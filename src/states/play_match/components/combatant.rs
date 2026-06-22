@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
-use super::super::match_config::{self, RogueOpener, WarlockCurse, WarriorShout, MageArmor, PaladinAura};
+use super::super::match_config::{self, RogueOpener, RoguePoison, WarlockCurse, WarriorShout, MageArmor, PaladinAura};
 use super::super::abilities::{AbilityType, ScalingStat, SpellSchool};
 use super::super::ability_config::AbilityConfig;
 use super::super::equipment::{ItemSlot, ItemId, ItemDefinitions};
@@ -184,6 +184,9 @@ pub struct Combatant {
     pub last_kill_target: Option<Entity>,
     /// Rogue-specific: which opener to use from stealth (Ambush or Cheap Shot)
     pub rogue_opener: RogueOpener,
+    /// Rogue-specific: which weapon poison is coated (currently only Crippling).
+    /// Drives the on-auto-hit poison proc in `combat_auto_attack`.
+    pub rogue_poison: RoguePoison,
     /// Warlock-specific: which curse to apply to each enemy target (indexed by enemy slot)
     pub warlock_curse_prefs: Vec<WarlockCurse>,
     /// Warrior-specific: which shout to use (Battle Shout, Demoralizing Shout, or Commanding Shout)
@@ -265,6 +268,7 @@ impl Combatant {
             last_target_swap_time: 0.0,
             last_kill_target: None,
             rogue_opener: RogueOpener::default(),
+            rogue_poison: RoguePoison::default(),
             warlock_curse_prefs: Vec::new(),
             warrior_shout: WarriorShout::default(),
             mage_armor: MageArmor::default(),
@@ -278,12 +282,45 @@ impl Combatant {
         slot: u8,
         class: match_config::CharacterClass,
         rogue_opener: RogueOpener,
+        rogue_poison: RoguePoison,
         warlock_curse_prefs: Vec<WarlockCurse>,
     ) -> Self {
         let mut combatant = Self::new(team, slot, class);
         combatant.rogue_opener = rogue_opener;
+        combatant.rogue_poison = rogue_poison;
         combatant.warlock_curse_prefs = warlock_curse_prefs;
         combatant
+    }
+
+    /// The weapon-poison self-buff marker aura for a Rogue (e.g. "Crippling
+    /// Poison"), shown in the buff bar to signify the coated weapon. `None` for
+    /// non-Rogues. Effectively permanent for the match (weapon poisons don't
+    /// expire mid-fight). Purely informational — the on-hit proc reads
+    /// `rogue_poison`, not this aura.
+    pub fn weapon_poison_self_buff(&self) -> Option<super::Aura> {
+        if self.class != match_config::CharacterClass::Rogue {
+            return None;
+        }
+        Some(super::Aura {
+            effect_type: super::AuraType::WeaponPoison,
+            // Effectively permanent for any match (cap is 300s); a finite value
+            // avoids `inf` in the buff-bar duration readout.
+            duration: 3600.0,
+            magnitude: 1.0,
+            break_on_damage_threshold: -1.0,
+            accumulated_damage: 0.0,
+            tick_interval: 0.0,
+            time_until_next_tick: 0.0,
+            caster: None,
+            ability_name: self.rogue_poison.name().to_string(),
+            fear_direction: (0.0, 0.0),
+            fear_direction_timer: 0.0,
+            spell_school: None,
+            applied_this_frame: false,
+            backlash_damage: None,
+            dr_category_override: None,
+            dispel_type: super::DispelType::Auto,
+        })
     }
 
     /// Create a new pet combatant with stats derived from the owner.
@@ -625,4 +662,7 @@ pub struct DispelPending {
     pub heal_on_success: Option<(Entity, f32)>,
     /// Optional filter: only remove auras matching these types (Master's Call only removes movement impairments)
     pub aura_type_filter: Option<Vec<AuraType>>,
+    /// When true, this dispel also removes poison/disease debuffs (Paladin Cleanse).
+    /// Dispel Magic / Devour Magic leave poisons untouched (false).
+    pub removes_poison: bool,
 }

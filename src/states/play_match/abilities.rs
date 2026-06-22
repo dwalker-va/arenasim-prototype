@@ -29,6 +29,42 @@ pub enum SpellSchool {
     None,
 }
 
+impl SpellSchool {
+    /// Encode this school as the `magnitude` of a `SpellSchoolLockout` aura.
+    /// The lockout aura carries the locked school in its `magnitude` field (it
+    /// has no dedicated school slot), so this and [`SpellSchool::from_lockout_magnitude`]
+    /// are the single round-trip used by the interrupt pipeline (writer) and the
+    /// AI (reader, e.g. the Rogue's second-school Kidney Shot check).
+    pub fn to_lockout_magnitude(self) -> f32 {
+        match self {
+            SpellSchool::Physical => 0.0,
+            SpellSchool::Frost => 1.0,
+            SpellSchool::Holy => 2.0,
+            SpellSchool::Shadow => 3.0,
+            SpellSchool::Arcane => 4.0,
+            SpellSchool::Fire => 5.0,
+            SpellSchool::Nature => 6.0,
+            SpellSchool::None => 7.0,
+        }
+    }
+
+    /// Decode a `SpellSchoolLockout` aura's `magnitude` back into a school.
+    /// Inverse of [`SpellSchool::to_lockout_magnitude`]; unrecognized values
+    /// fall back to `None` (treated as "no real school locked").
+    pub fn from_lockout_magnitude(magnitude: f32) -> SpellSchool {
+        match magnitude.round() as i32 {
+            0 => SpellSchool::Physical,
+            1 => SpellSchool::Frost,
+            2 => SpellSchool::Holy,
+            3 => SpellSchool::Shadow,
+            4 => SpellSchool::Arcane,
+            5 => SpellSchool::Fire,
+            6 => SpellSchool::Nature,
+            _ => SpellSchool::None,
+        }
+    }
+}
+
 /// What stat an ability scales with for damage/healing
 #[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
 pub enum ScalingStat {
@@ -58,6 +94,7 @@ pub enum AbilityType {
     MortalStrike, // Warrior damage + healing reduction
     Pummel,    // Warrior interrupt
     Kick,      // Rogue interrupt
+    CripplingPoison, // Rogue weapon poison: on-hit chance to slow (passive, not cast)
     // Warlock abilities
     Corruption,     // Shadow DoT
     Shadowbolt,     // Shadow projectile

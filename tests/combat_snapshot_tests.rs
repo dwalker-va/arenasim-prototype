@@ -16,7 +16,7 @@ use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::class_ai::combat_snapshot::CombatSnapshot;
 use arenasim::states::play_match::class_ai::CombatantInfo;
 use arenasim::states::play_match::{
-    ActiveAuras, Aura, AuraType, CastingState, ChannelingState, Combatant, DRCategory, DRTracker,
+    ActiveAuras, Aura, AuraType, CastingState, ChannelingState, Combatant, DRCategory, DRTracker, DispelType,
     Pet,
 };
 
@@ -36,6 +36,7 @@ fn target_info(entity: Entity, team: u8, class: CharacterClass) -> CombatantInfo
         stealthed: false,
         target: None,
         is_pet: false,
+        casting_ability: None,
         pet_type: None,
         pet: None,
     }
@@ -57,6 +58,8 @@ fn make_aura(effect_type: AuraType, ability_name: &str) -> Aura {
         spell_school: None,
         applied_this_frame: false,
         backlash_damage: None,
+        dr_category_override: None,
+        dispel_type: DispelType::Auto,
     }
 }
 
@@ -189,11 +192,11 @@ fn build_snapshot_from_world(world: &mut World) -> CombatSnapshot {
             (Without<CastingState>, Without<ChannelingState>),
         >,
         Query<
-            (Entity, &'static Combatant, &'static Transform, Option<&'static ActiveAuras>),
+            (Entity, &'static Combatant, &'static Transform, Option<&'static ActiveAuras>, &'static CastingState),
             With<CastingState>,
         >,
         Query<
-            (Entity, &'static Combatant, &'static Transform, Option<&'static ActiveAuras>),
+            (Entity, &'static Combatant, &'static Transform, Option<&'static ActiveAuras>, &'static ChannelingState),
             (With<ChannelingState>, Without<CastingState>),
         >,
         Query<(Entity, &'static DRTracker)>,

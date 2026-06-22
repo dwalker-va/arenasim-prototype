@@ -85,6 +85,8 @@ pub fn pet_ai_system(
                 stealthed: combatant.stealthed,
                 target: combatant.target,
                 is_pet: false,
+                // Pet AI doesn't read casts; this coarse snapshot omits CastingState.
+                casting_ability: None,
                 pet_type: None,
                 pet: owner_to_pet.get(&entity).copied(),
             })
@@ -588,7 +590,7 @@ fn try_devour_magic(
         caster_class: CharacterClass::Warlock,
         heal_on_success: Some((entity, heal_amount)),
         aura_type_filter: None,
-    });
+        removes_poison: false,    });
 
     true
 }
@@ -687,7 +689,7 @@ fn execute_masters_call(
         caster_class: CharacterClass::Hunter,
         heal_on_success: None,
         aura_type_filter: Some(vec![AuraType::Root, AuraType::MovementSpeedSlow]),
-    });
+        removes_poison: false,    });
 
     commands.spawn((
         DispelBurst {

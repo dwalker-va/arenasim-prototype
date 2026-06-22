@@ -16,7 +16,7 @@ use bevy::prelude::*;
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::class_ai::combat_snapshot::CombatSnapshot;
 use arenasim::states::play_match::class_ai::{dispel_priority, CombatantInfo};
-use arenasim::states::play_match::{Aura, AuraType, DRCategory, DRTracker, PetType};
+use arenasim::states::play_match::{Aura, AuraType, DRCategory, DRTracker, DispelType, PetType};
 
 // ============================================================================
 // Fixture helpers
@@ -38,6 +38,7 @@ fn info(entity: Entity, team: u8, class: CharacterClass) -> CombatantInfo {
         stealthed: false,
         target: None,
         is_pet: false,
+        casting_ability: None,
         pet_type: None,
         pet: None,
     }
@@ -46,6 +47,7 @@ fn info(entity: Entity, team: u8, class: CharacterClass) -> CombatantInfo {
 fn pet_info(entity: Entity, team: u8, owner_class: CharacterClass) -> CombatantInfo {
     CombatantInfo {
         is_pet: true,
+        casting_ability: None,
         pet_type: Some(PetType::Felhunter),
         ..info(entity, team, owner_class)
     }
@@ -67,6 +69,8 @@ fn aura_with(effect_type: AuraType, caster: Option<Entity>, break_on_damage_thre
         spell_school: None,
         applied_this_frame: false,
         backlash_damage: None,
+        dr_category_override: None,
+        dispel_type: DispelType::Auto,
     }
 }
 

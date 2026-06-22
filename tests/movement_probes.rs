@@ -887,6 +887,13 @@ mod priest_postures {
         // contaminate the probe: the Rogue's visible teammate would also be
         // forced onto the Priest and legitimately pressure it pre-opener.
         cfg.team2_kill_target = Some(1);
+        // Pin the Ambush opener: this probe tests the Priest's stealth-opener
+        // posture filtering, not the Rogue's kit. Ambush is the canonical
+        // stealth-burst opener and was the project default when this probe was
+        // written; the new CheapShot→Kidney default (a 10s stun lockdown that
+        // suppresses the PRESSURED transition) is covered by the rogue_chain
+        // probes instead.
+        cfg.team2_rogue_openers = vec!["Ambush".to_string()];
 
         let (_result, _timeline, trace) = run_observed_traced(cfg);
 
@@ -926,6 +933,7 @@ mod priest_postures {
             );
         }
     }
+
 
     /// (d) TIME-IN-FREE PROBE — Warrior+Priest mirror, unforced targeting:
     /// each Priest spends substantial time in FREE. Kill-target acquisition
@@ -1411,6 +1419,11 @@ mod escape_windows {
             vec!["Rogue", "Mage"],
             Some(16),
         );
+        // Pin the Rogue's original Ambush opener: this probe tests the Priest's
+        // critical-heal-during-escape-window behavior, with the Rogue as
+        // incidental melee pressure. The new CheapShot→Kidney default is covered
+        // by the rogue_chain probes.
+        cfg.team2_rogue_openers = vec!["Ambush".to_string(), "Ambush".to_string()];
         cfg.team1_kill_target = Some(0);
         cfg.team2_kill_target = Some(0);
         let (result, _timeline, trace) = run_observed_traced(cfg);
@@ -1433,6 +1446,7 @@ mod escape_windows {
             1,
         );
     }
+
 
     /// (d) MULTI-ATTACKER PROBE — two melee on the Priest, only one stunned:
     /// no EscapeWindowOpen ever fires. Non-vacuity is established
@@ -2308,11 +2322,17 @@ mod paladin_postures {
     /// melee, so a healthy scrum never flips the posture.
     #[test]
     fn healthy_no_healer_preserves_melee_identity() {
-        let cfg = create_config(
+        let mut cfg = create_config(
             vec!["Paladin", "Warrior"],
             vec!["Warrior", "Rogue"],
             Some(1),
         );
+        // This probe measures the Paladin's melee identity vs a melee comp; the
+        // Rogue is incidental melee pressure. Pin its original Ambush opener (the
+        // default when this probe was written) so the pressure profile is stable
+        // and decoupled from the new CheapShot→Kidney stun-chain default, which
+        // the rogue_chain probes cover.
+        cfg.team2_rogue_openers = vec!["Ambush".to_string(), "Ambush".to_string()];
         let (result, timeline, trace) = run_observed_traced(cfg);
         let gate = timeline.gates_open_time.expect("gates opened");
 
@@ -2397,6 +2417,7 @@ mod paladin_postures {
             frac * 100.0
         );
     }
+
 
     /// (f) CHIP-DAMAGE PROBE — a teammate takes light damage (stays above
     /// the urgency threshold) mid-dip: the dip still completes (the cast
@@ -2530,7 +2551,7 @@ mod paladin_unit {
     use arenasim::states::play_match::class_ai::CombatantInfo;
     use arenasim::states::play_match::components::{Combatant, HealerPosture, Posture};
     use arenasim::states::play_match::movement_config::MovementConfig;
-    use arenasim::states::play_match::{Aura, AuraType, DRCategory, DRTracker};
+    use arenasim::states::play_match::{Aura, AuraType, DRCategory, DRTracker, DispelType};
     use bevy::prelude::*;
 
     fn info(entity: Entity, team: u8, class: CharacterClass, pos: Vec3) -> CombatantInfo {
@@ -2549,6 +2570,7 @@ mod paladin_unit {
             stealthed: false,
             target: None,
             is_pet: false,
+            casting_ability: None,
             pet_type: None,
             pet: None,
         }
@@ -2752,7 +2774,7 @@ mod bucket_a_unit {
     use arenasim::states::match_config::CharacterClass;
     use arenasim::states::play_match::class_ai::combat_snapshot::CombatSnapshot;
     use arenasim::states::play_match::class_ai::{select_softer_melee_target, CombatantInfo};
-    use arenasim::states::play_match::{Aura, AuraType};
+    use arenasim::states::play_match::{Aura, AuraType, DispelType};
     use bevy::prelude::*;
 
     fn info(entity: Entity, team: u8, class: CharacterClass, hp: f32) -> CombatantInfo {
@@ -2771,6 +2793,7 @@ mod bucket_a_unit {
             stealthed: false,
             target: None,
             is_pet: false,
+            casting_ability: None,
             pet_type: None,
             pet: None,
         }
@@ -2792,6 +2815,8 @@ mod bucket_a_unit {
             spell_school: None,
             applied_this_frame: false,
             backlash_damage: None,
+            dr_category_override: None,
+            dispel_type: DispelType::Auto,
         }
     }
 
@@ -3294,6 +3319,99 @@ mod psychic_scream {
         assert_eq!(
             dip_completes, 0,
             "a focused Priest should self-peel, not complete an offensive dip"
+        );
+    }
+}
+
+/// Rogue Kidney Shot chain probes: the default Cheap Shot → Kidney Shot opener
+/// (a ~10s undiminished lockdown on the kill target, enabled by Kidney Shot's
+/// own DR category) and the no-double-spend Kick/Kidney denial chain against a
+/// healer.
+mod rogue_chain {
+    use super::priest_postures::run_observed_traced;
+    use super::*;
+
+    /// Rogue (team 1) vs Priest (team 1 enemy). The Rogue trains the Priest.
+    fn rogue_vs_priest(seed: u64) -> Vec<serde_json::Value> {
+        let cfg = create_config(vec!["Rogue"], vec!["Priest"], Some(seed));
+        let (_r, _t, trace) = run_observed_traced(cfg);
+        trace
+    }
+
+    /// The Rogue's ordered non-Stealth ability casts: (sim_time, ability, target_id).
+    /// Note: Kick is dispatched by `check_interrupts`, not the class AI, so it
+    /// does NOT appear here — only `decide_abilities` casts are traced.
+    fn rogue_casts(trace: &[serde_json::Value]) -> Vec<(f32, String, i64)> {
+        trace
+            .iter()
+            .filter(|v| {
+                v["kind"] == "ability_decision"
+                    && v["actor"]["class"] == "Rogue"
+                    && v["outcome"]["type"] == "action_taken"
+                    && v["outcome"]["ability"] != "Stealth"
+            })
+            .map(|v| {
+                (
+                    v["sim_time"].as_f64().unwrap() as f32,
+                    v["outcome"]["ability"].as_str().unwrap().to_string(),
+                    v["outcome"]["target_id"].as_i64().unwrap(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn opener_chains_cheapshot_into_kidney_on_kill_target() {
+        let trace = rogue_vs_priest(404);
+        let casts = rogue_casts(&trace);
+        assert!(
+            casts.len() >= 2,
+            "Rogue should open with at least two abilities, got {casts:?}"
+        );
+
+        let (t_cs, cs, cs_target) = &casts[0];
+        let (t_ks, ks, ks_target) = &casts[1];
+
+        assert_eq!(cs, "CheapShot", "default opener is Cheap Shot");
+        assert_eq!(ks, "KidneyShot", "Cheap Shot chains into Kidney Shot");
+        assert_eq!(
+            cs_target, ks_target,
+            "both opener stuns land on the same (kill) target"
+        );
+
+        // Hold-until-expiry: Kidney fires ~0.5s before the 4s Cheap Shot lapses,
+        // not immediately — a near-seamless ~10s lockdown rather than ~8s of
+        // overlap. (This also proves the opener pooled energy: a naive
+        // fire-when-affordable would chain at ~2s, not ~3.5s.)
+        let gap = t_ks - t_cs;
+        assert!(
+            (3.0..=4.0).contains(&gap),
+            "Kidney Shot should chain near Cheap Shot's expiry (gap 3.0-4.0s), got {gap:.2}s"
+        );
+    }
+
+    #[test]
+    fn chain_holds_kidney_rather_than_double_spending() {
+        // The no-double-spend behavior surfaces as the planner withholding Kidney
+        // Shot with a "Kidney held: …" trace note while a Kick or school lockout
+        // is already denying the healer's casts. Its presence proves the chain
+        // engaged instead of blindly stacking the stun onto a cast Kick handles.
+        let trace = rogue_vs_priest(404);
+        let held_for_chain = trace.iter().any(|v| {
+            v["kind"] == "ability_decision"
+                && v["actor"]["class"] == "Rogue"
+                && v["candidates"].as_array().is_some_and(|cs| {
+                    cs.iter().any(|c| {
+                        c["ability"] == "KidneyShot"
+                            && c["reason"]["PreconditionUnmet"]["note"]
+                                .as_str()
+                                .is_some_and(|n| n.starts_with("Kidney held"))
+                    })
+                })
+        });
+        assert!(
+            held_for_chain,
+            "the chain should hold Kidney Shot at least once (trace note 'Kidney held: …')"
         );
     }
 }

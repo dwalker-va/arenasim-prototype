@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use super::abilities::{AbilityType, ScalingStat, SpellSchool};
-use super::components::AuraType;
+use super::components::{AuraType, DRCategory, DispelType};
 
 /// Default value for break_on_damage: -1.0 means the aura doesn't break on damage.
 fn default_break_on_damage() -> f32 {
@@ -53,6 +53,18 @@ pub struct AuraEffect {
     /// Tick interval for DoT effects in seconds (0.0 = no ticks)
     #[serde(default)]
     pub tick_interval: f32,
+    /// Optional diminishing-returns category override for the applied aura. When
+    /// omitted (the default), the DR bucket is derived from `aura_type`. Set this
+    /// only when an ability needs its own bucket distinct from others sharing the
+    /// same aura type — currently just Kidney Shot (`Some(KidneyShotStun)`), which
+    /// must not share stun DR with Cheap Shot.
+    #[serde(default)]
+    pub dr_category: Option<DRCategory>,
+    /// Dispel classification of the applied aura. Defaults to `Auto` (magic
+    /// removability derived from the aura type). Set `Poison` for poison debuffs
+    /// (Crippling Poison) so Dispel Magic can't remove them — only a cleanse can.
+    #[serde(default)]
+    pub dispel_type: DispelType,
 }
 
 /// Projectile visual configuration.
@@ -125,6 +137,11 @@ pub struct AbilityConfig {
     /// Aura to apply on hit/cast (if any)
     #[serde(default)]
     pub applies_aura: Option<AuraEffect>,
+    /// On-hit application chance (0.0–1.0) for proc-style effects like weapon
+    /// poisons. `None` for everything else (the effect applies deterministically).
+    /// Crippling Poison sets this so its slow procs probabilistically per swing.
+    #[serde(default)]
+    pub application_chance: Option<f32>,
     /// Projectile travel speed in units/second (None = instant effect)
     #[serde(default)]
     pub projectile_speed: Option<f32>,
@@ -292,6 +309,7 @@ impl AbilityDefinitions {
             AbilityType::MortalStrike,
             AbilityType::Pummel,
             AbilityType::Kick,
+            AbilityType::CripplingPoison,
             AbilityType::Corruption,
             AbilityType::Shadowbolt,
             AbilityType::Fear,
@@ -428,6 +446,7 @@ mod tests {
             healing_base_max: 0.0,
             healing_coefficient: 0.0,
             applies_aura: None,
+            application_chance: None,
             projectile_speed: None,
             projectile_visuals: None,
             spell_school: SpellSchool::Frost,
@@ -465,6 +484,7 @@ mod tests {
             healing_base_max: 20.0,
             healing_coefficient: 0.75,
             applies_aura: None,
+            application_chance: None,
             projectile_speed: None,
             projectile_visuals: None,
             spell_school: SpellSchool::Holy,

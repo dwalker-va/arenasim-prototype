@@ -66,11 +66,11 @@ impl CombatSnapshot {
             (Without<CastingState>, Without<ChannelingState>),
         >,
         casting_auras: &Query<
-            (Entity, &Combatant, &Transform, Option<&ActiveAuras>),
+            (Entity, &Combatant, &Transform, Option<&ActiveAuras>, &CastingState),
             With<CastingState>,
         >,
         channeling_auras: &Query<
-            (Entity, &Combatant, &Transform, Option<&ActiveAuras>),
+            (Entity, &Combatant, &Transform, Option<&ActiveAuras>, &ChannelingState),
             (With<ChannelingState>, Without<CastingState>),
         >,
         dr_tracker_query: &Query<(Entity, &DRTracker)>,
@@ -89,8 +89,8 @@ impl CombatSnapshot {
         let all_entities = aura_query
             .iter()
             .map(|(entity, _, _, _)| entity)
-            .chain(casting_auras.iter().map(|(entity, _, _, _)| entity))
-            .chain(channeling_auras.iter().map(|(entity, _, _, _)| entity));
+            .chain(casting_auras.iter().map(|(entity, _, _, _, _)| entity))
+            .chain(channeling_auras.iter().map(|(entity, _, _, _, _)| entity));
         for entity in all_entities {
             if let Ok(pet) = pet_query.get(entity) {
                 owner_to_pet.insert(pet.owner, entity);
@@ -98,10 +98,10 @@ impl CombatSnapshot {
         }
 
         // Shared insert for all three sources: full CombatantInfo + cooldowns.
-        let mut insert_combatant = |entity: Entity,
+        let insert_combatant = |entity: Entity,
                                     combatant: &Combatant,
                                     transform: &Transform,
-                                    is_casting: bool,
+                                    casting_ability: Option<AbilityType>,
                                     combatants: &mut BTreeMap<Entity, CombatantInfo>,
                                     ability_cooldowns: &mut BTreeMap<
             Entity,
@@ -110,7 +110,7 @@ impl CombatSnapshot {
             let pet_comp = pet_query.get(entity).ok();
             // Estimated planar velocity: heading (Transform faces travel
             // direction) × base speed, zeroed while casting/channeling (planted).
-            let velocity = if is_casting {
+            let velocity = if casting_ability.is_some() {
                 Vec3::ZERO
             } else {
                 let fwd = transform.rotation * Vec3::Z;
@@ -131,6 +131,7 @@ impl CombatSnapshot {
                 stealthed: combatant.stealthed,
                 target: combatant.target,
                 is_pet: pet_comp.is_some(),
+                casting_ability,
                 pet_type: pet_comp.map(|p| p.pet_type),
                 pet: owner_to_pet.get(&entity).copied(),
             });
@@ -145,20 +146,20 @@ impl CombatSnapshot {
         };
 
         for (entity, combatant, transform, auras_opt) in aura_query.iter() {
-            insert_combatant(entity, &combatant, transform, false, &mut combatants, &mut ability_cooldowns);
+            insert_combatant(entity, &combatant, transform, None, &mut combatants, &mut ability_cooldowns);
             if let Some(auras) = auras_opt {
                 active_auras.insert(entity, auras.auras.clone());
             }
         }
 
-        for (entity, combatant, transform, auras_opt) in casting_auras.iter() {
-            insert_combatant(entity, combatant, transform, true, &mut combatants, &mut ability_cooldowns);
+        for (entity, combatant, transform, auras_opt, cast_state) in casting_auras.iter() {
+            insert_combatant(entity, combatant, transform, Some(cast_state.ability), &mut combatants, &mut ability_cooldowns);
             if let Some(auras) = auras_opt {
                 active_auras.insert(entity, auras.auras.clone());
             }
         }
-        for (entity, combatant, transform, auras_opt) in channeling_auras.iter() {
-            insert_combatant(entity, combatant, transform, true, &mut combatants, &mut ability_cooldowns);
+        for (entity, combatant, transform, auras_opt, channel_state) in channeling_auras.iter() {
+            insert_combatant(entity, combatant, transform, Some(channel_state.ability), &mut combatants, &mut ability_cooldowns);
             if let Some(auras) = auras_opt {
                 active_auras.insert(entity, auras.auras.clone());
             }

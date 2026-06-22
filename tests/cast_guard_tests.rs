@@ -13,7 +13,7 @@ use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::class_ai::cast_guard::{pre_cast_ok, PreCastOpts};
 use arenasim::states::play_match::class_ai::{CombatContext, CombatantInfo};
 use arenasim::states::play_match::{
-    AbilityDefinitions, AbilityType, ActiveAuras, Aura, AuraType, Combatant, DRTracker, ResourceType,
+    AbilityDefinitions, AbilityType, ActiveAuras, Aura, AuraType, Combatant, DRTracker, DispelType, ResourceType,
     SpellSchool,
 };
 
@@ -35,6 +35,7 @@ fn target_info(entity: Entity, team: u8, class: CharacterClass) -> CombatantInfo
         stealthed: false,
         target: None,
         is_pet: false,
+        casting_ability: None,
         pet_type: None,
         pet: None,
     }
@@ -57,6 +58,8 @@ fn make_aura(effect_type: AuraType, ability_name: &str, caster: Option<Entity>) 
         spell_school: None,
         applied_this_frame: false,
         backlash_damage: None,
+        dr_category_override: None,
+        dispel_type: DispelType::Auto,
     }
 }
 

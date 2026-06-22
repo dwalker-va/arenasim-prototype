@@ -18,7 +18,7 @@ use crate::states::play_match::systems::{
     self, combatant_id, Combatant, FloatingTextState, GameRng, MatchCountdown, ShadowSightState,
     SimulationSpeed,
 };
-use crate::states::play_match::components::{Pet, PetType, DRTracker};
+use crate::states::play_match::components::{ActiveAuras, Pet, PetType, DRTracker};
 use crate::states::play_match::constants::PET_SLOT_BASE;
 use crate::states::play_match::decision_trace::{DecisionTrace, TraceWriter};
 use crate::states::match_config::CharacterClass;
@@ -230,6 +230,7 @@ fn headless_setup_match(
         if let Some(character) = character_opt {
             combat_log.register_combatant(combatant_id(1, *character));
             let rogue_opener = config.team1_rogue_openers.get(i).copied().unwrap_or_default();
+            let rogue_poison = config.team1_rogue_poisons.get(i).copied().unwrap_or_default();
             let warlock_curse_prefs = config.team1_warlock_curse_prefs.get(i).cloned().unwrap_or_default();
             let warrior_shout = config.team1_warrior_shouts.get(i).copied().unwrap_or_default();
             let mage_armor = config.team1_mage_armors.get(i).copied().unwrap_or_default();
@@ -238,12 +239,13 @@ fn headless_setup_match(
             let mut loadout = resolve_loadout(*character, &default_loadouts, &equipment_overrides);
             enforce_two_hand_conflicts(&mut loadout, &item_defs);
             let position = Vec3::new(team1_spawn_x, 1.0, (i as f32 - 1.0) * 3.0);
-            let mut combatant = Combatant::new_with_curse_prefs(1, i as u8, *character, rogue_opener, warlock_curse_prefs);
+            let mut combatant = Combatant::new_with_curse_prefs(1, i as u8, *character, rogue_opener, rogue_poison, warlock_curse_prefs);
             combatant.warrior_shout = warrior_shout;
             combatant.mage_armor = mage_armor;
             combatant.paladin_aura = paladin_aura;
             combatant.apply_equipment(&loadout, &item_defs);
             let combatant_clone = combatant.clone();
+            let weapon_poison_buff = combatant.weapon_poison_self_buff();
             let entity = commands.spawn((
                 Transform::from_translation(position),
                 combatant,
@@ -252,6 +254,9 @@ fn headless_setup_match(
                     next_pattern_index: 0,
                 },
             )).id();
+            if let Some(buff) = weapon_poison_buff {
+                commands.entity(entity).insert(ActiveAuras { auras: vec![buff] });
+            }
 
             // Log equipment loadout
             combat_log.log(
@@ -306,6 +311,7 @@ fn headless_setup_match(
         if let Some(character) = character_opt {
             combat_log.register_combatant(combatant_id(2, *character));
             let rogue_opener = config.team2_rogue_openers.get(i).copied().unwrap_or_default();
+            let rogue_poison = config.team2_rogue_poisons.get(i).copied().unwrap_or_default();
             let warlock_curse_prefs = config.team2_warlock_curse_prefs.get(i).cloned().unwrap_or_default();
             let warrior_shout = config.team2_warrior_shouts.get(i).copied().unwrap_or_default();
             let mage_armor = config.team2_mage_armors.get(i).copied().unwrap_or_default();
@@ -314,12 +320,13 @@ fn headless_setup_match(
             let mut loadout = resolve_loadout(*character, &default_loadouts, &equipment_overrides);
             enforce_two_hand_conflicts(&mut loadout, &item_defs);
             let position = Vec3::new(team2_spawn_x, 1.0, (i as f32 - 1.0) * 3.0);
-            let mut combatant = Combatant::new_with_curse_prefs(2, i as u8, *character, rogue_opener, warlock_curse_prefs);
+            let mut combatant = Combatant::new_with_curse_prefs(2, i as u8, *character, rogue_opener, rogue_poison, warlock_curse_prefs);
             combatant.warrior_shout = warrior_shout;
             combatant.mage_armor = mage_armor;
             combatant.paladin_aura = paladin_aura;
             combatant.apply_equipment(&loadout, &item_defs);
             let combatant_clone = combatant.clone();
+            let weapon_poison_buff = combatant.weapon_poison_self_buff();
             let entity = commands.spawn((
                 Transform::from_translation(position),
                 combatant,
@@ -328,6 +335,9 @@ fn headless_setup_match(
                     next_pattern_index: 0,
                 },
             )).id();
+            if let Some(buff) = weapon_poison_buff {
+                commands.entity(entity).insert(ActiveAuras { auras: vec![buff] });
+            }
 
             // Log equipment loadout
             combat_log.log(

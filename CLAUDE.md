@@ -34,6 +34,17 @@ Use this to verify combat changes without manual testing.
 
 Look up WoW Classic spell and item data for implementation reference.
 
+**Setup (required on a fresh checkout):** the server is a local Node project at
+`tools/wowhead-mcp/` whose `dist/` and `node_modules/` are gitignored, so it
+must be built before use:
+```bash
+cd tools/wowhead-mcp && npm install && npm run build
+```
+Without this, the MCP fails to connect with `-32000` (Node can't find
+`dist/index.js`) and `mcp__wowhead-classic__*` tools are unavailable. After
+building, reconnect via `/mcp` (or restart). The server fetches live from
+Wowhead's Classic tooltip API; icon URLs are `https://wow.zamimg.com/images/wow/icons/large/<icon>.jpg`.
+
 **Spell Tools** — use when implementing new abilities:
 ```
 mcp__wowhead-classic__lookup_spell("Frostbolt")

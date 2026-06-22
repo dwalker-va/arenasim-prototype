@@ -90,6 +90,27 @@ pub enum AuraType {
     /// Applied by Unstable Affliction dispel backlash. Has its own DR category.
     /// Magnitude unused (always 1.0 by convention).
     Silence,
+    /// Marker buff signifying a Rogue has a weapon poison coated (e.g. Crippling
+    /// Poison). Purely informational — drives the buff-bar indicator; the on-hit
+    /// proc logic reads the Rogue's `rogue_poison` config, not this aura.
+    /// Magnitude unused (always 1.0 by convention). Not dispellable, no DR.
+    WeaponPoison,
+}
+
+/// How a debuff is classified for dispel/removal. Orthogonal to `AuraType` so a
+/// single effect (e.g. a `MovementSpeedSlow`) can be magic OR poison.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize, Default)]
+pub enum DispelType {
+    /// Derive removability from the aura type (the historical behavior):
+    /// magic-dispellable types are removable by Dispel Magic, others are not.
+    #[default]
+    Auto,
+    /// A poison debuff — NOT removable by Dispel Magic; removable only by a
+    /// poison cleanse (Paladin Cleanse). Crippling Poison uses this.
+    Poison,
+    /// A disease debuff — reserved for future use; same family as Poison,
+    /// removed by a disease/poison cleanse rather than Dispel Magic.
+    Disease,
 }
 
 impl AuraType {
@@ -150,14 +171,41 @@ pub struct Aura {
     /// Stored on the aura (rather than recomputed at dispel time) so caster death or stat
     /// changes after application do not change the backlash amount. None for all non-UA auras.
     pub backlash_damage: Option<f32>,
+    /// Per-aura diminishing-returns category override. When `Some`, this wins over the
+    /// category derived from `effect_type` (see [`Aura::dr_category`]). Used so two abilities
+    /// that apply the same `AuraType::Stun` can land in different DR buckets — Kidney Shot
+    /// carries `Some(DRCategory::KidneyShotStun)` so it does not share DR with Cheap Shot or
+    /// other stuns. `None` for every other aura (they fall back to `from_aura_type`).
+    pub dr_category_override: Option<DRCategory>,
+    /// Dispel classification (magic-derived `Auto` by default, or `Poison`/`Disease`).
+    /// Decouples removability from `effect_type` so e.g. a poison `MovementSpeedSlow`
+    /// (Crippling Poison) is immune to Dispel Magic but removable by a poison cleanse.
+    pub dispel_type: DispelType,
 }
 
 impl Aura {
+    /// Resolved diminishing-returns category for this aura: the per-aura
+    /// `dr_category_override` if set, otherwise derived from `effect_type`.
+    /// Returns `None` for non-CC auras. This is the single source of truth for
+    /// an aura's DR bucket — all DR-application and CC-replacement logic must go
+    /// through here so per-ability overrides (e.g. Kidney Shot's dedicated
+    /// `KidneyShotStun` bucket) are honored consistently.
+    pub fn dr_category(&self) -> Option<DRCategory> {
+        self.dr_category_override
+            .or_else(|| DRCategory::from_aura_type(&self.effect_type))
+    }
+
     /// Returns true if this aura can be removed by Dispel Magic.
     /// Magic-dispellable aura types (slows, roots, fear, polymorph) are always dispellable.
     /// DoTs are dispellable only if they have a magic spell school (Corruption, Immolate)
     /// but not if they're physical (Rend).
     pub fn can_be_dispelled(&self) -> bool {
+        // Poison/disease debuffs are NOT magic — Dispel Magic cannot touch them
+        // (they are removed by a poison/disease cleanse instead; see `is_cleansable_poison`).
+        if !matches!(self.dispel_type, DispelType::Auto) {
+            return false;
+        }
+
         // Inherently magic-dispellable aura types
         if self.effect_type.is_magic_dispellable() {
             return true;
@@ -172,6 +220,13 @@ impl Aura {
         }
 
         false
+    }
+
+    /// Returns true if this aura is a poison/disease debuff removable by a
+    /// poison cleanse (Paladin Cleanse). Mutually exclusive with
+    /// `can_be_dispelled` (magic).
+    pub fn is_cleansable_poison(&self) -> bool {
+        matches!(self.dispel_type, DispelType::Poison | DispelType::Disease)
     }
 }
 
@@ -234,7 +289,8 @@ impl AuraPending {
                 spell_school,
                 applied_this_frame: false,
                 backlash_damage: None,
-            },
+                dr_category_override: aura_effect.dr_category,
+                dispel_type: aura_effect.dispel_type,            },
         })
     }
 
@@ -272,7 +328,8 @@ impl AuraPending {
                 spell_school,
                 applied_this_frame: false,
                 backlash_damage: None,
-            },
+                dr_category_override: aura_effect.dr_category,
+                dispel_type: aura_effect.dispel_type,            },
         })
     }
 
@@ -310,7 +367,8 @@ impl AuraPending {
                 spell_school,
                 applied_this_frame: false,
                 backlash_damage: None,
-            },
+                dr_category_override: aura_effect.dr_category,
+                dispel_type: aura_effect.dispel_type,            },
         })
     }
 }
@@ -332,10 +390,15 @@ pub enum DRCategory {
     Roots = 3,
     Slows = 4,
     Silence = 5,
+    /// Kidney Shot's dedicated stun DR bucket. Unique in this game — nothing
+    /// else shares it — so a Cheap Shot opener into an immediate Kidney Shot
+    /// lands two undiminished stuns back-to-back. Set only via an aura's
+    /// `dr_category_override`, never returned by `from_aura_type`.
+    KidneyShotStun = 6,
 }
 
 impl DRCategory {
-    pub const COUNT: usize = 6;
+    pub const COUNT: usize = 7;
 
     #[inline]
     pub fn index(self) -> usize {

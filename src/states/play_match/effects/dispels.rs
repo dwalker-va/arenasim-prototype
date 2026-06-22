@@ -48,7 +48,9 @@ pub fn process_dispels(
                     if let Some(ref filter) = pending.aura_type_filter {
                         filter.contains(&a.effect_type)
                     } else {
+                        // Cleanse also lifts poison/disease; Dispel Magic doesn't.
                         a.can_be_dispelled()
+                            || (pending.removes_poison && a.is_cleansable_poison())
                     }
                 })
                 .map(|(i, _)| i)

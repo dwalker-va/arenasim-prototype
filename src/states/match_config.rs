@@ -13,9 +13,11 @@ use crate::states::play_match::equipment::{ItemId, ItemSlot};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum RogueOpener {
     /// High damage opener from stealth
-    #[default]
     Ambush,
-    /// 4 second stun opener from stealth
+    /// 4 second stun opener from stealth. Default: it chains into Kidney Shot
+    /// on the kill target for a ~10s stun lockdown (Kidney Shot has its own DR
+    /// category, so the two stuns do not diminish each other).
+    #[default]
     CheapShot,
 }
 
@@ -33,6 +35,42 @@ impl RogueOpener {
         match self {
             RogueOpener::Ambush => "High damage opener",
             RogueOpener::CheapShot => "4 sec stun opener",
+        }
+    }
+}
+
+/// Rogue weapon-poison choice. A strategic lever like the stealth opener — which
+/// poison the Rogue coats its weapons with. Extensible (Mind-numbing, Wound,
+/// Deadly, etc. to come); for now only Crippling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum RoguePoison {
+    /// Crippling Poison — auto-attacks have a chance to apply a strong (70%)
+    /// movement slow to the target. The default poison.
+    #[default]
+    Crippling,
+}
+
+impl RoguePoison {
+    /// Get the display name
+    pub fn name(&self) -> &'static str {
+        match self {
+            RoguePoison::Crippling => "Crippling Poison",
+        }
+    }
+
+    /// Get a short description
+    pub fn description(&self) -> &'static str {
+        match self {
+            RoguePoison::Crippling => "Auto-attacks may slow the target",
+        }
+    }
+
+    /// The ability definition that holds this poison's data (slow magnitude,
+    /// duration, application chance).
+    pub fn ability(&self) -> super::play_match::abilities::AbilityType {
+        use super::play_match::abilities::AbilityType;
+        match self {
+            RoguePoison::Crippling => AbilityType::CripplingPoison,
         }
     }
 }
@@ -368,6 +406,10 @@ pub struct MatchConfig {
     pub team1_rogue_openers: Vec<RogueOpener>,
     /// Team 2's rogue opener preferences (one per slot, defaults to Ambush)
     pub team2_rogue_openers: Vec<RogueOpener>,
+    /// Team 1's rogue weapon-poison preferences (one per slot, defaults to Crippling)
+    pub team1_rogue_poisons: Vec<RoguePoison>,
+    /// Team 2's rogue weapon-poison preferences (one per slot, defaults to Crippling)
+    pub team2_rogue_poisons: Vec<RoguePoison>,
     /// Team 1's warlock curse preferences: [warlock_slot][enemy_target_index] -> curse
     /// Outer vec indexed by team slot, inner vec indexed by enemy target slot
     pub team1_warlock_curse_prefs: Vec<Vec<WarlockCurse>>,
@@ -409,6 +451,8 @@ impl Default for MatchConfig {
             team2_cc_target: None,   // Use heuristics by default
             team1_rogue_openers: vec![RogueOpener::default()],
             team2_rogue_openers: vec![RogueOpener::default()],
+            team1_rogue_poisons: vec![RoguePoison::default()],
+            team2_rogue_poisons: vec![RoguePoison::default()],
             // One vec per slot, inner vec has curse pref per enemy (defaults to Agony)
             team1_warlock_curse_prefs: vec![vec![WarlockCurse::default()]],
             team2_warlock_curse_prefs: vec![vec![WarlockCurse::default()]],
@@ -439,6 +483,7 @@ impl MatchConfig {
             }
         }
         self.team1_rogue_openers.resize(size, RogueOpener::default());
+        self.team1_rogue_poisons.resize(size, RoguePoison::default());
         // Resize curse prefs: one inner vec per slot, each sized to enemy team
         let enemy_size = self.team2_size;
         self.team1_warlock_curse_prefs.resize(size, vec![WarlockCurse::default(); enemy_size]);
@@ -463,6 +508,7 @@ impl MatchConfig {
             }
         }
         self.team2_rogue_openers.resize(size, RogueOpener::default());
+        self.team2_rogue_poisons.resize(size, RoguePoison::default());
         // Resize curse prefs: one inner vec per slot, each sized to enemy team
         let enemy_size = self.team1_size;
         self.team2_warlock_curse_prefs.resize(size, vec![WarlockCurse::default(); enemy_size]);

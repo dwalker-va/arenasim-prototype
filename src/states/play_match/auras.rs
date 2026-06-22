@@ -136,7 +136,7 @@ pub fn reflect_instant_cc_in_snapshot(
         return;
     }
 
-    let dr_category = DRCategory::from_aura_type(&aura.effect_type);
+    let dr_category = aura.dr_category();
 
     // DR immunity rejects the CC entirely.
     if let Some(category) = dr_category {
@@ -161,7 +161,7 @@ pub fn reflect_instant_cc_in_snapshot(
     if let Some(category) = dr_category {
         if let Some(pos) = entry
             .iter()
-            .position(|a| DRCategory::from_aura_type(&a.effect_type) == Some(category))
+            .position(|a| a.dr_category() == Some(category))
         {
             entry.swap_remove(pos);
         }
@@ -326,7 +326,7 @@ pub fn apply_pending_auras(
         }
 
         // Check diminishing returns for CC auras
-        let dr_category = DRCategory::from_aura_type(&pending.aura.effect_type);
+        let dr_category = pending.aura.dr_category();
         let mut dr_multiplier: f32 = 1.0;
         if let Some(category) = dr_category {
             if let Some(ref mut tracker) = dr_tracker {
@@ -637,7 +637,7 @@ pub fn apply_pending_auras(
             // CC replacement: remove existing CC of same DR category before adding new one
             if let Some(ref mut active_auras) = active_auras {
                 if let Some(pos) = active_auras.auras.iter().position(|a| {
-                    DRCategory::from_aura_type(&a.effect_type) == Some(category)
+                    a.dr_category() == Some(category)
                 }) {
                     active_auras.auras.swap_remove(pos);
                 }
@@ -997,7 +997,7 @@ pub fn process_dot_ticks(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::components::auras::{Aura, AuraType, DRCategory, DRTracker};
+    use super::super::components::auras::{Aura, AuraType, DRCategory, DRTracker, DispelType};
     use super::super::abilities::SpellSchool;
     use bevy::prelude::Entity;
     use std::collections::BTreeMap;
@@ -1018,6 +1018,8 @@ mod tests {
             spell_school: None,
             applied_this_frame: false,
             backlash_damage: None,
+            dr_category_override: None,
+            dispel_type: DispelType::Auto,
         }
     }
 
@@ -1039,6 +1041,74 @@ mod tests {
         assert_eq!(target_auras.len(), 1);
         assert_eq!(target_auras[0].effect_type, AuraType::Stun);
         assert_eq!(target_auras[0].duration, 4.0);
+    }
+
+    #[test]
+    fn test_poison_debuff_is_cleanse_only_not_magic_dispel() {
+        // Crippling Poison: a MovementSpeedSlow tagged as Poison.
+        let mut crippling = make_cc_aura(AuraType::MovementSpeedSlow, 8.0);
+        crippling.dispel_type = DispelType::Poison;
+        assert!(
+            !crippling.can_be_dispelled(),
+            "a poison debuff must NOT be removable by Dispel Magic"
+        );
+        assert!(
+            crippling.is_cleansable_poison(),
+            "a poison debuff must be removable by a poison cleanse"
+        );
+
+        // A normal (magic) slow — e.g. Frost Nova — is the opposite.
+        let frost_slow = make_cc_aura(AuraType::MovementSpeedSlow, 8.0);
+        assert!(
+            frost_slow.can_be_dispelled(),
+            "a normal slow IS magic-dispellable"
+        );
+        assert!(!frost_slow.is_cleansable_poison());
+    }
+
+    #[test]
+    fn test_kidney_shot_separate_dr_from_cheap_shot() {
+        let target = target_entity();
+        let mut auras_map: BTreeMap<Entity, Vec<Aura>> = BTreeMap::new();
+        let mut dr_map: BTreeMap<Entity, DRTracker> = BTreeMap::new();
+        dr_map.insert(target, DRTracker::default());
+
+        // Cheap Shot: a plain stun (DRCategory::Stuns).
+        let cheap_shot = make_cc_aura(AuraType::Stun, 4.0);
+        reflect_instant_cc_in_snapshot(target, &cheap_shot, &mut auras_map, &mut dr_map);
+
+        // Kidney Shot: a stun on its OWN DR category, applied right after.
+        let mut kidney = make_cc_aura(AuraType::Stun, 6.0);
+        kidney.dr_category_override = Some(DRCategory::KidneyShotStun);
+        reflect_instant_cc_in_snapshot(target, &kidney, &mut auras_map, &mut dr_map);
+
+        // Both stuns coexist (different DR buckets → no CC replacement), and
+        // Kidney is undiminished at its full 6.0s despite following a stun.
+        let auras = auras_map.get(&target).unwrap();
+        assert_eq!(auras.len(), 2, "Cheap Shot and Kidney Shot are different DR categories and coexist");
+        let kidney_aura = auras
+            .iter()
+            .find(|a| a.dr_category_override == Some(DRCategory::KidneyShotStun))
+            .expect("kidney present");
+        assert_eq!(kidney_aura.duration, 6.0, "Kidney Shot must not be diminished by a prior Cheap Shot");
+
+        // The Stuns bucket is unaffected by the Kidney application, and a SECOND
+        // Kidney Shot still diminishes against its own category.
+        let tracker = dr_map.get_mut(&target).unwrap();
+        assert!(!tracker.is_immune(DRCategory::Stuns));
+        let second_kidney = tracker.apply(DRCategory::KidneyShotStun);
+        assert!(second_kidney < 1.0, "a second Kidney Shot diminishes against its own category");
+    }
+
+    #[test]
+    fn test_lockout_magnitude_roundtrip() {
+        for school in [
+            SpellSchool::Physical, SpellSchool::Frost, SpellSchool::Holy,
+            SpellSchool::Shadow, SpellSchool::Arcane, SpellSchool::Fire,
+            SpellSchool::Nature, SpellSchool::None,
+        ] {
+            assert_eq!(SpellSchool::from_lockout_magnitude(school.to_lockout_magnitude()), school);
+        }
     }
 
     #[test]
