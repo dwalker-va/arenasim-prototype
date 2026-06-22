@@ -23,7 +23,13 @@ use crate::states::play_match::decision_trace::{
 };
 use super::{CombatContext, CombatantInfo};
 use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
+use super::hunter_dip::{emit_dip_complete, HunterDipPlan};
 use super::super::utils::log_ability_use;
+
+/// Hold Concussive Shot while the target's existing slow has more than this many
+/// seconds left; refresh only inside this window before expiry so the new slow
+/// (after ~0.9s projectile travel) lands with no uptime gap and no wasted GCD.
+const CONCUSSIVE_REFRESH_WINDOW: f32 = 1.0;
 
 /// Hunter AI: Decides and executes abilities for a Hunter combatant.
 pub fn decide_hunter_action(
@@ -37,6 +43,7 @@ pub fn decide_hunter_action(
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
     instant_attacks: &mut Vec<super::QueuedInstantAttack>,
+    dip_plan: HunterDipPlan,
     decision_trace: &mut DecisionTrace,
 ) -> bool {
     let (nearest_enemy, nearest_distance) = find_nearest_enemy(entity, combatant.team, my_pos, ctx);
@@ -74,6 +81,29 @@ pub fn decide_hunter_action(
     if ctx.entity_is_immune(target_entity) {
         builder.finish_no_action(NoActionReason::TargetImmune);
         return false;
+    }
+
+    // Freezing Trap DIP arrival (highest priority): the committed walk reached
+    // throw range of the off-target enemy healer — drop the trap ON the healer's
+    // position (not the midpoint) so the healer, not a chaser, triggers it. On
+    // success install the dip-cleared posture and emit DipComplete; if the trap
+    // can't land (arena clamp / lost the window) fall through and the dip
+    // retries next tick.
+    if let HunterDipPlan::DipCast { target, completed_state } = dip_plan {
+        if ctx.combatants.get(&target).is_some_and(|i| i.is_alive) {
+            // Lead a moving target into its path; drop directly on a planted one.
+            let landing = super::hunter_dip::trap_lead_landing(ctx, target, my_pos)
+                .unwrap_or(my_pos);
+            if try_place_trap_at(
+                commands, combat_log, abilities, entity, combatant, my_pos,
+                landing, TrapType::Freezing, &mut builder,
+            ) {
+                builder.finish();
+                commands.entity(entity).try_insert(completed_state);
+                emit_dip_complete(decision_trace, ctx, target, my_pos);
+                return true;
+            }
+        }
     }
 
     let distance_to_target = my_pos.distance(target_info.position);
@@ -150,26 +180,33 @@ pub fn decide_hunter_action(
 
     // === CLOSING RANGE (8-20 yards) — Kite + instants ===
     if nearest_dist < 20.0 {
-        if let Some((enemy_entity, _)) = nearest_enemy {
+        let conc_max = abilities.get(&AbilityType::ConcussiveShot).map_or(35.0, |d| d.range);
+        if let Some(ct) = concussive_target(ctx, entity, my_pos, target_entity, HUNTER_DEAD_ZONE, conc_max) {
             if try_concussive_shot(
                 commands, combat_log, abilities, entity, combatant, my_pos,
-                enemy_entity, ctx, &mut builder,
+                ct, ctx, &mut builder,
             ) {
                 builder.finish();
                 return true;
             }
         }
 
-        if let Some((enemy_entity, _)) = nearest_enemy {
-            if let Some(enemy_info) = ctx.combatants.get(&enemy_entity) {
-                let midpoint = (my_pos + enemy_info.position) / 2.0;
-                if try_place_trap_at(
-                    commands, combat_log, abilities, entity, combatant, my_pos, midpoint,
-                    TrapType::Frost, &mut builder,
-                ) {
-                    builder.finish();
-                    return true;
-                }
+        // Frost Trap as a peel: aim the slow zone at the nearest kite-threat
+        // MELEE (Warrior/Rogue) when one is present — that's the threat worth
+        // slowing — rather than the nearest enemy generally (which can be a pet
+        // or a stray-closest caster). Falls back to the nearest enemy when no
+        // melee threat exists.
+        let frost_anchor = super::dps_postures::nearest_melee_threat(ctx, entity, my_pos)
+            .map(|(_, pos)| pos)
+            .or_else(|| nearest_enemy.and_then(|(e, _)| ctx.combatants.get(&e).map(|i| i.position)));
+        if let Some(anchor_pos) = frost_anchor {
+            let midpoint = (my_pos + anchor_pos) / 2.0;
+            if try_place_trap_at(
+                commands, combat_log, abilities, entity, combatant, my_pos, midpoint,
+                TrapType::Frost, &mut builder,
+            ) {
+                builder.finish();
+                return true;
             }
         }
 
@@ -193,12 +230,35 @@ pub fn decide_hunter_action(
 
     // === SAFE RANGE (20+ yards) — Full rotation ===
 
-    if try_concussive_shot(
-        commands, combat_log, abilities, entity, combatant, my_pos,
-        target_entity, ctx, &mut builder,
-    ) {
-        builder.finish();
-        return true;
+    // Burst-during-CC: when the enemy healer is hard-CC'd (e.g. our off-target
+    // Freezing Trap just incap'd it) it can't heal the kill target — land the
+    // Aimed Shot burst INSIDE that window instead of dribbling instants. Narrow
+    // priority PREPEND, gated on the healer being CC'd AND the kill target being
+    // someone other than that healer (bursting the healer would break its own
+    // breakable trap). Outside the window the rotation below is the unchanged
+    // order, so non-CC frames are untouched. This is the complement to the trap
+    // rework: the trap creates the healer-down window, this converts it.
+    let burst_window =
+        ctx.enemy_healer_is_cced() && ctx.enemy_healer() != Some(target_entity);
+    if burst_window && distance_to_target >= 20.0 {
+        if try_aimed_shot(
+            commands, combat_log, abilities, entity, combatant, my_pos,
+            target_entity, target_info, auras, ctx, &mut builder,
+        ) {
+            builder.finish();
+            return true;
+        }
+    }
+
+    let conc_max = abilities.get(&AbilityType::ConcussiveShot).map_or(35.0, |d| d.range);
+    if let Some(ct) = concussive_target(ctx, entity, my_pos, target_entity, HUNTER_DEAD_ZONE, conc_max) {
+        if try_concussive_shot(
+            commands, combat_log, abilities, entity, combatant, my_pos,
+            ct, ctx, &mut builder,
+        ) {
+            builder.finish();
+            return true;
+        }
     }
 
     // Sting sits ABOVE Freezing Trap so the trap guard below always sees an
@@ -212,25 +272,69 @@ pub fn decide_hunter_action(
         return true;
     }
 
-    let trap_target = freezing_trap_candidate(ctx, target_entity);
-    if let Some(trap_target_info) = ctx.combatants.get(&trap_target).filter(|info| info.is_alive) {
-        // Two-way CC guard (R8/R9): never aim Freezing Trap at a target the
-        // team has DoT'd — the first tick breaks the incapacitate
-        // (break_on_damage: 0.0). Reactive and binary: skip this tick, no
-        // fallthrough to a second candidate. Only traced when the trap is
-        // otherwise castable — while it's on cooldown, fall through so the
-        // trace records OnCooldown instead of masking it as the DoT guard.
-        if ctx.has_friendly_dots_on_target(trap_target)
-            && !combatant.ability_cooldowns.contains_key(&AbilityType::FreezingTrap)
-        {
-            builder.reject(AbilityType::FreezingTrap, RejectionReason::FriendlyBreakableCC);
-        } else if try_place_trap_at(
-            commands, combat_log, abilities, entity, combatant, my_pos,
-            (my_pos + trap_target_info.position) / 2.0,
-            TrapType::Freezing, &mut builder,
-        ) {
-            builder.finish();
-            return true;
+    // Freezing Trap. Preferred use is CC on the OFF-target enemy healer (the
+    // one the team is NOT killing) — but a placed trap triggers on the first
+    // enemy in radius, so we aim at the healer's POSITION (not the midpoint) and
+    // HOLD unless the healer itself will trigger it: it must be in throw range
+    // and no other enemy may be within the trigger radius of the landing. When
+    // it can't land cleanly, we hold the trap for the dip rather than feed it to
+    // the chaser. With no off-target healer (e.g. 1v1, or the healer IS the kill
+    // target) we fall back to the legacy peel: trap the candidate at the
+    // midpoint so the Hunter keeps its melee-peel in healer-less matchups.
+    let off_target = super::hunter_dip::opportunistic_off_target(
+        ctx, entity, combatant.team, combatant.target, my_pos,
+    );
+    if let Some((healer, healer_pos)) = off_target {
+        // Only drop opportunistically when already point-blank — the dip walks us
+        // in when we're farther out. Lead the landing into the target's path
+        // (planted target → directly on it) so the 1.5s arm doesn't whiff a kite.
+        let plant_close = my_pos.distance(healer_pos) <= super::hunter_dip::HUNTER_TRAP_PLANT_RANGE;
+        let landing = super::hunter_dip::trap_lead_landing(ctx, healer, my_pos).unwrap_or(healer_pos);
+        // No other living enemy close enough to the landing to beat the target
+        // to the trigger.
+        let healer_triggers = !ctx.combatants.values().any(|other| {
+            other.team != combatant.team
+                && other.is_alive
+                && other.entity != healer
+                && other.position.distance(landing) <= TRAP_TRIGGER_RADIUS
+        });
+        if plant_close && healer_triggers {
+            // Two-way CC guard (R8/R9): a friendly DoT on the healer pops the
+            // incap on the first tick — skip (only when the trap is castable).
+            if ctx.has_friendly_dots_on_target(healer)
+                && !combatant.ability_cooldowns.contains_key(&AbilityType::FreezingTrap)
+            {
+                builder.reject(AbilityType::FreezingTrap, RejectionReason::FriendlyBreakableCC);
+            } else if try_place_trap_at(
+                commands, combat_log, abilities, entity, combatant, my_pos,
+                landing, TrapType::Freezing, &mut builder,
+            ) {
+                builder.finish();
+                return true;
+            }
+        }
+        // else: HOLD — the dip will walk us into range to land it on the healer.
+    } else {
+        let trap_target = freezing_trap_candidate(ctx, target_entity);
+        if let Some(trap_target_info) = ctx.combatants.get(&trap_target).filter(|info| info.is_alive) {
+            // Two-way CC guard (R8/R9): never aim Freezing Trap at a target the
+            // team has DoT'd — the first tick breaks the incapacitate
+            // (break_on_damage: 0.0). Reactive and binary: skip this tick, no
+            // fallthrough to a second candidate. Only traced when the trap is
+            // otherwise castable — while it's on cooldown, fall through so the
+            // trace records OnCooldown instead of masking it as the DoT guard.
+            if ctx.has_friendly_dots_on_target(trap_target)
+                && !combatant.ability_cooldowns.contains_key(&AbilityType::FreezingTrap)
+            {
+                builder.reject(AbilityType::FreezingTrap, RejectionReason::FriendlyBreakableCC);
+            } else if try_place_trap_at(
+                commands, combat_log, abilities, entity, combatant, my_pos,
+                (my_pos + trap_target_info.position) / 2.0,
+                TrapType::Freezing, &mut builder,
+            ) {
+                builder.finish();
+                return true;
+            }
         }
     }
 
@@ -291,10 +395,63 @@ fn find_nearest_enemy(self_entity: Entity, my_team: u8, my_pos: Vec3, ctx: &Comb
     (nearest, distance)
 }
 
-fn is_target_slowed(target: Entity, ctx: &CombatContext) -> bool {
-    ctx.active_auras.get(&target).map_or(false, |auras| {
-        auras.iter().any(|a| a.effect_type == AuraType::MovementSpeedSlow)
+/// Remaining duration of the longest active `MovementSpeedSlow` on `target`,
+/// or `None` if it isn't slowed. (`Aura.duration` ticks down to zero, so it is
+/// the time remaining.)
+fn slow_remaining(target: Entity, ctx: &CombatContext) -> Option<f32> {
+    ctx.active_auras.get(&target).and_then(|auras| {
+        auras
+            .iter()
+            .filter(|a| a.effect_type == AuraType::MovementSpeedSlow)
+            .map(|a| a.duration)
+            .fold(None, |acc: Option<f32>, d| Some(acc.map_or(d, |m| m.max(d))))
     })
+}
+
+/// The Hunter's preferred Concussive Shot target, encoding the slow heuristics:
+///  1. **Peel the nearest melee kite-threat** (Warrior/Rogue) — a slow on a melee
+///     is almost always worth it — even when it isn't the kill target.
+///  2. **Otherwise the kill target, but only while it is actually moving** — a
+///     slow is wasted on a stationary/casting caster (uses the snapshot
+///     `velocity`, which is zero while casting/channeling).
+/// A candidate is skipped if it is out of range, already slowed with more than
+/// `CONCUSSIVE_REFRESH_WINDOW` left (hold; refresh only just before it expires so
+/// there's no uptime gap), or under a friendly break-on-damage CC (a no-op here
+/// since Concussive deals no damage, but kept as a guard).
+fn concussive_target(
+    ctx: &CombatContext,
+    entity: Entity,
+    my_pos: Vec3,
+    kill_target: Entity,
+    min_range: f32,
+    max_range: f32,
+) -> Option<Entity> {
+    let castable = |e: Entity| {
+        ctx.combatants.get(&e).map_or(false, |i| {
+            let d = my_pos.distance(i.position);
+            i.is_alive
+                && d >= min_range
+                && d <= max_range
+                && !ctx.has_friendly_breakable_cc(e)
+                && slow_remaining(e, ctx).map_or(true, |r| r <= CONCUSSIVE_REFRESH_WINDOW)
+        })
+    };
+    // 1. Nearest melee kite-threat — peel it, moving or not.
+    if let Some((m, _)) = super::dps_postures::nearest_melee_threat(ctx, entity, my_pos) {
+        if castable(m) {
+            return Some(m);
+        }
+    }
+    // 2. Else the kill target, but only while it is actually moving.
+    if castable(kill_target)
+        && ctx
+            .combatants
+            .get(&kill_target)
+            .map_or(false, |i| i.velocity.length() > 0.5)
+    {
+        return Some(kill_target);
+    }
+    None
 }
 
 /// Attempt to place a trap at a specific position (or at the Hunter's feet).
@@ -419,7 +576,9 @@ fn try_concussive_shot(
         return false;
     }
 
-    if is_target_slowed(target_entity, ctx) {
+    // Hold if already slowed with real time left; allow a refresh just before
+    // expiry (no uptime gap, no wasted GCD re-slowing).
+    if slow_remaining(target_entity, ctx).map_or(false, |r| r > CONCUSSIVE_REFRESH_WINDOW) {
         builder.reject(ability, RejectionReason::AlreadyApplied);
         return false;
     }

@@ -124,11 +124,16 @@ cancelled every melee-pet auto-attack swing. All Hunter baselines in
 
 ### A. Hunter 2v2 holes (diagnosed, NOT pet-related)
 
-- [ ] **Warrior 2v2 ~0%** — the Hunter's own Priest heals *itself* instead of
-      peeling the focused Hunter when it is trained through Mortal Wounds
-      (healing reduction). A healer anchor/target-selection problem, not Hunter
-      movement; generalizes to any squishy DPS focused under MS. Highest-leverage
-      fix for the comp.
+- [x] ~~**Warrior 2v2 ~19%**~~ — LARGELY ADDRESSED in this PR. NOT a healer
+      target-selection bug (the old framing was wrong: the Warrior trains the
+      enemy Priest, so self-healing is correct); the hole was zero Hunter kill
+      pressure. Root cause traced to the **Hunter mana economy** — it gets zero
+      mana from gear (mail itemization), the smallest effective pool of any mana
+      class. Fix: +60 gear mana + Freezing Trap 43→26 + smarter Concussive/trap
+      AI → Hunter+Priest 2v2 25%→~35%, overall Hunter 2v2 +4.7pt, 3v3 +5.1pt, no
+      1v1 regression. Full re-diagnosis:
+      `design-docs/balance/2026-06-20-warrior-2v2-rediagnosis.md`. (Remaining
+      Hunter holes — Mage control, deeper melee-pin — are separate, below.)
 - [ ] **Mage 2v2 0%** — control matchup (Polymorph / Frost Nova / kiting).
       LoS / pillar play is the structural counter (see healer bucket C — shared
       scorer term).

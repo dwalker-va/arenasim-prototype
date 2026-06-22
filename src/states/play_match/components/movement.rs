@@ -167,6 +167,15 @@ pub struct KitePosture {
     /// bonus at the next re-evaluation. `None` before the first directional
     /// decision and after posture transitions.
     pub last_direction: Option<Vec2>,
+    /// Freezing Trap DIP target (Hunter only): the enemy healer the committed
+    /// trap-setup walk is pursuing. `None` outside a dip. Mirrors the Paladin
+    /// `HealerPosture::dip_target`; the Mage never sets it.
+    pub dip_target: Option<Entity>,
+    /// Freezing Trap DIP budget deadline: absolute sim-time at which the walk
+    /// aborts (budget exceeded). A live dip is `now < dip_until`. `0.0` = no
+    /// live dip. While a dip is live the Hunter arm skips the ENGAGE/KITE
+    /// evaluation so the dip directive owns movement.
+    pub dip_until: f32,
 }
 
 impl KitePosture {
@@ -177,6 +186,13 @@ impl KitePosture {
             since: now,
             hold_until: 0.0,
             last_direction: None,
+            dip_target: None,
+            dip_until: 0.0,
         }
+    }
+
+    /// Is a Freezing Trap dip currently live at sim-time `now`?
+    pub fn dipping(&self, now: f32) -> bool {
+        now < self.dip_until && self.dip_target.is_some()
     }
 }

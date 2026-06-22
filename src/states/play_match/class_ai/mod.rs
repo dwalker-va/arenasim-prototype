@@ -22,6 +22,7 @@ pub mod rogue;
 pub mod warlock;
 pub mod paladin;
 pub mod hunter;
+pub mod hunter_dip;
 pub mod pet_ai;
 pub mod cast_guard;
 pub mod combat_snapshot;
@@ -53,6 +54,15 @@ pub struct CombatantInfo {
     pub max_mana: f32,
     /// Per-frame snapshot from Transform.
     pub position: Vec3,
+    /// Estimated planar velocity (XZ, units/sec): the facing heading (from the
+    /// Transform rotation, which `move_to_target` points along travel) scaled by
+    /// `base_movement_speed`. `Vec3::ZERO` when the combatant is casting or
+    /// channeling (planted) — so a consumer can lead a moving target and drop
+    /// directly on a stationary one. Used by the Hunter to lead Freezing Trap
+    /// into a kiting target's path. An estimate: a non-casting but idle target
+    /// carries a stale heading, but trap targets (healers/casters) are normally
+    /// either casting or kiting.
+    pub velocity: Vec3,
     pub is_alive: bool,
     pub stealthed: bool,
     pub target: Option<Entity>,

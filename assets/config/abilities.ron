@@ -815,7 +815,7 @@
             icon: "icons/abilities/spell_frost_chainsofice.jpg",
             cast_time: 0.0,
             range: 30.0,  // Placement range
-            mana_cost: 43.0,
+            mana_cost: 26.0,
             cooldown: 25.0,
             applies_aura: Some((
                 aura_type: Incapacitate,

@@ -227,6 +227,7 @@
             armor_type: Mail,
             armor: 157.0,
             max_health: 12.0,
+            max_mana: 10.0,
             attack_power: 6.0,
             crit_chance: 0.01,
         ),
@@ -239,6 +240,7 @@
             armor_type: Mail,
             armor: 157.0,
             max_health: 15.0,
+            max_mana: 10.0,
             attack_power: 5.0,
         ),
 
@@ -250,6 +252,7 @@
             armor_type: Mail,
             armor: 157.0,
             max_health: 14.0,
+            max_mana: 9.0,
             attack_power: 4.0,
             crit_chance: 0.01,
         ),
@@ -262,6 +265,7 @@
             armor_type: Mail,
             armor: 151.0,
             max_health: 8.0,
+            max_mana: 7.0,
             attack_power: 3.0,
         ),
 
@@ -273,6 +277,7 @@
             armor_type: Mail,
             armor: 151.0,
             max_health: 8.0,
+            max_mana: 6.0,
             attack_power: 3.0,
             movement_speed: 0.1,
         ),
@@ -285,6 +290,7 @@
             armor_type: Mail,
             armor: 146.0,
             max_health: 6.0,
+            max_mana: 5.0,
             attack_power: 3.0,
         ),
 
@@ -296,6 +302,7 @@
             armor_type: Mail,
             armor: 146.0,
             max_health: 5.0,
+            max_mana: 4.0,
             attack_power: 2.0,
         ),
 
@@ -307,6 +314,7 @@
             armor_type: Mail,
             armor: 151.0,
             max_health: 10.0,
+            max_mana: 7.0,
             attack_power: 3.0,
         ),
 
@@ -749,6 +757,7 @@
             attack_damage_max: 39.0, // was 26
             attack_speed: 0.4,
             attack_power: 4.0,
+            max_mana: 2.0,
         ),
 
         SniperScope: (

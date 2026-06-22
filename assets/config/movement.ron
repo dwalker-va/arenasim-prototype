@@ -128,5 +128,6 @@
         commit_window: 0.6,
         kite_entry_radius: 20.0,   // closing-range band — a melee within this opens KITE
         kite_sustain_radius: 24.0, // hold KITE a touch past entry (anti-strobe)
+        dip_budget: 6.0,           // walk up to 6s toward an out-of-range enemy healer to set a trap on it (0 disables)
     ),
 )
