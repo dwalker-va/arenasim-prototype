@@ -503,38 +503,41 @@ fn name_cell(ui: &mut egui::Ui, icon: Option<egui::TextureId>, name: &str, color
     );
 }
 
-/// Right-aligned fixed-width numeric cell.
+/// Right-aligned numeric cell of an *exact* `width`. We reserve the rect and
+/// paint the text into it (rather than `allocate_ui_with_layout`, which lets
+/// the cell shrink to its content and so misaligns columns when value widths
+/// differ — e.g. a "–" next to "12.3k").
 fn num_cell(ui: &mut egui::Ui, width: f32, text: String, color: egui::Color32, strong: bool) {
-    let mut rt = egui::RichText::new(text).size(14.0).color(color);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, ROW_HEIGHT), egui::Sense::hover());
+    let pos = rect.right_center();
+    let font = egui::FontId::proportional(14.0);
+    let painter = ui.painter();
+    // Faux-bold for totals: a second pass nudged a fraction of a pixel.
     if strong {
-        rt = rt.strong();
+        painter.text(pos + egui::vec2(0.6, 0.0), egui::Align2::RIGHT_CENTER, &text, font.clone(), color);
     }
-    ui.allocate_ui_with_layout(
-        egui::vec2(width, ROW_HEIGHT),
-        egui::Layout::right_to_left(egui::Align::Center),
-        |ui| {
-            ui.label(rt);
-        },
-    );
+    painter.text(pos, egui::Align2::RIGHT_CENTER, &text, font, color);
 }
 
 fn header_name_cell(ui: &mut egui::Ui, text: &str, dimf: f32) {
-    ui.allocate_ui_with_layout(
-        egui::vec2(W_NAME, 16.0),
-        egui::Layout::left_to_right(egui::Align::Center),
-        |ui| {
-            ui.label(egui::RichText::new(text).size(10.0).color(dim(HEADER_GREY, dimf)));
-        },
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(W_NAME, 16.0), egui::Sense::hover());
+    ui.painter().text(
+        rect.left_center(),
+        egui::Align2::LEFT_CENTER,
+        text,
+        egui::FontId::proportional(10.0),
+        dim(HEADER_GREY, dimf),
     );
 }
 
 fn header_num_cell(ui: &mut egui::Ui, width: f32, text: &str, dimf: f32) {
-    ui.allocate_ui_with_layout(
-        egui::vec2(width, 16.0),
-        egui::Layout::right_to_left(egui::Align::Center),
-        |ui| {
-            ui.label(egui::RichText::new(text).size(10.0).color(dim(HEADER_GREY, dimf)));
-        },
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 16.0), egui::Sense::hover());
+    ui.painter().text(
+        rect.right_center(),
+        egui::Align2::RIGHT_CENTER,
+        text,
+        egui::FontId::proportional(10.0),
+        dim(HEADER_GREY, dimf),
     );
 }
 
