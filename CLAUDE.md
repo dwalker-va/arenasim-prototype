@@ -522,6 +522,36 @@ mcp__wowhead-classic__lookup_item("Arcanite Reaper")
 cargo run --release
 ```
 
+### Iterate on an egui screen fast (offscreen snapshot loop)
+
+Tuning an egui screen by launching the client and driving it to the right
+state is a ~90s human-in-the-loop cycle. For the **Results screen** there is a
+fast loop instead: `draw_results_screen()` in `src/states/results_ui.rs` is a
+pure egui function (no Bevy ECS — takes plain `&MatchResults` / `&CombatLog` /
+`&ClassIcons`), so `tests/results_screen_snapshot.rs` renders it offscreen via
+`egui_kittest` (wgpu, no window, mock 2v2 data) in a fraction of a second.
+
+```bash
+# Render the screen → writes tests/snapshots/results_screen.new.png
+# (the test "fails" on any pixel diff; that's how it hands you the new image)
+cargo test --release --test results_screen_snapshot -- --ignored
+
+# ...open/Read that PNG, edit results_ui.rs, repeat. Once it looks right,
+# bless the baseline so the test goes green and guards against regressions:
+UPDATE_SNAPSHOTS=1 cargo test --release --test results_screen_snapshot -- --ignored
+```
+
+The test is `#[ignore]`d so the default `cargo test` skips it (it needs a GPU
+adapter; CI runners may lack one). `egui_kittest` is a dev-dependency pinned to
+the same egui version as `bevy_egui` (0.31). Fidelity caveat: kittest has no
+Bevy textures, so class icons render as class-color fallback squares and fonts
+are egui defaults — layout/spacing/color iterate faithfully; pixel-exact icon
+and font fidelity still needs the real client. **To extend this pattern to
+another screen**, refactor its UI system the same way: split the Bevy wrapper
+(grabs `EguiContexts` + resources, applies actions) from a pure
+`draw_*(ctx, &data...) -> Action` function, then drive that function from a
+kittest harness with mock data.
+
 ### Adding a New Combat System
 
 `tests/registration_audit.rs` enforces that every Bevy system function (`pub fn` taking SystemParam types) under `src/states/play_match/` is registered in one of three places. When adding a new system, pick the correct registration path:

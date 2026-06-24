@@ -310,6 +310,7 @@ pub fn check_match_end(
             time_remaining: 5.0,
             match_results: MatchResults {
                 winner,
+                duration_secs: combat_log.match_time,
                 team1_combatants: team1_stats,
                 team2_combatants: team2_stats,
             },

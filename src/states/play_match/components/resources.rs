@@ -206,6 +206,8 @@ pub struct VictoryCelebration {
 pub struct MatchResults {
     /// Winner: None = draw, Some(1) = team 1, Some(2) = team 2
     pub winner: Option<u8>,
+    /// Match duration in seconds (combat log match time at end).
+    pub duration_secs: f32,
     /// Stats for all Team 1 combatants
     pub team1_combatants: Vec<CombatantStats>,
     /// Stats for all Team 2 combatants

@@ -19,6 +19,7 @@ clap = { version = "4.4", features = ["derive"] }
 smallvec = "1.13"
 
 [dev-dependencies]
+egui_kittest = { version = "0.31", features = ["wgpu", "snapshot"] }
 regex = "1"
 tempfile = "3"
 

@@ -1,434 +1,575 @@
 //! Results Scene UI - Post-Match Statistics
 //!
-//! This module displays match results after a battle concludes, showing:
-//! - Winner announcement (or draw)
-//! - Side-by-side team statistics
-//! - Per-combatant breakdown (class, survival status, damage stats)
-//! - Return to main menu button
+//! Displays match results after a battle concludes:
+//! - Compact winner banner (victor color, match duration)
+//! - Two aligned, face-off team panels (loser panel dimmed)
+//! - Per-combatant rows with class icon, aligned stat columns, a relative
+//!   damage mini-bar, survival tag, and a click-to-expand ability breakdown
+//! - Team Σ TOTAL subtotal row
+//! - Return-to-menu button
 //!
 //! ## Data Source
-//! Reads the `MatchResults` resource inserted by the combat system
-//! when a match ends. This resource contains the winner and detailed
-//! stats for each combatant on both teams.
+//! Reads the `MatchResults` resource inserted at match end (winner, duration,
+//! per-combatant `CombatantStats`) plus the `CombatLog` for per-ability
+//! damage/healing, killing blows, and CC time. Class icons come from the
+//! shared `ClassIcons` egui-texture resource loaded in ConfigureMatch.
 //!
 //! ## UI Structure
 //! ```text
-//! ┌─────────────────────────────────────┐
-//! │         MATCH RESULTS               │
-//! │         [TEAM X WINS!]              │
-//! │                                     │
-//! │  ┌─────────────┐  ┌─────────────┐  │
-//! │  │  TEAM 1     │  │  TEAM 2     │  │
-//! │  │  Stats...   │  │  Stats...   │  │
-//! │  └─────────────┘  └─────────────┘  │
-//! │                                     │
-//! │           [DONE]                    │
-//! └─────────────────────────────────────┘
+//! ┌────────────────────────────────────────────────────┐
+//! │  ★ TEAM 1 VICTORY                       ⏱ 1:47       │
+//! ├──────────────────────────┬─────────────────────────┤
+//! │ TEAM 1         ★ WINNER   │ TEAM 2       (defeated)  │
+//! │ CLASS    DMG HEAL TKN  K  │ CLASS   DMG HEAL TKN  K  │
+//! │ ▌🛡Warrior 8.4k  –  3.1k 1 │ ▌❄Mage  4.2k  – 9.0k  0  │
+//! │   ▓▓▓▓▓▓▓▓▓▓▓▓▓     ALIVE │   ▓▓▓▓▓             DEAD │
+//! │ Σ TOTAL  9.6k 6.8k 5.5k 1 │ Σ TOTAL 5.1k 5.1k15.2k 0 │
+//! └──────────────────────────┴─────────────────────────┘
 //! ```
 
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use super::{GameState, play_match::{MatchResults, CombatantStats}};
+use super::configure_match_ui::ClassIcons;
+use super::match_config::CharacterClass;
 use crate::combat::log::CombatLog;
 
+// --- Layout constants (fixed widths keep numeric columns aligned across the
+//     header, every combatant row, and the Σ TOTAL row) ---
+const W_NAME: f32 = 116.0; // accent stripe + icon + class name
+const W_DMG: f32 = 52.0;
+const W_HEAL: f32 = 52.0;
+const W_TKN: f32 = 52.0;
+const W_K: f32 = 26.0;
+const ROW_HEIGHT: f32 = 22.0;
+
+// --- Palette ---
+const BG: egui::Color32 = egui::Color32::from_rgb(20, 20, 30);
+const PANEL_BG: egui::Color32 = egui::Color32::from_rgb(28, 28, 40);
+const HEADER_GREY: egui::Color32 = egui::Color32::from_rgb(140, 140, 158);
+const DIVIDER: egui::Color32 = egui::Color32::from_rgb(70, 70, 88);
+const C_DMG: egui::Color32 = egui::Color32::from_rgb(255, 150, 100);
+const C_HEAL: egui::Color32 = egui::Color32::from_rgb(110, 215, 130);
+const C_TKN: egui::Color32 = egui::Color32::from_rgb(230, 110, 110);
+const C_KILL: egui::Color32 = egui::Color32::from_rgb(255, 205, 90);
+const C_ALIVE: egui::Color32 = egui::Color32::from_rgb(120, 200, 120);
+const C_DEAD: egui::Color32 = egui::Color32::from_rgb(205, 110, 110);
+
+/// Dim factor applied to a defeated team's panel so the victor reads as dominant.
+const DIM_LOSER: f32 = 0.55;
+
 /// Main UI system for the Results screen.
-/// 
-/// Displays:
-/// - Title and winner announcement
-/// - Two-column layout with team stats
-/// - Done button to return to main menu
-/// 
-/// Cleans up the `MatchResults` resource when exiting.
+///
+/// Thin Bevy wrapper: grabs the egui context + resources and delegates the
+/// actual drawing to [`draw_results_screen`] (which is pure egui, so it can be
+/// snapshot-tested offscreen). Applies the DONE action on click.
 pub fn results_ui(
     mut contexts: EguiContexts,
     results: Option<Res<MatchResults>>,
     combat_log: Res<CombatLog>,
+    class_icons: Res<ClassIcons>,
     mut next_state: ResMut<NextState<GameState>>,
     mut commands: Commands,
 ) {
     let Some(ctx) = contexts.try_ctx_mut() else { return; };
-    
-    // Configure dark theme
+
+    let done = draw_results_screen(ctx, results.as_deref(), &combat_log, &class_icons);
+
+    if done {
+        commands.remove_resource::<MatchResults>();
+        next_state.set(GameState::MainMenu);
+    }
+}
+
+/// Render the entire Results screen into `ctx`. Returns `true` if the DONE
+/// button was clicked this frame.
+///
+/// This is deliberately free of Bevy ECS types (takes plain references) so it
+/// can be driven directly by an egui harness — see
+/// `tests/results_screen_snapshot.rs`, which renders it offscreen with
+/// `egui_kittest` for a fast, human-free visual-iteration loop.
+pub fn draw_results_screen(
+    ctx: &egui::Context,
+    results: Option<&MatchResults>,
+    combat_log: &CombatLog,
+    class_icons: &ClassIcons,
+) -> bool {
     let mut style = (*ctx.style()).clone();
-    style.visuals.window_fill = egui::Color32::from_rgb(20, 20, 30);
-    style.visuals.panel_fill = egui::Color32::from_rgb(20, 20, 30);
+    style.visuals.window_fill = BG;
+    style.visuals.panel_fill = BG;
     ctx.set_style(style);
+
+    let mut done = false;
 
     egui::CentralPanel::default()
         .frame(
             egui::Frame::none()
-                .fill(egui::Color32::from_rgb(20, 20, 30))
-                .inner_margin(egui::Margin::same(20))
+                .fill(BG)
+                .inner_margin(egui::Margin::same(24)),
         )
         .show(ctx, |ui| {
-            ui.add_space(20.0);
-
-            // Title
-            ui.vertical_centered(|ui| {
-                ui.heading(
-                    egui::RichText::new("MATCH RESULTS")
-                        .size(48.0)
-                        .color(egui::Color32::from_rgb(230, 204, 153)),
-                );
-            });
-
-            ui.add_space(30.0);
-
-            // Check if results exist
             let Some(results) = results else {
+                ui.add_space(40.0);
                 ui.vertical_centered(|ui| {
-                    ui.label(
+                    ui.heading(
                         egui::RichText::new("No match results available")
-                            .size(24.0)
-                            .color(egui::Color32::from_rgb(200, 100, 100)),
+                            .size(28.0)
+                            .color(C_DEAD),
                     );
                 });
                 return;
             };
 
-            // Winner announcement
-            ui.vertical_centered(|ui| {
-                let (winner_text, winner_color) = get_winner_display(results.winner);
-                
-                ui.heading(
-                    egui::RichText::new(winner_text)
-                        .size(36.0)
-                        .color(winner_color),
+            render_banner(ui, results.winner, results.duration_secs);
+            ui.add_space(24.0);
+
+            // Bar scaling shared across both teams so lengths are comparable.
+            let max_damage = results
+                .team1_combatants
+                .iter()
+                .chain(results.team2_combatants.iter())
+                .map(|s| s.damage_dealt)
+                .fold(0.0_f32, f32::max)
+                .max(1.0);
+
+            // Two face-off panels. `columns` gives each panel its own
+            // top-down layout (a plain `horizontal` wrapper would make the
+            // panel interiors inherit a left-to-right layout and collapse
+            // every row onto one line).
+            ui.columns(2, |columns| {
+                render_team_panel(
+                    &mut columns[0], "TEAM 1", 1, &results.team1_combatants, combat_log,
+                    class_icons, egui::Color32::from_rgb(90, 140, 230),
+                    results.winner, max_damage,
+                );
+                render_team_panel(
+                    &mut columns[1], "TEAM 2", 2, &results.team2_combatants, combat_log,
+                    class_icons, egui::Color32::from_rgb(230, 90, 90),
+                    results.winner, max_damage,
                 );
             });
 
-            ui.add_space(40.0);
+            ui.add_space(28.0);
 
-            // Stats tables side-by-side - centered
-            ui.vertical_centered(|ui| {
-                ui.horizontal(|ui| {
-                    let available_width = ui.available_width();
-                    let spacing = 30.0;
-                    let table_width = (available_width - spacing) / 2.0;
-
-                    // Team 1 Stats
-                    ui.vertical(|ui| {
-                        ui.set_max_width(table_width);
-                        render_team_stats(
-                            ui,
-                            "TEAM 1",
-                            1,
-                            &results.team1_combatants,
-                            &combat_log,
-                            egui::Color32::from_rgb(51, 102, 204)
-                        );
-                    });
-
-                    ui.add_space(spacing);
-
-                    // Team 2 Stats
-                    ui.vertical(|ui| {
-                        ui.set_max_width(table_width);
-                        render_team_stats(
-                            ui,
-                            "TEAM 2",
-                            2,
-                            &results.team2_combatants,
-                            &combat_log,
-                            egui::Color32::from_rgb(204, 51, 51)
-                        );
-                    });
-                });
-            });
-
-            ui.add_space(40.0);
-
-            // Done button - returns to main menu and cleans up results
             ui.vertical_centered(|ui| {
                 let button = egui::Button::new(
                     egui::RichText::new("DONE")
-                        .size(24.0)
+                        .size(22.0)
                         .color(egui::Color32::from_rgb(230, 242, 230)),
                 )
-                .min_size(egui::vec2(200.0, 50.0));
+                .min_size(egui::vec2(200.0, 48.0));
 
                 if ui.add(button).clicked() {
-                    commands.remove_resource::<MatchResults>();
-                    next_state.set(GameState::MainMenu);
+                    done = true;
                 }
             });
+        });
 
-            ui.add_space(20.0);
+    done
+}
+
+/// Render the top winner banner: victory line (in winner color) + match duration.
+fn render_banner(ui: &mut egui::Ui, winner: Option<u8>, duration_secs: f32) {
+    let (text, color) = match winner {
+        None => ("DRAW".to_string(), egui::Color32::from_rgb(210, 200, 120)),
+        Some(1) => ("TEAM 1 VICTORY".to_string(), egui::Color32::from_rgb(110, 160, 255)),
+        Some(2) => ("TEAM 2 VICTORY".to_string(), egui::Color32::from_rgb(255, 110, 110)),
+        Some(_) => ("MATCH COMPLETE".to_string(), HEADER_GREY),
+    };
+    let star = if winner.is_some() { "★ " } else { "" };
+
+    egui::Frame::none()
+        .fill(egui::Color32::from_rgb(26, 26, 38))
+        .rounding(8.0)
+        .inner_margin(egui::Margin::symmetric(20, 14))
+        .stroke(egui::Stroke::new(2.0, color))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.heading(
+                    egui::RichText::new(format!("{star}{text}"))
+                        .size(40.0)
+                        .color(color),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        egui::RichText::new(format!("⏱ {}", fmt_duration(duration_secs)))
+                            .size(22.0)
+                            .color(HEADER_GREY),
+                    );
+                });
+            });
         });
 }
 
-/// Get the winner announcement text and color.
-/// 
-/// Returns tuple of (text, color) based on match outcome:
-/// - None: Draw (yellow)
-/// - Some(1): Team 1 wins (blue)
-/// - Some(2): Team 2 wins (red)
-fn get_winner_display(winner: Option<u8>) -> (String, egui::Color32) {
-    match winner {
-        None => (
-            "DRAW!".to_string(),
-            egui::Color32::from_rgb(200, 200, 100), // Yellow
-        ),
-        Some(1) => (
-            "TEAM 1 WINS!".to_string(),
-            egui::Color32::from_rgb(100, 150, 255), // Blue
-        ),
-        Some(2) => (
-            "TEAM 2 WINS!".to_string(),
-            egui::Color32::from_rgb(255, 100, 100), // Red
-        ),
-        Some(_) => (
-            "ERROR: Invalid winner".to_string(),
-            egui::Color32::from_rgb(200, 100, 100),
-        ),
-    }
-}
-
-/// Render the stats table for one team.
-///
-/// Displays a grouped panel containing:
-/// - Team name header
-/// - Expandable combatant rows with stats and ability breakdown
-fn render_team_stats(
+/// Render one team's face-off panel.
+#[allow(clippy::too_many_arguments)]
+fn render_team_panel(
     ui: &mut egui::Ui,
     title: &str,
     team: u8,
     combatants: &[CombatantStats],
     combat_log: &CombatLog,
-    color: egui::Color32,
+    class_icons: &ClassIcons,
+    team_color: egui::Color32,
+    winner: Option<u8>,
+    max_damage: f32,
 ) {
-    ui.group(|ui| {
-        ui.set_min_width(380.0);
+    let is_winner = winner == Some(team);
+    let is_loser = winner.is_some() && !is_winner;
+    let dimf = if is_loser { DIM_LOSER } else { 1.0 };
 
-        // Team title
-        ui.heading(egui::RichText::new(title).size(20.0).color(color));
-        ui.add_space(10.0);
+    let stroke = if is_winner {
+        egui::Stroke::new(2.0, team_color)
+    } else {
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(55, 55, 70))
+    };
 
-        // Combatant rows
-        for stats in combatants {
-            render_expandable_combatant_row(ui, stats, team, combat_log);
-            ui.add_space(4.0);
-        }
-    });
-}
-
-/// Generate combatant ID for looking up combat log data.
-fn get_combatant_id(team: u8, stats: &CombatantStats) -> String {
-    format!("Team {} {}", team, stats.class.name())
-}
-
-/// Render a stat pill (small colored box with label and value).
-fn render_stat_pill(ui: &mut egui::Ui, label: &str, value: &str, color: egui::Color32) {
-    ui.horizontal(|ui| {
-        ui.label(egui::RichText::new(label).size(10.0).color(egui::Color32::from_rgb(150, 150, 150)));
-        ui.label(egui::RichText::new(value).size(12.0).color(color).strong());
-    });
-}
-
-/// Render an expandable combatant card with stats and ability breakdown.
-fn render_expandable_combatant_row(ui: &mut egui::Ui, stats: &CombatantStats, team: u8, combat_log: &CombatLog) {
-    let combatant_id = get_combatant_id(team, stats);
-
-    // Get class color
-    let class_color = stats.class.color();
-    let egui_class_color = egui::Color32::from_rgb(
-        (class_color.to_srgba().red * 255.0) as u8,
-        (class_color.to_srgba().green * 255.0) as u8,
-        (class_color.to_srgba().blue * 255.0) as u8,
-    );
-
-    // Get combat log stats
-    let kills = combat_log.killing_blows(&combatant_id);
-    let cc_time = combat_log.cc_done_seconds(&combatant_id);
-
-    // Card frame
     egui::Frame::none()
-        .fill(egui::Color32::from_rgb(30, 30, 40))
-        .rounding(4.0)
-        .inner_margin(egui::Margin::same(10))
+        .fill(PANEL_BG)
+        .rounding(6.0)
+        .inner_margin(egui::Margin::same(14))
+        .stroke(stroke)
         .show(ui, |ui| {
-            // Header row: Class name + Status badge
+            // Stretch the panel to fill its column (cells are narrow).
+            ui.set_min_width(ui.available_width());
+
+            // Title row: team name + winner/defeated tag.
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(stats.class.name()).size(16.0).color(egui_class_color).strong());
-                ui.add_space(10.0);
-
-                // Status badge
-                let (status_text, status_bg) = if stats.survived {
-                    ("ALIVE", egui::Color32::from_rgb(40, 80, 40))
-                } else {
-                    ("DEAD", egui::Color32::from_rgb(80, 40, 40))
-                };
-                egui::Frame::none()
-                    .fill(status_bg)
-                    .rounding(3.0)
-                    .inner_margin(egui::Margin::symmetric(6, 2))
-                    .show(ui, |ui| {
-                        ui.label(egui::RichText::new(status_text).size(10.0).color(egui::Color32::WHITE));
-                    });
-            });
-
-            ui.add_space(8.0);
-
-            // Stats row
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing.x = 16.0;
-                render_stat_pill(ui, "DMG", &format!("{:.0}", stats.damage_dealt), egui::Color32::from_rgb(255, 150, 100));
-                render_stat_pill(ui, "TAKEN", &format!("{:.0}", stats.damage_taken), egui::Color32::from_rgb(255, 100, 100));
-                render_stat_pill(ui, "HEAL", &format!("{:.0}", stats.healing_done), egui::Color32::from_rgb(100, 255, 100));
-                render_stat_pill(ui, "KILLS", &format!("{}", kills), egui::Color32::from_rgb(255, 215, 0));
-                if cc_time > 0.0 {
-                    render_stat_pill(ui, "CC", &format!("{:.1}s", cc_time), egui::Color32::from_rgb(180, 100, 255));
-                }
-            });
-
-            ui.add_space(6.0);
-
-            // Expandable details section
-            egui::CollapsingHeader::new(
-                egui::RichText::new("Ability Details").size(11.0).color(egui::Color32::from_rgb(150, 150, 170))
-            )
-            .id_salt(&combatant_id)
-            .show(ui, |ui| {
-                ui.add_space(4.0);
-
-                // Damage breakdown with bars
-                let damage_by_ability = combat_log.damage_by_ability(&combatant_id);
-                if !damage_by_ability.is_empty() {
-                    ui.label(egui::RichText::new("Damage").size(10.0).color(egui::Color32::from_rgb(255, 180, 100)));
-                    ui.add_space(2.0);
-
-                    let mut damage_vec: Vec<_> = damage_by_ability.iter().collect();
-                    damage_vec.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
-                    let total_damage: f32 = damage_vec.iter().map(|(_, &d)| d).sum();
-
-                    for (rank, (ability, &damage)) in damage_vec.iter().take(5).enumerate() {
-                        render_ability_bar(
-                            ui,
-                            rank + 1,
-                            ability,
-                            damage,
-                            total_damage,
-                            egui::Color32::from_rgb(180, 100, 40),
-                            egui::Color32::from_rgb(255, 180, 100),
+                ui.label(
+                    egui::RichText::new(title)
+                        .size(20.0)
+                        .color(dim(team_color, dimf))
+                        .strong(),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if is_winner {
+                        tag(ui, "★ WINNER", egui::Color32::from_rgb(60, 90, 50), C_KILL);
+                    } else if is_loser {
+                        ui.label(
+                            egui::RichText::new("(defeated)")
+                                .size(13.0)
+                                .italics()
+                                .color(dim(HEADER_GREY, dimf)),
                         );
                     }
-                }
-
-                // Healing breakdown with bars
-                let healing_by_ability = combat_log.healing_by_ability(&combatant_id);
-                if !healing_by_ability.is_empty() {
-                    ui.add_space(6.0);
-                    ui.label(egui::RichText::new("Healing").size(10.0).color(egui::Color32::from_rgb(100, 255, 100)));
-                    ui.add_space(2.0);
-
-                    let mut healing_vec: Vec<_> = healing_by_ability.iter().collect();
-                    healing_vec.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
-                    let total_healing: f32 = healing_vec.iter().map(|(_, &h)| h).sum();
-
-                    for (rank, (ability, &healing)) in healing_vec.iter().take(5).enumerate() {
-                        render_ability_bar(
-                            ui,
-                            rank + 1,
-                            ability,
-                            healing,
-                            total_healing,
-                            egui::Color32::from_rgb(40, 130, 40),
-                            egui::Color32::from_rgb(100, 255, 100),
-                        );
-                    }
-                }
-
-                // CC received
-                let cc_received = combat_log.cc_received_seconds(&combatant_id);
-                if cc_received > 0.0 {
-                    ui.add_space(4.0);
-                    ui.label(
-                        egui::RichText::new(format!("CC Received: {:.1}s", cc_received))
-                            .size(10.0)
-                            .color(egui::Color32::from_rgb(255, 100, 100))
-                    );
-                }
+                });
             });
+
+            ui.add_space(10.0);
+
+            // Column header row.
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                header_name_cell(ui, "CLASS", dimf);
+                header_num_cell(ui, W_DMG, "DMG", dimf);
+                header_num_cell(ui, W_HEAL, "HEAL", dimf);
+                header_num_cell(ui, W_TKN, "TKN", dimf);
+                header_num_cell(ui, W_K, "K", dimf);
+            });
+            ui.add_space(4.0);
+
+            // Combatant rows.
+            for stats in combatants {
+                combatant_block(ui, stats, team, combat_log, class_icons, max_damage, dimf);
+            }
+
+            // Σ TOTAL row.
+            total_row(ui, combatants, combat_log, team, dimf);
         });
 }
 
-/// Render a single ability bar with background fill showing relative contribution.
-fn render_ability_bar(
+/// One combatant: stat row + relative damage mini-bar + expandable breakdown.
+fn combatant_block(
     ui: &mut egui::Ui,
-    rank: usize,
-    ability: &str,
-    amount: f32,
-    total: f32,
-    bar_color: egui::Color32,
-    text_color: egui::Color32,
+    stats: &CombatantStats,
+    team: u8,
+    combat_log: &CombatLog,
+    class_icons: &ClassIcons,
+    max_damage: f32,
+    dimf: f32,
 ) {
-    let percentage = if total > 0.0 { amount / total } else { 0.0 };
-    let bar_width = ui.available_width().min(250.0);
+    let cid = combatant_id(team, stats);
+    let class_color = dim(class_color32(stats.class), dimf);
+    let kills = combat_log.killing_blows(&cid);
 
-    // Create a frame for the bar row
-    let (rect, _response) = ui.allocate_exact_size(
-        egui::vec2(bar_width, 18.0),
-        egui::Sense::hover()
-    );
+    // Stat row.
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        name_cell(ui, class_icons.textures.get(&stats.class).copied(), stats.class.name(), class_color);
+        num_cell(ui, W_DMG, fmt_k(stats.damage_dealt), dim(C_DMG, dimf), false);
+        num_cell(ui, W_HEAL, fmt_opt(stats.healing_done), dim(C_HEAL, dimf), false);
+        num_cell(ui, W_TKN, fmt_k(stats.damage_taken), dim(C_TKN, dimf), false);
+        num_cell(ui, W_K, kills.to_string(), dim(C_KILL, dimf), false);
+    });
 
-    if ui.is_rect_visible(rect) {
+    // Relative damage mini-bar + survival tag.
+    let frac = (stats.damage_dealt / max_damage).clamp(0.0, 1.0);
+    let (status_text, status_color) = if stats.survived {
+        ("ALIVE", C_ALIVE)
+    } else {
+        ("DEAD", C_DEAD)
+    };
+    ui.horizontal(|ui| {
+        let tag_w = 46.0;
+        let bar_w = (ui.available_width() - tag_w).max(20.0);
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(bar_w, 7.0), egui::Sense::hover());
         let painter = ui.painter();
+        painter.rect_filled(rect, 2.0, egui::Color32::from_rgb(38, 38, 50));
+        let fill = egui::Rect::from_min_size(rect.min, egui::vec2(rect.width() * frac, 7.0));
+        painter.rect_filled(fill, 2.0, dim(C_DMG, dimf * 0.9));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(
+                egui::RichText::new(status_text)
+                    .size(9.0)
+                    .strong()
+                    .color(dim(status_color, dimf)),
+            );
+        });
+    });
 
-        // Background (dark)
-        painter.rect_filled(
-            rect,
-            2.0,
-            egui::Color32::from_rgb(30, 30, 40)
-        );
+    // Expandable ability breakdown.
+    egui::CollapsingHeader::new(
+        egui::RichText::new("Ability breakdown")
+            .size(10.0)
+            .color(dim(egui::Color32::from_rgb(150, 150, 170), dimf)),
+    )
+    .id_salt(&cid)
+    .show(ui, |ui| {
+        render_ability_details(ui, &cid, combat_log, dimf);
+    });
 
-        // Filled portion (colored bar)
-        let filled_rect = egui::Rect::from_min_size(
-            rect.min,
-            egui::vec2(rect.width() * percentage, rect.height())
-        );
-        painter.rect_filled(
-            filled_rect,
-            2.0,
-            bar_color.linear_multiply(0.6)
-        );
+    ui.add_space(8.0);
+}
 
-        // Border
-        painter.rect_stroke(
-            rect,
-            2.0,
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 60, 70)),
-            egui::StrokeKind::Outside,
-        );
+/// Σ TOTAL subtotal row for a team (divider above, bold values).
+fn total_row(
+    ui: &mut egui::Ui,
+    combatants: &[CombatantStats],
+    combat_log: &CombatLog,
+    team: u8,
+    dimf: f32,
+) {
+    let dmg: f32 = combatants.iter().map(|s| s.damage_dealt).sum();
+    let heal: f32 = combatants.iter().map(|s| s.healing_done).sum();
+    let tkn: f32 = combatants.iter().map(|s| s.damage_taken).sum();
+    let kills: u32 = combatants
+        .iter()
+        .map(|s| combat_log.killing_blows(&combatant_id(team, s)))
+        .sum();
 
-        // Rank number
-        let rank_text = format!("{}.", rank);
-        painter.text(
-            rect.min + egui::vec2(4.0, 9.0),
-            egui::Align2::LEFT_CENTER,
-            &rank_text,
-            egui::FontId::proportional(10.0),
-            egui::Color32::from_rgb(150, 150, 150)
-        );
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
+    ui.painter().rect_filled(rect, 0.0, dim(DIVIDER, dimf));
+    ui.add_space(5.0);
 
-        // Ability name
-        painter.text(
-            rect.min + egui::vec2(20.0, 9.0),
-            egui::Align2::LEFT_CENTER,
-            ability,
-            egui::FontId::proportional(11.0),
-            egui::Color32::from_rgb(220, 220, 220)
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        ui.allocate_ui_with_layout(
+            egui::vec2(W_NAME, ROW_HEIGHT),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.label(
+                    egui::RichText::new("Σ TOTAL")
+                        .size(13.0)
+                        .strong()
+                        .color(dim(egui::Color32::from_rgb(205, 205, 215), dimf)),
+                );
+            },
         );
+        num_cell(ui, W_DMG, fmt_k(dmg), dim(C_DMG, dimf), true);
+        num_cell(ui, W_HEAL, fmt_opt(heal), dim(C_HEAL, dimf), true);
+        num_cell(ui, W_TKN, fmt_k(tkn), dim(C_TKN, dimf), true);
+        num_cell(ui, W_K, kills.to_string(), dim(C_KILL, dimf), true);
+    });
+}
 
-        // Amount and percentage on right
-        let amount_text = format!("{:.0} ({:.1}%)", amount, percentage * 100.0);
-        painter.text(
-            rect.max - egui::vec2(4.0, 9.0),
-            egui::Align2::RIGHT_CENTER,
-            &amount_text,
-            egui::FontId::proportional(10.0),
-            text_color
+/// Per-ability damage/healing bars + CC received, shown inside the expander.
+fn render_ability_details(ui: &mut egui::Ui, cid: &str, combat_log: &CombatLog, dimf: f32) {
+    ui.add_space(2.0);
+
+    let damage = combat_log.damage_by_ability(cid);
+    if !damage.is_empty() {
+        ui.label(egui::RichText::new("Damage").size(10.0).color(dim(C_DMG, dimf)));
+        render_ability_bars(ui, &damage, dim(C_DMG, dimf));
+    }
+
+    let healing = combat_log.healing_by_ability(cid);
+    if !healing.is_empty() {
+        ui.add_space(5.0);
+        ui.label(egui::RichText::new("Healing").size(10.0).color(dim(C_HEAL, dimf)));
+        render_ability_bars(ui, &healing, dim(C_HEAL, dimf));
+    }
+
+    let cc_received = combat_log.cc_received_seconds(cid);
+    if cc_received > 0.0 {
+        ui.add_space(4.0);
+        ui.label(
+            egui::RichText::new(format!("CC received: {cc_received:.1}s"))
+                .size(10.0)
+                .color(dim(egui::Color32::from_rgb(180, 100, 255), dimf)),
         );
     }
 }
 
+/// Render the top-5 ability contribution bars for one breakdown map.
+fn render_ability_bars(
+    ui: &mut egui::Ui,
+    by_ability: &std::collections::HashMap<String, f32>,
+    bar_color: egui::Color32,
+) {
+    let mut entries: Vec<_> = by_ability.iter().collect();
+    entries.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let total: f32 = entries.iter().map(|(_, &v)| v).sum();
 
+    for (ability, &amount) in entries.iter().take(5) {
+        let pct = if total > 0.0 { amount / total } else { 0.0 };
+        let width = ui.available_width().min(260.0);
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 16.0), egui::Sense::hover());
+        if !ui.is_rect_visible(rect) {
+            continue;
+        }
+        let painter = ui.painter();
+        painter.rect_filled(rect, 2.0, egui::Color32::from_rgb(34, 34, 46));
+        let fill = egui::Rect::from_min_size(rect.min, egui::vec2(rect.width() * pct, rect.height()));
+        painter.rect_filled(fill, 2.0, bar_color.linear_multiply(0.5));
+        painter.text(
+            rect.left_center() + egui::vec2(6.0, 0.0),
+            egui::Align2::LEFT_CENTER,
+            ability,
+            egui::FontId::proportional(10.0),
+            egui::Color32::from_rgb(215, 215, 220),
+        );
+        painter.text(
+            rect.right_center() - egui::vec2(6.0, 0.0),
+            egui::Align2::RIGHT_CENTER,
+            format!("{amount:.0} ({:.0}%)", pct * 100.0),
+            egui::FontId::proportional(9.0),
+            bar_color,
+        );
+    }
+}
+
+// --- Cell helpers (fixed-width for column alignment) ---
+
+/// Class name cell: accent stripe + icon (or color fallback) + class name.
+fn name_cell(ui: &mut egui::Ui, icon: Option<egui::TextureId>, name: &str, color: egui::Color32) {
+    ui.allocate_ui_with_layout(
+        egui::vec2(W_NAME, ROW_HEIGHT),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.spacing_mut().item_spacing.x = 5.0;
+            // Class-color accent stripe.
+            let (stripe, _) =
+                ui.allocate_exact_size(egui::vec2(3.0, ROW_HEIGHT - 6.0), egui::Sense::hover());
+            ui.painter().rect_filled(stripe, 1.0, color);
+            // Icon, or a colored square fallback if not loaded.
+            let (irect, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
+            if let Some(tex) = icon {
+                ui.painter().image(
+                    tex,
+                    irect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+            } else {
+                ui.painter().rect_filled(irect, 3.0, color);
+            }
+            ui.label(egui::RichText::new(name).size(14.0).strong().color(color));
+        },
+    );
+}
+
+/// Right-aligned fixed-width numeric cell.
+fn num_cell(ui: &mut egui::Ui, width: f32, text: String, color: egui::Color32, strong: bool) {
+    let mut rt = egui::RichText::new(text).size(14.0).color(color);
+    if strong {
+        rt = rt.strong();
+    }
+    ui.allocate_ui_with_layout(
+        egui::vec2(width, ROW_HEIGHT),
+        egui::Layout::right_to_left(egui::Align::Center),
+        |ui| {
+            ui.label(rt);
+        },
+    );
+}
+
+fn header_name_cell(ui: &mut egui::Ui, text: &str, dimf: f32) {
+    ui.allocate_ui_with_layout(
+        egui::vec2(W_NAME, 16.0),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.label(egui::RichText::new(text).size(10.0).color(dim(HEADER_GREY, dimf)));
+        },
+    );
+}
+
+fn header_num_cell(ui: &mut egui::Ui, width: f32, text: &str, dimf: f32) {
+    ui.allocate_ui_with_layout(
+        egui::vec2(width, 16.0),
+        egui::Layout::right_to_left(egui::Align::Center),
+        |ui| {
+            ui.label(egui::RichText::new(text).size(10.0).color(dim(HEADER_GREY, dimf)));
+        },
+    );
+}
+
+/// Small rounded pill tag (e.g. "★ WINNER").
+fn tag(ui: &mut egui::Ui, text: &str, bg: egui::Color32, fg: egui::Color32) {
+    egui::Frame::none()
+        .fill(bg)
+        .rounding(3.0)
+        .inner_margin(egui::Margin::symmetric(6, 2))
+        .show(ui, |ui| {
+            ui.label(egui::RichText::new(text).size(11.0).strong().color(fg));
+        });
+}
+
+// --- Pure helpers ---
+
+fn combatant_id(team: u8, stats: &CombatantStats) -> String {
+    format!("Team {} {}", team, stats.class.name())
+}
+
+/// `8400.0 -> "8.4k"`, values under 1000 stay exact.
+fn fmt_k(v: f32) -> String {
+    if v >= 1000.0 {
+        format!("{:.1}k", v / 1000.0)
+    } else {
+        format!("{v:.0}")
+    }
+}
+
+/// Like `fmt_k`, but renders zero as an em dash (for non-healers' HEAL column).
+fn fmt_opt(v: f32) -> String {
+    if v > 0.0 {
+        fmt_k(v)
+    } else {
+        "–".to_string()
+    }
+}
+
+/// Seconds -> `M:SS`.
+fn fmt_duration(secs: f32) -> String {
+    let total = secs.max(0.0) as u32;
+    format!("{}:{:02}", total / 60, total % 60)
+}
+
+/// Multiply an RGB color toward black by `f` (1.0 = unchanged, <1 = dimmer).
+fn dim(c: egui::Color32, f: f32) -> egui::Color32 {
+    egui::Color32::from_rgb(
+        (c.r() as f32 * f) as u8,
+        (c.g() as f32 * f) as u8,
+        (c.b() as f32 * f) as u8,
+    )
+}
+
+/// Convert a class's bevy `Color` to an egui `Color32`.
+fn class_color32(class: CharacterClass) -> egui::Color32 {
+    let c = class.color().to_srgba();
+    egui::Color32::from_rgb(
+        (c.red * 255.0) as u8,
+        (c.green * 255.0) as u8,
+        (c.blue * 255.0) as u8,
+    )
+}
