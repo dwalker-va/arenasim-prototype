@@ -18,3 +18,7 @@ Thumbs.db
 
 # Match logs (for debugging)
 match_logs/
+# egui_kittest transient snapshot artifacts (keep only the blessed *.png baseline)
+tests/snapshots/*.new.png
+tests/snapshots/*.old.png
+tests/snapshots/*.diff.png

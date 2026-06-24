@@ -42,6 +42,8 @@ const W_HEAL: f32 = 52.0;
 const W_TKN: f32 = 52.0;
 const W_K: f32 = 26.0;
 const ROW_HEIGHT: f32 = 22.0;
+/// Gap between the right-aligned stat columns.
+const STAT_GAP: f32 = 12.0;
 
 // --- Palette ---
 const BG: egui::Color32 = egui::Color32::from_rgb(20, 20, 30);
@@ -57,6 +59,10 @@ const C_DEAD: egui::Color32 = egui::Color32::from_rgb(205, 110, 110);
 
 /// Dim factor applied to a defeated team's panel so the victor reads as dominant.
 const DIM_LOSER: f32 = 0.55;
+
+/// Max width of the whole results block; centered, so it doesn't stretch
+/// edge-to-edge on a wide window.
+const CONTENT_MAX_W: f32 = 1080.0;
 
 /// Main UI system for the Results screen.
 ///
@@ -108,6 +114,9 @@ pub fn draw_results_screen(
                 .inner_margin(egui::Margin::same(24)),
         )
         .show(ctx, |ui| {
+          ui.vertical_centered(|ui| {
+            ui.set_max_width(CONTENT_MAX_W);
+
             let Some(results) = results else {
                 ui.add_space(40.0);
                 ui.vertical_centered(|ui| {
@@ -163,6 +172,7 @@ pub fn draw_results_screen(
                     done = true;
                 }
             });
+          });
         });
 
     done
@@ -184,6 +194,7 @@ fn render_banner(ui: &mut egui::Ui, winner: Option<u8>, duration_secs: f32) {
         .inner_margin(egui::Margin::symmetric(20, 14))
         .stroke(egui::Stroke::new(2.0, color))
         .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
             ui.horizontal(|ui| {
                 ui.heading(
                     egui::RichText::new(format!("{star}{text}"))
@@ -257,14 +268,16 @@ fn render_team_panel(
 
             ui.add_space(10.0);
 
-            // Column header row.
+            // Column header row (stats right-aligned to the panel edge).
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
                 header_name_cell(ui, "CLASS", dimf);
-                header_num_cell(ui, W_DMG, "DMG", dimf);
-                header_num_cell(ui, W_HEAL, "HEAL", dimf);
-                header_num_cell(ui, W_TKN, "TKN", dimf);
-                header_num_cell(ui, W_K, "K", dimf);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = STAT_GAP;
+                    header_num_cell(ui, W_K, "K", dimf);
+                    header_num_cell(ui, W_TKN, "TKN", dimf);
+                    header_num_cell(ui, W_HEAL, "HEAL", dimf);
+                    header_num_cell(ui, W_DMG, "DMG", dimf);
+                });
             });
             ui.add_space(4.0);
 
@@ -292,14 +305,16 @@ fn combatant_block(
     let class_color = dim(class_color32(stats.class), dimf);
     let kills = combat_log.killing_blows(&cid);
 
-    // Stat row.
+    // Stat row (name left, stats right-aligned to the panel edge).
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
         name_cell(ui, class_icons.textures.get(&stats.class).copied(), stats.class.name(), class_color);
-        num_cell(ui, W_DMG, fmt_k(stats.damage_dealt), dim(C_DMG, dimf), false);
-        num_cell(ui, W_HEAL, fmt_opt(stats.healing_done), dim(C_HEAL, dimf), false);
-        num_cell(ui, W_TKN, fmt_k(stats.damage_taken), dim(C_TKN, dimf), false);
-        num_cell(ui, W_K, kills.to_string(), dim(C_KILL, dimf), false);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = STAT_GAP;
+            num_cell(ui, W_K, kills.to_string(), dim(C_KILL, dimf), false);
+            num_cell(ui, W_TKN, fmt_k(stats.damage_taken), dim(C_TKN, dimf), false);
+            num_cell(ui, W_HEAL, fmt_opt(stats.healing_done), dim(C_HEAL, dimf), false);
+            num_cell(ui, W_DMG, fmt_k(stats.damage_dealt), dim(C_DMG, dimf), false);
+        });
     });
 
     // Relative damage mini-bar + survival tag.
@@ -363,7 +378,6 @@ fn total_row(
     ui.add_space(5.0);
 
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
         ui.allocate_ui_with_layout(
             egui::vec2(W_NAME, ROW_HEIGHT),
             egui::Layout::left_to_right(egui::Align::Center),
@@ -376,10 +390,13 @@ fn total_row(
                 );
             },
         );
-        num_cell(ui, W_DMG, fmt_k(dmg), dim(C_DMG, dimf), true);
-        num_cell(ui, W_HEAL, fmt_opt(heal), dim(C_HEAL, dimf), true);
-        num_cell(ui, W_TKN, fmt_k(tkn), dim(C_TKN, dimf), true);
-        num_cell(ui, W_K, kills.to_string(), dim(C_KILL, dimf), true);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = STAT_GAP;
+            num_cell(ui, W_K, kills.to_string(), dim(C_KILL, dimf), true);
+            num_cell(ui, W_TKN, fmt_k(tkn), dim(C_TKN, dimf), true);
+            num_cell(ui, W_HEAL, fmt_opt(heal), dim(C_HEAL, dimf), true);
+            num_cell(ui, W_DMG, fmt_k(dmg), dim(C_DMG, dimf), true);
+        });
     });
 }
 
