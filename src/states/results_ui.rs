@@ -56,9 +56,12 @@ const C_TKN: egui::Color32 = egui::Color32::from_rgb(230, 110, 110);
 const C_KILL: egui::Color32 = egui::Color32::from_rgb(255, 205, 90);
 const C_ALIVE: egui::Color32 = egui::Color32::from_rgb(120, 200, 120);
 const C_DEAD: egui::Color32 = egui::Color32::from_rgb(205, 110, 110);
+/// Near-white text drawn on top of the colored ability-breakdown bars (kept
+/// independent of the bar fill color so it stays legible on a full bar).
+const BAR_TEXT: egui::Color32 = egui::Color32::from_rgb(244, 244, 248);
 
 /// Dim factor applied to a defeated team's panel so the victor reads as dominant.
-const DIM_LOSER: f32 = 0.55;
+const DIM_LOSER: f32 = 0.72;
 
 /// Max width of the whole results block; centered, so it doesn't stretch
 /// edge-to-edge on a wide window.
@@ -407,14 +410,14 @@ fn render_ability_details(ui: &mut egui::Ui, cid: &str, combat_log: &CombatLog, 
     let damage = combat_log.damage_by_ability(cid);
     if !damage.is_empty() {
         ui.label(egui::RichText::new("Damage").size(10.0).color(dim(C_DMG, dimf)));
-        render_ability_bars(ui, &damage, dim(C_DMG, dimf));
+        render_ability_bars(ui, &damage, dim(C_DMG, dimf), dim(BAR_TEXT, dimf));
     }
 
     let healing = combat_log.healing_by_ability(cid);
     if !healing.is_empty() {
         ui.add_space(5.0);
         ui.label(egui::RichText::new("Healing").size(10.0).color(dim(C_HEAL, dimf)));
-        render_ability_bars(ui, &healing, dim(C_HEAL, dimf));
+        render_ability_bars(ui, &healing, dim(C_HEAL, dimf), dim(BAR_TEXT, dimf));
     }
 
     let cc_received = combat_log.cc_received_seconds(cid);
@@ -429,10 +432,14 @@ fn render_ability_details(ui: &mut egui::Ui, cid: &str, combat_log: &CombatLog, 
 }
 
 /// Render the top-5 ability contribution bars for one breakdown map.
+///
+/// `text_color` is kept near-white (not `bar_color`) so the ability name and
+/// amount stay legible on top of a full/near-full colored bar fill.
 fn render_ability_bars(
     ui: &mut egui::Ui,
     by_ability: &std::collections::HashMap<String, f32>,
     bar_color: egui::Color32,
+    text_color: egui::Color32,
 ) {
     let mut entries: Vec<_> = by_ability.iter().collect();
     entries.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
@@ -454,14 +461,14 @@ fn render_ability_bars(
             egui::Align2::LEFT_CENTER,
             ability,
             egui::FontId::proportional(10.0),
-            egui::Color32::from_rgb(215, 215, 220),
+            text_color,
         );
         painter.text(
             rect.right_center() - egui::vec2(6.0, 0.0),
             egui::Align2::RIGHT_CENTER,
             format!("{amount:.0} ({:.0}%)", pct * 100.0),
             egui::FontId::proportional(9.0),
-            bar_color,
+            text_color,
         );
     }
 }
