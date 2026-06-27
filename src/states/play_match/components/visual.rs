@@ -153,6 +153,25 @@ pub struct DispelBurst {
     pub initial_lifetime: f32,
 }
 
+/// Visual effect for a successful dispel — a twisting ribbon that spirals up off
+/// the dispelled combatant's head and fades. Distinct from `DispelBurst` (the
+/// expanding sphere, still used by Concussive Shot and Master's Call): the ribbon's
+/// unique silhouette + upward rise make it unmistakable as a cleanse and draw the
+/// eye to *which* combatant lost a buff. Spawned only on a successful dispel.
+#[derive(Component)]
+pub struct DispelRibbon {
+    /// The entity that was dispelled (ribbon anchors above this target's head)
+    pub target: Entity,
+    /// The class of the dispeller (affects color: Priest = white/silver, Paladin = golden)
+    pub caster_class: CharacterClass,
+    /// Time remaining before despawn (seconds)
+    pub lifetime: f32,
+    /// Initial lifetime for fade/rise progress
+    pub initial_lifetime: f32,
+    /// Spin accumulator (seconds) driving the ribbon's slow Y-axis rotation
+    pub spin: f32,
+}
+
 /// Visual effect for Psychic Scream — a self-centered expanding shadow burst
 /// around the caster that conveys the AoE fear radius. Spawned on cast, expands
 /// outward to roughly the scream radius and fades over its lifetime. Distinct
