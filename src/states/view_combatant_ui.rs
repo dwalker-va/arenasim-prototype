@@ -1317,6 +1317,12 @@ fn render_ability_tooltip(ui: &mut egui::Ui, name: &str, config: &AbilityConfig,
 
 /// Build a description string for an ability based on its config and combatant stats
 fn build_ability_description(config: &AbilityConfig, stats: &ClassStats) -> String {
+    // A hand-written description (abilities.ron) wins over the auto-generated
+    // text — for effects the numeric config can't express (totems, Purge).
+    if !config.description.is_empty() {
+        return config.description.clone();
+    }
+
     let mut parts = Vec::new();
 
     // Calculate stat contribution for damage

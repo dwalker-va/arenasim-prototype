@@ -1112,6 +1112,7 @@
         // Enemy-buff-removal mechanic arrives in U4; this entry just declares it.
         Purge: (
             name: "Purge",
+            description: "Removes one beneficial magic effect from an enemy.",
             icon: "icons/abilities/spell_nature_purge.jpg",
             cast_time: 0.0,
             range: 30.0,
@@ -1138,6 +1139,7 @@
         // Air — Windfury Totem: empowers melee allies' auto-attacks (U3 behavior).
         AirTotem: (
             name: "Windfury Totem",
+            description: "Summons an Air totem that gives nearby melee allies a 12% chance for an extra attack. Lasts 30 sec.",
             icon: "icons/abilities/spell_nature_windfury.jpg",
             cast_time: 0.0,
             range: 0.0,
@@ -1149,6 +1151,7 @@
         // Water — Healing Stream Totem: periodic ally heal in radius (U3 behavior).
         WaterTotem: (
             name: "Healing Stream Totem",
+            description: "Summons a Water totem that heals nearby allies for 8 health every second. Lasts 30 sec.",
             icon: "icons/abilities/inv_spear_04.jpg",
             cast_time: 0.0,
             range: 0.0,
@@ -1160,6 +1163,7 @@
         // Earth — Strength of Earth Totem: ally attack power in radius (U3 behavior).
         EarthTotem: (
             name: "Strength of Earth Totem",
+            description: "Summons an Earth totem that increases the attack power of nearby allies by 15. Lasts 30 sec.",
             icon: "icons/abilities/spell_nature_strengthofearthtotem02.jpg",
             cast_time: 0.0,
             range: 0.0,
@@ -1171,6 +1175,7 @@
         // Fire — Flametongue Totem: ally spell power in radius (U3 behavior).
         FireTotem: (
             name: "Flametongue Totem",
+            description: "Summons a Fire totem that increases the spell power of nearby allies by 18. Lasts 30 sec.",
             icon: "icons/abilities/spell_fire_flametounge.jpg",
             cast_time: 0.0,
             range: 0.0,
