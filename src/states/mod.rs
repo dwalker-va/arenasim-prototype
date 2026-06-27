@@ -194,12 +194,25 @@ impl Plugin for StatesPlugin {
                     .run_if(in_state(GameState::PlayMatch)),
             )
             // Dispel burst visual effects (separate group to avoid tuple size limits)
+            // Still used by Concussive Shot impact and Master's Call — NOT the dispel.
             .add_systems(
                 Update,
                 (
                     play_match::spawn_dispel_visuals,          // Spawn burst when dispel succeeds
                     play_match::update_dispel_bursts,          // Expand sphere and fade
                     play_match::cleanup_expired_dispel_bursts, // Remove expired bursts
+                )
+                    .after(CombatSystemPhase::CombatResolution)
+                    .run_if(in_state(GameState::PlayMatch)),
+            )
+            // Dispel ribbon visual effects (separate group to avoid tuple size limits)
+            // The spiraling "you got cleansed" indicator — graphical only.
+            .add_systems(
+                Update,
+                (
+                    play_match::spawn_dispel_ribbon_visuals,    // Attach ribbon mesh when a dispel succeeds
+                    play_match::update_dispel_ribbons,          // Rise off the head, spin, and fade
+                    play_match::cleanup_expired_dispel_ribbons, // Remove expired ribbons
                 )
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_state(GameState::PlayMatch)),

@@ -83,13 +83,16 @@ pub fn process_dispels(
                     combatant.class.name()
                 );
 
-                // Spawn dispel visual effect
+                // Spawn dispel visual effect — the spiraling ribbon above the
+                // dispelled combatant's head (distinct from the DispelBurst sphere,
+                // which Concussive Shot / Master's Call still use).
                 commands.spawn((
-                    DispelBurst {
+                    DispelRibbon {
                         target: pending.target,
                         caster_class: pending.caster_class,
-                        lifetime: 0.5,
-                        initial_lifetime: 0.5,
+                        lifetime: 1.2,
+                        initial_lifetime: 1.2,
+                        spin: 0.0,
                     },
                     PlayMatchEntity,
                 ));
