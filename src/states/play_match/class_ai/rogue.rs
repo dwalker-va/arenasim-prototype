@@ -408,7 +408,7 @@ fn try_ambush(
     let self_auras = ctx.active_auras.get(&entity).map(|v| v.as_slice()).unwrap_or(&[]);
     let ap_bonus = get_attack_power_bonus_from_slice(self_auras);
     let crit_bonus = get_crit_chance_bonus_from_slice(self_auras);
-    let mut damage = combatant.calculate_ability_damage_config(def, game_rng, ap_bonus);
+    let mut damage = combatant.calculate_ability_damage_config(def, game_rng, ap_bonus, 0.0);
     let is_crit = roll_crit(combatant.crit_chance + crit_bonus, game_rng);
     if is_crit { damage *= CRIT_DAMAGE_MULTIPLIER; }
     instant_attacks.push(super::QueuedInstantAttack {
@@ -636,7 +636,7 @@ fn try_sinister_strike(
     let self_auras = ctx.active_auras.get(&entity).map(|v| v.as_slice()).unwrap_or(&[]);
     let ap_bonus = get_attack_power_bonus_from_slice(self_auras);
     let crit_bonus = get_crit_chance_bonus_from_slice(self_auras);
-    let mut damage = combatant.calculate_ability_damage_config(def, game_rng, ap_bonus);
+    let mut damage = combatant.calculate_ability_damage_config(def, game_rng, ap_bonus, 0.0);
     let is_crit = roll_crit(combatant.crit_chance + crit_bonus, game_rng);
     if is_crit { damage *= CRIT_DAMAGE_MULTIPLIER; }
     instant_attacks.push(super::QueuedInstantAttack {

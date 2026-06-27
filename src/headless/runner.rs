@@ -18,7 +18,7 @@ use crate::states::play_match::systems::{
     self, combatant_id, Combatant, FloatingTextState, GameRng, MatchCountdown, ShadowSightState,
     SimulationSpeed,
 };
-use crate::states::play_match::components::{ActiveAuras, Pet, PetType, DRTracker};
+use crate::states::play_match::components::{ActiveAuras, AuraType, Pet, PetType, DRTracker, Totem, TotemElement};
 use crate::states::play_match::constants::PET_SLOT_BASE;
 use crate::states::play_match::decision_trace::{DecisionTrace, TraceWriter};
 use crate::states::match_config::CharacterClass;
@@ -52,6 +52,33 @@ pub struct ObservedCombatant {
     /// False once current_health hits 0. Dead combatants stay in the
     /// snapshot (their entities are not despawned) with frozen positions.
     pub alive: bool,
+    /// Current health (read-only). Lets probes assert HoT ticks / damage.
+    pub current_health: f32,
+    /// Maximum health (read-only). Pair with `current_health` for HP fraction.
+    pub max_health: f32,
+    /// Active aura effect types on this combatant, in `ActiveAuras` vec order.
+    /// Lets probes assert a combatant carries (or does not carry) a totem buff
+    /// without `&World` access. Empty when the entity has no `ActiveAuras`.
+    pub aura_types: Vec<AuraType>,
+}
+
+/// A read-only snapshot of one Shaman totem on a frame. Totems are NOT
+/// `Combatant`s (they carry only a `Totem` + `Transform`), so they are
+/// observed on a parallel list rather than in `FrameObservation::combatants`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ObservedTotem {
+    /// Entity of the Shaman who dropped this totem (buff caster attribution).
+    pub owner: Entity,
+    /// Team of the owning Shaman — allies (`team == owner_team`) get the buff.
+    pub owner_team: u8,
+    /// Which element this totem is.
+    pub element: TotemElement,
+    /// World-space totem position (y is height; distances are on x/z).
+    pub position: Vec3,
+    /// Allies within this distance receive the totem's buff.
+    pub radius: f32,
+    /// Seconds remaining before the totem expires.
+    pub duration_remaining: f32,
 }
 
 /// One frame's observation, passed to the observer callback of
@@ -66,6 +93,9 @@ pub struct FrameObservation {
     /// All combatant entities (including pets, including dead ones), keyed
     /// by entity. BTreeMap so iteration order is deterministic.
     pub combatants: BTreeMap<Entity, ObservedCombatant>,
+    /// All live Shaman totems this frame, sorted by entity id (deterministic).
+    /// Empty in matches without a Shaman.
+    pub totems: Vec<ObservedTotem>,
 }
 
 /// Result of a completed headless match
@@ -676,13 +706,36 @@ fn observe_frame(world: &World) -> FrameObservation {
         .unwrap_or(false);
 
     let mut combatants = BTreeMap::new();
+    let mut totems: Vec<(Entity, ObservedTotem)> = Vec::new();
     for entity_ref in world.iter_entities() {
+        // Totems are not Combatants — observe them on a parallel list.
+        if let (Some(totem), Some(transform)) =
+            (entity_ref.get::<Totem>(), entity_ref.get::<Transform>())
+        {
+            totems.push((
+                entity_ref.id(),
+                ObservedTotem {
+                    owner: totem.owner,
+                    owner_team: totem.owner_team,
+                    element: totem.element,
+                    position: transform.translation,
+                    radius: totem.radius,
+                    duration_remaining: totem.duration_remaining,
+                },
+            ));
+            continue;
+        }
+
         let (Some(combatant), Some(transform)) = (
             entity_ref.get::<Combatant>(),
             entity_ref.get::<Transform>(),
         ) else {
             continue;
         };
+        let aura_types = entity_ref
+            .get::<ActiveAuras>()
+            .map(|a| a.auras.iter().map(|aura| aura.effect_type).collect())
+            .unwrap_or_default();
         combatants.insert(
             entity_ref.id(),
             ObservedCombatant {
@@ -692,14 +745,22 @@ fn observe_frame(world: &World) -> FrameObservation {
                 class: combatant.class,
                 is_pet: entity_ref.contains::<Pet>(),
                 alive: combatant.is_alive(),
+                current_health: combatant.current_health,
+                max_health: combatant.max_health,
+                aura_types,
             },
         );
     }
+
+    // Sort by entity id for deterministic iteration order in probes.
+    totems.sort_by_key(|(e, _)| *e);
+    let totems = totems.into_iter().map(|(_, t)| t).collect();
 
     FrameObservation {
         sim_time,
         gates_open,
         combatants,
+        totems,
     }
 }
 

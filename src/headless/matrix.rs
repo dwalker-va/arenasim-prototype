@@ -350,5 +350,6 @@ fn short(c: CharacterClass) -> &'static str {
         CharacterClass::Warlock => "Wlk",
         CharacterClass::Paladin => "Pal",
         CharacterClass::Hunter => "Hun",
+        CharacterClass::Shaman => "Sha",
     }
 }

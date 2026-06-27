@@ -216,6 +216,16 @@ fn get_class_stats(class: CharacterClass) -> ClassStats {
             move_speed: 5.0,
             armor: 0.0,
         },
+        CharacterClass::Shaman => ClassStats {
+            health: 265,
+            resource_name: "Mana",
+            resource_max: 160,
+            attack_power: 0,
+            spell_power: 42,
+            attack_speed: 0.8,
+            move_speed: 5.0,
+            armor: 0.0,
+        },
     }
 }
 
@@ -289,6 +299,17 @@ fn get_class_abilities(class: CharacterClass) -> Vec<AbilityType> {
             AbilityType::FreezingTrap,
             AbilityType::FrostTrap,
         ],
+        CharacterClass::Shaman => vec![
+            AbilityType::LightningBolt,
+            AbilityType::FrostShock,
+            AbilityType::LesserHealingWave,
+            AbilityType::Purge,
+            AbilityType::WindShear,
+            AbilityType::AirTotem,
+            AbilityType::WaterTotem,
+            AbilityType::EarthTotem,
+            AbilityType::FireTotem,
+        ],
     }
 }
 
@@ -358,6 +379,16 @@ fn get_ability_name(ability: AbilityType) -> &'static str {
         AbilityType::MoltenArmor => "Molten Armor",
         AbilityType::ShadowResistanceAura => "Shadow Resistance Aura",
         AbilityType::ConcentrationAura => "Concentration Aura",
+        // Shaman abilities
+        AbilityType::LightningBolt => "Lightning Bolt",
+        AbilityType::FrostShock => "Frost Shock",
+        AbilityType::LesserHealingWave => "Lesser Healing Wave",
+        AbilityType::Purge => "Purge",
+        AbilityType::WindShear => "Wind Shear",
+        AbilityType::AirTotem => "Windfury Totem",
+        AbilityType::WaterTotem => "Healing Stream Totem",
+        AbilityType::EarthTotem => "Strength of Earth Totem",
+        AbilityType::FireTotem => "Flametongue Totem",
     }
 }
 
@@ -1458,6 +1489,15 @@ fn build_aura_description(aura: &super::play_match::ability_config::AuraEffect) 
         }
         AuraType::WeaponPoison => {
             "Weapon coated with poison. Attacks may apply a poison debuff.".to_string()
+        }
+        AuraType::SpellPowerIncrease => {
+            format!("Increases spell power by {:.0} for {:.0} sec.", aura.magnitude, aura.duration)
+        }
+        AuraType::HealingOverTime => {
+            format!("Heals {:.0} every {:.0} sec for {:.0} sec.", aura.magnitude, aura.tick_interval, aura.duration)
+        }
+        AuraType::WindfuryBuff => {
+            format!("Empowers melee auto-attacks for {:.0} sec.", aura.duration)
         }
     }
 }

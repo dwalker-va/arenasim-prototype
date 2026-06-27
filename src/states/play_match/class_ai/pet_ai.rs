@@ -590,7 +590,9 @@ fn try_devour_magic(
         caster_class: CharacterClass::Warlock,
         heal_on_success: Some((entity, heal_amount)),
         aura_type_filter: None,
-        removes_poison: false,    });
+        removes_poison: false,
+        removes_beneficial: false,
+    });
 
     true
 }
@@ -689,7 +691,9 @@ fn execute_masters_call(
         caster_class: CharacterClass::Hunter,
         heal_on_success: None,
         aura_type_filter: Some(vec![AuraType::Root, AuraType::MovementSpeedSlow]),
-        removes_poison: false,    });
+        removes_poison: false,
+        removes_beneficial: false,
+    });
 
     commands.spawn((
         DispelBurst {

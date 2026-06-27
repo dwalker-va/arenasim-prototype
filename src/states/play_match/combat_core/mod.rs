@@ -99,6 +99,22 @@ pub fn get_attack_power_bonus_from_slice(auras: &[Aura]) -> f32 {
         .sum()
 }
 
+/// Get the total spell power bonus from active auras.
+/// Sums SpellPowerIncrease magnitudes (e.g., the Shaman's Flametongue Totem).
+pub fn get_spell_power_bonus(auras: Option<&ActiveAuras>) -> f32 {
+    auras.map_or(0.0, |a| get_spell_power_bonus_from_slice(&a.auras))
+}
+
+/// Get the total spell power bonus from a slice of auras.
+/// Used by class AI which stores auras as Vec<Aura> in CombatContext.
+pub fn get_spell_power_bonus_from_slice(auras: &[Aura]) -> f32 {
+    auras
+        .iter()
+        .filter(|aura| aura.effect_type == AuraType::SpellPowerIncrease)
+        .map(|aura| aura.magnitude)
+        .sum()
+}
+
 /// Get the total crit chance bonus from CritChanceIncrease auras.
 /// Used by Molten Armor to increase crit chance dynamically.
 pub fn get_crit_chance_bonus(auras: Option<&ActiveAuras>) -> f32 {
@@ -771,6 +787,36 @@ mod tests {
     fn test_get_attack_power_bonus_empty() {
         let auras = ActiveAuras { auras: vec![] };
         assert_eq!(get_attack_power_bonus(Some(&auras)), 0.0);
+    }
+
+    #[test]
+    fn test_get_spell_power_bonus_sums_increases() {
+        let auras = ActiveAuras {
+            auras: vec![
+                create_aura(AuraType::SpellPowerIncrease, 30.0),
+                create_aura(AuraType::SpellPowerIncrease, 12.0),
+            ],
+        };
+        assert_eq!(get_spell_power_bonus(Some(&auras)), 42.0);
+    }
+
+    #[test]
+    fn test_get_spell_power_bonus_ignores_other_auras() {
+        let auras = ActiveAuras {
+            auras: vec![
+                create_aura(AuraType::SpellPowerIncrease, 30.0),
+                create_aura(AuraType::AttackPowerIncrease, 99.0),
+                create_aura(AuraType::CritChanceIncrease, 0.05),
+            ],
+        };
+        assert_eq!(get_spell_power_bonus(Some(&auras)), 30.0);
+    }
+
+    #[test]
+    fn test_get_spell_power_bonus_none_and_empty() {
+        assert_eq!(get_spell_power_bonus(None), 0.0);
+        let auras = ActiveAuras { auras: vec![] };
+        assert_eq!(get_spell_power_bonus(Some(&auras)), 0.0);
     }
 
     #[test]

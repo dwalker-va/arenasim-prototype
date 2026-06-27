@@ -223,6 +223,9 @@ impl Combatant {
             // one full bar per fight, no regen. Pool sized to afford ~1.6 full rotations
             // (240 / ~150 post cost-cut). See docs/plans/2026-05-22-001-fix-hunter-mana-economy-plan.md.
             match_config::CharacterClass::Hunter => (ResourceType::Mana, 265.0, 240.0, 0.0, 240.0, 18.0, 0.4, 30.0, 0.0, 0.07, 5.0),
+            // Shaman: Medium HP (caster-mail), mana ranged caster-healer, scales with Spell Power (5% crit).
+            // Offensive support — Lightning Bolt pressure + opportunistic Lesser Healing Wave.
+            match_config::CharacterClass::Shaman => (ResourceType::Mana, 265.0, 160.0, 0.0, 160.0, 7.0, 0.8, 0.0, 42.0, 0.05, 5.0),
         };
 
         // Rogues start stealthed
@@ -429,16 +432,17 @@ impl Combatant {
     /// `self.attack_power`. Pass 0.0 when no aura bonus applies.
     ///
     /// Uses the provided GameRng for deterministic results when seeded.
-    pub fn calculate_ability_damage_config(&self, ability_config: &AbilityConfig, rng: &mut GameRng, ap_bonus: f32) -> f32 {
+    pub fn calculate_ability_damage_config(&self, ability_config: &AbilityConfig, rng: &mut GameRng, ap_bonus: f32, sp_bonus: f32) -> f32 {
         // Calculate base damage (random between min and max)
         let damage_range = ability_config.damage_base_max - ability_config.damage_base_min;
         let base_damage = ability_config.damage_base_min + (rng.random_f32() * damage_range);
 
-        // Add stat scaling (with dynamic AP bonus for attack power scaling abilities)
+        // Add stat scaling (with dynamic AP/SP bonus from auras, e.g. Battle Shout,
+        // Flametongue Totem)
         // Floor effective AP at 0 to match old behavior where AP was clamped on mutation
         let stat_value = match ability_config.damage_scales_with {
             ScalingStat::AttackPower => (self.attack_power + ap_bonus).max(0.0),
-            ScalingStat::SpellPower => self.spell_power,
+            ScalingStat::SpellPower => self.spell_power + sp_bonus,
             ScalingStat::None => 0.0,
         };
 
@@ -449,13 +453,14 @@ impl Combatant {
     /// Formula: Base Healing + (Spell Power × Coefficient)
     ///
     /// Uses the provided GameRng for deterministic results when seeded.
-    pub fn calculate_ability_healing_config(&self, ability_config: &AbilityConfig, rng: &mut GameRng) -> f32 {
+    pub fn calculate_ability_healing_config(&self, ability_config: &AbilityConfig, rng: &mut GameRng, sp_bonus: f32) -> f32 {
         // Calculate base healing (random between min and max)
         let healing_range = ability_config.healing_base_max - ability_config.healing_base_min;
         let base_healing = ability_config.healing_base_min + (rng.random_f32() * healing_range);
 
-        // Add spell power scaling (healing always scales with spell power in WoW)
-        base_healing + (self.spell_power * ability_config.healing_coefficient)
+        // Add spell power scaling (healing always scales with spell power in WoW),
+        // including dynamic SP bonus from auras (e.g. Flametongue Totem)
+        base_healing + ((self.spell_power + sp_bonus) * ability_config.healing_coefficient)
     }
 
     /// Apply equipment stats from a resolved loadout to this combatant.
@@ -665,4 +670,9 @@ pub struct DispelPending {
     /// When true, this dispel also removes poison/disease debuffs (Paladin Cleanse).
     /// Dispel Magic / Devour Magic leave poisons untouched (false).
     pub removes_poison: bool,
+    /// When true, this is an OFFENSIVE dispel (Shaman's Purge): it strips a
+    /// BENEFICIAL aura from an enemy (`Aura::can_be_purged`) instead of a
+    /// debuff from an ally. `aura_type_filter` still takes precedence when set
+    /// (Purge sets it to the single chosen buff for a deterministic strip).
+    pub removes_beneficial: bool,
 }

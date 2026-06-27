@@ -42,6 +42,7 @@ pub mod auras;
 pub mod effects;
 pub mod match_flow;
 pub mod traps;
+pub mod totems;
 pub mod combat_ai;
 pub mod combat_core;
 pub mod shadow_sight;
@@ -69,6 +70,7 @@ pub use utils::*;
 pub use constants::*;
 pub use effects::*;
 pub use traps::*;
+pub use totems::*;
 pub use class_ai::pet_ai::pet_ai_system;
 pub use selection::{
     pick_selected_combatant, sync_selection_ring, follow_selection_ring,
@@ -341,9 +343,9 @@ pub fn setup_play_match(
 
     // Spawn arena floor - octagonal shape matching the wall boundary
     // Warm sandy/dirt battleground
-    let arena_length = 76.0;
-    let arena_width = 46.0;
-    let corner_cut = 10.0;
+    let arena_length = ARENA_FLOOR_HALF_X * 2.0;
+    let arena_width = ARENA_FLOOR_HALF_Z * 2.0;
+    let corner_cut = ARENA_FLOOR_CORNER_CUT;
     
     // Create custom octagonal mesh. UV scale tiles the procedural dirt texture
     // ~every 12 world units (square texels), giving the floor grain/variation
@@ -761,6 +763,7 @@ fn spawn_combatant(
         match_config::CharacterClass::Warlock => Color::srgb(0.58, 0.41, 0.93), // Purple
         match_config::CharacterClass::Paladin => Color::srgb(0.96, 0.55, 0.73), // Pink (WoW Paladin)
         match_config::CharacterClass::Hunter => Color::srgb(0.67, 0.83, 0.45), // Green (WoW Hunter)
+        match_config::CharacterClass::Shaman => Color::srgb(0.0, 0.44, 0.87), // Blue (WoW Shaman)
     };
     
     // Apply darkening for duplicate classes (0.65 multiplier per duplicate)

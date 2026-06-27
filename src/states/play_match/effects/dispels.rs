@@ -47,6 +47,9 @@ pub fn process_dispels(
                     // If aura_type_filter is set, only match those specific types
                     if let Some(ref filter) = pending.aura_type_filter {
                         filter.contains(&a.effect_type)
+                    } else if pending.removes_beneficial {
+                        // Offensive dispel (Shaman's Purge): strip enemy buffs only.
+                        a.can_be_purged()
                     } else {
                         // Cleanse also lifts poison/disease; Dispel Magic doesn't.
                         a.can_be_dispelled()

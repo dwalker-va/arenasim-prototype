@@ -80,6 +80,24 @@
         // fallback range even before it is focused.
         healing_heavy_hp: 0.6,
     ),
+    // Shaman healer posture (FREE/PRESSURED/ESCAPE). Tuned OFFENSIVE vs the
+    // Priest: a ranged caster-healer that wants to stay forward and pressure
+    // with Lightning Bolt, not park on the backline. First pass — real balance
+    // tuning is the final phase.
+    shaman: (
+        weights: (
+            threat_repulsion: 2.8,    // survive melee better without adding CC (was 2.0)
+            formation_pull: 1.0,      // weaker backline pull than the Priest (2.0) — drifts forward
+            corner_penalty: 6.0,      // same graded corner avoidance as the Priest
+            wand_pull: 1.0,           // stronger than the Priest (0.5): pull toward Lightning Bolt range of the kill target
+            commitment_bonus: 1.5,
+        ),
+        // FREE-directive tuning (mirrors the priest block).
+        formation_shift_threshold: 3.0, // re-target the formation point past this XZ move
+        formation_deadzone: 1.5,        // no Point directive issued within this of the point
+        directive_refresh_margin: 0.25, // refresh the standing walk below this remaining TTL
+        healing_heavy_hp: 0.6,          // team-HP parity gate (Shaman has no dip; kept for consistency)
+    ),
     // Melee target-swap (bucket A offensive-punish): swap off a kited kill
     // target onto a softer in-melee enemy instead of chasing forever.
     melee: (

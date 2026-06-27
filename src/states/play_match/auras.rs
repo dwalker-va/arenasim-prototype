@@ -385,6 +385,8 @@ pub fn apply_pending_auras(
             | AuraType::CritChanceIncrease | AuraType::ManaRegenIncrease
             | AuraType::FrostArmorBuff | AuraType::LockoutDurationReduction
             | AuraType::SpellResistanceBuff | AuraType::AttackSpeedSlow
+            | AuraType::SpellPowerIncrease | AuraType::HealingOverTime
+            | AuraType::WindfuryBuff
         );
         if is_buff_aura {
             // For Absorb shields, use ability_name as the key to allow different absorbs to coexist
@@ -567,6 +569,22 @@ pub fn apply_pending_auras(
 
         // Handle FrostArmorBuff - log application
         if pending.aura.effect_type == AuraType::FrostArmorBuff {
+            combat_log.log(
+                CombatLogEventType::Buff,
+                format!(
+                    "Team {} {} gains {}",
+                    target_combatant.team,
+                    target_combatant.class.name(),
+                    pending.aura.ability_name,
+                )
+            );
+        }
+
+        // Handle Shaman totem buffs (Flametongue / Healing Stream / Windfury) - log application
+        if matches!(
+            pending.aura.effect_type,
+            AuraType::SpellPowerIncrease | AuraType::HealingOverTime | AuraType::WindfuryBuff
+        ) {
             combat_log.log(
                 CombatLogEventType::Buff,
                 format!(
@@ -990,6 +1008,175 @@ pub fn process_dot_ticks(
     for (caster_entity, damage_dealt) in caster_damage_updates {
         if let Ok((_, mut caster, _, _)) = combatants_with_auras.get_mut(caster_entity) {
             caster.damage_dealt += damage_dealt;
+        }
+    }
+}
+
+/// Process healing-over-time ticks.
+///
+/// IMPORTANT: This system must run BEFORE update_auras so that the final tick
+/// fires exactly when the aura expires (WoW-style HoT behavior), mirroring
+/// process_dot_ticks. For example, a 15s HoT with 3s ticks will tick at
+/// t=3,6,9,12,15 (5 total ticks).
+///
+/// For each combatant carrying a HealingOverTime aura (e.g. the Shaman's
+/// Healing Stream Totem):
+/// 1. Tick down time_until_next_tick
+/// 2. On a normal or final tick, heal the bearer (clamped to max_health)
+/// 3. Credit the caster's healing_done
+/// 4. Spawn a green floating combat text
+/// 5. Log to the combat log
+pub fn process_hot_ticks(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut combat_log: ResMut<CombatLog>,
+    mut combatants_with_auras: Query<(Entity, &mut Combatant, &Transform, &mut ActiveAuras)>,
+    combatants_without_auras: Query<(Entity, &Combatant), Without<ActiveAuras>>,
+    mut fct_states: Query<&mut FloatingTextState>,
+    celebration: Option<Res<VictoryCelebration>>,
+) {
+    // Don't tick HoTs during victory celebration (mirrors process_dot_ticks)
+    if celebration.is_some() {
+        return;
+    }
+    let dt = time.delta_secs();
+
+    // Build a map of entity -> (team, class) for caster attribution lookups.
+    // Include BOTH combatants with auras AND combatants without auras (a caster
+    // may have shed all of its own auras while its totem buff lives on an ally).
+    let mut combatant_info: std::collections::HashMap<Entity, (u8, match_config::CharacterClass)> =
+        combatants_with_auras
+            .iter()
+            .map(|(entity, combatant, _, _)| (entity, (combatant.team, combatant.class)))
+            .collect();
+    for (entity, combatant) in combatants_without_auras.iter() {
+        combatant_info.insert(entity, (combatant.team, combatant.class));
+    }
+
+    // Build a map of entity -> position
+    let positions: std::collections::HashMap<Entity, Vec3> = combatants_with_auras
+        .iter()
+        .map(|(entity, _, transform, _)| (entity, transform.translation))
+        .collect();
+
+    // Track HoT healing to apply (to avoid borrow issues)
+    // Format: (target_entity, caster_entity, healing, target_pos, caster_team, caster_class, ability_name)
+    let mut hot_healing_to_apply: Vec<(Entity, Entity, f32, Vec3, u8, match_config::CharacterClass, String)> = Vec::new();
+
+    // First pass: tick down HoT timers and queue healing
+    for (entity, combatant, _transform, mut active_auras) in combatants_with_auras.iter_mut() {
+        if !combatant.is_alive() {
+            continue;
+        }
+
+        let target_pos = positions.get(&entity).copied().unwrap_or(Vec3::ZERO);
+
+        for aura in active_auras.auras.iter_mut() {
+            if aura.effect_type != AuraType::HealingOverTime {
+                continue;
+            }
+
+            // Tick down time until next healing application
+            aura.time_until_next_tick -= dt;
+
+            // Same normal/final-tick cadence as process_dot_ticks: the final tick
+            // fires exactly at expiration (WoW-style).
+            let normal_tick = aura.time_until_next_tick <= 0.0;
+            let final_tick = !normal_tick && (aura.duration - dt) <= 0.0;
+
+            if normal_tick || final_tick {
+                // Time to apply HoT healing!
+                let healing = aura.magnitude;
+
+                // Get caster info (if still exists) for attribution
+                if let Some(caster_entity) = aura.caster {
+                    if let Some(&(caster_team, caster_class)) = combatant_info.get(&caster_entity) {
+                        hot_healing_to_apply.push((
+                            entity,
+                            caster_entity,
+                            healing,
+                            target_pos,
+                            caster_team,
+                            caster_class,
+                            aura.ability_name.clone(),
+                        ));
+                    }
+                }
+
+                // Reset tick timer (only for normal ticks, final tick doesn't need reset)
+                if normal_tick {
+                    aura.time_until_next_tick = aura.tick_interval;
+                }
+            }
+        }
+    }
+
+    // Track caster healing_done updates
+    let mut caster_healing_updates: Vec<(Entity, f32)> = Vec::new();
+
+    // Second pass: apply queued HoT healing to bearers
+    for (target_entity, caster_entity, healing, target_pos, caster_team, caster_class, ability_name) in hot_healing_to_apply {
+        // Get target combatant (the bearer of the HoT)
+        let Ok((_, mut target, _, _)) = combatants_with_auras.get_mut(target_entity) else {
+            continue;
+        };
+
+        if !target.is_alive() {
+            continue;
+        }
+
+        let target_team = target.team;
+        let target_class = target.class;
+
+        // Apply healing (don't overheal); credit the caster's healing_done with the
+        // effective (non-overheal) amount, mirroring the casting.rs heal idiom.
+        let actual_healing = healing.min(target.max_health - target.current_health);
+        target.current_health = (target.current_health + healing).min(target.max_health);
+
+        caster_healing_updates.push((caster_entity, actual_healing));
+
+        // Spawn floating combat text (green for healing)
+        let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
+            get_next_fct_offset(&mut fct_state)
+        } else {
+            (0.0, 0.0)
+        };
+        commands.spawn((
+            FloatingCombatText {
+                world_position: target_pos + Vec3::new(offset_x, super::FCT_HEIGHT + offset_y, 0.0),
+                text: format!("+{:.0}", actual_healing),
+                color: egui::Color32::from_rgb(100, 255, 100), // Green for healing
+                lifetime: 1.5,
+                vertical_offset: offset_y,
+                is_crit: false, // HoT ticks never crit
+            },
+            PlayMatchEntity,
+        ));
+
+        // Log to combat log with structured data
+        let message = format!(
+            "Team {} {}'s {} heals Team {} {} for {:.0}",
+            caster_team,
+            caster_class.name(),
+            ability_name,
+            target_team,
+            target_class.name(),
+            actual_healing
+        );
+        combat_log.log_healing(
+            combatant_id(caster_team, caster_class),
+            combatant_id(target_team, target_class),
+            ability_name.clone(),
+            actual_healing,
+            false, // is_crit - HoT ticks never crit
+            message,
+        );
+    }
+
+    // Third pass: update caster healing_done stats
+    for (caster_entity, healing) in caster_healing_updates {
+        if let Ok((_, mut caster, _, _)) = combatants_with_auras.get_mut(caster_entity) {
+            caster.healing_done += healing;
         }
     }
 }

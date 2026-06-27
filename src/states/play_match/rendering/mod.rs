@@ -87,6 +87,9 @@ pub fn get_aura_icon_key(aura: &Aura, ability_definitions: &AbilityDefinitions) 
         AuraType::FrostArmorBuff => "aura_absorb".to_string(), // Self-buff, reuse absorb icon
         AuraType::Silence => "aura_silence".to_string(),
         AuraType::WeaponPoison => "aura_dot".to_string(), // Poison self-buff, reuse DoT icon
+        AuraType::SpellPowerIncrease => "aura_max_health".to_string(), // Totem buff, reuse buff icon
+        AuraType::HealingOverTime => "aura_max_health".to_string(), // Healing Stream Totem buff, reuse buff icon
+        AuraType::WindfuryBuff => "aura_max_health".to_string(), // Windfury Totem buff, reuse buff icon
     }
 }
 
@@ -106,7 +109,10 @@ pub fn is_buff_aura(aura_type: &AuraType) -> bool {
         AuraType::LockoutDurationReduction |
         AuraType::FrostArmorBuff |
         AuraType::SpellResistanceBuff |
-        AuraType::WeaponPoison
+        AuraType::WeaponPoison |
+        AuraType::SpellPowerIncrease |
+        AuraType::HealingOverTime |
+        AuraType::WindfuryBuff
     )
 }
 

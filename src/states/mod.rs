@@ -294,6 +294,8 @@ impl Plugin for StatesPlugin {
                     play_match::cleanup_ice_blocks,          // Despawn when aura breaks
                     play_match::spawn_slow_zone_visuals,     // Cyan disc on slow zones
                     play_match::update_slow_zone_visuals,    // Pulse + fade out
+                    play_match::spawn_totem_visuals,         // Element-colored pillar on new totems
+                    play_match::update_totem_visuals,        // Pulse + fade out
                 )
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_state(GameState::PlayMatch)),

@@ -15,7 +15,9 @@ use bevy::prelude::*;
 
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::class_ai::combat_snapshot::CombatSnapshot;
-use arenasim::states::play_match::class_ai::{dispel_priority, CombatantInfo};
+use arenasim::states::play_match::class_ai::{
+    dispel_priority, purge_priority, CombatantInfo, PURGE_MIN_PRIORITY,
+};
 use arenasim::states::play_match::{Aura, AuraType, DRCategory, DRTracker, DispelType, PetType};
 
 // ============================================================================
@@ -110,6 +112,156 @@ fn dispel_priority_returns_zero_for_buffs() {
     assert_eq!(dispel_priority(AuraType::Absorb), 0);
     assert_eq!(dispel_priority(AuraType::AttackPowerIncrease), 0);
     assert_eq!(dispel_priority(AuraType::WeakenedSoul), 0);
+}
+
+// ============================================================================
+// purge_priority — table ordering (Shaman offensive dispel)
+// ============================================================================
+
+#[test]
+fn purge_priority_orders_defensives_above_offensive_buffs() {
+    // The Shaman strips the most valuable enemy buff first: heavy defensive
+    // mitigation/sustain (Absorb, DamageTakenReduction, HoT) outrank offensive
+    // throughput (AP/SP/Windfury/Crit), which outrank minor utility.
+    // The headline invariant the rotation leans on: a defensive Absorb (PW:S)
+    // outranks an AttackPower buff.
+    assert!(purge_priority(AuraType::Absorb) > purge_priority(AuraType::AttackPowerIncrease));
+    assert!(
+        purge_priority(AuraType::DamageTakenReduction) > purge_priority(AuraType::AttackPowerIncrease)
+    );
+    assert!(purge_priority(AuraType::HealingOverTime) > purge_priority(AuraType::CritChanceIncrease));
+    assert!(
+        purge_priority(AuraType::AttackPowerIncrease)
+            > purge_priority(AuraType::LockoutDurationReduction)
+    );
+    assert!(purge_priority(AuraType::LockoutDurationReduction) > 0);
+    // SP and AP are equal-value throughput buffs.
+    assert_eq!(
+        purge_priority(AuraType::SpellPowerIncrease),
+        purge_priority(AuraType::AttackPowerIncrease)
+    );
+
+    // Lever C: PW:Fortitude (MaxHealthIncrease) is a CHEAP re-buff, deliberately
+    // deprioritized below the offensive buffs AND below the action floor, so the
+    // Shaman never wastes a GCD stripping it (the enemy just re-casts it).
+    assert!(purge_priority(AuraType::MaxHealthIncrease) < purge_priority(AuraType::WindfuryBuff));
+    assert!(purge_priority(AuraType::MaxHealthIncrease) < PURGE_MIN_PRIORITY);
+
+    // The action floor only admits the heavy defensives (denying mitigation /
+    // sustain is worth a cast); throughput re-buffs are below it.
+    assert!(purge_priority(AuraType::Absorb) >= PURGE_MIN_PRIORITY);
+    assert!(purge_priority(AuraType::DamageTakenReduction) >= PURGE_MIN_PRIORITY);
+    assert!(purge_priority(AuraType::HealingOverTime) >= PURGE_MIN_PRIORITY);
+    assert!(purge_priority(AuraType::AttackPowerIncrease) < PURGE_MIN_PRIORITY);
+}
+
+#[test]
+fn purge_priority_returns_zero_for_debuffs_and_unpurgeable() {
+    // Debuffs and un-purgeable markers/immunities are never purge targets, so
+    // they must score 0 (below anything `try_purge_enemy` will act on).
+    for ty in [
+        AuraType::Stun,
+        AuraType::Root,
+        AuraType::DamageOverTime,
+        AuraType::Fear,
+        AuraType::DamageImmunity, // Divine Shield — unpurgeable by design
+        AuraType::ShadowSight,
+        AuraType::WeaponPoison,
+    ] {
+        assert_eq!(purge_priority(ty), 0, "{:?} must not be a purge target", ty);
+    }
+}
+
+// ============================================================================
+// Shaman Purge target selection — mirrors try_purge_enemy's inner pick
+// ============================================================================
+
+/// Replicates `try_purge_enemy`'s candidate scan using the SAME production
+/// predicates it uses (`Aura::can_be_purged` + `purge_priority`): among living
+/// non-pet enemies, pick the enemy whose highest-priority purgeable buff is the
+/// most valuable, returning `(enemy, chosen buff)`. `None` when no enemy carries
+/// a purgeable buff (the reject path).
+fn select_purge_target(snapshot: &CombatSnapshot, my_team: u8) -> Option<(Entity, AuraType)> {
+    let mut best: Option<(Entity, AuraType, i32)> = None;
+    for (e, inf) in snapshot.combatants.iter() {
+        if inf.team == my_team || !inf.is_alive || inf.is_pet {
+            continue;
+        }
+        let Some(auras) = snapshot.active_auras.get(e) else {
+            continue;
+        };
+        for a in auras {
+            if !a.can_be_purged() {
+                continue;
+            }
+            let p = purge_priority(a.effect_type);
+            match best {
+                None => best = Some((*e, a.effect_type, p)),
+                Some((_, _, bp)) if p > bp => best = Some((*e, a.effect_type, p)),
+                _ => {}
+            }
+        }
+    }
+    best.map(|(e, a, _)| (e, a))
+}
+
+#[test]
+fn shaman_purges_enemy_with_dispellable_buff() {
+    let me = Entity::from_raw(1);
+    let enemy = Entity::from_raw(2);
+
+    let mut snapshot = snapshot_for(me, 1, CharacterClass::Shaman);
+    snapshot
+        .combatants
+        .insert(enemy, info(enemy, 2, CharacterClass::Warrior));
+
+    // Enemy carries an offensive AttackPower buff AND a defensive Absorb. Both
+    // are purgeable; the Shaman strips the higher-priority defensive first.
+    snapshot.active_auras.insert(
+        enemy,
+        vec![
+            aura_with(AuraType::AttackPowerIncrease, None, -1.0),
+            aura_with(AuraType::Absorb, None, -1.0),
+        ],
+    );
+
+    let (target, buff) = select_purge_target(&snapshot, 1).expect("a purgeable enemy buff exists");
+    assert_eq!(target, enemy, "the buffed enemy is the purge target");
+    assert_eq!(
+        buff,
+        AuraType::Absorb,
+        "the defensive Absorb outranks the AttackPower buff"
+    );
+}
+
+#[test]
+fn shaman_purge_finds_no_target_without_a_purgeable_buff() {
+    let me = Entity::from_raw(1);
+    let enemy = Entity::from_raw(2);
+    let ally = Entity::from_raw(3);
+
+    let mut snapshot = snapshot_for(me, 1, CharacterClass::Shaman);
+    snapshot
+        .combatants
+        .insert(enemy, info(enemy, 2, CharacterClass::Warrior));
+    snapshot
+        .combatants
+        .insert(ally, info(ally, 1, CharacterClass::Priest));
+
+    // The enemy carries only a DEBUFF (a Root we put on it) — not purgeable.
+    snapshot
+        .active_auras
+        .insert(enemy, vec![aura_with(AuraType::Root, None, -1.0)]);
+    // Our ally carries a real buff (Absorb) — but Purge never strips allies.
+    snapshot
+        .active_auras
+        .insert(ally, vec![aura_with(AuraType::Absorb, None, -1.0)]);
+
+    assert!(
+        select_purge_target(&snapshot, 1).is_none(),
+        "no enemy carries a purgeable buff — Purge must find no target (the \
+         ally's Absorb is off-limits)"
+    );
 }
 
 // ============================================================================

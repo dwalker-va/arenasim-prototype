@@ -85,6 +85,22 @@ pub const ARENA_HALF_Z: f32 = 21.5;
 /// Maximum |x| + |z| permitted at octagonal arena corners (diagonal wall boundary with wall+buffer offset).
 pub const ARENA_CORNER_SUM: f32 = 48.88;
 
+// --- Visual arena floor octagon -------------------------------------------
+// Single source of truth for the floor mesh (`create_octagon_mesh`) AND any
+// ground decal that must stay inside the walls (e.g. the totem radius disc).
+// Half-extents to the wall centerlines; the four corners are cut by
+// `ARENA_FLOOR_CORNER_CUT`, giving an octagon. Distinct from the gameplay
+// bounds above, which are inset by a wall+combatant buffer.
+
+/// Visual floor half-size on X (arena_length / 2 = 76 / 2).
+pub const ARENA_FLOOR_HALF_X: f32 = 38.0;
+
+/// Visual floor half-size on Z (arena_width / 2 = 46 / 2).
+pub const ARENA_FLOOR_HALF_Z: f32 = 23.0;
+
+/// Length cut off each corner along both axes to form the octagon.
+pub const ARENA_FLOOR_CORNER_CUT: f32 = 10.0;
+
 // ============================================================================
 // Visual/UI
 // ============================================================================
@@ -166,6 +182,27 @@ pub const DISENGAGE_DISTANCE: f32 = 15.0;
 
 /// Speed of the Disengage backward leap (units per second).
 pub const DISENGAGE_SPEED: f32 = 30.0;
+
+// ============================================================================
+// Shaman Totems
+// ============================================================================
+
+/// Radius (yards) around a totem within which allies receive its buff.
+/// Generous so the small per-element spacing offset is negligible vs coverage.
+pub const TOTEM_RADIUS: f32 = 20.0;
+
+/// Lifetime (seconds) of a dropped totem before it expires.
+pub const TOTEM_DURATION: f32 = 30.0;
+
+/// Per-element horizontal spacing offset (yards) so the four totems fan out
+/// around the Shaman's feet rather than stacking on one point. Applied along a
+/// deterministic per-element compass direction (see `class_ai::shaman`).
+pub const TOTEM_SPACING_OFFSET: f32 = 1.5;
+
+/// The AI recasts (refreshes) a totem once its remaining duration drops below
+/// this many seconds — or if the element is missing entirely. The pulse
+/// system's dedup keeps the freshest totem, so a recast replaces the old one.
+pub const TOTEM_REFRESH_THRESHOLD: f32 = 5.0;
 
 // ============================================================================
 // Diminishing Returns

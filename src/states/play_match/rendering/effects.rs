@@ -10,6 +10,9 @@ use bevy::render::render_resource::PrimitiveTopology;
 use bevy_egui::{egui, EguiContexts};
 use crate::states::play_match::abilities::SpellSchool;
 use crate::states::play_match::components::*;
+use crate::states::play_match::constants::{
+    ARENA_FLOOR_CORNER_CUT, ARENA_FLOOR_HALF_X, ARENA_FLOOR_HALF_Z,
+};
 use crate::states::match_config::CharacterClass;
 
 // ==============================================================================
@@ -843,6 +846,11 @@ fn healing_light_colors(class: CharacterClass) -> (Color, LinearRgba) {
             Color::srgba(1.0, 0.9, 0.6, 0.35),
             LinearRgba::new(2.5, 2.0, 1.0, 1.0),
         ),
+        CharacterClass::Shaman => (
+            // Elemental blue (Shaman class color): cool water/wave heal
+            Color::srgba(0.3, 0.6, 1.0, 0.35),
+            LinearRgba::new(1.2, 2.0, 3.0, 1.0),
+        ),
         _ => (
             // Fallback golden
             Color::srgba(1.0, 0.95, 0.7, 0.35),
@@ -951,6 +959,11 @@ fn dispel_burst_colors(class: CharacterClass) -> (Color, LinearRgba) {
             // Hunter gold (for Concussive Shot impact and Master's Call)
             Color::srgba(1.0, 0.85, 0.3, 0.5),
             LinearRgba::new(2.0, 1.7, 0.6, 1.0),
+        ),
+        CharacterClass::Shaman => (
+            // Elemental blue (Shaman class color): Purge burst reads as a wave
+            Color::srgba(0.3, 0.6, 1.0, 0.5),
+            LinearRgba::new(1.2, 2.0, 3.0, 1.0),
         ),
         _ => (
             Color::srgba(0.9, 0.9, 1.0, 0.5),
@@ -2386,5 +2399,162 @@ pub fn update_walk_animation(
         walk.phase = (walk.phase + step).rem_euclid(std::f32::consts::TAU);
         transform.translation.y = walk.ground_y + walk.phase.sin() * WALK_BOB_AMPLITUDE;
         walk.previous_xz = current_xz;
+    }
+}
+
+// ==============================================================================
+// Totem Visuals (Shaman, graphical-only)
+// ==============================================================================
+
+/// Build a flat ground disc of `radius` centered at `center` (world XZ), clipped
+/// to the arena floor octagon so it never spills past the walls. Vertices are in
+/// LOCAL space (offsets from `center`) lying in the XZ plane at y=0, so the mesh
+/// can be parented to an entity sitting at `center`. The octagon is the same one
+/// `create_octagon_mesh` builds the floor from (shared arena constants), and it
+/// is convex and contains every in-bounds totem, so a per-direction ray clip
+/// yields exactly circle ∩ octagon. Reusable by any ground decal that must stay
+/// inside the arena.
+fn arena_clipped_disc_mesh(center: Vec2, radius: f32) -> Mesh {
+    // Arena floor octagon as half-planes `n · p <= d` (un-normalized normals;
+    // the ray parameter cancels |n|). Four axis walls + four corner diagonals.
+    let hx = ARENA_FLOOR_HALF_X;
+    let hz = ARENA_FLOOR_HALF_Z;
+    let cs = ARENA_FLOOR_HALF_X - ARENA_FLOOR_CORNER_CUT + ARENA_FLOOR_HALF_Z;
+    let planes: [(Vec2, f32); 8] = [
+        (Vec2::new(1.0, 0.0), hx),
+        (Vec2::new(-1.0, 0.0), hx),
+        (Vec2::new(0.0, 1.0), hz),
+        (Vec2::new(0.0, -1.0), hz),
+        (Vec2::new(1.0, 1.0), cs),
+        (Vec2::new(-1.0, 1.0), cs),
+        (Vec2::new(1.0, -1.0), cs),
+        (Vec2::new(-1.0, -1.0), cs),
+    ];
+
+    const SEGMENTS: usize = 96;
+    let mut positions: Vec<[f32; 3]> = Vec::with_capacity(SEGMENTS + 1);
+    let mut indices: Vec<u32> = Vec::with_capacity(SEGMENTS * 3);
+    positions.push([0.0, 0.0, 0.0]); // fan center (index 0)
+    for i in 0..SEGMENTS {
+        let a = (i as f32) / (SEGMENTS as f32) * std::f32::consts::TAU;
+        let dir = Vec2::new(a.cos(), a.sin());
+        // Distance from center to the nearest octagon edge along `dir`, capped
+        // at the disc radius.
+        let mut t = radius;
+        for (n, d) in planes.iter() {
+            let nd = n.dot(dir);
+            if nd > 1e-6 {
+                t = t.min((d - n.dot(center)) / nd);
+            }
+        }
+        let p = dir * t.max(0.0);
+        positions.push([p.x, 0.0, p.y]); // dir.y maps to world/local Z
+    }
+    for i in 0..SEGMENTS {
+        indices.push(0);
+        indices.push(1 + i as u32);
+        indices.push(1 + ((i + 1) % SEGMENTS) as u32);
+    }
+    let normals = vec![[0.0, 1.0, 0.0]; positions.len()];
+    let uvs = vec![[0.0, 0.0]; positions.len()];
+    Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+        .with_inserted_indices(Indices::U32(indices))
+}
+
+/// Attach meshes to newly spawned totems. Headless mode spawns the bare `Totem`
+/// gameplay entity; this graphical-only system gives it a SOLID, clearly-
+/// non-player silhouette — a chunky carved post topped with a glowing element
+/// orb — plus a very subtle ground disc (clipped to the arena walls) marking the
+/// buff radius. Every mesh is a child entity, so the totem's gameplay `Transform`
+/// is never touched and the meshes clean up with the totem via recursive
+/// despawn. Registered ONLY in `StatesPlugin::build` — never in
+/// `add_core_combat_systems`.
+pub fn spawn_totem_visuals(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    new_totems: Query<(Entity, &Totem, &Transform), (Added<Totem>, Without<Children>)>,
+) {
+    for (totem_entity, totem, transform) in new_totems.iter() {
+        let color = totem.element.color();
+        let s = color.to_srgba();
+
+        // Solid carved post — short and blocky, distinct from the tall rounded
+        // player capsules.
+        let post_mesh = meshes.add(Cuboid::new(0.6, 1.3, 0.6));
+        let post_mat = materials.add(StandardMaterial {
+            base_color: color,
+            emissive: LinearRgba::new(s.red * 0.5, s.green * 0.5, s.blue * 0.5, 1.0),
+            perceptual_roughness: 0.75,
+            alpha_mode: AlphaMode::Opaque,
+            ..default()
+        });
+
+        // Floating element orb on top — reads instantly as a magic totem.
+        let orb_mesh = meshes.add(Sphere::new(0.34));
+        let orb_mat = materials.add(StandardMaterial {
+            base_color: color,
+            emissive: LinearRgba::new(s.red * 2.5, s.green * 2.5, s.blue * 2.5, 1.0),
+            alpha_mode: AlphaMode::Opaque,
+            ..default()
+        });
+
+        // Very subtle ground disc marking the buff radius, clipped to the arena
+        // floor octagon so it never spills past the walls. `Add` blend per the
+        // project's ground-indicator convention to avoid z-fighting flicker.
+        let disc_mesh = meshes.add(arena_clipped_disc_mesh(
+            transform.translation.xz(),
+            totem.radius,
+        ));
+        let disc_mat = materials.add(StandardMaterial {
+            base_color: color.with_alpha(0.08),
+            emissive: LinearRgba::new(s.red * 0.18, s.green * 0.18, s.blue * 0.18, 1.0),
+            alpha_mode: AlphaMode::Add,
+            cull_mode: None,
+            ..default()
+        });
+
+        // Child entities anchored to the totem's ground position (y = 0).
+        commands.entity(totem_entity).with_children(|parent| {
+            // post: base rests on the ground (Cuboid is centered, half-height 0.65)
+            parent.spawn((
+                Mesh3d(post_mesh),
+                MeshMaterial3d(post_mat),
+                Transform::from_xyz(0.0, 0.65, 0.0),
+            ));
+            // orb: floats just above the post top (post spans y 0.0..1.3)
+            parent.spawn((
+                Mesh3d(orb_mesh),
+                MeshMaterial3d(orb_mat),
+                Transform::from_xyz(0.0, 1.65, 0.0),
+            ));
+            // radius disc: a hair above the floor so it doesn't z-fight it
+            parent.spawn((
+                Mesh3d(disc_mesh),
+                MeshMaterial3d(disc_mat),
+                Transform::from_xyz(0.0, 0.03, 0.0),
+            ));
+        });
+    }
+}
+
+/// Shrink a totem (post + orb + radius disc together, via the child hierarchy)
+/// over its final 1.2 seconds as a clean expiry tell. Totems stay fully SOLID
+/// otherwise — no alpha fade. Mutates only `Transform.scale`, which gameplay
+/// ignores (the pulse system keys off `Totem.radius` and translation), so this
+/// remains purely cosmetic and graphical-only.
+pub fn update_totem_visuals(mut totems: Query<(&Totem, &mut Transform)>) {
+    for (totem, mut transform) in totems.iter_mut() {
+        let scale = if totem.duration_remaining < 1.2 {
+            (totem.duration_remaining / 1.2).clamp(0.0, 1.0).max(0.001)
+        } else {
+            1.0
+        };
+        if (transform.scale.x - scale).abs() > f32::EPSILON {
+            transform.scale = Vec3::splat(scale);
+        }
     }
 }

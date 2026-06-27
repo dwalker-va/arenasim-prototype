@@ -147,6 +147,16 @@ pub enum AbilityType {
     MoltenArmor,        // Mage self-buff - increases crit chance
     ShadowResistanceAura, // Paladin team aura - shadow resistance
     ConcentrationAura,  // Paladin team aura - reduces interrupt lockout duration
+    // Shaman abilities
+    LightningBolt,      // Shaman ranged Nature nuke (cast time)
+    FrostShock,         // Shaman instant Frost nuke + single-target slow
+    LesserHealingWave,  // Shaman fast direct heal
+    Purge,              // Shaman offensive dispel - removes one enemy buff
+    WindShear,          // Shaman ranged instant interrupt
+    AirTotem,           // Shaman Windfury Totem - empowers melee allies
+    WaterTotem,         // Shaman Healing Stream Totem - periodic ally heal
+    EarthTotem,         // Shaman Strength of Earth Totem - ally attack power
+    FireTotem,          // Shaman Flametongue Totem - ally spell power
 }
 
 impl AbilityType {

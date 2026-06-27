@@ -356,6 +356,16 @@ impl AbilityDefinitions {
             AbilityType::MoltenArmor,
             AbilityType::ShadowResistanceAura,
             AbilityType::ConcentrationAura,
+            // Shaman abilities
+            AbilityType::LightningBolt,
+            AbilityType::FrostShock,
+            AbilityType::LesserHealingWave,
+            AbilityType::Purge,
+            AbilityType::WindShear,
+            AbilityType::AirTotem,
+            AbilityType::WaterTotem,
+            AbilityType::EarthTotem,
+            AbilityType::FireTotem,
         ];
 
         let missing: Vec<AbilityType> = expected_abilities

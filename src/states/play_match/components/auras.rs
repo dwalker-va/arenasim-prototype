@@ -95,6 +95,17 @@ pub enum AuraType {
     /// proc logic reads the Rogue's `rogue_poison` config, not this aura.
     /// Magnitude unused (always 1.0 by convention). Not dispellable, no DR.
     WeaponPoison,
+    /// Increases spell power by a flat amount (magnitude = spell power bonus).
+    /// Used by the Shaman's Flametongue Totem. (Behavior wired in U2.)
+    SpellPowerIncrease,
+    /// Heals the affected combatant periodically (magnitude = healing per tick,
+    /// tick_interval determines frequency). Used by the Shaman's Healing Stream
+    /// Totem. (Behavior wired in U2.)
+    HealingOverTime,
+    /// Empowers melee allies' auto-attacks with a proc-style bonus attack.
+    /// Inert for ranged/caster allies. Used by the Shaman's Windfury Totem.
+    /// (Behavior wired in U2.)
+    WindfuryBuff,
 }
 
 /// How a debuff is classified for dispel/removal. Orthogonal to `AuraType` so a
@@ -227,6 +238,33 @@ impl Aura {
     /// `can_be_dispelled` (magic).
     pub fn is_cleansable_poison(&self) -> bool {
         matches!(self.dispel_type, DispelType::Poison | DispelType::Disease)
+    }
+
+    /// Returns true if this aura is a BENEFICIAL (buff) effect that an enemy
+    /// offensive dispel (Shaman's Purge) can strip.
+    ///
+    /// Only beneficial auras qualify — Purge removes enemy buffs, never their
+    /// debuffs/CC (those are the *target's* problem, not ours). Excludes:
+    /// `DamageImmunity` (Divine Shield is unpurgeable by design), `ShadowSight`
+    /// and `WeaponPoison` (mechanical markers, not real buffs), and every
+    /// debuff/CC aura type.
+    pub fn can_be_purged(&self) -> bool {
+        matches!(
+            self.effect_type,
+            AuraType::Absorb
+                | AuraType::MaxHealthIncrease
+                | AuraType::MaxManaIncrease
+                | AuraType::AttackPowerIncrease
+                | AuraType::SpellPowerIncrease
+                | AuraType::HealingOverTime
+                | AuraType::WindfuryBuff
+                | AuraType::DamageTakenReduction
+                | AuraType::CritChanceIncrease
+                | AuraType::ManaRegenIncrease
+                | AuraType::LockoutDurationReduction
+                | AuraType::FrostArmorBuff
+                | AuraType::SpellResistanceBuff
+        )
     }
 }
 
@@ -481,5 +519,76 @@ impl DRTracker {
     #[inline]
     pub fn level(&self, category: DRCategory) -> u8 {
         self.states[category.index()].level
+    }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a minimal aura carrying only `effect_type` — `can_be_purged`
+    /// inspects nothing else.
+    fn aura(effect_type: AuraType) -> Aura {
+        Aura {
+            effect_type,
+            ..Default::default()
+        }
+    }
+
+    /// Beneficial auras the Shaman's Purge strips: defensives, throughput
+    /// buffs, and minor utility buffs. Mirrors the `can_be_purged` match.
+    #[test]
+    fn can_be_purged_true_for_beneficial_buffs() {
+        for ty in [
+            AuraType::Absorb,
+            AuraType::MaxHealthIncrease,
+            AuraType::MaxManaIncrease,
+            AuraType::DamageTakenReduction,
+            AuraType::AttackPowerIncrease,
+            AuraType::SpellPowerIncrease,
+            AuraType::HealingOverTime,
+            AuraType::WindfuryBuff,
+            AuraType::CritChanceIncrease,
+            AuraType::ManaRegenIncrease,
+            AuraType::LockoutDurationReduction,
+            AuraType::FrostArmorBuff,
+            AuraType::SpellResistanceBuff,
+        ] {
+            assert!(
+                aura(ty).can_be_purged(),
+                "{:?} is a beneficial buff and must be purgeable",
+                ty
+            );
+        }
+    }
+
+    /// Purge must NOT strip: damage immunity (Divine Shield — unpurgeable by
+    /// design), the ShadowSight / WeaponPoison mechanical markers, or any
+    /// debuff / CC effect (those are the target's problem, not ours).
+    #[test]
+    fn can_be_purged_false_for_immunity_markers_and_debuffs() {
+        for ty in [
+            AuraType::DamageImmunity,
+            AuraType::ShadowSight,
+            AuraType::WeaponPoison,
+            AuraType::Stun,
+            AuraType::Root,
+            AuraType::Fear,
+            AuraType::Polymorph,
+            AuraType::DamageOverTime,
+            AuraType::MovementSpeedSlow,
+            AuraType::Silence,
+            AuraType::WeakenedSoul,
+        ] {
+            assert!(
+                !aura(ty).can_be_purged(),
+                "{:?} must NOT be purgeable",
+                ty
+            );
+        }
     }
 }
