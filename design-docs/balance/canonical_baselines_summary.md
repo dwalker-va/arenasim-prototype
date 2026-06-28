@@ -1,5 +1,13 @@
 # Canonical Balance Baselines
 
+> **⚠️ Partially stale (2026-06-28): the Shaman 8th class shipped (PR #78).**
+> The **1v1** canonical CSV has been regenerated to the full **8×8**
+> (`canonical_1v1_n100_300s.csv`), but the **2v2/3v3 full matrices and the tier
+> lists below are still 7-class** and do not include the Shaman. For the current
+> 1v1 8×8 ranking and the Shaman's healer-framed 2v2 read, see
+> `2026-06-28-shaman-8class-balance.md`. Regenerate the 2v2/3v3 canonicals for
+> 8 classes before the next cross-class balance pass.
+
 **Generated 2026-06-22** on the Rogue Crippling Poison meta — i.e. the Rogue
 Kidney Shot chain state *plus* Crippling Poison: a weapon poison whose
 auto-attacks have a 50% chance to apply/refresh a 70% movement slow (an 8s
@@ -26,7 +34,7 @@ aggregate).
 
 | Format | File | Coverage | N | Matches | Draws |
 |---|---|---|---|---|---|
-| 1v1 | `canonical_1v1_n100_300s.csv` | full 7×7 | 100 | 4,900 | 5.1% |
+| 1v1 | `canonical_1v1_n100_300s.csv` | full 8×8 (incl. Shaman, 2026-06-28) | 100 | 6,400 | — |
 | 2v2 | `canonical_2v2_full_n100_300s.csv` | every distinct-class pair × pair (441) | 100 | 44,100 | 0.9% |
 | 3v3 | `canonical_3v3_full_n50_300s.csv` | every distinct-class triple × triple (1225) | 50 | 61,250 | 0.4% |
 
