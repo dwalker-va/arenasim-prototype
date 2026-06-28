@@ -55,6 +55,39 @@ fn is_being_kited(
     is_slowed && out_of_range
 }
 
+/// Pick an enemy healer to lock down with Fear, or `None` if no useful target.
+///
+/// Returns a living enemy healer that is NOT the current kill target (we Fear the
+/// healer to stop it saving the target we're killing), is castable-on (not immune,
+/// not already CC'd), and is not yet Fear-DR-immune. DR on the Fears category is
+/// the natural rate limiter — once the healer is DR-immune this returns `None` and
+/// the Warlock resumes its damage rotation until the window reopens.
+fn pick_healer_to_fear(
+    kill_target: Entity,
+    ctx: &CombatContext,
+) -> Option<Entity> {
+    ctx.alive_enemies()
+        .into_iter()
+        .filter(|info| info.class.is_healer())
+        .map(|info| info.entity)
+        // Don't Fear the target we're actively trying to kill.
+        .filter(|&healer| healer != kill_target)
+        .find(|&healer| {
+            if ctx.entity_is_immune(healer) || ctx.is_dr_immune(healer, DRCategory::Fears) {
+                return false;
+            }
+            // Already stunned/feared/rooted? No value in re-CCing.
+            let already_ccd = ctx.active_auras
+                .get(&healer)
+                .map(|auras| auras.iter().any(|a| matches!(
+                    a.effect_type,
+                    AuraType::Stun | AuraType::Fear | AuraType::Root
+                )))
+                .unwrap_or(false);
+            !already_ccd
+        })
+}
+
 /// Warlock AI: Decides and executes abilities for a Warlock combatant.
 pub fn decide_warlock_action(
     commands: &mut Commands,
@@ -132,6 +165,28 @@ pub fn decide_warlock_action(
         ) {
             builder.finish();
             return true;
+        }
+    }
+
+    // Priority 1.75: Lock the enemy healer with Fear to open a kill window.
+    //
+    // The Warlock's pressure is pure DoT/Shadow Bolt — trivially out-healed in a
+    // healer comp. Its answer (long present in the kit, never used) is an 8s Fear
+    // on the *healer* while the team burns the kill target. Fear targets the
+    // healer, not the focused kill target (where a DoT tick would instantly break
+    // it). Diminishing Returns on the Fears category self-limits the chain, so
+    // this can't perma-lock; between DR windows the Warlock falls through to its
+    // normal rotation below.
+    if let Some(healer_entity) = pick_healer_to_fear(target_entity, ctx) {
+        if let Some(healer_info) = ctx.combatants.get(&healer_entity) {
+            let healer_pos = healer_info.position;
+            if try_fear(
+                commands, combat_log, abilities, entity, combatant, my_pos, auras,
+                healer_entity, healer_pos, ctx, &mut builder,
+            ) {
+                builder.finish();
+                return true;
+            }
         }
     }
 
