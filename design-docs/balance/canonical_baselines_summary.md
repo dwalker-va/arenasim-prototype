@@ -148,5 +148,6 @@ enough kill pressure even with the Shaman's offense).
   multithreaded `--matrix` numbers. Compare batch-vs-batch only.
 - **Default loadouts & strategy.** Strategy-var sweeps (poisons, openers, pets,
   totems, curses…) are a separate axis — see the `balance-sweep` skill.
-- **Shaman totem magnitudes** live in `class_ai/shaman.rs` (not the ability
-  config); a balance retune there needs the matching `abilities.ron` tooltip edit.
+- **Shaman totem magnitudes** live in `class_ai/shaman.rs` (`totem_spec`, not the
+  ability config). The View Combatant tooltips derive from them, so a retune
+  there updates the tooltip automatically (no manual `abilities.ron` sync).

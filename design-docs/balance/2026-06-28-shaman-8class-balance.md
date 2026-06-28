@@ -161,5 +161,6 @@ healing or the other totems. Full tier lists live in
 - Canonical baselines are all current: `canonical_1v1_n100_300s.csv` (8×8),
   `canonical_2v2_full_n100_300s.csv` (784), `canonical_3v3_full_n50_300s.csv`
   (3,136) — all regenerated this cycle.
-- Totem buff magnitudes that feed both balance and tooltips live in
-  `class_ai/shaman.rs`; a retune needs the matching `abilities.ron` tooltip edit.
+- Totem buff magnitudes live in `class_ai/shaman.rs` (`totem_spec`) and the View
+  Combatant tooltips now derive from them (`totem_buff_spec` → `totem_description`),
+  so a retune updates the tooltip automatically — no manual sync.
