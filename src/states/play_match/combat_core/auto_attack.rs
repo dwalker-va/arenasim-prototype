@@ -269,6 +269,22 @@ pub fn combat_auto_attack(
                                 let wf_crit_damage = if wf_is_crit { wf_base * CRIT_DAMAGE_MULTIPLIER } else { wf_base };
                                 let wf_total = (wf_crit_damage * (1.0 - damage_reduction) * ds_penalty).max(0.0);
                                 attacks.push((attacker_entity, target_entity, wf_total, false, wf_is_crit));
+
+                                // Signature Windfury VFX: a wind funnel swirls up
+                                // around the proccing melee ally. Spawned here like
+                                // FloatingCombatText; the mesh is built only in
+                                // graphical mode (rendering/effects.rs, registered
+                                // solely in states/mod.rs), so headless stays
+                                // mesh-free and deterministic.
+                                commands.spawn((
+                                    WindfuryTornado {
+                                        target: attacker_entity,
+                                        lifetime: 0.6,
+                                        initial_lifetime: 0.6,
+                                        spin: 0.0,
+                                    },
+                                    PlayMatchEntity,
+                                ));
                             }
                         }
                         combatant.attack_timer = 0.0;

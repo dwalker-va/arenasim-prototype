@@ -268,3 +268,20 @@ pub struct SelectionRing {
     /// The combatant entity this ring follows.
     pub target: Entity,
 }
+
+/// Transient Windfury Totem proc effect: a spinning wind funnel ("tornado") that
+/// swirls up around a melee ally the instant it lands a Windfury bonus swing.
+/// Spawned in core at the proc site (like FloatingCombatText); the
+/// spawn/update/cleanup systems live in `rendering/effects.rs` and are
+/// registered ONLY in `states/mod.rs`, so headless never builds the mesh.
+#[derive(Component)]
+pub struct WindfuryTornado {
+    /// The combatant the funnel swirls around (followed each frame).
+    pub target: Entity,
+    /// Seconds remaining before despawn.
+    pub lifetime: f32,
+    /// Initial lifetime, for fade/grow progress.
+    pub initial_lifetime: f32,
+    /// Spin accumulator (seconds) driving the fast Y-axis rotation.
+    pub spin: f32,
+}
