@@ -236,6 +236,7 @@ pub enum CharacterClass {
     Warlock,
     Paladin,
     Hunter,
+    Shaman,
 }
 
 impl CharacterClass {
@@ -249,6 +250,7 @@ impl CharacterClass {
             CharacterClass::Warlock,
             CharacterClass::Paladin,
             CharacterClass::Hunter,
+            CharacterClass::Shaman,
         ]
     }
 
@@ -262,6 +264,7 @@ impl CharacterClass {
             CharacterClass::Warlock => "Warlock",
             CharacterClass::Paladin => "Paladin",
             CharacterClass::Hunter => "Hunter",
+            CharacterClass::Shaman => "Shaman",
         }
     }
 
@@ -275,6 +278,7 @@ impl CharacterClass {
             CharacterClass::Warlock => "Shadow magic and curses",
             CharacterClass::Paladin => "Holy warrior and healer",
             CharacterClass::Hunter => "Ranged physical DPS with pet",
+            CharacterClass::Shaman => "Offensive totem healer",
         }
     }
 
@@ -288,6 +292,7 @@ impl CharacterClass {
             CharacterClass::Warlock => Color::srgb(0.58, 0.51, 0.79), // Purple
             CharacterClass::Paladin => Color::srgb(0.96, 0.55, 0.73), // Pink (WoW Paladin color)
             CharacterClass::Hunter => Color::srgb(0.67, 0.83, 0.45),   // Green (WoW Hunter color #ABD473)
+            CharacterClass::Shaman => Color::srgb(0.0, 0.44, 0.87),    // Blue (WoW Shaman color #0070DE)
         }
     }
 
@@ -298,7 +303,7 @@ impl CharacterClass {
 
     /// Whether this class is primarily a healer (for CC target prioritization).
     pub fn is_healer(&self) -> bool {
-        matches!(self, CharacterClass::Priest | CharacterClass::Paladin)
+        matches!(self, CharacterClass::Priest | CharacterClass::Paladin | CharacterClass::Shaman)
     }
 
     /// Whether this class converts damage taken into rage (see the 15%
@@ -315,7 +320,7 @@ impl CharacterClass {
     pub fn uses_mana(&self) -> bool {
         matches!(
             self,
-            CharacterClass::Mage | CharacterClass::Priest | CharacterClass::Warlock | CharacterClass::Paladin | CharacterClass::Hunter
+            CharacterClass::Mage | CharacterClass::Priest | CharacterClass::Warlock | CharacterClass::Paladin | CharacterClass::Hunter | CharacterClass::Shaman
         )
     }
 
@@ -341,6 +346,9 @@ impl CharacterClass {
             CharacterClass::Paladin => 2.0,
             // Hunter stays at 25 yards — between dead zone (8) and max range (35)
             CharacterClass::Hunter => 25.0,
+            // Shaman: ranged caster-healer. Lightning Bolt 30, so stay at ~28
+            // to use everything without repositioning.
+            CharacterClass::Shaman => 28.0,
         }
     }
 

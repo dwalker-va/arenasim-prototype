@@ -6,6 +6,7 @@
 //! - Interrupt decisions (when to interrupt enemy casts)
 
 use bevy::prelude::*;
+use bevy::ecs::system::SystemParam;
 use bevy_egui::egui;
 use crate::combat::log::CombatLog;
 use super::match_config;
@@ -17,6 +18,16 @@ use super::class_ai;
 
 // Re-export spawn_speech_bubble for backward compatibility (used by other modules)
 pub use super::utils::spawn_speech_bubble;
+
+/// Bundled extra params for `decide_abilities`, keeping it within Bevy's
+/// 16-argument system-function limit. Holds the victory-celebration guard and
+/// the live `Totem` query (so the Shaman AI knows which of its element totems
+/// are already out / about to expire).
+#[derive(SystemParam)]
+pub struct AbilityDispatchExtras<'w, 's> {
+    celebration: Option<Res<'w, VictoryCelebration>>,
+    totems: Query<'w, 's, &'static Totem>,
+}
 
 pub fn acquire_targets(
     countdown: Res<MatchCountdown>,
@@ -503,13 +514,28 @@ pub fn decide_abilities(
         Option<&MovementDirective>,
     )>,
     mut fct_states: Query<&mut FloatingTextState>,
-    celebration: Option<Res<VictoryCelebration>>,
+    extras: AbilityDispatchExtras,
     pet_query: Query<&Pet>,
     mut decision_trace: ResMut<crate::states::play_match::decision_trace::DecisionTrace>,
 ) {
     // Don't cast abilities during victory celebration
-    if celebration.is_some() {
+    if extras.celebration.is_some() {
         return;
+    }
+
+    // Per-Shaman snapshot of live totem durations, keyed by owner Shaman. Each
+    // entry is `[max duration_remaining; 4]` indexed by `TotemElement::index()`
+    // (0.0 = that element's totem is absent). The Shaman AI reads its own entry
+    // to decide which totems to (re)drop. Freshly spawned totems appear next
+    // frame; the cast cooldown covers that gap so we never double-drop.
+    let mut totem_durations: std::collections::BTreeMap<Entity, [f32; 4]> =
+        std::collections::BTreeMap::new();
+    for totem in extras.totems.iter() {
+        let slot = &mut totem_durations.entry(totem.owner).or_insert([0.0; 4])
+            [totem.element.index()];
+        if totem.duration_remaining > *slot {
+            *slot = totem.duration_remaining;
+        }
     }
 
     // CombatantInfo is a per-frame snapshot. Mutations to Combatant components
@@ -766,6 +792,49 @@ pub fn decide_abilities(
                 &ctx,
                 &mut decision_trace,
             ),
+            // Shaman: full healer-posture dispatch (U6). Mirrors the Priest arm
+            // — posture evaluation (FREE/PRESSURED/ESCAPE) runs BEFORE the
+            // ability pass and OUTSIDE the GCD short-circuit so directives
+            // refresh while on GCD; gated on gates_opened; never for casting
+            // Shamans (query excludes CastingState/ChannelingState — R12). The
+            // Shaman reuses the shared HealerPosture query slot. The plan's
+            // `escape_defer` makes the rotation defer non-critical casts during
+            // an ESCAPE window. Per-element totem durations come from the live
+            // Totem query snapshot above.
+            match_config::CharacterClass::Shaman => {
+                let durations = totem_durations.get(&entity).copied().unwrap_or([0.0; 4]);
+                let mut plan = class_ai::shaman::ShamanMovementPlan::default();
+                if countdown.gates_opened {
+                    if let Ok((healer_posture, _mage, directive)) = posture_movement.get_mut(entity) {
+                        plan = class_ai::shaman::evaluate_shaman_posture(
+                            &mut commands,
+                            entity,
+                            &combatant,
+                            my_pos,
+                            &ctx,
+                            healer_posture.map(bevy::prelude::Mut::into_inner),
+                            directive,
+                            &movement_config,
+                            time.elapsed_secs(),
+                            &mut decision_trace,
+                        );
+                    }
+                }
+                class_ai::shaman::decide_shaman_action(
+                    &mut commands,
+                    &mut combat_log,
+                    &abilities,
+                    entity,
+                    &mut combatant,
+                    my_pos,
+                    auras.as_deref(),
+                    &ctx,
+                    &durations,
+                    &plan,
+                    &movement_config,
+                    &mut decision_trace,
+                )
+            }
             match_config::CharacterClass::Paladin => {
                 // Posture evaluation (healer movement AI, U8) — mirrors the
                 // Priest arm: runs BEFORE the ability pass and OUTSIDE the
@@ -1215,6 +1284,11 @@ pub fn check_interrupts(
     channeling_targets: Query<&ChannelingState>,
     positions: Query<&Transform>,
     all_auras: Query<&ActiveAuras>,
+    // Casting enemies the interrupter can scan independently of its kill target.
+    // Disjoint from `combatants` (which is `Without<CastingState>`), so this
+    // read-only borrow of `&Combatant` does not conflict. Used by the Shaman's
+    // Wind Shear to prefer interrupting the enemy healer mid-cast.
+    casting_combatants: Query<(Entity, &Combatant, &Transform), With<CastingState>>,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
     // Don't interrupt during victory celebration
@@ -1232,14 +1306,67 @@ pub fn check_interrupts(
             continue;
         }
 
-        // Only Warriors and Rogues have interrupts
+        // Only Warriors, Rogues, and Shamans have interrupts
         if combatant.class != match_config::CharacterClass::Warrior
-            && combatant.class != match_config::CharacterClass::Rogue {
+            && combatant.class != match_config::CharacterClass::Rogue
+            && combatant.class != match_config::CharacterClass::Shaman {
             continue;
         }
 
-        let Some(target_entity) = combatant.target else {
-            continue;
+        // Pick the interrupt target. Warriors/Rogues interrupt their current kill
+        // target. The Shaman instead scans for ANY casting enemy in Wind Shear
+        // range, preferring the enemy HEALER mid-cast (then nearest, then lowest
+        // entity id for determinism) so Wind Shear locks enemy heals rather than
+        // only the kill target's casts.
+        let target_entity = if combatant.class == match_config::CharacterClass::Shaman {
+            let my_pos = transform.translation;
+            let wind_shear_range = abilities.get_unchecked(&AbilityType::WindShear).range;
+            let mut best: Option<(Entity, bool, f32)> = None;
+            for (e, c, t) in casting_combatants.iter() {
+                if c.team == combatant.team || !c.is_alive() {
+                    continue;
+                }
+                // Mid an un-interrupted cast?
+                match casting_targets.get(e) {
+                    Ok(cs) if !cs.interrupted => {}
+                    _ => continue,
+                }
+                // Skip immune targets (Divine Shield).
+                if let Ok(a) = all_auras.get(e) {
+                    if a.auras.iter().any(|au| au.effect_type == AuraType::DamageImmunity) {
+                        continue;
+                    }
+                }
+                let dist = my_pos.distance(t.translation);
+                if dist > wind_shear_range {
+                    continue;
+                }
+                let is_healer = c.class.is_healer();
+                let replace = match best {
+                    None => true,
+                    Some((be, bh, bd)) => {
+                        if is_healer != bh {
+                            is_healer
+                        } else if dist != bd {
+                            dist < bd
+                        } else {
+                            e < be
+                        }
+                    }
+                };
+                if replace {
+                    best = Some((e, is_healer, dist));
+                }
+            }
+            match best {
+                Some((e, _, _)) => e,
+                None => continue,
+            }
+        } else {
+            let Some(target_entity) = combatant.target else {
+                continue;
+            };
+            target_entity
         };
 
         // Don't waste interrupts on immune targets (Divine Shield)
@@ -1291,6 +1418,7 @@ pub fn check_interrupts(
                 }
                 AbilityType::Kick
             },
+            match_config::CharacterClass::Shaman => AbilityType::WindShear,
             _ => continue,
         };
 

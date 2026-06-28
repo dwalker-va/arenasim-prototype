@@ -150,5 +150,28 @@
             Trinket1: MarkOfTheChampion,
             Ranged: AshwoodBow,
         },
+
+        // ====================================================================
+        // SHAMAN — Caster mail (Earthfury), spell-power accessories, mace + frill
+        // Mirrors the Priest's caster accessory coverage but on mail armor.
+        // Gear prioritizes mana + spell power to relieve the 160-base starvation.
+        // ====================================================================
+        Shaman: {
+            Head: EarthfuryHelmet,
+            Shoulders: EarthfuryEpaulets,
+            Chest: EarthfuryVestments,
+            Wrists: EarthfuryBracers,
+            Hands: EarthfuryGauntlets,
+            Waist: EarthfuryBelt,
+            Legs: EarthfuryLegguards,
+            Feet: EarthfuryBoots,
+            Back: CloakOfConcentration,
+            Neck: AmuletOfResilience,
+            Ring1: SignetOfFocus,
+            Ring2: RingOfProtection,
+            Trinket1: EssenceOfEternalLife,
+            MainHand: HammerOfTheRighteous,
+            OffHand: TomeOfKnowledge,
+        },
     }
 )

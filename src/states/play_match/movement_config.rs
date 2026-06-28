@@ -215,6 +215,52 @@ impl Default for PaladinMovementConfig {
     }
 }
 
+/// Shaman-specific movement configuration.
+///
+/// Mirrors [`PriestMovementConfig`] minus the Dip fields — the Shaman has no
+/// Hammer-of-Justice / Psychic-Scream dip. The defaults lean OFFENSIVE versus
+/// the Priest (a ranged caster that pressures rather than a pure backline
+/// healer): weaker `threat_repulsion`/`formation_pull` (less eager to flee /
+/// fall back) and a stronger `wand_pull` (the Shaman repurposes the wand-pull
+/// term as a pull toward Lightning Bolt range of the kill target).
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ShamanMovementConfig {
+    pub weights: MovementWeights,
+    /// FREE: distance (XZ units) the formation point must move before the
+    /// directive is re-targeted and a `FormationShift` trace event fires.
+    pub formation_shift_threshold: f32,
+    /// FREE deadzone: no Point directive is issued when the Shaman is already
+    /// this close to the formation point (prevents micro-shuffling).
+    pub formation_deadzone: f32,
+    /// FREE: refresh the standing directive when its remaining TTL drops below
+    /// this — keeps a walk alive across decide ticks without re-scoring.
+    pub directive_refresh_margin: f32,
+    /// Healing-heavy deferral fraction (parity with the Priest): observable,
+    /// deterministic team-HP gate kept for forward-compatibility / consistency.
+    pub healing_heavy_hp: f32,
+}
+
+impl Default for ShamanMovementConfig {
+    fn default() -> Self {
+        Self {
+            weights: MovementWeights {
+                // Offense-slanted vs the Priest (3.0/2.0/6.0/0.5): less flee,
+                // weaker backline pull, stronger Lightning-Bolt-range pull.
+                threat_repulsion: 2.0,
+                formation_pull: 1.0,
+                corner_penalty: 6.0,
+                wand_pull: 1.0,
+                ..MovementWeights::default()
+            },
+            formation_shift_threshold: 3.0,
+            formation_deadzone: 1.5,
+            directive_refresh_margin: 0.25,
+            healing_heavy_hp: 0.6,
+        }
+    }
+}
+
 /// Melee target-swap tuning (bucket A offensive-punish). When a melee's kill
 /// target kites persistently out of reach and a softer enemy is in melee, the
 /// melee swaps instead of chasing forever — gated by hysteresis to avoid
@@ -324,6 +370,7 @@ pub struct MovementConfig {
     pub shared: SharedMovementConfig,
     pub priest: PriestMovementConfig,
     pub paladin: PaladinMovementConfig,
+    pub shaman: ShamanMovementConfig,
     pub melee: MeleeMovementConfig,
     pub mage: DpsMovementConfig,
     pub hunter: DpsMovementConfig,
@@ -360,6 +407,9 @@ impl MovementConfig {
             ("priest.formation_shift_threshold", self.priest.formation_shift_threshold),
             ("priest.formation_deadzone", self.priest.formation_deadzone),
             ("priest.directive_refresh_margin", self.priest.directive_refresh_margin),
+            ("shaman.formation_shift_threshold", self.shaman.formation_shift_threshold),
+            ("shaman.formation_deadzone", self.shaman.formation_deadzone),
+            ("shaman.directive_refresh_margin", self.shaman.directive_refresh_margin),
         ];
         for (name, value) in non_negatives {
             if value < 0.0 || !value.is_finite() {
@@ -372,6 +422,7 @@ impl MovementConfig {
             ("shared.urgency_hp_threshold", s.urgency_hp_threshold),
             ("paladin.healing_heavy_hp", self.paladin.healing_heavy_hp),
             ("priest.healing_heavy_hp", self.priest.healing_heavy_hp),
+            ("shaman.healing_heavy_hp", self.shaman.healing_heavy_hp),
         ];
         for (name, value) in fractions {
             if !(0.0..=1.0).contains(&value) {
@@ -406,6 +457,20 @@ impl MovementConfig {
                 self.priest.directive_refresh_margin, s.directive_ttl
             ));
         }
+        if self.shaman.formation_deadzone >= self.shaman.formation_shift_threshold {
+            issues.push(format!(
+                "shaman.formation_deadzone ({}) must be below shaman.formation_shift_threshold \
+                 ({}) — otherwise the deadzone swallows every formation shift",
+                self.shaman.formation_deadzone, self.shaman.formation_shift_threshold
+            ));
+        }
+        if self.shaman.directive_refresh_margin >= s.directive_ttl {
+            issues.push(format!(
+                "shaman.directive_refresh_margin ({}) must be below shared.directive_ttl ({}) — \
+                 a margin at/above the TTL refreshes the directive every tick",
+                self.shaman.directive_refresh_margin, s.directive_ttl
+            ));
+        }
 
         let m = &self.melee;
         if !(m.swap_range > 0.0) || !m.swap_range.is_finite() {
@@ -430,6 +495,7 @@ impl MovementConfig {
         for (class, weights) in [
             ("priest", &self.priest.weights),
             ("paladin", &self.paladin.weights),
+            ("shaman", &self.shaman.weights),
             ("mage", &self.mage.weights),
             ("hunter", &self.hunter.weights),
         ] {

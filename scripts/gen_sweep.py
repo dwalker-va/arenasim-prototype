@@ -30,7 +30,7 @@ done > /tmp/pet_sweep.jsonl
 
 Notes
 -----
-- `{p}` in --t1 is a wildcard that expands over all 7 classes (skipping any
+- `{p}` in --t1 is a wildcard that expands over all 8 classes (skipping any
   expansion that would duplicate a class already in the template).
 - Opposing teams are distinct-class unordered combinations of --t2-size.
 - The cap defaults to 300s: healer attrition resolves around ~200-240s, so a
@@ -45,8 +45,8 @@ import itertools
 import json
 import sys
 
-CLASSES = ["Warrior", "Mage", "Rogue", "Priest", "Warlock", "Paladin", "Hunter"]
-HEALERS = {"Priest", "Paladin"}
+CLASSES = ["Warrior", "Mage", "Rogue", "Priest", "Warlock", "Paladin", "Hunter", "Shaman"]
+HEALERS = {"Priest", "Paladin", "Shaman"}
 
 
 def expand_t1(template):

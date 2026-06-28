@@ -238,6 +238,11 @@ pub fn combat_auto_attack(
                         let base_damage = combatant.attack_damage + combatant.next_attack_bonus_damage;
                         // Roll crit before damage reduction (include dynamic crit bonus from auras)
                         let crit_bonus = super::get_crit_chance_bonus(auras.as_deref());
+                        // Windfury Totem: a MELEE attacker carrying its own WindfuryBuff
+                        // aura has a chance (= aura magnitude) for one bonus swing.
+                        // Gated to melee (R14/AE3) — see `windfury_bonus_chance`.
+                        // Captured here because `auras` is borrowed again below.
+                        let windfury_chance = windfury_bonus_chance(attacker_is_melee, auras.as_deref());
                         let is_crit = roll_crit(combatant.crit_chance + crit_bonus, &mut game_rng);
                         let crit_damage = if is_crit { base_damage * CRIT_DAMAGE_MULTIPLIER } else { base_damage };
                         // Apply physical damage reduction from curses (Curse of Weakness: -20%)
@@ -248,6 +253,40 @@ pub fn combat_auto_attack(
                         let has_bonus = combatant.next_attack_bonus_damage > 0.0;
 
                         attacks.push((attacker_entity, target_entity, total_damage, has_bonus, is_crit));
+
+                        // Windfury Totem proc: a successful roll pushes a duplicate
+                        // (bonus) swing that resolves like a normal weapon hit. Both
+                        // the proc roll and the bonus swing's crit roll draw from the
+                        // seeded game_rng, so match determinism is preserved. This branch
+                        // is only reached when a WindfuryBuff aura is present, so existing
+                        // (totem-free) matches draw zero extra RNG and stay byte-identical.
+                        if let Some(wf_chance) = windfury_chance {
+                            if game_rng.random_f32() < wf_chance {
+                                // Bonus swing uses base weapon damage (the Heroic Strike
+                                // bonus is consumed by the primary swing) and re-rolls crit.
+                                let wf_base = combatant.attack_damage;
+                                let wf_is_crit = roll_crit(combatant.crit_chance + crit_bonus, &mut game_rng);
+                                let wf_crit_damage = if wf_is_crit { wf_base * CRIT_DAMAGE_MULTIPLIER } else { wf_base };
+                                let wf_total = (wf_crit_damage * (1.0 - damage_reduction) * ds_penalty).max(0.0);
+                                attacks.push((attacker_entity, target_entity, wf_total, false, wf_is_crit));
+
+                                // Signature Windfury VFX: a wind funnel swirls up
+                                // around the proccing melee ally. Spawned here like
+                                // FloatingCombatText; the mesh is built only in
+                                // graphical mode (rendering/effects.rs, registered
+                                // solely in states/mod.rs), so headless stays
+                                // mesh-free and deterministic.
+                                commands.spawn((
+                                    WindfuryTornado {
+                                        target: attacker_entity,
+                                        lifetime: 0.6,
+                                        initial_lifetime: 0.6,
+                                        spin: 0.0,
+                                    },
+                                    PlayMatchEntity,
+                                ));
+                            }
+                        }
                         combatant.attack_timer = 0.0;
 
                         // Consume the bonus damage after queueing the attack
@@ -614,6 +653,26 @@ pub fn combat_auto_attack(
     }
 }
 
+/// Windfury Totem bonus-swing chance for this attacker. Returns `Some(magnitude)`
+/// ONLY when the attacker is melee and carries a `WindfuryBuff` aura (R14/AE3):
+/// the totem may pulse the buff onto every ally in radius, but the proc is inert
+/// for ranged/caster allies who are wanding or auto-shooting. Returns `None`
+/// (no bonus swing) for a ranged attacker even if it carries the buff.
+pub(crate) fn windfury_bonus_chance(
+    attacker_is_melee: bool,
+    auras: Option<&ActiveAuras>,
+) -> Option<f32> {
+    if !attacker_is_melee {
+        return None;
+    }
+    auras.and_then(|a| {
+        a.auras
+            .iter()
+            .find(|aura| aura.effect_type == AuraType::WindfuryBuff)
+            .map(|aura| aura.magnitude)
+    })
+}
+
 /// Apply or refresh the Crippling Poison slow on `target`. Returns true if it was
 /// freshly applied (vs. just refreshed) — the caller logs only the initial proc.
 ///
@@ -646,5 +705,54 @@ fn apply_or_refresh_crippling(
             commands.spawn(pending);
         }
         true
+    }
+}
+
+#[cfg(test)]
+mod windfury_gate_tests {
+    use super::*;
+    use super::super::super::components::{ActiveAuras, Aura};
+
+    fn windfury_auras(magnitude: f32) -> ActiveAuras {
+        ActiveAuras {
+            auras: vec![Aura {
+                effect_type: AuraType::WindfuryBuff,
+                magnitude,
+                ..Default::default()
+            }],
+        }
+    }
+
+    /// AE3 (covers R14 Windfury): a MELEE ally carrying the Windfury Totem buff
+    /// gets the bonus-swing chance, but a CASTER/ranged ally in the same totem
+    /// radius (same buff aura) gets NONE — the proc is melee-gated even though
+    /// the totem pulses the buff onto everyone in range.
+    #[test]
+    fn windfury_bonus_only_for_melee_attacker() {
+        let buffed = windfury_auras(0.2);
+
+        // Melee ally inside the radius: bonus swing chance == aura magnitude.
+        assert_eq!(
+            windfury_bonus_chance(true, Some(&buffed)),
+            Some(0.2),
+            "a melee ally carrying the Windfury buff must get the bonus-swing chance"
+        );
+
+        // Caster/ranged ally inside the same radius (same buff): NO bonus swing.
+        assert_eq!(
+            windfury_bonus_chance(false, Some(&buffed)),
+            None,
+            "a ranged/caster ally must get NO Windfury bonus swing even while \
+             carrying the totem buff"
+        );
+    }
+
+    /// A melee attacker without the buff gets no bonus swing (the aura is the
+    /// gate, not just melee-ness).
+    #[test]
+    fn windfury_bonus_none_without_buff() {
+        let empty = ActiveAuras { auras: vec![] };
+        assert_eq!(windfury_bonus_chance(true, Some(&empty)), None);
+        assert_eq!(windfury_bonus_chance(true, None), None);
     }
 }

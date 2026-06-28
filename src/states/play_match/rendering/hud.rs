@@ -881,5 +881,8 @@ fn get_aura_fallback_color(aura_type: &AuraType) -> egui::Color32 {
         AuraType::FrostArmorBuff => egui::Color32::from_rgb(100, 149, 237), // Cornflower blue (self-buff)
         AuraType::Silence => egui::Color32::from_rgb(75, 0, 130), // Indigo (silence debuff)
         AuraType::WeaponPoison => egui::Color32::from_rgb(64, 180, 64), // Poison green (self-buff)
+        AuraType::SpellPowerIncrease => egui::Color32::from_rgb(255, 99, 71), // Tomato (Flametongue Totem buff)
+        AuraType::HealingOverTime => egui::Color32::from_rgb(64, 200, 120), // Sea green (Healing Stream Totem buff)
+        AuraType::WindfuryBuff => egui::Color32::from_rgb(135, 206, 250), // Light sky blue (Windfury Totem buff)
     }
 }

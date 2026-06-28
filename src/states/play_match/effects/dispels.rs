@@ -44,7 +44,10 @@ pub fn process_dispels(
                 .iter()
                 .enumerate()
                 .filter(|(_, a)| {
-                    // If aura_type_filter is set, only match those specific types
+                    // If aura_type_filter is set, only match those specific types.
+                    // This is how the Shaman's Purge strips a chosen enemy buff
+                    // (it pins the filter to a `can_be_purged` type) and how
+                    // Master's Call removes only movement impairments from an ally.
                     if let Some(ref filter) = pending.aura_type_filter {
                         filter.contains(&a.effect_type)
                     } else {
@@ -57,7 +60,14 @@ pub fn process_dispels(
                 .collect();
 
             if !dispellable_indices.is_empty() {
-                // Randomly select one to remove (WoW Classic behavior)
+                // Randomly select one to remove (WoW Classic behavior). This
+                // randomness is INTENTIONAL design, not a rough edge: even when
+                // the caster pinned an `aura_type_filter` (e.g. Shaman Purge), a
+                // target carrying multiple matching auras gets a coin-flip among
+                // them. Keeping dispels/purges probabilistic adds matchup
+                // variance and forces heavier purge investment to reliably strip
+                // the buff you want. Do NOT change this to a deterministic
+                // highest-magnitude pick.
                 let random_idx = (game_rng.random_f32() * dispellable_indices.len() as f32) as usize;
                 let idx_to_remove = dispellable_indices[random_idx.min(dispellable_indices.len() - 1)];
 

@@ -1,39 +1,32 @@
 # Canonical Balance Baselines
 
-**Generated 2026-06-22** on the Rogue Crippling Poison meta — i.e. the Rogue
-Kidney Shot chain state *plus* Crippling Poison: a weapon poison whose
-auto-attacks have a 50% chance to apply/refresh a 70% movement slow (an 8s
-*poison* debuff — immune to Dispel Magic, removable only by a cleanse).
-Supersedes the earlier 2026-06-22 Kidney-chain baselines.
+**Generated 2026-06-28** — first full-matrix baseline with the **8th class, the
+Shaman** (offensive totem healer; PR #78). All three formats regenerated on the
+batch harness at 300s cap. Supersedes the 2026-06-22 7-class Crippling-Poison
+baselines.
 
-**The dominant change this cycle is Crippling Poison, and it is the sticking
-lever the Rogue actually needed.** The Kidney Shot chain (last cycle) was pure
-control and barely moved the Rogue's team numbers (+1.1 / +1.0); the Rogue
-stayed dead last in both team formats because its real problem was *uptime* —
-getting kited and peeled off the kill target. A maintained 70% slow fixes that
-directly: **Rogue 1v1 64.9 → 77.3 (now the #1 1v1 class), 2v2 40.3 → 45.6
-(+5.2), 3v3 41.5 → 44.9 (+3.4).** The Rogue is **off the team-format floor in
-both formats** (5th of 7, above Warlock and Warrior) — the new floor is the
-Warrior. Most visible single cell: 1v1 Rogue-vs-Hunter **0% → 64%**, a kite the
-Rogue previously could never close. The change is Rogue-isolated; each other
-class's aggregate shifts ≤2.3pt and only through its Rogue matchup column.
+**Headline: the Shaman enters as the #2 team-format class (2v2 55.7%, 3v3
+54.4%), behind only the Mage — and Mage+Shaman is the new #1 2v2 comp (82.0%).**
+The offensive-healer design overshot the middle: its Flametongue spell-power
+totem + Purge (strip enemy defensives) + Wind Shear (lock enemy heals) make a
+ranged carry (esp. the Mage) substantially stronger, and unlike the pure
+healers it adds its own kill pressure. Mage stays #1; Paladin and Priest both
+slip a tier as the Shaman absorbs healer-slot share. **No buff — if anything the
+Shaman is a mild nerf-watch at the top (Mage+Shaman 82%).**
 
-Authoritative current-state references. Use as the "before" when assessing any
-balance change — **compare batch-vs-batch only** (a few points off the older
-multithreaded `--matrix` numbers), and **full-canonical vs full-canonical** (a
-focused `--t1` slice vs a label subset of the canonical is biased for the
-aggregate).
+Authoritative current-state references. Use as the "before" when assessing a
+balance change — **compare batch-vs-batch only**, and **full-canonical vs
+full-canonical**.
 
 | Format | File | Coverage | N | Matches | Draws |
 |---|---|---|---|---|---|
-| 1v1 | `canonical_1v1_n100_300s.csv` | full 7×7 | 100 | 4,900 | 5.1% |
-| 2v2 | `canonical_2v2_full_n100_300s.csv` | every distinct-class pair × pair (441) | 100 | 44,100 | 0.9% |
-| 3v3 | `canonical_3v3_full_n50_300s.csv` | every distinct-class triple × triple (1225) | 50 | 61,250 | 0.4% |
+| 1v1 | `canonical_1v1_n100_300s.csv` | full 8×8 | 100 | 6,400 | 11.1% |
+| 2v2 | `canonical_2v2_full_n100_300s.csv` | every distinct-class pair × pair (784) | 100 | 78,400 | 2.4% |
+| 3v3 | `canonical_3v3_full_n50_300s.csv` | every distinct-class triple × triple (3,136) | 50 | 156,800 | 1.1% |
 
-Distinct-class comps, both orderings, 300s cap, default loadouts/strategy
-(Rogue opener = Cheap Shot, Rogue poison = Crippling). Regenerate via
-`scripts/gen_sweep.py --full {2,3}` (and `--t1 '{p}' --t2-size 1` for 1v1) +
-`arenasim --batch` (see the `balance-sweep` skill).
+Distinct-class comps, both orderings, 300s cap, default loadouts/strategy.
+Regenerate via `scripts/gen_sweep.py --full {2,3}` (and `--t1 '{p}' --t2-size 1`
+for 1v1) + `arenasim --batch` (see the `balance-sweep` skill).
 
 ---
 
@@ -41,134 +34,118 @@ Distinct-class comps, both orderings, 300s cap, default loadouts/strategy
 
 | Tier | 1v1 | 2v2 | 3v3 |
 |---|---|---|---|
-| **S — meta-defining** | **Rogue 77.3**, Paladin 65.4 | **Mage 61.6** | **Mage 62.1** |
-| **A — strong** | Mage 57.4 | Paladin 56.6 | Paladin 55.8 |
-| **B — playable** | Hunter 51.3 | Hunter 50.6, Priest 46.7, **Rogue 45.6**, Warlock 43.6 | Priest 52.5, Hunter 46.7, **Rogue 44.9**, Warlock 43.9 |
-| **C — weak** | Warlock 38.9, Warrior 32.3 | Warrior 42.2 | Warrior 42.8 |
-| **D — bottom** | Priest 9.9 | — | — |
+| **S — meta-defining** | **Rogue 81.0** | **Mage 64.6** | **Mage 62.4** |
+| **A — strong** | Mage 63.2, Paladin 58.2 | **Shaman 55.7**, Paladin 53.0 | **Shaman 54.4**, Paladin 52.8, Priest 50.3 |
+| **B — playable** | Hunter 44.9, **Shaman 37.8** | Rogue 47.2, Hunter 44.8, Priest 43.0 | Rogue 47.8 |
+| **C — weak** | Warlock 34.8, Warrior 28.4 | Warrior 40.9, Warlock 40.8 | Warrior 43.6, Warlock 43.2, Hunter 40.9 |
+| **D — bottom** | Priest 8.9 | — | — |
 
-**The team-format meta is still Mage + Paladin**, unchanged in ordering (the
-Crippling change is Rogue-isolated). **The story is the Rogue:** it is now the
-**#1 1v1 class (77.3)** — the Cheap Shot → Kidney lockdown plus a maintained 70%
-slow means a single target can neither escape nor out-sustain it — and it has
-climbed **off the team-format floor** (2v2 45.6, 3v3 44.9, 5th of 7 in both).
-The slow gives the Rogue the damage *uptime* on the kill target that the
-control-only chain could not. **The Warrior is now the team-format floor**
-(42.2 / 42.8): a no-utility melee with no sustain and no peel, it is the class
-most exposed once the Rogue is no longer the obvious bottom. Other classes move
-only through their Rogue matchup column (≤2.3pt; Warrior −1.8/−2.3 and Mage
-−1.7/−1.0 are the largest, both the Rogue-vs-them cells).
+**The team meta is now Mage + Shaman**, with Paladin a clear third. The Shaman
+debuts at A-tier #2 in both team formats; the Mage holds #1 and is *amplified*
+by the Shaman partnership. **The Priest drops to mid-B in 2v2** (43.0) — the
+Shaman is a strictly-better offensive healer in most comps. **Hunter is the 3v3
+floor** (40.9), surfaced as Warlock/Warrior stay weak. 1v1 is unchanged in
+character: Rogue the lone-target bully, the pure-healer Priest the basement, and
+the Shaman mid-pack (37.8) but far above Priest — its offense carries 1v1 where
+the Priest has none.
 
-## 2v2 comp tier list (441 comps)
+## 2v2 comp tier list (784 matchups)
 
 **Meta-defining (top):**
 | Winrate | Comp |
 |---|---|
-| **74.0%** | Mage+Paladin |
-| 73.4% | Mage+Priest |
-| 68.3% | Paladin+Warrior |
-| 63.5% | Mage+Warlock |
-| **63.2%** | **Paladin+Rogue** |
-| 61.9% | Hunter+Paladin |
+| **82.0%** | **Mage+Shaman** |
+| 78.4% | Mage+Paladin |
+| 72.1% | Mage+Priest |
+| **70.8%** | **Rogue+Shaman** |
+| 66.7% | Warrior+Paladin |
+| 61.1% | Mage+Warlock |
 
 **Unplayable (bottom):**
 | Winrate | Comp |
 |---|---|
-| 40.6% | Hunter+Warrior |
-| 38.7% | Priest+Warrior |
-| 36.6% | Rogue+Warrior |
-| 26.5% | Rogue+Warlock |
-| 19.8% | Warlock+Warrior |
-| **11.2%** | **Paladin+Priest** |
+| 33.4% | Warlock+Hunter |
+| 33.3% | Warrior+Hunter |
+| 30.0% | Warrior+Rogue |
+| 22.6% | Rogue+Warlock |
+| 18.9% | Warlock+Warrior |
+| **8.8%** | **Priest+Paladin** |
 
-**Paladin+Rogue (63.2%) is now a top-5 2v2 comp** — the Paladin sustains while a
-sticky Rogue grinds the kill target down; it was mid-pack before Crippling. The
-Rogue's *own* worst pairings also climbed (Rogue+Warlock 20.6 → 26.5, Rogue+
-Warrior 32.7 → 36.6). The floor is now **Warrior-heavy** (Hunter+Warrior,
-Priest+Warrior, Rogue+Warrior all near the bottom) plus double-healer
-(Paladin+Priest 11.2%, still the worst).
+**Mage+Shaman (82.0%) is the new top 2v2 comp**, edging out Mage+Paladin — the
+Flametongue totem turns the Mage's burst lethal while Purge/Wind Shear strip the
+enemy's answers. **Rogue+Shaman (70.8%) is the #4 comp** — the same tempo on a
+sticky melee. Notably the **Shaman double-healer comps are playable** (Priest+
+Shaman 37.2%, Paladin+Shaman 49.8%) unlike the pure Priest+Paladin floor (8.8%):
+the offensive healer gives a double-healer comp a real win condition.
 
-## 3v3 comp tier list (1225 comps)
+## 3v3 comp tier list (3,136 matchups)
 
 **Meta-defining (top):**
 | Winrate | Comp |
 |---|---|
-| **82.9%** | Mage+Paladin+Warlock |
-| 79.7% | Mage+Priest+Warlock |
-| 77.6% | Hunter+Mage+Paladin |
-| **77.1%** | **Mage+Paladin+Rogue** |
-| 74.7% | Hunter+Mage+Priest |
-| **74.3%** | **Mage+Priest+Rogue** |
+| **78.8%** | **Mage+Warlock+Shaman** |
+| 77.7% | Mage+Warlock+Paladin |
+| **77.1%** | **Mage+Priest+Shaman** |
+| 77.0% | Mage+Rogue+Paladin |
+| **75.9%** | **Mage+Paladin+Shaman** |
+| 74.6% | Mage+Priest+Warlock |
 
 **Unplayable (bottom):**
 | Winrate | Comp |
 |---|---|
-| 28.2% | Priest+Warlock+Warrior |
-| 25.7% | Paladin+Priest+Warlock |
-| 25.3% | Hunter+Rogue+Warlock |
-| 22.1% | Hunter+Warlock+Warrior |
-| 17.4% | Hunter+Rogue+Warrior |
-| **7.9%** | **Rogue+Warlock+Warrior** |
+| 26.6% | Priest+Paladin+Hunter |
+| 19.1% | Priest+Paladin+Shaman |
+| 18.6% | Rogue+Warlock+Hunter |
+| 18.0% | Warrior+Rogue+Warlock |
+| 16.8% | Warrior+Warlock+Hunter |
+| **12.5%** | **Warrior+Rogue+Hunter** |
 
-Rogue-with-two-carries is now firmly top-tier (Mage+Paladin+Rogue 77.1%,
-Mage+Priest+Rogue 74.3%). No-sustain melee piles are still the floor —
-Rogue+Warlock+Warrior 7.9% remains the single worst comp in the game — which is
-a comp-composition problem (no healer, no carry), not a Rogue deficit.
+Mage-anchored Shaman triples own the top (Mage+Warlock+Shaman 78.8% is the new
+#1). No-healer melee piles are the floor (Warrior+Rogue+Hunter 12.5%), with the
+triple-healer Priest+Paladin+Shaman near the bottom (19.1% — three healers, not
+enough kill pressure even with the Shaman's offense).
 
 ## What's meta-defining vs unplayable — the read
 
-- **Mage is still clear #1 in teams** (61.6 / 62.1) and anchors the top comps;
-  **LoS/pillar play remains the deferred structural answer to its kiting.**
-- **Paladin holds #2**; Mage+Paladin is the top 2v2 (74.0%), and **Paladin+Rogue
-  (63.2%) is a new top-5** thanks to Crippling.
-- **The Rogue is now an S-tier 1v1 bully (77.3) and a mid-B team class (45.6 /
-  44.9), off the floor.** Crippling Poison is the *uptime* lever the chain
-  lacked. Its remaining team ceiling is comp-driven (it wants a carry/healer
-  partner; no-sustain Rogue piles are still the game's floor), not a stat
-  deficit. **Counterplay is real: Paladin Cleanse strips the poison** (it's a
-  poison, immune to Dispel Magic) — a healthy Paladin lifts it, an under-
-  pressure one prioritizes healing, so the slow has partial uptime rather than
-  full negation.
-- **The Warrior is the new team-format floor** (42.2 / 42.8) — surfaced, not
-  caused, by the Rogue's climb: a no-utility, no-sustain melee. Likely the next
-  candidate for attention.
-- **Double-healer and no-sustain melee piles remain the structural floors**
-  (Paladin+Priest 11.2% 2v2; Rogue+Warlock+Warrior 7.9% 3v3).
+- **Mage is still clear #1 in teams** (64.6 / 62.4) and anchors every top comp;
+  LoS/pillar play remains the deferred structural answer to its kiting.
+- **The Shaman is the new #2** (55.7 / 54.4) and the story this cycle: a healer
+  that adds damage. It pairs best with ranged carries — **Mage+Shaman is the top
+  2v2 comp and Mage+*+Shaman the top 3v3s.** Watch it for over-tuning before
+  considering any Shaman buff; the likely lever is its Flametongue spell-power
+  magnitude (the Mage-amplifier) rather than its healing — edit `totem_spec` in
+  `class_ai/shaman.rs` (tuning the magnitude there updates the tooltip too).
+- **Paladin holds A-tier #3**; still the premier healer for melee/caster comps
+  (it beats the Shaman head-to-head healing a Warrior or Mage via HoJ + bubble),
+  just no longer the top healer overall.
+- **The Priest slips to mid-B in 2v2** (43.0) — outclassed by the Shaman as an
+  offensive healer in most pairings. A Priest-buff conversation, not a Shaman
+  nerf.
+- **Double/triple-healer and no-sustain melee piles remain the structural
+  floors** (Priest+Paladin 8.8% 2v2; Warrior+Rogue+Hunter 12.5% 3v3) — though
+  the Shaman makes *its own* double-healer comps playable.
 
-## Changes this cycle (vs the prior 2026-06-22 Kidney-chain baseline)
+## Changes this cycle (vs the 2026-06-22 7-class Crippling baseline)
 
-- **Crippling Poison (this PR).** A Rogue weapon poison (the `RoguePoison`
-  strategic lever, default Crippling): auto-attacks roll a 50% `application_
-  chance` to apply/refresh an 8s, 70% movement slow. The slow is a **poison
-  debuff** (new `DispelType::Poison`) — immune to Dispel Magic, removable only
-  by a poison cleanse; **Paladin Cleanse** was wired to lift it (rated at the
-  maintenance-cleanse tier). Refreshed in place, so it never diminishes. Rogues
-  carry a "Crippling Poison" weapon self-buff indicator.
-- **Effect: Rogue 1v1 64.9 → 77.3 (+12.4, now #1), 2v2 40.3 → 45.6 (+5.2),
-  3v3 41.5 → 44.9 (+3.4).** Unlike the control-only chain (which netted ~+1),
-  the slow moves the team aggregate meaningfully and lifts the Rogue off the
-  floor in both team formats. Single biggest cell: 1v1 Rogue-vs-Hunter 0% → 64%.
-- **Knock-on, not nerfs.** Each non-Rogue class shifts ≤2.3pt and only via its
-  Rogue matchup column (Warrior −1.8/−2.3, Mage −1.7/−1.0, Hunter −1.0/−0.2 in
-  2v2/3v3). Non-Rogue-vs-non-Rogue cells are unchanged.
-- **Draw rates flat** (1v1 5.1%, 2v2 0.9%, 3v3 0.4%): no stall pathology.
-
-### Prior cycle (Kidney Shot chain, carried forward)
-
-The Kidney Shot chain (own `KidneyShotStun` DR category; Cheap Shot → Kidney
-~10s opener lockdown; Kick→hold→Kidney denial chain) is the control layer
-beneath Crippling. It made the Rogue an A-tier 1v1 class but left it the
-team-format floor; Crippling is what lifts the team numbers.
+- **The Shaman shipped (PR #78)** — an 8th class (mana ranged caster-healer,
+  offensive slant): Lightning Bolt, Frost Shock, Lesser Healing Wave, Purge
+  (offensive dispel), Wind Shear (ranged interrupt), and four element totems
+  (Flametongue +SP, Windfury melee proc, Strength of Earth +AP, Healing Stream
+  HoT). Tuning shipped with it (totem mana 12, Flametongue SP 18, AP 15, Windfury
+  12%, purge priority floor, threat_repulsion 2.8).
+- **Effect:** debuts #2 in 2v2 (55.7) and 3v3 (54.4); Mage+Shaman becomes the #1
+  2v2 comp (82.0%). Mage edges up (61.6 → 64.6 in 2v2 as it gains the Shaman
+  partner); Paladin (56.6 → 53.0) and Priest (46.7 → 43.0) slip as the Shaman
+  takes healer-slot share. Pre-existing non-Shaman cells are otherwise stable.
+- **Draw rates** 2v2 2.4% / 3v3 1.1% — no stall pathology from the new healer.
+- See `2026-06-28-shaman-8class-balance.md` for the symmetrized healer-framed
+  read (Shaman vs Priest/Paladin as the same DPS's healer) and the 1v1 detail.
 
 ## Caveats
 
-- **Spawn-side asymmetry** up to ~18% in some matchups; the full matrix runs
-  both orderings so tier lists average it out. The Rogue's deterministic opener
-  amplifies this in Rogue-vs-Rogue mirrors. Mechanism in
-  `docs/reports/2026-06-mirror-asymmetry-diagnostic.md`; fix deferred.
+- **Spawn-side asymmetry** up to ~18% in some matchups; the full matrix runs both
+  orderings so tier lists average it out.
 - **Batch harness order-sensitivity** (deferred): a few points off the historical
   multithreaded `--matrix` numbers. Compare batch-vs-batch only.
 - **Default loadouts & strategy.** Strategy-var sweeps (poisons, openers, pets,
-  curses…) are a separate axis — see the `balance-sweep` skill. The Rogue poison
-  default is Crippling (the only poison so far; more are planned as a lever like
-  the opener).
+  totems, curses…) are a separate axis — see the `balance-sweep` skill.

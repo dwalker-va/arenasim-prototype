@@ -259,6 +259,19 @@ impl Plugin for StatesPlugin {
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_state(GameState::PlayMatch)),
             )
+            // Windfury Totem proc effect: a spinning wind funnel around the melee
+            // ally that just landed a bonus swing (graphical only — the marker is
+            // spawned in core like FCT; the mesh is built only here).
+            .add_systems(
+                Update,
+                (
+                    play_match::spawn_windfury_tornado_visuals,  // Build funnel mesh for new procs
+                    play_match::update_windfury_tornados,        // Spin fast, follow ally, fade
+                    play_match::cleanup_expired_windfury_tornados, // Despawn when expired
+                )
+                    .after(CombatSystemPhase::CombatResolution)
+                    .run_if(in_state(GameState::PlayMatch)),
+            )
             // Drain Life beam visual effects (separate group to avoid tuple size limits)
             .add_systems(
                 Update,
@@ -294,6 +307,8 @@ impl Plugin for StatesPlugin {
                     play_match::cleanup_ice_blocks,          // Despawn when aura breaks
                     play_match::spawn_slow_zone_visuals,     // Cyan disc on slow zones
                     play_match::update_slow_zone_visuals,    // Pulse + fade out
+                    play_match::spawn_totem_visuals,         // Element-colored pillar on new totems
+                    play_match::update_totem_visuals,        // Pulse + fade out
                 )
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_state(GameState::PlayMatch)),

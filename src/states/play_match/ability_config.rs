@@ -91,6 +91,11 @@ pub struct AbilityConfig {
     /// Icon asset path (e.g. "icons/abilities/spell_frost_frostbolt02.jpg")
     #[serde(default)]
     pub icon: String,
+    /// Optional hand-written effect description for the tooltip. When non-empty
+    /// it overrides the auto-generated description — used for effects that aren't
+    /// expressible from the numeric config fields (totems, Purge, etc.).
+    #[serde(default)]
+    pub description: String,
 
     // === Casting ===
     /// Cast time in seconds (0.0 = instant)
@@ -356,6 +361,16 @@ impl AbilityDefinitions {
             AbilityType::MoltenArmor,
             AbilityType::ShadowResistanceAura,
             AbilityType::ConcentrationAura,
+            // Shaman abilities
+            AbilityType::LightningBolt,
+            AbilityType::FrostShock,
+            AbilityType::LesserHealingWave,
+            AbilityType::Purge,
+            AbilityType::WindShear,
+            AbilityType::AirTotem,
+            AbilityType::WaterTotem,
+            AbilityType::EarthTotem,
+            AbilityType::FireTotem,
         ];
 
         let missing: Vec<AbilityType> = expected_abilities
@@ -433,6 +448,7 @@ mod tests {
         let config = AbilityConfig {
             name: "Test".to_string(),
             icon: String::new(),
+            description: String::new(),
             cast_time: 0.0,
             range: 40.0,
             min_range: None,
@@ -471,6 +487,7 @@ mod tests {
         let config = AbilityConfig {
             name: "Test Heal".to_string(),
             icon: String::new(),
+            description: String::new(),
             cast_time: 1.5,
             range: 40.0,
             min_range: None,

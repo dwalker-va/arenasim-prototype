@@ -216,6 +216,16 @@ fn get_class_stats(class: CharacterClass) -> ClassStats {
             move_speed: 5.0,
             armor: 0.0,
         },
+        CharacterClass::Shaman => ClassStats {
+            health: 265,
+            resource_name: "Mana",
+            resource_max: 160,
+            attack_power: 0,
+            spell_power: 42,
+            attack_speed: 0.8,
+            move_speed: 5.0,
+            armor: 0.0,
+        },
     }
 }
 
@@ -289,6 +299,17 @@ fn get_class_abilities(class: CharacterClass) -> Vec<AbilityType> {
             AbilityType::FreezingTrap,
             AbilityType::FrostTrap,
         ],
+        CharacterClass::Shaman => vec![
+            AbilityType::LightningBolt,
+            AbilityType::FrostShock,
+            AbilityType::LesserHealingWave,
+            AbilityType::Purge,
+            AbilityType::WindShear,
+            AbilityType::AirTotem,
+            AbilityType::WaterTotem,
+            AbilityType::EarthTotem,
+            AbilityType::FireTotem,
+        ],
     }
 }
 
@@ -358,6 +379,16 @@ fn get_ability_name(ability: AbilityType) -> &'static str {
         AbilityType::MoltenArmor => "Molten Armor",
         AbilityType::ShadowResistanceAura => "Shadow Resistance Aura",
         AbilityType::ConcentrationAura => "Concentration Aura",
+        // Shaman abilities
+        AbilityType::LightningBolt => "Lightning Bolt",
+        AbilityType::FrostShock => "Frost Shock",
+        AbilityType::LesserHealingWave => "Lesser Healing Wave",
+        AbilityType::Purge => "Purge",
+        AbilityType::WindShear => "Wind Shear",
+        AbilityType::AirTotem => "Windfury Totem",
+        AbilityType::WaterTotem => "Healing Stream Totem",
+        AbilityType::EarthTotem => "Strength of Earth Totem",
+        AbilityType::FireTotem => "Flametongue Totem",
     }
 }
 
@@ -1160,7 +1191,7 @@ fn render_abilities_panel(
                         ui.layer_id(),
                         ui.id().with(ability_name),
                         |ui| {
-                            render_ability_tooltip(ui, ability_name, config, stats);
+                            render_ability_tooltip(ui, *ability, ability_name, config, stats);
                         },
                     );
                 }
@@ -1186,7 +1217,7 @@ fn get_spell_school_color(school: SpellSchool) -> egui::Color32 {
 }
 
 /// Render a WoW-style ability tooltip
-fn render_ability_tooltip(ui: &mut egui::Ui, name: &str, config: &AbilityConfig, stats: &ClassStats) {
+fn render_ability_tooltip(ui: &mut egui::Ui, ability: AbilityType, name: &str, config: &AbilityConfig, stats: &ClassStats) {
     ui.set_min_width(250.0);
     ui.set_max_width(300.0);
 
@@ -1265,7 +1296,7 @@ fn render_ability_tooltip(ui: &mut egui::Ui, name: &str, config: &AbilityConfig,
     ui.add_space(4.0);
 
     // Description - build dynamically based on ability effects and stats
-    let description = build_ability_description(config, stats);
+    let description = build_ability_description(ability, config, stats);
     ui.label(
         egui::RichText::new(description)
             .size(12.0)
@@ -1285,7 +1316,46 @@ fn render_ability_tooltip(ui: &mut egui::Ui, name: &str, config: &AbilityConfig,
 }
 
 /// Build a description string for an ability based on its config and combatant stats
-fn build_ability_description(config: &AbilityConfig, stats: &ClassStats) -> String {
+/// Totem tooltip text generated from the gameplay buff spec (magnitude +
+/// `TOTEM_DURATION`), so the displayed numbers always match the simulation.
+/// `None` for non-totem abilities.
+fn totem_description(ability: AbilityType) -> Option<String> {
+    use crate::states::play_match::class_ai::shaman::totem_buff_spec;
+    use crate::states::play_match::constants::TOTEM_DURATION;
+    let (aura, mag) = totem_buff_spec(ability)?;
+    let effect = match aura {
+        AuraType::SpellPowerIncrease => {
+            format!("increases the spell power of nearby allies by {:.0}", mag)
+        }
+        AuraType::AttackPowerIncrease => {
+            format!("increases the attack power of nearby allies by {:.0}", mag)
+        }
+        AuraType::HealingOverTime => {
+            format!("heals nearby allies for {:.0} health every second", mag)
+        }
+        AuraType::WindfuryBuff => format!(
+            "gives nearby melee allies a {:.0}% chance for an extra attack",
+            mag * 100.0
+        ),
+        _ => return None,
+    };
+    Some(format!("Summons a totem that {}. Lasts {:.0} sec.", effect, TOTEM_DURATION))
+}
+
+fn build_ability_description(ability: AbilityType, config: &AbilityConfig, stats: &ClassStats) -> String {
+    // Totems: generate the description straight from the gameplay buff spec so
+    // the tooltip can never drift from the actual magnitude (single source of
+    // truth: `class_ai::shaman::totem_spec`). Wins over everything else.
+    if let Some(desc) = totem_description(ability) {
+        return desc;
+    }
+
+    // Otherwise a hand-written description (abilities.ron) wins over the
+    // auto-generated text — for effects the numeric config can't express (Purge).
+    if !config.description.is_empty() {
+        return config.description.clone();
+    }
+
     let mut parts = Vec::new();
 
     // Calculate stat contribution for damage
@@ -1458,6 +1528,15 @@ fn build_aura_description(aura: &super::play_match::ability_config::AuraEffect) 
         }
         AuraType::WeaponPoison => {
             "Weapon coated with poison. Attacks may apply a poison debuff.".to_string()
+        }
+        AuraType::SpellPowerIncrease => {
+            format!("Increases spell power by {:.0} for {:.0} sec.", aura.magnitude, aura.duration)
+        }
+        AuraType::HealingOverTime => {
+            format!("Heals {:.0} every {:.0} sec for {:.0} sec.", aura.magnitude, aura.tick_interval, aura.duration)
+        }
+        AuraType::WindfuryBuff => {
+            format!("Empowers melee auto-attacks for {:.0} sec.", aura.duration)
         }
     }
 }
@@ -2419,4 +2498,40 @@ fn render_warlock_curse_panel(
             match_config.set_curse_pref(view_state.team, view_state.slot, enemy_slot, curse);
         }
     });
+}
+
+#[cfg(test)]
+mod totem_tooltip_tests {
+    use super::*;
+    use crate::states::play_match::class_ai::shaman::totem_buff_spec;
+
+    /// The totem tooltip must embed the EXACT gameplay magnitude (sourced from
+    /// `totem_spec` via `totem_buff_spec`), so a balance retune of a totem can
+    /// never leave the View Combatant tooltip stale.
+    #[test]
+    fn totem_tooltip_reflects_gameplay_magnitude() {
+        for ability in [
+            AbilityType::FireTotem,
+            AbilityType::EarthTotem,
+            AbilityType::WaterTotem,
+            AbilityType::AirTotem,
+        ] {
+            let desc = totem_description(ability).expect("totem has a generated description");
+            let (aura, mag) = totem_buff_spec(ability).unwrap();
+            // Windfury is a proc chance shown as a percent; the rest are flat.
+            let shown = match aura {
+                AuraType::WindfuryBuff => format!("{:.0}", mag * 100.0),
+                _ => format!("{:.0}", mag),
+            };
+            assert!(
+                desc.contains(&shown),
+                "{:?} tooltip {:?} must contain the gameplay magnitude {}",
+                ability,
+                desc,
+                shown
+            );
+        }
+        // Non-totem abilities get no totem description.
+        assert!(totem_description(AbilityType::LightningBolt).is_none());
+    }
 }

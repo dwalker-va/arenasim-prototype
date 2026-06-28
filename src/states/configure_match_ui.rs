@@ -64,6 +64,7 @@ pub fn load_class_icons(
         (match_config::CharacterClass::Warlock, "icons/classes/warlock.png"),
         (match_config::CharacterClass::Paladin, "icons/classes/paladin.png"),
         (match_config::CharacterClass::Hunter, "icons/classes/hunter.png"),
+        (match_config::CharacterClass::Shaman, "icons/classes/shaman.png"),
     ];
 
     // Load handles if not already loaded

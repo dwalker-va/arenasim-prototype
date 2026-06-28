@@ -32,6 +32,7 @@ pub use super::match_flow::update_countdown;
 pub use super::combat_core::regenerate_resources;
 pub use super::shadow_sight::track_shadow_sight_timer;
 pub use super::auras::process_dot_ticks;
+pub use super::auras::process_hot_ticks;
 pub use super::auras::update_auras;
 pub use super::auras::apply_pending_auras;
 // Effect processing (instant ability effects)
@@ -61,6 +62,9 @@ pub use super::combat_core::despawn_pets_of_dead_owners;
 
 // === Phase 1 (additional): Slow Zone ===
 pub use super::traps::slow_zone_system;
+
+// === Phase 1 (additional): Totem pulse ===
+pub use super::totems::totem_pulse_system;
 
 // === Phase 3: Combat Resolution ===
 pub use super::combat_core::combat_auto_attack;
@@ -139,8 +143,10 @@ where
             regenerate_resources,
             track_shadow_sight_timer,
             process_dot_ticks,
+            process_hot_ticks,     // HoT healing — like process_dot_ticks, must run BEFORE update_auras
             update_auras,
             slow_zone_system,       // Zone slow refresh before aura processing
+            totem_pulse_system,     // Totem dedup + buff pulse on allies (after slow_zone_system)
             process_divine_shield,  // Must run BEFORE apply_pending_auras so DamageImmunity blocks CC
             apply_pending_auras,
             process_dispels,

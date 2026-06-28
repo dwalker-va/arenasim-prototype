@@ -199,8 +199,9 @@ pub fn process_casting(
 
             // Pre-calculate damage/healing (using caster's stats + dynamic aura bonuses)
             let ap_bonus = super::get_attack_power_bonus(caster_auras.as_deref());
+            let sp_bonus = super::get_spell_power_bonus(caster_auras.as_deref());
             let crit_bonus = super::get_crit_chance_bonus(caster_auras.as_deref());
-            let mut ability_damage = caster.calculate_ability_damage_config(def, &mut game_rng, ap_bonus);
+            let mut ability_damage = caster.calculate_ability_damage_config(def, &mut game_rng, ap_bonus, sp_bonus);
 
             // Roll crit for damage (before physical damage reduction)
             let is_crit_damage = if def.is_damage() {
@@ -221,7 +222,7 @@ pub fn process_casting(
             let ds_penalty = get_divine_shield_damage_penalty(caster_auras.as_deref());
             ability_damage = (ability_damage * ds_penalty).max(0.0);
 
-            let mut ability_healing = caster.calculate_ability_healing_config(def, &mut game_rng);
+            let mut ability_healing = caster.calculate_ability_healing_config(def, &mut game_rng, sp_bonus);
 
             // Roll crit for healing (before healing reduction)
             let is_crit_heal = if def.is_heal() {

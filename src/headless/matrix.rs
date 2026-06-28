@@ -1,4 +1,5 @@
-//! 7×7 class matchup matrix runner.
+//! Full class-vs-class matchup matrix runner (every `CharacterClass::all()`
+//! pairing — 8×8 today, scales automatically as classes are added).
 //!
 //! Runs every (team1_class, team2_class) pair N times via the existing
 //! `run_headless_match_with` entry point, accumulates per-cell win/loss/draw
@@ -55,7 +56,8 @@ impl CellStats {
     }
 }
 
-/// Run the 7×7 matchup matrix and write CSV + Markdown reports.
+/// Run the full class matchup matrix (all `CharacterClass::all()` pairings)
+/// and write CSV + Markdown reports.
 ///
 /// `trace_mode` defaults to `On` for matrix runs (see CLI resolution in main.rs);
 /// when enabled, each match writes its own JSONL trace to a
@@ -350,5 +352,6 @@ fn short(c: CharacterClass) -> &'static str {
         CharacterClass::Warlock => "Wlk",
         CharacterClass::Paladin => "Pal",
         CharacterClass::Hunter => "Hun",
+        CharacterClass::Shaman => "Sha",
     }
 }

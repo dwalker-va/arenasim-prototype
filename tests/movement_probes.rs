@@ -3415,3 +3415,269 @@ mod rogue_chain {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// U9 — Shaman totem probes
+// ---------------------------------------------------------------------------
+//
+// These probes exercise the totem subsystem end-to-end through the observed
+// headless run, using the U9 observer extensions (per-frame combatant
+// health/auras + a parallel totem list). They pin fixed seeds and guard every
+// windowed assertion with `assert_min_occurrences` so a seed shift can't make
+// them pass vacuously.
+//
+// Seed notes (seed 7, BasicArena):
+// - shaman_fixture (focus the Shaman, slot 0): the enemy Warrior trains the
+//   Shaman, so the Shaman is injured and its Healing Stream HoT ticks for >0.
+//   The Shaman drops all four totems during the 10s countdown (stationary), so
+//   both it and its slot-1 Warrior ally start inside every totem's radius.
+//   Post-gate the Warrior charges the enemy and leaves the ~20yd totem field —
+//   the natural "outside radius" subject for the negative control.
+// - placement_fixture (focus the Warrior, slot 1): enemies chase the Warrior
+//   into midfield, leaving the backline Shaman unthreatened, so its totems drop
+//   near its feet and far from any enemy (the "not in melee" assertion).
+mod shaman_totems {
+    use super::*;
+    use arenasim::headless::runner::ObservedTotem;
+    use arenasim::states::play_match::constants::{TOTEM_DURATION, TOTEM_SPACING_OFFSET};
+    use arenasim::states::play_match::{AuraType, TotemElement};
+
+    /// Shaman + Warrior vs Warrior + Priest, enemies forced onto the Shaman
+    /// (slot 0). Pins seed 7.
+    fn shaman_fixture() -> HeadlessMatchConfig {
+        let mut cfg = create_config(
+            vec!["Shaman", "Warrior"],
+            vec!["Warrior", "Priest"],
+            Some(7),
+        );
+        cfg.team2_kill_target = Some(0);
+        cfg
+    }
+
+    /// Shaman + Warrior vs Warrior + Priest, enemies forced onto the WARRIOR
+    /// (slot 1) so the backline Shaman stays unthreatened. Pins seed 7.
+    fn placement_fixture() -> HeadlessMatchConfig {
+        let mut cfg = create_config(
+            vec!["Shaman", "Warrior"],
+            vec!["Warrior", "Priest"],
+            Some(7),
+        );
+        cfg.team2_kill_target = Some(1);
+        cfg
+    }
+
+    /// Run an observed match, collecting every frame observation (combatant
+    /// health/auras + totems).
+    fn run_collecting_frames(config: HeadlessMatchConfig) -> (MatchResult, Vec<FrameObservation>) {
+        let mut frames = Vec::new();
+        let result = run_headless_match_observed(config, true, None, |frame| {
+            frames.push(frame.clone());
+        })
+        .expect("observed shaman match failed");
+        (result, frames)
+    }
+
+    /// First entity matching (team, class, non-pet) across the run.
+    fn find_combatant(frames: &[FrameObservation], team: u8, class: CharacterClass) -> Entity {
+        for f in frames {
+            for (e, c) in &f.combatants {
+                if c.team == team && c.class == class && !c.is_pet {
+                    return *e;
+                }
+            }
+        }
+        panic!("no team-{} {:?} found in any frame", team, class);
+    }
+
+    /// The team's live Healing Stream (Water) totem on this frame, if any.
+    fn water_totem(frame: &FrameObservation, team: u8) -> Option<&ObservedTotem> {
+        frame
+            .totems
+            .iter()
+            .find(|t| t.owner_team == team && t.element == TotemElement::Water)
+    }
+
+    /// Horizontal (x/z) distance — totems sit at y=0 and combatants at y~1, so
+    /// the spacing-offset assertion compares on the plane the offset is in.
+    fn horiz(a: Vec3, b: Vec3) -> f32 {
+        let (dx, dz) = (a.x - b.x, a.z - b.z);
+        (dx * dx + dz * dz).sqrt()
+    }
+
+    /// (1) An ally within the Healing Stream totem's radius carries the
+    /// HealingOverTime buff. Asserted over the window where the geometry holds
+    /// — every frame the team-1 Water totem exists AND the subject is within
+    /// its radius (the same 3D distance test `totem_pulse_system` uses). Both
+    /// the focused Shaman (always ~1.5yd from its own totem, injured so its
+    /// ticks heal >0) and its Warrior ally (in-radius during the countdown)
+    /// are checked.
+    #[test]
+    fn healing_stream_buffs_ally_in_radius() {
+        let (_result, frames) = run_collecting_frames(shaman_fixture());
+        let shaman = find_combatant(&frames, 1, CharacterClass::Shaman);
+        let warrior = find_combatant(&frames, 1, CharacterClass::Warrior);
+
+        for (label, subject) in [("Shaman", shaman), ("Warrior", warrior)] {
+            let mut in_radius = 0usize;
+            let mut buffed = 0usize;
+            for f in &frames {
+                let Some(totem) = water_totem(f, 1) else {
+                    continue;
+                };
+                let Some(c) = f.combatants.get(&subject) else {
+                    continue;
+                };
+                if !c.alive {
+                    continue;
+                }
+                if totem.position.distance(c.position) > totem.radius {
+                    continue;
+                }
+                in_radius += 1;
+                if c.aura_types.contains(&AuraType::HealingOverTime) {
+                    buffed += 1;
+                }
+            }
+            assert_min_occurrences(
+                &format!("{} frames in Healing Stream radius", label),
+                in_radius,
+                30,
+            );
+            let frac = buffed as f32 / in_radius as f32;
+            eprintln!(
+                "healing-stream probe: {} carried HoT in {}/{} in-radius frames ({:.0}%)",
+                label,
+                buffed,
+                in_radius,
+                frac * 100.0
+            );
+            // A handful of unbuffed frames are expected the instant a totem is
+            // (re)dropped — it spawns in Phase 2, after the Phase-1 pulse, so
+            // that one frame the totem exists but has not pulsed yet.
+            assert!(
+                frac >= 0.9,
+                "{} carried the Healing Stream HoT in only {:.0}% of in-radius \
+                 frames (floor 90%) — the totem buff is not landing",
+                label,
+                frac * 100.0
+            );
+        }
+    }
+
+    /// (2) NEGATIVE CONTROL — an ally kept outside the totem radius does not
+    /// carry the totem buff. The Warrior charges the enemy and leaves the
+    /// field; the buff lingers up to the 2s refresh window after leaving, so
+    /// the assertion only fires on frames where the Warrior has been
+    /// continuously outside the Water totem's radius for > 2.0s.
+    #[test]
+    fn ally_outside_radius_gets_no_totem_buff() {
+        let (_result, frames) = run_collecting_frames(shaman_fixture());
+        let warrior = find_combatant(&frames, 1, CharacterClass::Warrior);
+
+        let mut last_in_radius_time: Option<f32> = None;
+        let mut tested = 0usize;
+        for f in &frames {
+            let Some(c) = f.combatants.get(&warrior) else {
+                continue;
+            };
+            if !c.alive {
+                continue;
+            }
+            let totem = water_totem(f, 1);
+            let dist = totem.map(|t| t.position.distance(c.position));
+            let in_radius = matches!((totem, dist), (Some(t), Some(d)) if d <= t.radius);
+            if in_radius {
+                last_in_radius_time = Some(f.sim_time);
+                continue;
+            }
+            // Outside radius (or no totem). Only assert once the residual
+            // refresh window since the last in-radius frame has DURABLY
+            // expired. The buff is refreshed to a 2.0s window each in-radius
+            // pulse, so a subject that just stepped out keeps it for ~2s; a
+            // 3.0s margin clears that boundary (the buff is genuinely gone,
+            // not merely lingering — this probe surfaced the lag, which is the
+            // documented behavior, not a bug).
+            let residual_expired = match last_in_radius_time {
+                Some(t) => f.sim_time - t > 3.0,
+                None => true,
+            };
+            if !residual_expired {
+                continue;
+            }
+            tested += 1;
+            assert!(
+                !c.aura_types.contains(&AuraType::HealingOverTime),
+                "Warrior carried the Healing Stream HoT at t={:.1}s while {:.1}yd \
+                 outside the totem radius (residual window already expired)",
+                f.sim_time,
+                dist.unwrap_or(f32::INFINITY),
+            );
+        }
+        assert_min_occurrences("Warrior outside-radius (residual-expired) frames", tested, 30);
+    }
+
+    /// (3) Totems spawn near the Shaman (within the spacing offset), not at the
+    /// enemy. A "fresh drop" frame is one where a team-1 totem reads its full
+    /// `TOTEM_DURATION` (it spawns in Phase 2, after the Phase-1 pulse that
+    /// would tick it, so its first observed frame is un-ticked). At that frame
+    /// the Shaman is at the drop position: horizontal distance to it must be
+    /// within the spacing offset, and the totem must be strictly closer to its
+    /// own caster than to any enemy (i.e. dropped at the Shaman, not on the
+    /// target).
+    #[test]
+    fn totem_placement_is_near_caster_not_in_melee() {
+        let (_result, frames) = run_collecting_frames(placement_fixture());
+        let shaman = find_combatant(&frames, 1, CharacterClass::Shaman);
+
+        let mut placements = 0usize;
+        for f in &frames {
+            let Some(sh) = f.combatants.get(&shaman) else {
+                continue;
+            };
+
+            for t in f.totems.iter().filter(|t| t.owner_team == 1) {
+                if t.duration_remaining < TOTEM_DURATION - 1e-3 {
+                    continue; // already ticked — not a fresh drop
+                }
+                placements += 1;
+                let d_caster = horiz(t.position, sh.position);
+                // Nearest enemy to the TOTEM (not to the Shaman).
+                let enemy_to_totem = f
+                    .combatants
+                    .values()
+                    .filter(|c| c.team == 2 && !c.is_pet && c.alive)
+                    .map(|c| horiz(c.position, t.position))
+                    .fold(f32::INFINITY, f32::min);
+                eprintln!(
+                    "placement probe: {:?} totem dropped {:.2}yd from Shaman, \
+                     nearest enemy {:.1}yd from the totem (t={:.1}s)",
+                    t.element, d_caster, enemy_to_totem, f.sim_time
+                );
+                // Primary invariant: dropped at the caster's feet.
+                assert!(
+                    d_caster <= TOTEM_SPACING_OFFSET + 0.5,
+                    "{:?} totem dropped {:.2}yd from the Shaman (spacing offset {:.1} + \
+                     0.5 tolerance) — not at the caster's feet",
+                    t.element,
+                    d_caster,
+                    TOTEM_SPACING_OFFSET
+                );
+                // "Not at the enemy": the totem is strictly nearer its caster
+                // than any enemy. Robust even when an enemy closes on the
+                // Shaman — the totem still sits at the caster, never on the
+                // target.
+                assert!(
+                    d_caster < enemy_to_totem,
+                    "{:?} totem ({:.2}yd from caster) is no closer to the Shaman \
+                     than to an enemy ({:.1}yd) — totems must spawn at the caster, \
+                     not the target",
+                    t.element,
+                    d_caster,
+                    enemy_to_totem
+                );
+            }
+        }
+        // At least one drop per element across the match.
+        assert_min_occurrences("fresh totem placements", placements, 4);
+    }
+}

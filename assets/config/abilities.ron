@@ -1044,5 +1044,140 @@
             )),
             spell_school: Holy,
         ),
+
+        // ============================================================================
+        // SHAMAN ABILITIES
+        // ============================================================================
+        // NOTE: UNIT 1 declares these so the class loads and validates. Combat
+        // behavior (totem placement, Purge, Wind Shear, the heal/nuke ladder)
+        // arrives in later units; the Shaman AI is currently a no-op stub.
+
+        // Lightning Bolt: ranged Nature nuke, the Shaman's main sustained pressure.
+        LightningBolt: (
+            name: "Lightning Bolt",
+            icon: "icons/abilities/spell_nature_lightning.jpg",
+            cast_time: 2.0,
+            range: 30.0,
+            mana_cost: 30.0,
+            cooldown: 0.0,
+            damage_base_min: 18.0,
+            damage_base_max: 24.0,
+            damage_coefficient: 0.6,
+            damage_scales_with: SpellPower,
+            projectile_speed: Some(40.0),
+            projectile_visuals: Some((
+                color: (0.4, 0.7, 1.0),
+                emissive: (0.7, 0.9, 1.6),
+            )),
+            spell_school: Nature,
+        ),
+
+        // Frost Shock: instant Frost nuke + single-target slow (soft peel).
+        // Slow is non-breaking, matching Frostbolt's slow semantics.
+        FrostShock: (
+            name: "Frost Shock",
+            icon: "icons/abilities/spell_frost_frostshock.jpg",
+            cast_time: 0.0,
+            range: 25.0,
+            mana_cost: 25.0,
+            cooldown: 6.0,
+            damage_base_min: 15.0,
+            damage_base_max: 20.0,
+            damage_coefficient: 0.4,
+            damage_scales_with: SpellPower,
+            applies_aura: Some((
+                aura_type: MovementSpeedSlow,
+                duration: 8.0,
+                magnitude: 0.5,
+                // Uses default -1.0 (doesn't break on damage), like Frostbolt's slow
+            )),
+            spell_school: Frost,
+        ),
+
+        // Lesser Healing Wave: fast direct heal. The Shaman's only heal.
+        LesserHealingWave: (
+            name: "Lesser Healing Wave",
+            icon: "icons/abilities/spell_nature_healingwavelesser.jpg",
+            cast_time: 1.5,
+            range: 40.0,
+            mana_cost: 25.0,
+            cooldown: 0.0,
+            healing_base_min: 15.0,
+            healing_base_max: 20.0,
+            healing_coefficient: 0.75,
+            spell_school: Nature,
+        ),
+
+        // Purge: offensive dispel — removes one beneficial aura from an enemy.
+        // Enemy-buff-removal mechanic arrives in U4; this entry just declares it.
+        Purge: (
+            name: "Purge",
+            description: "Removes one beneficial magic effect from an enemy.",
+            icon: "icons/abilities/spell_nature_purge.jpg",
+            cast_time: 0.0,
+            range: 30.0,
+            mana_cost: 18.0,
+            cooldown: 0.0,
+            spell_school: Nature,
+            is_dispel: true,
+        ),
+
+        // Wind Shear: ranged instant interrupt + short school lockout.
+        // Reuses the Pummel/Kick interrupt fields.
+        WindShear: (
+            name: "Wind Shear",
+            icon: "icons/abilities/spell_nature_cyclone.jpg",
+            cast_time: 0.0,
+            range: 30.0,
+            mana_cost: 12.0,
+            cooldown: 9.0,
+            spell_school: Nature,
+            is_interrupt: true,
+            lockout_duration: 3.0,
+        ),
+
+        // Air — Windfury Totem: empowers melee allies' auto-attacks (U3 behavior).
+        AirTotem: (
+            name: "Windfury Totem",
+            icon: "icons/abilities/spell_nature_windfury.jpg",
+            cast_time: 0.0,
+            range: 0.0,
+            mana_cost: 12.0,
+            cooldown: 6.0,
+            spell_school: Nature,
+        ),
+
+        // Water — Healing Stream Totem: periodic ally heal in radius (U3 behavior).
+        WaterTotem: (
+            name: "Healing Stream Totem",
+            icon: "icons/abilities/inv_spear_04.jpg",
+            cast_time: 0.0,
+            range: 0.0,
+            mana_cost: 12.0,
+            cooldown: 6.0,
+            spell_school: Nature,
+        ),
+
+        // Earth — Strength of Earth Totem: ally attack power in radius (U3 behavior).
+        EarthTotem: (
+            name: "Strength of Earth Totem",
+            icon: "icons/abilities/spell_nature_strengthofearthtotem02.jpg",
+            cast_time: 0.0,
+            range: 0.0,
+            mana_cost: 12.0,
+            cooldown: 6.0,
+            spell_school: Nature,
+        ),
+
+        // Fire — Flametongue Totem: ally spell power in radius (U3 behavior).
+        FireTotem: (
+            name: "Flametongue Totem",
+            icon: "icons/abilities/spell_fire_flametounge.jpg",
+            cast_time: 0.0,
+            range: 0.0,
+            mana_cost: 12.0,
+            cooldown: 6.0,
+            spell_school: Fire,
+        ),
     }
 )

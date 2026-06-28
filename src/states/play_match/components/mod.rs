@@ -6,6 +6,7 @@ pub mod combatant;
 pub mod auras;
 pub mod resources;
 pub mod pets;
+pub mod totems;
 pub mod visual;
 pub mod movement;
 
@@ -13,6 +14,7 @@ pub use combatant::*;
 pub use auras::*;
 pub use resources::*;
 pub use pets::*;
+pub use totems::*;
 pub use visual::*;
 pub use movement::*;
 

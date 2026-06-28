@@ -160,6 +160,16 @@ pub enum ItemId {
     BeaststalkerBracers,
     BeaststalkerMantle,
 
+    // === Caster Mail Armor (Shaman) — spell power + mana on mail ===
+    EarthfuryHelmet,
+    EarthfuryVestments,
+    EarthfuryLegguards,
+    EarthfuryGauntlets,
+    EarthfuryBoots,
+    EarthfuryBelt,
+    EarthfuryBracers,
+    EarthfuryEpaulets,
+
     // === Leather Armor (Rogue, Hunter) ===
     NightstalkerCowl,
     NightstalkerTunic,
@@ -411,7 +421,7 @@ fn default_weapon_type() -> WeaponType {
 fn max_armor_type(class: CharacterClass) -> &'static [ArmorType] {
     match class {
         CharacterClass::Warrior | CharacterClass::Paladin => &[ArmorType::Cloth, ArmorType::Leather, ArmorType::Mail, ArmorType::Plate, ArmorType::None],
-        CharacterClass::Hunter => &[ArmorType::Cloth, ArmorType::Leather, ArmorType::Mail, ArmorType::None],
+        CharacterClass::Hunter | CharacterClass::Shaman => &[ArmorType::Cloth, ArmorType::Leather, ArmorType::Mail, ArmorType::None],
         CharacterClass::Rogue => &[ArmorType::Cloth, ArmorType::Leather, ArmorType::None],
         CharacterClass::Mage | CharacterClass::Priest | CharacterClass::Warlock => &[ArmorType::Cloth, ArmorType::None],
     }

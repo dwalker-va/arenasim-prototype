@@ -22,6 +22,7 @@ pub mod rogue;
 pub mod warlock;
 pub mod paladin;
 pub mod hunter;
+pub mod shaman;
 pub mod hunter_dip;
 pub mod pet_ai;
 pub mod cast_guard;
@@ -565,6 +566,41 @@ pub fn dispel_priority(aura_type: AuraType) -> i32 {
     }
 }
 
+/// Calculate purge priority for a BENEFICIAL aura on an enemy.
+/// Higher values = more valuable to strip with Purge.
+///
+/// Defensive buffs (shields/absorbs and incoming-damage reductions) outrank
+/// offensive buffs (attack/spell power, crit), which outrank minor utility
+/// buffs (mana regen, lockout reduction, resistances). Mirrors
+/// [`dispel_priority`] but for the offensive (enemy-buff-strip) direction.
+/// Only auras for which [`Aura::can_be_purged`] is true should be passed here.
+/// Minimum [`purge_priority`] worth spending a GCD on: only high-value
+/// defensives (Absorb / DamageTakenReduction / HoT-class sustain) clear this
+/// bar, so Purge never wastes a cast stripping cheap re-buffs like Fortitude.
+pub const PURGE_MIN_PRIORITY: i32 = 70;
+
+pub fn purge_priority(aura_type: AuraType) -> i32 {
+    match aura_type {
+        // Defensives — most valuable to remove (denies mitigation / sustain).
+        AuraType::Absorb => 100,              // PW:Shield / damage absorb
+        AuraType::DamageTakenReduction => 90, // flat incoming-damage cut
+        AuraType::MaxHealthIncrease => 15,    // cheap re-buff (PW:Fortitude) — not worth a GCD to strip
+        AuraType::HealingOverTime => 70,      // ongoing sustain (Healing Stream)
+        // Offensive throughput buffs.
+        AuraType::AttackPowerIncrease => 60,
+        AuraType::SpellPowerIncrease => 60,
+        AuraType::WindfuryBuff => 55,
+        AuraType::CritChanceIncrease => 50,
+        // Minor utility buffs.
+        AuraType::MaxManaIncrease => 30,
+        AuraType::ManaRegenIncrease => 25,
+        AuraType::SpellResistanceBuff => 20,
+        AuraType::FrostArmorBuff => 20,
+        AuraType::LockoutDurationReduction => 15,
+        _ => 0,
+    }
+}
+
 /// Shared dispel logic used by Priest (Dispel Magic) and Paladin (Cleanse).
 ///
 /// Finds the ally with the highest priority dispellable debuff and casts
@@ -719,6 +755,149 @@ pub fn try_dispel_ally(
         combatant.class.name(),
         log_name
     );
+
+    true
+}
+
+/// Offensive dispel: the Shaman's Purge. Structural mirror of
+/// [`try_dispel_ally`], but scans ENEMIES (team != self) for a beneficial,
+/// [`Aura::can_be_purged`] aura and strips the single highest-[`purge_priority`]
+/// one.
+///
+/// Target selection: among enemies in Purge range carrying a purgeable buff,
+/// pick the one whose best buff has the highest priority. Ties prefer the enemy
+/// HEALER (deny its defensives first), then the lowest entity id (BTreeMap
+/// iteration order — deterministic for seeded replay).
+///
+/// Gated by [`pre_cast_ok`] with `check_friendly_cc: false` (offensive — no
+/// friendly-CC concern) and `check_target_immune: true` (respect Divine Shield;
+/// range/mana/lockout/silence handled by the guard). Predicate failures emit
+/// typed reject events; success emits choose and spawns a `DispelPending` whose
+/// `aura_type_filter` is pinned to the single chosen (purgeable) buff type, so
+/// `process_dispels` strips that beneficial aura from the enemy — a random pick
+/// only if the enemy holds several auras of that same type (intentional).
+#[allow(clippy::too_many_arguments)]
+pub fn try_purge_enemy(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
+    trace: &mut crate::states::play_match::decision_trace::DecisionEventBuilder<'_>,
+) -> bool {
+    use self::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
+    use crate::states::play_match::decision_trace::RejectionReason;
+
+    let ability = AbilityType::Purge;
+    let def = abilities.get_unchecked(&ability);
+
+    let enemy_healer = ctx.enemy_healer();
+
+    // Best enemy to purge: (entity, position, chosen aura, priority, is_healer).
+    let mut best: Option<(Entity, Vec3, AuraType, i32, bool)> = None;
+
+    for (e, info) in ctx.combatants.iter() {
+        // Must be an alive enemy, skip pets.
+        if info.team == combatant.team || !info.is_alive || info.is_pet {
+            continue;
+        }
+
+        // Range gate (final mana/range is re-checked by pre_cast_ok on the winner).
+        if my_pos.distance(info.position) > def.range {
+            continue;
+        }
+
+        let Some(enemy_auras) = ctx.active_auras.get(e) else {
+            continue;
+        };
+
+        // Highest-priority purgeable buff on this enemy. First aura at the max
+        // priority wins (stable by aura-vec order — deterministic).
+        let mut best_aura: Option<(AuraType, i32)> = None;
+        for aura in enemy_auras {
+            if !aura.can_be_purged() {
+                continue;
+            }
+            let priority = purge_priority(aura.effect_type);
+            match best_aura {
+                None => best_aura = Some((aura.effect_type, priority)),
+                Some((_, bp)) if priority > bp => best_aura = Some((aura.effect_type, priority)),
+                _ => {}
+            }
+        }
+
+        let Some((aura_type, priority)) = best_aura else {
+            continue;
+        };
+
+        // Value floor: only spend a GCD purging high-value defensives
+        // (Absorb / DamageTakenReduction / HoT-class sustain, priority >= 70).
+        // Cheap re-buffs (Fortitude, attack/spell power) aren't worth the cast.
+        if priority < PURGE_MIN_PRIORITY {
+            continue;
+        }
+
+        let is_healer = enemy_healer == Some(*e);
+        let better = match best {
+            None => true,
+            Some((_, _, _, best_prio, best_heal)) => {
+                priority > best_prio || (priority == best_prio && is_healer && !best_heal)
+            }
+        };
+        if better {
+            best = Some((*e, info.position, aura_type, priority, is_healer));
+        }
+    }
+
+    let Some((target_entity, target_pos, chosen_aura, _, _)) = best else {
+        trace.reject(ability, RejectionReason::NoValidTarget);
+        return false;
+    };
+
+    // Universal pre-cast guard (lockout / silence / cooldown / mana / range /
+    // target immunity). Offensive cast — no friendly-CC guard.
+    let opts = PreCastOpts {
+        check_friendly_cc: false,
+        check_friendly_dots: false,
+        check_target_immune: true,
+        bypass_silence: false,
+    };
+    if !pre_cast_ok(ability, def, combatant, my_pos, auras, Some((target_entity, target_pos)), ctx, opts) {
+        trace.reject(
+            ability,
+            classify_pre_cast_failure(ability, def, combatant, my_pos, auras, Some((target_entity, target_pos)), ctx, opts),
+        );
+        return false;
+    }
+
+    trace.choose(ability, Some(target_entity), true);
+
+    // Execute.
+    combatant.current_mana -= def.mana_cost;
+    combatant.global_cooldown = GCD;
+    if def.cooldown > 0.0 {
+        combatant.ability_cooldowns.insert(ability, def.cooldown);
+    }
+
+    let target_tuple = ctx.combatants.get(&target_entity).map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, target_tuple, "casts");
+
+    // Pin the filter to the chosen (highest-priority) buff type so process_dispels
+    // targets that valuable buff rather than any purgeable aura. If the enemy
+    // holds several auras of that type the strip is a random pick among them
+    // (intentional — see process_dispels).
+    commands.spawn(DispelPending {
+        target: target_entity,
+        dispeller: entity,
+        log_prefix: "[PURGE]",
+        caster_class: combatant.class,
+        heal_on_success: None,
+        aura_type_filter: Some(vec![chosen_aura]),
+        removes_poison: false,
+    });
 
     true
 }
