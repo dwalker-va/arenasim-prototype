@@ -135,12 +135,31 @@ outliers, not weakness:
   That is a *Priest buff* conversation, not a Shaman nerf.
 - **Mage+Shaman** weakness is acceptable comp identity; leave it.
 
+## Full 2v2/3v3 matrices (added 2026-06-28)
+
+The complete 8-class canonical matrices were regenerated (2v2: 784 matchups ×
+N=100 = 78,400 matches; 3v3: 3,136 × N=50 = 156,800). They sharpen the verdict:
+**the Shaman debuts as the #2 team-format class — 2v2 55.7%, 3v3 54.4% — behind
+only the Mage (64.6 / 62.4), and Mage+Shaman is the new #1 2v2 comp (82.0%).**
+Adding the Shaman pushes the Mage up (it gains a strong partner), and drops the
+Paladin (53.0) and Priest (43.0) a step as the Shaman absorbs healer-slot share.
+
+This is a touch stronger than the focused healer-framed sweep alone implied: the
+Shaman doesn't just match the existing healers, it raises the ceiling of ranged
+carries. The reconciliation with the head-to-head numbers above: Mage+Shaman
+beats the *field* harder (82% vs everyone) yet still loses the specific
+Mage+Shaman-vs-Mage+Priest mirror (38%) — both true.
+
+Refined verdict: **balanced-to-strong; a mild nerf-watch at the top, not a
+buff.** The cleanest lever if it proves over-tuned is the **Flametongue
+spell-power magnitude** (the Mage-amplifier, currently 18) rather than its
+healing or the other totems. Full tier lists live in
+`canonical_baselines_summary.md`.
+
 ## Follow-ups
 
-- The canonical **2v2/3v3 full matrices** (`canonical_2v2_full_n100_300s.csv`,
-  `canonical_3v3_full_n50_300s.csv`) are still 7-class and now stale. Regenerating
-  them for 8 classes is a large sweep (8-class 2v2 ≈ 36 comps² × N) — deferred;
-  do it before the next cross-class balance pass.
-- `canonical_1v1_n100_300s.csv` **was** regenerated to 8×8 by this run.
+- Canonical baselines are all current: `canonical_1v1_n100_300s.csv` (8×8),
+  `canonical_2v2_full_n100_300s.csv` (784), `canonical_3v3_full_n50_300s.csv`
+  (3,136) — all regenerated this cycle.
 - Totem buff magnitudes that feed both balance and tooltips live in
   `class_ai/shaman.rs`; a retune needs the matching `abilities.ron` tooltip edit.
