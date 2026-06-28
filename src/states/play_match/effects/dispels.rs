@@ -44,12 +44,12 @@ pub fn process_dispels(
                 .iter()
                 .enumerate()
                 .filter(|(_, a)| {
-                    // If aura_type_filter is set, only match those specific types
+                    // If aura_type_filter is set, only match those specific types.
+                    // This is how the Shaman's Purge strips a chosen enemy buff
+                    // (it pins the filter to a `can_be_purged` type) and how
+                    // Master's Call removes only movement impairments from an ally.
                     if let Some(ref filter) = pending.aura_type_filter {
                         filter.contains(&a.effect_type)
-                    } else if pending.removes_beneficial {
-                        // Offensive dispel (Shaman's Purge): strip enemy buffs only.
-                        a.can_be_purged()
                     } else {
                         // Cleanse also lifts poison/disease; Dispel Magic doesn't.
                         a.can_be_dispelled()

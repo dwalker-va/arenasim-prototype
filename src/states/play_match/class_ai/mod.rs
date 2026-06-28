@@ -747,7 +747,6 @@ pub fn try_dispel_ally(
         heal_on_success: None,
         aura_type_filter: None,
         removes_poison,
-        removes_beneficial: false,
     });
 
     info!(
@@ -773,9 +772,10 @@ pub fn try_dispel_ally(
 /// Gated by [`pre_cast_ok`] with `check_friendly_cc: false` (offensive — no
 /// friendly-CC concern) and `check_target_immune: true` (respect Divine Shield;
 /// range/mana/lockout/silence handled by the guard). Predicate failures emit
-/// typed reject events; success emits choose and spawns a `DispelPending` with
-/// `removes_beneficial: true` and an `aura_type_filter` pinned to the chosen
-/// buff so the strip is deterministic (not a random pick in `process_dispels`).
+/// typed reject events; success emits choose and spawns a `DispelPending` whose
+/// `aura_type_filter` is pinned to the single chosen (purgeable) buff type, so
+/// `process_dispels` strips that beneficial aura from the enemy — a random pick
+/// only if the enemy holds several auras of that same type (intentional).
 #[allow(clippy::too_many_arguments)]
 pub fn try_purge_enemy(
     commands: &mut Commands,
@@ -885,8 +885,10 @@ pub fn try_purge_enemy(
     let target_tuple = ctx.combatants.get(&target_entity).map(|info| (info.team, info.class));
     log_ability_use(combat_log, combatant.team, combatant.class, &def.name, target_tuple, "casts");
 
-    // Deterministic single strip: filter to the chosen buff so process_dispels
-    // removes exactly it (not a random purgeable aura).
+    // Pin the filter to the chosen (highest-priority) buff type so process_dispels
+    // targets that valuable buff rather than any purgeable aura. If the enemy
+    // holds several auras of that type the strip is a random pick among them
+    // (intentional — see process_dispels).
     commands.spawn(DispelPending {
         target: target_entity,
         dispeller: entity,
@@ -895,7 +897,6 @@ pub fn try_purge_enemy(
         heal_on_success: None,
         aura_type_filter: Some(vec![chosen_aura]),
         removes_poison: false,
-        removes_beneficial: true,
     });
 
     true

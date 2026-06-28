@@ -670,9 +670,4 @@ pub struct DispelPending {
     /// When true, this dispel also removes poison/disease debuffs (Paladin Cleanse).
     /// Dispel Magic / Devour Magic leave poisons untouched (false).
     pub removes_poison: bool,
-    /// When true, this is an OFFENSIVE dispel (Shaman's Purge): it strips a
-    /// BENEFICIAL aura from an enemy (`Aura::can_be_purged`) instead of a
-    /// debuff from an ally. `aura_type_filter` still takes precedence when set
-    /// (Purge sets it to the single chosen buff for a deterministic strip).
-    pub removes_beneficial: bool,
 }
