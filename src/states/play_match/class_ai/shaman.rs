@@ -450,6 +450,21 @@ pub(super) fn maintain_totems(
 
 /// Per-element ability/buff mapping. MODEST magnitudes — real balance is a later
 /// unit. Mirrors the `TotemElement -> buff` table documented in the U3 spec.
+/// The `(buff aura, magnitude)` a totem ability grants, sourced from
+/// [`totem_spec`] so UI/tooltips read the SAME number gameplay uses — they can
+/// never drift. Returns `None` for non-totem abilities.
+pub fn totem_buff_spec(ability: AbilityType) -> Option<(AuraType, f32)> {
+    let element = match ability {
+        AbilityType::AirTotem => TotemElement::Air,
+        AbilityType::WaterTotem => TotemElement::Water,
+        AbilityType::EarthTotem => TotemElement::Earth,
+        AbilityType::FireTotem => TotemElement::Fire,
+        _ => return None,
+    };
+    let (_, aura_type, magnitude, _) = totem_spec(element);
+    Some((aura_type, magnitude))
+}
+
 fn totem_spec(element: TotemElement) -> (AbilityType, AuraType, f32, SpellSchool) {
     match element {
         // Windfury Totem — empowers melee allies' auto-attacks (proc chance 0..1).
