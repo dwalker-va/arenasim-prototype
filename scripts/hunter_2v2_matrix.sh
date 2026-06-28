@@ -99,7 +99,7 @@ trap 'rm -rf "$TEMP_DIR"' EXIT
 
 # Hunter+Priest vs each opposing class + Priest (mirror healer partner)
 HEALER="Priest"
-OPPONENTS=("Warrior" "Mage" "Rogue" "Priest" "Warlock" "Paladin")
+OPPONENTS=("Warrior" "Mage" "Rogue" "Priest" "Warlock" "Paladin" "Shaman")
 
 # Write CSV header
 echo "team1,team2,runs,team1_wins,team2_wins,draws,team1_winrate,draw_rate,avg_duration_secs" > "$OUT_CSV"
