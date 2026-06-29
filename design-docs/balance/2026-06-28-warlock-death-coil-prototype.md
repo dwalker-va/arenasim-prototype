@@ -78,9 +78,14 @@ Both 3v3 Warlock comps improve (Priest+Mage 77→80, Priest+Warrior 22→28).
   melee-class trigger and kite/stay at range, so Death Coil rarely fires there;
   the Paladin dip is the extra mana spent for no peel. These are 1v1 (off-target
   bracket) and not pursued.
-- **DR sharing with Fear** means a healer already feared can't be Death-Coiled for
-  full duration. Intentional, but if Death Coil should double as a healer-lockout,
-  give it its own DR category.
+- **DR:** Death Coil diminishes on its own `Horror` DR bucket, NOT Fears (WoW
+  Classic behavior — horror and fear are separate DRs). It reuses
+  `AuraType::Fear` only for the flee locomotion + dispel classification; the
+  `dr_category_override: Some(Horror)` decouples DR (the Kidney Shot idiom). So a
+  Fear and a Death Coil on one target both land at full duration. Verified in a
+  trace (Fear lands DR 100% / 8.0s even 6s after a Death Coil); balance impact
+  negligible (2v2 47.3 → 47.5, 3v3 53.2 → 53.9 — they rarely hit the same target,
+  since Fear goes to the healer and Death Coil to a training melee).
 
 ## Reproduction
 

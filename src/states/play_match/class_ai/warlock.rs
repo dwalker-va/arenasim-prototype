@@ -117,7 +117,9 @@ fn pick_death_coil_peel(
             if !is_training_me && !is_melee {
                 return false;
             }
-            if ctx.entity_is_immune(info.entity) || ctx.is_dr_immune(info.entity, DRCategory::Fears) {
+            // Death Coil diminishes on the Horror bucket (not Fears), so gate on
+            // Horror DR — a target that is Fear-DR-immune can still be horrified.
+            if ctx.entity_is_immune(info.entity) || ctx.is_dr_immune(info.entity, DRCategory::Horror) {
                 return false;
             }
             let already_ccd = ctx.active_auras

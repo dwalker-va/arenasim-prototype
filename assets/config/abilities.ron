@@ -558,9 +558,10 @@
         // damage (break_on_damage: -1.0), unlike Fear — so it is a guaranteed
         // peel against a training melee (the kit's answer to Rogue/Shaman) plus a
         // burst-of-sustain. WoW's 2 min cooldown is scaled to 30s for this sim's
-        // ~45s matches (otherwise it fires once and never again). Shares the Fears
-        // DR category (AuraType::Fear) — a deliberate limiter on Fear+Death Coil
-        // chaining the same target.
+        // ~45s matches (otherwise it fires once and never again). Diminishes on
+        // its own Horror DR bucket (NOT Fears) — matching WoW Classic, where
+        // horror and fear are separate DRs, so a Fear and a Death Coil on one
+        // target do not diminish each other.
         DeathCoil: (
             name: "Death Coil",
             icon: "icons/abilities/spell_shadow_deathcoil.jpg",
@@ -577,6 +578,10 @@
                 duration: 3.0,
                 magnitude: 0.0,
                 break_on_damage: -1.0, // horror: never breaks on damage
+                // Reuse AuraType::Fear for the flee locomotion + dispel
+                // classification, but diminish on a dedicated Horror bucket so
+                // Death Coil and Fear do NOT share DR (WoW Classic behavior).
+                dr_category: Some(Horror),
             )),
             spell_school: Shadow,
             projectile_speed: Some(40.0),
