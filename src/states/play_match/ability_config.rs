@@ -324,6 +324,7 @@ impl AbilityDefinitions {
             AbilityType::CurseOfWeakness,
             AbilityType::CurseOfTongues,
             AbilityType::UnstableAffliction,
+            AbilityType::DeathCoil,
             AbilityType::ArcaneIntellect,
             AbilityType::BattleShout,
             AbilityType::IceBarrier,

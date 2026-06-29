@@ -270,6 +270,31 @@ pub fn process_projectile_hits(
                     continue;
                 };
                 caster.damage_dealt += actual_damage + absorbed;
+
+                // Death Coil lifesteal: the Warlock gains health equal to the
+                // damage actually dealt (health removed; absorbed damage isn't
+                // "caused"). Capped at the caster's missing health.
+                if ability == AbilityType::DeathCoil && actual_damage > 0.0 {
+                    let effective = actual_damage.min(caster.max_health - caster.current_health);
+                    caster.current_health = (caster.current_health + actual_damage).min(caster.max_health);
+                    caster.healing_done += effective;
+                    if effective > 0.0 {
+                        let id = combatant_id(caster_team, caster_class);
+                        combat_log.log_healing(
+                            id.clone(),
+                            id,
+                            def.name.to_string(),
+                            effective,
+                            false,
+                            format!(
+                                "Team {} {}'s Death Coil heals for {:.0}",
+                                caster_team,
+                                caster_class.name(),
+                                effective
+                            ),
+                        );
+                    }
+                }
             } // caster borrow dropped here
             
             // Spawn yellow floating combat text for ability damage

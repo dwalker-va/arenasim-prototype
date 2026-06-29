@@ -105,6 +105,7 @@ pub enum AbilityType {
     CurseOfWeakness, // Shadow debuff - reduces target damage dealt
     CurseOfTongues, // Shadow debuff - increases target cast time
     UnstableAffliction, // Shadow DoT - dispel backlash applies Silence + Shadow damage
+    DeathCoil,      // Shadow instant - 3s horror (never breaks) + damage + self-heal, peel cooldown
     // Buff abilities
     ArcaneIntellect, // Mage buff - increases max mana
     BattleShout,     // Warrior buff - increases attack power
