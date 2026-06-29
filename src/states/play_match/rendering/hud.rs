@@ -261,10 +261,18 @@ pub fn render_health_bars(
                             render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &root_text, egui::Color32::from_rgb(100, 200, 255), ui_scale);
                         }
 
-                        // FEAR indicator with duration countdown
+                        // FEAR / HORROR indicator with duration countdown. Death Coil
+                        // applies a Fear-type aura (for the flee locomotion) but is
+                        // mechanically a separate horror with its own DR, so it gets
+                        // its own green "HORROR" label to parallel "FEAR".
                         if let Some(fear_aura) = auras.auras.iter().find(|a| a.effect_type == AuraType::Fear) {
-                            let fear_text = format!("FEAR {:.1}s", fear_aura.duration);
-                            render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &fear_text, egui::Color32::from_rgb(148, 103, 189), ui_scale);
+                            let (label, color) = if fear_aura.ability_name == "Death Coil" {
+                                ("HORROR", egui::Color32::from_rgb(80, 220, 110)) // green — matches the coil
+                            } else {
+                                ("FEAR", egui::Color32::from_rgb(148, 103, 189)) // purple
+                            };
+                            let fear_text = format!("{} {:.1}s", label, fear_aura.duration);
+                            render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &fear_text, color, ui_scale);
                         }
 
                         // SHEEPED indicator with duration countdown (Polymorph)
