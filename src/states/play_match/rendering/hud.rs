@@ -242,9 +242,18 @@ pub fn render_health_bars(
                     // Status indicators above health bar
                     let mut status_offset = -12.0 * ui_scale; // Starting position above health bar
 
+                    // All status labels share one neutral color: the label TEXT
+                    // (STUN/ROOT/HORROR/...) carries the information, and keeping
+                    // status text out of the hue budget leaves colors free for
+                    // gameplay visuals (projectiles, auras, impact bursts) without
+                    // new collision cases. White on the black outline reads on any
+                    // background; yellow/green/light-blue stay reserved for the
+                    // damage/heal/absorb floating combat text.
+                    let status_color = egui::Color32::WHITE;
+
                     // STEALTH indicator (if stealthed)
                     if combatant.stealthed {
-                        render_status_label(ui, &bar_pos, bar_width, &mut status_offset, "STEALTH", egui::Color32::from_rgb(180, 120, 230), ui_scale);
+                        render_status_label(ui, &bar_pos, bar_width, &mut status_offset, "STEALTH", status_color, ui_scale);
                     }
 
                     // Status effect indicators (if has auras)
@@ -252,39 +261,39 @@ pub fn render_health_bars(
                         // STUN indicator with duration countdown
                         if let Some(stun_aura) = auras.auras.iter().find(|a| a.effect_type == AuraType::Stun) {
                             let stun_text = format!("STUN {:.1}s", stun_aura.duration);
-                            render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &stun_text, egui::Color32::from_rgb(255, 100, 100), ui_scale);
+                            render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &stun_text, status_color, ui_scale);
                         }
 
                         // ROOT indicator with duration countdown
                         if let Some(root_aura) = auras.auras.iter().find(|a| a.effect_type == AuraType::Root) {
                             let root_text = format!("ROOT {:.1}s", root_aura.duration);
-                            render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &root_text, egui::Color32::from_rgb(100, 200, 255), ui_scale);
+                            render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &root_text, status_color, ui_scale);
                         }
 
                         // FEAR / HORROR indicator with duration countdown. Death Coil
                         // applies a Fear-type aura (for the flee locomotion) but is
                         // mechanically a separate horror with its own DR, so it gets
-                        // its own green "HORROR" label to parallel "FEAR".
+                        // its own "HORROR" label to parallel "FEAR".
                         if let Some(fear_aura) = auras.auras.iter().find(|a| a.effect_type == AuraType::Fear) {
-                            let (label, color) = if fear_aura.ability_name == "Death Coil" {
-                                ("HORROR", egui::Color32::from_rgb(80, 220, 110)) // green — matches the coil
+                            let label = if fear_aura.ability_name == "Death Coil" {
+                                "HORROR"
                             } else {
-                                ("FEAR", egui::Color32::from_rgb(148, 103, 189)) // purple
+                                "FEAR"
                             };
                             let fear_text = format!("{} {:.1}s", label, fear_aura.duration);
-                            render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &fear_text, color, ui_scale);
+                            render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &fear_text, status_color, ui_scale);
                         }
 
                         // SHEEPED indicator with duration countdown (Polymorph)
                         if let Some(poly_aura) = auras.auras.iter().find(|a| a.effect_type == AuraType::Polymorph) {
                             let poly_text = format!("SHEEPED {:.1}s", poly_aura.duration);
-                            render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &poly_text, egui::Color32::from_rgb(255, 105, 180), ui_scale); // Hot pink
+                            render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &poly_text, status_color, ui_scale);
                         }
 
                         // SILENCE indicator with duration countdown
                         if let Some(silence_aura) = auras.auras.iter().find(|a| a.effect_type == AuraType::Silence) {
                             let silence_text = format!("SILENCE {:.1}s", silence_aura.duration);
-                            render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &silence_text, egui::Color32::from_rgb(180, 100, 230), ui_scale); // Violet
+                            render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &silence_text, status_color, ui_scale);
                         }
                     }
 
