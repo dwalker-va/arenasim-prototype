@@ -440,6 +440,13 @@ fn try_spell_lock(
 
     let my_team = combatant.team;
 
+    // Collect every interruptible enemy cast in range, then pick the highest-value
+    // one. Spell Lock applies a *school-specific* lockout, so interrupting a heal
+    // locks the healer out of healing — far more valuable than eating a DPS nuke.
+    // Priority: heal cast > any other cast (first-seen). This turns the Felhunter's
+    // one interrupt per 24s into a heal-denial tool instead of a random interrupt.
+    let mut first_caster: Option<Entity> = None;
+    let mut heal_caster: Option<Entity> = None;
     for (target_entity, target_combatant, cast_state) in casting_targets.iter() {
         if target_combatant.team == my_team || !target_combatant.is_alive() {
             continue;
@@ -456,6 +463,14 @@ fn try_spell_lock(
         if distance > def.range {
             continue;
         }
+        if first_caster.is_none() {
+            first_caster = Some(target_entity);
+        }
+        if heal_caster.is_none() && abilities.get_unchecked(&cast_state.ability).is_heal() {
+            heal_caster = Some(target_entity);
+        }
+    }
+    if let Some(target_entity) = heal_caster.or(first_caster) {
         builder.choose(ability, Some(target_entity), true);
         execute_spell_lock(commands, combat_log, abilities, entity, combatant, target_entity, &def.name);
         return true;

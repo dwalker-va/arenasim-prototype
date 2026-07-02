@@ -228,6 +228,17 @@ impl Plugin for StatesPlugin {
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_state(GameState::PlayMatch)),
             )
+            // Death Coil impact burst (separate group to avoid tuple size limits)
+            .add_systems(
+                Update,
+                (
+                    play_match::spawn_death_coil_burst,            // Attach mesh when a coil-impact marker appears
+                    play_match::update_death_coil_bursts,          // Flash, punch outward, fade
+                    play_match::cleanup_expired_death_coil_bursts, // Remove expired bursts
+                )
+                    .after(CombatSystemPhase::CombatResolution)
+                    .run_if(in_state(GameState::PlayMatch)),
+            )
             // Unstable Affliction visuals: DoT glow, backlash burst, silenced text
             // (graphical only — never registered in headless systems.rs).
             .add_systems(

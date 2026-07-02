@@ -23,7 +23,7 @@ use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::{
     ActiveAuras, AuraPending, AuraType, CastingState, ChannelingState, Combatant,
-    DRCategory,
+    DRCategory, PlayMatchEntity, Projectile,
 };
 use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::constants::GCD;
@@ -53,6 +53,88 @@ fn is_being_kited(
     let out_of_range = distance_to_target > preferred_range;
 
     is_slowed && out_of_range
+}
+
+/// Pick an enemy healer to lock down with Fear, or `None` if no useful target.
+///
+/// Returns a living enemy healer that is NOT the current kill target (we Fear the
+/// healer to stop it saving the target we're killing), is castable-on (not immune,
+/// not already CC'd), and is not yet Fear-DR-immune. DR on the Fears category is
+/// the natural rate limiter — once the healer is DR-immune this returns `None` and
+/// the Warlock resumes its damage rotation until the window reopens.
+fn pick_healer_to_fear(
+    kill_target: Entity,
+    ctx: &CombatContext,
+) -> Option<Entity> {
+    ctx.alive_enemies()
+        .into_iter()
+        .filter(|info| info.class.is_healer())
+        .map(|info| info.entity)
+        // Don't Fear the target we're actively trying to kill.
+        .filter(|&healer| healer != kill_target)
+        .find(|&healer| {
+            if ctx.entity_is_immune(healer) || ctx.is_dr_immune(healer, DRCategory::Fears) {
+                return false;
+            }
+            // Already stunned/feared/rooted? No value in re-CCing.
+            let already_ccd = ctx.active_auras
+                .get(&healer)
+                .map(|auras| auras.iter().any(|a| matches!(
+                    a.effect_type,
+                    AuraType::Stun | AuraType::Fear | AuraType::Root
+                )))
+                .unwrap_or(false);
+            !already_ccd
+        })
+}
+
+/// Distance (yards) within which an enemy is treated as "training" the Warlock
+/// and worth a Death Coil peel.
+const DEATH_COIL_PEEL_RADIUS: f32 = 8.0;
+
+/// Pick an enemy to peel off the Warlock with Death Coil, or `None`.
+///
+/// A threat is an alive enemy within [`DEATH_COIL_PEEL_RADIUS`] of the Warlock
+/// that is either explicitly targeting it or is a melee class (Warrior/Rogue) —
+/// i.e. something that pins the cloth caster. Excludes targets that are immune,
+/// Fear-DR-immune, or already hard-CC'd (no value in re-CCing). Returns the
+/// nearest such enemy. The caller still range/cooldown/mana-gates via
+/// `try_death_coil`, so this only answers "is there someone to peel?".
+fn pick_death_coil_peel(
+    me: Entity,
+    my_pos: Vec3,
+    ctx: &CombatContext,
+) -> Option<Entity> {
+    let mut threats: Vec<(Entity, f32)> = ctx.alive_enemies()
+        .into_iter()
+        .filter(|info| {
+            let dist = info.position.distance(my_pos);
+            if dist > DEATH_COIL_PEEL_RADIUS {
+                return false;
+            }
+            let is_training_me = info.target == Some(me);
+            let is_melee = matches!(info.class, CharacterClass::Warrior | CharacterClass::Rogue);
+            if !is_training_me && !is_melee {
+                return false;
+            }
+            // Death Coil diminishes on the Horror bucket (not Fears), so gate on
+            // Horror DR — a target that is Fear-DR-immune can still be horrified.
+            if ctx.entity_is_immune(info.entity) || ctx.is_dr_immune(info.entity, DRCategory::Horror) {
+                return false;
+            }
+            let already_ccd = ctx.active_auras
+                .get(&info.entity)
+                .map(|auras| auras.iter().any(|a| matches!(
+                    a.effect_type,
+                    AuraType::Stun | AuraType::Fear | AuraType::Root
+                )))
+                .unwrap_or(false);
+            !already_ccd
+        })
+        .map(|info| (info.entity, info.position.distance(my_pos)))
+        .collect();
+    threats.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+    threats.first().map(|(e, _)| *e)
 }
 
 /// Warlock AI: Decides and executes abilities for a Warlock combatant.
@@ -88,6 +170,24 @@ pub fn decide_warlock_action(
     let Some(mut builder) = ctx.start_ability_decision(decision_trace, Some(target_entity), my_pos) else {
         return false;
     };
+
+    // Priority 0: Death Coil peel. A melee attacker on the cloth Warlock is its
+    // worst case (the kit otherwise has no instant CC that survives damage — Fear
+    // breaks). Death Coil's horror never breaks on damage, so it guarantees a 3s
+    // peel and heals the Warlock for the hit. Reactive defensive cooldown, so it
+    // outranks the damage rotation.
+    if let Some(peel_target) = pick_death_coil_peel(entity, my_pos, ctx) {
+        if let Some(peel_info) = ctx.combatants.get(&peel_target) {
+            let peel_pos = peel_info.position;
+            if try_death_coil(
+                commands, combat_log, abilities, entity, combatant, my_pos, auras,
+                peel_target, peel_pos, ctx, &mut builder,
+            ) {
+                builder.finish();
+                return true;
+            }
+        }
+    }
 
     let enemy_has_dispeller = ctx.alive_enemies().iter().any(|e| matches!(
         e.class,
@@ -132,6 +232,28 @@ pub fn decide_warlock_action(
         ) {
             builder.finish();
             return true;
+        }
+    }
+
+    // Priority 1.75: Lock the enemy healer with Fear to open a kill window.
+    //
+    // The Warlock's pressure is pure DoT/Shadow Bolt — trivially out-healed in a
+    // healer comp. Its answer (long present in the kit, never used) is an 8s Fear
+    // on the *healer* while the team burns the kill target. Fear targets the
+    // healer, not the focused kill target (where a DoT tick would instantly break
+    // it). Diminishing Returns on the Fears category self-limits the chain, so
+    // this can't perma-lock; between DR windows the Warlock falls through to its
+    // normal rotation below.
+    if let Some(healer_entity) = pick_healer_to_fear(target_entity, ctx) {
+        if let Some(healer_info) = ctx.combatants.get(&healer_entity) {
+            let healer_pos = healer_info.position;
+            if try_fear(
+                commands, combat_log, abilities, entity, combatant, my_pos, auras,
+                healer_entity, healer_pos, ctx, &mut builder,
+            ) {
+                builder.finish();
+                return true;
+            }
         }
     }
 
@@ -498,6 +620,75 @@ fn try_fear(
 
     info!(
         "Team {} {} starts casting Fear on enemy",
+        combatant.team,
+        combatant.class.name()
+    );
+
+    true
+}
+
+/// Try to fire Death Coil at a peel target: instant Shadow projectile that, on
+/// impact, deals damage, heals the Warlock for that damage (see
+/// `projectiles.rs`), and applies a 3s never-breaking horror via the def's Fear
+/// aura. Gated through `pre_cast_ok` (range/mana/cooldown/school-lock).
+fn try_death_coil(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    target_entity: Entity,
+    target_pos: Vec3,
+    ctx: &CombatContext,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    let death_coil = AbilityType::DeathCoil;
+    let def = abilities.get_unchecked(&death_coil);
+
+    let opts = PreCastOpts::default();
+    if !pre_cast_ok(
+        death_coil, def, combatant, my_pos, auras,
+        Some((target_entity, target_pos)), ctx, opts,
+    ) {
+        builder.reject(
+            death_coil,
+            classify_pre_cast_failure(
+                death_coil, def, combatant, my_pos, auras,
+                Some((target_entity, target_pos)), ctx, opts,
+            ),
+        );
+        return false;
+    }
+
+    builder.choose(death_coil, Some(target_entity), true);
+
+    let projectile_speed = def.projectile_speed.unwrap_or(40.0);
+    commands.spawn((
+        Projectile {
+            caster: entity,
+            target: target_entity,
+            ability: death_coil,
+            speed: projectile_speed,
+            caster_team: combatant.team,
+            caster_class: combatant.class,
+        },
+        Transform::from_translation(my_pos + Vec3::new(0.0, 1.5, 0.0)),
+        PlayMatchEntity,
+    ));
+
+    combatant.current_mana -= def.mana_cost;
+    combatant.ability_cooldowns.insert(death_coil, def.cooldown);
+    combatant.global_cooldown = GCD;
+
+    let target_tuple = ctx.combatants
+        .get(&target_entity)
+        .map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, "Death Coil", target_tuple, "fires");
+
+    info!(
+        "Team {} {} fires Death Coil (peel + lifesteal)",
         combatant.team,
         combatant.class.name()
     );

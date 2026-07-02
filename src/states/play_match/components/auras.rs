@@ -433,10 +433,17 @@ pub enum DRCategory {
     /// lands two undiminished stuns back-to-back. Set only via an aura's
     /// `dr_category_override`, never returned by `from_aura_type`.
     KidneyShotStun = 6,
+    /// Horror's dedicated DR bucket (Warlock Death Coil). In WoW Classic the
+    /// fear-flee "horror" effect diminishes separately from Fear, so a Fear and
+    /// a Death Coil on one target do not share DR. Death Coil reuses
+    /// `AuraType::Fear` for the flee locomotion + dispel classification but
+    /// carries `dr_category_override: Some(Horror)` to land here. Set only via
+    /// the override, never returned by `from_aura_type`.
+    Horror = 7,
 }
 
 impl DRCategory {
-    pub const COUNT: usize = 7;
+    pub const COUNT: usize = 8;
 
     #[inline]
     pub fn index(self) -> usize {

@@ -187,6 +187,23 @@ pub struct ScreamBurst {
     pub initial_lifetime: f32,
 }
 
+/// Flashy impact burst for Death Coil — a bright skull-green pop on the *target*
+/// when the coil lands. Death Coil is often used as a point-blank self-peel
+/// against melee (near-zero projectile travel), so the traveling sphere reads as
+/// too subtle; this burst pops on the victim and is visible regardless of range.
+/// Follows the target for its short life, starts as an intense flash, then
+/// expands and fades. Distinct from `ScreamBurst` (caster-centered, violet) and
+/// `DispelBurst` (small): target-centered, vivid green, with a hot initial flash.
+#[derive(Component)]
+pub struct DeathCoilBurst {
+    /// The struck target — the burst follows this entity for its short life.
+    pub target: Entity,
+    /// Time remaining before despawn (seconds).
+    pub lifetime: f32,
+    /// Initial lifetime for the expand/fade curve.
+    pub initial_lifetime: f32,
+}
+
 /// Visual effect indicating a combatant has Unstable Affliction active.
 /// Pulses at ~0.5Hz (every 2s) in deep violet so it reads independently from
 /// Corruption's faster green tendrils when both DoTs are stacked on the target.

@@ -47,6 +47,10 @@ pub fn spawn_projectile_visuals(
         } else if is_web_projectile(projectile.ability) {
             // Web: slightly smaller elongated cuboid
             meshes.add(Cuboid::new(0.06, 0.06, 0.4))
+        } else if projectile.ability == AbilityType::DeathCoil {
+            // Death Coil: chunky bright orb — it has almost no travel as a
+            // self-peel, so make the coil itself read at point-blank range.
+            meshes.add(Sphere::new(0.55))
         } else {
             // Default: sphere for caster projectiles
             meshes.add(Sphere::new(0.3))
@@ -270,6 +274,31 @@ pub fn process_projectile_hits(
                     continue;
                 };
                 caster.damage_dealt += actual_damage + absorbed;
+
+                // Death Coil lifesteal: the Warlock gains health equal to the
+                // damage actually dealt (health removed; absorbed damage isn't
+                // "caused"). Capped at the caster's missing health.
+                if ability == AbilityType::DeathCoil && actual_damage > 0.0 {
+                    let effective = actual_damage.min(caster.max_health - caster.current_health);
+                    caster.current_health = (caster.current_health + actual_damage).min(caster.max_health);
+                    caster.healing_done += effective;
+                    if effective > 0.0 {
+                        let id = combatant_id(caster_team, caster_class);
+                        combat_log.log_healing(
+                            id.clone(),
+                            id,
+                            def.name.to_string(),
+                            effective,
+                            false,
+                            format!(
+                                "Team {} {}'s Death Coil heals for {:.0}",
+                                caster_team,
+                                caster_class.name(),
+                                effective
+                            ),
+                        );
+                    }
+                }
             } // caster borrow dropped here
             
             // Spawn yellow floating combat text for ability damage
@@ -378,6 +407,20 @@ pub fn process_projectile_hits(
             if let Some(aura_pending) = AuraPending::from_ability(target_entity, caster_entity, def) {
                 commands.spawn(aura_pending);
             }
+        }
+
+        // Spawn the flashy Death Coil impact burst on the struck target. Death
+        // Coil is often a point-blank self-peel (near-zero travel), so the
+        // traveling sphere is easy to miss — this green flash pops on the victim.
+        if ability == AbilityType::DeathCoil {
+            commands.spawn((
+                DeathCoilBurst {
+                    target: target_entity,
+                    lifetime: 0.55,
+                    initial_lifetime: 0.55,
+                },
+                PlayMatchEntity,
+            ));
         }
 
         // Spawn visual impact burst for Concussive Shot (reuses DispelBurst with Hunter gold)
