@@ -239,6 +239,18 @@ impl Plugin for StatesPlugin {
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_state(GameState::PlayMatch)),
             )
+            // Berserker Rage activation visuals (separate group to avoid tuple size limits)
+            // The TBC-style black angry mask + red glow at the Warrior's head.
+            .add_systems(
+                Update,
+                (
+                    play_match::spawn_berserk_mask_visuals,     // Attach glyph quad + glow when a mask marker appears
+                    play_match::update_berserk_masks,           // Follow head, billboard, pop/hold/collapse
+                    play_match::cleanup_expired_berserk_masks,  // Remove expired masks and glows
+                )
+                    .after(CombatSystemPhase::CombatResolution)
+                    .run_if(in_state(GameState::PlayMatch)),
+            )
             // Unstable Affliction visuals: DoT glow, backlash burst, silenced text
             // (graphical only — never registered in headless systems.rs).
             .add_systems(

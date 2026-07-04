@@ -118,6 +118,19 @@ pub fn process_berserker_rage(
                 fears_broken
             );
 
+            // Activation visual: the TBC-style black angry mask + red glow at
+            // the Warrior's head. Marker is spawned in both modes (like
+            // ScreamBurst); the mesh/texture are attached only by the
+            // graphical-only systems in states/mod.rs, so headless is unaffected.
+            commands.spawn((
+                BerserkMask {
+                    caster: pending.caster,
+                    lifetime: 1.4,
+                    initial_lifetime: 1.4,
+                },
+                PlayMatchEntity,
+            ));
+
             // Spawn white "Berserker Rage" FCT on the Warrior (status text stays
             // white per the color budget; the label carries the information)
             let text_position = transform.translation + Vec3::new(0.0, super::super::FCT_HEIGHT, 0.0);
