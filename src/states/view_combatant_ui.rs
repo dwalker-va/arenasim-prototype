@@ -237,6 +237,7 @@ fn get_class_abilities(class: CharacterClass) -> Vec<AbilityType> {
             AbilityType::DemoralizingShout,
             AbilityType::CommandingShout,
             AbilityType::Charge,
+            AbilityType::BerserkerRage,
             AbilityType::Rend,
             AbilityType::MortalStrike,
             AbilityType::Pummel,
@@ -358,6 +359,7 @@ fn get_ability_name(ability: AbilityType) -> &'static str {
         AbilityType::PaladinCleanse => "Cleanse",
         AbilityType::DevotionAura => "Devotion Aura",
         AbilityType::DivineShield => "Divine Shield",
+        AbilityType::BerserkerRage => "Berserker Rage",
         // Pet abilities (Felhunter)
         AbilityType::SpellLock => "Spell Lock",
         AbilityType::DevourMagic => "Devour Magic",
@@ -1539,6 +1541,9 @@ fn build_aura_description(aura: &super::play_match::ability_config::AuraEffect) 
         }
         AuraType::WindfuryBuff => {
             format!("Empowers melee auto-attacks for {:.0} sec.", aura.duration)
+        }
+        AuraType::FearImmunity => {
+            format!("Breaks Fear and grants immunity to Fear effects for {:.0} sec. Does not affect Horror (Death Coil).", aura.duration)
         }
     }
 }

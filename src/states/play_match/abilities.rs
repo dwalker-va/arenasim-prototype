@@ -93,6 +93,7 @@ pub enum AbilityType {
     Rend,
     MortalStrike, // Warrior damage + healing reduction
     Pummel,    // Warrior interrupt
+    BerserkerRage, // Warrior fear break + 10s fear immunity (horror bypasses it)
     Kick,      // Rogue interrupt
     CripplingPoison, // Rogue weapon poison: on-hit chance to slow (passive, not cast)
     // Warlock abilities

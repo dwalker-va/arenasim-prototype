@@ -295,6 +295,12 @@ pub fn render_health_bars(
                             let silence_text = format!("SILENCE {:.1}s", silence_aura.duration);
                             render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &silence_text, status_color, ui_scale);
                         }
+
+                        // BERSERK indicator with duration countdown (Berserker Rage fear immunity)
+                        if let Some(br_aura) = auras.auras.iter().find(|a| a.effect_type == AuraType::FearImmunity) {
+                            let br_text = format!("BERSERK {:.1}s", br_aura.duration);
+                            render_status_label(ui, &bar_pos, bar_width, &mut status_offset, &br_text, status_color, ui_scale);
+                        }
                     }
 
                     // Scaled corner radius
@@ -901,5 +907,6 @@ fn get_aura_fallback_color(aura_type: &AuraType) -> egui::Color32 {
         AuraType::SpellPowerIncrease => egui::Color32::from_rgb(255, 99, 71), // Tomato (Flametongue Totem buff)
         AuraType::HealingOverTime => egui::Color32::from_rgb(64, 200, 120), // Sea green (Healing Stream Totem buff)
         AuraType::WindfuryBuff => egui::Color32::from_rgb(135, 206, 250), // Light sky blue (Windfury Totem buff)
+        AuraType::FearImmunity => egui::Color32::from_rgb(255, 69, 0), // Orange red (Berserker Rage, matches AP buff)
     }
 }

@@ -313,6 +313,7 @@ impl AbilityDefinitions {
             AbilityType::Rend,
             AbilityType::MortalStrike,
             AbilityType::Pummel,
+            AbilityType::BerserkerRage,
             AbilityType::Kick,
             AbilityType::CripplingPoison,
             AbilityType::Corruption,

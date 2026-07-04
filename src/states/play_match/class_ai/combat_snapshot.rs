@@ -22,7 +22,8 @@ use super::{CombatContext, CombatantInfo};
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::auras::reflect_instant_cc_in_snapshot;
 use crate::states::play_match::components::{
-    ActiveAuras, Aura, CastingState, ChannelingState, Combatant, DRTracker, Pet,
+    ActiveAuras, Aura, CastingState, ChannelingState, ChargingState, Combatant, DisengagingState,
+    DRTracker, Pet,
 };
 
 /// Per-frame snapshot of every combatant's stats, auras, and DR state.
@@ -62,7 +63,7 @@ impl CombatSnapshot {
     /// `.iter_mut()` after this call returns.
     pub fn build(
         aura_query: &Query<
-            (Entity, &mut Combatant, &Transform, Option<&mut ActiveAuras>),
+            (Entity, &mut Combatant, &Transform, Option<&mut ActiveAuras>, Option<&ChargingState>, Option<&DisengagingState>),
             (Without<CastingState>, Without<ChannelingState>),
         >,
         casting_auras: &Query<
@@ -88,7 +89,7 @@ impl CombatSnapshot {
         let mut owner_to_pet: BTreeMap<Entity, Entity> = BTreeMap::new();
         let all_entities = aura_query
             .iter()
-            .map(|(entity, _, _, _)| entity)
+            .map(|(entity, _, _, _, _, _)| entity)
             .chain(casting_auras.iter().map(|(entity, _, _, _, _)| entity))
             .chain(channeling_auras.iter().map(|(entity, _, _, _, _)| entity));
         for entity in all_entities {
@@ -145,7 +146,7 @@ impl CombatSnapshot {
             ability_cooldowns.insert(entity, cooldowns);
         };
 
-        for (entity, combatant, transform, auras_opt) in aura_query.iter() {
+        for (entity, combatant, transform, auras_opt, _, _) in aura_query.iter() {
             insert_combatant(entity, &combatant, transform, None, &mut combatants, &mut ability_cooldowns);
             if let Some(auras) = auras_opt {
                 active_auras.insert(entity, auras.auras.clone());

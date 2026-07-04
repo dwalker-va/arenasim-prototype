@@ -23,7 +23,7 @@ use crate::states::play_match::decision_trace::{
     DecisionEventBuilder, DecisionTrace, NoActionReason, RejectionReason, ResourceKind,
 };
 
-use crate::states::play_match::utils::log_ability_use;
+use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
 use super::CombatContext;
 use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
@@ -771,5 +771,98 @@ fn try_heroic_strike(
         combatant.class.name(),
         bonus_damage
     );
+}
+
+/// Try to use Berserker Rage while incapacitated (fear break path).
+///
+/// Called from `combat_ai.rs` before the incapacitation gate, mirroring the
+/// Paladin Divine Shield while-CC arm. The caller owns the builder lifecycle.
+///
+/// TBC-faithful semantics: usable while FEARED (breaks the fear + grants 10s
+/// fear immunity via the deferred `BerserkerRagePending`), but NOT while
+/// stunned/polymorphed/incapacitated, and Death Coil's horror (a Fear-type
+/// aura on the dedicated Horror DR bucket) can be neither broken nor blocked.
+/// Reads CC state from the snapshot (`ctx`) so instant fears landed earlier
+/// this frame (e.g. Psychic Scream) are answered on the same tick.
+pub fn try_berserker_rage_while_cc(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    ctx: &CombatContext,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    let ability = AbilityType::BerserkerRage;
+    let def = match abilities.get(&ability) {
+        Some(d) => d,
+        None => return false,
+    };
+
+    // Hard-CC'd in a non-fear way: cannot act at all. Horror also fully locks
+    // the Warrior out — only a real Fear leaves the "break out" window open.
+    let hard_locked = ctx.self_auras().map_or(false, |auras| {
+        auras.iter().any(|a| {
+            matches!(
+                a.effect_type,
+                AuraType::Stun | AuraType::Polymorph | AuraType::Incapacitate
+            ) || (a.effect_type == AuraType::Fear
+                && a.dr_category() == Some(DRCategory::Horror))
+        })
+    });
+    if hard_locked {
+        builder.reject(
+            ability,
+            RejectionReason::PreconditionUnmet {
+                note: "hard-CC'd (stun/poly/incap/horror) — Berserker Rage only answers Fear".into(),
+            },
+        );
+        return false;
+    }
+
+    // Only worth pressing if there's a breakable Fear on us.
+    let has_breakable_fear = ctx.self_auras().map_or(false, |auras| {
+        auras.iter().any(|a| {
+            a.effect_type == AuraType::Fear && a.dr_category() != Some(DRCategory::Horror)
+        })
+    });
+    if !has_breakable_fear {
+        builder.reject(
+            ability,
+            RejectionReason::PreconditionUnmet {
+                note: "no breakable Fear on self".into(),
+            },
+        );
+        return false;
+    }
+
+    if combatant.ability_cooldowns.get(&ability).copied().unwrap_or(0.0) > 0.0 {
+        let remaining = combatant.ability_cooldowns.get(&ability).copied().unwrap_or(0.0);
+        builder.reject(ability, RejectionReason::OnCooldown { remaining });
+        return false;
+    }
+
+    if ctx.has_aura(AuraType::FearImmunity) {
+        builder.reject(ability, RejectionReason::AlreadyApplied);
+        return false;
+    }
+
+    builder.choose(ability, Some(entity), true);
+
+    let caster_id = combatant_id(combatant.team, combatant.class);
+    info!("{} breaks fear with Berserker Rage!", caster_id);
+
+    commands.spawn(BerserkerRagePending {
+        caster: entity,
+        caster_team: combatant.team,
+        caster_class: combatant.class,
+    });
+
+    combatant.ability_cooldowns.insert(ability, def.cooldown);
+    combatant.global_cooldown = GCD;
+
+    log_ability_use(combat_log, combatant.team, combatant.class, "Berserker Rage", None, "uses");
+
+    true
 }
 
