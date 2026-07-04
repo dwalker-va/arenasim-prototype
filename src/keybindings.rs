@@ -32,6 +32,7 @@ pub enum GameAction {
 
     // Display
     ToggleAuraIcons,
+    ToggleCombatPanel,
 }
 
 impl GameAction {
@@ -53,6 +54,7 @@ impl GameAction {
             GameAction::SpeedFast => "Speed: 2x",
             GameAction::SpeedVeryFast => "Speed: 3x",
             GameAction::ToggleAuraIcons => "Toggle Aura Icons",
+            GameAction::ToggleCombatPanel => "Toggle Combat Log Panel",
         }
     }
     
@@ -66,7 +68,7 @@ impl GameAction {
             GameAction::PausePlay | GameAction::SpeedSlow
             | GameAction::SpeedNormal | GameAction::SpeedFast
             | GameAction::SpeedVeryFast => "Simulation",
-            GameAction::ToggleAuraIcons => "Display",
+            GameAction::ToggleAuraIcons | GameAction::ToggleCombatPanel => "Display",
         }
     }
     
@@ -88,6 +90,7 @@ impl GameAction {
             GameAction::SpeedFast,
             GameAction::SpeedVeryFast,
             GameAction::ToggleAuraIcons,
+            GameAction::ToggleCombatPanel,
         ]
     }
 }
@@ -298,6 +301,7 @@ impl Keybindings {
 
         // Display
         bindings.insert(GameAction::ToggleAuraIcons, KeyBinding::new(KeyCode::KeyV));
+        bindings.insert(GameAction::ToggleCombatPanel, KeyBinding::new(KeyCode::KeyL));
 
         Self { bindings }
     }

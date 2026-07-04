@@ -19,10 +19,18 @@ pub struct GameSettings {
     /// Whether to show aura icons below combatant health bars (default: true)
     #[serde(default = "default_show_aura_icons")]
     pub show_aura_icons: bool,
+    /// Whether the combat log / timeline panel is open (default: false — it is
+    /// a diagnostic tool, not part of the default spectator presentation)
+    #[serde(default = "default_show_combat_panel")]
+    pub show_combat_panel: bool,
 }
 
 fn default_show_aura_icons() -> bool {
     true
+}
+
+fn default_show_combat_panel() -> bool {
+    false
 }
 
 /// Tracks whether settings have changed and require application restart
@@ -65,6 +73,7 @@ impl Default for GameSettings {
             vsync: true,
             keybindings: Keybindings::default(),
             show_aura_icons: true,
+            show_combat_panel: false,
         }
     }
 }

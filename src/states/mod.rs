@@ -359,18 +359,23 @@ impl Plugin for StatesPlugin {
             // UI rendering systems
             .add_systems(
                 Update,
+                // Chained: egui systems are serialized on EguiContexts anyway,
+                // and render_team_frames must run AFTER render_combat_panel —
+                // it anchors to available_rect(), which only reflects panels
+                // already shown this frame.
                 (
+                    play_match::load_spell_icons,
                     play_match::render_time_controls,
                     play_match::render_camera_controls,
+                    play_match::render_combat_panel,
                     play_match::render_countdown,
                     play_match::render_victory_celebration,
                     play_match::render_health_bars,
                     play_match::render_team_frames,
                     play_match::render_floating_combat_text,
                     play_match::render_speech_bubbles,
-                    play_match::render_combat_panel,
-                    play_match::load_spell_icons,
                 )
+                    .chain()
                     .run_if(in_state(GameState::PlayMatch)),
             )
             // Selection ring follow & cleanup — runs after combat resolution

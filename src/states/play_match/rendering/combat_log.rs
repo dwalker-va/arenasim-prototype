@@ -5,7 +5,7 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use crate::combat::log::{CombatLog, CombatLogEventType};
-use crate::states::play_match::components::{CombatPanelView, SpellIcons};
+use crate::states::play_match::components::{CombatPanelView, DisplaySettings, SpellIcons};
 
 // ==============================================================================
 // Timeline Constants
@@ -35,7 +35,14 @@ pub fn render_combat_panel(
     combat_log: Res<CombatLog>,
     mut panel_view: ResMut<CombatPanelView>,
     spell_icons: Res<SpellIcons>,
+    display_settings: Res<DisplaySettings>,
 ) {
+    // Hidden by default: the log/timeline is a diagnostic tool, not part of
+    // the default spectator presentation. Toggle with L (or the Log checkbox).
+    if !display_settings.show_combat_panel {
+        return;
+    }
+
     // Use try_ctx_mut to gracefully handle window close
     let Some(ctx) = contexts.try_ctx_mut() else { return; };
 

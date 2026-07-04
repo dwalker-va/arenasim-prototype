@@ -112,7 +112,11 @@ pub fn draw_team_frames(
     class_icons: &ClassIcons,
     spell_icons: &SpellIcons,
 ) {
-    let screen = ctx.screen_rect();
+    // Anchor to available_rect (not screen_rect): egui panels shown earlier
+    // this frame (e.g. the combat log SidePanel) shrink the available rect,
+    // so open diagnostics push the frames aside instead of being painted
+    // over. Requires render_combat_panel to run before this system.
+    let avail = ctx.available_rect();
 
     egui::Area::new(egui::Id::new("team_frames"))
         .fixed_pos(egui::pos2(0.0, 0.0))
@@ -121,8 +125,8 @@ pub fn draw_team_frames(
             draw_column(
                 painter,
                 &data.team1,
-                EDGE_MARGIN,
-                screen,
+                avail.left() + EDGE_MARGIN,
+                avail,
                 "TEAM 1",
                 class_icons,
                 spell_icons,
@@ -130,8 +134,8 @@ pub fn draw_team_frames(
             draw_column(
                 painter,
                 &data.team2,
-                screen.width() - EDGE_MARGIN - FRAME_W,
-                screen,
+                avail.right() - EDGE_MARGIN - FRAME_W,
+                avail,
                 "TEAM 2",
                 class_icons,
                 spell_icons,

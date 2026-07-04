@@ -55,6 +55,12 @@ pub fn render_time_controls(
         info!("Aura icons toggled to: {}", display_settings.show_aura_icons);
     }
 
+    // Handle L key toggle for the combat log / timeline panel
+    if keybindings.action_just_pressed(GameAction::ToggleCombatPanel, &keyboard) {
+        display_settings.show_combat_panel = !display_settings.show_combat_panel;
+        info!("Combat panel toggled to: {}", display_settings.show_combat_panel);
+    }
+
     // Use try_ctx_mut to gracefully handle window close
     let Some(ctx) = contexts.try_ctx_mut() else { return; };
 
@@ -166,6 +172,20 @@ pub fn render_time_controls(
                 }
                 ui.label(
                     egui::RichText::new("Auras [V]")
+                        .size(12.0)
+                        .color(egui::Color32::from_rgb(200, 200, 200))
+                );
+            });
+
+            // Combat log / timeline panel toggle
+            ui.horizontal(|ui| {
+                let mut show_panel = display_settings.show_combat_panel;
+                if ui.checkbox(&mut show_panel, "").changed() {
+                    display_settings.show_combat_panel = show_panel;
+                    info!("Combat panel toggled to: {}", display_settings.show_combat_panel);
+                }
+                ui.label(
+                    egui::RichText::new("Log [L]")
                         .size(12.0)
                         .color(egui::Color32::from_rgb(200, 200, 200))
                 );
