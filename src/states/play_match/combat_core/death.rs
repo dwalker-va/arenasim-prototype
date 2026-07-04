@@ -8,10 +8,10 @@ use super::super::components::*;
 /// Detects dead combatants without a DeathAnimation component and adds one.
 pub fn trigger_death_animation(
     mut commands: Commands,
-    combatants: Query<(Entity, &Combatant, &Transform), Without<DeathAnimation>>,
+    combatants: Query<(Entity, &Combatant, &Transform, Option<&Pet>), Without<DeathAnimation>>,
     all_combatants: Query<(&Transform, &Combatant)>,
 ) {
-    for (entity, combatant, transform) in combatants.iter() {
+    for (entity, combatant, transform, pet) in combatants.iter() {
         if combatant.is_alive() {
             continue;
         }
@@ -54,10 +54,11 @@ pub fn trigger_death_animation(
 
         commands.entity(entity).insert(DeathAnimation::new(fall_direction));
 
+        let display_name = pet.map_or_else(|| combatant.class.name(), |p| p.pet_type.name());
         info!(
             "Team {} {} death animation started (falling toward {:?})",
             combatant.team,
-            combatant.class.name(),
+            display_name,
             fall_direction
         );
     }
@@ -126,7 +127,7 @@ pub fn despawn_pets_of_dead_owners(
                 pet_combatant.current_health = 0.0;
                 combat_log.log(
                     CombatLogEventType::Death,
-                    format!("[DEATH] Team {} {} despawns (owner died)", pet_combatant.team, pet.pet_type.name()),
+                    format!("Team {} {} despawns (owner died)", pet_combatant.team, pet.pet_type.name()),
                 );
             }
         }
