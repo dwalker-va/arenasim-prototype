@@ -603,7 +603,9 @@ pub fn render_health_bars(
                             );
                         }
 
-                        next_bar_y_offset += channel_bar_height + bar_spacing;
+                        // Channel bar is the last element in the overhead stack —
+                        // no further y-offset consumers (aura icons live in the
+                        // team frames now).
                     }
 
                 }
