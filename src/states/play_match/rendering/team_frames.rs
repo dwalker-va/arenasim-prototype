@@ -1,10 +1,12 @@
 //! Broadcast-style fixed team frames (spectator UI).
 //!
 //! Team 1 frames are pinned to the left screen edge, Team 2 to the right,
-//! WoW-arena-tournament style: class icon, health/resource bars, cast bar,
-//! and buff/debuff icon rows with timers. This is the stable home for
-//! per-combatant information; the overhead nameplate keeps only what is
-//! *spatially* meaningful (a thin HP sliver + CC status labels), leaving the
+//! WoW-arena-tournament style: class icon, health/resource bars, and
+//! buff/debuff icon rows with timers. This is the stable home for
+//! per-combatant information; the overhead nameplate keeps what is
+//! *spatially* meaningful — a thin HP sliver, CC status labels, and the
+//! cast/channel bars (with no casting animations on the character models,
+//! the overhead bar is the tell for who is casting at whom) — leaving the
 //! head-level space free for effects like the Berserker Rage mask.
 //!
 //! Split like the Results screen: [`draw_team_frames`] is a pure egui
@@ -40,14 +42,6 @@ pub struct FrameAura {
     pub is_hard_cc: bool,
 }
 
-/// A cast (or channel) in progress.
-pub struct FrameCast {
-    pub name: String,
-    /// 0.0 → 1.0 fill fraction.
-    pub progress: f32,
-    pub interrupted: bool,
-}
-
 /// Everything the frame shows for one combatant.
 pub struct CombatantFrame {
     pub class: CharacterClass,
@@ -62,7 +56,6 @@ pub struct CombatantFrame {
     pub current_resource: f32,
     pub max_resource: f32,
     pub resource_type: ResourceType,
-    pub cast: Option<FrameCast>,
     pub buffs: Vec<FrameAura>,
     pub debuffs: Vec<FrameAura>,
 }
@@ -85,7 +78,6 @@ const FRAME_SPACING: f32 = 10.0;
 const HEADER_H: f32 = 26.0;
 const HP_H: f32 = 16.0;
 const RESOURCE_H: f32 = 8.0;
-const CAST_H: f32 = 14.0;
 const AURA_ICON: f32 = 20.0;
 const AURA_GAP: f32 = 2.0;
 const ROW_GAP: f32 = 4.0;
@@ -100,9 +92,6 @@ fn frame_height(frame: &CombatantFrame) -> f32 {
         return PAD + PET_HEADER_H + ROW_GAP + PET_HP_H + PAD;
     }
     let mut h = PAD + HEADER_H + ROW_GAP + HP_H + 3.0 + RESOURCE_H;
-    if frame.cast.is_some() {
-        h += ROW_GAP + CAST_H;
-    }
     if !frame.buffs.is_empty() {
         h += ROW_GAP + AURA_ICON;
     }
@@ -313,45 +302,6 @@ fn draw_frame(
     );
     y += RESOURCE_H;
 
-    // Cast bar (only while casting/channeling).
-    if let Some(cast) = &frame.cast {
-        y += ROW_GAP;
-        let cast_rect = egui::Rect::from_min_size(egui::pos2(inner_x, y), egui::vec2(inner_w, CAST_H));
-        painter.rect_filled(cast_rect, 2.0, egui::Color32::from_rgb(15, 15, 20));
-        if cast.interrupted {
-            painter.rect_stroke(
-                cast_rect,
-                2.0,
-                egui::Stroke::new(1.5, egui::Color32::from_rgb(220, 50, 50)),
-                egui::StrokeKind::Outside,
-            );
-            painter.text(
-                cast_rect.center(),
-                egui::Align2::CENTER_CENTER,
-                "INTERRUPTED",
-                egui::FontId::proportional(10.0),
-                egui::Color32::WHITE,
-            );
-        } else {
-            painter.rect_filled(
-                egui::Rect::from_min_size(
-                    cast_rect.min,
-                    egui::vec2(cast_rect.width() * cast.progress.clamp(0.0, 1.0), CAST_H),
-                ),
-                2.0,
-                egui::Color32::from_rgb(255, 180, 50),
-            );
-            painter.text(
-                cast_rect.center(),
-                egui::Align2::CENTER_CENTER,
-                &cast.name,
-                egui::FontId::proportional(10.0),
-                egui::Color32::WHITE,
-            );
-        }
-        y += CAST_H;
-    }
-
     // Buff row (gold borders), then debuff row (red borders).
     if !frame.buffs.is_empty() {
         y += ROW_GAP;
@@ -523,13 +473,7 @@ pub fn render_team_frames(
     abilities: Res<AbilityDefinitions>,
     class_icons: Res<ClassIcons>,
     spell_icons: Res<SpellIcons>,
-    combatants: Query<(
-        Entity,
-        &Combatant,
-        Option<&CastingState>,
-        Option<&ChannelingState>,
-        Option<&ActiveAuras>,
-    )>,
+    combatants: Query<(Entity, &Combatant, Option<&ActiveAuras>)>,
     pet_query: Query<&Pet>,
     display_settings: Res<DisplaySettings>,
 ) {
@@ -538,38 +482,14 @@ pub fn render_team_frames(
     // Sort by (team, slot) so frame order is stable across frames and matches
     // config slot order (pets have slot >= 100 and sink to the column bottom).
     let mut rows: Vec<_> = combatants.iter().collect();
-    rows.sort_by_key(|(_, c, _, _, _)| (c.team, c.slot));
+    rows.sort_by_key(|(_, c, _)| (c.team, c.slot));
 
     let mut data = TeamFramesData::default();
-    for (entity, combatant, casting, channeling, auras) in rows {
+    for (entity, combatant, auras) in rows {
         let pet_label = pet_query
             .get(entity)
             .ok()
             .map(|pet| format!("{} (pet)", pet.pet_type.name()));
-
-        let cast = if let Some(casting) = casting {
-            let def = abilities.get(&casting.ability);
-            let (name, cast_time) = def
-                .map(|d| (d.name.clone(), d.cast_time))
-                .unwrap_or_else(|| (format!("{:?}", casting.ability), 0.0));
-            let progress = if cast_time > 0.0 {
-                1.0 - (casting.time_remaining / cast_time)
-            } else {
-                0.0
-            };
-            Some(FrameCast { name, progress, interrupted: casting.interrupted })
-        } else if let Some(channeling) = channeling {
-            let def = abilities.get(&channeling.ability);
-            let name = def
-                .map(|d| d.name.clone())
-                .unwrap_or_else(|| format!("{:?}", channeling.ability));
-            // Channels drain rather than fill: bar shows time remaining.
-            let channel_duration = def.and_then(|d| d.channel_duration).unwrap_or(5.0);
-            let progress = (channeling.duration_remaining / channel_duration).clamp(0.0, 1.0);
-            Some(FrameCast { name, progress, interrupted: channeling.interrupted })
-        } else {
-            None
-        };
 
         let mut buffs = Vec::new();
         let mut debuffs = Vec::new();
@@ -609,7 +529,6 @@ pub fn render_team_frames(
             current_resource: combatant.current_mana,
             max_resource: combatant.max_mana,
             resource_type: combatant.resource_type,
-            cast,
             buffs,
             debuffs,
         };

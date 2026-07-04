@@ -24,8 +24,7 @@ use egui_kittest::Harness;
 use arenasim::states::configure_match_ui::ClassIcons;
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::{
-    draw_team_frames, CombatantFrame, FrameAura, FrameCast, ResourceType, SpellIcons,
-    TeamFramesData,
+    draw_team_frames, CombatantFrame, FrameAura, ResourceType, SpellIcons, TeamFramesData,
 };
 
 fn aura(icon_key: &str, remaining: f32, is_buff: bool, is_hard_cc: bool) -> FrameAura {
@@ -38,8 +37,9 @@ fn aura(icon_key: &str, remaining: f32, is_buff: bool, is_hard_cc: bool) -> Fram
 }
 
 /// A busy 2v2-with-pets scene exercising every frame element: full/hurt/dead
-/// HP states, all three resource types, casting + interrupted casts, absorb
-/// overlay, buff + debuff rows (including overflow), stealth tag, pet frames.
+/// HP states, all three resource types, absorb overlay, buff + debuff rows
+/// (including overflow), stealth tag, pet frames. (Cast bars live on the
+/// overhead nameplate, not in the frames.)
 fn mock_data() -> TeamFramesData {
     TeamFramesData {
         team1: vec![
@@ -54,7 +54,6 @@ fn mock_data() -> TeamFramesData {
                 current_resource: 62.0,
                 max_resource: 100.0,
                 resource_type: ResourceType::Rage,
-                cast: None,
                 buffs: vec![
                     aura("Battle Shout", 96.0, true, false),
                     aura("Berserker Rage", 7.3, true, false),
@@ -76,11 +75,6 @@ fn mock_data() -> TeamFramesData {
                 current_resource: 41.0,
                 max_resource: 150.0,
                 resource_type: ResourceType::Mana,
-                cast: Some(FrameCast {
-                    name: "Flash Heal".to_string(),
-                    progress: 0.62,
-                    interrupted: false,
-                }),
                 buffs: vec![
                     aura("Power Word: Shield", 21.0, true, false),
                     aura("Power Word: Fortitude", 412.0, true, false),
@@ -100,11 +94,6 @@ fn mock_data() -> TeamFramesData {
                 current_resource: 118.0,
                 max_resource: 200.0,
                 resource_type: ResourceType::Mana,
-                cast: Some(FrameCast {
-                    name: "Fear".to_string(),
-                    progress: 0.35,
-                    interrupted: true,
-                }),
                 buffs: vec![],
                 debuffs: vec![
                     aura("Rend", 9.0, false, false),
@@ -130,7 +119,6 @@ fn mock_data() -> TeamFramesData {
                 current_resource: 35.0,
                 max_resource: 100.0,
                 resource_type: ResourceType::Energy,
-                cast: None,
                 buffs: vec![],
                 debuffs: vec![],
             },
@@ -145,7 +133,6 @@ fn mock_data() -> TeamFramesData {
                 current_resource: 0.0,
                 max_resource: 0.0,
                 resource_type: ResourceType::Mana,
-                cast: None,
                 buffs: vec![],
                 debuffs: vec![],
             },
