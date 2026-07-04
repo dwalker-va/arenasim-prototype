@@ -592,7 +592,8 @@ fn dim(c: egui::Color32, f: f32) -> egui::Color32 {
 }
 
 /// Convert a class's bevy `Color` to an egui `Color32`.
-fn class_color32(class: CharacterClass) -> egui::Color32 {
+/// Public: also used by the in-match team frames for icon fallbacks.
+pub fn class_color32(class: CharacterClass) -> egui::Color32 {
     let c = class.color().to_srgba();
     egui::Color32::from_rgb(
         (c.red * 255.0) as u8,

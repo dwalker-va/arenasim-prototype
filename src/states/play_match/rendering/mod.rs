@@ -11,12 +11,14 @@ pub mod combat_log;
 pub mod effects;
 pub mod hud;
 pub mod overlays;
+pub mod team_frames;
 
 // Re-export all public items for backwards compatibility
 pub use combat_log::*;
 pub use effects::*;
 pub use hud::*;
 pub use overlays::*;
+pub use team_frames::*;
 
 use bevy::prelude::*;
 use bevy_egui::egui;
@@ -90,6 +92,7 @@ pub fn get_aura_icon_key(aura: &Aura, ability_definitions: &AbilityDefinitions) 
         AuraType::SpellPowerIncrease => "aura_max_health".to_string(), // Totem buff, reuse buff icon
         AuraType::HealingOverTime => "aura_max_health".to_string(), // Healing Stream Totem buff, reuse buff icon
         AuraType::WindfuryBuff => "aura_max_health".to_string(), // Windfury Totem buff, reuse buff icon
+        AuraType::FearImmunity => "aura_max_health".to_string(), // Berserker Rage buff, reuse buff icon (real icon comes from the ability config)
     }
 }
 
@@ -112,6 +115,7 @@ pub fn is_buff_aura(aura_type: &AuraType) -> bool {
         AuraType::WeaponPoison |
         AuraType::SpellPowerIncrease |
         AuraType::HealingOverTime |
+        AuraType::FearImmunity |
         AuraType::WindfuryBuff
     )
 }

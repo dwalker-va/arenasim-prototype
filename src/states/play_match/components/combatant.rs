@@ -644,6 +644,18 @@ pub struct DivineShieldPending {
     pub caster_class: match_config::CharacterClass,
 }
 
+/// Pending Berserker Rage activation to be processed.
+/// Uses the deferred pending pattern (like DivineShieldPending) because Warrior AI
+/// has immutable aura access. The process_berserker_rage() system breaks Fear auras
+/// on the caster (but NOT Death Coil's horror — separate DR bucket) and applies the
+/// FearImmunity aura.
+#[derive(Component)]
+pub struct BerserkerRagePending {
+    pub caster: Entity,
+    pub caster_team: u8,
+    pub caster_class: match_config::CharacterClass,
+}
+
 /// Pending dispel to be processed by the aura system.
 /// This allows dispels to be applied without holding mutable references
 /// to the aura map during AI decision making.

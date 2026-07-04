@@ -106,6 +106,13 @@ pub enum AuraType {
     /// Inert for ranged/caster allies. Used by the Shaman's Windfury Totem.
     /// (Behavior wired in U2.)
     WindfuryBuff,
+    /// Immunity to Fear effects — blocks new Fear applications on the holder.
+    /// Deliberately does NOT block Death Coil's horror (a Fear-type aura with
+    /// `dr_category_override: Some(DRCategory::Horror)`) — horror bypasses fear
+    /// immunity, matching WoW TBC. Used by the Warrior's Berserker Rage.
+    /// Magnitude unused (always 1.0 by convention). Not purgeable (physical
+    /// enrage, not magic).
+    FearImmunity,
 }
 
 /// How a debuff is classified for dispel/removal. Orthogonal to `AuraType` so a

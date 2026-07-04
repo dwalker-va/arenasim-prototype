@@ -40,6 +40,7 @@ pub use super::effects::process_dispels;
 pub use super::effects::process_holy_shock_heals;
 pub use super::effects::process_holy_shock_damage;
 pub use super::effects::process_divine_shield;
+pub use super::effects::process_berserker_rage;
 pub use super::effects::process_backlash;
 
 // === Phase 2: Combat and Movement ===
@@ -148,6 +149,7 @@ where
             slow_zone_system,       // Zone slow refresh before aura processing
             totem_pulse_system,     // Totem dedup + buff pulse on allies (after slow_zone_system)
             process_divine_shield,  // Must run BEFORE apply_pending_auras so DamageImmunity blocks CC
+            process_berserker_rage, // Must run BEFORE apply_pending_auras so FearImmunity blocks queued Fears
             apply_pending_auras,
             process_dispels,
             // Must run AFTER process_dispels (consumes BacklashPending events that

@@ -500,7 +500,7 @@ pub fn decide_abilities(
     countdown: Res<MatchCountdown>,
     time: Res<Time>,
     movement_config: Res<crate::states::play_match::movement_config::MovementConfig>,
-    mut combatants: Query<(Entity, &mut Combatant, &Transform, Option<&mut ActiveAuras>), (Without<CastingState>, Without<ChannelingState>)>,
+    mut combatants: Query<(Entity, &mut Combatant, &Transform, Option<&mut ActiveAuras>, Option<&ChargingState>, Option<&DisengagingState>), (Without<CastingState>, Without<ChannelingState>)>,
     casting_auras: Query<(Entity, &Combatant, &Transform, Option<&ActiveAuras>, &CastingState), With<CastingState>>,
     channeling_auras: Query<(Entity, &Combatant, &Transform, Option<&ActiveAuras>, &ChannelingState), (With<ChannelingState>, Without<CastingState>)>,
     dr_tracker_query: Query<(Entity, &DRTracker)>,
@@ -584,11 +584,29 @@ pub fn decide_abilities(
     // the "Cheap Shot then Kick on same target same frame" wasted-interrupt gap.
     let mut same_frame_cc_queue: Vec<(Entity, Aura)> = Vec::new();
 
-    for (entity, mut combatant, transform, auras) in combatants.iter_mut() {
+    // Charging/Disengaging combatants are CC-immune in the real application path
+    // (apply_pending_auras rejects the aura with "Immune (charging)"). Mirror that
+    // here so the snapshot reflection doesn't show a phantom CC on an unstoppable
+    // target — without this, a Warrior screamed mid-Charge saw a one-frame phantom
+    // fear and wasted Berserker Rage's cooldown answering it.
+    let unstoppable: std::collections::BTreeSet<Entity> = combatants
+        .iter()
+        .filter(|(_, _, _, _, charging, disengaging)| charging.is_some() || disengaging.is_some())
+        .map(|(e, _, _, _, _, _)| e)
+        .collect();
+
+    for (entity, mut combatant, transform, auras, _, _) in combatants.iter_mut() {
         // Flush pending same-frame CCs into the per-frame snapshot BEFORE any checks
         // or decisions for this combatant, so that stuns/roots landed earlier this frame
         // are visible to this combatant's incapacitation check and its CombatContext.
         for (cc_target, cc_aura) in same_frame_cc_queue.drain(..) {
+            let is_cc = matches!(
+                cc_aura.effect_type,
+                AuraType::Fear | AuraType::Stun | AuraType::Root | AuraType::Polymorph | AuraType::Incapacitate
+            );
+            if is_cc && unstoppable.contains(&cc_target) {
+                continue; // real path will reject it as "Immune (charging)"
+            }
             snapshot.reflect_instant_cc(cc_target, &cc_aura);
         }
 
@@ -639,6 +657,36 @@ pub fn decide_abilities(
             };
             if acted {
                 continue; // DivineShieldPending spawned — CC will be purged next frame
+            }
+            continue; // Still incapacitated, can't do anything else
+        }
+
+        // Warrior-specific: Berserker Rage can be used while feared (TBC rule —
+        // breaks the fear + grants fear immunity; horror/stun/poly stay locked).
+        // Same builder-ownership shape as the Paladin Divine Shield arm above.
+        if is_incapacitated && combatant.class == match_config::CharacterClass::Warrior {
+            let cc_ctx = snapshot.context_for(entity);
+            let actor_view = cc_ctx
+                .self_info()
+                .map(crate::states::play_match::decision_trace::ActorView::from_info);
+            let acted = if let Some(av) = actor_view {
+                let mut builder = decision_trace.start_ability_decision(av, None);
+                let result = class_ai::warrior::try_berserker_rage_while_cc(
+                    &mut commands,
+                    &mut combat_log,
+                    &abilities,
+                    entity,
+                    &mut combatant,
+                    &cc_ctx,
+                    &mut builder,
+                );
+                builder.finish();
+                result
+            } else {
+                false
+            };
+            if acted {
+                continue; // BerserkerRagePending spawned — fear breaks next frame
             }
             continue; // Still incapacitated, can't do anything else
         }
@@ -986,7 +1034,7 @@ pub fn decide_abilities(
         };
         let damage = (damage * ds_penalty).max(0.0);
 
-        if let Ok((_, mut target, target_transform, mut target_auras)) = combatants.get_mut(target_entity) {
+        if let Ok((_, mut target, target_transform, mut target_auras, _, _)) = combatants.get_mut(target_entity) {
             if target.is_alive() {
                 // Apply damage with absorb shield consideration
                 let (dmg, absorbed) = super::combat_core::apply_damage_with_absorb(
@@ -1122,7 +1170,7 @@ pub fn decide_abilities(
         }
 
         // Update attacker's damage dealt
-        if let Ok((_, mut attacker, _, _)) = combatants.get_mut(attacker_entity) {
+        if let Ok((_, mut attacker, _, _, _, _)) = combatants.get_mut(attacker_entity) {
             attacker.damage_dealt += actual_damage;
         }
     }
@@ -1142,11 +1190,11 @@ pub fn decide_abilities(
 
         // Skip if caster died from an instant attack earlier this frame (or entity is gone)
         match combatants.get(caster_entity) {
-            Ok((_, caster, _, _)) if caster.is_alive() => {}
+            Ok((_, caster, _, _, _, _)) if caster.is_alive() => {}
             _ => continue,
         }
 
-        if let Ok((_, mut target, target_transform, mut target_auras)) = combatants.get_mut(target_entity) {
+        if let Ok((_, mut target, target_transform, mut target_auras, _, _)) = combatants.get_mut(target_entity) {
             if target.is_alive() {
                 // Apply damage with absorb shield consideration (Frost Nova is always Frost school)
                 let (dmg, absorbed) = super::combat_core::apply_damage_with_absorb(
@@ -1270,7 +1318,7 @@ pub fn decide_abilities(
         }
 
         // Update caster's damage dealt
-        if let Ok((_, mut caster, _, _)) = combatants.get_mut(caster_entity) {
+        if let Ok((_, mut caster, _, _, _, _)) = combatants.get_mut(caster_entity) {
             caster.damage_dealt += actual_damage;
         }
     }

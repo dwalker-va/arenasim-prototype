@@ -64,6 +64,9 @@ pub struct SimulationSpeed {
 pub struct DisplaySettings {
     /// Whether to show aura icons below combatant health bars
     pub show_aura_icons: bool,
+    /// Whether the combat log / timeline side panel is open. Off by default:
+    /// it is a diagnostic tool, not part of the default spectator view.
+    pub show_combat_panel: bool,
 }
 
 impl Default for SimulationSpeed {

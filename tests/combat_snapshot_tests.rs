@@ -16,8 +16,8 @@ use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::class_ai::combat_snapshot::CombatSnapshot;
 use arenasim::states::play_match::class_ai::CombatantInfo;
 use arenasim::states::play_match::{
-    ActiveAuras, Aura, AuraType, CastingState, ChannelingState, Combatant, DRCategory, DRTracker, DispelType,
-    Pet,
+    ActiveAuras, Aura, AuraType, CastingState, ChannelingState, ChargingState, Combatant,
+    DRCategory, DRTracker, DisengagingState, DispelType, Pet,
 };
 
 fn target_info(entity: Entity, team: u8, class: CharacterClass) -> CombatantInfo {
@@ -188,7 +188,7 @@ fn reflect_instant_cc_respects_existing_dr_immunity() {
 fn build_snapshot_from_world(world: &mut World) -> CombatSnapshot {
     let mut state: SystemState<(
         Query<
-            (Entity, &'static mut Combatant, &'static Transform, Option<&'static mut ActiveAuras>),
+            (Entity, &'static mut Combatant, &'static Transform, Option<&'static mut ActiveAuras>, Option<&'static ChargingState>, Option<&'static DisengagingState>),
             (Without<CastingState>, Without<ChannelingState>),
         >,
         Query<

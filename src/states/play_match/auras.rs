@@ -136,6 +136,18 @@ pub fn reflect_instant_cc_in_snapshot(
         return;
     }
 
+    // Berserker Rage FearImmunity blocks real Fears in the real path — mirror
+    // that here. Death Coil's horror (DRCategory::Horror) bypasses it.
+    if aura.effect_type == AuraType::Fear && aura.dr_category() != Some(DRCategory::Horror) {
+        let has_fear_immunity = active_auras_map
+            .get(&target)
+            .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::FearImmunity))
+            .unwrap_or(false);
+        if has_fear_immunity {
+            return;
+        }
+    }
+
     let dr_category = aura.dr_category();
 
     // DR immunity rejects the CC entirely.
@@ -320,6 +332,51 @@ pub fn apply_pending_auras(
                 },
                 PlayMatchEntity,
             ));
+
+            commands.entity(pending_entity).despawn();
+            continue;
+        }
+
+        // Check for FearImmunity (Berserker Rage): blocks real Fear applications.
+        // Death Coil's horror (Fear-type aura resolving to DRCategory::Horror)
+        // BYPASSES this — horror and fear are separate mechanics (TBC rule).
+        let is_blockable_fear = pending.aura.effect_type == AuraType::Fear
+            && pending.aura.dr_category() != Some(DRCategory::Horror);
+        let has_fear_immunity = if let Some(ref auras) = active_auras {
+            auras.auras.iter().any(|a| a.effect_type == AuraType::FearImmunity)
+        } else {
+            false
+        };
+
+        if is_blockable_fear && has_fear_immunity {
+            let text_position = target_transform.translation + Vec3::new(0.0, 2.5, 0.0);
+            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(pending.target) {
+                get_next_fct_offset(&mut fct_state)
+            } else {
+                (0.0, 0.0)
+            };
+
+            commands.spawn((
+                FloatingCombatText {
+                    world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
+                    text: "Immune".to_string(),
+                    color: egui::Color32::YELLOW,
+                    lifetime: 1.5,
+                    vertical_offset: offset_y,
+                    is_crit: false,
+                },
+                PlayMatchEntity,
+            ));
+
+            combat_log.log(
+                CombatLogEventType::CrowdControl,
+                format!(
+                    "{} IMMUNE on Team {} {} (Berserker Rage)",
+                    pending.aura.ability_name,
+                    target_combatant.team,
+                    target_combatant.class.name(),
+                ),
+            );
 
             commands.entity(pending_entity).despawn();
             continue;

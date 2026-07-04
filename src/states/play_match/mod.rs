@@ -339,6 +339,7 @@ pub fn setup_play_match(
     // Initialize display settings from game settings
     commands.insert_resource(DisplaySettings {
         show_aura_icons: game_settings.show_aura_icons,
+        show_combat_panel: game_settings.show_combat_panel,
     });
 
     // Spawn arena floor - octagonal shape matching the wall boundary

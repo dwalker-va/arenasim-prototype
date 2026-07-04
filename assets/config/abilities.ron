@@ -279,6 +279,30 @@
             spell_school: None,
         ),
 
+        // Berserker Rage: instant self-buff that breaks an active Fear on the
+        // Warrior and grants 10s of Fear immunity (TBC-faithful). Death Coil's
+        // horror BYPASSES both the break and the immunity — horror and fear are
+        // separate mechanics, so Death Coil remains the Warlock's answer to a
+        // zerking Warrior (matching TBC, where warlock guides open with Death
+        // Coil precisely because Berserker Rage can't answer it). The aura here
+        // is the immunity buff; the fear break is handled by
+        // process_berserker_rage via the BerserkerRagePending deferred pattern.
+        BerserkerRage: (
+            name: "Berserker Rage",
+            icon: "icons/abilities/spell_nature_ancestralguardian.jpg",
+            cast_time: 0.0,
+            range: 0.0,           // Self-cast
+            mana_cost: 0.0,
+            cooldown: 30.0,
+            applies_aura: Some((
+                aura_type: FearImmunity,
+                duration: 10.0,
+                magnitude: 1.0,
+                break_on_damage: -1.0, // never breaks on damage
+            )),
+            spell_school: None,
+        ),
+
         // ============================================================================
         // ROGUE ABILITIES
         // ============================================================================

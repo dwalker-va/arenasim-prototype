@@ -204,6 +204,35 @@ pub struct DeathCoilBurst {
     pub initial_lifetime: f32,
 }
 
+/// Visual effect for Berserker Rage activation — the TBC-style flat black
+/// "angry face" mask that flashes at the Warrior's head. Billboarded to the
+/// camera, pops in with a scale overshoot, holds, then collapses. Spawned as a
+/// bare marker by `process_berserker_rage` (headless-safe); the graphical
+/// systems attach the textured quad and spawn the companion [`BerserkGlow`].
+#[derive(Component)]
+pub struct BerserkMask {
+    /// The Warrior — the mask follows this entity's head for its short life.
+    pub caster: Entity,
+    /// Time remaining before despawn (seconds).
+    pub lifetime: f32,
+    /// Initial lifetime for the pop/hold/collapse curve.
+    pub initial_lifetime: f32,
+}
+
+/// Companion effect to [`BerserkMask`] — the hot red-orange emissive glow
+/// behind the mask. Separate top-level entity (not a child) so both pieces use
+/// the same flat follow-the-caster idiom as every other effect here. Spawned
+/// by the graphical mask-spawn system only, never by combat code.
+#[derive(Component)]
+pub struct BerserkGlow {
+    /// The Warrior — the glow follows this entity's head for its short life.
+    pub caster: Entity,
+    /// Time remaining before despawn (seconds).
+    pub lifetime: f32,
+    /// Initial lifetime for the pulse/fade curve.
+    pub initial_lifetime: f32,
+}
+
 /// Visual effect indicating a combatant has Unstable Affliction active.
 /// Pulses at ~0.5Hz (every 2s) in deep violet so it reads independently from
 /// Corruption's faster green tendrils when both DoTs are stacked on the target.

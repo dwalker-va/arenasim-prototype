@@ -239,6 +239,18 @@ impl Plugin for StatesPlugin {
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_state(GameState::PlayMatch)),
             )
+            // Berserker Rage activation visuals (separate group to avoid tuple size limits)
+            // The TBC-style black angry mask + red glow at the Warrior's head.
+            .add_systems(
+                Update,
+                (
+                    play_match::spawn_berserk_mask_visuals,     // Attach glyph quad + glow when a mask marker appears
+                    play_match::update_berserk_masks,           // Follow head, billboard, pop/hold/collapse
+                    play_match::cleanup_expired_berserk_masks,  // Remove expired masks and glows
+                )
+                    .after(CombatSystemPhase::CombatResolution)
+                    .run_if(in_state(GameState::PlayMatch)),
+            )
             // Unstable Affliction visuals: DoT glow, backlash burst, silenced text
             // (graphical only — never registered in headless systems.rs).
             .add_systems(
@@ -347,17 +359,23 @@ impl Plugin for StatesPlugin {
             // UI rendering systems
             .add_systems(
                 Update,
+                // Chained: egui systems are serialized on EguiContexts anyway,
+                // and render_team_frames must run AFTER render_combat_panel —
+                // it anchors to available_rect(), which only reflects panels
+                // already shown this frame.
                 (
+                    play_match::load_spell_icons,
                     play_match::render_time_controls,
                     play_match::render_camera_controls,
+                    play_match::render_combat_panel,
                     play_match::render_countdown,
                     play_match::render_victory_celebration,
                     play_match::render_health_bars,
+                    play_match::render_team_frames,
                     play_match::render_floating_combat_text,
                     play_match::render_speech_bubbles,
-                    play_match::render_combat_panel,
-                    play_match::load_spell_icons,
                 )
+                    .chain()
                     .run_if(in_state(GameState::PlayMatch)),
             )
             // Selection ring follow & cleanup — runs after combat resolution
