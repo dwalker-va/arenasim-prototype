@@ -173,6 +173,29 @@ pub fn handle_camera_input(
     }
 }
 
+/// Look-at point for FollowCenter mode: the midpoint of the two teams'
+/// centroids, so a headcount imbalance (pets, 2v3) can't bias the camera
+/// toward the larger team.
+fn follow_center_target(
+    combatants: &Query<(Entity, &Transform, &Combatant), Without<ArenaCamera>>,
+) -> Vec3 {
+    let mut sums = [Vec3::ZERO; 2];
+    let mut counts = [0u32; 2];
+    for (_, transform, combatant) in combatants.iter() {
+        if combatant.is_alive() && (combatant.team == 1 || combatant.team == 2) {
+            let idx = (combatant.team - 1) as usize;
+            sums[idx] += transform.translation;
+            counts[idx] += 1;
+        }
+    }
+    match (counts[0], counts[1]) {
+        (0, 0) => Vec3::ZERO,
+        (_, 0) => sums[0] / counts[0] as f32,
+        (0, _) => sums[1] / counts[1] as f32,
+        (_, _) => (sums[0] / counts[0] as f32 + sums[1] / counts[1] as f32) / 2.0,
+    }
+}
+
 /// Update camera position and rotation based on controller state
 pub fn update_camera_position(
     mut camera_controller: ResMut<CameraController>,
@@ -190,19 +213,7 @@ pub fn update_camera_position(
     if needs_manual_switch {
         // Calculate current target before switching to manual
         let current_target = match camera_controller.mode {
-            CameraMode::FollowCenter => {
-                let alive_combatants: Vec<Vec3> = combatants
-                    .iter()
-                    .filter(|(_, _, c)| c.is_alive())
-                    .map(|(_, t, _)| t.translation)
-                    .collect();
-                if alive_combatants.is_empty() {
-                    Vec3::ZERO
-                } else {
-                    let sum: Vec3 = alive_combatants.iter().sum();
-                    sum / alive_combatants.len() as f32
-                }
-            }
+            CameraMode::FollowCenter => follow_center_target(&combatants),
             CameraMode::FollowCombatant(target_entity) => {
                 combatants
                     .iter()
@@ -237,21 +248,7 @@ pub fn update_camera_position(
     
     // Determine the target look-at point based on camera mode
     let target_point = match camera_controller.mode {
-        CameraMode::FollowCenter => {
-            // Calculate center of all alive combatants
-            let alive_combatants: Vec<Vec3> = combatants
-                .iter()
-                .filter(|(_, _, c)| c.is_alive())
-                .map(|(_, t, _)| t.translation)
-                .collect();
-            
-            if alive_combatants.is_empty() {
-                Vec3::ZERO
-            } else {
-                let sum: Vec3 = alive_combatants.iter().sum();
-                sum / alive_combatants.len() as f32
-            }
-        }
+        CameraMode::FollowCenter => follow_center_target(&combatants),
         CameraMode::FollowCombatant(target_entity) => {
             // Follow specific combatant
             combatants
