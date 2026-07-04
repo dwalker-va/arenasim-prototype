@@ -365,6 +365,7 @@ impl Plugin for StatesPlugin {
                     play_match::render_countdown,
                     play_match::render_victory_celebration,
                     play_match::render_health_bars,
+                    play_match::render_team_frames,
                     play_match::render_floating_combat_text,
                     play_match::render_speech_bubbles,
                     play_match::render_combat_panel,

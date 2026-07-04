@@ -5,9 +5,7 @@
 use bevy::prelude::*;
 use bevy::time::Real;
 use bevy_egui::{egui, EguiContexts};
-use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
-use super::{get_aura_icon_key, is_buff_aura, AURA_ICON_SIZE, AURA_ICON_SPACING};
 
 // ==============================================================================
 // Zoom Scaling Constants
@@ -191,13 +189,10 @@ pub fn render_time_controls(
 /// - **Channel bar** (when channeling): Green bar that drains down as channel progresses
 pub fn render_health_bars(
     mut contexts: EguiContexts,
-    abilities: Res<AbilityDefinitions>,
-    combatants: Query<(&Combatant, &Transform, Option<&CastingState>, Option<&ChannelingState>, Option<&ActiveAuras>)>,
+    combatants: Query<(&Combatant, &Transform, Option<&ActiveAuras>)>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
     time: Res<Time<Real>>,
-    spell_icons: Res<SpellIcons>,
     camera_controller: Res<CameraController>,
-    display_settings: Res<DisplaySettings>,
 ) {
     // Use try_ctx_mut to gracefully handle window close
     let Some(ctx) = contexts.try_ctx_mut() else { return; };
@@ -217,7 +212,7 @@ pub fn render_health_bars(
     egui::Area::new(egui::Id::new("health_bars"))
         .fixed_pos(egui::pos2(0.0, 0.0))
         .show(ctx, |ui| {
-            for (combatant, transform, casting_state, channeling_state, active_auras) in combatants.iter() {
+            for (combatant, transform, active_auras) in combatants.iter() {
                 if !combatant.is_alive() {
                     continue;
                 }
@@ -233,7 +228,6 @@ pub fn render_health_bars(
                     // Health bar dimensions (scaled by zoom)
                     let bar_width = 50.0 * ui_scale;
                     let bar_height = 6.0 * ui_scale;
-                    let bar_spacing = 2.0 * ui_scale;
                     let bar_pos = egui::pos2(
                         screen_pos.x - bar_width / 2.0,
                         screen_pos.y - bar_height / 2.0,
@@ -393,268 +387,10 @@ pub fn render_health_bars(
                         );
                     }
 
-                    // Resource bar (mana/energy/rage)
-                    let mut next_bar_y_offset = bar_height + bar_spacing;
-                    if combatant.max_mana > 0.0 {
-                        let resource_percent = combatant.current_mana / combatant.max_mana;
-                        let resource_bar_pos = egui::pos2(
-                            bar_pos.x,
-                            bar_pos.y + next_bar_y_offset,
-                        );
-                        let resource_bar_height = 4.0 * ui_scale; // Slightly smaller than health bar
-
-                        // Determine resource color based on type
-                        let (resource_color, res_border_color) = match combatant.resource_type {
-                            ResourceType::Mana => (
-                                egui::Color32::from_rgb(80, 150, 255),  // Blue
-                                egui::Color32::from_rgb(150, 150, 200),
-                            ),
-                            ResourceType::Energy => (
-                                egui::Color32::from_rgb(255, 255, 100), // Yellow
-                                egui::Color32::from_rgb(200, 200, 150),
-                            ),
-                            ResourceType::Rage => (
-                                egui::Color32::from_rgb(255, 80, 80),   // Red
-                                egui::Color32::from_rgb(200, 150, 150),
-                            ),
-                        };
-
-                        // Resource bar background
-                        ui.painter().rect_filled(
-                            egui::Rect::from_min_size(resource_bar_pos, egui::vec2(bar_width, resource_bar_height)),
-                            corner_radius,
-                            egui::Color32::from_rgb(20, 20, 30),
-                        );
-
-                        // Resource bar fill (colored by resource type)
-                        ui.painter().rect_filled(
-                            egui::Rect::from_min_size(
-                                resource_bar_pos,
-                                egui::vec2(bar_width * resource_percent, resource_bar_height),
-                            ),
-                            corner_radius,
-                            resource_color,
-                        );
-
-                        // Resource bar border
-                        ui.painter().rect_stroke(
-                            egui::Rect::from_min_size(resource_bar_pos, egui::vec2(bar_width, resource_bar_height)),
-                            corner_radius,
-                            egui::Stroke::new(1.0 * ui_scale, res_border_color),
-                            egui::StrokeKind::Outside,
-                        );
-
-                        next_bar_y_offset += resource_bar_height + bar_spacing;
-                    }
-
-                    // Cast bar (only when actively casting)
-                    if let Some(casting) = casting_state {
-                        let ability_def = abilities.get_unchecked(&casting.ability);
-
-                        let cast_bar_pos = egui::pos2(
-                            bar_pos.x,
-                            bar_pos.y + next_bar_y_offset,
-                        );
-                        let cast_bar_height = 8.0 * ui_scale; // Slightly larger than other bars
-                        let cast_bar_width = bar_width + 10.0 * ui_scale; // Wider for better visibility
-
-                        // Adjust x position to keep it centered
-                        let cast_bar_pos = egui::pos2(
-                            cast_bar_pos.x - 5.0 * ui_scale,
-                            cast_bar_pos.y,
-                        );
-
-                        let cast_font_size = 10.0 * ui_scale;
-
-                        // Interrupted casts show in RED
-                        if casting.interrupted {
-                            // Red background for interrupted
-                            ui.painter().rect_filled(
-                                egui::Rect::from_min_size(cast_bar_pos, egui::vec2(cast_bar_width, cast_bar_height)),
-                                corner_radius,
-                                egui::Color32::from_rgb(150, 20, 20), // Dark red
-                            );
-
-                            // Red border
-                            ui.painter().rect_stroke(
-                                egui::Rect::from_min_size(cast_bar_pos, egui::vec2(cast_bar_width, cast_bar_height)),
-                                corner_radius,
-                                egui::Stroke::new(1.5 * ui_scale, egui::Color32::from_rgb(220, 50, 50)),
-                                egui::StrokeKind::Outside,
-                            );
-
-                            // "INTERRUPTED" text in white
-                            let text_pos = egui::pos2(
-                                cast_bar_pos.x + cast_bar_width / 2.0,
-                                cast_bar_pos.y + cast_bar_height / 2.0,
-                            );
-                            ui.painter().text(
-                                text_pos,
-                                egui::Align2::CENTER_CENTER,
-                                "INTERRUPTED",
-                                egui::FontId::proportional(cast_font_size),
-                                egui::Color32::WHITE,
-                            );
-                        } else {
-                            // Normal cast bar
-                            let cast_progress = 1.0 - (casting.time_remaining / ability_def.cast_time);
-
-                            // Cast bar background (darker)
-                            ui.painter().rect_filled(
-                                egui::Rect::from_min_size(cast_bar_pos, egui::vec2(cast_bar_width, cast_bar_height)),
-                                corner_radius,
-                                egui::Color32::from_rgb(15, 15, 20),
-                            );
-
-                            // Cast bar fill (orange/yellow, WoW-style)
-                            ui.painter().rect_filled(
-                                egui::Rect::from_min_size(
-                                    cast_bar_pos,
-                                    egui::vec2(cast_bar_width * cast_progress, cast_bar_height),
-                                ),
-                                corner_radius,
-                                egui::Color32::from_rgb(255, 180, 50), // Orange
-                            );
-
-                            // Cast bar border
-                            ui.painter().rect_stroke(
-                                egui::Rect::from_min_size(cast_bar_pos, egui::vec2(cast_bar_width, cast_bar_height)),
-                                corner_radius,
-                                egui::Stroke::new(1.5 * ui_scale, egui::Color32::from_rgb(255, 200, 100)),
-                                egui::StrokeKind::Outside,
-                            );
-
-                            // Spell name text (centered on cast bar)
-                            let text_pos = egui::pos2(
-                                cast_bar_pos.x + cast_bar_width / 2.0,
-                                cast_bar_pos.y + cast_bar_height / 2.0,
-                            );
-                            ui.painter().text(
-                                text_pos,
-                                egui::Align2::CENTER_CENTER,
-                                &ability_def.name,
-                                egui::FontId::proportional(cast_font_size),
-                                egui::Color32::WHITE,
-                            );
-                        }
-
-                        next_bar_y_offset += cast_bar_height + bar_spacing;
-                    }
-
-                    // Channel bar (only when actively channeling)
-                    // Unlike cast bars which fill up, channel bars start full and drain down
-                    if let Some(channeling) = channeling_state {
-                        let ability_def = abilities.get_unchecked(&channeling.ability);
-                        let channel_duration = ability_def.channel_duration.unwrap_or(5.0);
-
-                        let channel_bar_pos = egui::pos2(
-                            bar_pos.x,
-                            bar_pos.y + next_bar_y_offset,
-                        );
-                        let channel_bar_height = 8.0 * ui_scale;
-                        let channel_bar_width = bar_width + 10.0 * ui_scale;
-
-                        // Adjust x position to keep it centered
-                        let channel_bar_pos = egui::pos2(
-                            channel_bar_pos.x - 5.0 * ui_scale,
-                            channel_bar_pos.y,
-                        );
-
-                        let channel_font_size = 10.0 * ui_scale;
-
-                        // Interrupted channels show in RED
-                        if channeling.interrupted {
-                            // Red background for interrupted
-                            ui.painter().rect_filled(
-                                egui::Rect::from_min_size(channel_bar_pos, egui::vec2(channel_bar_width, channel_bar_height)),
-                                corner_radius,
-                                egui::Color32::from_rgb(150, 20, 20),
-                            );
-
-                            // Red border
-                            ui.painter().rect_stroke(
-                                egui::Rect::from_min_size(channel_bar_pos, egui::vec2(channel_bar_width, channel_bar_height)),
-                                corner_radius,
-                                egui::Stroke::new(1.5 * ui_scale, egui::Color32::from_rgb(220, 50, 50)),
-                                egui::StrokeKind::Outside,
-                            );
-
-                            // "INTERRUPTED" text
-                            let text_pos = egui::pos2(
-                                channel_bar_pos.x + channel_bar_width / 2.0,
-                                channel_bar_pos.y + channel_bar_height / 2.0,
-                            );
-                            ui.painter().text(
-                                text_pos,
-                                egui::Align2::CENTER_CENTER,
-                                "INTERRUPTED",
-                                egui::FontId::proportional(channel_font_size),
-                                egui::Color32::WHITE,
-                            );
-                        } else {
-                            // Channel bar drains from full to empty (opposite of cast bar)
-                            let channel_progress = channeling.duration_remaining / channel_duration;
-
-                            // Channel bar background (darker)
-                            ui.painter().rect_filled(
-                                egui::Rect::from_min_size(channel_bar_pos, egui::vec2(channel_bar_width, channel_bar_height)),
-                                corner_radius,
-                                egui::Color32::from_rgb(15, 15, 20),
-                            );
-
-                            // Channel bar fill (green/teal, distinct from orange cast bar)
-                            ui.painter().rect_filled(
-                                egui::Rect::from_min_size(
-                                    channel_bar_pos,
-                                    egui::vec2(channel_bar_width * channel_progress, channel_bar_height),
-                                ),
-                                corner_radius,
-                                egui::Color32::from_rgb(50, 200, 150), // Teal/green
-                            );
-
-                            // Channel bar border
-                            ui.painter().rect_stroke(
-                                egui::Rect::from_min_size(channel_bar_pos, egui::vec2(channel_bar_width, channel_bar_height)),
-                                corner_radius,
-                                egui::Stroke::new(1.5 * ui_scale, egui::Color32::from_rgb(100, 220, 180)),
-                                egui::StrokeKind::Outside,
-                            );
-
-                            // Spell name text (centered on channel bar)
-                            let text_pos = egui::pos2(
-                                channel_bar_pos.x + channel_bar_width / 2.0,
-                                channel_bar_pos.y + channel_bar_height / 2.0,
-                            );
-                            ui.painter().text(
-                                text_pos,
-                                egui::Align2::CENTER_CENTER,
-                                &ability_def.name,
-                                egui::FontId::proportional(channel_font_size),
-                                egui::Color32::WHITE,
-                            );
-                        }
-
-                        next_bar_y_offset += channel_bar_height + bar_spacing;
-                    }
-
-                    // Aura icons (below cast bar or resource bar) - only if enabled
-                    if display_settings.show_aura_icons {
-                        if let Some(auras) = active_auras {
-                            if !auras.auras.is_empty() {
-                                render_aura_icons(
-                                    ui.painter(),
-                                    bar_pos,
-                                    bar_width,
-                                    next_bar_y_offset,
-                                    auras,
-                                    &spell_icons,
-                                    &abilities,
-                                    ui_scale,
-                                    pulse_intensity,
-                                );
-                            }
-                        }
-                    }
+                    // Resource, cast/channel bars and aura icon rows moved to the
+                    // fixed team frames (team_frames.rs) — the overhead plate keeps
+                    // only the spatially-meaningful HP sliver + status labels, so
+                    // head-level effects (Berserker Rage mask, FCT) have room.
                 }
             }
         });
@@ -711,8 +447,9 @@ fn render_status_label(
 // Aura Icons
 // ==============================================================================
 
-/// Check if an aura type is a hard CC that should be highlighted
-fn is_hard_cc_aura(aura_type: &AuraType) -> bool {
+/// Check if an aura type is a hard CC that should be highlighted.
+/// Public: also used by the team frames for the bright-border treatment.
+pub fn is_hard_cc_aura(aura_type: &AuraType) -> bool {
     matches!(aura_type,
         AuraType::Stun |
         AuraType::Fear |
@@ -721,192 +458,3 @@ fn is_hard_cc_aura(aura_type: &AuraType) -> bool {
     )
 }
 
-/// Render aura icons with countdown timers below the health/cast bars.
-/// Icons are centered below the health bar, with buffs using gold borders
-/// and debuffs using red borders. Countdown timers use OmniCC-style coloring.
-/// Hard CC effects (stun, fear, polymorph, root) get a pulsing glow.
-fn render_aura_icons(
-    painter: &egui::Painter,
-    bar_pos: egui::Pos2,
-    bar_width: f32,
-    y_offset: f32,
-    auras: &ActiveAuras,
-    spell_icons: &SpellIcons,
-    ability_definitions: &AbilityDefinitions,
-    ui_scale: f32,
-    pulse_intensity: f32,
-) {
-    let num_auras = auras.auras.len();
-    if num_auras == 0 {
-        return;
-    }
-
-    // Scale icon size and spacing
-    let icon_size = AURA_ICON_SIZE * ui_scale;
-    let icon_spacing = AURA_ICON_SPACING * ui_scale;
-    let corner_radius = 2.0 * ui_scale;
-
-    // Calculate total width of icon row
-    let total_width = (num_auras as f32 * icon_size)
-        + ((num_auras - 1) as f32 * icon_spacing);
-
-    // Center the icons below the health bar
-    let start_x = bar_pos.x + (bar_width - total_width) / 2.0;
-    let icons_y = bar_pos.y + y_offset + 2.0 * ui_scale; // Small gap below bars
-
-    for (i, aura) in auras.auras.iter().enumerate() {
-        let icon_x = start_x + (i as f32 * (icon_size + icon_spacing));
-        let icon_rect = egui::Rect::from_min_size(
-            egui::pos2(icon_x, icons_y),
-            egui::vec2(icon_size, icon_size),
-        );
-
-        // Check if this is a hard CC that needs highlighting
-        let is_hard_cc = is_hard_cc_aura(&aura.effect_type);
-
-        // Border color: gold for buffs, red for debuffs, bright for hard CC
-        let is_buff = is_buff_aura(&aura.effect_type);
-        let border_color = if is_hard_cc {
-            // Pulsing bright color for hard CC
-            let intensity = (200.0 + 55.0 * pulse_intensity) as u8;
-            egui::Color32::from_rgb(intensity, 50, 50)  // Pulsing red
-        } else if is_buff {
-            egui::Color32::from_rgb(255, 215, 0)  // Gold
-        } else {
-            egui::Color32::from_rgb(200, 50, 50)  // Red
-        };
-
-        // Draw icon background
-        painter.rect_filled(
-            icon_rect,
-            corner_radius,
-            egui::Color32::from_rgb(20, 20, 20),
-        );
-
-        // Try to draw the icon texture
-        let icon_key = get_aura_icon_key(aura, ability_definitions);
-        if let Some(texture_id) = spell_icons.textures.get(&icon_key) {
-            // Draw the icon texture
-            painter.image(
-                *texture_id,
-                icon_rect.shrink(2.0 * ui_scale), // Shrink slightly for border
-                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                egui::Color32::WHITE,
-            );
-        } else {
-            // Fallback: draw colored rectangle based on aura type
-            let fallback_color = get_aura_fallback_color(&aura.effect_type);
-            painter.rect_filled(
-                icon_rect.shrink(2.0 * ui_scale),
-                1.0 * ui_scale,
-                fallback_color,
-            );
-        }
-
-        // Draw border (thicker for hard CC)
-        let border_width = if is_hard_cc { 3.0 * ui_scale } else { 2.0 * ui_scale };
-        painter.rect_stroke(
-            icon_rect,
-            corner_radius,
-            egui::Stroke::new(border_width, border_color),
-            egui::StrokeKind::Outside,
-        );
-
-        // Draw pulsing outer glow for hard CC effects
-        if is_hard_cc {
-            let glow_alpha = (150.0 + 100.0 * pulse_intensity) as u8;
-            let glow_expand = (3.0 + 4.0 * pulse_intensity) * ui_scale;
-            painter.rect_stroke(
-                icon_rect.expand(glow_expand),
-                corner_radius + glow_expand,
-                egui::Stroke::new(3.0 * ui_scale, egui::Color32::from_rgba_unmultiplied(255, 80, 80, glow_alpha)),
-                egui::StrokeKind::Outside,
-            );
-        }
-
-        // Draw countdown timer (OmniCC style)
-        // Skip timer for long-duration buffs (>60s) - they won't expire naturally
-        let seconds_remaining = aura.duration.ceil() as i32;
-        if seconds_remaining > 0 && aura.duration <= 60.0 {
-            let countdown_text = format!("{}", seconds_remaining);
-
-            // Color based on time remaining: white (>3s), orange (1-3s), red (<1s)
-            let text_color = if aura.duration > 3.0 {
-                egui::Color32::WHITE
-            } else if aura.duration > 1.0 {
-                egui::Color32::from_rgb(255, 165, 0) // Orange
-            } else {
-                egui::Color32::from_rgb(255, 50, 50) // Red
-            };
-
-            let font = egui::FontId::proportional(14.0 * ui_scale);
-            let text_pos = egui::pos2(
-                icon_rect.center().x,
-                icon_rect.center().y,
-            );
-
-            // Draw black outline for visibility
-            let outline_offset = 1.0 * ui_scale;
-            let outline_offsets = [
-                (-outline_offset, 0.0), (outline_offset, 0.0), (0.0, -outline_offset), (0.0, outline_offset),
-                (-outline_offset, -outline_offset), (outline_offset, -outline_offset), (-outline_offset, outline_offset), (outline_offset, outline_offset),
-            ];
-            for (dx, dy) in outline_offsets {
-                painter.text(
-                    egui::pos2(text_pos.x + dx, text_pos.y + dy),
-                    egui::Align2::CENTER_CENTER,
-                    &countdown_text,
-                    font.clone(),
-                    egui::Color32::BLACK,
-                );
-            }
-
-            // Draw main text
-            painter.text(
-                text_pos,
-                egui::Align2::CENTER_CENTER,
-                &countdown_text,
-                font,
-                text_color,
-            );
-        }
-    }
-}
-
-/// Get a fallback color for an aura type when no icon is available.
-fn get_aura_fallback_color(aura_type: &AuraType) -> egui::Color32 {
-    match aura_type {
-        AuraType::MovementSpeedSlow => egui::Color32::from_rgb(100, 149, 237), // Cornflower blue
-        AuraType::Root => egui::Color32::from_rgb(139, 90, 43),  // Brown
-        AuraType::Stun => egui::Color32::from_rgb(255, 215, 0),  // Gold
-        AuraType::Fear => egui::Color32::from_rgb(148, 0, 211),  // Purple
-        AuraType::DamageOverTime => egui::Color32::from_rgb(138, 43, 226), // Blue violet
-        AuraType::Absorb => egui::Color32::from_rgb(255, 255, 255), // White
-        AuraType::HealingReduction => egui::Color32::from_rgb(178, 34, 34), // Firebrick
-        AuraType::MaxHealthIncrease => egui::Color32::from_rgb(34, 139, 34), // Forest green
-        AuraType::MaxManaIncrease => egui::Color32::from_rgb(65, 105, 225), // Royal blue
-        AuraType::AttackPowerIncrease => egui::Color32::from_rgb(255, 69, 0), // Orange red
-        AuraType::SpellSchoolLockout => egui::Color32::from_rgb(128, 0, 0), // Maroon
-        AuraType::WeakenedSoul => egui::Color32::from_rgb(169, 169, 169), // Dark gray
-        AuraType::Polymorph => egui::Color32::from_rgb(255, 182, 193), // Light pink
-        AuraType::ShadowSight => egui::Color32::from_rgb(75, 0, 130), // Indigo
-        AuraType::DamageReduction => egui::Color32::from_rgb(139, 69, 19), // Saddle brown (debuff)
-        AuraType::CastTimeIncrease => egui::Color32::from_rgb(128, 0, 128), // Purple (curse)
-        AuraType::DamageTakenReduction => egui::Color32::from_rgb(255, 215, 0), // Gold (Paladin aura)
-        AuraType::DamageImmunity => egui::Color32::from_rgb(255, 215, 0), // Gold (Divine Shield)
-        AuraType::Incapacitate => egui::Color32::from_rgb(135, 206, 250), // Light sky blue (frozen)
-        AuraType::SpellResistanceBuff => egui::Color32::from_rgb(100, 200, 100), // Green (resistance buff)
-        AuraType::AttackPowerReduction => egui::Color32::from_rgb(178, 34, 34), // Firebrick (debuff)
-        AuraType::CritChanceIncrease => egui::Color32::from_rgb(255, 140, 0), // Dark orange (buff)
-        AuraType::ManaRegenIncrease => egui::Color32::from_rgb(65, 105, 225), // Royal blue (buff)
-        AuraType::AttackSpeedSlow => egui::Color32::from_rgb(100, 149, 237), // Cornflower blue (debuff)
-        AuraType::LockoutDurationReduction => egui::Color32::from_rgb(255, 215, 0), // Gold (buff)
-        AuraType::FrostArmorBuff => egui::Color32::from_rgb(100, 149, 237), // Cornflower blue (self-buff)
-        AuraType::Silence => egui::Color32::from_rgb(75, 0, 130), // Indigo (silence debuff)
-        AuraType::WeaponPoison => egui::Color32::from_rgb(64, 180, 64), // Poison green (self-buff)
-        AuraType::SpellPowerIncrease => egui::Color32::from_rgb(255, 99, 71), // Tomato (Flametongue Totem buff)
-        AuraType::HealingOverTime => egui::Color32::from_rgb(64, 200, 120), // Sea green (Healing Stream Totem buff)
-        AuraType::WindfuryBuff => egui::Color32::from_rgb(135, 206, 250), // Light sky blue (Windfury Totem buff)
-        AuraType::FearImmunity => egui::Color32::from_rgb(255, 69, 0), // Orange red (Berserker Rage, matches AP buff)
-    }
-}
