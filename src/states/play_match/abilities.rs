@@ -118,6 +118,7 @@ pub enum AbilityType {
     // Dispel abilities
     DispelMagic, // Priest - removes one magic debuff from ally
     PsychicScream, // Priest - instant self-centered AoE fear, breaks on damage
+    ManaBurn, // Priest - cast-time Shadow spell that destroys mana on an enemy mana user
     // Paladin abilities
     FlashOfLight,     // Paladin fast heal
     HolyLight,        // Paladin big heal (2.5s cast)

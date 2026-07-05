@@ -656,6 +656,21 @@ pub struct BerserkerRagePending {
     pub caster_class: match_config::CharacterClass,
 }
 
+/// Pending Mana Burn to be processed (Priest Mana Burn).
+/// Spawned at cast completion in `combat_core/casting.rs`; consumed by
+/// `effects/mana_burn.rs::process_mana_burn`, which destroys mana on the
+/// target. Only `ResourceType::Mana` targets are affected — Warriors reuse
+/// `current_mana` as their rage pool and must never be burned.
+#[derive(Component)]
+pub struct ManaBurnPending {
+    /// Target whose mana is destroyed
+    pub target: Entity,
+    /// Mana destroyed (clamped to the target's current mana at processing time)
+    pub amount: f32,
+    pub caster_team: u8,
+    pub caster_class: match_config::CharacterClass,
+}
+
 /// Pending dispel to be processed by the aura system.
 /// This allows dispels to be applied without holding mutable references
 /// to the aura map during AI decision making.

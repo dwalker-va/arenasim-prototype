@@ -207,6 +207,18 @@ pub fn decide_priest_action(
         }
     }
 
+    // Priority 6.5: Mana Burn — starve the enemy healer during comfortable
+    // windows. Outranks Mind Blast: denying ~2 Flash Heals of enemy mana per
+    // cast converts the team's damage better than the Priest's own filler
+    // nuke. Team-healthy and target-mana gates live inside (traced).
+    if try_mana_burn(
+        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
+        escape_defer, plan.pressured, &mut builder,
+    ) {
+        builder.finish();
+        return true;
+    }
+
     // Priority 7: Mind Blast
     if try_mind_blast(
         commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
@@ -822,6 +834,134 @@ fn try_mind_blast(
 
     info!(
         "Team {} {} starts casting {} on enemy",
+        combatant.team,
+        combatant.class.name(),
+        def.name
+    );
+
+    true
+}
+
+/// Minimum enemy-healer mana for a Mana Burn cast to be worth 2.5s of GCDs.
+/// Below this the wand out-pressures the burn (and dampening is doing the
+/// starving for us anyway).
+const MANA_BURN_MIN_TARGET_MANA: f32 = 20.0;
+
+/// Try to cast Mana Burn — 2.5s Shadow cast that destroys mana on the enemy
+/// healer (mana pressure win condition; see priest-mana-burn design notes).
+///
+/// Targets `ctx.enemy_healer()` directly, NOT `combatant.target`: the kill
+/// target is usually a DPS, but mana pressure only converts against the class
+/// whose mana gates the enemy team's survival. Deliberately does NOT check
+/// friendly CC on the target — Mana Burn deals no damage, so burning a feared
+/// or screamed healer cannot break the CC and is in fact the ideal window.
+///
+/// Gated on team health (like maintenance dispels): a 2.5s movement-locking
+/// cast is only affordable when nobody needs a heal soon.
+fn try_mana_burn(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
+    escape_defer: Option<f32>,
+    pressured: bool,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    let ability = AbilityType::ManaBurn;
+    let def = abilities.get_unchecked(&ability);
+
+    if escape_defer.is_some() {
+        builder.reject(
+            ability,
+            RejectionReason::PreconditionUnmet {
+                note: "escape window live: movement-locking cast deferred".to_string(),
+            },
+        );
+        return false;
+    }
+
+    // A 2.5s cast is a movement lock; under PRESSURED the posture machine
+    // needs the legs. Burn only from comfortable (FREE) windows.
+    if pressured {
+        builder.reject(
+            ability,
+            RejectionReason::PreconditionUnmet {
+                note: "pressured: movement-locking cast deferred".to_string(),
+            },
+        );
+        return false;
+    }
+
+    if !ctx.is_team_healthy(0.70, my_pos) {
+        builder.reject(
+            ability,
+            RejectionReason::PreconditionUnmet {
+                note: "team not healthy: heal GCDs reserved".to_string(),
+            },
+        );
+        return false;
+    }
+
+    let Some(target_entity) = ctx.enemy_healer() else {
+        builder.reject(ability, RejectionReason::NoValidTarget);
+        return false;
+    };
+
+    let Some(target_info) = ctx.combatants.get(&target_entity) else {
+        builder.reject(ability, RejectionReason::NoValidTarget);
+        return false;
+    };
+
+    if target_info.current_mana < MANA_BURN_MIN_TARGET_MANA {
+        builder.reject(
+            ability,
+            RejectionReason::PreconditionUnmet {
+                note: "enemy healer mana too low to burn".to_string(),
+            },
+        );
+        return false;
+    }
+
+    let target_pos = target_info.position;
+
+    let opts = PreCastOpts {
+        check_friendly_cc: false, // no damage — cannot break friendly CC
+        check_target_immune: true,
+        ..Default::default()
+    };
+    if !pre_cast_ok(
+        ability, def, combatant, my_pos, auras,
+        Some((target_entity, target_pos)), ctx, opts,
+    ) {
+        builder.reject(
+            ability,
+            classify_pre_cast_failure(
+                ability, def, combatant, my_pos, auras,
+                Some((target_entity, target_pos)), ctx, opts,
+            ),
+        );
+        return false;
+    }
+
+    builder.choose(ability, Some(target_entity), false);
+
+    combatant.ability_cooldowns.insert(ability, def.cooldown);
+    combatant.global_cooldown = GCD;
+    let cast_time = calculate_cast_time(def.cast_time, auras);
+
+    commands.entity(entity).insert(CastingState::new(ability, target_entity, cast_time));
+
+    let target_tuple = ctx.combatants
+        .get(&target_entity)
+        .map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, target_tuple, "begins casting");
+
+    info!(
+        "Team {} {} starts casting {} on enemy healer",
         combatant.team,
         combatant.class.name(),
         def.name

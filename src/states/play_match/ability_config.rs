@@ -192,6 +192,15 @@ pub struct AbilityConfig {
     #[serde(default)]
     pub is_dispel: bool,
 
+    // === Mana Burn ===
+    /// Mana destroyed on the target when this ability lands (Priest Mana Burn).
+    /// Only affects `ResourceType::Mana` targets — Warriors reuse `current_mana`
+    /// as their rage pool and must never be burned. NOT scaled by ArenaDampening:
+    /// dampening throttles healing throughput; mana burn is pressure toward
+    /// resolution, which is the same goal.
+    #[serde(default)]
+    pub mana_burn_amount: f32,
+
     // === Dispel Backlash ===
     /// Configuration for the dispel-backlash mechanic (currently only Unstable Affliction).
     /// When this ability's aura is removed by an enemy dispel, the dispeller takes direct
@@ -310,6 +319,7 @@ impl AbilityDefinitions {
             AbilityType::KidneyShot,
             AbilityType::PowerWordFortitude,
             AbilityType::PsychicScream,
+            AbilityType::ManaBurn,
             AbilityType::Rend,
             AbilityType::MortalStrike,
             AbilityType::Pummel,
@@ -477,6 +487,7 @@ mod tests {
             channel_tick_interval: 1.0,
             channel_healing_per_tick: 0.0,
             is_dispel: false,
+            mana_burn_amount: 0.0,
             dispel_backlash: None,
         };
 
@@ -516,6 +527,7 @@ mod tests {
             channel_tick_interval: 1.0,
             channel_healing_per_tick: 0.0,
             is_dispel: false,
+            mana_burn_amount: 0.0,
             dispel_backlash: None,
         };
 

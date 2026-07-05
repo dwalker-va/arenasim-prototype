@@ -307,6 +307,18 @@ pub fn process_casting(
         let target_pos = target_transform.translation;
         let text_position = target_transform.translation + Vec3::new(0.0, FCT_HEIGHT, 0.0);
 
+        // Mana Burn: queue the mana destruction for process_mana_burn (effects/
+        // mana_burn.rs), which owns the ResourceType::Mana guard, clamping, and
+        // logging. Deliberately NOT scaled by ArenaDampening (see that module).
+        if def.mana_burn_amount > 0.0 {
+            commands.spawn(ManaBurnPending {
+                target: target_entity,
+                amount: def.mana_burn_amount,
+                caster_team,
+                caster_class,
+            });
+        }
+
         // Handle damage spells
         if def.is_damage() {
             // Use pre-calculated damage (already includes stat scaling and DamageReduction)

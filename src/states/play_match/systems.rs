@@ -43,6 +43,7 @@ pub use super::effects::process_holy_shock_damage;
 pub use super::effects::process_divine_shield;
 pub use super::effects::process_berserker_rage;
 pub use super::effects::process_backlash;
+pub use super::effects::process_mana_burn;
 
 // === Phase 2: Combat and Movement ===
 pub use super::auras::process_aura_breaks;
@@ -160,6 +161,7 @@ where
             process_backlash,
             process_holy_shock_heals,
             process_holy_shock_damage,
+            process_mana_burn,
         )
             .chain()
             .in_set(CombatSystemPhase::ResourcesAndAuras)
