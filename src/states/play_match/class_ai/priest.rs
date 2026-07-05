@@ -896,6 +896,26 @@ fn try_mana_burn(
         return false;
     }
 
+    // Focus gate: PRESSURED only sees proximity threats (danger_radius), so a
+    // ranged train — a Shaman chain-casting Lightning Bolt from 30yd — leaves
+    // the Priest nominally FREE while standing still for 2.5s is lethal
+    // exposure. If any living enemy has us as their target, don't hard-cast.
+    let being_focused = ctx.combatants.iter().any(|(_, info)| {
+        info.team != combatant.team
+            && info.is_alive
+            && !info.stealthed
+            && info.target == Some(entity)
+    });
+    if being_focused {
+        builder.reject(
+            ability,
+            RejectionReason::PreconditionUnmet {
+                note: "enemy focus on self: movement-locking cast deferred".to_string(),
+            },
+        );
+        return false;
+    }
+
     if !ctx.is_team_healthy(0.70, my_pos) {
         builder.reject(
             ability,
