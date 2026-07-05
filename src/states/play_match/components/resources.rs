@@ -136,6 +136,11 @@ pub struct CameraController {
     /// cursor travel was below the click threshold. Consumed by the
     /// selection picking system, which clears it.
     pub pending_pick: bool,
+    /// Smoothed look-at point the camera is actually rendering. Chases the
+    /// mode's desired target each frame so membership changes (deaths,
+    /// follow-target cycling) glide instead of snapping. `None` until the
+    /// first camera update of a match.
+    pub smoothed_target: Option<Vec3>,
 }
 
 impl Default for CameraController {
@@ -151,6 +156,7 @@ impl Default for CameraController {
             keyboard_movement: Vec3::ZERO,
             press_position: None,
             pending_pick: false,
+            smoothed_target: None,
         }
     }
 }
