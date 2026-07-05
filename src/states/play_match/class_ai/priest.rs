@@ -842,10 +842,58 @@ fn try_mind_blast(
     true
 }
 
-/// Minimum enemy-healer mana for a Mana Burn cast to be worth 2.5s of GCDs.
-/// Below this the wand out-pressures the burn (and dampening is doing the
-/// starving for us anyway).
-const MANA_BURN_MIN_TARGET_MANA: f32 = 20.0;
+/// Minimum enemy-healer mana for a Mana Burn cast to be worth the GCDs.
+/// Deliberately BELOW the cheapest enemy heal cost (~18-25): keeping a
+/// near-broke healer under one heal's cost is the lockout win condition —
+/// pressured healers live near-zero on the 1.0/s trickle, so waiting for a
+/// "full bar worth burning" means never burning at all.
+const MANA_BURN_MIN_TARGET_MANA: f32 = 10.0;
+
+/// Stand this far inside Mana Burn's max range so drift between decide ticks
+/// doesn't flicker the cast in and out of OutOfRange.
+const MANA_BURN_RANGE_BUFFER: f32 = 2.0;
+
+/// Any living, visible enemy currently targeting `entity` — the ranged-train
+/// detection the PRESSURED proximity trigger cannot see (a Shaman
+/// chain-casting from 30yd never enters danger_radius).
+fn any_enemy_focusing(entity: Entity, my_team: u8, ctx: &CombatContext) -> bool {
+    ctx.combatants.iter().any(|(_, info)| {
+        info.team != my_team && info.is_alive && !info.stealthed && info.target == Some(entity)
+    })
+}
+
+/// Any living enemy stealthed — an unaccounted-for opener; standing still in
+/// a long cast is the ideal Cheap Shot victim.
+fn any_enemy_stealthed(my_team: u8, ctx: &CombatContext) -> bool {
+    ctx.combatants
+        .iter()
+        .any(|(_, info)| info.team != my_team && info.is_alive && info.stealthed)
+}
+
+/// The Mana Burn positioning window: `Some(enemy healer position)` when the
+/// cheap burn preconditions hold — enemy healer alive with mana worth
+/// burning, no stealthed enemy, nobody focusing us, team healthy. Shared by
+/// the FREE formation burn-pull (position toward the window) and mirrored by
+/// `try_mana_burn`'s authoritative cast gates.
+fn mana_burn_pull_target(
+    entity: Entity,
+    combatant: &Combatant,
+    my_pos: Vec3,
+    ctx: &CombatContext,
+) -> Option<Vec3> {
+    let healer = ctx.enemy_healer()?;
+    let info = ctx.combatants.get(&healer)?;
+    if info.current_mana < MANA_BURN_MIN_TARGET_MANA {
+        return None;
+    }
+    if any_enemy_stealthed(combatant.team, ctx) {
+        return None;
+    }
+    if any_enemy_focusing(entity, combatant.team, ctx) {
+        return None;
+    }
+    Some(info.position)
+}
 
 /// Try to cast Mana Burn — 2.5s Shadow cast that destroys mana on the enemy
 /// healer (mana pressure win condition; see priest-mana-burn design notes).
@@ -856,8 +904,8 @@ const MANA_BURN_MIN_TARGET_MANA: f32 = 20.0;
 /// friendly CC on the target — Mana Burn deals no damage, so burning a feared
 /// or screamed healer cannot break the CC and is in fact the ideal window.
 ///
-/// Gated on team health (like maintenance dispels): a 2.5s movement-locking
-/// cast is only affordable when nobody needs a heal soon.
+/// No explicit team-health gate: the heal rungs above this one fire first
+/// whenever a heal is needed, so reaching this rung implies a surplus GCD.
 fn try_mana_burn(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -900,13 +948,7 @@ fn try_mana_burn(
     // ranged train — a Shaman chain-casting Lightning Bolt from 30yd — leaves
     // the Priest nominally FREE while standing still for 2.5s is lethal
     // exposure. If any living enemy has us as their target, don't hard-cast.
-    let being_focused = ctx.combatants.iter().any(|(_, info)| {
-        info.team != combatant.team
-            && info.is_alive
-            && !info.stealthed
-            && info.target == Some(entity)
-    });
-    if being_focused {
+    if any_enemy_focusing(entity, combatant.team, ctx) {
         builder.reject(
             ability,
             RejectionReason::PreconditionUnmet {
@@ -920,10 +962,7 @@ fn try_mana_burn(
     // gate can't see the opener coming — and a Priest standing still in a
     // 2.5s cast is the ideal Cheap Shot victim. Don't hard-cast while an
     // enemy is unaccounted for.
-    let enemy_stealthed = ctx.combatants.iter().any(|(_, info)| {
-        info.team != combatant.team && info.is_alive && info.stealthed
-    });
-    if enemy_stealthed {
+    if any_enemy_stealthed(combatant.team, ctx) {
         builder.reject(
             ability,
             RejectionReason::PreconditionUnmet {
@@ -933,15 +972,10 @@ fn try_mana_burn(
         return false;
     }
 
-    if !ctx.is_team_healthy(0.70, my_pos) {
-        builder.reject(
-            ability,
-            RejectionReason::PreconditionUnmet {
-                note: "team not healthy: heal GCDs reserved".to_string(),
-            },
-        );
-        return false;
-    }
+    // NOTE: no explicit team-health gate. Flash Heal (priority 5, fires for
+    // any ally below 90% in range) and PW: Shield sit ABOVE this rung, so a
+    // frame that reaches Mana Burn is a frame where no heal was needed —
+    // the ladder ordering IS the health gate, exactly as for Mind Blast.
 
     let Some(target_entity) = ctx.enemy_healer() else {
         builder.reject(ability, RejectionReason::NoValidTarget);
@@ -1415,7 +1449,7 @@ pub fn evaluate_priest_posture(
             );
         }
         _ => free_tick(
-            commands, entity, combatant, my_pos, ctx, state, directive, movement, now,
+            commands, abilities, entity, combatant, my_pos, ctx, state, directive, movement, now,
             decision_trace, transitioned, prev,
         ),
     }
@@ -1482,6 +1516,7 @@ fn pressured_tick(
 #[allow(clippy::too_many_arguments)]
 fn free_tick(
     commands: &mut Commands,
+    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &Combatant,
     my_pos: Vec3,
@@ -1516,7 +1551,7 @@ fn free_tick(
         commands.entity(entity).remove::<MovementDirective>();
     }
 
-    let Some(point) = compute_formation_point(entity, combatant, my_pos, ctx, movement) else {
+    let Some(point) = compute_formation_point(abilities, entity, combatant, my_pos, ctx, movement) else {
         // DEGENERATE (R5/AE4): no formation directive; fall through to the
         // legacy ladder. Exit transitions still emit — goal_kind
         // Entity records "legacy target pursuit governs".
@@ -1599,6 +1634,7 @@ fn free_tick(
 /// still drifts into wand range) and into arena bounds. `None` when no
 /// living non-pet ally exists (degenerate case R5/AE4).
 fn compute_formation_point(
+    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &Combatant,
     my_pos: Vec3,
@@ -1680,6 +1716,33 @@ fn compute_formation_point(
                 let clamped = offset / dist * shared.wand_range;
                 point.x = target.position.x + clamped.x;
                 point.z = target.position.z + clamped.y;
+            }
+        }
+    }
+
+    // Burn-range pull: while the Mana Burn window is open (see
+    // `mana_burn_pull_target`), spending the FREE window in cast range is
+    // worth more than the backline point — the enemy healer typically sits
+    // ~70yd away and no static cast range reaches it from formation. Clamp
+    // the point toward the healer's burn range, but never beyond heal range
+    // of the ally centroid (healer duty anchors the excursion). Applied
+    // after the wand clamp: when the burn window is open, burning outranks
+    // wanding.
+    if movement.priest.weights.burn_pull > 0.0 {
+        if let Some(healer_pos) = mana_burn_pull_target(entity, combatant, my_pos, ctx) {
+            let burn_range =
+                abilities.get_unchecked(&AbilityType::ManaBurn).range - MANA_BURN_RANGE_BUFFER;
+            let offset = Vec2::new(point.x - healer_pos.x, point.z - healer_pos.z);
+            let dist = offset.length();
+            if dist > burn_range {
+                let pulled = offset / dist * burn_range;
+                let candidate =
+                    Vec3::new(healer_pos.x + pulled.x, my_pos.y, healer_pos.z + pulled.y);
+                let anchor_dist =
+                    Vec2::new(candidate.x - centroid.x, candidate.z - centroid.z).length();
+                if anchor_dist <= shared.heal_range {
+                    point = candidate;
+                }
             }
         }
     }

@@ -47,6 +47,12 @@ pub struct MovementWeights {
     /// Low-weight pull toward wand range of the kill target (Priest;
     /// 0.0 disables for Paladin).
     pub wand_pull: f32,
+    /// FREE formation clamp toward Mana Burn range of the ENEMY healer,
+    /// active only while the burn window is open (team healthy, no stealthed
+    /// enemy, nobody focusing the Priest, enemy healer mana worth burning)
+    /// and never beyond heal range of the ally centroid. Priest only —
+    /// `0.0` disables for every other class.
+    pub burn_pull: f32,
     /// Ring-attraction toward the kill target's `[min, max]` band (Mage
     /// kiting). `0.0` disables for the healers, which have no kill-target ring.
     pub range_band: f32,
@@ -71,6 +77,7 @@ impl Default for MovementWeights {
             // divergence from the RON, now aligned (P3 residual).
             corner_penalty: 6.0,
             wand_pull: 0.5,
+            burn_pull: 1.0,
             range_band: 0.0,
             flee: 0.0,
             commitment_bonus: 1.5,
@@ -203,9 +210,10 @@ impl Default for PaladinMovementConfig {
     fn default() -> Self {
         Self {
             weights: MovementWeights {
-                // Paladin has no wand and no backline formation point.
+                // Paladin has no wand, no backline formation point, no Mana Burn.
                 wand_pull: 0.0,
                 formation_pull: 0.0,
+                burn_pull: 0.0,
                 ..MovementWeights::default()
             },
             fallback_range: 15.0,
@@ -251,6 +259,7 @@ impl Default for ShamanMovementConfig {
                 formation_pull: 1.0,
                 corner_penalty: 6.0,
                 wand_pull: 1.0,
+                burn_pull: 0.0, // Shaman has no Mana Burn
                 ..MovementWeights::default()
             },
             formation_shift_threshold: 3.0,
@@ -345,6 +354,7 @@ impl Default for DpsMovementConfig {
                 flee: 0.0,
                 corner_penalty: 4.0,
                 wand_pull: 0.0,
+                burn_pull: 0.0,
                 range_band: 2.0,
                 commitment_bonus: 1.5,
             },
@@ -504,6 +514,7 @@ impl MovementConfig {
                 ("formation_pull", weights.formation_pull),
                 ("corner_penalty", weights.corner_penalty),
                 ("wand_pull", weights.wand_pull),
+                ("burn_pull", weights.burn_pull),
                 ("range_band", weights.range_band),
                 ("flee", weights.flee),
                 ("commitment_bonus", weights.commitment_bonus),
@@ -634,6 +645,14 @@ mod tests {
         assert_eq!(
             config.paladin.weights.wand_pull, 0.0,
             "Paladin has no wand — wand_pull must be disabled"
+        );
+        assert_eq!(
+            config.paladin.weights.burn_pull, 0.0,
+            "Paladin has no Mana Burn — burn_pull must be disabled"
+        );
+        assert_eq!(
+            config.shaman.weights.burn_pull, 0.0,
+            "Shaman has no Mana Burn — burn_pull must be disabled"
         );
         assert!(
             (0.4..=0.8).contains(&config.shared.commit_window),

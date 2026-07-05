@@ -195,9 +195,9 @@
         ManaBurn: (
             name: "Mana Burn",
             icon: "icons/abilities/spell_shadow_manaburn.jpg",
-            description: "Destroys 50 mana on an enemy mana user. Long Shadow cast — interruptible, and the lockout blocks Mind Blast and Psychic Scream, not heals.",
-            cast_time: 2.5,
-            range: 30.0,
+            description: "Destroys 50 mana on an enemy mana user. Interruptible Shadow cast — the lockout blocks Mind Blast and Psychic Scream, not heals.",
+            cast_time: 1.5,
+            range: 40.0,
             mana_cost: 25.0,
             cooldown: 0.0,
             spell_school: Shadow,
