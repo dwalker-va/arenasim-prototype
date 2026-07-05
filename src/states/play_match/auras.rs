@@ -191,6 +191,7 @@ pub fn reflect_instant_cc_in_snapshot(
 pub fn apply_pending_auras(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
+    dampening: Res<ArenaDampening>,
     pending_auras: Query<(Entity, &AuraPending)>,
     mut combatants: Query<(&mut Combatant, Option<&mut ActiveAuras>, &Transform, Option<&mut DRTracker>)>,
     charging_query: Query<&ChargingState>,
@@ -690,6 +691,12 @@ pub fn apply_pending_auras(
             aura_to_add.duration *= dr_multiplier;
         }
 
+        // Arena dampening: absorb shields count as healing — scale the shield
+        // size at application (PW:Shield, Ice Barrier)
+        if aura_to_add.effect_type == AuraType::Absorb {
+            aura_to_add.magnitude = dampening.apply(aura_to_add.magnitude);
+        }
+
         // Log DR info for CC auras
         if let Some(category) = dr_category {
             let display_name = if let Ok(pet) = pet_query.get(pending.target) {
@@ -1087,6 +1094,7 @@ pub fn process_hot_ticks(
     time: Res<Time>,
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
+    dampening: Res<ArenaDampening>,
     mut combatants_with_auras: Query<(Entity, &mut Combatant, &Transform, &mut ActiveAuras)>,
     combatants_without_auras: Query<(Entity, &Combatant), Without<ActiveAuras>>,
     mut fct_states: Query<&mut FloatingTextState>,
@@ -1184,6 +1192,10 @@ pub fn process_hot_ticks(
 
         let target_team = target.team;
         let target_class = target.class;
+
+        // Arena dampening: time-ramped reduction of all healing (HoT ticks and
+        // Healing Stream Totem pulses included — free sustain must dampen too)
+        let healing = dampening.apply(healing);
 
         // Apply healing (don't overheal); credit the caster's healing_done with the
         // effective (non-overheal) amount, mirroring the casting.rs heal idiom.

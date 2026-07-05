@@ -133,7 +133,7 @@ for opp in "${OPPONENTS[@]}"; do
   "team1": ["${SIDE_A}", "${HEALER}"],
   "team2": ["${SIDE_B}", "${HEALER}"],
   "random_seed": ${SEED},
-  "max_duration_secs": 120,
+  "max_duration_secs": 300,
   "output_path": "${LOG_PATH}"
 }
 EOF

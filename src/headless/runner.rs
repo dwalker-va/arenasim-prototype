@@ -15,8 +15,8 @@ use crate::states::play_match::movement_config::{load_movement_config, MovementC
 use crate::states::play_match::equipment::{EquipmentPlugin, ItemDefinitions, DefaultLoadouts, resolve_loadout, enforce_two_hand_conflicts, format_loadout, load_item_definitions, load_default_loadouts};
 // Use the stable systems API instead of importing internal functions directly
 use crate::states::play_match::systems::{
-    self, combatant_id, Combatant, FloatingTextState, GameRng, MatchCountdown, ShadowSightState,
-    SimulationSpeed,
+    self, combatant_id, ArenaDampening, Combatant, FloatingTextState, GameRng, MatchCountdown,
+    ShadowSightState, SimulationSpeed,
 };
 use crate::states::play_match::components::{ActiveAuras, AuraType, Pet, PetType, DRTracker, Totem, TotemElement};
 use crate::states::play_match::constants::PET_SLOT_BASE;
@@ -239,6 +239,7 @@ fn headless_setup_match(
     // Initialize required resources
     commands.insert_resource(SimulationSpeed { multiplier: 1.0 });
     commands.insert_resource(MatchCountdown::default());
+    commands.insert_resource(ArenaDampening::default());
     commands.insert_resource(ShadowSightState::default());
 
     // Initialize GameRng with seed if provided (deterministic mode)

@@ -35,6 +35,21 @@ pub const SAFE_KITING_DISTANCE: f32 = 8.0;
 pub const HOLY_SHOCK_DAMAGE_RANGE: f32 = 20.0;
 
 // ============================================================================
+// Arena Dampening
+// ============================================================================
+
+/// Combat seconds after gates open before dampening starts ramping.
+/// Chosen so the healthy majority of matches (most finish well under this)
+/// are untouched; only long attrition games feel it.
+pub const DAMPENING_START_SECS: f32 = 75.0;
+
+/// Seconds over which dampening ramps linearly from 0% to 100% once started.
+/// Full dampening therefore lands at START + RAMP seconds of combat —
+/// comfortably before the 300s match cap so zero-healing attrition has time
+/// to resolve the match instead of drawing.
+pub const DAMPENING_RAMP_SECS: f32 = 120.0;
+
+// ============================================================================
 // Health Thresholds
 // ============================================================================
 

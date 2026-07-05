@@ -136,7 +136,18 @@ For deeper context, see these focused references:
 1. **Pre-match** (10s countdown): Combatants can buff, mana restored each frame
 2. **Gates open**: Combat begins, AI takes over
 3. **Combat loop**: Target acquisition → ability decisions → casting → damage/healing
-4. **Match end**: When one team is eliminated, logs saved, results displayed
+4. **Arena dampening**: starting `DAMPENING_START_SECS` (75s) after gates, ALL healing,
+   absorb shields, and lifesteal ramp linearly to zero over `DAMPENING_RAMP_SECS` (120s;
+   both in `constants.rs`). Ticked by `match_flow::update_dampening` into the
+   `ArenaDampening` resource; every heal/absorb application site scales through
+   `ArenaDampening::apply`. Guarantees attrition endgames (healer-vs-healer especially)
+   resolve instead of drawing at the cap — expect `[EVENT] Arena dampening reaches N%`
+   milestones in logs of matches longer than ~85s. When adding a NEW healing or absorb
+   mechanic, apply `Res<ArenaDampening>` at its application site.
+5. **Match end**: When one team is eliminated, logs saved, results displayed. Attacks
+   queued in a frame all land even if the attacker died earlier that same frame
+   (dying-blow semantics) — simultaneous mutual lethal is a DRAW, not an
+   iteration-order win.
 
 ### Adding a New Ability
 

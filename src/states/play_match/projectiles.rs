@@ -142,6 +142,7 @@ pub fn process_projectile_hits(
     mut combat_log: ResMut<CombatLog>,
     mut game_rng: ResMut<GameRng>,
     abilities: Res<AbilityDefinitions>,
+    dampening: Res<ArenaDampening>,
     projectiles: Query<(Entity, &Projectile, &Transform)>,
     mut combatants: Query<(&Transform, &mut Combatant, Option<&mut ActiveAuras>)>,
     mut fct_states: Query<&mut FloatingTextState>,
@@ -279,8 +280,10 @@ pub fn process_projectile_hits(
                 // damage actually dealt (health removed; absorbed damage isn't
                 // "caused"). Capped at the caster's missing health.
                 if ability == AbilityType::DeathCoil && actual_damage > 0.0 {
-                    let effective = actual_damage.min(caster.max_health - caster.current_health);
-                    caster.current_health = (caster.current_health + actual_damage).min(caster.max_health);
+                    // Arena dampening applies to lifesteal like any other healing
+                    let lifesteal = dampening.apply(actual_damage);
+                    let effective = lifesteal.min(caster.max_health - caster.current_health);
+                    caster.current_health = (caster.current_health + lifesteal).min(caster.max_health);
                     caster.healing_done += effective;
                     if effective > 0.0 {
                         let id = combatant_id(caster_team, caster_class);
