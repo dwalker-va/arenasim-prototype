@@ -895,7 +895,7 @@ fn mana_burn_pull_target(
     Some(info.position)
 }
 
-/// Try to cast Mana Burn — 2.5s Shadow cast that destroys mana on the enemy
+/// Try to cast Mana Burn — a Shadow spell that destroys mana on the enemy
 /// healer (mana pressure win condition; see priest-mana-burn design notes).
 ///
 /// Targets `ctx.enemy_healer()` directly, NOT `combatant.target`: the kill
@@ -906,6 +906,11 @@ fn mana_burn_pull_target(
 ///
 /// No explicit team-health gate: the heal rungs above this one fire first
 /// whenever a heal is needed, so reaching this rung implies a surplus GCD.
+///
+/// The escape/pressured/focus/stealth gates protect the STANDSTILL of a
+/// hard cast (sweeps proved a Priest rooted mid-burn dies to ranged trains
+/// and stealth openers), so they apply only when `cast_time > 0` — an
+/// instant burn locks nothing and weaves safely between heals.
 fn try_mana_burn(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -922,47 +927,51 @@ fn try_mana_burn(
     let ability = AbilityType::ManaBurn;
     let def = abilities.get_unchecked(&ability);
 
-    if escape_defer.is_some() {
-        builder.reject(
-            ability,
-            RejectionReason::PreconditionUnmet {
-                note: "escape window live: movement-locking cast deferred".to_string(),
-            },
-        );
-        return false;
-    }
+    // Movement-lock protections — hard casts only (see doc comment).
+    if def.cast_time > 0.0 {
+        if escape_defer.is_some() {
+            builder.reject(
+                ability,
+                RejectionReason::PreconditionUnmet {
+                    note: "escape window live: movement-locking cast deferred".to_string(),
+                },
+            );
+            return false;
+        }
 
-    // A 2.5s cast is a movement lock; under PRESSURED the posture machine
-    // needs the legs. Burn only from comfortable (FREE) windows.
-    if pressured {
-        builder.reject(
-            ability,
-            RejectionReason::PreconditionUnmet {
-                note: "pressured: movement-locking cast deferred".to_string(),
-            },
-        );
-        return false;
-    }
+        // Under PRESSURED the posture machine needs the legs. Burn only from
+        // comfortable (FREE) windows.
+        if pressured {
+            builder.reject(
+                ability,
+                RejectionReason::PreconditionUnmet {
+                    note: "pressured: movement-locking cast deferred".to_string(),
+                },
+            );
+            return false;
+        }
 
-    // Focus gate: PRESSURED only sees proximity threats (danger_radius), so a
-    // ranged train — a Shaman chain-casting Lightning Bolt from 30yd — leaves
-    // the Priest nominally FREE while standing still for 2.5s is lethal
-    // exposure. If any living enemy has us as their target, don't hard-cast.
-    if any_enemy_focusing(entity, combatant.team, ctx) {
-        builder.reject(
-            ability,
-            RejectionReason::PreconditionUnmet {
-                note: "enemy focus on self: movement-locking cast deferred".to_string(),
-            },
-        );
-        return false;
+        // Focus gate: PRESSURED only sees proximity threats (danger_radius),
+        // so a ranged train — a Shaman chain-casting Lightning Bolt from 30yd
+        // — leaves the Priest nominally FREE while standing still for a long
+        // cast is lethal exposure. If any living enemy has us as their
+        // target, don't hard-cast.
+        if any_enemy_focusing(entity, combatant.team, ctx) {
+            builder.reject(
+                ability,
+                RejectionReason::PreconditionUnmet {
+                    note: "enemy focus on self: movement-locking cast deferred".to_string(),
+                },
+            );
+            return false;
+        }
     }
 
     // Stealth gate: a stealthed enemy has no visible target, so the focus
     // gate can't see the opener coming — and a Priest standing still in a
-    // 2.5s cast is the ideal Cheap Shot victim. Don't hard-cast while an
-    // enemy is unaccounted for.
-    if any_enemy_stealthed(combatant.team, ctx) {
+    // long cast is the ideal Cheap Shot victim. Don't hard-cast while an
+    // enemy is unaccounted for. (Hard casts only, like the gates above.)
+    if def.cast_time > 0.0 && any_enemy_stealthed(combatant.team, ctx) {
         builder.reject(
             ability,
             RejectionReason::PreconditionUnmet {
