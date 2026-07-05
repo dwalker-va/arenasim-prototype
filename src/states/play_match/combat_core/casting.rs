@@ -113,6 +113,7 @@ pub fn process_casting(
     mut combat_log: ResMut<CombatLog>,
     abilities: Res<AbilityDefinitions>,
     mut game_rng: ResMut<GameRng>,
+    dampening: Res<ArenaDampening>,
     mut combatants: Query<(Entity, &Transform, &mut Combatant, Option<&mut CastingState>, Option<&mut ActiveAuras>)>,
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
@@ -498,6 +499,9 @@ pub fn process_casting(
                 }
             }
 
+            // Arena dampening: time-ramped reduction of all healing
+            healing = dampening.apply(healing);
+
             // Apply healing (don't overheal)
             let actual_healing = healing.min(target.max_health - target.current_health);
             target.current_health = (target.current_health + healing).min(target.max_health);
@@ -743,6 +747,7 @@ pub fn process_channeling(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
     abilities: Res<AbilityDefinitions>,
+    dampening: Res<ArenaDampening>,
     mut combatants: Query<(Entity, &Transform, &mut Combatant, Option<&mut ChannelingState>, Option<&mut ActiveAuras>)>,
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
@@ -1027,6 +1032,9 @@ pub fn process_channeling(
                     }
                 }
             }
+
+            // Arena dampening: time-ramped reduction of all healing
+            actual_healing = dampening.apply(actual_healing);
 
             // Apply healing
             let effective_healing = actual_healing.min(caster.max_health - caster.current_health);

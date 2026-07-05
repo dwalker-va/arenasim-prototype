@@ -23,6 +23,7 @@ pub fn process_holy_shock_heals(
     mut combat_log: ResMut<CombatLog>,
     mut game_rng: ResMut<GameRng>,
     abilities: Res<AbilityDefinitions>,
+    dampening: Res<ArenaDampening>,
     pending_heals: Query<(Entity, &HolyShockHealPending)>,
     mut combatants: Query<(&mut Combatant, &Transform, Option<&ActiveAuras>)>,
     mut fct_states: Query<&mut FloatingTextState>,
@@ -58,6 +59,9 @@ pub fn process_holy_shock_heals(
                     }
                 }
             }
+
+            // Arena dampening: time-ramped reduction of all healing
+            heal_amount = dampening.apply(heal_amount);
 
             let old_health = target.current_health;
             target.current_health = (target.current_health + heal_amount).min(target.max_health);

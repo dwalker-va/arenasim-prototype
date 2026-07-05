@@ -144,6 +144,50 @@ pub fn handle_time_controls(
     }
 }
 
+/// Dampening milestones (reduction fractions) that get a combat-log event the
+/// first time the ramp crosses them, so log readers can see when sustain
+/// started collapsing.
+const DAMPENING_MILESTONES: [f32; 4] = [0.25, 0.50, 0.75, 1.00];
+
+/// Pure dampening curve: reduction fraction for a given combat time
+/// (seconds since gates opened). Zero until `DAMPENING_START_SECS`, then
+/// linear to 1.0 over `DAMPENING_RAMP_SECS`.
+pub(crate) fn dampening_reduction(time_since_gates: f32) -> f32 {
+    use super::constants::{DAMPENING_RAMP_SECS, DAMPENING_START_SECS};
+    ((time_since_gates - DAMPENING_START_SECS) / DAMPENING_RAMP_SECS).clamp(0.0, 1.0)
+}
+
+/// Tick the arena dampening ramp once combat starts.
+///
+/// Runs in both headless and graphical modes (registered in
+/// `add_core_combat_systems`, Phase 1). Healing/absorb application sites read
+/// the resulting `ArenaDampening` resource and scale through
+/// `ArenaDampening::apply`.
+pub fn update_dampening(
+    time: Res<Time>,
+    countdown: Res<MatchCountdown>,
+    mut dampening: ResMut<ArenaDampening>,
+    mut combat_log: ResMut<CombatLog>,
+) {
+    if !countdown.gates_opened {
+        return;
+    }
+
+    dampening.time_since_gates += time.delta_secs();
+    dampening.reduction = dampening_reduction(dampening.time_since_gates);
+
+    while dampening.next_milestone < DAMPENING_MILESTONES.len()
+        && dampening.reduction >= DAMPENING_MILESTONES[dampening.next_milestone]
+    {
+        let pct = DAMPENING_MILESTONES[dampening.next_milestone] * 100.0;
+        combat_log.log(
+            CombatLogEventType::MatchEvent,
+            format!("Arena dampening reaches {:.0}% — healing and absorbs reduced", pct),
+        );
+        dampening.next_milestone += 1;
+    }
+}
+
 /// Check if the match has ended (one or both teams eliminated).
 /// 
 /// When the match ends:
@@ -359,10 +403,41 @@ pub fn update_victory_celebration(
     if celebration.time_remaining <= 0.0 {
         // Store match results for Results scene
         commands.insert_resource(celebration.match_results.clone());
-        
+
         // Transition to Results
         next_state.set(GameState::Results);
         info!("Victory celebration complete - transitioning to Results");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::dampening_reduction;
+    use super::super::constants::{DAMPENING_RAMP_SECS, DAMPENING_START_SECS};
+
+    #[test]
+    fn dampening_zero_before_start() {
+        assert_eq!(dampening_reduction(0.0), 0.0);
+        assert_eq!(dampening_reduction(DAMPENING_START_SECS - 0.1), 0.0);
+    }
+
+    #[test]
+    fn dampening_ramps_linearly() {
+        let half = DAMPENING_START_SECS + DAMPENING_RAMP_SECS / 2.0;
+        assert!((dampening_reduction(half) - 0.5).abs() < 1e-5);
+    }
+
+    #[test]
+    fn dampening_caps_at_full() {
+        assert_eq!(dampening_reduction(DAMPENING_START_SECS + DAMPENING_RAMP_SECS), 1.0);
+        assert_eq!(dampening_reduction(10_000.0), 1.0);
+    }
+
+    #[test]
+    fn dampening_full_before_match_cap() {
+        // Matches time out at 300s of combat; full dampening must land well
+        // before that so zero-healing attrition has time to resolve the match.
+        assert!(DAMPENING_START_SECS + DAMPENING_RAMP_SECS <= 240.0);
     }
 }
 

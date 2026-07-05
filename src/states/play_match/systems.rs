@@ -29,6 +29,7 @@ use bevy::prelude::*;
 
 // === Phase 1: Resources and Auras ===
 pub use super::match_flow::update_countdown;
+pub use super::match_flow::update_dampening;
 pub use super::combat_core::regenerate_resources;
 pub use super::shadow_sight::track_shadow_sight_timer;
 pub use super::auras::process_dot_ticks;
@@ -79,7 +80,7 @@ pub use super::utils::combatant_id;
 // === Components and Resources ===
 pub use super::components::{
     Combatant, CastingState, ChannelingState, ActiveAuras, Aura, AuraPending, AuraType,
-    FloatingTextState, GameRng, MatchCountdown, SimulationSpeed, ShadowSightState,
+    ArenaDampening, FloatingTextState, GameRng, MatchCountdown, SimulationSpeed, ShadowSightState,
 };
 
 /// System set labels for combat system ordering.
@@ -141,6 +142,7 @@ where
         Update,
         (
             update_countdown,
+            update_dampening, // Ramp heal/absorb dampening BEFORE any healing applies this frame
             regenerate_resources,
             track_shadow_sight_timer,
             process_dot_ticks,

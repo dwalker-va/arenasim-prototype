@@ -179,6 +179,31 @@ impl Default for MatchCountdown {
     }
 }
 
+/// Arena dampening state — a time-ramped reduction to ALL healing and absorb
+/// shields that guarantees long matches resolve instead of stalling in a
+/// heal-vs-wand equilibrium (healer-vs-healer endgames were structurally
+/// drawish: trickle mana regen funds more HPS than wand DPS forever).
+///
+/// Ramp: zero until `DAMPENING_START_SECS` after gates open, then linear to
+/// 100% over `DAMPENING_RAMP_SECS`. Ticked by `match_flow::update_dampening`;
+/// consumed at every healing/absorb application site via `apply()`.
+#[derive(Resource, Default)]
+pub struct ArenaDampening {
+    /// Combat time elapsed since gates opened (seconds).
+    pub time_since_gates: f32,
+    /// Current healing/absorb reduction fraction: 0.0 = no reduction, 1.0 = fully dampened.
+    pub reduction: f32,
+    /// Index into the milestone table of the next milestone not yet logged.
+    pub next_milestone: usize,
+}
+
+impl ArenaDampening {
+    /// Scale a healing or absorb amount by the current dampening level.
+    pub fn apply(&self, amount: f32) -> f32 {
+        amount * (1.0 - self.reduction)
+    }
+}
+
 /// Resource tracking Shadow Sight orb spawn state.
 /// Shadow Sight orbs spawn after extended combat to break stealth stalemates.
 #[derive(Resource)]

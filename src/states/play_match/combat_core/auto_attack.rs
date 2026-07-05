@@ -324,9 +324,6 @@ pub fn combat_auto_attack(
     let mut damage_dealt_updates: Vec<(Entity, f32)> = Vec::new();
     let mut absorbed_per_target: std::collections::BTreeMap<Entity, f32> = std::collections::BTreeMap::new();
 
-    // Track which combatants have died during this frame's attack processing
-    let mut died_this_frame: std::collections::BTreeSet<Entity> = std::collections::BTreeSet::new();
-
     // Track crit status per target for FCT display
     let mut crit_per_target: std::collections::BTreeMap<Entity, bool> = std::collections::BTreeMap::new();
 
@@ -360,11 +357,13 @@ pub fn combat_auto_attack(
     for (attacker_entity, target_entity, damage, has_bonus, is_crit) in attacks {
         // If any attack to this target crits, mark the FCT as crit
         crit_per_target.entry(target_entity).and_modify(|c| *c = *c || is_crit).or_insert(is_crit);
-        // Bug fix: Don't allow attacks from combatants who died earlier this frame
-        // This can happen when two combatants attack each other in the same frame
-        if died_this_frame.contains(&attacker_entity) {
-            continue;
-        }
+        // Dying-blow semantics: every attack queued by an attacker who was alive
+        // at frame start lands, even if the attacker died earlier in this loop.
+        // Skipping those attacks made the winner of a simultaneous-lethal
+        // exchange depend on entity iteration order (Team 1's shot processed
+        // first, cancelling Team 2's counter-shot) — a systematic side bias in
+        // mirror matchups. Mutual lethal now kills both, and check_match_end
+        // records the draw.
 
         // Bug fix: Don't auto-attack targets with breakable CC from a friendly caster.
         // This prevents, e.g., a Warlock pet from breaking its team's Polymorph.
@@ -490,10 +489,6 @@ pub fn combat_auto_attack(
 
                     // Log death with killer tracking (only on first death to prevent duplicates)
                     if is_killing_blow {
-                        // Track that this target died - prevents them from dealing damage
-                        // if they had a queued attack later in this frame
-                        died_this_frame.insert(target_entity);
-
                         // Mark target as dead to prevent duplicate death processing across systems
                         let was_already_dead = if let Ok((_, _, mut dead_target, _, _, _)) = combatants.get_mut(target_entity) {
                             let already = dead_target.is_dead;

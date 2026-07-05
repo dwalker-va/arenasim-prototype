@@ -330,6 +330,9 @@ pub fn setup_play_match(
     // Initialize match countdown (10 seconds before gates open)
     commands.insert_resource(MatchCountdown::default());
 
+    // Initialize arena dampening (time-ramped heal/absorb reduction)
+    commands.insert_resource(ArenaDampening::default());
+
     // Initialize Shadow Sight state (for stealth stalemate breaking)
     commands.insert_resource(ShadowSightState::default());
 
@@ -892,6 +895,7 @@ pub fn cleanup_play_match(
     commands.remove_resource::<AmbientLight>();
     commands.remove_resource::<SimulationSpeed>();
     commands.remove_resource::<MatchCountdown>();
+    commands.remove_resource::<ArenaDampening>();
     commands.remove_resource::<ShadowSightState>();
     commands.remove_resource::<DisplaySettings>();
     // Remove optional resources (may not exist if match didn't finish)

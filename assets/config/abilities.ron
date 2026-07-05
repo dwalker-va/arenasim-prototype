@@ -1210,12 +1210,17 @@
         ),
 
         // Water — Healing Stream Totem: periodic ally heal in radius (U3 behavior).
+        // Costs 2x the buff totems: it is SUSTAIN, not utility. At 12 mana its
+        // 30s uptime cost (0.4 mana/s) was fully funded by gear trickle regen
+        // (1.0 mana/s), making it free infinite healing in OOM attrition — the
+        // core of the healer-vs-healer stalemate. At 24, upkeep eats most of
+        // the trickle, so keeping it up competes with hardcast heals.
         WaterTotem: (
             name: "Healing Stream Totem",
             icon: "icons/abilities/inv_spear_04.jpg",
             cast_time: 0.0,
             range: 0.0,
-            mana_cost: 12.0,
+            mana_cost: 24.0,
             cooldown: 6.0,
             spell_school: Nature,
         ),
