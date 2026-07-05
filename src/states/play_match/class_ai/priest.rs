@@ -916,6 +916,23 @@ fn try_mana_burn(
         return false;
     }
 
+    // Stealth gate: a stealthed enemy has no visible target, so the focus
+    // gate can't see the opener coming — and a Priest standing still in a
+    // 2.5s cast is the ideal Cheap Shot victim. Don't hard-cast while an
+    // enemy is unaccounted for.
+    let enemy_stealthed = ctx.combatants.iter().any(|(_, info)| {
+        info.team != combatant.team && info.is_alive && info.stealthed
+    });
+    if enemy_stealthed {
+        builder.reject(
+            ability,
+            RejectionReason::PreconditionUnmet {
+                note: "stealthed enemy unaccounted for: movement-locking cast deferred".to_string(),
+            },
+        );
+        return false;
+    }
+
     if !ctx.is_team_healthy(0.70, my_pos) {
         builder.reject(
             ability,
