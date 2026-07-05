@@ -5,7 +5,12 @@
 use bevy::prelude::*;
 use bevy::time::Real;
 use bevy_egui::{egui, EguiContexts};
-use super::components::{CameraController, CameraMode, ArenaCamera, Combatant};
+use super::components::{CameraController, CameraMode, ArenaCamera, Combatant, Pet};
+
+/// Exponential smoothing rate for the camera's look-at point (higher =
+/// snappier). ~6 gives a ~170ms time constant: deaths and follow-target
+/// switches glide instead of popping, while ordinary tracking feels tight.
+const TARGET_SMOOTH_RATE: f32 = 6.0;
 
 /// Handle camera input for mode switching, zoom, rotation, and drag
 pub fn handle_camera_input(
@@ -16,7 +21,7 @@ pub fn handle_camera_input(
     mut mouse_wheel: EventReader<bevy::input::mouse::MouseWheel>,
     mut cursor_moved: EventReader<bevy::window::CursorMoved>,
     time: Res<Time<Real>>,
-    combatants: Query<Entity, With<Combatant>>,
+    combatants: Query<(Entity, &Combatant)>,
     windows: Query<&bevy::window::Window>,
     mut contexts: EguiContexts,
 ) {
@@ -58,37 +63,37 @@ pub fn handle_camera_input(
         camera_controller.keyboard_movement.x += move_speed;
     }
 
-    // Cycle camera modes
+    // Cycle camera modes: Center -> each alive combatant (team 1 then team 2,
+    // slot order, pets after their team's players) -> Manual -> Center
     if keybindings.action_just_pressed(GameAction::CycleCameraMode, &keyboard) {
+        let mut candidates: Vec<(u8, u8, Entity)> = combatants
+            .iter()
+            .filter(|(_, c)| c.is_alive())
+            .map(|(e, c)| (c.team, c.slot, e))
+            .collect();
+        candidates.sort_unstable();
+
         camera_controller.mode = match camera_controller.mode {
             CameraMode::FollowCenter => {
-                // Find first alive combatant to follow
-                if let Some(entity) = combatants.iter().next() {
-                    CameraMode::FollowCombatant(entity)
-                } else {
-                    CameraMode::FollowCenter
-                }
-            }
-            CameraMode::FollowCombatant(current_entity) => {
-                // Cycle to next combatant
-                let mut found_current = false;
-                let mut next_entity = None;
-
-                for entity in combatants.iter() {
-                    if found_current {
-                        next_entity = Some(entity);
-                        break;
-                    }
-                    if entity == current_entity {
-                        found_current = true;
-                    }
-                }
-
-                // If we found a next entity, use it. Otherwise, go to manual or back to center
-                if let Some(entity) = next_entity {
+                if let Some(&(_, _, entity)) = candidates.first() {
                     CameraMode::FollowCombatant(entity)
                 } else {
                     CameraMode::Manual
+                }
+            }
+            CameraMode::FollowCombatant(current_entity) => {
+                match candidates.iter().position(|&(_, _, e)| e == current_entity) {
+                    // Advance to the next alive combatant, or Manual after the last
+                    Some(i) if i + 1 < candidates.len() => {
+                        CameraMode::FollowCombatant(candidates[i + 1].2)
+                    }
+                    Some(_) => CameraMode::Manual,
+                    // Current target died since we started following it -
+                    // restart the cycle from the first alive combatant
+                    None => match candidates.first() {
+                        Some(&(_, _, entity)) => CameraMode::FollowCombatant(entity),
+                        None => CameraMode::Manual,
+                    },
                 }
             }
             CameraMode::Manual => CameraMode::FollowCenter,
@@ -198,6 +203,7 @@ fn follow_center_target(
 
 /// Update camera position and rotation based on controller state
 pub fn update_camera_position(
+    time: Res<Time<Real>>,
     mut camera_controller: ResMut<CameraController>,
     mut camera_query: Query<&mut Transform, With<ArenaCamera>>,
     combatants: Query<(Entity, &Transform, &Combatant), Without<ArenaCamera>>,
@@ -205,26 +211,17 @@ pub fn update_camera_position(
     let Ok(mut camera_transform) = camera_query.single_mut() else {
         return;
     };
-    
-    // If user just started dragging OR using keyboard movement, switch to manual mode and preserve current target
-    let needs_manual_switch = (camera_controller.is_dragging || camera_controller.keyboard_movement != Vec3::ZERO) 
+
+    // Keyboard panning is the one input that means "look somewhere else" -
+    // switch to manual mode, preserving the point currently on screen.
+    // Drag-rotation and zoom only adjust the orbit and keep following.
+    let needs_manual_switch = camera_controller.keyboard_movement != Vec3::ZERO
         && camera_controller.mode != CameraMode::Manual;
-    
+
     if needs_manual_switch {
-        // Calculate current target before switching to manual
-        let current_target = match camera_controller.mode {
-            CameraMode::FollowCenter => follow_center_target(&combatants),
-            CameraMode::FollowCombatant(target_entity) => {
-                combatants
-                    .iter()
-                    .find(|(e, _, _)| *e == target_entity)
-                    .map(|(_, t, _)| t.translation)
-                    .unwrap_or(Vec3::ZERO)
-            }
-            CameraMode::Manual => camera_controller.manual_target,
-        };
-        
-        camera_controller.manual_target = current_target;
+        camera_controller.manual_target = camera_controller
+            .smoothed_target
+            .unwrap_or_else(|| follow_center_target(&combatants));
         camera_controller.mode = CameraMode::Manual;
     }
     
@@ -246,8 +243,8 @@ pub fn update_camera_position(
         camera_controller.manual_target += rotated_movement;
     }
     
-    // Determine the target look-at point based on camera mode
-    let target_point = match camera_controller.mode {
+    // Determine the desired look-at point based on camera mode
+    let desired_target = match camera_controller.mode {
         CameraMode::FollowCenter => follow_center_target(&combatants),
         CameraMode::FollowCombatant(target_entity) => {
             // Follow specific combatant
@@ -262,7 +259,21 @@ pub fn update_camera_position(
             camera_controller.manual_target
         }
     };
-    
+
+    // Chase the desired target with exponential smoothing so discontinuities
+    // (a death shifting the centroid, cycling follow targets) glide instead
+    // of snapping. Framerate-independent: converges at the same speed
+    // regardless of dt.
+    let target_point = match camera_controller.smoothed_target {
+        Some(previous) => {
+            let alpha = 1.0 - (-TARGET_SMOOTH_RATE * time.delta_secs()).exp();
+            previous.lerp(desired_target, alpha)
+        }
+        None => desired_target,
+    };
+    camera_controller.smoothed_target = Some(target_point);
+
+
     // Calculate camera position based on spherical coordinates
     let x = target_point.x + camera_controller.zoom_distance * camera_controller.pitch.sin() * camera_controller.yaw.sin();
     let y = target_point.y + camera_controller.zoom_distance * camera_controller.pitch.cos();
@@ -277,6 +288,7 @@ pub fn render_camera_controls(
     mut contexts: EguiContexts,
     camera_controller: Res<CameraController>,
     keybindings: Res<crate::keybindings::Keybindings>,
+    combatants: Query<(&Combatant, Option<&Pet>)>,
 ) {
     use crate::keybindings::GameAction;
 
@@ -298,9 +310,20 @@ pub fn render_camera_controls(
             
             // Current mode
             let mode_text = match camera_controller.mode {
-                CameraMode::FollowCenter => "Center",
-                CameraMode::FollowCombatant(_) => "Follow Combatant",
-                CameraMode::Manual => "Manual",
+                CameraMode::FollowCenter => "Center".to_string(),
+                CameraMode::FollowCombatant(entity) => {
+                    match combatants.get(entity) {
+                        Ok((combatant, pet)) => {
+                            let name = pet.map_or_else(
+                                || combatant.class.name(),
+                                |p| p.pet_type.name(),
+                            );
+                            format!("Following Team {} {}", combatant.team, name)
+                        }
+                        Err(_) => "Follow Combatant".to_string(),
+                    }
+                }
+                CameraMode::Manual => "Manual".to_string(),
             };
             
             ui.label(
