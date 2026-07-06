@@ -187,6 +187,23 @@ pub fn decide_priest_action(
         return true;
     }
 
+    // Priority 4.5: Mana Burn — held for the premium window, exactly like a
+    // human Priest: the enemy healer sitting in CC (our burn deals no damage,
+    // so it can NEVER break the CC — a stunned/feared/polymorphed healer is a
+    // free burn) while the partner doesn't need healing. Sits ABOVE Flash
+    // Heal because its internal health floor is two-tier: during a CC window
+    // it burns unless an ally is in real danger (<70%); outside one it
+    // requires a topped team (<90% floor, i.e. only surplus GCDs — Flash
+    // Heal's own trigger), so ordering is safe. Safety gates (escape/
+    // pressured/focus/stealth) live inside and are traced.
+    if try_mana_burn(
+        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
+        escape_defer, plan.pressured, &mut builder,
+    ) {
+        builder.finish();
+        return true;
+    }
+
     // Priority 5: Flash Heal
     if try_flash_heal(
         commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
@@ -205,18 +222,6 @@ pub fn decide_priest_action(
             builder.finish();
             return true;
         }
-    }
-
-    // Priority 6.5: Mana Burn — starve the enemy healer during comfortable
-    // windows. Outranks Mind Blast: denying ~2 Flash Heals of enemy mana per
-    // cast converts the team's damage better than the Priest's own filler
-    // nuke. Team-healthy and target-mana gates live inside (traced).
-    if try_mana_burn(
-        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
-        escape_defer, plan.pressured, &mut builder,
-    ) {
-        builder.finish();
-        return true;
     }
 
     // Priority 7: Mind Blast
@@ -853,12 +858,41 @@ const MANA_BURN_MIN_TARGET_MANA: f32 = 10.0;
 /// doesn't flicker the cast in and out of OutOfRange.
 const MANA_BURN_RANGE_BUFFER: f32 = 2.0;
 
-/// Any living, visible enemy currently targeting `entity` — the ranged-train
-/// detection the PRESSURED proximity trigger cannot see (a Shaman
-/// chain-casting from 30yd never enters danger_radius).
+/// Health floor for burning during a premium window (enemy healer in
+/// cast-preventing CC): burn unless an ally is in real danger.
+const MANA_BURN_CC_WINDOW_HEALTH_FLOOR: f32 = 0.70;
+
+/// Health floor outside a CC window: only surplus GCDs — 0.90 is Flash
+/// Heal's own trigger threshold, so this rung sitting above Flash Heal
+/// cannot steal a needed heal.
+const MANA_BURN_SURPLUS_HEALTH_FLOOR: f32 = 0.90;
+
+/// Cast/attack-preventing CC on an entity (Stun/Fear/Polymorph/Incapacitate —
+/// deliberately NOT Root: a rooted caster still casts). Same set as
+/// `CombatContext::enemy_healer_is_cced`.
+fn attack_prevented_by_cc(ctx: &CombatContext, entity: Entity) -> bool {
+    ctx.active_auras.get(&entity).map_or(false, |auras| {
+        auras.iter().any(|a| {
+            matches!(
+                a.effect_type,
+                AuraType::Stun | AuraType::Fear | AuraType::Polymorph | AuraType::Incapacitate
+            )
+        })
+    })
+}
+
+/// Any living, visible enemy currently targeting `entity` AND able to act on
+/// it — the ranged-train detection the PRESSURED proximity trigger cannot see
+/// (a Shaman chain-casting from 30yd never enters danger_radius). An enemy in
+/// attack-preventing CC is exempt: a feared Warrior still nominally targets
+/// the Priest, but the burn window his fear creates is exactly when to cast.
 fn any_enemy_focusing(entity: Entity, my_team: u8, ctx: &CombatContext) -> bool {
-    ctx.combatants.iter().any(|(_, info)| {
-        info.team != my_team && info.is_alive && !info.stealthed && info.target == Some(entity)
+    ctx.combatants.iter().any(|(e, info)| {
+        info.team != my_team
+            && info.is_alive
+            && !info.stealthed
+            && info.target == Some(entity)
+            && !attack_prevented_by_cc(ctx, *e)
     })
 }
 
@@ -981,10 +1015,30 @@ fn try_mana_burn(
         return false;
     }
 
-    // NOTE: no explicit team-health gate. Flash Heal (priority 5, fires for
-    // any ally below 90% in range) and PW: Shield sit ABOVE this rung, so a
-    // frame that reaches Mana Burn is a frame where no heal was needed —
-    // the ladder ordering IS the health gate, exactly as for Mind Blast.
+    // Two-tier health floor (the rung sits ABOVE Flash Heal): during a
+    // premium window — the enemy healer in cast-preventing CC, which our
+    // zero-damage burn can never break — burn unless an ally is in real
+    // danger. Outside one, require a topped team (90% is Flash Heal's own
+    // trigger), i.e. only surplus GCDs.
+    let cc_window = ctx.enemy_healer_is_cced();
+    let health_floor = if cc_window {
+        MANA_BURN_CC_WINDOW_HEALTH_FLOOR
+    } else {
+        MANA_BURN_SURPLUS_HEALTH_FLOOR
+    };
+    if !ctx.is_team_healthy(health_floor, my_pos) {
+        builder.reject(
+            ability,
+            RejectionReason::PreconditionUnmet {
+                note: if cc_window {
+                    "ally in danger: heal wins even the CC window".to_string()
+                } else {
+                    "no surplus GCD: team not topped and no CC window".to_string()
+                },
+            },
+        );
+        return false;
+    }
 
     let Some(target_entity) = ctx.enemy_healer() else {
         builder.reject(ability, RejectionReason::NoValidTarget);
