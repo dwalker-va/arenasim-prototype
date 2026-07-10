@@ -159,7 +159,12 @@
             applies_aura: Some((
                 aura_type: Absorb,
                 duration: 30.0,
-                magnitude: 50.0,
+                // Scales with spell power (25 + 0.4 × SP ≈ 70 at the shipped
+                // 112-SP loadout; was flat 50 — the one Priest number that
+                // never grew with the kit). Apply site: try_power_word_shield
+                // via from_ability_scaled.
+                magnitude: 25.0,
+                magnitude_coefficient: 0.4,
             )),
             spell_school: Holy,
         ),
@@ -195,13 +200,13 @@
         ManaBurn: (
             name: "Mana Burn",
             icon: "icons/abilities/spell_shadow_manaburn.jpg",
-            description: "Destroys 75 mana on an enemy mana user. Interruptible Shadow cast (deals no damage, so it never breaks crowd control) — the lockout blocks Mind Blast and Psychic Scream, not heals.",
+            description: "Destroys 50 mana on an enemy mana user. Interruptible Shadow cast (deals no damage, so it never breaks crowd control) — the lockout blocks Mind Blast and Psychic Scream, not heals.",
             cast_time: 1.5,
             range: 40.0,
             mana_cost: 25.0,
             cooldown: 0.0,
             spell_school: Shadow,
-            mana_burn_amount: 75.0,
+            mana_burn_amount: 50.0,
         ),
 
         // ============================================================================

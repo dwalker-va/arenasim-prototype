@@ -309,6 +309,21 @@ impl AuraPending {
         caster: Entity,
         ability_def: &AbilityConfig,
     ) -> Option<Self> {
+        Self::from_ability_scaled(target, caster, ability_def, 0.0)
+    }
+
+    /// Like [`Self::from_ability`], but scales the aura magnitude with the
+    /// caster's spell power: `magnitude + spell_power × magnitude_coefficient`
+    /// (Power Word: Shield absorb). Pass the caster's EFFECTIVE spell power
+    /// (base + gear + aura bonuses). `ability_config::validate()` rejects a
+    /// non-zero coefficient on any ability whose apply site doesn't call this
+    /// variant, so plain `from_ability` callers can't silently drop scaling.
+    pub fn from_ability_scaled(
+        target: Entity,
+        caster: Entity,
+        ability_def: &AbilityConfig,
+        spell_power: f32,
+    ) -> Option<Self> {
         let aura_effect = ability_def.applies_aura.as_ref()?;
 
         // Convert spell school to Option (None for Physical, since physical = not magic-dispellable)
@@ -322,7 +337,8 @@ impl AuraPending {
             aura: Aura {
                 effect_type: aura_effect.aura_type,
                 duration: aura_effect.duration,
-                magnitude: aura_effect.magnitude,
+                magnitude: aura_effect.magnitude
+                    + spell_power * aura_effect.magnitude_coefficient,
                 break_on_damage_threshold: aura_effect.break_on_damage,
                 accumulated_damage: 0.0,
                 tick_interval: aura_effect.tick_interval,

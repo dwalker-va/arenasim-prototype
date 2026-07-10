@@ -44,6 +44,14 @@ pub struct AuraEffect {
     /// - DamageOverTime: damage per tick
     /// - HealingReduction: multiplier (0.65 = 35% reduction)
     pub magnitude: f32,
+    /// Spell-power scaling for the magnitude: effective magnitude =
+    /// `magnitude + caster spell power × magnitude_coefficient` (Power Word:
+    /// Shield: 25 + 0.4 × SP). Applied only at call sites using
+    /// `AuraPending::from_ability_scaled` — `validate()` rejects a non-zero
+    /// coefficient on any ability not in `SP_SCALED_AURA_WIRED`, so a config
+    /// edit can't silently no-op.
+    #[serde(default)]
+    pub magnitude_coefficient: f32,
     /// Damage threshold that breaks the aura.
     /// - Negative (default -1.0) = doesn't break on damage
     /// - 0.0 = breaks on ANY damage (e.g., Polymorph)
@@ -389,6 +397,24 @@ impl AbilityDefinitions {
             .into_iter()
             .filter(|ability| !self.definitions.contains_key(ability))
             .collect();
+
+        // SP-scaled aura magnitudes only take effect at call sites using
+        // `AuraPending::from_ability_scaled`. Reject a non-zero coefficient on
+        // any ability whose apply site isn't wired for it — otherwise the RON
+        // edit silently no-ops.
+        const SP_SCALED_AURA_WIRED: &[AbilityType] = &[AbilityType::PowerWordShield];
+        for (ability, def) in &self.definitions {
+            if let Some(aura) = &def.applies_aura {
+                if aura.magnitude_coefficient != 0.0 && !SP_SCALED_AURA_WIRED.contains(ability) {
+                    panic!(
+                        "abilities.ron: {:?} sets applies_aura.magnitude_coefficient but its \
+                         apply site uses AuraPending::from_ability (unscaled). Wire the site \
+                         to from_ability_scaled and add it to SP_SCALED_AURA_WIRED.",
+                        ability
+                    );
+                }
+            }
+        }
 
         if missing.is_empty() {
             Ok(())

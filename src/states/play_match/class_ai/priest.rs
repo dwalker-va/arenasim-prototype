@@ -19,7 +19,9 @@ use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::{AbilityConfig, AbilityDefinitions};
 use crate::states::play_match::components::*;
-use crate::states::play_match::combat_core::{calculate_cast_time, clamp_to_arena};
+use crate::states::play_match::combat_core::{
+    calculate_cast_time, clamp_to_arena, get_spell_power_bonus,
+};
 use crate::states::play_match::constants::GCD;
 use crate::states::play_match::decision_trace::{
     DecisionEventBuilder, DecisionTrace, MovementGoalKind, MovementTrigger,
@@ -619,7 +621,12 @@ fn try_power_word_shield(
     let target_tuple = ctx.combatants.get(&shield_entity).map(|info| (info.team, info.class));
     log_ability_use(combat_log, combatant.team, combatant.class, "Power Word: Shield", target_tuple, "casts");
 
-    if let Some(aura_pending) = AuraPending::from_ability(shield_entity, entity, pw_shield_def) {
+    // Absorb scales with the Priest's effective spell power (base + gear +
+    // aura bonuses) via magnitude_coefficient — same stat the heals use.
+    let effective_sp = combatant.spell_power + get_spell_power_bonus(auras);
+    if let Some(aura_pending) =
+        AuraPending::from_ability_scaled(shield_entity, entity, pw_shield_def, effective_sp)
+    {
         commands.spawn(aura_pending);
     }
 
