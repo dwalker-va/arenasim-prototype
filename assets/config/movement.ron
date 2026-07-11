@@ -54,6 +54,7 @@
             formation_pull: 2.0,
             corner_penalty: 6.0,
             wand_pull: 0.5,
+            burn_pull: 1.0,           // FREE clamp toward Mana Burn range of the ENEMY healer while the burn window is open
             commitment_bonus: 1.5,
         ),
         // FREE-directive tuning (formerly hardcoded consts in priest.rs).
@@ -69,6 +70,7 @@
             formation_pull: 0.0,      // Paladin keeps melee identity — no backline point
             corner_penalty: 4.0,
             wand_pull: 0.0,           // Paladin has no wand
+            burn_pull: 0.0,           // Paladin has no Mana Burn
             commitment_bonus: 1.5,
         ),
         // PRESSURED retreat range (instead of face-tanking at melee).
@@ -90,6 +92,7 @@
             formation_pull: 1.0,      // weaker backline pull than the Priest (2.0) — drifts forward
             corner_penalty: 6.0,      // same graded corner avoidance as the Priest
             wand_pull: 1.0,           // stronger than the Priest (0.5): pull toward Lightning Bolt range of the kill target
+            burn_pull: 0.0,           // Shaman has no Mana Burn
             commitment_bonus: 1.5,
         ),
         // FREE-directive tuning (mirrors the priest block).

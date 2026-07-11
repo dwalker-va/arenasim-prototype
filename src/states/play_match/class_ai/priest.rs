@@ -19,7 +19,9 @@ use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::{AbilityConfig, AbilityDefinitions};
 use crate::states::play_match::components::*;
-use crate::states::play_match::combat_core::{calculate_cast_time, clamp_to_arena};
+use crate::states::play_match::combat_core::{
+    calculate_cast_time, clamp_to_arena, get_spell_power_bonus,
+};
 use crate::states::play_match::constants::GCD;
 use crate::states::play_match::decision_trace::{
     DecisionEventBuilder, DecisionTrace, MovementGoalKind, MovementTrigger,
@@ -182,6 +184,23 @@ pub fn decide_priest_action(
     if try_power_word_shield(
         commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
         shielded_this_frame, &mut builder,
+    ) {
+        builder.finish();
+        return true;
+    }
+
+    // Priority 4.5: Mana Burn — held for the premium window, exactly like a
+    // human Priest: the enemy healer sitting in CC (our burn deals no damage,
+    // so it can NEVER break the CC — a stunned/feared/polymorphed healer is a
+    // free burn) while the partner doesn't need healing. Sits ABOVE Flash
+    // Heal because its internal health floor is two-tier: during a CC window
+    // it burns unless an ally is in real danger (<70%); outside one it
+    // requires a topped team (<90% floor, i.e. only surplus GCDs — Flash
+    // Heal's own trigger), so ordering is safe. Safety gates (escape/
+    // pressured/focus/stealth) live inside and are traced.
+    if try_mana_burn(
+        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
+        escape_defer, plan.pressured, &mut builder,
     ) {
         builder.finish();
         return true;
@@ -602,7 +621,12 @@ fn try_power_word_shield(
     let target_tuple = ctx.combatants.get(&shield_entity).map(|info| (info.team, info.class));
     log_ability_use(combat_log, combatant.team, combatant.class, "Power Word: Shield", target_tuple, "casts");
 
-    if let Some(aura_pending) = AuraPending::from_ability(shield_entity, entity, pw_shield_def) {
+    // Absorb scales with the Priest's effective spell power (base + gear +
+    // aura bonuses) via magnitude_coefficient — same stat the heals use.
+    let effective_sp = combatant.spell_power + get_spell_power_bonus(auras);
+    if let Some(aura_pending) =
+        AuraPending::from_ability_scaled(shield_entity, entity, pw_shield_def, effective_sp)
+    {
         commands.spawn(aura_pending);
     }
 
@@ -822,6 +846,263 @@ fn try_mind_blast(
 
     info!(
         "Team {} {} starts casting {} on enemy",
+        combatant.team,
+        combatant.class.name(),
+        def.name
+    );
+
+    true
+}
+
+/// Minimum enemy-healer mana for a Mana Burn cast to be worth the GCDs.
+/// Deliberately BELOW the cheapest enemy heal cost (~18-25): keeping a
+/// near-broke healer under one heal's cost is the lockout win condition —
+/// pressured healers live near-zero on the 1.0/s trickle, so waiting for a
+/// "full bar worth burning" means never burning at all.
+const MANA_BURN_MIN_TARGET_MANA: f32 = 10.0;
+
+/// Stand this far inside Mana Burn's max range so drift between decide ticks
+/// doesn't flicker the cast in and out of OutOfRange.
+const MANA_BURN_RANGE_BUFFER: f32 = 2.0;
+
+/// Health floor for burning during a premium window (enemy healer in
+/// cast-preventing CC): burn unless an ally is in real danger.
+const MANA_BURN_CC_WINDOW_HEALTH_FLOOR: f32 = 0.70;
+
+/// Health floor outside a CC window: only surplus GCDs — 0.90 is Flash
+/// Heal's own trigger threshold, so this rung sitting above Flash Heal
+/// cannot steal a needed heal.
+const MANA_BURN_SURPLUS_HEALTH_FLOOR: f32 = 0.90;
+
+/// Cast/attack-preventing CC on an entity (Stun/Fear/Polymorph/Incapacitate —
+/// deliberately NOT Root: a rooted caster still casts). Same set as
+/// `CombatContext::enemy_healer_is_cced`.
+fn attack_prevented_by_cc(ctx: &CombatContext, entity: Entity) -> bool {
+    ctx.active_auras.get(&entity).map_or(false, |auras| {
+        auras.iter().any(|a| {
+            matches!(
+                a.effect_type,
+                AuraType::Stun | AuraType::Fear | AuraType::Polymorph | AuraType::Incapacitate
+            )
+        })
+    })
+}
+
+/// Any living, visible enemy currently targeting `entity` AND able to act on
+/// it — the ranged-train detection the PRESSURED proximity trigger cannot see
+/// (a Shaman chain-casting from 30yd never enters danger_radius). An enemy in
+/// attack-preventing CC is exempt: a feared Warrior still nominally targets
+/// the Priest, but the burn window his fear creates is exactly when to cast.
+fn any_enemy_focusing(entity: Entity, my_team: u8, ctx: &CombatContext) -> bool {
+    ctx.combatants.iter().any(|(e, info)| {
+        info.team != my_team
+            && info.is_alive
+            && !info.stealthed
+            && info.target == Some(entity)
+            && !attack_prevented_by_cc(ctx, *e)
+    })
+}
+
+/// Any living enemy stealthed — an unaccounted-for opener; standing still in
+/// a long cast is the ideal Cheap Shot victim.
+fn any_enemy_stealthed(my_team: u8, ctx: &CombatContext) -> bool {
+    ctx.combatants
+        .iter()
+        .any(|(_, info)| info.team != my_team && info.is_alive && info.stealthed)
+}
+
+/// The Mana Burn positioning window: `Some(enemy healer position)` when the
+/// cheap burn preconditions hold — enemy healer alive with mana worth
+/// burning, no stealthed enemy, nobody focusing us, team healthy. Shared by
+/// the FREE formation burn-pull (position toward the window) and mirrored by
+/// `try_mana_burn`'s authoritative cast gates.
+fn mana_burn_pull_target(
+    entity: Entity,
+    combatant: &Combatant,
+    my_pos: Vec3,
+    ctx: &CombatContext,
+) -> Option<Vec3> {
+    let healer = ctx.enemy_healer()?;
+    let info = ctx.combatants.get(&healer)?;
+    if info.current_mana < MANA_BURN_MIN_TARGET_MANA {
+        return None;
+    }
+    if any_enemy_stealthed(combatant.team, ctx) {
+        return None;
+    }
+    if any_enemy_focusing(entity, combatant.team, ctx) {
+        return None;
+    }
+    Some(info.position)
+}
+
+/// Try to cast Mana Burn — a Shadow spell that destroys mana on the enemy
+/// healer (mana pressure win condition; see priest-mana-burn design notes).
+///
+/// Targets `ctx.enemy_healer()` directly, NOT `combatant.target`: the kill
+/// target is usually a DPS, but mana pressure only converts against the class
+/// whose mana gates the enemy team's survival. Deliberately does NOT check
+/// friendly CC on the target — Mana Burn deals no damage, so burning a feared
+/// or screamed healer cannot break the CC and is in fact the ideal window.
+///
+/// No explicit team-health gate: the heal rungs above this one fire first
+/// whenever a heal is needed, so reaching this rung implies a surplus GCD.
+///
+/// The escape/pressured/focus/stealth gates protect the STANDSTILL of a
+/// hard cast (sweeps proved a Priest rooted mid-burn dies to ranged trains
+/// and stealth openers), so they apply only when `cast_time > 0` — an
+/// instant burn locks nothing and weaves safely between heals.
+fn try_mana_burn(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
+    escape_defer: Option<f32>,
+    pressured: bool,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    let ability = AbilityType::ManaBurn;
+    let def = abilities.get_unchecked(&ability);
+
+    // Movement-lock protections — hard casts only (see doc comment).
+    if def.cast_time > 0.0 {
+        if escape_defer.is_some() {
+            builder.reject(
+                ability,
+                RejectionReason::PreconditionUnmet {
+                    note: "escape window live: movement-locking cast deferred".to_string(),
+                },
+            );
+            return false;
+        }
+
+        // Under PRESSURED the posture machine needs the legs. Burn only from
+        // comfortable (FREE) windows.
+        if pressured {
+            builder.reject(
+                ability,
+                RejectionReason::PreconditionUnmet {
+                    note: "pressured: movement-locking cast deferred".to_string(),
+                },
+            );
+            return false;
+        }
+
+        // Focus gate: PRESSURED only sees proximity threats (danger_radius),
+        // so a ranged train — a Shaman chain-casting Lightning Bolt from 30yd
+        // — leaves the Priest nominally FREE while standing still for a long
+        // cast is lethal exposure. If any living enemy has us as their
+        // target, don't hard-cast.
+        if any_enemy_focusing(entity, combatant.team, ctx) {
+            builder.reject(
+                ability,
+                RejectionReason::PreconditionUnmet {
+                    note: "enemy focus on self: movement-locking cast deferred".to_string(),
+                },
+            );
+            return false;
+        }
+    }
+
+    // Stealth gate: a stealthed enemy has no visible target, so the focus
+    // gate can't see the opener coming — and a Priest standing still in a
+    // long cast is the ideal Cheap Shot victim. Don't hard-cast while an
+    // enemy is unaccounted for. (Hard casts only, like the gates above.)
+    if def.cast_time > 0.0 && any_enemy_stealthed(combatant.team, ctx) {
+        builder.reject(
+            ability,
+            RejectionReason::PreconditionUnmet {
+                note: "stealthed enemy unaccounted for: movement-locking cast deferred".to_string(),
+            },
+        );
+        return false;
+    }
+
+    // Two-tier health floor (the rung sits ABOVE Flash Heal): during a
+    // premium window — the enemy healer in cast-preventing CC, which our
+    // zero-damage burn can never break — burn unless an ally is in real
+    // danger. Outside one, require a topped team (90% is Flash Heal's own
+    // trigger), i.e. only surplus GCDs.
+    let cc_window = ctx.enemy_healer_is_cced();
+    let health_floor = if cc_window {
+        MANA_BURN_CC_WINDOW_HEALTH_FLOOR
+    } else {
+        MANA_BURN_SURPLUS_HEALTH_FLOOR
+    };
+    if !ctx.is_team_healthy(health_floor, my_pos) {
+        builder.reject(
+            ability,
+            RejectionReason::PreconditionUnmet {
+                note: if cc_window {
+                    "ally in danger: heal wins even the CC window".to_string()
+                } else {
+                    "no surplus GCD: team not topped and no CC window".to_string()
+                },
+            },
+        );
+        return false;
+    }
+
+    let Some(target_entity) = ctx.enemy_healer() else {
+        builder.reject(ability, RejectionReason::NoValidTarget);
+        return false;
+    };
+
+    let Some(target_info) = ctx.combatants.get(&target_entity) else {
+        builder.reject(ability, RejectionReason::NoValidTarget);
+        return false;
+    };
+
+    if target_info.current_mana < MANA_BURN_MIN_TARGET_MANA {
+        builder.reject(
+            ability,
+            RejectionReason::PreconditionUnmet {
+                note: "enemy healer mana too low to burn".to_string(),
+            },
+        );
+        return false;
+    }
+
+    let target_pos = target_info.position;
+
+    let opts = PreCastOpts {
+        check_friendly_cc: false, // no damage — cannot break friendly CC
+        check_target_immune: true,
+        ..Default::default()
+    };
+    if !pre_cast_ok(
+        ability, def, combatant, my_pos, auras,
+        Some((target_entity, target_pos)), ctx, opts,
+    ) {
+        builder.reject(
+            ability,
+            classify_pre_cast_failure(
+                ability, def, combatant, my_pos, auras,
+                Some((target_entity, target_pos)), ctx, opts,
+            ),
+        );
+        return false;
+    }
+
+    builder.choose(ability, Some(target_entity), false);
+
+    combatant.ability_cooldowns.insert(ability, def.cooldown);
+    combatant.global_cooldown = GCD;
+    let cast_time = calculate_cast_time(def.cast_time, auras);
+
+    commands.entity(entity).insert(CastingState::new(ability, target_entity, cast_time));
+
+    let target_tuple = ctx.combatants
+        .get(&target_entity)
+        .map(|info| (info.team, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, target_tuple, "begins casting");
+
+    info!(
+        "Team {} {} starts casting {} on enemy healer",
         combatant.team,
         combatant.class.name(),
         def.name
@@ -1238,7 +1519,7 @@ pub fn evaluate_priest_posture(
             );
         }
         _ => free_tick(
-            commands, entity, combatant, my_pos, ctx, state, directive, movement, now,
+            commands, abilities, entity, combatant, my_pos, ctx, state, directive, movement, now,
             decision_trace, transitioned, prev,
         ),
     }
@@ -1305,6 +1586,7 @@ fn pressured_tick(
 #[allow(clippy::too_many_arguments)]
 fn free_tick(
     commands: &mut Commands,
+    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &Combatant,
     my_pos: Vec3,
@@ -1339,7 +1621,7 @@ fn free_tick(
         commands.entity(entity).remove::<MovementDirective>();
     }
 
-    let Some(point) = compute_formation_point(entity, combatant, my_pos, ctx, movement) else {
+    let Some(point) = compute_formation_point(abilities, entity, combatant, my_pos, ctx, movement) else {
         // DEGENERATE (R5/AE4): no formation directive; fall through to the
         // legacy ladder. Exit transitions still emit — goal_kind
         // Entity records "legacy target pursuit governs".
@@ -1422,6 +1704,7 @@ fn free_tick(
 /// still drifts into wand range) and into arena bounds. `None` when no
 /// living non-pet ally exists (degenerate case R5/AE4).
 fn compute_formation_point(
+    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &Combatant,
     my_pos: Vec3,
@@ -1503,6 +1786,33 @@ fn compute_formation_point(
                 let clamped = offset / dist * shared.wand_range;
                 point.x = target.position.x + clamped.x;
                 point.z = target.position.z + clamped.y;
+            }
+        }
+    }
+
+    // Burn-range pull: while the Mana Burn window is open (see
+    // `mana_burn_pull_target`), spending the FREE window in cast range is
+    // worth more than the backline point — the enemy healer typically sits
+    // ~70yd away and no static cast range reaches it from formation. Clamp
+    // the point toward the healer's burn range, but never beyond heal range
+    // of the ally centroid (healer duty anchors the excursion). Applied
+    // after the wand clamp: when the burn window is open, burning outranks
+    // wanding.
+    if movement.priest.weights.burn_pull > 0.0 {
+        if let Some(healer_pos) = mana_burn_pull_target(entity, combatant, my_pos, ctx) {
+            let burn_range =
+                abilities.get_unchecked(&AbilityType::ManaBurn).range - MANA_BURN_RANGE_BUFFER;
+            let offset = Vec2::new(point.x - healer_pos.x, point.z - healer_pos.z);
+            let dist = offset.length();
+            if dist > burn_range {
+                let pulled = offset / dist * burn_range;
+                let candidate =
+                    Vec3::new(healer_pos.x + pulled.x, my_pos.y, healer_pos.z + pulled.y);
+                let anchor_dist =
+                    Vec2::new(candidate.x - centroid.x, candidate.z - centroid.z).length();
+                if anchor_dist <= shared.heal_range {
+                    point = candidate;
+                }
             }
         }
     }

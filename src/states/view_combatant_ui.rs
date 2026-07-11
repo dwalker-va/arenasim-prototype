@@ -268,6 +268,7 @@ fn get_class_abilities(class: CharacterClass) -> Vec<AbilityType> {
             AbilityType::PowerWordShield,
             AbilityType::DispelMagic,
             AbilityType::PsychicScream,
+            AbilityType::ManaBurn,
         ],
         CharacterClass::Warlock => vec![
             AbilityType::Corruption,
@@ -330,6 +331,7 @@ fn get_ability_name(ability: AbilityType) -> &'static str {
         AbilityType::KidneyShot => "Kidney Shot",
         AbilityType::PowerWordFortitude => "Power Word: Fortitude",
         AbilityType::PsychicScream => "Psychic Scream",
+        AbilityType::ManaBurn => "Mana Burn",
         AbilityType::Rend => "Rend",
         AbilityType::MortalStrike => "Mortal Strike",
         AbilityType::Pummel => "Pummel",
