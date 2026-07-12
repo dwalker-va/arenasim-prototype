@@ -439,6 +439,7 @@ mod tests {
             wand_pull: 0.0,
             range_band: 0.0,
             flee: 0.0,
+            burn_pull: 0.0,
             commitment_bonus: 0.5,
         };
         let dirs = compass_directions_16();
@@ -727,6 +728,7 @@ mod tests {
             wand_pull: 0.0,
             range_band: 0.0,
             flee: 6.0,
+            burn_pull: 0.0,
             commitment_bonus: 0.0,
         };
         let dirs = compass_directions_16();
