@@ -197,13 +197,13 @@ pub fn armory_ui(
 // SUB-COMPONENTS
 // ============================================================================
 
-/// Renders the top header: "← Back" button on the left, "ARMORY" title centered.
+/// Renders the top header: "BACK" button on the left, "ARMORY" title centered.
 fn render_header(ui: &mut egui::Ui, next_state: &mut NextState<GameState>) {
     ui.horizontal(|ui| {
         if ui
             .add(
                 egui::Button::new(
-                    egui::RichText::new("← Back")
+                    egui::RichText::new("BACK")
                         .size(18.0)
                         .color(BUTTON_TEXT),
                 )
