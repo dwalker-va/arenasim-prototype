@@ -124,7 +124,7 @@ fn texel_noise(x: u32, y: u32) -> f32 {
 /// - `blotch_amp` / `grain_amp`: multiplicative variation strength.
 /// - `courses`: number of horizontal stone courses across the image height
 ///   (`0` disables — used by the floor).
-fn create_surface_texture(base: [f32; 3], blotch_amp: f32, grain_amp: f32, courses: u32) -> Image {
+pub(crate) fn create_surface_texture(base: [f32; 3], blotch_amp: f32, grain_amp: f32, courses: u32) -> Image {
     const SIZE: u32 = 512;
     let mut data = vec![0u8; (SIZE * SIZE * 4) as usize];
 
@@ -184,7 +184,7 @@ fn create_surface_texture(base: [f32; 3], blotch_amp: f32, grain_amp: f32, cours
 /// `uv_scale` maps world units to texture space (UV = world_pos * uv_scale),
 /// giving square, uniformly-tiled texels regardless of the floor's aspect
 /// ratio. Smaller values = the texture repeats more often.
-fn create_octagon_mesh(length: f32, width: f32, corner_cut: f32, uv_scale: f32) -> Mesh {
+pub(crate) fn create_octagon_mesh(length: f32, width: f32, corner_cut: f32, uv_scale: f32) -> Mesh {
     let half_length = length / 2.0;
     let half_width = width / 2.0;
     
@@ -239,6 +239,224 @@ fn create_octagon_mesh(length: f32, width: f32, corner_cut: f32, uv_scale: f32) 
     .with_inserted_indices(bevy::render::mesh::Indices::U32(indices))
 }
 
+/// Vibrant per-class colors used for 3D combatant meshes. Deliberately
+/// distinct from `CharacterClass::color()`, the muted UI palette.
+pub(crate) fn class_mesh_color(class: match_config::CharacterClass) -> Color {
+    match class {
+        match_config::CharacterClass::Warrior => Color::srgb(0.9, 0.6, 0.3), // Orange/brown
+        match_config::CharacterClass::Mage => Color::srgb(0.3, 0.6, 1.0),    // Bright blue
+        match_config::CharacterClass::Rogue => Color::srgb(1.0, 0.9, 0.2),   // Bright yellow
+        match_config::CharacterClass::Priest => Color::srgb(0.95, 0.95, 0.95), // White
+        match_config::CharacterClass::Warlock => Color::srgb(0.58, 0.41, 0.93), // Purple
+        match_config::CharacterClass::Paladin => Color::srgb(0.96, 0.55, 0.73), // Pink (WoW Paladin)
+        match_config::CharacterClass::Hunter => Color::srgb(0.67, 0.83, 0.45), // Green (WoW Hunter)
+        match_config::CharacterClass::Shaman => Color::srgb(0.0, 0.44, 0.87), // Blue (WoW Shaman)
+    }
+}
+
+/// Spawns the warm directional "sun" light with 2-cascade shadows grounded to
+/// the ~76-unit arena. Returns the entity so the caller can tag it with its
+/// own scene marker (PlayMatch vs main-menu backdrop).
+pub(crate) fn spawn_arena_sun(commands: &mut Commands) -> Entity {
+    commands
+        .spawn((
+            DirectionalLight {
+                illuminance: 25000.0,
+                color: Color::srgb(1.0, 0.95, 0.85), // Warm golden sunlight
+                shadows_enabled: true,
+                ..default()
+            },
+            CascadeShadowConfigBuilder {
+                num_cascades: 2,
+                maximum_distance: 120.0,
+                ..default()
+            }
+            .build(),
+            Transform::from_xyz(4.0, 8.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
+        ))
+        .id()
+}
+
+/// Spawns the arena environment geometry: the octagonal dirt floor plus the
+/// eight chamfered stadium walls. Returns all spawned entities so the caller
+/// can tag them with its own scene marker (PlayMatch vs main-menu backdrop).
+pub(crate) fn spawn_arena_environment(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    images: &mut Assets<Image>,
+) -> Vec<Entity> {
+    let mut entities = Vec::with_capacity(9);
+
+    // Arena floor - octagonal shape matching the wall boundary.
+    // Warm sandy/dirt battleground.
+    let arena_length = ARENA_FLOOR_HALF_X * 2.0;
+    let arena_width = ARENA_FLOOR_HALF_Z * 2.0;
+    let corner_cut = ARENA_FLOOR_CORNER_CUT;
+
+    // Create custom octagonal mesh. UV scale tiles the procedural dirt texture
+    // ~every 12 world units (square texels), giving the floor grain/variation
+    // without an external asset.
+    let octagon_mesh = create_octagon_mesh(arena_length, arena_width, corner_cut, 1.0 / 12.0);
+    // Sandy dirt: blotches + grain, no courses.
+    let floor_texture = images.add(create_surface_texture([0.79, 0.66, 0.46], 0.12, 0.06, 0));
+
+    entities.push(
+        commands
+            .spawn((
+                Mesh3d(meshes.add(octagon_mesh)),
+                MeshMaterial3d(materials.add(StandardMaterial {
+                    // Sandy tone is baked into the texture, so the tint stays white to
+                    // avoid double-darkening the baked color.
+                    base_color: Color::WHITE,
+                    base_color_texture: Some(floor_texture),
+                    perceptual_roughness: 0.95, // Matte dirt/sand texture
+                    cull_mode: None, // Render both sides
+                    ..default()
+                })),
+            ))
+            .id(),
+    );
+
+    // Rectangular arena walls with chamfered corners (simplified stadium shape)
+    let wall_height = 4.0;
+    let wall_thickness = 1.0;
+
+    // Procedural weathered-stone texture for the walls (#8b7355 baked in),
+    // with faint horizontal courses so it reads as stacked masonry.
+    let wall_texture = images.add(create_surface_texture([0.54, 0.45, 0.33], 0.10, 0.05, 6));
+
+    // Arena dimensions: elongated octagon
+    let corner_cut = 10.0; // How much to cut off each corner
+    let half_length = arena_length / 2.0; // 38.0
+    let half_width = arena_width / 2.0;   // 23.0
+
+    // Calculate wall dimensions
+    let long_wall_length = arena_length - corner_cut * 2.0; // North/South walls
+    let short_wall_length = arena_width - corner_cut * 2.0; // East/West walls
+    let corner_wall_length = corner_cut * 1.414; // Diagonal length (45° angle)
+
+    // One stone material per wall size. uv_transform scales the shared texture
+    // to each wall's length × height so texels stay square (~6 world units per
+    // tile) instead of smearing across the long faces. The Repeat sampler wraps
+    // the resulting >1 UVs.
+    let wall_tile = 6.0;
+    let stone_material = |length: f32, materials: &mut Assets<StandardMaterial>| {
+        materials.add(StandardMaterial {
+            base_color: Color::WHITE, // tone baked into the texture
+            base_color_texture: Some(wall_texture.clone()),
+            perceptual_roughness: 0.9,
+            uv_transform: Affine2::from_scale(Vec2::new(
+                length / wall_tile,
+                wall_height / wall_tile,
+            )),
+            ..default()
+        })
+    };
+    let long_wall_material = stone_material(long_wall_length, materials);
+    let short_wall_material = stone_material(short_wall_length, materials);
+    let corner_wall_material = stone_material(corner_wall_length, materials);
+
+    // North wall (positive Z) - main long side
+    entities.push(
+        commands
+            .spawn((
+                Mesh3d(meshes.add(Cuboid::new(long_wall_length, wall_height, wall_thickness))),
+                MeshMaterial3d(long_wall_material.clone()),
+                Transform::from_xyz(0.0, wall_height / 2.0, half_width),
+            ))
+            .id(),
+    );
+
+    // South wall (negative Z) - main long side
+    entities.push(
+        commands
+            .spawn((
+                Mesh3d(meshes.add(Cuboid::new(long_wall_length, wall_height, wall_thickness))),
+                MeshMaterial3d(long_wall_material.clone()),
+                Transform::from_xyz(0.0, wall_height / 2.0, -half_width),
+            ))
+            .id(),
+    );
+
+    // East wall (positive X) - short side
+    entities.push(
+        commands
+            .spawn((
+                Mesh3d(meshes.add(Cuboid::new(wall_thickness, wall_height, short_wall_length))),
+                MeshMaterial3d(short_wall_material.clone()),
+                Transform::from_xyz(half_length, wall_height / 2.0, 0.0),
+            ))
+            .id(),
+    );
+
+    // West wall (negative X) - short side
+    entities.push(
+        commands
+            .spawn((
+                Mesh3d(meshes.add(Cuboid::new(wall_thickness, wall_height, short_wall_length))),
+                MeshMaterial3d(short_wall_material.clone()),
+                Transform::from_xyz(-half_length, wall_height / 2.0, 0.0),
+            ))
+            .id(),
+    );
+
+    // Angled corner pieces to connect the walls (45-degree angles).
+    // Each corner wall connects the end of one straight wall to the end of another.
+    let corner_offset_x = half_length - corner_cut / 2.0;
+    let corner_offset_z = half_width - corner_cut / 2.0;
+
+    // Northeast corner (connects North wall to East wall)
+    entities.push(
+        commands
+            .spawn((
+                Mesh3d(meshes.add(Cuboid::new(corner_wall_length, wall_height, wall_thickness))),
+                MeshMaterial3d(corner_wall_material.clone()),
+                Transform::from_xyz(corner_offset_x, wall_height / 2.0, corner_offset_z)
+                    .with_rotation(Quat::from_rotation_y(std::f32::consts::PI / 4.0)),
+            ))
+            .id(),
+    );
+
+    // Southeast corner (connects South wall to East wall)
+    entities.push(
+        commands
+            .spawn((
+                Mesh3d(meshes.add(Cuboid::new(corner_wall_length, wall_height, wall_thickness))),
+                MeshMaterial3d(corner_wall_material.clone()),
+                Transform::from_xyz(corner_offset_x, wall_height / 2.0, -corner_offset_z)
+                    .with_rotation(Quat::from_rotation_y(-std::f32::consts::PI / 4.0)),
+            ))
+            .id(),
+    );
+
+    // Northwest corner (connects North wall to West wall)
+    entities.push(
+        commands
+            .spawn((
+                Mesh3d(meshes.add(Cuboid::new(corner_wall_length, wall_height, wall_thickness))),
+                MeshMaterial3d(corner_wall_material.clone()),
+                Transform::from_xyz(-corner_offset_x, wall_height / 2.0, corner_offset_z)
+                    .with_rotation(Quat::from_rotation_y(-std::f32::consts::PI / 4.0)),
+            ))
+            .id(),
+    );
+
+    // Southwest corner (connects South wall to West wall)
+    entities.push(
+        commands
+            .spawn((
+                Mesh3d(meshes.add(Cuboid::new(corner_wall_length, wall_height, wall_thickness))),
+                MeshMaterial3d(corner_wall_material.clone()),
+                Transform::from_xyz(-corner_offset_x, wall_height / 2.0, -corner_offset_z)
+                    .with_rotation(Quat::from_rotation_y(std::f32::consts::PI / 4.0)),
+            ))
+            .id(),
+    );
+
+    entities
+}
+
 // ============================================================================
 // Setup & Cleanup Systems
 // ============================================================================
@@ -291,22 +509,8 @@ pub fn setup_play_match(
     // Add directional light (sun-like) - warm golden sunlight.
     // Shadows grounded to the ~76-unit arena via a 2-cascade config so units
     // cast contact shadows that anchor them to the floor.
-    commands.spawn((
-        DirectionalLight {
-            illuminance: 25000.0,
-            color: Color::srgb(1.0, 0.95, 0.85), // Warm golden sunlight
-            shadows_enabled: true,
-            ..default()
-        },
-        CascadeShadowConfigBuilder {
-            num_cascades: 2,
-            maximum_distance: 120.0,
-            ..default()
-        }
-        .build(),
-        Transform::from_xyz(4.0, 8.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
-        PlayMatchEntity,
-    ));
+    let sun = spawn_arena_sun(&mut commands);
+    commands.entity(sun).insert(PlayMatchEntity);
 
     // Add ambient light for overall scene brightness - warm atmospheric glow.
     // Kept low so the directional light + shadows carry the contrast and the
@@ -345,144 +549,11 @@ pub fn setup_play_match(
         show_combat_panel: game_settings.show_combat_panel,
     });
 
-    // Spawn arena floor - octagonal shape matching the wall boundary
-    // Warm sandy/dirt battleground
-    let arena_length = ARENA_FLOOR_HALF_X * 2.0;
-    let arena_width = ARENA_FLOOR_HALF_Z * 2.0;
-    let corner_cut = ARENA_FLOOR_CORNER_CUT;
-    
-    // Create custom octagonal mesh. UV scale tiles the procedural dirt texture
-    // ~every 12 world units (square texels), giving the floor grain/variation
-    // without an external asset.
-    let octagon_mesh = create_octagon_mesh(arena_length, arena_width, corner_cut, 1.0 / 12.0);
-    // Sandy dirt: blotches + grain, no courses.
-    let floor_texture = images.add(create_surface_texture([0.79, 0.66, 0.46], 0.12, 0.06, 0));
-
-    commands.spawn((
-        Mesh3d(meshes.add(octagon_mesh)),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            // Sandy tone is baked into the texture, so the tint stays white to
-            // avoid double-darkening the baked color.
-            base_color: Color::WHITE,
-            base_color_texture: Some(floor_texture),
-            perceptual_roughness: 0.95, // Matte dirt/sand texture
-            cull_mode: None, // Render both sides
-            ..default()
-        })),
-        PlayMatchEntity,
-    ));
-
-    // Spawn rectangular arena walls with chamfered corners (simplified stadium shape)
-    let wall_height = 4.0;
-    let wall_thickness = 1.0;
-    
-    // Procedural weathered-stone texture for the walls (#8b7355 baked in),
-    // with faint horizontal courses so it reads as stacked masonry.
-    let wall_texture = images.add(create_surface_texture([0.54, 0.45, 0.33], 0.10, 0.05, 6));
-
-    // Arena dimensions: elongated octagon
-    let corner_cut = 10.0; // How much to cut off each corner
-    let half_length = arena_length / 2.0; // 38.0
-    let half_width = arena_width / 2.0;   // 23.0
-
-    // Calculate wall dimensions
-    let long_wall_length = arena_length - corner_cut * 2.0; // North/South walls
-    let short_wall_length = arena_width - corner_cut * 2.0; // East/West walls
-    let corner_wall_length = corner_cut * 1.414; // Diagonal length (45° angle)
-
-    // One stone material per wall size. uv_transform scales the shared texture
-    // to each wall's length × height so texels stay square (~6 world units per
-    // tile) instead of smearing across the long faces. The Repeat sampler wraps
-    // the resulting >1 UVs.
-    let wall_tile = 6.0;
-    let stone_material = |length: f32, materials: &mut Assets<StandardMaterial>| {
-        materials.add(StandardMaterial {
-            base_color: Color::WHITE, // tone baked into the texture
-            base_color_texture: Some(wall_texture.clone()),
-            perceptual_roughness: 0.9,
-            uv_transform: Affine2::from_scale(Vec2::new(
-                length / wall_tile,
-                wall_height / wall_tile,
-            )),
-            ..default()
-        })
-    };
-    let long_wall_material = stone_material(long_wall_length, &mut materials);
-    let short_wall_material = stone_material(short_wall_length, &mut materials);
-    let corner_wall_material = stone_material(corner_wall_length, &mut materials);
-    
-    // North wall (positive Z) - main long side
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(long_wall_length, wall_height, wall_thickness))),
-        MeshMaterial3d(long_wall_material.clone()),
-        Transform::from_xyz(0.0, wall_height / 2.0, half_width),
-        PlayMatchEntity,
-    ));
-
-    // South wall (negative Z) - main long side
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(long_wall_length, wall_height, wall_thickness))),
-        MeshMaterial3d(long_wall_material.clone()),
-        Transform::from_xyz(0.0, wall_height / 2.0, -half_width),
-        PlayMatchEntity,
-    ));
-
-    // East wall (positive X) - short side
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(wall_thickness, wall_height, short_wall_length))),
-        MeshMaterial3d(short_wall_material.clone()),
-        Transform::from_xyz(half_length, wall_height / 2.0, 0.0),
-        PlayMatchEntity,
-    ));
-
-    // West wall (negative X) - short side
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(wall_thickness, wall_height, short_wall_length))),
-        MeshMaterial3d(short_wall_material.clone()),
-        Transform::from_xyz(-half_length, wall_height / 2.0, 0.0),
-        PlayMatchEntity,
-    ));
-    
-    // Add angled corner pieces to connect the walls (45-degree angles)
-    // Each corner wall connects the end of one straight wall to the end of another
-    let corner_offset_x = half_length - corner_cut / 2.0;
-    let corner_offset_z = half_width - corner_cut / 2.0;
-    
-    // Northeast corner (connects North wall to East wall)
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(corner_wall_length, wall_height, wall_thickness))),
-        MeshMaterial3d(corner_wall_material.clone()),
-        Transform::from_xyz(corner_offset_x, wall_height / 2.0, corner_offset_z)
-            .with_rotation(Quat::from_rotation_y(std::f32::consts::PI / 4.0)),
-        PlayMatchEntity,
-    ));
-    
-    // Southeast corner (connects South wall to East wall)
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(corner_wall_length, wall_height, wall_thickness))),
-        MeshMaterial3d(corner_wall_material.clone()),
-        Transform::from_xyz(corner_offset_x, wall_height / 2.0, -corner_offset_z)
-            .with_rotation(Quat::from_rotation_y(-std::f32::consts::PI / 4.0)),
-        PlayMatchEntity,
-    ));
-    
-    // Northwest corner (connects North wall to West wall)
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(corner_wall_length, wall_height, wall_thickness))),
-        MeshMaterial3d(corner_wall_material.clone()),
-        Transform::from_xyz(-corner_offset_x, wall_height / 2.0, corner_offset_z)
-            .with_rotation(Quat::from_rotation_y(-std::f32::consts::PI / 4.0)),
-        PlayMatchEntity,
-    ));
-    
-    // Southwest corner (connects South wall to West wall)
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(corner_wall_length, wall_height, wall_thickness))),
-        MeshMaterial3d(corner_wall_material.clone()),
-        Transform::from_xyz(-corner_offset_x, wall_height / 2.0, -corner_offset_z)
-            .with_rotation(Quat::from_rotation_y(std::f32::consts::PI / 4.0)),
-        PlayMatchEntity,
-    ));
+    // Spawn arena environment (octagonal floor + chamfered stadium walls)
+    // via the shared helper, tagging everything for PlayMatch cleanup.
+    for entity in spawn_arena_environment(&mut commands, &mut meshes, &mut materials, &mut images) {
+        commands.entity(entity).insert(PlayMatchEntity);
+    }
 
     // Count class occurrences per team to apply darkening to duplicates
     use std::collections::HashMap;
@@ -759,17 +830,8 @@ fn spawn_combatant(
     item_defs: &ItemDefinitions,
 ) -> (Entity, Combatant) {
     // Get vibrant class colors for 3D visibility
-    let base_color = match class {
-        match_config::CharacterClass::Warrior => Color::srgb(0.9, 0.6, 0.3), // Orange/brown
-        match_config::CharacterClass::Mage => Color::srgb(0.3, 0.6, 1.0),    // Bright blue
-        match_config::CharacterClass::Rogue => Color::srgb(1.0, 0.9, 0.2),   // Bright yellow
-        match_config::CharacterClass::Priest => Color::srgb(0.95, 0.95, 0.95), // White
-        match_config::CharacterClass::Warlock => Color::srgb(0.58, 0.41, 0.93), // Purple
-        match_config::CharacterClass::Paladin => Color::srgb(0.96, 0.55, 0.73), // Pink (WoW Paladin)
-        match_config::CharacterClass::Hunter => Color::srgb(0.67, 0.83, 0.45), // Green (WoW Hunter)
-        match_config::CharacterClass::Shaman => Color::srgb(0.0, 0.44, 0.87), // Blue (WoW Shaman)
-    };
-    
+    let base_color = class_mesh_color(class);
+
     // Apply darkening for duplicate classes (0.65 multiplier per duplicate)
     let darken_factor = 0.65f32.powi(duplicate_index as i32);
     let combatant_color = Color::srgb(

@@ -6,6 +6,7 @@ use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
 pub mod match_config;
+pub mod main_menu;
 pub mod configure_match_ui;
 pub mod play_match;
 pub mod results_ui;
@@ -62,10 +63,14 @@ impl Plugin for StatesPlugin {
             .init_resource::<armory_ui::ArmoryFilters>()
             // Player selection (click-to-select) — graphical-only
             .init_resource::<play_match::Selection>()
-            // Main menu systems (now using egui)
+            // Main menu systems (defined in main_menu module): ambient 3D
+            // arena backdrop (setup/orbit/cleanup) + the egui menu overlay
+            .add_systems(OnEnter(GameState::MainMenu), main_menu::setup_menu_scene)
+            .add_systems(OnExit(GameState::MainMenu), main_menu::cleanup_menu_scene)
             .add_systems(
                 Update,
-                main_menu_ui.run_if(in_state(GameState::MainMenu)),
+                (main_menu::orbit_menu_camera, main_menu::main_menu_ui)
+                    .run_if(in_state(GameState::MainMenu)),
             )
             // Options menu systems (now using egui)
             .add_systems(
@@ -401,144 +406,6 @@ impl Plugin for StatesPlugin {
 }
 
 // ============================================================================
-// Main Menu (egui)
-// ============================================================================
-
-fn main_menu_ui(
-    mut contexts: EguiContexts,
-    mut next_state: ResMut<NextState<GameState>>,
-    mut commands: Commands,
-    primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
-) {
-    // Use try_ctx_mut to gracefully handle window close (the context
-    // dies with the primary window; ctx_mut panics on the final frame)
-    let Some(ctx) = contexts.try_ctx_mut() else { return; };
-    
-    // Configure style for a dark theme
-    let mut style = (*ctx.style()).clone();
-    style.visuals.window_fill = egui::Color32::from_rgb(20, 20, 30);
-    style.visuals.panel_fill = egui::Color32::from_rgb(20, 20, 30);
-    ctx.set_style(style);
-
-    egui::CentralPanel::default()
-        .frame(egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 30)))
-        .show(ctx, |ui| {
-            ui.vertical_centered(|ui| {
-                ui.add_space(150.0);
-
-                // Title
-                ui.heading(
-                    egui::RichText::new("ARENASIM")
-                        .size(72.0)
-                        .color(egui::Color32::from_rgb(230, 204, 153)),
-                );
-
-                ui.add_space(10.0);
-
-                // Subtitle
-                ui.label(
-                    egui::RichText::new("Arena Combat Autobattler")
-                        .size(24.0)
-                        .color(egui::Color32::from_rgb(153, 140, 128)),
-                );
-
-                ui.add_space(60.0);
-
-                // Menu buttons
-                let button_size = egui::vec2(280.0, 60.0);
-
-                if ui
-                    .add_sized(
-                        button_size,
-                        egui::Button::new(
-                            egui::RichText::new("MATCH")
-                                .size(28.0)
-                                .color(egui::Color32::from_rgb(230, 217, 191)),
-                        ),
-                    )
-                    .clicked()
-                {
-                    info!("Match button pressed - transitioning to ConfigureMatch");
-                    next_state.set(GameState::ConfigureMatch);
-                }
-
-                ui.add_space(10.0);
-
-                if ui
-                    .add_sized(
-                        button_size,
-                        egui::Button::new(
-                            egui::RichText::new("ARMORY")
-                                .size(28.0)
-                                .color(egui::Color32::from_rgb(230, 217, 191)),
-                        ),
-                    )
-                    .clicked()
-                {
-                    info!("Armory button pressed - transitioning to Armory");
-                    next_state.set(GameState::Armory);
-                }
-
-                ui.add_space(10.0);
-
-                if ui
-                    .add_sized(
-                        button_size,
-                        egui::Button::new(
-                            egui::RichText::new("OPTIONS")
-                                .size(28.0)
-                                .color(egui::Color32::from_rgb(230, 217, 191)),
-                        ),
-                    )
-                    .clicked()
-                {
-                    info!("Options button pressed - transitioning to Options");
-                    next_state.set(GameState::Options);
-                }
-
-                ui.add_space(10.0);
-
-                if ui
-                    .add_sized(
-                        button_size,
-                        egui::Button::new(
-                            egui::RichText::new("EXIT")
-                                .size(28.0)
-                                .color(egui::Color32::from_rgb(230, 217, 191)),
-                        ),
-                    )
-                    .clicked()
-                {
-                    info!("Exit button pressed - closing primary window");
-                    // Do NOT write `AppExit` from a system here: on macOS the
-                    // programmatic exit path can deadlock the winit event
-                    // loop and the app freezes instead of quitting
-                    // (bevyengine/bevy#23313 — observed here on Bevy 0.16
-                    // after the 0.16/winit-0.30 migration). Despawning the
-                    // primary window re-enters winit's native close path and
-                    // the default `ExitCondition::OnAllClosed` exits cleanly.
-                    for window in primary_window.iter() {
-                        commands.entity(window).despawn();
-                    }
-                }
-            });
-
-            // Version text in bottom right
-            ui.with_layout(egui::Layout::bottom_up(egui::Align::RIGHT), |ui| {
-                ui.add_space(20.0);
-                ui.horizontal(|ui| {
-                    ui.add_space(20.0);
-                    ui.label(
-                        egui::RichText::new("v0.1.0 - Prototype")
-                            .size(14.0)
-                            .color(egui::Color32::from_rgb(102, 102, 102)),
-                    );
-                });
-            });
-        });
-}
-
-// ============================================================================
 // Options Menu (egui)
 // ============================================================================
 
@@ -578,7 +445,7 @@ fn options_ui(
                 egui::vec2(80.0, 36.0)
             );
             ui.allocate_new_ui(egui::UiBuilder::new().max_rect(back_rect), |ui| {
-                if ui.button(egui::RichText::new("← BACK").size(20.0)).clicked() {
+                if ui.button(egui::RichText::new("BACK").size(20.0)).clicked() {
                     next_state.set(GameState::MainMenu);
                 }
             });
@@ -918,7 +785,7 @@ fn keybindings_ui(
                 egui::vec2(80.0, 36.0)
             );
             ui.allocate_new_ui(egui::UiBuilder::new().max_rect(back_rect), |ui| {
-                if ui.button(egui::RichText::new("← BACK").size(20.0)).clicked() {
+                if ui.button(egui::RichText::new("BACK").size(20.0)).clicked() {
                     next_state.set(GameState::Options);
                 }
             });

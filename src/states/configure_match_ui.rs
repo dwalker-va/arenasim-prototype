@@ -173,7 +173,7 @@ pub fn configure_match_ui(
                 egui::vec2(80.0, 36.0)
             );
             ui.allocate_new_ui(egui::UiBuilder::new().max_rect(back_rect), |ui| {
-                if ui.button(egui::RichText::new("← BACK").size(20.0)).clicked() {
+                if ui.button(egui::RichText::new("BACK").size(20.0)).clicked() {
                     next_state.set(GameState::MainMenu);
                 }
             });
