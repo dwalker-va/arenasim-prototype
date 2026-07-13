@@ -112,7 +112,7 @@ pub fn draw_results_screen(
 
     egui::CentralPanel::default()
         .frame(
-            egui::Frame::none()
+            egui::Frame::new()
                 .fill(BG)
                 .inner_margin(egui::Margin::same(24)),
         )
@@ -191,9 +191,9 @@ fn render_banner(ui: &mut egui::Ui, winner: Option<u8>, duration_secs: f32) {
     };
     let star = if winner.is_some() { "★ " } else { "" };
 
-    egui::Frame::none()
+    egui::Frame::new()
         .fill(egui::Color32::from_rgb(26, 26, 38))
-        .rounding(8.0)
+        .corner_radius(8.0)
         .inner_margin(egui::Margin::symmetric(20, 14))
         .stroke(egui::Stroke::new(2.0, color))
         .show(ui, |ui| {
@@ -238,9 +238,9 @@ fn render_team_panel(
         egui::Stroke::new(1.0, egui::Color32::from_rgb(55, 55, 70))
     };
 
-    egui::Frame::none()
+    egui::Frame::new()
         .fill(PANEL_BG)
-        .rounding(6.0)
+        .corner_radius(6.0)
         .inner_margin(egui::Margin::same(14))
         .stroke(stroke)
         .show(ui, |ui| {
@@ -543,9 +543,9 @@ fn header_num_cell(ui: &mut egui::Ui, width: f32, text: &str, dimf: f32) {
 
 /// Small rounded pill tag (e.g. "★ WINNER").
 fn tag(ui: &mut egui::Ui, text: &str, bg: egui::Color32, fg: egui::Color32) {
-    egui::Frame::none()
+    egui::Frame::new()
         .fill(bg)
-        .rounding(3.0)
+        .corner_radius(3.0)
         .inner_margin(egui::Margin::symmetric(6, 2))
         .show(ui, |ui| {
             ui.label(egui::RichText::new(text).size(11.0).strong().color(fg));

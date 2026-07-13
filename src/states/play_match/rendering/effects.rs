@@ -323,14 +323,14 @@ pub fn render_speech_bubbles(
         // White rounded rectangle background
         painter.rect_filled(
             rect,
-            egui::Rounding::same(6),
+            egui::CornerRadius::same(6),
             egui::Color32::from_rgba_unmultiplied(255, 255, 255, 240),
         );
 
         // Black border
         painter.rect_stroke(
             rect,
-            egui::Rounding::same(6),
+            egui::CornerRadius::same(6),
             egui::Stroke::new(2.0, egui::Color32::BLACK),
             egui::StrokeKind::Outside,
         );

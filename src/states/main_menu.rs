@@ -167,7 +167,7 @@ pub fn draw_main_menu(ctx: &egui::Context, time_secs: f32) -> Option<MenuAction>
     // (bevy_egui composites egui over the camera output), so the frame has no
     // fill — readability comes from the painted scrims below.
     egui::CentralPanel::default()
-        .frame(egui::Frame::none())
+        .frame(egui::Frame::new())
         .show(ctx, |ui| {
             paint_backdrop_scrims(ui);
 

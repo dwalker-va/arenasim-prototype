@@ -3266,14 +3266,21 @@ mod psychic_scream {
     /// healer (the kill-target guard keeps it from fearing an enemy the team is
     /// already breaking the fear on): DipEnter → DipComplete fire and a scream
     /// cast lands. Seed 42, 2v2. The enemy team focuses the team-1 Warrior
-    /// (freeing the team-1 Priest); the team-1 team focuses the enemy Warrior
-    /// (kill_target 0), leaving the enemy Priest unfocused so the dip permits
+    /// (freeing the team-1 Priest); the team-1 team focuses the enemy Rogue
+    /// (kill_target 0), leaving the enemy Paladin unfocused so the dip permits
     /// fearing it.
+    ///
+    /// The enemy healer is a Paladin, NOT a Priest: since Mana Burn (PR #83), a
+    /// priest-mirror devolves into a mutual mana-burn war that drains both
+    /// pools below Psychic Scream's 55-mana cost, so the dip's `pre_cast_ok`
+    /// gate never opens and the probe goes vacuous. The enemy DPS is a Rogue
+    /// (low sustained pressure), keeping the team-1 Warrior above
+    /// `healing_heavy_hp` so the dip's ally-HP deferral stays open.
     #[test]
     fn offensive_dip_fears_enemy_healer() {
-        let mut cfg = create_config(vec!["Priest", "Warrior"], vec!["Warrior", "Priest"], Some(42));
+        let mut cfg = create_config(vec!["Priest", "Warrior"], vec!["Rogue", "Paladin"], Some(42));
         cfg.team2_kill_target = Some(1); // focus team-1 Warrior, freeing the Priest to dip
-        cfg.team1_kill_target = Some(0); // team kills the enemy Warrior, leaving the healer free
+        cfg.team1_kill_target = Some(0); // team kills the enemy Rogue, leaving the healer free
         let (_result, _timeline, trace) = run_observed_traced(cfg);
 
         let events = movement_events(&trace);
