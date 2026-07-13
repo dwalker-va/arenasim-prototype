@@ -153,7 +153,7 @@ pub fn armory_ui(
     ctx.set_style(style);
 
     egui::CentralPanel::default()
-        .frame(egui::Frame::none().fill(BG_COLOR).inner_margin(egui::Margin::same(16)))
+        .frame(egui::Frame::new().fill(BG_COLOR).inner_margin(egui::Margin::same(16)))
         .show(ctx, |ui| {
             render_header(ui, &mut next_state);
             ui.add_space(12.0);

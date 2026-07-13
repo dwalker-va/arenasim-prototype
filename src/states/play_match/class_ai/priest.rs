@@ -919,7 +919,6 @@ fn any_enemy_stealthed(my_team: u8, ctx: &CombatContext) -> bool {
 fn mana_burn_pull_target(
     entity: Entity,
     combatant: &Combatant,
-    my_pos: Vec3,
     ctx: &CombatContext,
 ) -> Option<Vec3> {
     let healer = ctx.enemy_healer()?;
@@ -1799,7 +1798,7 @@ fn compute_formation_point(
     // after the wand clamp: when the burn window is open, burning outranks
     // wanding.
     if movement.priest.weights.burn_pull > 0.0 {
-        if let Some(healer_pos) = mana_burn_pull_target(entity, combatant, my_pos, ctx) {
+        if let Some(healer_pos) = mana_burn_pull_target(entity, combatant, ctx) {
             let burn_range =
                 abilities.get_unchecked(&AbilityType::ManaBurn).range - MANA_BURN_RANGE_BUFFER;
             let offset = Vec2::new(point.x - healer_pos.x, point.z - healer_pos.z);

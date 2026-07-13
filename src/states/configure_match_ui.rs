@@ -155,7 +155,7 @@ pub fn configure_match_ui(
 
     egui::CentralPanel::default()
         .frame(
-            egui::Frame::none()
+            egui::Frame::new()
                 .fill(egui::Color32::from_rgb(20, 20, 30))
                 .inner_margin(egui::Margin {
                     left: 15,

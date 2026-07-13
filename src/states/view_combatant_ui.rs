@@ -565,7 +565,7 @@ pub fn view_combatant_ui(
     // Get the view state or show error
     let Some(view_state) = view_state else {
         egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 30)))
+            .frame(egui::Frame::new().fill(egui::Color32::from_rgb(20, 20, 30)))
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.add_space(100.0);
@@ -615,7 +615,7 @@ pub fn view_combatant_ui(
 
     egui::CentralPanel::default()
         .frame(
-            egui::Frame::none()
+            egui::Frame::new()
                 .fill(egui::Color32::from_rgb(20, 20, 30))
                 .inner_margin(egui::Margin::same(20)),
         )
@@ -655,9 +655,9 @@ pub fn view_combatant_ui(
                     egui::vec2(header_width, 90.0),
                     egui::Layout::left_to_right(egui::Align::Center),
                     |ui| {
-                        egui::Frame::none()
+                        egui::Frame::new()
                             .fill(egui::Color32::from_rgb(35, 35, 45))
-                            .rounding(8.0)
+                            .corner_radius(8.0)
                             .inner_margin(egui::Margin::same(15))
                             .stroke(egui::Stroke::new(2.0, class_color32.gamma_multiply(0.6)))
                             .show(ui, |ui| {
