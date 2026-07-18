@@ -41,6 +41,7 @@ pub mod rendering;
 pub mod auras;
 pub mod effects;
 pub mod match_flow;
+pub mod map_geometry;
 pub mod traps;
 pub mod totems;
 pub mod combat_ai;
