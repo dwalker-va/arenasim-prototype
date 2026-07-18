@@ -1,117 +1,43 @@
-// Map definitions for ArenaSim
-// RON format - Rusty Object Notation
-// This file defines the available arena maps
-
+// Per-map obstacle geometry for line-of-sight and collision.
+//
+// Loaded by `src/states/play_match/map_config.rs` (MapConfigPlugin) in BOTH
+// headless and graphical modes via std::fs + ron (no Bevy AssetServer). Keyed
+// by named map fields; #[serde(default)] means a partial file (one map only)
+// leaves the others at their struct defaults.
+//
+// Volume forms (mirror map_geometry::ObstacleVolume):
+//   Cylinder(center: (x, z), radius, base_y, height)   // vertical finite cylinder
+//   Aabb(min: (x, y, z), max: (x, y, z))               // closed axis-aligned box
+//
+// All volumes must lie within arena gameplay bounds (±36.5 x, ±21.5 z);
+// cover anchors (XZ) must not sit inside any volume. Enforced by validate().
 (
-    maps: [
-        (
-            id: "basic_arena",
-            name: "Basic Arena",
-            description: "A classic colosseum-style arena with warm stone walls and sandy battleground",
-            // Arena dimensions in units (stadium/oval shape)
-            size: (
-                width: 50.0,  // Long axis (80 total with walls)
-                depth: 50.0,  // Short axis (50 total with walls)
-            ),
-            // Team spawn points
-            team_spawns: [
-                // Team 1 spawns
-                [
-                    (x: -15.0, z: 0.0),
-                    (x: -15.0, z: -5.0),
-                    (x: -15.0, z: 5.0),
-                ],
-                // Team 2 spawns
-                [
-                    (x: 15.0, z: 0.0),
-                    (x: 15.0, z: -5.0),
-                    (x: 15.0, z: 5.0),
-                ],
-            ],
-            // Gate positions (where teams wait before match starts)
-            gates: [
-                (x: -18.0, z: 0.0, facing: 0.0),
-                (x: 18.0, z: 0.0, facing: 180.0),
-            ],
-            // Colors for the arena floor and walls - warm stone theme
-            colors: (
-                floor: "#c9a876",       // Warm sandy tan - the battleground dirt/sand
-                walls: "#8b7355",       // Weathered stone brown - the arena walls
-                team_1_gate: "#d4691e", // Burnt orange - classic banner color
-                team_2_gate: "#c95d2a", // Deep orange-red - warm accent color
-            ),
-            // Grid settings for low-poly aesthetic
-            grid: (
-                tile_size: 2.0,
-                show_grid_lines: true,
-                grid_line_color: "#a58a65", // Subtle darker sand color for grid lines
-            ),
-        ),
-        (
-            id: "pillared_arena",
-            name: "Pillared Arena",
-            description: "An arena with pillars providing line-of-sight breaks",
-            size: (
-                width: 50.0,
-                depth: 40.0,
-            ),
-            team_spawns: [
-                [
-                    (x: -20.0, z: 0.0),
-                    (x: -20.0, z: -8.0),
-                    (x: -20.0, z: 8.0),
-                ],
-                [
-                    (x: 20.0, z: 0.0),
-                    (x: 20.0, z: -8.0),
-                    (x: 20.0, z: 8.0),
-                ],
-            ],
-            gates: [
-                (x: -23.0, z: 0.0, facing: 0.0),
-                (x: 23.0, z: 0.0, facing: 180.0),
-            ],
-            // Obstacles in the arena
-            obstacles: [
-                (
-                    shape: Pillar,
-                    position: (x: -8.0, z: -8.0),
-                    size: (width: 3.0, height: 6.0, depth: 3.0),
-                ),
-                (
-                    shape: Pillar,
-                    position: (x: 8.0, z: -8.0),
-                    size: (width: 3.0, height: 6.0, depth: 3.0),
-                ),
-                (
-                    shape: Pillar,
-                    position: (x: -8.0, z: 8.0),
-                    size: (width: 3.0, height: 6.0, depth: 3.0),
-                ),
-                (
-                    shape: Pillar,
-                    position: (x: 8.0, z: 8.0),
-                    size: (width: 3.0, height: 6.0, depth: 3.0),
-                ),
-                (
-                    shape: Pillar,
-                    position: (x: 0.0, z: 0.0),
-                    size: (width: 4.0, height: 8.0, depth: 4.0),
-                ),
-            ],
-            colors: (
-                floor: "#3a3a3a",
-                walls: "#2a2a2a",
-                pillars: "#5a5a5a",
-                team_1_gate: "#2244aa",
-                team_2_gate: "#aa2222",
-            ),
-            grid: (
-                tile_size: 2.0,
-                show_grid_lines: true,
-                grid_line_color: "#444444",
-            ),
-        ),
-    ],
-)
+    // BasicArena: open field, no obstacles.
+    basic_arena: (
+        volumes: [],
+    ),
 
+    // PillaredArena (KTD15): two full-height cover cylinders, mirrored about
+    // x=0 (the team-side swap is symmetric, so both are declared explicitly).
+    pillared_arena: (
+        volumes: [
+            Cylinder(center: (9.0, 0.0), radius: 2.5, base_y: 0.0, height: 5.0),
+            Cylinder(center: (-9.0, 0.0), radius: 2.5, base_y: 0.0, height: 5.0),
+        ],
+    ),
+
+    // TestVerticality: LoS test asset — a raised platform (top surface at y=3),
+    // a three-box stepped ramp ascending onto it, and one full-height pillar.
+    test_verticality: (
+        volumes: [
+            // Raised platform, top at y=3.
+            Aabb(min: (4.0, 0.0, -6.0), max: (16.0, 3.0, 6.0)),
+            // Stepped ramp up to the platform (heights 1, 2, 3).
+            Aabb(min: (-4.0, 0.0, -3.0), max: (-1.0, 1.0, 3.0)),
+            Aabb(min: (-1.0, 0.0, -3.0), max: (2.0, 2.0, 3.0)),
+            Aabb(min: (2.0, 0.0, -3.0), max: (4.0, 3.0, 3.0)),
+            // A single full-height pillar off to the side.
+            Cylinder(center: (-12.0, 0.0), radius: 2.0, base_y: 0.0, height: 5.0),
+        ],
+    ),
+)

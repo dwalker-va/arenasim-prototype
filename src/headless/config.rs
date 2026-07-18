@@ -247,8 +247,9 @@ impl HeadlessMatchConfig {
         match name {
             "BasicArena" => Ok(ArenaMap::BasicArena),
             "PillaredArena" => Ok(ArenaMap::PillaredArena),
+            "TestVerticality" => Ok(ArenaMap::TestVerticality),
             _ => Err(format!(
-                "Unknown map: '{}'. Valid maps: BasicArena, PillaredArena",
+                "Unknown map: '{}'. Valid maps: BasicArena, PillaredArena, TestVerticality",
                 name
             )),
         }
@@ -416,6 +417,11 @@ impl HeadlessMatchConfig {
                 name
             )),
         }
+    }
+
+    #[cfg(test)]
+    fn parse_map_for_test(name: &str) -> Result<ArenaMap, String> {
+        Self::parse_map(name)
     }
 
     /// Parse a string-keyed equipment map into typed ItemSlot/ItemId map
@@ -620,5 +626,27 @@ impl HeadlessMatchConfig {
             team1_equipment,
             team2_equipment,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Scenario 5: the headless map-name parser accepts "TestVerticality".
+    #[test]
+    fn parse_map_accepts_test_verticality() {
+        assert_eq!(
+            HeadlessMatchConfig::parse_map_for_test("TestVerticality").unwrap(),
+            ArenaMap::TestVerticality
+        );
+    }
+
+    /// An unknown map name still errors, and the error lists TestVerticality
+    /// among the valid options.
+    #[test]
+    fn parse_map_rejects_unknown_and_lists_test_verticality() {
+        let err = HeadlessMatchConfig::parse_map_for_test("Nonsense").unwrap_err();
+        assert!(err.contains("TestVerticality"), "error should list the new map: {}", err);
     }
 }

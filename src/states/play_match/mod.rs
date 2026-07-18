@@ -42,6 +42,7 @@ pub mod auras;
 pub mod effects;
 pub mod match_flow;
 pub mod map_geometry;
+pub mod map_config;
 pub mod traps;
 pub mod totems;
 pub mod combat_ai;
@@ -58,6 +59,7 @@ pub mod selection;
 pub use abilities::*;
 pub use ability_config::*;
 pub use movement_config::*;
+pub use map_config::*;
 pub use components::*;
 pub use camera::*;
 pub use projectiles::*;
@@ -476,6 +478,7 @@ pub fn setup_play_match(
     game_settings: Res<crate::settings::GameSettings>,
     item_defs: Res<ItemDefinitions>,
     default_loadouts: Res<DefaultLoadouts>,
+    map_geometry: Res<MapGeometryConfig>,
 ) {
     info!("Setting up Play Match scene with config: {:?}", *config);
 
@@ -537,6 +540,9 @@ pub fn setup_play_match(
 
     // Initialize arena dampening (time-ramped heal/absorb reduction)
     commands.insert_resource(ArenaDampening::default());
+
+    // Derive the obstacle geometry for the selected map (line-of-sight).
+    commands.insert_resource(map_geometry.active_for(config.map));
 
     // Initialize Shadow Sight state (for stealth stalemate breaking)
     commands.insert_resource(ShadowSightState::default());
@@ -959,6 +965,7 @@ pub fn cleanup_play_match(
     commands.remove_resource::<SimulationSpeed>();
     commands.remove_resource::<MatchCountdown>();
     commands.remove_resource::<ArenaDampening>();
+    commands.remove_resource::<ActiveMapGeometry>();
     commands.remove_resource::<ShadowSightState>();
     commands.remove_resource::<DisplaySettings>();
     // Remove optional resources (may not exist if match didn't finish)

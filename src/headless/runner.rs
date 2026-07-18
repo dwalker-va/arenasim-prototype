@@ -9,9 +9,10 @@ use std::time::Duration;
 
 use crate::combat::log::{CombatLog, CombatLogEventType, CombatantMetadata, MatchMetadata};
 use crate::states::match_config::MatchConfig;
-use crate::states::play_match::{AbilityConfigPlugin, MovementConfigPlugin};
+use crate::states::play_match::{AbilityConfigPlugin, MapConfigPlugin, MovementConfigPlugin};
 use crate::states::play_match::ability_config::{AbilityDefinitions, load_ability_definitions};
 use crate::states::play_match::movement_config::{load_movement_config, MovementConfig};
+use crate::states::play_match::map_config::{load_map_geometry_config, MapGeometryConfig};
 use crate::states::play_match::equipment::{EquipmentPlugin, ItemDefinitions, DefaultLoadouts, resolve_loadout, enforce_two_hand_conflicts, format_loadout, load_item_definitions, load_default_loadouts};
 // Use the stable systems API instead of importing internal functions directly
 use crate::states::play_match::systems::{
@@ -228,6 +229,7 @@ fn headless_setup_match(
     mut combat_log: ResMut<CombatLog>,
     item_defs: Res<ItemDefinitions>,
     default_loadouts: Res<DefaultLoadouts>,
+    map_geometry: Res<MapGeometryConfig>,
 ) {
     // Clear and initialize combat log
     combat_log.clear();
@@ -241,6 +243,9 @@ fn headless_setup_match(
     commands.insert_resource(MatchCountdown::default());
     commands.insert_resource(ArenaDampening::default());
     commands.insert_resource(ShadowSightState::default());
+
+    // Derive the obstacle geometry for the selected map (line-of-sight).
+    commands.insert_resource(map_geometry.active_for(config.map));
 
     // Initialize GameRng with seed if provided (deterministic mode)
     let game_rng = match headless_state.random_seed {
@@ -635,17 +640,20 @@ pub struct PreloadedConfigs {
     pub items: ItemDefinitions,
     pub loadouts: DefaultLoadouts,
     pub movement: MovementConfig,
+    pub maps: MapGeometryConfig,
 }
 
 impl PreloadedConfigs {
-    /// Parse all four RON config files once (abilities, items, loadouts
-    /// which validate against items, and the healer movement config).
+    /// Parse all RON config files once (abilities, items, loadouts which
+    /// validate against items, the healer movement config, and the map
+    /// geometry config).
     pub fn load() -> Result<Self, String> {
         let abilities = load_ability_definitions()?;
         let items = load_item_definitions()?;
         let loadouts = load_default_loadouts(&items)?;
         let movement = load_movement_config()?;
-        Ok(Self { abilities, items, loadouts, movement })
+        let maps = load_map_geometry_config()?;
+        Ok(Self { abilities, items, loadouts, movement, maps })
     }
 }
 
@@ -809,11 +817,13 @@ fn run_match_impl(
             app.insert_resource(c.abilities.clone())
                 .insert_resource(c.items.clone())
                 .insert_resource(c.loadouts.clone())
-                .insert_resource(c.movement);
+                .insert_resource(c.movement)
+                .insert_resource(c.maps.clone());
         }
         None => {
             app.add_plugins(AbilityConfigPlugin)
                 .add_plugins(MovementConfigPlugin)
+                .add_plugins(MapConfigPlugin)
                 .add_plugins(EquipmentPlugin);
         }
     }
@@ -848,6 +858,10 @@ fn run_match_impl(
     debug_assert!(
         app.world().contains_resource::<MovementConfig>(),
         "MovementConfigPlugin is not registered in the headless runner"
+    );
+    debug_assert!(
+        app.world().contains_resource::<MapGeometryConfig>(),
+        "MapConfigPlugin is not registered in the headless runner"
     );
 
     // Install the decision-trace writer (if requested) BEFORE the first
