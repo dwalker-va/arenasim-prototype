@@ -22,12 +22,96 @@ use crate::states::play_match::decision_trace::{
     ActorView, DecisionTrace, MovementEventBuilder, MovementGoalKind, MovementTrigger,
     Posture as TracePosture, TargetView,
 };
+use crate::states::play_match::map_geometry::has_line_of_sight;
 use crate::states::play_match::movement_config::{MovementWeights, SharedMovementConfig};
 
 use super::{CombatContext, CombatantInfo};
 
 /// Distance ahead at which the position scorer evaluates candidate steps.
 pub(super) const SCORER_LOOKAHEAD: f32 = 2.0;
+
+/// Eye height (y) at which cover-pull sight probes are cast — must match the
+/// scorer's `EYE_HEIGHT` (`combat_core::movement_scoring`) so the trace term
+/// reported here agrees with the score the scorer actually used.
+const EYE_HEIGHT: f32 = 1.0;
+
+// ============================================================================
+// U8 — deny-posture cover_pull: urgency suppression + trace term
+// ============================================================================
+
+/// Urgency suppression predicate (U8, settled requirement R11 — the AE4
+/// counter): is a living non-pet TEAMMATE (excluding self) below
+/// `urgency_hp_threshold` AND within heal range — someone this healer must save
+/// rather than hide from? Self being low is deliberately NOT a trigger: a low
+/// healer taking cover is correct self-preservation, not abandonment of a dying
+/// ally.
+pub(super) fn teammate_needs_saving(
+    entity: Entity,
+    my_pos: Vec3,
+    ctx: &CombatContext,
+    shared: &SharedMovementConfig,
+) -> bool {
+    ctx.alive_allies().into_iter().any(|a| {
+        a.entity != entity
+            && !a.is_pet
+            && a.health_pct() < shared.urgency_hp_threshold
+            && my_pos.distance(a.position) <= shared.heal_range
+    })
+}
+
+/// Zero `cover_pull` when a teammate needs saving (U8/R11); otherwise the
+/// weights pass through unchanged. Pure over the `needs_saving` decision so the
+/// seam is unit-testable without building a snapshot. When `cover_pull` is
+/// already 0 (the DPS blocks, or a class with denial disabled) this is a no-op
+/// copy, so nothing off the deny path is disturbed.
+pub(super) fn apply_cover_suppression(
+    weights: &MovementWeights,
+    teammate_needs_saving: bool,
+) -> MovementWeights {
+    if teammate_needs_saving && weights.cover_pull > 0.0 {
+        MovementWeights { cover_pull: 0.0, ..*weights }
+    } else {
+        *weights
+    }
+}
+
+/// The scorer weights for one PRESSURED/ESCAPE decision: the class weights with
+/// `cover_pull` suppressed while a teammate needs saving. Short-circuits the
+/// snapshot scan when denial is disabled for the class (`cover_pull == 0`).
+fn deny_weights(
+    entity: Entity,
+    my_pos: Vec3,
+    ctx: &CombatContext,
+    shared: &SharedMovementConfig,
+    weights: &MovementWeights,
+) -> MovementWeights {
+    if weights.cover_pull <= 0.0 {
+        return *weights;
+    }
+    apply_cover_suppression(weights, teammate_needs_saving(entity, my_pos, ctx, shared))
+}
+
+/// Cover-pull contribution of the winning direction — the *effective*
+/// `cover_pull` weight times the number of threats the lookahead step is
+/// occluded from. Emitted as the `cover_pull` scorer term so the deny posture
+/// is trace-visible: a `0.0` here means either no cover was available at the
+/// chosen step or the urgency suppression zeroed the weight this tick. Pure;
+/// mirrors the `cover_pull` block in `score_direction` (obstacle-free ⇒ 0).
+fn cover_pull_term(chosen: Vec2, inputs: &ScorerInputs, cover_weight: f32) -> f32 {
+    if cover_weight <= 0.0 {
+        return 0.0;
+    }
+    let next = inputs.my_pos + Vec3::new(chosen.x, 0.0, chosen.y) * inputs.lookahead;
+    let cand_eye = Vec3::new(next.x, EYE_HEIGHT, next.z);
+    let occluded = inputs
+        .threats
+        .iter()
+        .filter(|t| {
+            !has_line_of_sight(&inputs.obstacles, cand_eye, Vec3::new(t.x, EYE_HEIGHT, t.z))
+        })
+        .count();
+    cover_weight * occluded as f32
+}
 
 /// ESCAPE window math (R7), pure for unit testing.
 ///
@@ -237,7 +321,10 @@ pub(super) fn escape_tick(
         // drives the direction (and los_seek is 0.0 for healers regardless).
         los_target: None,
     };
-    let chosen = score_directions(&compass_directions_16(), &inputs, weights);
+    // U8 deny posture: use cover to break attacker LoS while escaping, unless a
+    // teammate needs saving (urgency suppression zeroes cover_pull that tick).
+    let eff_weights = deny_weights(entity, my_pos, ctx, shared, weights);
+    let chosen = score_directions(&compass_directions_16(), &inputs, &eff_weights);
     if chosen == Vec2::ZERO {
         return; // defensive — 16 candidates always yield a direction
     }
@@ -258,6 +345,7 @@ pub(super) fn escape_tick(
         );
         builder.chosen_direction([chosen.x, chosen.y]);
         builder.masked(mask_bitmask(&compass_directions_16(), &inputs));
+        builder.scorer_term("cover_pull", cover_pull_term(chosen, &inputs, eff_weights.cover_pull));
         let los = los_mask_bitmask(&compass_directions_16(), &inputs);
         if los != 0 {
             builder.los_masked(los);
@@ -411,7 +499,11 @@ pub(super) fn healer_pressured_tick_shared(
         obstacles: ctx.obstacles.to_vec(),
         los_target,
     };
-    let chosen = score_directions(&compass_directions_16(), &inputs, weights);
+    // U8 deny posture: prefer a step that breaks attacker LoS (cover_pull),
+    // unless a teammate needs saving — then urgency suppression zeroes it so the
+    // healer is never pulled into cover while an ally is dying (R11).
+    let eff_weights = deny_weights(entity, my_pos, ctx, shared, weights);
+    let chosen = score_directions(&compass_directions_16(), &inputs, &eff_weights);
     if chosen == Vec2::ZERO {
         return; // defensive — 16 candidates always yield a direction
     }
@@ -455,6 +547,7 @@ pub(super) fn healer_pressured_tick_shared(
             }
             builder.chosen_direction([chosen.x, chosen.y]);
             builder.masked(mask_bitmask(&compass_directions_16(), &inputs));
+            builder.scorer_term("cover_pull", cover_pull_term(chosen, &inputs, eff_weights.cover_pull));
             let los = los_mask_bitmask(&compass_directions_16(), &inputs);
             if los != 0 {
                 builder.los_masked(los);
@@ -489,4 +582,75 @@ pub(super) fn start_movement_event_with_target<'t>(
         .get(&goal)
         .map(|info| TargetView::from_info(info, my_pos));
     Some(decision_trace.start_movement_decision(actor, target))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::states::play_match::map_geometry::ObstacleVolume;
+
+    fn priest_like() -> MovementWeights {
+        MovementWeights { cover_pull: 1.5, threat_repulsion: 3.0, ..MovementWeights::default() }
+    }
+
+    /// U8 scenario 1 (the suppression seam): while a teammate needs saving, the
+    /// effective weights zero `cover_pull` — the healer must not be pulled into
+    /// cover — and every other term is untouched.
+    #[test]
+    fn cover_suppressed_when_teammate_needs_saving() {
+        let w = priest_like();
+        let eff = apply_cover_suppression(&w, true);
+        assert_eq!(eff.cover_pull, 0.0, "cover_pull must be zeroed under urgency");
+        assert_eq!(eff.threat_repulsion, w.threat_repulsion, "threat_repulsion untouched");
+        assert_eq!(eff.corner_penalty, w.corner_penalty, "corner_penalty untouched");
+        assert_eq!(eff.commitment_bonus, w.commitment_bonus, "commitment_bonus untouched");
+    }
+
+    /// No teammate in danger → weights pass through unchanged (denial stays on).
+    #[test]
+    fn cover_active_when_team_healthy() {
+        let w = priest_like();
+        let eff = apply_cover_suppression(&w, false);
+        assert_eq!(eff.cover_pull, w.cover_pull, "cover_pull stays on when no teammate is dying");
+    }
+
+    /// A class with denial disabled (`cover_pull == 0`) is a no-op copy even
+    /// while a teammate is dying — no accidental sign flips off the deny path.
+    #[test]
+    fn suppression_noop_when_cover_disabled() {
+        let w = MovementWeights { cover_pull: 0.0, ..MovementWeights::default() };
+        assert_eq!(apply_cover_suppression(&w, true).cover_pull, 0.0);
+    }
+
+    /// The `cover_pull` trace term reports 0 on an obstacle-free map (no
+    /// occlusion possible) and `weight × occluded-count` when a pillar hides the
+    /// chosen step from the threat — and 0 once the effective weight is
+    /// suppressed, so the trace shows the suppression directly.
+    #[test]
+    fn cover_pull_term_counts_occluded_threats() {
+        let threat = Vec3::new(0.0, 1.0, 10.0);
+        let base = ScorerInputs {
+            my_pos: Vec3::new(0.0, 1.0, -3.0),
+            lookahead: 2.0,
+            threats: vec![threat],
+            ..Default::default()
+        };
+        let chosen = Vec2::new(0.0, 1.0); // +Z: steps to (0, -1), on the axis
+        // Obstacle-free: never occluded → 0 regardless of weight.
+        assert_eq!(cover_pull_term(chosen, &base, 1.5), 0.0);
+
+        // A thin pillar between the step and the threat occludes it → weight × 1.
+        let occluded = ScorerInputs {
+            obstacles: vec![ObstacleVolume::Cylinder {
+                center_xz: Vec2::new(0.0, 3.0),
+                radius: 0.5,
+                base_y: 0.0,
+                height: 10.0,
+            }],
+            ..base.clone()
+        };
+        assert_eq!(cover_pull_term(chosen, &occluded, 1.5), 1.5);
+        // Suppressed (effective weight 0) → 0 contribution even when occluded.
+        assert_eq!(cover_pull_term(chosen, &occluded, 0.0), 0.0);
+    }
 }

@@ -782,8 +782,10 @@ mod tests {
 
     #[test]
     fn shipped_los_weights_default_off() {
-        // U7 ships the LoS terms present-but-disabled (0.0) in every block;
-        // U8/U9 tune them. Pin that so an accidental non-zero is caught.
+        // `los_seek` stays disabled everywhere until U9 (the attacker knob).
+        // `cover_pull` was turned on for the three healers in U8 (deny posture)
+        // and stays off for the DPS kiters — pin both so an accidental change
+        // is caught.
         let config = load_movement_config().expect("assets/config/movement.ron must load");
         for (name, w) in [
             ("priest", &config.priest.weights),
@@ -792,8 +794,28 @@ mod tests {
             ("mage", &config.mage.weights),
             ("hunter", &config.hunter.weights),
         ] {
-            assert_eq!(w.los_seek, 0.0, "{name}.los_seek must ship at 0.0");
-            assert_eq!(w.cover_pull, 0.0, "{name}.cover_pull must ship at 0.0");
+            assert_eq!(w.los_seek, 0.0, "{name}.los_seek must ship at 0.0 until U9");
+        }
+        // U8 deny-posture weights: healers cover, DPS kiters do not. Each stays
+        // below its block's threat_repulsion so denial shapes the retreat
+        // without overriding escape.
+        assert_eq!(config.priest.weights.cover_pull, 1.5, "priest.cover_pull (U8)");
+        assert_eq!(config.paladin.weights.cover_pull, 1.0, "paladin.cover_pull (U8, melee identity → lower)");
+        assert_eq!(config.shaman.weights.cover_pull, 1.5, "shaman.cover_pull (U8)");
+        assert_eq!(config.mage.weights.cover_pull, 0.0, "mage.cover_pull off (U9)");
+        assert_eq!(config.hunter.weights.cover_pull, 0.0, "hunter.cover_pull off (U9)");
+        for (name, w) in [
+            ("priest", &config.priest.weights),
+            ("paladin", &config.paladin.weights),
+            ("shaman", &config.shaman.weights),
+        ] {
+            assert!(
+                w.cover_pull < w.threat_repulsion,
+                "{name}.cover_pull ({}) must stay below threat_repulsion ({}) — denial shapes \
+                 the retreat direction, it never overrides escape",
+                w.cover_pull,
+                w.threat_repulsion,
+            );
         }
     }
 

@@ -1713,6 +1713,7 @@ mod directive_executor {
 
     use arenasim::states::play_match::abilities::AbilityType;
     use arenasim::states::play_match::combat_core::{move_to_target, DIRECTIVE_POINT_EPSILON};
+    use arenasim::states::play_match::map_config::ActiveMapGeometry;
     use arenasim::states::play_match::components::{
         ActiveAuras, Aura, AuraType, CastingState, Combatant, MatchCountdown, MovementDirective,
         MovementGoal,
@@ -1734,6 +1735,9 @@ mod directive_executor {
                 time_remaining: 0.0,
                 gates_opened: true,
             })
+            // move_to_target reads the active map's obstacle volumes; an empty
+            // default preserves the obstacle-free behavior these probes expect.
+            .insert_resource(ActiveMapGeometry::default())
             .add_systems(Update, move_to_target);
         app
     }
@@ -3744,6 +3748,215 @@ mod u6_collision_smoke {
                 }
             }
             assert!(checked > 0, "seed {}: no samples checked — timeline empty?", seed);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// U8 — healer deny posture (cover_pull) on PillaredArena
+// ---------------------------------------------------------------------------
+//
+// A pressured healer with all teammates healthy should use the pillars to break
+// its trainer's line of sight — that's the whole point of turning cover_pull on.
+// We measure it directly: a Warrior trains the enemy Priest on PillaredArena;
+// during the Priest's PRESSURED windows (teammates healthy → urgency suppression
+// OFF → cover_pull active) the Priest spends real sim-time OCCLUDED from the
+// Warrior, and its movement decisions carry the cover_pull scorer term.
+mod u8_healer_cover {
+    use super::*;
+    use super::priest_postures::{movement_events, pressured_windows};
+    use arenasim::headless::runner::TraceConfig;
+    use arenasim::states::match_config::ArenaMap;
+    use arenasim::states::play_match::map_config::load_map_geometry_config;
+    use arenasim::states::play_match::map_geometry::{has_line_of_sight, ObstacleVolume};
+    use arenasim::states::play_match::movement_config::load_movement_config;
+
+    /// Must match the scorer's / posture module's LoS eye height.
+    const EYE_HEIGHT: f32 = 1.0;
+
+    /// Warrior+Priest vs Priest+Mage on PillaredArena. Team-1's Warrior trains
+    /// team-2's Priest (slot 0); the Priest's Mage teammate stays at range and
+    /// healthy through the early pressured windows — so the deny posture is
+    /// active (urgency suppression off) exactly when we measure occlusion.
+    fn train_config(seed: u64) -> HeadlessMatchConfig {
+        let mut cfg =
+            create_config(vec!["Warrior", "Priest"], vec!["Priest", "Mage"], Some(seed));
+        cfg.map = "PillaredArena".to_string();
+        cfg.team1_kill_target = Some(0); // team-1 focuses team-2's Priest
+        cfg
+    }
+
+    /// One observed + traced PillaredArena run: full per-frame observations
+    /// (positions AND health) plus the parsed trace events.
+    fn run_observed_full(
+        cfg: HeadlessMatchConfig,
+    ) -> (Vec<FrameObservation>, Vec<serde_json::Value>) {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+        drop(tmp);
+        let mut frames: Vec<FrameObservation> = Vec::new();
+        run_headless_match_observed(
+            cfg,
+            true,
+            Some(TraceConfig { output_path: path.clone() }),
+            |frame| frames.push(frame.clone()),
+        )
+        .expect("observed traced headless match failed");
+        let body = std::fs::read_to_string(&path).unwrap_or_default();
+        let events: Vec<serde_json::Value> =
+            body.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+        let _ = std::fs::remove_file(path);
+        (frames, events)
+    }
+
+    /// Line of sight between two ground units at the LoS eye height (the plane
+    /// the cast/heal/scorer sight tests all use).
+    fn sees(obstacles: &[ObstacleVolume], a: Vec3, b: Vec3) -> bool {
+        has_line_of_sight(
+            obstacles,
+            Vec3::new(a.x, EYE_HEIGHT, a.z),
+            Vec3::new(b.x, EYE_HEIGHT, b.z),
+        )
+    }
+
+    /// Find the unique (team, class, non-pet) entity in a frame.
+    fn find(frame: &FrameObservation, team: u8, class: CharacterClass) -> bevy::prelude::Entity {
+        let m: Vec<_> = frame
+            .combatants
+            .iter()
+            .filter(|(_, c)| c.team == team && c.class == class && !c.is_pet)
+            .map(|(e, _)| *e)
+            .collect();
+        assert_eq!(m.len(), 1, "expected one team-{team} {class:?}, found {}", m.len());
+        m[0]
+    }
+
+    /// Measure, over one run: total sim-seconds the trained Priest was OCCLUDED
+    /// from its Warrior trainer during PRESSURED windows in which all its
+    /// non-pet teammates were healthy (above the urgency threshold), plus the
+    /// number of qualifying frames and whether any PRESSURED movement decision
+    /// carried the cover_pull scorer term.
+    struct CoverStats {
+        occluded_secs: f32,
+        qualifying_frames: usize,
+        pressured_cover_terms: usize,
+    }
+
+    fn measure(seed: u64) -> CoverStats {
+        let geom = load_map_geometry_config()
+            .expect("maps.ron loads")
+            .active_for(ArenaMap::PillaredArena);
+        let obstacles = geom.volumes;
+        assert!(!obstacles.is_empty(), "PillaredArena must carry cover volumes");
+
+        let mv = load_movement_config().expect("movement.ron loads");
+        let urgency = mv.shared.urgency_hp_threshold;
+
+        let (frames, trace) = run_observed_full(train_config(seed));
+        let gate = frames
+            .iter()
+            .find(|f| f.gates_open)
+            .map(|f| f.sim_time)
+            .expect("gates opened");
+        let last = frames.last().map(|f| f.sim_time).unwrap_or(gate);
+
+        let first = frames.first().expect("frames recorded");
+        let priest = find(first, 2, CharacterClass::Priest);
+        let warrior = find(first, 1, CharacterClass::Warrior);
+
+        // PRESSURED windows for the trained Priest (team 2, slot 0), in
+        // combat-time; convert to frame-time with `gate`.
+        let events = movement_events(&trace);
+        let windows = pressured_windows(&events, 2, 0, last - gate);
+
+        let in_window = |t: f32| {
+            windows
+                .iter()
+                .any(|(w0, w1)| t >= *w0 + gate && t <= *w1 + gate)
+        };
+
+        let dt = 1.0_f32 / 60.0;
+        let mut occluded_secs = 0.0;
+        let mut qualifying_frames = 0usize;
+        for f in &frames {
+            if !f.gates_open || !in_window(f.sim_time) {
+                continue;
+            }
+            let Some(p) = f.combatants.get(&priest) else { continue };
+            let Some(w) = f.combatants.get(&warrior) else { continue };
+            if !p.alive || !w.alive {
+                continue;
+            }
+            // All non-pet team-2 teammates (excluding the Priest) healthy →
+            // urgency suppression is OFF, so cover_pull is active this frame.
+            let teammate_in_danger = f.combatants.iter().any(|(e, c)| {
+                *e != priest
+                    && c.team == 2
+                    && !c.is_pet
+                    && c.alive
+                    && c.max_health > 0.0
+                    && c.current_health / c.max_health < urgency
+            });
+            if teammate_in_danger {
+                continue;
+            }
+            qualifying_frames += 1;
+            if !sees(&obstacles, p.position, w.position) {
+                occluded_secs += dt;
+            }
+        }
+
+        // Any PRESSURED movement decision for the trained Priest carrying the
+        // cover_pull scorer term (scenario 2b).
+        let pressured_cover_terms = trace
+            .iter()
+            .filter(|v| {
+                v["kind"] == "movement_decision"
+                    && v["actor"]["team"].as_u64() == Some(2)
+                    && v["actor"]["slot"].as_u64() == Some(0)
+                    && v["posture"] == "pressured"
+                    && v["scorer_terms"]["cover_pull"].is_number()
+            })
+            .count();
+
+        CoverStats { occluded_secs, qualifying_frames, pressured_cover_terms }
+    }
+
+    /// The deny posture buys real occlusion: at two fixed seeds, a pressured
+    /// Priest (teammates healthy) spends time behind cover, breaking its
+    /// trainer's LoS — and its PRESSURED movement decisions carry the cover_pull
+    /// scorer term.
+    #[test]
+    fn pressured_priest_uses_cover_against_its_trainer() {
+        // Floor calibrated from the measured occlusion at these seeds (~4.6s of
+        // ~33s pressured): set at 2.0s, comfortably under observed so it pins
+        // deliberate cover use without being brittle to seed/tuning drift.
+        const OCCLUSION_FLOOR_SECS: f32 = 2.0;
+        for seed in [0u64, 3u64] {
+            let s = measure(seed);
+            eprintln!(
+                "U8 cover probe seed {seed}: occluded {:.2}s over {} qualifying pressured frames, \
+                 {} PRESSURED cover_pull terms",
+                s.occluded_secs, s.qualifying_frames, s.pressured_cover_terms,
+            );
+            // Non-vacuity: the trained Priest actually spent pressured frames
+            // with healthy teammates (or the floor below proves nothing).
+            assert_min_occurrences(
+                &format!("seed {seed} qualifying pressured frames"),
+                s.qualifying_frames,
+                30,
+            );
+            assert!(
+                s.occluded_secs >= OCCLUSION_FLOOR_SECS,
+                "seed {seed}: pressured Priest was occluded from its trainer only {:.2}s \
+                 (floor {OCCLUSION_FLOOR_SECS}s) — the deny posture is not using cover",
+                s.occluded_secs,
+            );
+            assert_min_occurrences(
+                &format!("seed {seed} PRESSURED cover_pull scorer terms"),
+                s.pressured_cover_terms,
+                1,
+            );
         }
     }
 }
