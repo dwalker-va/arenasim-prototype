@@ -91,7 +91,9 @@ pub fn setup_menu_scene(
     });
     commands.insert_resource(ClearColor(Color::srgb(0.05, 0.06, 0.09)));
 
-    for entity in spawn_arena_environment(&mut commands, &mut meshes, &mut materials, &mut images)
+    // The title backdrop is an open arena — no obstacle meshes.
+    for entity in
+        spawn_arena_environment(&mut commands, &mut meshes, &mut materials, &mut images, &[])
     {
         commands.entity(entity).insert(MenuSceneEntity);
     }

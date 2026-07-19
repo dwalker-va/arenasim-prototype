@@ -280,14 +280,19 @@ pub(crate) fn spawn_arena_sun(commands: &mut Commands) -> Entity {
         .id()
 }
 
-/// Spawns the arena environment geometry: the octagonal dirt floor plus the
-/// eight chamfered stadium walls. Returns all spawned entities so the caller
-/// can tag them with its own scene marker (PlayMatch vs main-menu backdrop).
+/// Spawns the arena environment geometry: the octagonal dirt floor, the eight
+/// chamfered stadium walls, and one cosmetic mesh per obstacle in `obstacles`
+/// (the active map's line-of-sight volumes — empty for open maps). The obstacle
+/// meshes are purely visual: geometry truth lives in the `ActiveMapGeometry`
+/// resource, and these meshes are placed to match it. Returns all spawned
+/// entities so the caller can tag them with its own scene marker (PlayMatch vs
+/// main-menu backdrop).
 pub(crate) fn spawn_arena_environment(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
     images: &mut Assets<Image>,
+    obstacles: &[map_geometry::ObstacleVolume],
 ) -> Vec<Entity> {
     let mut entities = Vec::with_capacity(9);
 
@@ -457,6 +462,58 @@ pub(crate) fn spawn_arena_environment(
             .id(),
     );
 
+    // Cosmetic obstacle meshes for the active map's line-of-sight volumes
+    // (pillars, platforms). Solid stone architecture — reuses the wall texture
+    // and roughness so they read as the same masonry family. Positioned to
+    // match the analytic volumes exactly: Bevy's Cylinder/Cuboid meshes are
+    // centered at their origin, so a volume whose base sits at `base_y` is
+    // translated up by half its height. Opaque (no AlphaMode::Add) — these are
+    // architecture, not effects.
+    for volume in obstacles {
+        let (mesh, translation, uv_extent): (Mesh, Vec3, Vec2) = match *volume {
+            map_geometry::ObstacleVolume::Cylinder {
+                center_xz,
+                radius,
+                base_y,
+                height,
+            } => (
+                Cylinder::new(radius, height).into(),
+                Vec3::new(center_xz.x, base_y + height / 2.0, center_xz.y),
+                // Wrap the texture around the circumference and up the side.
+                Vec2::new(2.0 * std::f32::consts::PI * radius, height),
+            ),
+            map_geometry::ObstacleVolume::Aabb { min, max } => {
+                let size = max - min;
+                (
+                    Cuboid::new(size.x, size.y, size.z).into(),
+                    (min + max) / 2.0,
+                    Vec2::new(size.x, size.y),
+                )
+            }
+        };
+
+        let obstacle_material = materials.add(StandardMaterial {
+            base_color: Color::WHITE, // tone baked into the shared wall texture
+            base_color_texture: Some(wall_texture.clone()),
+            perceptual_roughness: 0.9,
+            uv_transform: Affine2::from_scale(Vec2::new(
+                uv_extent.x / wall_tile,
+                uv_extent.y / wall_tile,
+            )),
+            ..default()
+        });
+
+        entities.push(
+            commands
+                .spawn((
+                    Mesh3d(meshes.add(mesh)),
+                    MeshMaterial3d(obstacle_material),
+                    Transform::from_translation(translation),
+                ))
+                .id(),
+        );
+    }
+
     entities
 }
 
@@ -541,8 +598,11 @@ pub fn setup_play_match(
     // Initialize arena dampening (time-ramped heal/absorb reduction)
     commands.insert_resource(ArenaDampening::default());
 
-    // Derive the obstacle geometry for the selected map (line-of-sight).
-    commands.insert_resource(map_geometry.active_for(config.map));
+    // Derive the obstacle geometry for the selected map (line-of-sight). The
+    // same volumes drive both the gameplay resource and the cosmetic obstacle
+    // meshes spawned by `spawn_arena_environment` below, so they cannot drift.
+    let active_map_geometry = map_geometry.active_for(config.map);
+    commands.insert_resource(active_map_geometry.clone());
 
     // Initialize Shadow Sight state (for stealth stalemate breaking)
     commands.insert_resource(ShadowSightState::default());
@@ -558,7 +618,13 @@ pub fn setup_play_match(
 
     // Spawn arena environment (octagonal floor + chamfered stadium walls)
     // via the shared helper, tagging everything for PlayMatch cleanup.
-    for entity in spawn_arena_environment(&mut commands, &mut meshes, &mut materials, &mut images) {
+    for entity in spawn_arena_environment(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        &mut images,
+        &active_map_geometry.volumes,
+    ) {
         commands.entity(entity).insert(PlayMatchEntity);
     }
 
