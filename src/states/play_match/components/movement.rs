@@ -167,6 +167,19 @@ pub struct KitePosture {
     /// bonus at the next re-evaluation. `None` before the first directional
     /// decision and after posture transitions.
     pub last_direction: Option<Vec2>,
+    /// Occlusion-timeout direct chase (ENGAGE): absolute sim-time at which the
+    /// kiter FIRST became continuously occluded from its kill target while in
+    /// shot range (the `should_seek_los` stall). Once the stall persists past
+    /// `seek_chase_timeout` the kiter abandons orbit-seeking and walks straight
+    /// at the target until sight is regained. Reset to `None` whenever sight is
+    /// regained, the kill target changes (see `occluded_target`), or the target
+    /// dies / leaves range. `None` = not currently occlusion-stalled. Always
+    /// `None` on obstacle-free maps (sight never breaks).
+    pub occluded_since: Option<f32>,
+    /// The kill target the `occluded_since` clock is tracking. A change here
+    /// (target swap) restarts the continuous-occlusion clock even if the new
+    /// target is also occluded. `None` when not stalled.
+    pub occluded_target: Option<Entity>,
     /// Freezing Trap DIP target (Hunter only): the enemy healer the committed
     /// trap-setup walk is pursuing. `None` outside a dip. Mirrors the Paladin
     /// `HealerPosture::dip_target`; the Mage never sets it.
@@ -205,6 +218,8 @@ impl KitePosture {
             since: now,
             hold_until: 0.0,
             last_direction: None,
+            occluded_since: None,
+            occluded_target: None,
             dip_target: None,
             dip_until: 0.0,
         }

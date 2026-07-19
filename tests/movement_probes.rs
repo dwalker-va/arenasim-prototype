@@ -4825,3 +4825,227 @@ mod los_probes {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Occlusion-timeout direct chase (Mage/Hunter kiter) on PillaredArena
+// ---------------------------------------------------------------------------
+//
+// The defect: on PillaredArena a lone pillar-hugging healer could not be caught
+// by a ranged attacker. The ENGAGE `range_band` pins the kiter to a ~20yd orbit,
+// and orbit-flanking a target hugging a 2.5yd pillar is geometrically
+// unwinnable at equal speed; `los_seek` is a greedy per-step bonus that gives no
+// gradient when ALL 16 candidate steps are occluded, so the kiter never closes.
+//
+// The fix (`seek_chase_timeout`): once the in-range-and-occluded seek stall has
+// persisted past the timeout, the kiter abandons orbit-seeking and walks
+// straight at the target's live position (a Point directive) until sight
+// returns. This probe drives Mage+Priest vs Warrior+Shaman: the Warrior dies
+// early, leaving a lone Shaman that hugs a pillar. We assert the Mage's longest
+// continuous occluded-from-Shaman window after the Warrior's death is bounded,
+// and the match resolves by elimination well before the cap.
+mod chase_los {
+    use super::*;
+
+    use arenasim::states::match_config::ArenaMap;
+    use arenasim::states::play_match::map_config::load_map_geometry_config;
+    use arenasim::states::play_match::map_geometry::{has_line_of_sight, ObstacleVolume, EYE_HEIGHT};
+
+    fn chase_config(seed: u64) -> HeadlessMatchConfig {
+        HeadlessMatchConfig {
+            team1: vec!["Mage".into(), "Priest".into()],
+            team2: vec!["Warrior".into(), "Shaman".into()],
+            // Cap well above the observed fixed-behavior resolution so the
+            // "resolves before N" ceiling has headroom (and so a regression that
+            // reopened the stall would visibly run long instead of being capped).
+            max_duration_secs: 300.0,
+            random_seed: Some(seed),
+            map: "PillaredArena".to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn sees(obstacles: &[ObstacleVolume], a: Vec3, b: Vec3) -> bool {
+        has_line_of_sight(
+            obstacles,
+            Vec3::new(a.x, EYE_HEIGHT, a.z),
+            Vec3::new(b.x, EYE_HEIGHT, b.z),
+        )
+    }
+
+    struct ChaseStats {
+        winner: Option<u8>,
+        duration: f32,
+        warrior_death: Option<f32>,
+        /// Longest continuous window (sim-seconds) the Mage was occluded from
+        /// the Shaman AFTER the Warrior's death.
+        max_occluded_window: f32,
+        /// Total occluded sim-seconds after the Warrior's death (vacuity guard).
+        total_occluded: f32,
+        /// Matched (Mage, Shaman) samples after the Warrior's death.
+        lone_samples: usize,
+    }
+
+    fn measure(seed: u64) -> ChaseStats {
+        let obstacles = load_map_geometry_config()
+            .expect("maps.ron loads")
+            .active_for(ArenaMap::PillaredArena)
+            .volumes;
+        assert!(!obstacles.is_empty(), "PillaredArena must carry cover volumes");
+
+        let (result, timeline) = run_observed_collecting(chase_config(seed));
+        let gate = timeline.gates_open_time.expect("gates opened");
+
+        let mage = timeline.find(1, CharacterClass::Mage, false);
+        let warrior = timeline.find(2, CharacterClass::Warrior, false);
+        let shaman = timeline.find(2, CharacterClass::Shaman, false);
+
+        // Warrior death: its samples are alive-only, so the last sample is the
+        // last alive frame. `None` if it never died (survived to the end).
+        let warrior_samples = timeline.samples.get(&warrior).cloned().unwrap_or_default();
+        let mage_end = timeline
+            .samples
+            .get(&mage)
+            .and_then(|s| s.last())
+            .map(|(t, _)| *t)
+            .unwrap_or(gate);
+        let warrior_death = warrior_samples.last().map(|(t, _)| *t).filter(|t| *t < mage_end - 0.5);
+
+        // After the Warrior dies the Shaman is the lone enemy = Mage's kill
+        // target. Match Mage/Shaman samples on identical frame stamps and walk
+        // the post-death slice, tracking contiguous occluded runs.
+        let mage_s = timeline.samples.get(&mage).cloned().unwrap_or_default();
+        let shaman_s = timeline.samples.get(&shaman).cloned().unwrap_or_default();
+        let death_t = warrior_death.unwrap_or(f32::INFINITY);
+
+        let mut max_window = 0.0f32;
+        let mut total_occluded = 0.0f32;
+        let mut lone_samples = 0usize;
+        let mut run_start: Option<f32> = None;
+        let (mut i, mut j) = (0usize, 0usize);
+        let mut prev_t: Option<f32> = None;
+        while i < mage_s.len() && j < shaman_s.len() {
+            let (tm, pm) = mage_s[i];
+            let (ts, ps) = shaman_s[j];
+            if tm == ts {
+                if tm > death_t {
+                    lone_samples += 1;
+                    let occluded = !sees(&obstacles, pm, ps);
+                    if occluded {
+                        if let Some(pt) = prev_t {
+                            total_occluded += tm - pt;
+                        }
+                        let start = *run_start.get_or_insert(tm);
+                        max_window = max_window.max(tm - start);
+                    } else {
+                        run_start = None;
+                    }
+                    prev_t = Some(tm);
+                }
+                i += 1;
+                j += 1;
+            } else if tm < ts {
+                i += 1;
+            } else {
+                j += 1;
+            }
+        }
+
+        ChaseStats {
+            winner: result.winner,
+            duration: result.match_time,
+            warrior_death,
+            max_occluded_window: max_window,
+            total_occluded,
+            lone_samples,
+        }
+    }
+
+    /// Exploratory seed scan — prints per-seed stats so the pinned seeds below
+    /// can be (re)chosen when trajectories drift. Ignored by default.
+    #[test]
+    #[ignore]
+    fn scan_seeds() {
+        for seed in 0u64..40 {
+            let s = measure(seed);
+            eprintln!(
+                "seed {seed:2}: winner={:?} dur={:5.1} wdeath={:>6} lone={:4} occl_total={:5.1} max_win={:5.2}",
+                s.winner,
+                s.duration,
+                s.warrior_death.map(|t| format!("{t:.1}")).unwrap_or_else(|| "none".into()),
+                s.lone_samples,
+                s.total_occluded,
+                s.max_occluded_window,
+            );
+        }
+    }
+
+    /// The occlusion-timeout chase bounds the lone-Shaman endgame. At pinned
+    /// seeds where the Warrior dies early and the surviving Shaman hugs a pillar,
+    /// the Mage's longest continuous occluded window is bounded (roughly the
+    /// timeout plus the walk-to-sight travel time) and the match resolves by
+    /// ELIMINATION well before the cap — not by drawing out to the dampening
+    /// endgame the way the pre-fix orbit-only kiter did.
+    fn assert_chase_bounds_lone_shaman(seed: u64) {
+        let s = measure(seed);
+
+        // Vacuity: the Warrior must actually die early AND a lone-Shaman
+        // occlusion endgame must occur, or the bound below proves nothing.
+        assert!(
+            s.warrior_death.is_some(),
+            "seed {seed}: Warrior never died — no lone-Shaman endgame to bound",
+        );
+        assert_min_occurrences(&format!("seed {seed} lone-Shaman samples"), s.lone_samples, 300);
+        assert!(
+            s.total_occluded >= 2.0,
+            "seed {seed}: only {:.2}s total occlusion after Warrior death — not exercising the \
+             pillar-hug stall",
+            s.total_occluded,
+        );
+
+        // The fix bounds the stall. Budget: seek_chase_timeout (3.5s) arms the
+        // chase, then the kiter walks ~20yd to regain sight (a few seconds at
+        // base speed), so ~15s is a comfortable ceiling that a re-opened stall
+        // (which ran the full match) would blow past.
+        assert!(
+            s.max_occluded_window <= 15.0,
+            "seed {seed}: Mage's longest continuous occluded-from-Shaman window was {:.2}s \
+             (> 15s) — the occlusion-timeout chase is not catching the pillar-hugger",
+            s.max_occluded_window,
+        );
+
+        // Resolves by elimination, well before the cap.
+        assert_eq!(
+            s.winner,
+            Some(1),
+            "seed {seed}: expected team 1 (Mage+Priest) to win by elimination, got {:?}",
+            s.winner,
+        );
+        assert!(
+            s.duration <= 200.0,
+            "seed {seed}: match ran {:.1}s (> 200s) — the lone Shaman was not caught promptly",
+            s.duration,
+        );
+    }
+
+    #[test]
+    fn chase_bounds_lone_shaman_endgame_seed_a() {
+        assert_chase_bounds_lone_shaman(SEED_A);
+    }
+
+    #[test]
+    fn chase_bounds_lone_shaman_endgame_seed_b() {
+        assert_chase_bounds_lone_shaman(SEED_B);
+    }
+
+    // Pinned by `scan_seeds` (run with `--ignored`): seeds where the Warrior
+    // dies early and the surviving Shaman hugs a pillar into a long occlusion
+    // endgame. The before/after contrast (measured by toggling
+    // `seek_chase_timeout` to 0.0) is stark:
+    //   seed 26: DISABLED → draw at the 300s cap, 242.8s longest occluded window
+    //            (the lone Shaman is essentially never caught);
+    //            ENABLED  → team-1 elimination at ~79s, 8.9s longest window.
+    //   seed 23: DISABLED → draw at the 300s cap, 80.9s longest occluded window;
+    //            ENABLED  → team-1 elimination at ~104s, 6.7s longest window.
+    const SEED_A: u64 = 26;
+    const SEED_B: u64 = 23;
+}

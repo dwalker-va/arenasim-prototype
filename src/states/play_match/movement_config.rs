@@ -368,6 +368,16 @@ pub struct DpsMovementConfig {
     /// in-range traps on the healer). Mirrors the Paladin/Priest `dip_budget`.
     /// Ignored by the Mage.
     pub dip_budget: f32,
+    /// Occlusion-timeout direct chase: seconds an ENGAGE kiter may stay
+    /// continuously occluded from its kill target while in shot range (the
+    /// orbit-seek stall) before it abandons orbit-seeking and walks straight at
+    /// the target's live position until sight is regained. Counters the
+    /// geometrically-unwinnable orbit-flank against a target hugging a thin
+    /// pillar (`los_seek` gives no gradient when every candidate step is
+    /// occluded). `0.0` disables the chase (the kiter keeps orbit-seeking). No
+    /// effect on obstacle-free maps — sight never breaks, so the timer never
+    /// arms.
+    pub seek_chase_timeout: f32,
 }
 
 impl Default for DpsMovementConfig {
@@ -397,6 +407,7 @@ impl Default for DpsMovementConfig {
             kite_entry_radius: 20.0,   // Hunter closing-range band
             kite_sustain_radius: 24.0, // hold a touch past entry
             dip_budget: 0.0,           // Mage default off; Hunter ron turns it on
+            seek_chase_timeout: 3.5,   // abandon orbit-seek → direct chase after this many occluded seconds
         }
     }
 }
@@ -612,6 +623,13 @@ impl MovementConfig {
                     m.kite_sustain_radius, m.kite_entry_radius
                 ));
             }
+            // Occlusion-chase timeout: non-negative and finite (0.0 = disabled).
+            if m.seek_chase_timeout < 0.0 || !m.seek_chase_timeout.is_finite() {
+                issues.push(format!(
+                    "{class}.seek_chase_timeout ({}) must be non-negative and finite (0.0 disables)",
+                    m.seek_chase_timeout
+                ));
+            }
         }
 
         if issues.is_empty() {
@@ -822,6 +840,11 @@ mod tests {
         }
         assert_eq!(config.mage.weights.los_seek, 2.0, "mage.los_seek (U9 seek knob)");
         assert_eq!(config.hunter.weights.los_seek, 1.0, "hunter.los_seek (U9 seek knob)");
+        // Occlusion-timeout direct chase: both kiters ship at 3.5s (0.0 would
+        // disable). Pinned so an accidental RON edit that turns the chase off
+        // (re-opening the pillar-hug stall) is caught.
+        assert_eq!(config.mage.seek_chase_timeout, 3.5, "mage.seek_chase_timeout");
+        assert_eq!(config.hunter.seek_chase_timeout, 3.5, "hunter.seek_chase_timeout");
         // Deny-posture weights: healers cover, DPS kiters do not. Each stays
         // below its block's threat_repulsion so denial shapes the retreat
         // without overriding escape.

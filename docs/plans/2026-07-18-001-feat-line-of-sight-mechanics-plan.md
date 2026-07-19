@@ -140,6 +140,7 @@ Deferred for later:
 - LoS gating for ground-placed abilities (trap placement arcs, totem pulses) — revisit if exemption proves exploitable.
 - Unit-vs-unit body-blocking collision — this slice is units-vs-obstacles only.
 - Occlusion-aware projectile visuals (fading a projectile that passes through a pillar) — cosmetic polish.
+- Pincer coordination — splitting two attackers to opposite pillar sides to corner a denying healer; the human counter-play to pillar-hugging, deferred with the luring milestone (inter-agent coordination).
 
 ### Dependencies / Assumptions
 

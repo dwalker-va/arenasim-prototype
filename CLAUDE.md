@@ -315,6 +315,7 @@ with the context-steering mask refactor.
 **DPS kiter blocks** (`mage:` / `hunter:` — the shared ENGAGE/KITE machine, `DpsMovementConfig`):
 - `weights:` (above) plus `range_band_min`/`max` (orbit ring; min = SAFE_KITING_DISTANCE / HUNTER_DEAD_ZONE 8), `kite_hold` (anti-strobe hysteresis), `directive_ttl` (must cover the longest cast), `commit_window`.
 - `kite_entry_radius`/`kite_sustain_radius` — proximity-gated kiters only (Hunter: KITE when a melee is within entry, exit when kited past sustain). The Mage is aura-gated (KITE keys off its own root/slow), so it ignores these.
+- `seek_chase_timeout` (mage/hunter 3.5) — seconds an ENGAGE kiter may stay continuously occluded from its kill target in shot range (the `los_seek` orbit-seek stall) before it abandons orbit-seeking and walks straight at the target's live position (a `Point` directive, TTL = `directive_ttl`) until sight returns — the counter to a target hugging a thin pillar, where `los_seek` gives no gradient because every candidate step is occluded. `0.0` disables the chase. No-op on obstacle-free maps (never occluded). Traced via the existing `SeekLos` trigger; a `goal_kind` of `point` distinguishes chase from the `direction` orbit-seek.
 
 **Paladin-only block** (`paladin:` — alongside its `weights:`):
 - `fallback_range: 15.0` — PRESSURED retreat range (instead of face-tanking at melee)

@@ -206,6 +206,42 @@ fn should_seek_los(
     !has_line_of_sight(ctx.obstacles, my_eye, tgt_eye)
 }
 
+/// Occlusion-timeout chase arm/reset/decide seam (pure, unit-tested).
+///
+/// `seeking` is the in-shot-range-and-occluded stall signal (`should_seek_los`),
+/// which already folds in "target alive" and "target in range" — so a dead
+/// target, an out-of-range target, or regained sight all present as
+/// `seeking == false`. Given the previous continuous-occlusion clock
+/// (`prev_since`) and the target that clock was tracking (`prev_target`),
+/// returns the updated `(occluded_since, chase)`:
+/// - `seeking == false` → reset the clock (`None`), never chase.
+/// - `seeking == true`, target changed → restart the clock at `now` (a swap must
+///   re-earn the timeout even if the new target is also occluded).
+/// - `seeking == true`, same target → keep the clock; chase once it has run for
+///   `timeout` seconds.
+///
+/// `timeout == 0.0` disables the chase (the kiter keeps orbit-seeking). The
+/// caller stores `occluded_target = kill_target` when `seeking`, else `None`.
+fn seek_chase_decision(
+    prev_since: Option<f32>,
+    prev_target: Option<Entity>,
+    kill_target: Option<Entity>,
+    seeking: bool,
+    now: f32,
+    timeout: f32,
+) -> (Option<f32>, bool) {
+    if !seeking {
+        return (None, false);
+    }
+    let since = if prev_target != kill_target {
+        now // target swap (or first arm) restarts the continuous-occlusion clock
+    } else {
+        prev_since.unwrap_or(now)
+    };
+    let chase = timeout > 0.0 && now - since >= timeout;
+    (Some(since), chase)
+}
+
 /// `los_seek` contribution of the winning direction: the weight when the
 /// lookahead step can see the kill target, else `0.0`. Mirrors the `los_seek`
 /// block in `score_direction`; emitted as the `los_seek` scorer term so seek /
@@ -361,7 +397,26 @@ pub fn evaluate_dps_posture(
         // the pillar — clear any stale kite vector and fall through to pursuit.
         // That "else" is the exact pre-existing ENGAGE behavior, and a provable no-op
         // on obstacle-free maps (never occluded).
-        if !should_seek_los(ctx, entity, my_pos, kill_target) {
+        let seeking = should_seek_los(ctx, entity, my_pos, kill_target);
+
+        // Occlusion-timeout direct chase: track how long the seek stall has
+        // persisted (updated every tick, before the recommit gate). When it
+        // exceeds `seek_chase_timeout`, orbit-seeking (a greedy per-step
+        // `los_seek` with no gradient once every candidate is occluded) is
+        // abandoned in favor of walking straight at the target — the collision
+        // resolver slides the chaser around the pillar until sight returns.
+        let (occluded_since, chase) = seek_chase_decision(
+            state.occluded_since,
+            state.occluded_target,
+            kill_target,
+            seeking,
+            now,
+            config.seek_chase_timeout,
+        );
+        state.occluded_since = occluded_since;
+        state.occluded_target = if seeking { kill_target } else { None };
+
+        if !seeking {
             if directive.is_some() {
                 commands.entity(entity).remove::<MovementDirective>();
             }
@@ -372,10 +427,47 @@ pub fn evaluate_dps_posture(
         }
 
         // Hold the committed direction for the anti-zigzag window; re-score on
-        // transition or when the window/directive expired.
+        // transition or when the window/directive expired. Shared by the direct
+        // chase and the orbit-seek scorer below.
         let recommit = transitioned
             || directive.map_or(true, |d| now >= d.committed_until || now >= d.expires);
         if !recommit {
+            if needs_insert {
+                commands.entity(entity).try_insert(*state);
+            }
+            return;
+        }
+
+        // Direct-chase branch: issue a Point directive toward the target's live
+        // position (re-targeted each recommit as the target moves). The commit
+        // window handles anti-zigzag; `directive_ttl` keeps the walk alive
+        // between recommits and past the longest cast. Reuses the SeekLos
+        // trigger — the Point vs Direction goal kind distinguishes chase from
+        // orbit-seek in the trace. When sight returns the next decision tick
+        // sees `seeking == false` and removes this directive.
+        if chase {
+            if let Some(target_pos) =
+                kill_target.and_then(|t| ctx.combatants.get(&t)).map(|i| i.position)
+            {
+                commands.entity(entity).try_insert(MovementDirective {
+                    goal: MovementGoal::Point(target_pos),
+                    expires: now + config.directive_ttl,
+                    committed_until: now + config.commit_window,
+                });
+                // A Point chase has no scored direction; a stale kite vector
+                // must not leak into a later orbit-seek recommit.
+                state.last_direction = None;
+                if let Some(info) = ctx.combatants.get(&entity) {
+                    let actor = ActorView::from_info(info);
+                    let mut builder = decision_trace.start_movement_decision(actor, None);
+                    builder.direction_change(
+                        TracePosture::Engage,
+                        MovementTrigger::SeekLos,
+                        MovementGoalKind::Point,
+                    );
+                    builder.finish();
+                }
+            }
             if needs_insert {
                 commands.entity(entity).try_insert(*state);
             }
@@ -498,8 +590,56 @@ pub fn evaluate_dps_posture(
 
 #[cfg(test)]
 mod tests {
-    use super::is_kite_threat;
+    use super::{is_kite_threat, seek_chase_decision};
     use crate::states::play_match::match_config::CharacterClass;
+    use bevy::prelude::Entity;
+
+    /// The occlusion-timeout chase arm/reset/decide seam. Covers: arm-and-hold
+    /// until the timeout, fire at/after it, reset on regained sight, reset on a
+    /// dead/out-of-range target (both surface as `seeking == false`), restart on
+    /// a target swap, and the `0.0` = disabled convention.
+    #[test]
+    fn seek_chase_decision_arms_fires_and_resets() {
+        let t0 = Entity::from_raw(7);
+        let t1 = Entity::from_raw(9);
+        let timeout = 3.5;
+
+        // First occluded tick: arm the clock at `now`, do not chase yet.
+        let (since, chase) = seek_chase_decision(None, None, Some(t0), true, 10.0, timeout);
+        assert_eq!(since, Some(10.0), "clock arms at the first occluded tick");
+        assert!(!chase, "no chase before the timeout elapses");
+
+        // Still occluded, same target, before the timeout: hold, no chase.
+        let (since, chase) =
+            seek_chase_decision(Some(10.0), Some(t0), Some(t0), true, 13.0, timeout);
+        assert_eq!(since, Some(10.0), "clock persists while continuously occluded");
+        assert!(!chase, "3.0s < 3.5s timeout — still no chase");
+
+        // Timeout reached: chase, clock unchanged.
+        let (since, chase) =
+            seek_chase_decision(Some(10.0), Some(t0), Some(t0), true, 13.5, timeout);
+        assert_eq!(since, Some(10.0));
+        assert!(chase, "occluded for exactly the timeout → chase");
+
+        // Sight regained (seeking == false, e.g. LoS clear / target dead / out
+        // of range): reset the clock, never chase.
+        let (since, chase) =
+            seek_chase_decision(Some(10.0), Some(t0), Some(t0), false, 14.0, timeout);
+        assert_eq!(since, None, "regained sight / lost target resets the clock");
+        assert!(!chase);
+
+        // Target swap while still occluded: restart the clock, do not chase on
+        // the swap tick even though the old clock had aged past the timeout.
+        let (since, chase) =
+            seek_chase_decision(Some(10.0), Some(t0), Some(t1), true, 15.0, timeout);
+        assert_eq!(since, Some(15.0), "a target swap restarts the continuous-occlusion clock");
+        assert!(!chase, "the swapped-to target must re-earn the timeout");
+
+        // `0.0` disables the chase even when occluded far past any window.
+        let (_since, chase) =
+            seek_chase_decision(Some(0.0), Some(t0), Some(t0), true, 100.0, 0.0);
+        assert!(!chase, "seek_chase_timeout == 0.0 disables the direct chase");
+    }
 
     /// Regression guard for the melee-only kite filter: the Hunter kites ONLY
     /// melee-DPS threats. Ranged classes are excluded (the Hunter holds at shot
