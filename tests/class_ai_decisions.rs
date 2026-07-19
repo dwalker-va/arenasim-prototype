@@ -86,6 +86,7 @@ fn snapshot_for(self_entity: Entity, team: u8, class: CharacterClass) -> CombatS
         active_auras: BTreeMap::new(),
         dr_trackers: BTreeMap::new(),
         ability_cooldowns: BTreeMap::new(),
+        obstacles: Vec::new(),
     }
 }
 

@@ -22,6 +22,7 @@ use crate::states::play_match::constants::{CHARGE_MIN_RANGE, CRIT_DAMAGE_MULTIPL
 use crate::states::play_match::decision_trace::{
     DecisionEventBuilder, DecisionTrace, NoActionReason, RejectionReason, ResourceKind,
 };
+use crate::states::play_match::map_geometry::has_line_of_sight;
 
 use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
@@ -495,6 +496,15 @@ fn try_charge(
                 max: charge_def.range,
             },
         );
+        return false;
+    }
+
+    // The dash is a straight sprint to the target — if an obstacle crosses that
+    // segment, Charge would clip into (or slide to a stop against) the pillar
+    // instead of reaching melee. Reject up front so the AI picks another action;
+    // `move_to_target`'s per-frame slide is only the mid-dash safety net.
+    if !has_line_of_sight(ctx.obstacles, my_pos, target_pos) {
+        builder.reject(charge, RejectionReason::LosBlocked);
         return false;
     }
 

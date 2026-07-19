@@ -2584,6 +2584,7 @@ mod paladin_unit {
             active_auras: BTreeMap::new(),
             dr_trackers: BTreeMap::new(),
             ability_cooldowns: BTreeMap::new(),
+            obstacles: Vec::new(),
         }
     }
 
@@ -2841,6 +2842,7 @@ mod bucket_a_unit {
                 active_auras,
                 dr_trackers: BTreeMap::new(),
                 ability_cooldowns: BTreeMap::new(),
+                obstacles: Vec::new(),
             },
             me,
         )
@@ -3686,5 +3688,62 @@ mod shaman_totems {
         }
         // At least one drop per element across the match.
         assert_min_occurrences("fresh totem placements", placements, 4);
+    }
+}
+
+// ===========================================================================
+// U6: universal movement collision — pillar-interior regression guard
+// ===========================================================================
+
+/// With obstacle collision wired into every movement branch (fear/poly wander,
+/// pursuit, directive, disengage, pet-follow, center-seek), no ground unit
+/// should ever occupy a PillaredArena pillar's interior. Runs a fear-heavy 2v2
+/// (dual Priests → Psychic Scream, plus a melee Warrior training a caster) so
+/// feared wander, pursuit, and directive movement all drive units against the
+/// pillars, at two fixed seeds. The pillars are the shipped PillaredArena
+/// defaults: radius-2.5 cylinders mirrored at (±9, 0) (see `map_config.rs`).
+///
+/// `resolve_movement` keeps a mover's center at `radius + MOVER_RADIUS` (= 3.0)
+/// from a pillar it would otherwise enter, so a sample whose center crosses
+/// inside the solid 2.5 radius means a movement branch bypassed the resolver.
+mod u6_collision_smoke {
+    use super::*;
+
+    /// Shipped PillaredArena pillars (map_config.rs defaults).
+    const PILLARS: [(f32, f32); 2] = [(9.0, 0.0), (-9.0, 0.0)];
+    const PILLAR_RADIUS: f32 = 2.5;
+
+    fn pillared_fear_config(seed: u64) -> HeadlessMatchConfig {
+        let mut cfg = create_config(
+            vec!["Warrior", "Priest"],
+            vec!["Warlock", "Priest"],
+            Some(seed),
+        );
+        cfg.map = "PillaredArena".to_string();
+        cfg
+    }
+
+    #[test]
+    fn no_unit_rests_inside_a_pillar() {
+        for seed in [1u64, 7u64] {
+            let (_result, timeline) = run_observed_collecting(pillared_fear_config(seed));
+            let mut checked = 0usize;
+            for (entity, samples) in &timeline.samples {
+                let info = timeline.info.get(entity).expect("entity has info");
+                for &(t, pos) in samples {
+                    for (px, pz) in PILLARS {
+                        let d = ((pos.x - px).powi(2) + (pos.z - pz).powi(2)).sqrt();
+                        assert!(
+                            d >= PILLAR_RADIUS - 0.01,
+                            "seed {}: team-{} {:?} (is_pet={}) at t={:.2} is inside pillar \
+                             ({}, {}): center-dist {:.3} < {}",
+                            seed, info.team, info.class, info.is_pet, t, px, pz, d, PILLAR_RADIUS
+                        );
+                        checked += 1;
+                    }
+                }
+            }
+            assert!(checked > 0, "seed {}: no samples checked — timeline empty?", seed);
+        }
     }
 }
