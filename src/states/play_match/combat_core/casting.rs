@@ -8,6 +8,8 @@ use super::super::components::*;
 use super::super::abilities::AbilityType;
 use super::super::abilities::SpellSchool;
 use super::super::ability_config::AbilityDefinitions;
+use super::super::map_config::ActiveMapGeometry;
+use super::super::map_geometry::has_line_of_sight;
 use super::super::constants::{CRIT_DAMAGE_MULTIPLIER, CRIT_HEALING_MULTIPLIER};
 use super::super::utils::{spawn_speech_bubble, get_next_fct_offset, combatant_id};
 use super::super::FCT_HEIGHT;
@@ -114,6 +116,7 @@ pub fn process_casting(
     abilities: Res<AbilityDefinitions>,
     mut game_rng: ResMut<GameRng>,
     dampening: Res<ArenaDampening>,
+    map_geometry: Res<ActiveMapGeometry>,
     mut combatants: Query<(Entity, &Transform, &mut Combatant, Option<&mut CastingState>, Option<&mut ActiveAuras>)>,
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
@@ -275,6 +278,30 @@ pub fn process_casting(
 
         // If this ability uses a projectile, spawn it and skip immediate effect application
         if let Some(projectile_speed) = def.projectile_speed {
+            // LoS re-check (U4), projectile path: a cast whose target left line
+            // of sight during the cast fizzles at completion — BEFORE the
+            // projectile spawns (once launched, a projectile lands regardless of
+            // LoS). Scoped here (rather than before this branch) so the instant
+            // path re-check below is the single authority for instant abilities.
+            // Read the target position in a scoped immutable borrow; if the
+            // target no longer resolves, skip the gate and fall through to the
+            // existing spawn behavior. Empty obstacle lists → always clear, so
+            // this is byte-identical on BasicArena / obstacle-free maps.
+            if let Ok((_, target_transform, ..)) = combatants.get(target_entity) {
+                if !has_line_of_sight(&map_geometry.volumes, caster_pos, target_transform.translation) {
+                    combat_log.log(
+                        CombatLogEventType::MatchEvent,
+                        format!(
+                            "Team {} {} fails to cast {}: target out of line of sight",
+                            caster_team,
+                            caster_class.name(),
+                            def.name
+                        ),
+                    );
+                    continue;
+                }
+            }
+
             // Spawn projectile with Transform (required for move_projectiles to work in headless mode)
             // Visual mesh/material is added by spawn_projectile_visuals in graphical mode
             commands.spawn((
@@ -301,6 +328,25 @@ pub fn process_casting(
         };
 
         if !target.is_alive() {
+            continue;
+        }
+
+        // LoS re-check (U4), instant-effect path: mirror the projectile branch
+        // — a target that left line of sight during the cast fizzles before any
+        // effect applies. Placed AFTER the dead-target short-circuit above, so a
+        // target that is both dead AND out of LoS fizzles as a dead target (the
+        // is_alive check wins by placement). Same caster→target segment and
+        // no-op-on-empty semantics as the cast-start gate.
+        if !has_line_of_sight(&map_geometry.volumes, caster_pos, target_transform.translation) {
+            combat_log.log(
+                CombatLogEventType::MatchEvent,
+                format!(
+                    "Team {} {} fails to cast {}: target out of line of sight",
+                    caster_team,
+                    caster_class.name(),
+                    def.name
+                ),
+            );
             continue;
         }
 
