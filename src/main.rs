@@ -37,7 +37,7 @@ fn main() {
         // 7×7 matchup matrix mode — defaults to trace `on` so every cell's
         // trace is on disk when an anomaly surfaces; explicit `off` opts out.
         let trace_mode = args.trace_mode.unwrap_or(cli::TraceMode::On);
-        if let Err(e) = headless::run_matrix(n, args.seed_base, args.save_logs, trace_mode) {
+        if let Err(e) = headless::run_matrix(n, args.seed_base, args.save_logs, trace_mode, args.matrix_map) {
             eprintln!("Matrix run failed: {}", e);
             std::process::exit(1);
         }

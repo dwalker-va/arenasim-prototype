@@ -74,6 +74,13 @@ pub struct Args {
     #[arg(long, value_name = "SEED", default_value_t = 0)]
     pub seed_base: u64,
 
+    /// Arena map for matrix mode. Defaults to "BasicArena" (the historical
+    /// matrix behavior). "PillaredArena" runs every cell with line-of-sight
+    /// obstacles active. "TestVerticality" is a test-only asset and is
+    /// rejected here. CSV columns are unchanged regardless of map.
+    #[arg(long, value_name = "MAP", default_value = "BasicArena")]
+    pub matrix_map: String,
+
     /// In matrix mode, also write each individual match's `.txt` log file.
     /// Off by default to avoid 49 × N files in match_logs/.
     #[arg(long)]

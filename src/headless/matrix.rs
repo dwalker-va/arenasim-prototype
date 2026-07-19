@@ -16,7 +16,7 @@ use std::fs;
 use std::io::Write;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use crate::states::match_config::CharacterClass;
+use crate::states::match_config::{ArenaMap, CharacterClass};
 
 use super::config::HeadlessMatchConfig;
 use super::runner::{run_headless_match_with, TraceConfig};
@@ -66,9 +66,30 @@ impl CellStats {
 /// trace filenames. If any per-match `TraceWriter::create` (or final flush)
 /// fails, the failure is appended to `match_logs/traces/<timestamp>/_failures.log`
 /// so the user has a single aggregated record alongside the CSV/MD report.
-pub fn run_matrix(n: u32, seed_base: u64, save_logs: bool, trace_mode: TraceMode) -> Result<(), String> {
+pub fn run_matrix(
+    n: u32,
+    seed_base: u64,
+    save_logs: bool,
+    trace_mode: TraceMode,
+    matrix_map: String,
+) -> Result<(), String> {
     if n == 0 {
         return Err("--matrix N requires N >= 1".to_string());
+    }
+
+    // Validate the map with the same parser the single-match path uses, then
+    // reject TestVerticality explicitly: it parses (the single-match path
+    // accepts it for LoS unit-probing) but is a test asset, not a balance
+    // arena, so it must never seed a 4900-match sweep.
+    match super::config::HeadlessMatchConfig::parse_map(&matrix_map)? {
+        ArenaMap::TestVerticality => {
+            return Err(format!(
+                "--matrix-map '{}' is a test-only asset and is not a valid matrix map. \
+                 Use BasicArena or PillaredArena.",
+                matrix_map
+            ));
+        }
+        _ => {}
     }
 
     let classes = CharacterClass::all();
@@ -80,8 +101,8 @@ pub fn run_matrix(n: u32, seed_base: u64, save_logs: bool, trace_mode: TraceMode
         .map(|d| d.as_secs())
         .unwrap_or(0);
 
-    println!("Running matrix: {}×{} matchups × {} runs = {} matches (seed_base={}, trace={:?})",
-        classes.len(), classes.len(), n, total_matches, seed_base, trace_mode);
+    println!("Running matrix: {}×{} matchups × {} runs = {} matches (map={}, seed_base={}, trace={:?})",
+        classes.len(), classes.len(), n, total_matches, matrix_map, seed_base, trace_mode);
 
     // Per-run subdir scopes trace output to this invocation, eliminating
     // collisions with concurrent matrix runs that share match_logs/traces/.
@@ -103,7 +124,7 @@ pub fn run_matrix(n: u32, seed_base: u64, save_logs: bool, trace_mode: TraceMode
             for run in 0..n {
                 let seed = seed_base.wrapping_add(global_idx);
                 global_idx += 1;
-                let config = build_config(c1, c2, seed);
+                let config = build_config(c1, c2, seed, &matrix_map);
 
                 let trace_config = traces_dir.as_ref().map(|dir| TraceConfig {
                     output_path: format!(
@@ -178,11 +199,16 @@ pub fn run_matrix(n: u32, seed_base: u64, save_logs: bool, trace_mode: TraceMode
 /// Build a minimal `HeadlessMatchConfig` for a 1v1 matchup with a fixed seed.
 /// All per-class strategy options use defaults — the matrix is for raw class
 /// matchup balance, not loadout testing.
-fn build_config(team1: CharacterClass, team2: CharacterClass, seed: u64) -> HeadlessMatchConfig {
+fn build_config(
+    team1: CharacterClass,
+    team2: CharacterClass,
+    seed: u64,
+    map: &str,
+) -> HeadlessMatchConfig {
     HeadlessMatchConfig {
         team1: vec![team1.name().to_string()],
         team2: vec![team2.name().to_string()],
-        map: "BasicArena".to_string(),
+        map: map.to_string(),
         team1_kill_target: None,
         team2_kill_target: None,
         team1_cc_target: None,

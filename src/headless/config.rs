@@ -242,8 +242,14 @@ impl HeadlessMatchConfig {
         }
     }
 
-    /// Parse a map name string into ArenaMap
-    fn parse_map(name: &str) -> Result<ArenaMap, String> {
+    /// Parse a map name string into ArenaMap.
+    ///
+    /// Public so the matrix runner can validate its `--matrix-map` lever with
+    /// the same parser the single-match path uses. NOTE: this accepts
+    /// `TestVerticality` (a test asset) — callers that must exclude it from
+    /// real play (the matrix runner) reject that variant explicitly after
+    /// parsing.
+    pub fn parse_map(name: &str) -> Result<ArenaMap, String> {
         match name {
             "BasicArena" => Ok(ArenaMap::BasicArena),
             "PillaredArena" => Ok(ArenaMap::PillaredArena),
@@ -417,11 +423,6 @@ impl HeadlessMatchConfig {
                 name
             )),
         }
-    }
-
-    #[cfg(test)]
-    fn parse_map_for_test(name: &str) -> Result<ArenaMap, String> {
-        Self::parse_map(name)
     }
 
     /// Parse a string-keyed equipment map into typed ItemSlot/ItemId map
@@ -637,7 +638,7 @@ mod tests {
     #[test]
     fn parse_map_accepts_test_verticality() {
         assert_eq!(
-            HeadlessMatchConfig::parse_map_for_test("TestVerticality").unwrap(),
+            HeadlessMatchConfig::parse_map("TestVerticality").unwrap(),
             ArenaMap::TestVerticality
         );
     }
@@ -646,7 +647,7 @@ mod tests {
     /// among the valid options.
     #[test]
     fn parse_map_rejects_unknown_and_lists_test_verticality() {
-        let err = HeadlessMatchConfig::parse_map_for_test("Nonsense").unwrap_err();
+        let err = HeadlessMatchConfig::parse_map("Nonsense").unwrap_err();
         assert!(err.contains("TestVerticality"), "error should list the new map: {}", err);
     }
 }

@@ -4638,3 +4638,172 @@ mod u10_press {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// U12 — line-of-sight acceptance-evidence (AE) coverage map
+// ---------------------------------------------------------------------------
+//
+// The LoS feature's acceptance evidence is pinned across several test files.
+// This module owns the AE cells not already covered elsewhere; the comment
+// below is the traceability map so a future reader knows where each AE lives:
+//
+//   AE1 (cast-start LoS gate emits LosBlocked) — src/.../cast_guard.rs unit
+//       tests + tests/decision_trace_audit.rs's PillaredArena reference matchup
+//       (Mage+Priest v Warrior+Priest, seed 7).
+//   AE2 (a cast in flight fizzles at completion when the target leaves LoS)
+//       and AE3 (launched projectiles still land) — `completion_fizzle_*` here.
+//   AE4 (pressured healer denies LoS behind cover) — `mod u8_healer_cover`.
+//   AE5 (elevation participates in sight; R15/R16) — `verticality_*` here,
+//       asserted against the SHIPPED TestVerticality map data.
+//   AE6 (universal collision keeps units out of pillars) — `mod u6_collision_smoke`.
+//
+// Kept each probe to 1-2 pinned seeds with the vacuity-guard idiom used across
+// this file: a probe that measures "at least one X" first asserts the run
+// actually produced the conditions X depends on.
+mod los_probes {
+    use super::*;
+    use arenasim::states::match_config::ArenaMap;
+    use arenasim::states::play_match::map_config::load_map_geometry_config;
+    use arenasim::states::play_match::map_geometry::has_line_of_sight;
+
+    // AE5 / R15 / R16 — elevation participates in line of sight.
+    //
+    // The AI does not navigate verticality (no pathing onto platforms), so we
+    // cannot force two combatants onto a ramp/platform in a live match. Instead
+    // we assert the geometry directly against the SHIPPED TestVerticality
+    // volumes from assets/config/maps.ron — a stronger guarantee than synthetic
+    // geometry, because it pins the map data the feature actually ships.
+    //
+    // TestVerticality layout (see maps.ron): a raised platform occupying
+    // x∈[4,16], z∈[-6,6], y∈[0,3] (walkable top surface at y=3), a three-box
+    // stepped ramp climbing west→east to it, and a full-height pillar at
+    // (-12, 0). Eye height for a unit standing ON the platform top is y≈4
+    // (feet at 3 + 1yd eye); a ground unit's eye is y≈1.
+
+    /// Load the shipped TestVerticality obstacle volumes.
+    fn verticality_volumes() -> Vec<arenasim::states::play_match::map_geometry::ObstacleVolume> {
+        let geom = load_map_geometry_config()
+            .expect("maps.ron loads")
+            .active_for(ArenaMap::TestVerticality);
+        assert!(
+            !geom.volumes.is_empty(),
+            "TestVerticality must carry obstacle volumes"
+        );
+        geom.volumes
+    }
+
+    /// A unit below/beside a platform edge is OCCLUDED from a unit standing on
+    /// the platform top: the segment clips the platform's solid body. This is
+    /// the y-axis (elevation) doing real work — a purely-XZ occlusion test
+    /// could not distinguish "on top" from "on the ground beside it".
+    #[test]
+    fn verticality_below_edge_is_occluded_from_platform_top() {
+        let obstacles = verticality_volumes();
+        // Ground unit just east of the platform (x=18, past the x=16 face).
+        let below = Vec3::new(18.0, 1.0, 0.0);
+        // Unit standing on the platform top (feet at y=3, eye at y≈4), interior.
+        let on_top = Vec3::new(10.0, 4.0, 0.0);
+        assert!(
+            !has_line_of_sight(&obstacles, below, on_top),
+            "a ground unit beside the platform must be occluded from a unit on top \
+             (the platform edge blocks the diagonal)"
+        );
+    }
+
+    /// Two units both at platform-top height have a clear ramp-line sightline
+    /// across the top of the ramp/platform: the segment rides at y≈4, above
+    /// every obstacle's top (platform and ramp tops are y=3), so elevation
+    /// GRANTS sight. Mirrors the "segment over pillar top" geometry unit test,
+    /// but against the shipped map.
+    #[test]
+    fn verticality_ramp_line_at_height_is_clear() {
+        let obstacles = verticality_volumes();
+        // Atop the ramp's highest step / platform lip.
+        let ramp_top = Vec3::new(5.0, 4.0, 0.0);
+        // Across the platform top.
+        let platform_top = Vec3::new(12.0, 4.0, 0.0);
+        assert!(
+            has_line_of_sight(&obstacles, ramp_top, platform_top),
+            "a sightline riding along the platform top (y≈4, above the y=3 surfaces) \
+             must be clear — elevation grants sight"
+        );
+    }
+
+    /// AE5 headless smoke: a TestVerticality match parses and runs to
+    /// completion (config accepts the test map; the sim doesn't panic on it).
+    #[test]
+    fn verticality_headless_match_runs_to_completion() {
+        let mut cfg = create_config(vec!["Warrior", "Priest"], vec!["Mage", "Priest"], Some(1));
+        cfg.map = "TestVerticality".to_string();
+        cfg.max_duration_secs = 60.0;
+        let result = run_headless_match_with(cfg, true, None)
+            .expect("TestVerticality headless match should run to completion");
+        assert!(
+            result.match_time > 0.0,
+            "match should have advanced some sim time"
+        );
+    }
+
+    // AE2 / AE3 — completion fizzle + projectiles still land.
+    //
+    // On PillaredArena, a Mage's Frostbolt cast can START with LoS to its
+    // target and then lose it mid-cast as the target moves behind a pillar; the
+    // cast fizzles at COMPLETION ("fails to cast Frostbolt: target out of line
+    // of sight"). AE3 is the complementary guarantee: this does NOT swallow
+    // projectiles that were already launched — a Frostbolt that left the wand
+    // before the target broke LoS still travels and lands ("Frostbolt hits").
+    //
+    // We assert both from the same match's combat log. Pinned to two seeds of
+    // the reference matchup (Mage+Priest v Warrior+Priest on PillaredArena):
+    // seed 3 yields 2 completion fizzles + 15 impacts, seed 7 yields 1 + 10.
+
+    /// Run one PillaredArena match and return its combat-log text.
+    fn pillared_log(seed: u64) -> String {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+        drop(tmp);
+        let mut cfg =
+            create_config(vec!["Mage", "Priest"], vec!["Warrior", "Priest"], Some(seed));
+        cfg.map = "PillaredArena".to_string();
+        cfg.max_duration_secs = 120.0;
+        cfg.output_path = Some(path.to_string_lossy().into_owned());
+        // suppress_log = false so the .txt log is written to output_path.
+        run_headless_match_with(cfg, false, None).expect("PillaredArena match runs");
+        let body = std::fs::read_to_string(&path).unwrap_or_default();
+        let _ = std::fs::remove_file(&path);
+        body
+    }
+
+    #[test]
+    fn completion_fizzle_and_projectiles_still_land() {
+        for seed in [3u64, 7u64] {
+            let log = pillared_log(seed);
+
+            let fizzles = log
+                .lines()
+                .filter(|l| l.contains("fails to cast") && l.contains("line of sight"))
+                .count();
+            let impacts = log
+                .lines()
+                .filter(|l| l.contains("Frostbolt hits") || l.contains("Frostbolt CRITS"))
+                .count();
+
+            eprintln!(
+                "U12 completion-fizzle probe seed {seed}: {fizzles} LoS fizzle(s), {impacts} Frostbolt impact(s)"
+            );
+
+            // AE2: at least one in-flight cast fizzled at completion for LoS.
+            assert_min_occurrences(
+                &format!("seed {seed} completion LoS fizzles"),
+                fizzles,
+                1,
+            );
+            // AE3: launched projectiles still landed in the same match.
+            assert_min_occurrences(
+                &format!("seed {seed} Frostbolt impacts"),
+                impacts,
+                1,
+            );
+        }
+    }
+}
