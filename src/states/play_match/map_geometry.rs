@@ -14,7 +14,7 @@
 //! pure functions over `bevy::math` (glam) vector types, which the whole crate
 //! already uses. This keeps the math unit-testable in isolation and, more
 //! importantly, *deterministic*: the sim's probe harness proves bit-identical
-//! seeded runs, so nothing here may iterate a `HashMap`/`HashSet` (KTD16).
+//! seeded runs, so nothing here may iterate a `HashMap`/`HashSet`.
 //! Obstacle lists are `&[ObstacleVolume]` walked in slice order; all arithmetic
 //! is plain `f32` with a fixed evaluation order.
 //!
@@ -55,6 +55,11 @@ const TOUCH_EPS: f32 = 1e-4;
 /// relative to obstacle and arena scale, enough to keep a unit's center from
 /// visually clipping a wall.
 pub const MOVER_RADIUS: f32 = 0.5;
+
+/// Height (y) at which line-of-sight segment endpoints sit — entity center-mass
+/// height. Shared by the cast/heal/auto LoS gates and the movement scorer's
+/// sight probes so every occlusion test agrees.
+pub const EYE_HEIGHT: f32 = 1.0;
 
 /// Margin by which a resolved slide position is pushed strictly outside a
 /// footprint, so the returned point never re-tests as penetrating.

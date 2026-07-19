@@ -1,4 +1,4 @@
-//! U6 durable guard: the Warrior's Charge decision rejects with `LosBlocked`
+//! Durable guard: the Warrior's Charge decision rejects with `LosBlocked`
 //! when an obstacle straddles the straight dash path to the target.
 //!
 //! Charge is a scripted sprint along the segment caster→target. If a pillar

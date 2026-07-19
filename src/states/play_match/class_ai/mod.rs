@@ -307,7 +307,7 @@ impl<'a> CombatContext<'a> {
         self.lowest_health_ally_below(threshold, f32::MAX, my_pos).is_none()
     }
 
-    /// Team-HP-fraction advantage of the deciding combatant's team — the U10
+    /// Team-HP-fraction advantage of the deciding combatant's team — the
     /// press-when-ahead signal. Own team's summed alive-member health fraction
     /// minus the sum of every other team's: positive = ahead, negative = behind,
     /// `0.0` = level (or self missing from the snapshot). Pets excluded and dead
@@ -549,7 +549,7 @@ impl<'a> CombatContext<'a> {
 // ============================================================================
 
 /// Summed health fraction of each team's alive, non-pet members, keyed by team
-/// id. The press-when-ahead advantage signal (U10) derives from these sums;
+/// id. The press-when-ahead advantage signal derives from these sums;
 /// [`CombatContext::team_hp_advantage`] is own-team minus the rest. Deterministic
 /// — accumulates in BTreeMap (entity) order. Mirrors
 /// [`CombatContext::is_team_healthy`]'s alive/`!is_pet` conventions; a dead
@@ -562,6 +562,16 @@ pub fn team_hp_sums(combatants: &BTreeMap<Entity, CombatantInfo>) -> BTreeMap<u8
         }
     }
     sums
+}
+
+/// Press-when-ahead predicate: own team leads by at least the margin. A plain
+/// `>=` threshold with no hysteresis band — team-HP sums change only on discrete
+/// damage/heal events, so the differential does not strobe frame-to-frame the
+/// way a positional signal would, and a stateful schmitt latch would be dead
+/// weight. Shared by the healer deny postures and the Warrior tempo reset (both
+/// "stop the defensive behavior when clearly ahead"). Pure for unit testing.
+pub(crate) fn pressing_when_ahead(advantage: f32, margin: f32) -> bool {
+    advantage >= margin
 }
 
 // ============================================================================

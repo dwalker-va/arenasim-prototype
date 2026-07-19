@@ -67,12 +67,12 @@ pub struct MovementWeights {
     pub commitment_bonus: f32,
     /// Bonus for a candidate step position that has line of sight to the kill
     /// target (`los_target`) — a ranged attacker steers toward angles it can
-    /// actually shoot from. `0.0` disables (default; U8/U9 tune it). No-op on
+    /// actually shoot from. `0.0` disables (default). No-op on
     /// obstacle-free maps.
     pub los_seek: f32,
     /// Bonus per threat a candidate step position is OCCLUDED from (line of
     /// sight to the threat is broken by an obstacle) — pulls a pressured unit
-    /// into cover. `0.0` disables (default; U8/U9 tune it). No-op on
+    /// into cover. `0.0` disables (default). No-op on
     /// obstacle-free maps.
     pub cover_pull: f32,
 }
@@ -142,7 +142,7 @@ pub struct SharedMovementConfig {
     pub anchor_switch_margin: f32,
     /// Wand-range pull target distance (Priest wand range).
     pub wand_range: f32,
-    /// Press-when-ahead margin (U10), in summed team-HP-fraction units: a team
+    /// Press-when-ahead margin, in summed team-HP-fraction units: a team
     /// whose `team_hp_advantage` (own alive-member HP fraction sum minus the
     /// enemy's) reaches this turns denial OFF — its healers stop pulling into
     /// cover and its Warrior stops resetting tempo, so a clearly-winning team
@@ -310,7 +310,7 @@ pub struct MeleeMovementConfig {
     /// target to justify abandoning the original focus (prevents swapping over
     /// trivial HP differences).
     pub swap_hp_margin: f32,
-    /// Tempo-reset window (Warrior, U9): after a movement-impairing CC ends,
+    /// Tempo-reset window (Warrior): after a movement-impairing CC ends,
     /// how many seconds the melee falls back toward its healer instead of
     /// face-chasing (while its gap closer is on cooldown and it is out of
     /// melee). Bounded — never a permanent retreat; normal pursuit resumes when
@@ -806,10 +806,10 @@ mod tests {
 
     #[test]
     fn shipped_los_weights_default_off() {
-        // `los_seek` is the U9 attacker knob: ON for the DPS kiters (Mage 2.0 /
+        // `los_seek` is the attacker knob: ON for the DPS kiters (Mage 2.0 /
         // Hunter 1.0 — seek a sighted angle when occluded in shot range) and
         // OFF for the healers (they deny LoS via `cover_pull`, they don't seek
-        // it). `cover_pull` was turned on for the three healers in U8 (deny
+        // it). `cover_pull` was turned on for the three healers (deny
         // posture) and stays off for the DPS kiters — pin both so an accidental
         // change is caught.
         let config = load_movement_config().expect("assets/config/movement.ron must load");
@@ -822,7 +822,7 @@ mod tests {
         }
         assert_eq!(config.mage.weights.los_seek, 2.0, "mage.los_seek (U9 seek knob)");
         assert_eq!(config.hunter.weights.los_seek, 1.0, "hunter.los_seek (U9 seek knob)");
-        // U8 deny-posture weights: healers cover, DPS kiters do not. Each stays
+        // Deny-posture weights: healers cover, DPS kiters do not. Each stays
         // below its block's threat_repulsion so denial shapes the retreat
         // without overriding escape.
         assert_eq!(config.priest.weights.cover_pull, 1.5, "priest.cover_pull (U8)");

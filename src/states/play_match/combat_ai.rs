@@ -811,7 +811,7 @@ pub fn decide_abilities(
                 )
             },
             match_config::CharacterClass::Warrior => {
-                // Tempo-reset movement pre-pass (U9) — mirrors the Mage arm:
+                // Tempo-reset movement pre-pass — mirrors the Mage arm:
                 // runs BEFORE the ability pass and OUTSIDE decide_warrior_action's
                 // GCD short-circuit (legs aren't on the GCD), gated on
                 // gates_opened, never for casting/CC'd warriors (query excludes

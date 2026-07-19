@@ -62,7 +62,7 @@
 use bevy::prelude::*;
 
 use super::is_in_arena_bounds;
-use super::super::map_geometry::{has_line_of_sight, position_blocked, ObstacleVolume};
+use super::super::map_geometry::{has_line_of_sight, position_blocked, ObstacleVolume, EYE_HEIGHT};
 use super::super::movement_config::MovementWeights;
 use super::super::ARENA_CORNER_SUM;
 
@@ -76,10 +76,6 @@ pub const MASK_ANCHOR: u16 = 1 << 1;
 /// movement-blocking footprint test, [`position_blocked`]). Always clear on
 /// obstacle-free maps, so BasicArena scoring is unaffected.
 pub const MASK_LOS: u16 = 1 << 2;
-
-/// Eye height (y) at which line-of-sight probes are cast — matches the cast
-/// gates so the scorer's sight tests agree with the cast/heal LoS checks.
-const EYE_HEIGHT: f32 = 1.0;
 
 /// Where the graded corner penalty starts biting, as |x|+|z|. Below this the
 /// term is zero; it ramps linearly to full weight at the corner wall
@@ -342,18 +338,26 @@ fn argmax_interest(
     best.map(|(dir, _)| dir)
 }
 
-/// Bitmask over `candidates` (≤16): bit `i` is set when candidate `i` is
-/// eliminated by any hard constraint. Feeds the `masked` trace field; a value
-/// of `0xFFFF` over the full compass means an all-masked frame (the R6
-/// byte-identity attribution signal).
-pub fn mask_bitmask(candidates: &[Vec2], inputs: &ScorerInputs) -> u16 {
+/// Bitmask over `candidates` (≤16): bit `i` is set when candidate `i`'s hard
+/// constraint mask intersects `bits`. The shared fold behind [`mask_bitmask`]
+/// (`bits = u16::MAX`, any constraint) and [`los_mask_bitmask`]
+/// (`bits = MASK_LOS`, obstacle only).
+fn bitmask_matching(candidates: &[Vec2], inputs: &ScorerInputs, bits: u16) -> u16 {
     candidates.iter().enumerate().fold(0u16, |acc, (i, &c)| {
-        if candidate_mask(c, inputs) != 0 {
+        if candidate_mask(c, inputs) & bits != 0 {
             acc | (1u16 << i)
         } else {
             acc
         }
     })
+}
+
+/// Bitmask over `candidates` (≤16): bit `i` is set when candidate `i` is
+/// eliminated by any hard constraint. Feeds the `masked` trace field; a value
+/// of `0xFFFF` over the full compass means an all-masked frame (the R6
+/// byte-identity attribution signal).
+pub fn mask_bitmask(candidates: &[Vec2], inputs: &ScorerInputs) -> u16 {
+    bitmask_matching(candidates, inputs, u16::MAX)
 }
 
 /// Bitmask over `candidates` (≤16) of only the candidates eliminated by the
@@ -362,13 +366,25 @@ pub fn mask_bitmask(candidates: &[Vec2], inputs: &ScorerInputs) -> u16 {
 /// consumers can attribute obstacle-driven divergence without decoding the
 /// combined mask. Always `0` on obstacle-free maps.
 pub fn los_mask_bitmask(candidates: &[Vec2], inputs: &ScorerInputs) -> u16 {
-    candidates.iter().enumerate().fold(0u16, |acc, (i, &c)| {
-        if candidate_mask(c, inputs) & MASK_LOS != 0 {
-            acc | (1u16 << i)
-        } else {
-            acc
-        }
-    })
+    bitmask_matching(candidates, inputs, MASK_LOS)
+}
+
+/// Both [`mask_bitmask`] and [`los_mask_bitmask`] in one pass, computing each
+/// candidate's mask exactly once. Returns `(combined, los_only)` — bit-identical
+/// to calling the two individually, but the production trace call sites emit
+/// both fields together, so this halves the `candidate_mask` work.
+pub fn mask_and_los_bitmask(candidates: &[Vec2], inputs: &ScorerInputs) -> (u16, u16) {
+    candidates
+        .iter()
+        .enumerate()
+        .fold((0u16, 0u16), |(all, los), (i, &c)| {
+            let mask = candidate_mask(c, inputs);
+            let bit = 1u16 << i;
+            (
+                if mask != 0 { all | bit } else { all },
+                if mask & MASK_LOS != 0 { los | bit } else { los },
+            )
+        })
 }
 
 /// Pick a movement direction by argmax of the interest pass over candidates
@@ -893,7 +909,7 @@ mod tests {
         assert!(chosen.is_finite(), "chosen direction must be finite, got {chosen:?}");
     }
 
-    // ---- U7: obstacle (LoS) mask + terms ----------------------------------
+    // ---- obstacle (LoS) mask + terms ----------------------------------
 
     /// A tall cylinder pillar spanning ground height, centered at `(cx, cz)`.
     fn pillar(cx: f32, cz: f32, r: f32) -> ObstacleVolume {
@@ -920,7 +936,7 @@ mod tests {
         }
     }
 
-    /// U7.1: a candidate whose step walks into a pillar is `MASK_LOS`-masked,
+    /// A candidate whose step walks into a pillar is `MASK_LOS`-masked,
     /// while an open direction survives the mask pass.
     #[test]
     fn step_into_pillar_is_los_masked() {
@@ -943,7 +959,7 @@ mod tests {
         assert_eq!(candidate_mask(away, &inputs), 0, "an open step must be unmasked");
     }
 
-    /// U7.2a: the fallback ladder drops the ANCHOR mask before the LoS mask.
+    /// The fallback ladder drops the ANCHOR mask before the LoS mask.
     /// Two candidates — one anchor-only-masked, one LoS-masked — with none
     /// clear: the ladder must pick the anchor-only one (LoS bit still clear).
     #[test]
@@ -967,7 +983,7 @@ mod tests {
         assert_eq!(chosen, a, "anchor must lift before LoS, choosing the anchor-only candidate");
     }
 
-    /// U7.2b: the fallback ladder drops the LoS mask before the BOUNDARY mask.
+    /// The fallback ladder drops the LoS mask before the BOUNDARY mask.
     /// One candidate LoS-masked (in bounds), one boundary-masked: the ladder
     /// must pick the LoS one.
     #[test]
@@ -988,7 +1004,7 @@ mod tests {
         assert_eq!(chosen, c, "LoS must lift before boundary, choosing the in-bounds candidate");
     }
 
-    /// U7.2c: with every candidate masked, the ladder still returns a direction
+    /// With every candidate masked, the ladder still returns a direction
     /// (never strands the unit).
     #[test]
     fn all_masked_ladder_returns_direction() {
@@ -1010,7 +1026,7 @@ mod tests {
         assert_ne!(chosen, Vec2::ZERO, "the ladder must never strand the unit");
     }
 
-    /// U7.3: the anchor constraint is distance AND sight. A candidate within
+    /// The anchor constraint is distance AND sight. A candidate within
     /// heal range but OCCLUDED from the anchor is anchor-masked; removing the
     /// pillar clears it (proving occlusion, not distance, caused the mask).
     #[test]
@@ -1037,7 +1053,7 @@ mod tests {
         );
     }
 
-    /// U7.3 (reverse): a candidate in clear LoS but OUT of heal range is still
+    /// (reverse) a candidate in clear LoS but OUT of heal range is still
     /// anchor-masked (distance half of the AND).
     #[test]
     fn anchor_masked_when_out_of_range_in_sight() {
@@ -1056,7 +1072,7 @@ mod tests {
         );
     }
 
-    /// U7.4: `cover_pull` scores a step that hides from a threat above an
+    /// `cover_pull` scores a step that hides from a threat above an
     /// exposed one; `los_seek` scores a step that sees the target above an
     /// occluded one. Same geometry, opposite sign.
     #[test]
@@ -1098,7 +1114,7 @@ mod tests {
         );
     }
 
-    /// U7.5: mask bits are deterministic — identical across repeated evaluation
+    /// Mask bits are deterministic — identical across repeated evaluation
     /// of the same inputs.
     #[test]
     fn mask_bits_are_deterministic() {
@@ -1120,7 +1136,7 @@ mod tests {
         assert_eq!(first_los & !first, 0, "los_mask must be a subset of mask");
     }
 
-    /// U7.6: obstacle-free no-op. With no obstacles, MASK_LOS is never set, and
+    /// Obstacle-free no-op. With no obstacles, MASK_LOS is never set, and
     /// the new `los_seek`/`cover_pull` terms (even at high weight) do not change
     /// the chosen direction versus zero-weight — the BasicArena byte-identity
     /// guarantee at the scorer level.

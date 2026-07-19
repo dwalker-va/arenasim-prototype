@@ -14,32 +14,26 @@
 use bevy::prelude::*;
 
 use crate::states::play_match::combat_core::{
-    compass_directions_16, los_mask_bitmask, mask_bitmask, score_directions, AnchorConstraint,
-    ScorerInputs,
+    compass_directions_16, mask_and_los_bitmask, score_directions, AnchorConstraint, ScorerInputs,
 };
 use crate::states::play_match::components::{HealerPosture, MovementDirective, MovementGoal, Posture};
 use crate::states::play_match::decision_trace::{
     ActorView, DecisionTrace, MovementEventBuilder, MovementGoalKind, MovementTrigger,
     Posture as TracePosture, TargetView,
 };
-use crate::states::play_match::map_geometry::has_line_of_sight;
+use crate::states::play_match::map_geometry::{has_line_of_sight, EYE_HEIGHT};
 use crate::states::play_match::movement_config::{MovementWeights, SharedMovementConfig};
 
-use super::{CombatContext, CombatantInfo};
+use super::{pressing_when_ahead, CombatContext, CombatantInfo};
 
 /// Distance ahead at which the position scorer evaluates candidate steps.
 pub(super) const SCORER_LOOKAHEAD: f32 = 2.0;
 
-/// Eye height (y) at which cover-pull sight probes are cast — must match the
-/// scorer's `EYE_HEIGHT` (`combat_core::movement_scoring`) so the trace term
-/// reported here agrees with the score the scorer actually used.
-const EYE_HEIGHT: f32 = 1.0;
-
 // ============================================================================
-// U8 — deny-posture cover_pull: urgency suppression + trace term
+// Deny-posture cover_pull: urgency suppression + trace term
 // ============================================================================
 
-/// Urgency suppression predicate (U8, settled requirement R11 — the AE4
+/// Urgency suppression predicate (settled requirement R11 — the AE4
 /// counter): is a living non-pet TEAMMATE (excluding self) below
 /// `urgency_hp_threshold` AND within heal range — someone this healer must save
 /// rather than hide from? Self being low is deliberately NOT a trigger: a low
@@ -61,7 +55,7 @@ pub(super) fn teammate_needs_saving(
 
 /// Zero `cover_pull` when denial should be OFF this tick; otherwise the weights
 /// pass through unchanged. The `suppress` decision is either urgency (a teammate
-/// needs saving, U8/R11) OR press (own team is clearly ahead, U10) — both mean
+/// needs saving, R11) OR press (own team is clearly ahead) — both mean
 /// "stop hiding". Pure over the boolean so the seam is unit-testable without
 /// building a snapshot. When `cover_pull` is already 0 (the DPS blocks, or a
 /// class with denial disabled) this is a no-op copy, so nothing off the deny
@@ -77,19 +71,9 @@ pub(super) fn apply_cover_suppression(
     }
 }
 
-/// Press-when-ahead predicate (U10): own team leads by at least the margin, so
-/// denial turns OFF (press = "keep seeking the fight", not a new aggressive
-/// behavior). A plain `>=` threshold with no hysteresis band — team-HP sums
-/// change only on discrete damage/heal events, so the differential does not
-/// strobe frame-to-frame the way a positional signal would, and a stateful
-/// schmitt latch would be dead weight. Pure for unit testing.
-pub(super) fn pressing_when_ahead(advantage: f32, margin: f32) -> bool {
-    advantage >= margin
-}
-
 /// The scorer weights for one PRESSURED/ESCAPE decision: the class weights with
-/// `cover_pull` suppressed while a teammate needs saving (U8) OR the team is
-/// pressing its advantage (U10). Short-circuits the snapshot scan when denial
+/// `cover_pull` suppressed while a teammate needs saving OR the team is
+/// pressing its advantage. Short-circuits the snapshot scan when denial
 /// is disabled for the class (`cover_pull == 0`).
 fn deny_weights(
     entity: Entity,
@@ -336,7 +320,7 @@ pub(super) fn escape_tick(
         // drives the direction (and los_seek is 0.0 for healers regardless).
         los_target: None,
     };
-    // U8 deny posture: use cover to break attacker LoS while escaping, unless a
+    // Deny posture: use cover to break attacker LoS while escaping, unless a
     // teammate needs saving (urgency suppression zeroes cover_pull that tick).
     let eff_weights = deny_weights(entity, my_pos, ctx, shared, weights);
     let chosen = score_directions(&compass_directions_16(), &inputs, &eff_weights);
@@ -359,9 +343,9 @@ pub(super) fn escape_tick(
             MovementGoalKind::Direction,
         );
         builder.chosen_direction([chosen.x, chosen.y]);
-        builder.masked(mask_bitmask(&compass_directions_16(), &inputs));
+        let (masked, los) = mask_and_los_bitmask(&compass_directions_16(), &inputs);
+        builder.masked(masked);
         builder.scorer_term("cover_pull", cover_pull_term(chosen, &inputs, eff_weights.cover_pull));
-        let los = los_mask_bitmask(&compass_directions_16(), &inputs);
         if los != 0 {
             builder.los_masked(los);
         }
@@ -514,7 +498,7 @@ pub(super) fn healer_pressured_tick_shared(
         obstacles: ctx.obstacles.to_vec(),
         los_target,
     };
-    // U8 deny posture: prefer a step that breaks attacker LoS (cover_pull),
+    // Deny posture: prefer a step that breaks attacker LoS (cover_pull),
     // unless a teammate needs saving — then urgency suppression zeroes it so the
     // healer is never pulled into cover while an ally is dying (R11).
     let eff_weights = deny_weights(entity, my_pos, ctx, shared, weights);
@@ -561,9 +545,9 @@ pub(super) fn healer_pressured_tick_shared(
                 );
             }
             builder.chosen_direction([chosen.x, chosen.y]);
-            builder.masked(mask_bitmask(&compass_directions_16(), &inputs));
+            let (masked, los) = mask_and_los_bitmask(&compass_directions_16(), &inputs);
+            builder.masked(masked);
             builder.scorer_term("cover_pull", cover_pull_term(chosen, &inputs, eff_weights.cover_pull));
-            let los = los_mask_bitmask(&compass_directions_16(), &inputs);
             if los != 0 {
                 builder.los_masked(los);
             }
@@ -608,7 +592,7 @@ mod tests {
         MovementWeights { cover_pull: 1.5, threat_repulsion: 3.0, ..MovementWeights::default() }
     }
 
-    /// U8 scenario 1 (the suppression seam): while a teammate needs saving, the
+    /// Scenario 1 (the suppression seam): while a teammate needs saving, the
     /// effective weights zero `cover_pull` — the healer must not be pulled into
     /// cover — and every other term is untouched.
     #[test]
@@ -637,7 +621,7 @@ mod tests {
         assert_eq!(apply_cover_suppression(&w, true).cover_pull, 0.0);
     }
 
-    /// U10 press gate: the margin is a `>=` threshold. Exactly-at-margin
+    /// Press gate: the margin is a `>=` threshold. Exactly-at-margin
     /// presses (denial off); a hair below does not.
     #[test]
     fn pressing_when_ahead_is_inclusive_at_margin() {
@@ -649,7 +633,7 @@ mod tests {
         assert!(!pressing_when_ahead(-0.5, margin), "behind never presses");
     }
 
-    /// U10 at the suppression seam: an ahead-by-margin team zeroes `cover_pull`
+    /// Press at the suppression seam: an ahead-by-margin team zeroes `cover_pull`
     /// (press = denial off), exactly as the urgency path does; a level/behind
     /// team leaves it on. Drives `apply_cover_suppression` through the same
     /// boolean `deny_weights` computes from the press predicate.

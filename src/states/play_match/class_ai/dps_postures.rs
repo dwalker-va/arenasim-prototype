@@ -23,14 +23,13 @@
 use bevy::prelude::*;
 
 use crate::states::play_match::combat_core::{
-    compass_directions_16, los_mask_bitmask, mask_bitmask, score_directions, RangeBand,
-    ScorerInputs,
+    compass_directions_16, mask_and_los_bitmask, score_directions, RangeBand, ScorerInputs,
 };
 use crate::states::play_match::components::{
     AuraType, DpsPosture, KitePosture, MovementDirective, MovementGoal,
 };
 use crate::states::play_match::constants::MELEE_RANGE;
-use crate::states::play_match::map_geometry::has_line_of_sight;
+use crate::states::play_match::map_geometry::{has_line_of_sight, EYE_HEIGHT};
 use crate::states::play_match::match_config::CharacterClass;
 use crate::states::play_match::decision_trace::{
     ActorView, DecisionTrace, MovementGoalKind, MovementTrigger, Posture as TracePosture,
@@ -41,11 +40,6 @@ use super::CombatContext;
 
 /// One scorer-lookahead step distance (matches the healer scorer).
 const SCORER_LOOKAHEAD: f32 = 2.0;
-
-/// Local eye height for LoS probes — mirrors the scorer's `EYE_HEIGHT`
-/// (`combat_core::movement_scoring`) and the healer postures' copy, so
-/// occlusion tests here agree with the scorer's `los_seek` term.
-const EYE_HEIGHT: f32 = 1.0;
 
 /// Does any alive enemy carry an aura the Mage itself applied of a
 /// movement-impairing kind (Root / MovementSpeedSlow), optionally restricted to
@@ -180,34 +174,36 @@ pub fn nearest_melee_threat(
         .map(|i| (i.entity, i.position))
 }
 
-/// In ENGAGE, the kill-target position a kiter should seek line of sight
-/// toward: `Some(pos)` when it is within its preferred (idle/shot) range of a
-/// living kill target but OCCLUDED from it — the R10 stall case where normal
-/// pursuit stands still yet every cast is LoS-blocked. `None` when it has a
-/// clear line (fire away), is beyond preferred range (pursuit walks in and the
-/// collision resolver slides it around the pillar, self-healing occlusion), or
-/// has no kill target. Always `None` on obstacle-free maps: sight holds, so
-/// nothing is ever occluded — the seek path is a provable no-op there.
-fn engage_seek_target(
+/// Whether an ENGAGE kiter should reposition to regain line of sight: true when
+/// it is within its preferred (idle/shot) range of a living kill target but
+/// OCCLUDED from it — the R10 stall case where normal pursuit stands still yet
+/// every cast is LoS-blocked. false when it has a clear line (fire away), is
+/// beyond preferred range (pursuit walks in and the collision resolver slides it
+/// around the pillar, self-healing occlusion), or has no kill target. Always
+/// false on obstacle-free maps: sight holds, so nothing is ever occluded — the
+/// seek path is a provable no-op there.
+fn should_seek_los(
     ctx: &CombatContext,
     entity: Entity,
     my_pos: Vec3,
     kill_target: Option<Entity>,
-) -> Option<Vec3> {
-    let my_class = ctx.combatants.get(&entity)?.class;
-    let info = ctx.combatants.get(&kill_target?)?;
+) -> bool {
+    let Some(my_class) = ctx.combatants.get(&entity).map(|i| i.class) else {
+        return false;
+    };
+    let Some(info) = kill_target.and_then(|t| ctx.combatants.get(&t)) else {
+        return false;
+    };
     if !info.is_alive {
-        return None;
+        return false;
     }
     if my_pos.distance(info.position) > my_class.preferred_range() {
-        return None; // pursuit closes the gap and clears the pillar on its own
+        return false; // pursuit closes the gap and clears the pillar on its own
     }
     let my_eye = Vec3::new(my_pos.x, EYE_HEIGHT, my_pos.z);
     let tgt_eye = Vec3::new(info.position.x, EYE_HEIGHT, info.position.z);
-    if has_line_of_sight(ctx.obstacles, my_eye, tgt_eye) {
-        return None; // clear line — no repositioning needed
-    }
-    Some(info.position)
+    // Occluded from an in-range kill target → reposition to regain sight.
+    !has_line_of_sight(ctx.obstacles, my_eye, tgt_eye)
 }
 
 /// `los_seek` contribution of the winning direction: the weight when the
@@ -357,15 +353,15 @@ pub fn evaluate_dps_posture(
             }
         }
 
-        // Seek-LoS (U9): a kiter idle in shot range but OCCLUDED from the kill
+        // Seek-LoS: a kiter idle in shot range but OCCLUDED from the kill
         // target can't fire — without this it stalls behind a pillar forever
         // (R10). Run the scorer (los_seek steers toward a sighted angle while
         // range_band holds distance) to reposition. Otherwise — a clear line,
         // or out of range where normal pursuit closes the gap and slides around
         // the pillar — clear any stale kite vector and fall through to pursuit.
-        // That "else" is the exact pre-U9 ENGAGE behavior, and a provable no-op
+        // That "else" is the exact pre-existing ENGAGE behavior, and a provable no-op
         // on obstacle-free maps (never occluded).
-        let Some(_seek_pos) = engage_seek_target(ctx, entity, my_pos, kill_target) else {
+        if !should_seek_los(ctx, entity, my_pos, kill_target) {
             if directive.is_some() {
                 commands.entity(entity).remove::<MovementDirective>();
             }
@@ -373,7 +369,7 @@ pub fn evaluate_dps_posture(
                 commands.entity(entity).try_insert(*state);
             }
             return;
-        };
+        }
 
         // Hold the committed direction for the anti-zigzag window; re-score on
         // transition or when the window/directive expired.
@@ -411,8 +407,8 @@ pub fn evaluate_dps_posture(
                         MovementGoalKind::Direction,
                     );
                     builder.chosen_direction([chosen.x, chosen.y]);
-                    builder.masked(mask_bitmask(&compass_directions_16(), &inputs));
-                    let los = los_mask_bitmask(&compass_directions_16(), &inputs);
+                    let (masked, los) = mask_and_los_bitmask(&compass_directions_16(), &inputs);
+                    builder.masked(masked);
                     if los != 0 {
                         builder.los_masked(los);
                     }
@@ -482,8 +478,8 @@ pub fn evaluate_dps_posture(
                 );
             }
             builder.chosen_direction([chosen.x, chosen.y]);
-            builder.masked(mask_bitmask(&compass_directions_16(), &inputs));
-            let los = los_mask_bitmask(&compass_directions_16(), &inputs);
+            let (masked, los) = mask_and_los_bitmask(&compass_directions_16(), &inputs);
+            builder.masked(masked);
             if los != 0 {
                 builder.los_masked(los);
             }

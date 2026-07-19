@@ -236,12 +236,12 @@ pub fn combat_auto_attack(
                     {
                         continue;
                     }
-                    // Line-of-sight gate (U5): ranged autos (Hunter Auto Shot,
+                    // Line-of-sight gate: ranged autos (Hunter Auto Shot,
                     // caster wand shots) require an unobstructed line to the
                     // target. Occlusion skips the swing exactly like an
                     // out-of-range tick — the timer keeps building so the shot
                     // fires the instant the target clears cover. MELEE autos are
-                    // deliberately excluded (KTD13): two melee units flanking a
+                    // deliberately excluded: two melee units flanking a
                     // thin obstacle edge can still trade hits. Empty obstacle
                     // lists → always clear, so this is a byte-identical no-op on
                     // BasicArena / obstacle-free maps.

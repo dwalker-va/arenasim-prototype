@@ -17,7 +17,7 @@
         volumes: [],
     ),
 
-    // PillaredArena (KTD15): two full-height cover cylinders, mirrored about
+    // PillaredArena: two full-height cover cylinders, mirrored about
     // x=0 (the team-side swap is symmetric, so both are declared explicitly).
     pillared_arena: (
         volumes: [

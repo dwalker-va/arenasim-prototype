@@ -932,7 +932,7 @@ fn movement_slow_multiplier_stacks_multiplicatively() {
 }
 
 // ============================================================================
-// team_hp_sums / team_hp_advantage — U10 press-when-ahead signal
+// team_hp_sums / team_hp_advantage — press-when-ahead signal
 // ============================================================================
 
 /// A full-HP `info` scaled to `hp_frac` of its max (0.0..=1.0).

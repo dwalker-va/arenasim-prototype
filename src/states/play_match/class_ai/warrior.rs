@@ -28,7 +28,7 @@ use crate::states::play_match::movement_config::MeleeMovementConfig;
 
 use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
-use super::CombatContext;
+use super::{pressing_when_ahead, CombatContext};
 use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
 
 /// Shout range constant (applies to all shout variants)
@@ -893,9 +893,9 @@ pub fn under_movement_cc(auras: Option<&ActiveAuras>) -> bool {
     })
 }
 
-/// The melee tempo-reset decision seam (Warrior, U9), pure for unit testing.
+/// The melee tempo-reset decision seam (Warrior), pure for unit testing.
 /// The reset runs — falling back toward the healer instead of face-chasing —
-/// only while ALL of: the team is NOT pressing an advantage (U10 — a clearly
+/// only while ALL of: the team is NOT pressing an advantage (a clearly
 /// winning team keeps chasing rather than resetting tempo), the CC-armed window
 /// is still open (`now < armed_until`), the gap closer (Charge) is on cooldown,
 /// the warrior is out of melee range of its target, and a living healer ally
@@ -915,10 +915,10 @@ pub fn melee_reset_active(
 /// Nearest living, non-pet healer ally position to `my_pos` — the fallback
 /// anchor for the tempo reset. Deterministic: iterates the BTree-ordered
 /// snapshot, tie-breaking equal distances by entity order.
-fn nearest_healer_ally(ctx: &CombatContext, team: u8, my_pos: Vec3) -> Option<Vec3> {
-    ctx.combatants
-        .values()
-        .filter(|i| i.team == team && i.is_alive && !i.is_pet && i.class.is_healer())
+fn nearest_healer_ally(ctx: &CombatContext, my_pos: Vec3) -> Option<Vec3> {
+    ctx.alive_allies()
+        .into_iter()
+        .filter(|i| i.class.is_healer())
         .min_by(|a, b| {
             a.position
                 .distance(my_pos)
@@ -928,7 +928,7 @@ fn nearest_healer_ally(ctx: &CombatContext, team: u8, my_pos: Vec3) -> Option<Ve
         .map(|i| i.position)
 }
 
-/// Warrior tempo-reset movement pre-pass (U9). Runs before the ability pass and
+/// Warrior tempo-reset movement pre-pass. Runs before the ability pass and
 /// outside the GCD short-circuit (legs aren't on the GCD), mirroring the Mage /
 /// healer posture pre-passes. Arms the reset while under movement CC, then —
 /// once the CC drops and while Charge is still down — issues a
@@ -958,9 +958,9 @@ pub fn evaluate_warrior_reset(
     let needs_insert = reset_state.is_none();
     let state: &mut MeleeResetState = reset_state.unwrap_or(&mut local);
 
-    // U10 press-when-ahead: a team clearly ahead keeps chasing rather than
+    // Press-when-ahead: a team clearly ahead keeps chasing rather than
     // resetting tempo, so suppress BOTH arming and activation while pressing.
-    let pressing = ctx.team_hp_advantage() >= press_margin;
+    let pressing = pressing_when_ahead(ctx.team_hp_advantage(), press_margin);
 
     // Arm while under movement CC — the window stays open `reset_window` after
     // the CC ends so the reset actually runs (a rooted warrior can't move, so
@@ -979,7 +979,7 @@ pub fn evaluate_warrior_reset(
         .target
         .and_then(|t| ctx.combatants.get(&t))
         .map_or(false, |i| my_pos.distance(i.position) > MELEE_RANGE);
-    let healer_pos = nearest_healer_ally(ctx, combatant.team, my_pos);
+    let healer_pos = nearest_healer_ally(ctx, my_pos);
 
     let active = melee_reset_active(
         now,

@@ -2555,7 +2555,7 @@ mod paladin_unit {
     use arenasim::states::play_match::class_ai::CombatantInfo;
     use arenasim::states::play_match::components::{Combatant, HealerPosture, Posture};
     use arenasim::states::play_match::movement_config::MovementConfig;
-    use arenasim::states::play_match::{Aura, AuraType, DRCategory, DRTracker, DispelType};
+    use arenasim::states::play_match::{Aura, AuraType, DRCategory, DRTracker};
     use bevy::prelude::*;
 
     fn info(entity: Entity, team: u8, class: CharacterClass, pos: Vec3) -> CombatantInfo {
@@ -3696,7 +3696,7 @@ mod shaman_totems {
 }
 
 // ===========================================================================
-// U6: universal movement collision — pillar-interior regression guard
+// Universal movement collision — pillar-interior regression guard
 // ===========================================================================
 
 /// With obstacle collision wired into every movement branch (fear/poly wander,
@@ -3712,10 +3712,30 @@ mod shaman_totems {
 /// inside the solid 2.5 radius means a movement branch bypassed the resolver.
 mod u6_collision_smoke {
     use super::*;
+    use arenasim::states::match_config::ArenaMap;
+    use arenasim::states::play_match::map_config::load_map_geometry_config;
+    use arenasim::states::play_match::map_geometry::ObstacleVolume;
 
-    /// Shipped PillaredArena pillars (map_config.rs defaults).
-    const PILLARS: [(f32, f32); 2] = [(9.0, 0.0), (-9.0, 0.0)];
-    const PILLAR_RADIUS: f32 = 2.5;
+    /// The shipped PillaredArena cylinder footprints as (center_x, center_z,
+    /// radius), loaded live so the smoke test tracks the real map geometry
+    /// instead of a hardcoded copy.
+    fn pillar_footprints() -> Vec<(f32, f32, f32)> {
+        let geom = load_map_geometry_config()
+            .expect("maps.ron loads")
+            .active_for(ArenaMap::PillaredArena);
+        let pillars: Vec<(f32, f32, f32)> = geom
+            .volumes
+            .iter()
+            .filter_map(|v| match v {
+                ObstacleVolume::Cylinder { center_xz, radius, .. } => {
+                    Some((center_xz.x, center_xz.y, *radius))
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(!pillars.is_empty(), "PillaredArena must carry cylinder pillars");
+        pillars
+    }
 
     fn pillared_fear_config(seed: u64) -> HeadlessMatchConfig {
         let mut cfg = create_config(
@@ -3729,19 +3749,20 @@ mod u6_collision_smoke {
 
     #[test]
     fn no_unit_rests_inside_a_pillar() {
+        let pillars = pillar_footprints();
         for seed in [1u64, 7u64] {
             let (_result, timeline) = run_observed_collecting(pillared_fear_config(seed));
             let mut checked = 0usize;
             for (entity, samples) in &timeline.samples {
                 let info = timeline.info.get(entity).expect("entity has info");
                 for &(t, pos) in samples {
-                    for (px, pz) in PILLARS {
+                    for (px, pz, radius) in pillars.iter().copied() {
                         let d = ((pos.x - px).powi(2) + (pos.z - pz).powi(2)).sqrt();
                         assert!(
-                            d >= PILLAR_RADIUS - 0.01,
+                            d >= radius - 0.01,
                             "seed {}: team-{} {:?} (is_pet={}) at t={:.2} is inside pillar \
                              ({}, {}): center-dist {:.3} < {}",
-                            seed, info.team, info.class, info.is_pet, t, px, pz, d, PILLAR_RADIUS
+                            seed, info.team, info.class, info.is_pet, t, px, pz, d, radius
                         );
                         checked += 1;
                     }
@@ -3753,7 +3774,7 @@ mod u6_collision_smoke {
 }
 
 // ---------------------------------------------------------------------------
-// U8 — healer deny posture (cover_pull) on PillaredArena
+// Healer deny posture (cover_pull) on PillaredArena
 // ---------------------------------------------------------------------------
 //
 // A pressured healer with all teammates healthy should use the pillars to break
@@ -3768,11 +3789,8 @@ mod u8_healer_cover {
     use arenasim::headless::runner::TraceConfig;
     use arenasim::states::match_config::ArenaMap;
     use arenasim::states::play_match::map_config::load_map_geometry_config;
-    use arenasim::states::play_match::map_geometry::{has_line_of_sight, ObstacleVolume};
+    use arenasim::states::play_match::map_geometry::{has_line_of_sight, ObstacleVolume, EYE_HEIGHT};
     use arenasim::states::play_match::movement_config::load_movement_config;
-
-    /// Must match the scorer's / posture module's LoS eye height.
-    const EYE_HEIGHT: f32 = 1.0;
 
     /// Warrior+Priest vs Priest+Mage on PillaredArena. Team-1's Warrior trains
     /// team-2's Priest (slot 0); the Priest's Mage teammate stays at range and
@@ -3962,7 +3980,7 @@ mod u8_healer_cover {
 }
 
 // ---------------------------------------------------------------------------
-// U9 — attacker seek-LoS (Mage/Hunter) + melee tempo reset (Warrior)
+// Attacker seek-LoS (Mage/Hunter) + melee tempo reset (Warrior)
 // ---------------------------------------------------------------------------
 //
 // Two behaviors:
@@ -4057,7 +4075,7 @@ mod u9_seek_reset {
             .collect()
     }
 
-    /// Count of Mage `SeekLos` movement decisions — the ENGAGE repositioning U9
+    /// Count of Mage `SeekLos` movement decisions — the ENGAGE repositioning
     /// adds, fired when the Mage is occluded from its kill target in shot range.
     fn mage_seek_count(lines: &[serde_json::Value]) -> usize {
         lines
@@ -4074,7 +4092,7 @@ mod u9_seek_reset {
     /// Longest CONTIGUOUS run of Frostbolt `LosBlocked` decisions (span in
     /// sim-seconds), where the run is broken by a successful cast or any other
     /// outcome. A perpetual LoS stall shows as one very long run; an enemy
-    /// healer juking behind a pillar (its U8 job) can legitimately extend a run
+    /// healer juking behind a pillar (its job) can legitimately extend a run
     /// but is NOT a Mage-side stall — so this metric is used only on the
     /// canonical no-juke seed 7.
     fn max_contiguous_block_span(lines: &[serde_json::Value]) -> f32 {
@@ -4113,9 +4131,9 @@ mod u9_seek_reset {
     /// pillar refusing to move. Holds regardless of how long the enemy healer
     /// jukes, so it is the property pinned at both seeds.
     ///
-    /// Seeds re-pinned for U10: press-when-ahead turns the enemy Priest's LoS
+    /// Seeds re-pinned: press-when-ahead turns the enemy Priest's LoS
     /// denial OFF whenever its team leads, so the original seeds (3, 7) no longer
-    /// exercise occlusion in this comp. Seeds 48/54 are post-U10 seeds where the
+    /// exercise occlusion in this comp. Seeds 48/54 are seeds where the
     /// enemy healer stays behind long enough to deny sight and drive the seek.
     fn assert_mage_repositions_and_casts(seed: u64) {
         let lines = run_traced_lines(
@@ -4166,7 +4184,7 @@ mod u9_seek_reset {
     /// Tight anti-stall bound at a canonical occlusion seed. Absent a persistent
     /// enemy-healer juke, an occluded Mage recovers to a cast quickly: the
     /// longest contiguous LosBlocked run is well under 10 sim-seconds. Seed
-    /// re-pinned for U10 (seed 7 no longer occludes — see
+    /// re-pinned (seed 7 no longer occludes — see
     /// `assert_mage_repositions_and_casts`); seed 48 keeps the enemy healer
     /// denying while staying inside the bound.
     #[test]
@@ -4191,7 +4209,7 @@ mod u9_seek_reset {
     /// ENGAGE seek decisions during occluded windows.
     #[test]
     fn mage_seek_emits_los_seek_scorer_term() {
-        // Seed re-pinned for U10 (7 no longer occludes in this comp).
+        // Seed re-pinned (7 no longer occludes in this comp).
         let lines = run_traced_lines(
             vec!["Mage", "Priest"],
             vec!["Warrior", "Priest"],
@@ -4231,7 +4249,7 @@ mod u9_seek_reset {
         assert!(!melee_reset_active(1.0, 5.0, true, false, true, false));
         // No healer to fall back toward → no reset.
         assert!(!melee_reset_active(1.0, 5.0, true, true, false, false));
-        // U10: pressing an advantage overrides every other condition → keep
+        // Pressing an advantage overrides every other condition → keep
         // chasing, never reset, even with the full window/CD/range/healer set.
         assert!(!melee_reset_active(1.0, 5.0, true, true, true, true));
     }
@@ -4380,7 +4398,7 @@ mod u9_seek_reset {
     #[test]
     fn warrior_reset_emits_healer_directive_when_armed_and_charge_down() {
         // Armed window open, Charge on cooldown, out of melee, healer present.
-        // press_margin f32::MAX isolates the U9 mechanic from the U10 press gate
+        // press_margin f32::MAX isolates the reset mechanic from the press gate
         // (the 2v1 fixture is otherwise a standing team-HP lead).
         let (goal, traced) = run_reset(100.0, 1.0, true, 20.0, true, f32::MAX);
         assert!(
@@ -4393,7 +4411,7 @@ mod u9_seek_reset {
 
     #[test]
     fn warrior_reset_suppressed_when_team_ahead() {
-        // Same activating scenario as above, but the U10 press gate is live at
+        // Same activating scenario as above, but the press gate is live at
         // the shipped 0.2 margin. The fixture team (Warrior + Priest, both full)
         // leads the lone enemy Mage by a full member (advantage 1.0 >= 0.2), so
         // the Warrior keeps chasing: no fallback directive, no MeleeReset trace.
@@ -4429,7 +4447,7 @@ mod u9_seek_reset {
 }
 
 // ---------------------------------------------------------------------------
-// U10 — press-when-ahead (advantage signal turns denial OFF)
+// Press-when-ahead (advantage signal turns denial OFF)
 // ---------------------------------------------------------------------------
 //
 // A team clearly ahead should seek the fight, not LoS-stall into the dampening
@@ -4569,7 +4587,7 @@ mod u10_press {
         }
     }
 
-    /// The core U10 property at two fixed seeds: while ahead, a Priest never
+    /// The core property at two fixed seeds: while ahead, a Priest never
     /// pulls into cover (press = denial off); while behind, it still does.
     #[test]
     fn leading_healer_stops_denying_trailing_healer_keeps_denying() {
@@ -4611,7 +4629,7 @@ mod u10_press {
     /// F4 endgame guard: the healer-heavy comp RESOLVES by elimination — never
     /// the 300s cap draw — at the pinned seeds, and seed 13 does so at ~86s,
     /// PAST the 75s dampening onset (a real attrition endgame that still
-    /// terminates because the leader presses instead of LoS-stalling). U12's
+    /// terminates because the leader presses instead of LoS-stalling). The AE
     /// sweep owns the aggregate draw-rate; this pins the mechanism end-to-end.
     #[test]
     fn press_comp_resolves_before_cap() {
@@ -4640,7 +4658,7 @@ mod u10_press {
 }
 
 // ---------------------------------------------------------------------------
-// U12 — line-of-sight acceptance-evidence (AE) coverage map
+// Line-of-sight acceptance-evidence (AE) coverage map
 // ---------------------------------------------------------------------------
 //
 // The LoS feature's acceptance evidence is pinned across several test files.

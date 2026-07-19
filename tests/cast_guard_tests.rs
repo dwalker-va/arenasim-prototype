@@ -580,7 +580,7 @@ fn classify_returns_out_of_range_when_only_range_fails() {
 }
 
 // ============================================================================
-// Line-of-sight gate (U3) — a targeted cast fails fast when an obstacle volume
+// Line-of-sight gate — a targeted cast fails fast when an obstacle volume
 // blocks the caster→target segment. Runs AFTER can_cast_config, so range wins
 // precedence; empty obstacle lists (BasicArena) are a no-op.
 // ============================================================================

@@ -102,7 +102,7 @@ impl Default for MapGeometryConfig {
         Self {
             // BasicArena: no obstacles.
             basic_arena: MapDef::default(),
-            // PillaredArena (KTD15): two full-height cylinders, mirrored about
+            // PillaredArena: two full-height cylinders, mirrored about
             // x=0, radius 2.5, floor to y=5.
             pillared_arena: MapDef {
                 volumes: vec![

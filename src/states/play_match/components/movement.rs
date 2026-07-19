@@ -124,7 +124,7 @@ pub struct HealerPosture {
     /// meaningfully). `None` before the first formation directive and after
     /// posture transitions.
     pub last_point: Option<Vec2>,
-    /// DIP target (Paladin only, U8): the enemy healer the committed Hammer
+    /// DIP target (Paladin only): the enemy healer the committed Hammer
     /// of Justice walk is pursuing. `None` outside DIP.
     pub dip_target: Option<Entity>,
     /// DIP budget deadline: absolute sim-time at which the walk-stun-return
@@ -178,7 +178,7 @@ pub struct KitePosture {
     pub dip_until: f32,
 }
 
-/// Persistent melee "tempo reset" state (Warrior, U9). When a melee's go is
+/// Persistent melee "tempo reset" state (Warrior). When a melee's go is
 /// stopped by a movement-impairing CC (Root/Stun/Incapacitate) and its gap
 /// closer is on cooldown, it falls back toward its healer for a bounded window
 /// instead of face-chasing a kited target into more CC. The window is *armed*

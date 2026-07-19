@@ -101,6 +101,26 @@ pub fn update_stealth_visuals(
     }
 }
 
+/// Log a cast that fizzled because the target left line of sight during the
+/// cast. Shared by the projectile and instant-effect LoS re-check sites in
+/// `process_casting`, which build the identical `MatchEvent` message.
+fn log_los_fizzle(
+    combat_log: &mut CombatLog,
+    team: u8,
+    class: match_config::CharacterClass,
+    ability_name: &str,
+) {
+    combat_log.log(
+        CombatLogEventType::MatchEvent,
+        format!(
+            "Team {} {} fails to cast {}: target out of line of sight",
+            team,
+            class.name(),
+            ability_name
+        ),
+    );
+}
+
 /// Process casting: update cast timers and apply effects when casts complete.
 ///
 /// When a cast completes:
@@ -278,7 +298,7 @@ pub fn process_casting(
 
         // If this ability uses a projectile, spawn it and skip immediate effect application
         if let Some(projectile_speed) = def.projectile_speed {
-            // LoS re-check (U4), projectile path: a cast whose target left line
+            // LoS re-check, projectile path: a cast whose target left line
             // of sight during the cast fizzles at completion — BEFORE the
             // projectile spawns (once launched, a projectile lands regardless of
             // LoS). Scoped here (rather than before this branch) so the instant
@@ -289,15 +309,7 @@ pub fn process_casting(
             // this is byte-identical on BasicArena / obstacle-free maps.
             if let Ok((_, target_transform, ..)) = combatants.get(target_entity) {
                 if !has_line_of_sight(&map_geometry.volumes, caster_pos, target_transform.translation) {
-                    combat_log.log(
-                        CombatLogEventType::MatchEvent,
-                        format!(
-                            "Team {} {} fails to cast {}: target out of line of sight",
-                            caster_team,
-                            caster_class.name(),
-                            def.name
-                        ),
-                    );
+                    log_los_fizzle(&mut combat_log, caster_team, caster_class, &def.name);
                     continue;
                 }
             }
@@ -331,22 +343,14 @@ pub fn process_casting(
             continue;
         }
 
-        // LoS re-check (U4), instant-effect path: mirror the projectile branch
+        // LoS re-check, instant-effect path: mirror the projectile branch
         // — a target that left line of sight during the cast fizzles before any
         // effect applies. Placed AFTER the dead-target short-circuit above, so a
         // target that is both dead AND out of LoS fizzles as a dead target (the
         // is_alive check wins by placement). Same caster→target segment and
         // no-op-on-empty semantics as the cast-start gate.
         if !has_line_of_sight(&map_geometry.volumes, caster_pos, target_transform.translation) {
-            combat_log.log(
-                CombatLogEventType::MatchEvent,
-                format!(
-                    "Team {} {} fails to cast {}: target out of line of sight",
-                    caster_team,
-                    caster_class.name(),
-                    def.name
-                ),
-            );
+            log_los_fizzle(&mut combat_log, caster_team, caster_class, &def.name);
             continue;
         }
 

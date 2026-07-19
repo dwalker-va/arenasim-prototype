@@ -277,13 +277,13 @@ pub enum MovementTrigger {
     /// hold has elapsed (Mage: no Mage-owned root/slow on a visible enemy;
     /// Hunter: no melee-DPS threat within the sustain radius).
     KiteExit,
-    /// DPS-kiter ENGAGE seek-LoS (U9): the kiter is idle in shot range of the
+    /// DPS-kiter ENGAGE seek-LoS: the kiter is idle in shot range of the
     /// kill target but OCCLUDED from it, so it ran the scorer (los_seek term) to
     /// reposition to a sighted angle instead of stalling behind cover. Emitted
     /// within the ENGAGE posture (no transition), so no `previous_posture`.
     /// Obstacle maps only.
     SeekLos,
-    /// Melee tempo reset (Warrior, U9): a CC'd melee with its gap closer down
+    /// Melee tempo reset (Warrior): a CC'd melee with its gap closer down
     /// and out of melee range fell back toward its healer for a bounded window
     /// instead of face-chasing. Emitted on the activation edge only.
     MeleeReset,
