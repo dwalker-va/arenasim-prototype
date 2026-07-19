@@ -24,7 +24,7 @@ cargo run --release -- --headless /tmp/test.json
 
 **Config options:**
 - `team1`, `team2`: Arrays of class names (Warrior, Mage, Rogue, Priest, Warlock, Paladin, Hunter)
-- `map`: "BasicArena" or "PillaredArena"
+- `map`: "BasicArena", "PillaredArena", or "TestVerticality" (a headless-only LoS test asset with a raised platform and ramp; `--matrix` rejects it and it never appears in the graphical map-select list)
 - `team1_kill_target`, `team2_kill_target`: Priority target index (0-based)
 - `max_duration_secs`: Timeout (default 300)
 
@@ -294,6 +294,7 @@ fractions in 0..1; values below are the shipped defaults):
 - `urgency_hp_threshold: 0.5` — defer non-critical casts during ESCAPE/DIP unless an ally is below this HP fraction
 - `anchor_switch_margin: 0.1` — sticky-anchor switch requires this HP-fraction injury margin
 - `wand_range: 30.0` — wand-range pull target distance (Priest)
+- `press_advantage_margin: 0.2` — team-HP-fraction lead at/above which a team "presses": its healers' `cover_pull` zeroes and the melee tempo reset stays disarmed (denial is reserved for the trailing side)
 
 **Per-class scorer weights** (`priest.weights:` / `paladin.weights:` —
 `score_directions` term weights; `0.0` disables a term). All terms here are
@@ -308,6 +309,8 @@ with the context-steering mask refactor.
 - `range_band` (0.0 for healers; Mage/Hunter 2.0 / 0.5) — ring-attraction toward the kill target's `[min, max]` band; disabled for healers
 - `flee` (0.0 for healers + Mage; Hunter 6.0) — constant pull away from the nearest threat, NOT proximity-weighted (distance-maximization), so a chased ranged DPS outruns an un-impaired chaser at all ranges. Hunter's `corner_penalty` (8.0) must EXCEED `flee` or the kiter flees into corners.
 - `commitment_bonus` (1.5/1.5) — bonus toward the committed direction during the commit window
+- `los_seek` (0.0 for healers; Mage 2.0 / Hunter 1.0) — reward for candidate steps that have/restore line of sight to the kill target; drives occluded-in-range casters to orbit to a sighted angle instead of idling
+- `cover_pull` (Priest/Shaman 1.5, Paladin 1.0, 0.0 for DPS) — reward for candidate steps occluded from threats; drives pressured-healer pillar denial. Kept below `threat_repulsion` so denial shapes retreat direction without overriding escape; zeroed when a healable teammate is below `urgency_hp_threshold` or the team is pressing (`press_advantage_margin`)
 
 **DPS kiter blocks** (`mage:` / `hunter:` — the shared ENGAGE/KITE machine, `DpsMovementConfig`):
 - `weights:` (above) plus `range_band_min`/`max` (orbit ring; min = SAFE_KITING_DISTANCE / HUNTER_DEAD_ZONE 8), `kite_hold` (anti-strobe hysteresis), `directive_ttl` (must cover the longest cast), `commit_window`.
@@ -426,12 +429,22 @@ jq -c 'select(.kind == "movement_decision" and .actor.entity_id == 7) | {t: .sim
 jq -c 'select(.kind == "movement_decision" and .actor.class == "Priest" and .scorer_terms != null) | {t: .sim_time, posture, dir: .chosen_direction, terms: .scorer_terms}' $T
 
 # Masked candidates — the `masked` field is a u16 bitmask over the 16 compass
-# directions (bit i set when candidate i was eliminated by the boundary or
-# ally-anchor mask). Present only when the scorer ran. A value of 65535
-# (0xFFFF) is an all-masked frame, where the fallback ladder fired — the ONLY
-# legitimate source of Part A behavior divergence from the old penalty scheme,
-# so this is the query R6 byte-identity attribution uses on a divergent cell.
+# directions (bit i set when candidate i was eliminated by the boundary,
+# ally-anchor, or obstacle (MASK_LOS) mask). Present only when the scorer ran.
+# A value of 65535 (0xFFFF) is an all-masked frame, where the fallback ladder
+# fired (lift order: anchor -> LoS -> boundary) — the ONLY legitimate source
+# of Part A behavior divergence from the old penalty scheme, so this is the
+# query R6 byte-identity attribution uses on a divergent cell.
 jq -c 'select(.kind == "movement_decision" and .masked == 65535) | {t: .sim_time, class: .actor.class, entity: .actor.entity_id, posture}' $T
+
+# LoS-only eliminations — `los_masked` is a strict subset of `masked` carrying
+# just the obstacle-blocked candidates; emitted only when nonzero, so it never
+# appears on obstacle-free maps (BasicArena traces are unchanged).
+jq -c 'select(.kind == "movement_decision" and .los_masked != null) | {t: .sim_time, class: .actor.class, masked, los_masked}' $T
+
+# Why didn't the Mage cast? LoS rejections by ability (fires on PillaredArena /
+# TestVerticality when a pillar blocks the segment at cast start)
+jq -c 'select(.actor.class == "Mage") | .candidates[]? | select(.status == "rejected" and .reason == "LosBlocked") | .ability' $T | sort | uniq -c
 
 # Paladin HoJ dips: DipEnter carries the goal entity (the enemy healer) in
 # the event's `target` view; DipComplete fires when HoJ lands, DipAbort when

@@ -383,6 +383,13 @@ mod tests {
         }
     }
 
+    fn aabb(min_x: f32, min_y: f32, min_z: f32, max_x: f32, max_y: f32, max_z: f32) -> ObstacleVolume {
+        ObstacleVolume::Aabb {
+            min: Vec3::new(min_x, min_y, min_z),
+            max: Vec3::new(max_x, max_y, max_z),
+        }
+    }
+
     fn footprint_dist(v: &ObstacleVolume, p: Vec3) -> f32 {
         match *v {
             ObstacleVolume::Cylinder { center_xz, .. } => {
@@ -514,5 +521,109 @@ mod tests {
         let pos = Vec3::new(1.0, 1.0, 2.0);
         let desired = Vec3::new(4.0, 1.0, 6.0);
         assert_eq!(resolve_movement(&[], pos, desired), desired);
+    }
+
+    /// Scenario 10a: a step driven into a box's `-X` face from outside on X only
+    /// slides tangentially along Z — the mover clamps to the X face (never
+    /// entering the MOVER_RADIUS-inflated footprint) while keeping its lateral Z
+    /// progress. Mirrors the cylinder slide test against an `Aabb`.
+    #[test]
+    fn resolve_movement_slides_along_box_x_face() {
+        let box_vol = aabb(-5.0, 0.0, -5.0, 5.0, 2.0, 5.0);
+        let pos = Vec3::new(-8.0, 1.0, 0.0); // outside on X only
+        let desired = Vec3::new(0.0, 1.0, 2.0); // heads +X into the box with a +Z lateral bias
+        let out = resolve_movement(&[box_vol], pos, desired);
+
+        assert!(out.is_finite(), "no NaN/inf");
+        assert_ne!(out, desired, "the blocked step must be modified");
+        assert!(
+            !position_blocked(&[box_vol], out),
+            "resolved position {:?} must sit outside the inflated footprint",
+            out
+        );
+        assert!(out.z > pos.z, "lateral (Z) progress must be preserved, got z={}", out.z);
+        assert!(out.x <= -5.0, "must be clamped to the -X face, got x={}", out.x);
+    }
+
+    /// Scenario 10b: the Z-face mirror — approaching a box's `-Z` face from
+    /// outside on Z only slides tangentially along X.
+    #[test]
+    fn resolve_movement_slides_along_box_z_face() {
+        let box_vol = aabb(-5.0, 0.0, -5.0, 5.0, 2.0, 5.0);
+        let pos = Vec3::new(0.0, 1.0, -8.0); // outside on Z only
+        let desired = Vec3::new(2.0, 1.0, 0.0); // heads +Z into the box with a +X lateral bias
+        let out = resolve_movement(&[box_vol], pos, desired);
+
+        assert!(out.is_finite(), "no NaN/inf");
+        assert_ne!(out, desired, "the blocked step must be modified");
+        assert!(
+            !position_blocked(&[box_vol], out),
+            "resolved position {:?} must sit outside the inflated footprint",
+            out
+        );
+        assert!(out.x > pos.x, "lateral (X) progress must be preserved, got x={}", out.x);
+        assert!(out.z <= -5.0, "must be clamped to the -Z face, got z={}", out.z);
+    }
+
+    /// Scenario 10c: a corner approach (mover outside on BOTH axes) exercises the
+    /// least-penetration-axis tie-break in `slide_against`: the desired step
+    /// penetrates the `-X` face more shallowly than the `-Z` face, so the mover
+    /// is pushed out along X (the axis of least penetration) and keeps its Z.
+    #[test]
+    fn resolve_movement_box_corner_clamps_least_penetration_axis() {
+        let box_vol = aabb(-5.0, 0.0, -5.0, 5.0, 2.0, 5.0);
+        let pos = Vec3::new(-8.0, 1.0, -8.0); // diagonally outside the corner (both axes)
+        // Shallow X penetration (just past the -5.5 inflated face), deep Z
+        // penetration (well inside), so the tie-break clamps X.
+        let desired = Vec3::new(-4.0, 1.0, 0.0);
+        let out = resolve_movement(&[box_vol], pos, desired);
+
+        assert!(out.is_finite(), "no NaN/inf");
+        assert!(
+            !position_blocked(&[box_vol], out),
+            "resolved position {:?} must sit outside the inflated footprint",
+            out
+        );
+        assert!(
+            out.x <= -5.0,
+            "least-penetration tie-break must push out along X, got x={}",
+            out.x
+        );
+        assert!(
+            (out.z - desired.z).abs() < 1e-3,
+            "clamping X must leave Z at the desired value, got z={}",
+            out.z
+        );
+    }
+
+    /// Scenario 10d: a mover fully enclosed by boxes (an inner box it sits in,
+    /// wrapped by a huge outer box so any tangential slide is still inside the
+    /// outer volume) stays put — returns `pos`, no NaN, no clip-through.
+    #[test]
+    fn resolve_movement_box_fully_enclosed_stays_put() {
+        let inner = aabb(-5.0, 0.0, -5.0, 5.0, 20.0, 5.0);
+        let outer = aabb(-30.0, 0.0, -30.0, 30.0, 20.0, 30.0);
+        let pos = Vec3::new(0.0, 1.0, 0.0);
+        let desired = Vec3::new(2.0, 1.0, 0.0);
+        let out = resolve_movement(&[inner, outer], pos, desired);
+
+        assert!(out.is_finite(), "no NaN/inf");
+        assert!(out.distance(pos) < 1e-3, "enclosed mover must stay put, got {:?}", out);
+    }
+
+    /// Scenario 10e: a box whose Y-span sits entirely above the mover's `y ≈ 1.0`
+    /// (an elevated platform) does not block ground movement — the step passes
+    /// through unchanged even though its XZ projection lands inside the box.
+    #[test]
+    fn resolve_movement_box_above_mover_y_does_not_block() {
+        let platform = aabb(-5.0, 5.0, -5.0, 5.0, 7.0, 5.0); // y ∈ [5, 7], above y=1
+        let pos = Vec3::new(-8.0, 1.0, 0.0);
+        let desired = Vec3::new(0.0, 1.0, 0.0); // XZ interior of the platform, but at ground y
+        let out = resolve_movement(&[platform], pos, desired);
+
+        assert_eq!(
+            out, desired,
+            "a platform whose y-span excludes the mover must not block ground movement"
+        );
     }
 }
