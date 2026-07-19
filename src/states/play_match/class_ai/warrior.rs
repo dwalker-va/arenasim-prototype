@@ -895,19 +895,21 @@ pub fn under_movement_cc(auras: Option<&ActiveAuras>) -> bool {
 
 /// The melee tempo-reset decision seam (Warrior, U9), pure for unit testing.
 /// The reset runs — falling back toward the healer instead of face-chasing —
-/// only while ALL of: the CC-armed window is still open (`now < armed_until`),
-/// the gap closer (Charge) is on cooldown, the warrior is out of melee range of
-/// its target, and a living healer ally exists to fall back toward. Any one
-/// failing resumes normal pursuit; the gap closer coming up is the intended
-/// exit (re-engage with a fresh Charge).
+/// only while ALL of: the team is NOT pressing an advantage (U10 — a clearly
+/// winning team keeps chasing rather than resetting tempo), the CC-armed window
+/// is still open (`now < armed_until`), the gap closer (Charge) is on cooldown,
+/// the warrior is out of melee range of its target, and a living healer ally
+/// exists to fall back toward. Any one failing resumes normal pursuit; the gap
+/// closer coming up is the intended exit (re-engage with a fresh Charge).
 pub fn melee_reset_active(
     now: f32,
     armed_until: f32,
     charge_on_cooldown: bool,
     out_of_melee: bool,
     has_healer: bool,
+    pressing: bool,
 ) -> bool {
-    now < armed_until && charge_on_cooldown && out_of_melee && has_healer
+    !pressing && now < armed_until && charge_on_cooldown && out_of_melee && has_healer
 }
 
 /// Nearest living, non-pet healer ally position to `my_pos` — the fallback
@@ -948,6 +950,7 @@ pub fn evaluate_warrior_reset(
     reset_state: Option<&mut MeleeResetState>,
     directive: Option<&MovementDirective>,
     cfg: &MeleeMovementConfig,
+    press_margin: f32,
     now: f32,
     decision_trace: &mut DecisionTrace,
 ) {
@@ -955,10 +958,14 @@ pub fn evaluate_warrior_reset(
     let needs_insert = reset_state.is_none();
     let state: &mut MeleeResetState = reset_state.unwrap_or(&mut local);
 
+    // U10 press-when-ahead: a team clearly ahead keeps chasing rather than
+    // resetting tempo, so suppress BOTH arming and activation while pressing.
+    let pressing = ctx.team_hp_advantage() >= press_margin;
+
     // Arm while under movement CC — the window stays open `reset_window` after
     // the CC ends so the reset actually runs (a rooted warrior can't move, so
-    // the useful moment is right after the root drops).
-    if under_movement_cc(auras) {
+    // the useful moment is right after the root drops). Not while pressing.
+    if !pressing && under_movement_cc(auras) {
         state.armed_until = now + cfg.reset_window;
     }
 
@@ -980,6 +987,7 @@ pub fn evaluate_warrior_reset(
         charge_on_cd,
         out_of_melee,
         healer_pos.is_some(),
+        pressing,
     );
 
     if active {

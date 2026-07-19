@@ -47,6 +47,11 @@
         anchor_switch_margin: 0.1,
         // Wand-range pull target distance (Priest wand range).
         wand_range: 30.0,
+        // Press-when-ahead margin (U10), in summed team-HP-fraction units: a
+        // team leading by this much turns denial OFF (healers stop pulling into
+        // cover, the Warrior stops resetting tempo) so a clearly-winning team
+        // seeks the fight instead of LoS-stalling into the dampening endgame.
+        press_advantage_margin: 0.2,
     ),
     priest: (
         weights: (

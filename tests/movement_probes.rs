@@ -4112,6 +4112,11 @@ mod u9_seek_reset {
     /// (emits SeekLos) and keeps landing Frostbolts — it never stands behind a
     /// pillar refusing to move. Holds regardless of how long the enemy healer
     /// jukes, so it is the property pinned at both seeds.
+    ///
+    /// Seeds re-pinned for U10: press-when-ahead turns the enemy Priest's LoS
+    /// denial OFF whenever its team leads, so the original seeds (3, 7) no longer
+    /// exercise occlusion in this comp. Seeds 48/54 are post-U10 seeds where the
+    /// enemy healer stays behind long enough to deny sight and drive the seek.
     fn assert_mage_repositions_and_casts(seed: u64) {
         let lines = run_traced_lines(
             vec!["Mage", "Priest"],
@@ -4149,33 +4154,35 @@ mod u9_seek_reset {
     }
 
     #[test]
-    fn mage_repositions_and_casts_despite_occlusion_seed_7() {
-        assert_mage_repositions_and_casts(7);
+    fn mage_repositions_and_casts_despite_occlusion_seed_48() {
+        assert_mage_repositions_and_casts(48);
     }
 
     #[test]
-    fn mage_repositions_and_casts_despite_occlusion_seed_3() {
-        assert_mage_repositions_and_casts(3);
+    fn mage_repositions_and_casts_despite_occlusion_seed_54() {
+        assert_mage_repositions_and_casts(54);
     }
 
-    /// Tight anti-stall bound at the canonical occlusion seed (seed 7, the same
-    /// LoS-coverage seed the decision-trace audit pins). Absent a persistent
+    /// Tight anti-stall bound at a canonical occlusion seed. Absent a persistent
     /// enemy-healer juke, an occluded Mage recovers to a cast quickly: the
-    /// longest contiguous LosBlocked run is well under 10 sim-seconds.
+    /// longest contiguous LosBlocked run is well under 10 sim-seconds. Seed
+    /// re-pinned for U10 (seed 7 no longer occludes — see
+    /// `assert_mage_repositions_and_casts`); seed 48 keeps the enemy healer
+    /// denying while staying inside the bound.
     #[test]
-    fn mage_recovers_to_cast_within_bound_seed_7() {
+    fn mage_recovers_to_cast_within_bound_seed_48() {
         let lines = run_traced_lines(
             vec!["Mage", "Priest"],
             vec!["Warrior", "Priest"],
-            7,
+            48,
             "PillaredArena",
         );
         let blocked = mage_frostbolt_times(&lines, "", Some("LosBlocked"));
-        assert!(blocked.len() >= 3, "seed 7 must exercise occlusion, got {}", blocked.len());
+        assert!(blocked.len() >= 3, "seed 48 must exercise occlusion, got {}", blocked.len());
         let span = max_contiguous_block_span(&lines);
         assert!(
             span <= 10.0,
-            "seed 7: longest contiguous LosBlocked run was {:.2}s (> 10s) — Mage stalled",
+            "seed 48: longest contiguous LosBlocked run was {:.2}s (> 10s) — Mage stalled",
             span
         );
     }
@@ -4184,10 +4191,11 @@ mod u9_seek_reset {
     /// ENGAGE seek decisions during occluded windows.
     #[test]
     fn mage_seek_emits_los_seek_scorer_term() {
+        // Seed re-pinned for U10 (7 no longer occludes in this comp).
         let lines = run_traced_lines(
             vec!["Mage", "Priest"],
             vec!["Warrior", "Priest"],
-            7,
+            48,
             "PillaredArena",
         );
         let seek_with_term = lines
@@ -4213,16 +4221,19 @@ mod u9_seek_reset {
 
     #[test]
     fn melee_reset_active_truth_table() {
-        // All conditions met → reset runs.
-        assert!(melee_reset_active(1.0, 5.0, true, true, true));
+        // All conditions met (not pressing) → reset runs.
+        assert!(melee_reset_active(1.0, 5.0, true, true, true, false));
         // Window lapsed (now >= armed_until) → no reset (bounded, not permanent).
-        assert!(!melee_reset_active(5.0, 5.0, true, true, true));
+        assert!(!melee_reset_active(5.0, 5.0, true, true, true, false));
         // Gap closer ready → re-engage, not reset.
-        assert!(!melee_reset_active(1.0, 5.0, false, true, true));
+        assert!(!melee_reset_active(1.0, 5.0, false, true, true, false));
         // Already in melee → keep swinging.
-        assert!(!melee_reset_active(1.0, 5.0, true, false, true));
+        assert!(!melee_reset_active(1.0, 5.0, true, false, true, false));
         // No healer to fall back toward → no reset.
-        assert!(!melee_reset_active(1.0, 5.0, true, true, false));
+        assert!(!melee_reset_active(1.0, 5.0, true, true, false, false));
+        // U10: pressing an advantage overrides every other condition → keep
+        // chasing, never reset, even with the full window/CD/range/healer set.
+        assert!(!melee_reset_active(1.0, 5.0, true, true, true, true));
     }
 
     fn cc_aura(effect: AuraType) -> Aura {
@@ -4296,6 +4307,7 @@ mod u9_seek_reset {
         charge_on_cd: bool,
         target_distance: f32,
         with_healer: bool,
+        press_margin: f32,
     ) -> (Option<MovementGoal>, bool) {
         let mut world = World::new();
         let warrior = world.spawn_empty().id();
@@ -4348,6 +4360,7 @@ mod u9_seek_reset {
                 Some(&mut reset_state),
                 None,
                 &MeleeMovementConfig::default(),
+                press_margin,
                 now,
                 &mut trace,
             );
@@ -4367,7 +4380,9 @@ mod u9_seek_reset {
     #[test]
     fn warrior_reset_emits_healer_directive_when_armed_and_charge_down() {
         // Armed window open, Charge on cooldown, out of melee, healer present.
-        let (goal, traced) = run_reset(100.0, 1.0, true, 20.0, true);
+        // press_margin f32::MAX isolates the U9 mechanic from the U10 press gate
+        // (the 2v1 fixture is otherwise a standing team-HP lead).
+        let (goal, traced) = run_reset(100.0, 1.0, true, 20.0, true, f32::MAX);
         assert!(
             matches!(goal, Some(MovementGoal::Point(p)) if p == HEALER_POS),
             "expected a Point directive toward the healer, got {:?}",
@@ -4377,23 +4392,249 @@ mod u9_seek_reset {
     }
 
     #[test]
+    fn warrior_reset_suppressed_when_team_ahead() {
+        // Same activating scenario as above, but the U10 press gate is live at
+        // the shipped 0.2 margin. The fixture team (Warrior + Priest, both full)
+        // leads the lone enemy Mage by a full member (advantage 1.0 >= 0.2), so
+        // the Warrior keeps chasing: no fallback directive, no MeleeReset trace.
+        let (goal, traced) = run_reset(100.0, 1.0, true, 20.0, true, 0.2);
+        assert!(
+            goal.is_none(),
+            "pressing an advantage must suppress the reset directive, got {:?}",
+            goal
+        );
+        assert!(!traced, "no MeleeReset trace while pressing");
+    }
+
+    #[test]
     fn warrior_reset_silent_when_gap_closer_ready() {
         // Charge off cooldown → re-engage, no fallback directive.
-        let (goal, traced) = run_reset(100.0, 1.0, false, 20.0, true);
+        let (goal, traced) = run_reset(100.0, 1.0, false, 20.0, true, f32::MAX);
         assert!(goal.is_none(), "gap closer ready must not issue a reset directive");
         assert!(!traced);
     }
 
     #[test]
     fn warrior_reset_silent_without_healer() {
-        let (goal, _) = run_reset(100.0, 1.0, true, 20.0, false);
+        let (goal, _) = run_reset(100.0, 1.0, true, 20.0, false, f32::MAX);
         assert!(goal.is_none(), "no healer ally → nothing to fall back toward");
     }
 
     #[test]
     fn warrior_reset_silent_in_melee() {
         // In melee range of the target → keep swinging, no reset.
-        let (goal, _) = run_reset(100.0, 1.0, true, 1.0, true);
+        let (goal, _) = run_reset(100.0, 1.0, true, 1.0, true, f32::MAX);
         assert!(goal.is_none(), "in melee must not reset");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// U10 — press-when-ahead (advantage signal turns denial OFF)
+// ---------------------------------------------------------------------------
+//
+// A team clearly ahead should seek the fight, not LoS-stall into the dampening
+// endgame (R13/F4). "Press" is simply "denial off": once a team's
+// `team_hp_advantage` reaches `shared.press_advantage_margin`, its healers stop
+// pulling into cover. We measure this directly on PillaredArena with a
+// healer-heavy comp (Warrior+Priest vs Warlock+Priest): each Priest's
+// PRESSURED/ESCAPE movement decisions carry the `cover_pull` scorer term, and we
+// join every decision to that team's HP advantage at the moment it fired.
+//
+//   - the LEADING team's Priest (advantage >= margin) emits ZERO positive
+//     cover_pull terms — press zeroed the weight; and
+//   - the TRAILING team's Priest (advantage <= -margin) still denies
+//     (cover_pull > 0 on real occlusion), proving the suppression is
+//     conditional, not a global disable.
+//
+// The match also RESOLVES by elimination (EndReason::Kill), well under the 300s
+// cap — the F4 promise that pressing closes the draw loophole. Seed 13 resolves
+// at ~86s, past the 75s dampening onset, so it exercises a real attrition
+// endgame that still terminates.
+mod u10_press {
+    use super::*;
+    use arenasim::headless::runner::{EndReason, MatchResult, TraceConfig};
+    use arenasim::states::play_match::movement_config::load_movement_config;
+    use std::collections::BTreeMap as Btm;
+
+    /// One observed + traced PillaredArena run of the healer-heavy comp.
+    fn run(seed: u64) -> (MatchResult, Vec<FrameObservation>, Vec<serde_json::Value>) {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+        drop(tmp);
+        let cfg = HeadlessMatchConfig {
+            team1: vec!["Warrior".into(), "Priest".into()],
+            team2: vec!["Warlock".into(), "Priest".into()],
+            max_duration_secs: 300.0,
+            random_seed: Some(seed),
+            map: "PillaredArena".to_string(),
+            ..Default::default()
+        };
+        let mut frames: Vec<FrameObservation> = Vec::new();
+        let result = run_headless_match_observed(
+            cfg,
+            true,
+            Some(TraceConfig { output_path: path.clone() }),
+            |f| frames.push(f.clone()),
+        )
+        .expect("observed traced headless match failed");
+        let body = std::fs::read_to_string(&path).unwrap_or_default();
+        let events: Vec<serde_json::Value> =
+            body.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+        let _ = std::fs::remove_file(path);
+        (result, frames, events)
+    }
+
+    /// `team`'s HP-fraction advantage at absolute frame time `abs_t` — the same
+    /// alive/`!is_pet` sum the sim's `team_hp_advantage` computes, evaluated on
+    /// the nearest observed frame. Mirrors the production signal so the probe
+    /// classifies a decision by the very quantity the code gated on.
+    fn team_adv_at(frames: &[FrameObservation], abs_t: f32, team: u8) -> Option<f32> {
+        let f = frames.iter().min_by(|a, b| {
+            (a.sim_time - abs_t)
+                .abs()
+                .partial_cmp(&(b.sim_time - abs_t).abs())
+                .unwrap()
+        })?;
+        let mut sums: Btm<u8, f32> = Btm::new();
+        for c in f.combatants.values() {
+            if c.alive && !c.is_pet && c.max_health > 0.0 {
+                *sums.entry(c.team).or_insert(0.0) += c.current_health / c.max_health;
+            }
+        }
+        let own = sums.get(&team).copied().unwrap_or(0.0);
+        let enemy: f32 = sums.iter().filter(|(t, _)| **t != team).map(|(_, v)| *v).sum();
+        Some(own - enemy)
+    }
+
+    struct PressStats {
+        end_reason: EndReason,
+        match_time: f32,
+        /// PRESSURED/ESCAPE Priest decisions fired while that Priest's team led
+        /// by >= margin (the leader, pressing).
+        leader_decisions: usize,
+        /// ...of those, how many carried a POSITIVE cover_pull term. Must be 0:
+        /// press zeroes the weight, so a leader can never pull into cover.
+        leader_cover_positive: usize,
+        /// Trailing-Priest decisions (team behind by >= margin) that denied LoS
+        /// (cover_pull > 0) — proof the suppression is conditional.
+        trailer_denials: usize,
+    }
+
+    fn measure(seed: u64) -> PressStats {
+        let margin = load_movement_config()
+            .expect("movement.ron loads")
+            .shared
+            .press_advantage_margin;
+        let (result, frames, events) = run(seed);
+        let gate = frames
+            .iter()
+            .find(|f| f.gates_open)
+            .map(|f| f.sim_time)
+            .expect("gates opened");
+
+        let (mut leader_decisions, mut leader_cover_positive, mut trailer_denials) = (0, 0, 0);
+        for v in &events {
+            if v["kind"] != "movement_decision" || v["actor"]["class"] != "Priest" {
+                continue;
+            }
+            let posture = v["posture"].as_str().unwrap_or("");
+            if posture != "pressured" && posture != "escape" {
+                continue;
+            }
+            // Only decisions that ran the scorer carry the cover_pull term.
+            let Some(cover) = v["scorer_terms"]["cover_pull"].as_f64() else {
+                continue;
+            };
+            let team = v["actor"]["team"].as_u64().unwrap_or(0) as u8;
+            let combat_t = v["sim_time"].as_f64().unwrap_or(0.0) as f32;
+            let Some(adv) = team_adv_at(&frames, combat_t + gate, team) else {
+                continue;
+            };
+            if adv >= margin {
+                leader_decisions += 1;
+                if cover > 0.0 {
+                    leader_cover_positive += 1;
+                }
+            } else if adv <= -margin && cover > 0.0 {
+                trailer_denials += 1;
+            }
+        }
+
+        PressStats {
+            end_reason: result.end_reason,
+            match_time: result.match_time,
+            leader_decisions,
+            leader_cover_positive,
+            trailer_denials,
+        }
+    }
+
+    /// The core U10 property at two fixed seeds: while ahead, a Priest never
+    /// pulls into cover (press = denial off); while behind, it still does.
+    #[test]
+    fn leading_healer_stops_denying_trailing_healer_keeps_denying() {
+        for seed in [2u64, 13u64] {
+            let s = measure(seed);
+            eprintln!(
+                "U10 press probe seed {seed}: end={} t={:.1} leader_decisions={} \
+                 leader_cover_positive={} trailer_denials={}",
+                s.end_reason.as_str(),
+                s.match_time,
+                s.leader_decisions,
+                s.leader_cover_positive,
+                s.trailer_denials,
+            );
+
+            // Non-vacuity: the leading Priest actually took PRESSURED/ESCAPE
+            // decisions while ahead (or the zero below proves nothing).
+            assert_min_occurrences(
+                &format!("seed {seed} leading-Priest pressured/escape decisions while ahead"),
+                s.leader_decisions,
+                3,
+            );
+            // Press: NONE of them pulled into cover.
+            assert_eq!(
+                s.leader_cover_positive, 0,
+                "seed {seed}: a leading Priest pulled into cover {} time(s) while its team was \
+                 ahead by the press margin — press should have zeroed cover_pull",
+                s.leader_cover_positive,
+            );
+            // Conditional: the trailing Priest still denied LoS (cover in use).
+            assert_min_occurrences(
+                &format!("seed {seed} trailing-Priest cover denials while behind"),
+                s.trailer_denials,
+                3,
+            );
+        }
+    }
+
+    /// F4 endgame guard: the healer-heavy comp RESOLVES by elimination — never
+    /// the 300s cap draw — at the pinned seeds, and seed 13 does so at ~86s,
+    /// PAST the 75s dampening onset (a real attrition endgame that still
+    /// terminates because the leader presses instead of LoS-stalling). U12's
+    /// sweep owns the aggregate draw-rate; this pins the mechanism end-to-end.
+    #[test]
+    fn press_comp_resolves_before_cap() {
+        for seed in [2u64, 13u64] {
+            let s = measure(seed);
+            assert_eq!(
+                s.end_reason,
+                EndReason::Kill,
+                "seed {seed}: match ended by {} at {:.1}s — a clearly-ahead team should press to \
+                 a kill, not stall into the cap",
+                s.end_reason.as_str(),
+                s.match_time,
+            );
+            assert!(
+                s.match_time < 300.0,
+                "seed {seed}: match ran the full {:.1}s cap",
+                s.match_time,
+            );
+        }
+        // Seed 13 specifically resolves deep into dampening (past 75s).
+        assert!(
+            measure(13).match_time > 75.0,
+            "seed 13 should resolve past the 75s dampening onset (real attrition endgame)",
+        );
     }
 }

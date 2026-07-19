@@ -828,6 +828,7 @@ pub fn decide_abilities(
                             reset.map(bevy::prelude::Mut::into_inner),
                             directive,
                             &movement_config.melee,
+                            movement_config.shared.press_advantage_margin,
                             time.elapsed_secs(),
                             &mut decision_trace,
                         );

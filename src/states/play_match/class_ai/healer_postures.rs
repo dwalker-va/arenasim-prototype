@@ -59,25 +59,38 @@ pub(super) fn teammate_needs_saving(
     })
 }
 
-/// Zero `cover_pull` when a teammate needs saving (U8/R11); otherwise the
-/// weights pass through unchanged. Pure over the `needs_saving` decision so the
-/// seam is unit-testable without building a snapshot. When `cover_pull` is
-/// already 0 (the DPS blocks, or a class with denial disabled) this is a no-op
-/// copy, so nothing off the deny path is disturbed.
+/// Zero `cover_pull` when denial should be OFF this tick; otherwise the weights
+/// pass through unchanged. The `suppress` decision is either urgency (a teammate
+/// needs saving, U8/R11) OR press (own team is clearly ahead, U10) — both mean
+/// "stop hiding". Pure over the boolean so the seam is unit-testable without
+/// building a snapshot. When `cover_pull` is already 0 (the DPS blocks, or a
+/// class with denial disabled) this is a no-op copy, so nothing off the deny
+/// path is disturbed.
 pub(super) fn apply_cover_suppression(
     weights: &MovementWeights,
-    teammate_needs_saving: bool,
+    suppress: bool,
 ) -> MovementWeights {
-    if teammate_needs_saving && weights.cover_pull > 0.0 {
+    if suppress && weights.cover_pull > 0.0 {
         MovementWeights { cover_pull: 0.0, ..*weights }
     } else {
         *weights
     }
 }
 
+/// Press-when-ahead predicate (U10): own team leads by at least the margin, so
+/// denial turns OFF (press = "keep seeking the fight", not a new aggressive
+/// behavior). A plain `>=` threshold with no hysteresis band — team-HP sums
+/// change only on discrete damage/heal events, so the differential does not
+/// strobe frame-to-frame the way a positional signal would, and a stateful
+/// schmitt latch would be dead weight. Pure for unit testing.
+pub(super) fn pressing_when_ahead(advantage: f32, margin: f32) -> bool {
+    advantage >= margin
+}
+
 /// The scorer weights for one PRESSURED/ESCAPE decision: the class weights with
-/// `cover_pull` suppressed while a teammate needs saving. Short-circuits the
-/// snapshot scan when denial is disabled for the class (`cover_pull == 0`).
+/// `cover_pull` suppressed while a teammate needs saving (U8) OR the team is
+/// pressing its advantage (U10). Short-circuits the snapshot scan when denial
+/// is disabled for the class (`cover_pull == 0`).
 fn deny_weights(
     entity: Entity,
     my_pos: Vec3,
@@ -88,7 +101,9 @@ fn deny_weights(
     if weights.cover_pull <= 0.0 {
         return *weights;
     }
-    apply_cover_suppression(weights, teammate_needs_saving(entity, my_pos, ctx, shared))
+    let suppress = teammate_needs_saving(entity, my_pos, ctx, shared)
+        || pressing_when_ahead(ctx.team_hp_advantage(), shared.press_advantage_margin);
+    apply_cover_suppression(weights, suppress)
 }
 
 /// Cover-pull contribution of the winning direction — the *effective*
@@ -620,6 +635,37 @@ mod tests {
     fn suppression_noop_when_cover_disabled() {
         let w = MovementWeights { cover_pull: 0.0, ..MovementWeights::default() };
         assert_eq!(apply_cover_suppression(&w, true).cover_pull, 0.0);
+    }
+
+    /// U10 press gate: the margin is a `>=` threshold. Exactly-at-margin
+    /// presses (denial off); a hair below does not.
+    #[test]
+    fn pressing_when_ahead_is_inclusive_at_margin() {
+        let margin = 0.2;
+        assert!(pressing_when_ahead(margin, margin), ">= is inclusive at the margin");
+        assert!(pressing_when_ahead(0.5, margin), "clearly ahead presses");
+        assert!(!pressing_when_ahead(margin - 1e-4, margin), "just under the margin does not press");
+        assert!(!pressing_when_ahead(0.0, margin), "level does not press");
+        assert!(!pressing_when_ahead(-0.5, margin), "behind never presses");
+    }
+
+    /// U10 at the suppression seam: an ahead-by-margin team zeroes `cover_pull`
+    /// (press = denial off), exactly as the urgency path does; a level/behind
+    /// team leaves it on. Drives `apply_cover_suppression` through the same
+    /// boolean `deny_weights` computes from the press predicate.
+    #[test]
+    fn press_zeroes_cover_pull_only_when_ahead() {
+        let w = priest_like();
+        let margin = 0.2;
+        // Ahead by the margin → suppressed.
+        let ahead = apply_cover_suppression(&w, pressing_when_ahead(0.4, margin));
+        assert_eq!(ahead.cover_pull, 0.0, "pressing zeroes cover_pull");
+        // Level → denial stays on.
+        let level = apply_cover_suppression(&w, pressing_when_ahead(0.0, margin));
+        assert_eq!(level.cover_pull, w.cover_pull, "level team keeps denying");
+        // Behind → denial stays on.
+        let behind = apply_cover_suppression(&w, pressing_when_ahead(-0.5, margin));
+        assert_eq!(behind.cover_pull, w.cover_pull, "trailing team keeps denying");
     }
 
     /// The `cover_pull` trace term reports 0 on an obstacle-free map (no

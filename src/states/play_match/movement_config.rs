@@ -142,6 +142,15 @@ pub struct SharedMovementConfig {
     pub anchor_switch_margin: f32,
     /// Wand-range pull target distance (Priest wand range).
     pub wand_range: f32,
+    /// Press-when-ahead margin (U10), in summed team-HP-fraction units: a team
+    /// whose `team_hp_advantage` (own alive-member HP fraction sum minus the
+    /// enemy's) reaches this turns denial OFF — its healers stop pulling into
+    /// cover and its Warrior stops resetting tempo, so a clearly-winning team
+    /// seeks the fight instead of LoS-stalling into the dampening endgame. A
+    /// plain `>=` threshold (no hysteresis band): team-HP sums move only on
+    /// discrete damage/heal events, so the differential does not oscillate
+    /// frame-to-frame the way a positional signal would.
+    pub press_advantage_margin: f32,
 }
 
 impl Default for SharedMovementConfig {
@@ -159,6 +168,7 @@ impl Default for SharedMovementConfig {
             urgency_hp_threshold: 0.5,
             anchor_switch_margin: 0.1,
             wand_range: 30.0,
+            press_advantage_margin: 0.2,
         }
     }
 }
@@ -421,6 +431,7 @@ impl MovementConfig {
             ("shared.pressured_hold", s.pressured_hold),
             ("shared.directive_ttl", s.directive_ttl),
             ("shared.wand_range", s.wand_range),
+            ("shared.press_advantage_margin", s.press_advantage_margin),
             ("paladin.fallback_range", self.paladin.fallback_range),
             ("paladin.dip_budget", self.paladin.dip_budget),
             ("priest.dip_budget", self.priest.dip_budget),

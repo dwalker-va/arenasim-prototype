@@ -307,6 +307,31 @@ impl<'a> CombatContext<'a> {
         self.lowest_health_ally_below(threshold, f32::MAX, my_pos).is_none()
     }
 
+    /// Team-HP-fraction advantage of the deciding combatant's team — the U10
+    /// press-when-ahead signal. Own team's summed alive-member health fraction
+    /// minus the sum of every other team's: positive = ahead, negative = behind,
+    /// `0.0` = level (or self missing from the snapshot). Pets excluded and dead
+    /// members contribute 0, mirroring [`is_team_healthy`]'s conventions.
+    ///
+    /// Deterministic: the per-team sums accumulate in BTreeMap (entity) order
+    /// via [`team_hp_sums`], so seeded replays agree to the bit and the two
+    /// teams' advantages are exact negations of one another (same summands,
+    /// opposite sign). Cheap enough to call per decision — the snapshot holds a
+    /// handful of combatants — so it needs no cached field on the context.
+    pub fn team_hp_advantage(&self) -> f32 {
+        let Some(my_team) = self.self_info().map(|i| i.team) else {
+            return 0.0;
+        };
+        let sums = team_hp_sums(self.combatants);
+        let own = sums.get(&my_team).copied().unwrap_or(0.0);
+        let enemy: f32 = sums
+            .iter()
+            .filter(|(team, _)| **team != my_team)
+            .map(|(_, sum)| *sum)
+            .sum();
+        own - enemy
+    }
+
     /// Check if `entity` currently has a specific aura type.
     fn entity_has_aura(&self, entity: Entity, aura_type: AuraType) -> bool {
         self.active_auras
@@ -517,6 +542,26 @@ impl<'a> CombatContext<'a> {
             .map(|info| TargetView::from_info(info, my_pos));
         Some(decision_trace.start_ability_decision(actor_view, target_view))
     }
+}
+
+// ============================================================================
+// Shared Team-State Utilities
+// ============================================================================
+
+/// Summed health fraction of each team's alive, non-pet members, keyed by team
+/// id. The press-when-ahead advantage signal (U10) derives from these sums;
+/// [`CombatContext::team_hp_advantage`] is own-team minus the rest. Deterministic
+/// — accumulates in BTreeMap (entity) order. Mirrors
+/// [`CombatContext::is_team_healthy`]'s alive/`!is_pet` conventions; a dead
+/// member contributes 0 (excluded), so a wiped team sums to `0.0`.
+pub fn team_hp_sums(combatants: &BTreeMap<Entity, CombatantInfo>) -> BTreeMap<u8, f32> {
+    let mut sums: BTreeMap<u8, f32> = BTreeMap::new();
+    for info in combatants.values() {
+        if info.is_alive && !info.is_pet {
+            *sums.entry(info.team).or_insert(0.0) += info.health_pct();
+        }
+    }
+    sums
 }
 
 // ============================================================================
