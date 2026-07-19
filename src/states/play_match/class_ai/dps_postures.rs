@@ -30,6 +30,7 @@ use crate::states::play_match::components::{
     AuraType, DpsPosture, KitePosture, MovementDirective, MovementGoal,
 };
 use crate::states::play_match::constants::MELEE_RANGE;
+use crate::states::play_match::map_geometry::has_line_of_sight;
 use crate::states::play_match::match_config::CharacterClass;
 use crate::states::play_match::decision_trace::{
     ActorView, DecisionTrace, MovementGoalKind, MovementTrigger, Posture as TracePosture,
@@ -40,6 +41,11 @@ use super::CombatContext;
 
 /// One scorer-lookahead step distance (matches the healer scorer).
 const SCORER_LOOKAHEAD: f32 = 2.0;
+
+/// Local eye height for LoS probes — mirrors the scorer's `EYE_HEIGHT`
+/// (`combat_core::movement_scoring`) and the healer postures' copy, so
+/// occlusion tests here agree with the scorer's `los_seek` term.
+const EYE_HEIGHT: f32 = 1.0;
 
 /// Does any alive enemy carry an aura the Mage itself applied of a
 /// movement-impairing kind (Root / MovementSpeedSlow), optionally restricted to
@@ -174,6 +180,116 @@ pub fn nearest_melee_threat(
         .map(|i| (i.entity, i.position))
 }
 
+/// In ENGAGE, the kill-target position a kiter should seek line of sight
+/// toward: `Some(pos)` when it is within its preferred (idle/shot) range of a
+/// living kill target but OCCLUDED from it — the R10 stall case where normal
+/// pursuit stands still yet every cast is LoS-blocked. `None` when it has a
+/// clear line (fire away), is beyond preferred range (pursuit walks in and the
+/// collision resolver slides it around the pillar, self-healing occlusion), or
+/// has no kill target. Always `None` on obstacle-free maps: sight holds, so
+/// nothing is ever occluded — the seek path is a provable no-op there.
+fn engage_seek_target(
+    ctx: &CombatContext,
+    entity: Entity,
+    my_pos: Vec3,
+    kill_target: Option<Entity>,
+) -> Option<Vec3> {
+    let my_class = ctx.combatants.get(&entity)?.class;
+    let info = ctx.combatants.get(&kill_target?)?;
+    if !info.is_alive {
+        return None;
+    }
+    if my_pos.distance(info.position) > my_class.preferred_range() {
+        return None; // pursuit closes the gap and clears the pillar on its own
+    }
+    let my_eye = Vec3::new(my_pos.x, EYE_HEIGHT, my_pos.z);
+    let tgt_eye = Vec3::new(info.position.x, EYE_HEIGHT, info.position.z);
+    if has_line_of_sight(ctx.obstacles, my_eye, tgt_eye) {
+        return None; // clear line — no repositioning needed
+    }
+    Some(info.position)
+}
+
+/// `los_seek` contribution of the winning direction: the weight when the
+/// lookahead step can see the kill target, else `0.0`. Mirrors the `los_seek`
+/// block in `score_direction`; emitted as the `los_seek` scorer term so seek /
+/// kite decisions are trace-visible (`0.0` ⇒ no sighted step was chosen this
+/// tick, or an obstacle-free map).
+fn los_seek_term(chosen: Vec2, inputs: &ScorerInputs, weight: f32) -> f32 {
+    if weight <= 0.0 {
+        return 0.0;
+    }
+    let Some(target) = inputs.los_target else {
+        return 0.0;
+    };
+    let next = inputs.my_pos + Vec3::new(chosen.x, 0.0, chosen.y) * inputs.lookahead;
+    let cand_eye = Vec3::new(next.x, EYE_HEIGHT, next.z);
+    let target_eye = Vec3::new(target.x, EYE_HEIGHT, target.z);
+    if has_line_of_sight(&inputs.obstacles, cand_eye, target_eye) {
+        weight
+    } else {
+        0.0
+    }
+}
+
+/// Build the kiter's `ScorerInputs` for one scoring pass — shared by the KITE
+/// orbit and the ENGAGE seek-LoS repositioning so both see identical
+/// threat / range-band / `los_target` wiring. The caller supplies the committed
+/// direction (`None` outside the anti-zigzag window, which disables the term).
+fn build_kiter_inputs(
+    ctx: &CombatContext,
+    entity: Entity,
+    my_pos: Vec3,
+    kill_target: Option<Entity>,
+    config: &DpsMovementConfig,
+    committed_direction: Option<Vec2>,
+) -> ScorerInputs {
+    let self_team = self_team(ctx, entity);
+    // Stealthed enemies are excluded — the kiter can't see them, so it must not
+    // flee from a stealthed Rogue's position until stealth breaks.
+    let threats: Vec<Vec3> = ctx
+        .combatants
+        .values()
+        .filter(|i| !i.is_pet && i.team != self_team && i.is_alive && !i.stealthed)
+        .map(|i| i.position)
+        .collect();
+
+    // Nearest threat for the distance-max `flee` term (Hunter). Deterministic:
+    // threats are collected from a BTreeMap, so equal distances tie-break by
+    // entity order.
+    let nearest_threat = threats.iter().copied().min_by(|a, b| {
+        a.distance(my_pos)
+            .partial_cmp(&b.distance(my_pos))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let kill_target_info = kill_target
+        .and_then(|t| ctx.combatants.get(&t))
+        .filter(|i| i.is_alive);
+    let range_band = kill_target_info.map(|i| RangeBand {
+        target: i.position,
+        min: config.range_band_min,
+        max: config.range_band_max,
+    });
+    // LoS-seek target: the kill target the kiter shoots.
+    let los_target = kill_target_info.map(|i| i.position);
+
+    ScorerInputs {
+        my_pos,
+        lookahead: SCORER_LOOKAHEAD,
+        threats,
+        anchor: None,
+        formation_point: None,
+        wand_target: None,
+        wand_range: 0.0,
+        range_band,
+        nearest_threat,
+        committed_direction,
+        obstacles: ctx.obstacles.to_vec(),
+        los_target,
+    }
+}
+
 /// Evaluate a DPS kiter's ENGAGE/KITE posture and (in KITE) issue a movement
 /// directive. Shared by the Mage (aura-gated) and Hunter (proximity-gated) —
 /// the caller computes `entry_trigger`/`sustain` with the class-specific
@@ -225,13 +341,9 @@ pub fn evaluate_dps_posture(
     }
 
     if next == DpsPosture::Engage {
-        // ENGAGE: no directive — clear any stale kite vector so the Mage closes
-        // to preferred range via normal pursuit instead of coasting.
-        if directive.is_some() {
-            commands.entity(entity).remove::<MovementDirective>();
-        }
+        // Trace the KITE → ENGAGE exit (unchanged: fires on any KITE→ENGAGE
+        // transition, independent of the seek repositioning below).
         if transitioned {
-            // Trace the KITE → ENGAGE exit.
             if let Some(info) = ctx.combatants.get(&entity) {
                 let actor = ActorView::from_info(info);
                 let mut builder = decision_trace.start_movement_decision(actor, None);
@@ -242,6 +354,74 @@ pub fn evaluate_dps_posture(
                     MovementGoalKind::Direction,
                 );
                 builder.finish();
+            }
+        }
+
+        // Seek-LoS (U9): a kiter idle in shot range but OCCLUDED from the kill
+        // target can't fire — without this it stalls behind a pillar forever
+        // (R10). Run the scorer (los_seek steers toward a sighted angle while
+        // range_band holds distance) to reposition. Otherwise — a clear line,
+        // or out of range where normal pursuit closes the gap and slides around
+        // the pillar — clear any stale kite vector and fall through to pursuit.
+        // That "else" is the exact pre-U9 ENGAGE behavior, and a provable no-op
+        // on obstacle-free maps (never occluded).
+        let Some(_seek_pos) = engage_seek_target(ctx, entity, my_pos, kill_target) else {
+            if directive.is_some() {
+                commands.entity(entity).remove::<MovementDirective>();
+            }
+            if needs_insert {
+                commands.entity(entity).try_insert(*state);
+            }
+            return;
+        };
+
+        // Hold the committed direction for the anti-zigzag window; re-score on
+        // transition or when the window/directive expired.
+        let recommit = transitioned
+            || directive.map_or(true, |d| now >= d.committed_until || now >= d.expires);
+        if !recommit {
+            if needs_insert {
+                commands.entity(entity).try_insert(*state);
+            }
+            return;
+        }
+
+        let committed_direction = directive
+            .filter(|d| now < d.committed_until)
+            .and(state.last_direction);
+        let inputs =
+            build_kiter_inputs(ctx, entity, my_pos, kill_target, config, committed_direction);
+        let chosen = score_directions(&compass_directions_16(), &inputs, &config.weights);
+        if chosen != Vec2::ZERO {
+            commands.entity(entity).try_insert(MovementDirective {
+                goal: MovementGoal::Direction(chosen),
+                expires: now + config.directive_ttl,
+                committed_until: now + config.commit_window,
+            });
+            let direction_changed =
+                state.last_direction.map_or(true, |d| d.distance(chosen) > 1e-3);
+            state.last_direction = Some(chosen);
+            if transitioned || direction_changed {
+                if let Some(info) = ctx.combatants.get(&entity) {
+                    let actor = ActorView::from_info(info);
+                    let mut builder = decision_trace.start_movement_decision(actor, None);
+                    builder.direction_change(
+                        TracePosture::Engage,
+                        MovementTrigger::SeekLos,
+                        MovementGoalKind::Direction,
+                    );
+                    builder.chosen_direction([chosen.x, chosen.y]);
+                    builder.masked(mask_bitmask(&compass_directions_16(), &inputs));
+                    let los = los_mask_bitmask(&compass_directions_16(), &inputs);
+                    if los != 0 {
+                        builder.los_masked(los);
+                    }
+                    builder.scorer_term(
+                        "los_seek",
+                        los_seek_term(chosen, &inputs, config.weights.los_seek),
+                    );
+                    builder.finish();
+                }
             }
         }
         if needs_insert {
@@ -261,58 +441,11 @@ pub fn evaluate_dps_posture(
         return;
     }
 
-    let self_team = self_team(ctx, entity);
-    // Stealthed enemies are excluded — the kiter can't see them, so it must not
-    // flee from a stealthed Rogue's position until stealth breaks.
-    let threats: Vec<Vec3> = ctx
-        .combatants
-        .values()
-        .filter(|i| !i.is_pet && i.team != self_team && i.is_alive && !i.stealthed)
-        .map(|i| i.position)
-        .collect();
-
-    // Nearest threat for the distance-max `flee` term (Hunter). Deterministic:
-    // threats are collected from a BTreeMap, so equal distances tie-break by
-    // entity order.
-    let nearest_threat = threats
-        .iter()
-        .copied()
-        .min_by(|a, b| {
-            a.distance(my_pos)
-                .partial_cmp(&b.distance(my_pos))
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-
-    let kill_target_info = kill_target
-        .and_then(|t| ctx.combatants.get(&t))
-        .filter(|i| i.is_alive);
-    let range_band = kill_target_info.map(|i| RangeBand {
-        target: i.position,
-        min: config.range_band_min,
-        max: config.range_band_max,
-    });
-    // LoS-seek target: the kill target the kiter shoots. los_seek is 0.0 today
-    // (U8/U9 tune it), so this is faithful wiring, not yet a behavior change.
-    let los_target = kill_target_info.map(|i| i.position);
-
     let committed_direction = directive
         .filter(|d| now < d.committed_until)
         .and(state.last_direction);
 
-    let inputs = ScorerInputs {
-        my_pos,
-        lookahead: SCORER_LOOKAHEAD,
-        threats,
-        anchor: None,
-        formation_point: None,
-        wand_target: None,
-        wand_range: 0.0,
-        range_band,
-        nearest_threat,
-        committed_direction,
-        obstacles: ctx.obstacles.to_vec(),
-        los_target,
-    };
+    let inputs = build_kiter_inputs(ctx, entity, my_pos, kill_target, config, committed_direction);
     let chosen = score_directions(&compass_directions_16(), &inputs, &config.weights);
     if chosen == Vec2::ZERO {
         if needs_insert {
@@ -354,6 +487,10 @@ pub fn evaluate_dps_posture(
             if los != 0 {
                 builder.los_masked(los);
             }
+            builder.scorer_term(
+                "los_seek",
+                los_seek_term(chosen, &inputs, config.weights.los_seek),
+            );
             builder.finish();
         }
     }

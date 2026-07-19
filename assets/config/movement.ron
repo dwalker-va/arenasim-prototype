@@ -113,6 +113,7 @@
         swap_range: 4.0,       // softer target must be this close (yards) to swap to
         swap_hysteresis: 2.0,  // min seconds between swaps (anti-ping-pong)
         swap_hp_margin: 0.15,  // softer target must be this HP fraction below the kill target
+        reset_window: 3.0,     // U9: seconds a CC'd melee falls back to its healer (gap closer down) before resuming pursuit
     ),
     // Mage ENGAGE/KITE pilot (Part B). Kiting orbits the kill target between
     // range_band_min and range_band_max while repelling melee threats.
@@ -124,8 +125,8 @@
             wand_pull: 0.0,        // Mage has no wand
             range_band: 2.0,       // ring attraction toward the kill target
             commitment_bonus: 1.5,
-            los_seek: 0.0,         // bonus for a step with sight to the kill target (U8/U9 tune; obstacle maps only)
-            cover_pull: 0.0,       // bonus per threat a step is occluded from (U8/U9 tune; obstacle maps only)
+            los_seek: 2.0,         // U9: orbit to a sighted angle when occluded in cast range (matches range_band so LoS and distance trade evenly); obstacle maps only
+            cover_pull: 0.0,       // bonus per threat a step is occluded from (kiters flee, they don't hide; obstacle maps only)
         ),
         range_band_min: 8.0,       // SAFE_KITING_DISTANCE — stay out of melee of the kill target
         range_band_max: 30.0,      // within AUTO_SHOT_RANGE — keep the kill target in cast range
@@ -149,8 +150,8 @@
             range_band: 0.5,        // gentle keep-in-range, not an orbit
             flee: 6.0,              // distance-max flee from the nearest chaser (the kiter's core)
             commitment_bonus: 1.5,
-            los_seek: 0.0,          // bonus for a step with sight to the kill target (U8/U9 tune; obstacle maps only)
-            cover_pull: 0.0,        // bonus per threat a step is occluded from (U8/U9 tune; obstacle maps only)
+            los_seek: 1.0,          // U9: nudge toward a sighted angle when occluded in shot range — kept below flee (6.0) so escape still dominates; obstacle maps only
+            cover_pull: 0.0,        // bonus per threat a step is occluded from (kiters flee, they don't hide; obstacle maps only)
         ),
         range_band_min: 8.0,       // HUNTER_DEAD_ZONE — can't shoot inside this
         range_band_max: 34.0,      // ~AUTO_SHOT_RANGE — only pull in near the shot-range edge

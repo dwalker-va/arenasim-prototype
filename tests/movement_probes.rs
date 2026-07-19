@@ -3960,3 +3960,440 @@ mod u8_healer_cover {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// U9 — attacker seek-LoS (Mage/Hunter) + melee tempo reset (Warrior)
+// ---------------------------------------------------------------------------
+//
+// Two behaviors:
+//  - Ranged seek: a kiter idle in shot range but OCCLUDED from its kill target
+//    repositions (los_seek scorer term) instead of stalling behind a pillar
+//    (R10). Evidenced from the trace: every Frostbolt LosBlocked is followed by
+//    a successful Frostbolt cast within a bounded window.
+//  - Melee reset: a CC'd Warrior with its gap closer down falls back toward its
+//    healer (R12). The decision seam is pure (`melee_reset_active`) and the
+//    integration is driven directly through `evaluate_warrior_reset` (World +
+//    CommandQueue), asserting the emitted `MovementGoal::Point(healer)`
+//    directive — the least-fragile form of the plan's acceptance bar.
+mod u9_seek_reset {
+    use super::*;
+
+    use std::collections::BTreeMap;
+
+    use bevy::ecs::world::CommandQueue;
+    use bevy::prelude::*;
+
+    use arenasim::headless::runner::TraceConfig;
+    use arenasim::states::play_match::class_ai::warrior::{
+        evaluate_warrior_reset, melee_reset_active, under_movement_cc,
+    };
+    use arenasim::states::play_match::class_ai::{CombatContext, CombatantInfo};
+    use arenasim::states::play_match::components::{
+        ActiveAuras, Aura, AuraType, Combatant, MeleeResetState, MovementDirective, MovementGoal,
+    };
+    use arenasim::states::play_match::decision_trace::{DecisionTrace, EventPayload, MovementTrigger};
+    use arenasim::states::play_match::movement_config::MeleeMovementConfig;
+    use arenasim::states::play_match::{AbilityType, DispelType};
+
+    // ----- ranged seek (Mage) anti-stall, trace-derived -----
+
+    fn run_traced_lines(
+        team1: Vec<&str>,
+        team2: Vec<&str>,
+        seed: u64,
+        map: &str,
+    ) -> Vec<serde_json::Value> {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+        let config = HeadlessMatchConfig {
+            team1: team1.into_iter().map(String::from).collect(),
+            team2: team2.into_iter().map(String::from).collect(),
+            max_duration_secs: 120.0,
+            random_seed: Some(seed),
+            map: map.to_string(),
+            ..Default::default()
+        };
+        run_headless_match_with(config, true, Some(TraceConfig { output_path: path.clone() }))
+            .expect("traced headless match failed");
+        std::fs::read_to_string(&path)
+            .expect("read trace file")
+            .lines()
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            .collect()
+    }
+
+    /// sim_times of Mage ability decisions where a Frostbolt candidate had the
+    /// given `status` (e.g. "chosen") or, when `reason` is set, that rejection
+    /// reason (e.g. "LosBlocked").
+    fn mage_frostbolt_times(
+        lines: &[serde_json::Value],
+        status: &str,
+        reason: Option<&str>,
+    ) -> Vec<f32> {
+        lines
+            .iter()
+            .filter(|v| {
+                v.get("kind").and_then(|k| k.as_str()) == Some("ability_decision")
+                    && v.get("actor").and_then(|a| a.get("class")).and_then(|c| c.as_str())
+                        == Some("Mage")
+            })
+            .filter_map(|v| {
+                let cands = v.get("candidates")?.as_array()?;
+                let hit = cands.iter().any(|c| {
+                    if c.get("ability").and_then(|a| a.as_str()) != Some("Frostbolt") {
+                        return false;
+                    }
+                    match reason {
+                        Some(r) => c.get("reason").and_then(|x| x.as_str()) == Some(r),
+                        None => c.get("status").and_then(|s| s.as_str()) == Some(status),
+                    }
+                });
+                if hit {
+                    v.get("sim_time").and_then(|t| t.as_f64()).map(|t| t as f32)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// Count of Mage `SeekLos` movement decisions — the ENGAGE repositioning U9
+    /// adds, fired when the Mage is occluded from its kill target in shot range.
+    fn mage_seek_count(lines: &[serde_json::Value]) -> usize {
+        lines
+            .iter()
+            .filter(|v| {
+                v.get("kind").and_then(|k| k.as_str()) == Some("movement_decision")
+                    && v.get("actor").and_then(|a| a.get("class")).and_then(|c| c.as_str())
+                        == Some("Mage")
+                    && v.get("trigger").and_then(|t| t.as_str()) == Some("SeekLos")
+            })
+            .count()
+    }
+
+    /// Longest CONTIGUOUS run of Frostbolt `LosBlocked` decisions (span in
+    /// sim-seconds), where the run is broken by a successful cast or any other
+    /// outcome. A perpetual LoS stall shows as one very long run; an enemy
+    /// healer juking behind a pillar (its U8 job) can legitimately extend a run
+    /// but is NOT a Mage-side stall — so this metric is used only on the
+    /// canonical no-juke seed 7.
+    fn max_contiguous_block_span(lines: &[serde_json::Value]) -> f32 {
+        let mut run_start: Option<f32> = None;
+        let mut max_span = 0.0f32;
+        for v in lines {
+            if v.get("kind").and_then(|k| k.as_str()) != Some("ability_decision")
+                || v.get("actor").and_then(|a| a.get("class")).and_then(|c| c.as_str())
+                    != Some("Mage")
+            {
+                continue;
+            }
+            let Some(cands) = v.get("candidates").and_then(|c| c.as_array()) else {
+                continue;
+            };
+            let Some(fb) = cands
+                .iter()
+                .find(|c| c.get("ability").and_then(|a| a.as_str()) == Some("Frostbolt"))
+            else {
+                continue;
+            };
+            let t = v.get("sim_time").and_then(|x| x.as_f64()).unwrap_or(0.0) as f32;
+            let blocked = fb.get("reason").and_then(|x| x.as_str()) == Some("LosBlocked");
+            if blocked {
+                let start = *run_start.get_or_insert(t);
+                max_span = max_span.max(t - start);
+            } else {
+                run_start = None; // cast or any other outcome breaks the run
+            }
+        }
+        max_span
+    }
+
+    /// R10 anti-stall, robust form: whenever the Mage is occluded it REPOSITIONS
+    /// (emits SeekLos) and keeps landing Frostbolts — it never stands behind a
+    /// pillar refusing to move. Holds regardless of how long the enemy healer
+    /// jukes, so it is the property pinned at both seeds.
+    fn assert_mage_repositions_and_casts(seed: u64) {
+        let lines = run_traced_lines(
+            vec!["Mage", "Priest"],
+            vec!["Warrior", "Priest"],
+            seed,
+            "PillaredArena",
+        );
+        let blocked = mage_frostbolt_times(&lines, "", Some("LosBlocked"));
+        let casts = mage_frostbolt_times(&lines, "chosen", None);
+        let seeks = mage_seek_count(&lines);
+
+        // Vacuity guard: the scenario must actually exercise LoS denial.
+        assert!(
+            blocked.len() >= 3,
+            "seed {seed}: expected >= 3 Frostbolt LosBlocked events, got {} — not exercising \
+             occlusion",
+            blocked.len()
+        );
+        assert!(
+            seeks >= 1,
+            "seed {seed}: Mage was occluded ({} blocks) but never emitted SeekLos — it stood \
+             still instead of repositioning",
+            blocked.len()
+        );
+        // Recovery: despite heavy occlusion the Mage still lands casts, and at
+        // least one lands after occlusion began (never permanently locked out).
+        let first_block = blocked.iter().cloned().fold(f32::INFINITY, f32::min);
+        let casts_after = casts.iter().filter(|c| **c >= first_block).count();
+        assert!(
+            casts_after >= 1,
+            "seed {seed}: no Frostbolt cast landed after occlusion began ({} blocks) — perpetual \
+             stall",
+            blocked.len()
+        );
+    }
+
+    #[test]
+    fn mage_repositions_and_casts_despite_occlusion_seed_7() {
+        assert_mage_repositions_and_casts(7);
+    }
+
+    #[test]
+    fn mage_repositions_and_casts_despite_occlusion_seed_3() {
+        assert_mage_repositions_and_casts(3);
+    }
+
+    /// Tight anti-stall bound at the canonical occlusion seed (seed 7, the same
+    /// LoS-coverage seed the decision-trace audit pins). Absent a persistent
+    /// enemy-healer juke, an occluded Mage recovers to a cast quickly: the
+    /// longest contiguous LosBlocked run is well under 10 sim-seconds.
+    #[test]
+    fn mage_recovers_to_cast_within_bound_seed_7() {
+        let lines = run_traced_lines(
+            vec!["Mage", "Priest"],
+            vec!["Warrior", "Priest"],
+            7,
+            "PillaredArena",
+        );
+        let blocked = mage_frostbolt_times(&lines, "", Some("LosBlocked"));
+        assert!(blocked.len() >= 3, "seed 7 must exercise occlusion, got {}", blocked.len());
+        let span = max_contiguous_block_span(&lines);
+        assert!(
+            span <= 10.0,
+            "seed 7: longest contiguous LosBlocked run was {:.2}s (> 10s) — Mage stalled",
+            span
+        );
+    }
+
+    /// Scenario 2: the `los_seek` term is trace-visible in the Mage's
+    /// ENGAGE seek decisions during occluded windows.
+    #[test]
+    fn mage_seek_emits_los_seek_scorer_term() {
+        let lines = run_traced_lines(
+            vec!["Mage", "Priest"],
+            vec!["Warrior", "Priest"],
+            7,
+            "PillaredArena",
+        );
+        let seek_with_term = lines
+            .iter()
+            .filter(|v| {
+                v.get("kind").and_then(|k| k.as_str()) == Some("movement_decision")
+                    && v.get("trigger").and_then(|t| t.as_str()) == Some("SeekLos")
+            })
+            .filter(|v| {
+                v.get("scorer_terms")
+                    .and_then(|s| s.get("los_seek"))
+                    .is_some()
+            })
+            .count();
+        assert!(
+            seek_with_term >= 1,
+            "expected >= 1 Mage SeekLos movement decision carrying a los_seek scorer term, got {}",
+            seek_with_term
+        );
+    }
+
+    // ----- melee reset (Warrior) decision seam -----
+
+    #[test]
+    fn melee_reset_active_truth_table() {
+        // All conditions met → reset runs.
+        assert!(melee_reset_active(1.0, 5.0, true, true, true));
+        // Window lapsed (now >= armed_until) → no reset (bounded, not permanent).
+        assert!(!melee_reset_active(5.0, 5.0, true, true, true));
+        // Gap closer ready → re-engage, not reset.
+        assert!(!melee_reset_active(1.0, 5.0, false, true, true));
+        // Already in melee → keep swinging.
+        assert!(!melee_reset_active(1.0, 5.0, true, false, true));
+        // No healer to fall back toward → no reset.
+        assert!(!melee_reset_active(1.0, 5.0, true, true, false));
+    }
+
+    fn cc_aura(effect: AuraType) -> Aura {
+        Aura {
+            effect_type: effect,
+            duration: 3.0,
+            magnitude: 1.0,
+            break_on_damage_threshold: -1.0,
+            accumulated_damage: 0.0,
+            tick_interval: 0.0,
+            time_until_next_tick: 0.0,
+            caster: None,
+            ability_name: "test".to_string(),
+            fear_direction: (0.0, 0.0),
+            fear_direction_timer: 0.0,
+            spell_school: None,
+            applied_this_frame: false,
+            backlash_damage: None,
+            dr_category_override: None,
+            dispel_type: DispelType::Auto,
+        }
+    }
+
+    #[test]
+    fn under_movement_cc_detects_root_and_stun_not_fear() {
+        let root = ActiveAuras { auras: vec![cc_aura(AuraType::Root)] };
+        let stun = ActiveAuras { auras: vec![cc_aura(AuraType::Stun)] };
+        let fear = ActiveAuras { auras: vec![cc_aura(AuraType::Fear)] };
+        assert!(under_movement_cc(Some(&root)), "Root is a movement CC");
+        assert!(under_movement_cc(Some(&stun)), "Stun is a movement CC");
+        assert!(!under_movement_cc(Some(&fear)), "Fear is not (feared warriors run)");
+        assert!(!under_movement_cc(None), "no auras → not CC'd");
+    }
+
+    fn info(
+        entity: Entity,
+        team: u8,
+        class: CharacterClass,
+        position: Vec3,
+        target: Option<Entity>,
+    ) -> CombatantInfo {
+        CombatantInfo {
+            entity,
+            team,
+            slot: 0,
+            class,
+            current_health: 100.0,
+            max_health: 100.0,
+            current_mana: 100.0,
+            max_mana: 100.0,
+            position,
+            velocity: Vec3::ZERO,
+            is_alive: true,
+            stealthed: false,
+            target,
+            is_pet: false,
+            casting_ability: None,
+            pet_type: None,
+            pet: None,
+        }
+    }
+
+    const HEALER_POS: Vec3 = Vec3::new(5.0, 1.0, -5.0);
+
+    /// Drive `evaluate_warrior_reset` once in a constructed scenario. Returns the
+    /// movement directive goal it emitted (if any) and whether it traced a
+    /// `MeleeReset` event.
+    fn run_reset(
+        armed_until: f32,
+        now: f32,
+        charge_on_cd: bool,
+        target_distance: f32,
+        with_healer: bool,
+    ) -> (Option<MovementGoal>, bool) {
+        let mut world = World::new();
+        let warrior = world.spawn_empty().id();
+        let target = Entity::from_raw(90_001);
+        let healer = Entity::from_raw(90_002);
+
+        let my_pos = Vec3::new(0.0, 1.0, 0.0);
+        let target_pos = Vec3::new(0.0, 1.0, target_distance);
+
+        let mut combatant = Combatant::new(1, 0, CharacterClass::Warrior);
+        combatant.target = Some(target);
+        if charge_on_cd {
+            combatant.ability_cooldowns.insert(AbilityType::Charge, 8.0);
+        }
+
+        let mut combatants: BTreeMap<Entity, CombatantInfo> = BTreeMap::new();
+        combatants.insert(warrior, info(warrior, 1, CharacterClass::Warrior, my_pos, Some(target)));
+        combatants.insert(target, info(target, 2, CharacterClass::Mage, target_pos, None));
+        if with_healer {
+            combatants.insert(healer, info(healer, 1, CharacterClass::Priest, HEALER_POS, None));
+        }
+
+        let active_auras: BTreeMap<Entity, Vec<Aura>> = BTreeMap::new();
+        let dr_trackers = BTreeMap::new();
+        let ability_cooldowns = BTreeMap::new();
+        let obstacles = Vec::new();
+
+        let ctx = CombatContext {
+            combatants: &combatants,
+            active_auras: &active_auras,
+            dr_trackers: &dr_trackers,
+            ability_cooldowns: &ability_cooldowns,
+            obstacles: &obstacles,
+            self_entity: warrior,
+        };
+
+        let mut reset_state = MeleeResetState { armed_until, active: false };
+        let mut trace = DecisionTrace::default();
+
+        let mut queue = CommandQueue::default();
+        {
+            let mut commands = Commands::new(&mut queue, &world);
+            evaluate_warrior_reset(
+                &mut commands,
+                warrior,
+                &combatant,
+                my_pos,
+                None, // CC has ended — the armed window is what keeps the reset live
+                &ctx,
+                Some(&mut reset_state),
+                None,
+                &MeleeMovementConfig::default(),
+                now,
+                &mut trace,
+            );
+        }
+        queue.apply(&mut world);
+
+        let goal = world.get::<MovementDirective>(warrior).map(|d| d.goal);
+        let traced = trace.pending_events.iter().any(|e| {
+            matches!(
+                &e.payload,
+                EventPayload::Movement { trigger, .. } if *trigger == MovementTrigger::MeleeReset
+            )
+        });
+        (goal, traced)
+    }
+
+    #[test]
+    fn warrior_reset_emits_healer_directive_when_armed_and_charge_down() {
+        // Armed window open, Charge on cooldown, out of melee, healer present.
+        let (goal, traced) = run_reset(100.0, 1.0, true, 20.0, true);
+        assert!(
+            matches!(goal, Some(MovementGoal::Point(p)) if p == HEALER_POS),
+            "expected a Point directive toward the healer, got {:?}",
+            goal
+        );
+        assert!(traced, "activation should emit a MeleeReset trace event");
+    }
+
+    #[test]
+    fn warrior_reset_silent_when_gap_closer_ready() {
+        // Charge off cooldown → re-engage, no fallback directive.
+        let (goal, traced) = run_reset(100.0, 1.0, false, 20.0, true);
+        assert!(goal.is_none(), "gap closer ready must not issue a reset directive");
+        assert!(!traced);
+    }
+
+    #[test]
+    fn warrior_reset_silent_without_healer() {
+        let (goal, _) = run_reset(100.0, 1.0, true, 20.0, false);
+        assert!(goal.is_none(), "no healer ally → nothing to fall back toward");
+    }
+
+    #[test]
+    fn warrior_reset_silent_in_melee() {
+        // In melee range of the target → keep swinging, no reset.
+        let (goal, _) = run_reset(100.0, 1.0, true, 1.0, true);
+        assert!(goal.is_none(), "in melee must not reset");
+    }
+}

@@ -18,11 +18,13 @@ use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
 use crate::states::play_match::combat_core::{roll_crit, get_attack_power_bonus_from_slice, get_crit_chance_bonus_from_slice};
-use crate::states::play_match::constants::{CHARGE_MIN_RANGE, CRIT_DAMAGE_MULTIPLIER, GCD};
+use crate::states::play_match::constants::{CHARGE_MIN_RANGE, CRIT_DAMAGE_MULTIPLIER, GCD, MELEE_RANGE};
 use crate::states::play_match::decision_trace::{
-    DecisionEventBuilder, DecisionTrace, NoActionReason, RejectionReason, ResourceKind,
+    ActorView, DecisionEventBuilder, DecisionTrace, MovementGoalKind, MovementTrigger,
+    NoActionReason, Posture as TracePosture, RejectionReason, ResourceKind,
 };
 use crate::states::play_match::map_geometry::has_line_of_sight;
+use crate::states::play_match::movement_config::MeleeMovementConfig;
 
 use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
@@ -874,5 +876,145 @@ pub fn try_berserker_rage_while_cc(
     log_ability_use(combat_log, combatant.team, combatant.class, "Berserker Rage", None, "uses");
 
     true
+}
+
+/// True while a movement-impairing CC (Root / Stun / Incapacitate — the same
+/// set `move_to_target` treats as movement-preventing) sits on the warrior.
+/// Fear is excluded: a feared warrior already runs, so there is no stalled "go"
+/// to reset. Pure over the aura list for unit testing.
+pub fn under_movement_cc(auras: Option<&ActiveAuras>) -> bool {
+    auras.map_or(false, |a| {
+        a.auras.iter().any(|aura| {
+            matches!(
+                aura.effect_type,
+                AuraType::Root | AuraType::Stun | AuraType::Incapacitate
+            )
+        })
+    })
+}
+
+/// The melee tempo-reset decision seam (Warrior, U9), pure for unit testing.
+/// The reset runs — falling back toward the healer instead of face-chasing —
+/// only while ALL of: the CC-armed window is still open (`now < armed_until`),
+/// the gap closer (Charge) is on cooldown, the warrior is out of melee range of
+/// its target, and a living healer ally exists to fall back toward. Any one
+/// failing resumes normal pursuit; the gap closer coming up is the intended
+/// exit (re-engage with a fresh Charge).
+pub fn melee_reset_active(
+    now: f32,
+    armed_until: f32,
+    charge_on_cooldown: bool,
+    out_of_melee: bool,
+    has_healer: bool,
+) -> bool {
+    now < armed_until && charge_on_cooldown && out_of_melee && has_healer
+}
+
+/// Nearest living, non-pet healer ally position to `my_pos` — the fallback
+/// anchor for the tempo reset. Deterministic: iterates the BTree-ordered
+/// snapshot, tie-breaking equal distances by entity order.
+fn nearest_healer_ally(ctx: &CombatContext, team: u8, my_pos: Vec3) -> Option<Vec3> {
+    ctx.combatants
+        .values()
+        .filter(|i| i.team == team && i.is_alive && !i.is_pet && i.class.is_healer())
+        .min_by(|a, b| {
+            a.position
+                .distance(my_pos)
+                .partial_cmp(&b.position.distance(my_pos))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|i| i.position)
+}
+
+/// Warrior tempo-reset movement pre-pass (U9). Runs before the ability pass and
+/// outside the GCD short-circuit (legs aren't on the GCD), mirroring the Mage /
+/// healer posture pre-passes. Arms the reset while under movement CC, then —
+/// once the CC drops and while Charge is still down — issues a
+/// `MovementGoal::Point` directive toward the nearest healer for the armed
+/// window, so the warrior regroups instead of walking straight back into the
+/// kiter's CC. The directive is re-issued each frame while active and cleared
+/// on deactivation; `move_to_target` executes it in the same slot as the kite /
+/// healer directives. A no-op when the warrior has no healer ally (nothing to
+/// fall back toward) and, being CC-gated, dormant until its go is actually
+/// stopped.
+#[allow(clippy::too_many_arguments)]
+pub fn evaluate_warrior_reset(
+    commands: &mut Commands,
+    entity: Entity,
+    combatant: &Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
+    reset_state: Option<&mut MeleeResetState>,
+    directive: Option<&MovementDirective>,
+    cfg: &MeleeMovementConfig,
+    now: f32,
+    decision_trace: &mut DecisionTrace,
+) {
+    let mut local = MeleeResetState::default();
+    let needs_insert = reset_state.is_none();
+    let state: &mut MeleeResetState = reset_state.unwrap_or(&mut local);
+
+    // Arm while under movement CC — the window stays open `reset_window` after
+    // the CC ends so the reset actually runs (a rooted warrior can't move, so
+    // the useful moment is right after the root drops).
+    if under_movement_cc(auras) {
+        state.armed_until = now + cfg.reset_window;
+    }
+
+    let charge_on_cd = combatant
+        .ability_cooldowns
+        .get(&AbilityType::Charge)
+        .copied()
+        .unwrap_or(0.0)
+        > 0.0;
+    let out_of_melee = combatant
+        .target
+        .and_then(|t| ctx.combatants.get(&t))
+        .map_or(false, |i| my_pos.distance(i.position) > MELEE_RANGE);
+    let healer_pos = nearest_healer_ally(ctx, combatant.team, my_pos);
+
+    let active = melee_reset_active(
+        now,
+        state.armed_until,
+        charge_on_cd,
+        out_of_melee,
+        healer_pos.is_some(),
+    );
+
+    if active {
+        let healer_pos = healer_pos.expect("active implies a healer ally");
+        commands.entity(entity).try_insert(MovementDirective {
+            goal: MovementGoal::Point(healer_pos),
+            // Bounded by the armed window — the directive can never outlive it.
+            expires: state.armed_until,
+            committed_until: now, // no commit window; re-issued each frame
+        });
+        if !state.active {
+            // Activation edge — trace once, not every frame.
+            if let Some(info) = ctx.combatants.get(&entity) {
+                let actor = ActorView::from_info(info);
+                let mut builder = decision_trace.start_movement_decision(actor, None);
+                builder.direction_change(
+                    TracePosture::Free,
+                    MovementTrigger::MeleeReset,
+                    MovementGoalKind::Point,
+                );
+                builder.finish();
+            }
+        }
+        state.active = true;
+    } else {
+        if state.active && directive.is_some() {
+            // We issued the fallback directive; clear it so normal pursuit
+            // (face-chase / charge) resumes.
+            commands.entity(entity).remove::<MovementDirective>();
+        }
+        state.active = false;
+    }
+
+    if needs_insert {
+        commands.entity(entity).try_insert(*state);
+    }
 }
 

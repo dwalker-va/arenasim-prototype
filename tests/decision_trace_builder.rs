@@ -505,6 +505,7 @@ fn movement_payload_roundtrips_to_movement_variant_via_untagged_deserialize() {
             position,
             scorer_terms,
             masked,
+            los_masked,
         } => {
             assert_eq!(posture, Posture::Escape);
             assert_eq!(previous_posture, Some(Posture::Pressured));
@@ -514,6 +515,7 @@ fn movement_payload_roundtrips_to_movement_variant_via_untagged_deserialize() {
             assert_eq!(position, [3.0, 0.5, -7.0]);
             assert!(scorer_terms.is_none());
             assert!(masked.is_none());
+            assert!(los_masked.is_none());
         }
         other => panic!("expected EventPayload::Movement, got {:?}", other),
     }

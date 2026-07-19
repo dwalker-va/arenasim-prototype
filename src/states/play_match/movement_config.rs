@@ -300,6 +300,12 @@ pub struct MeleeMovementConfig {
     /// target to justify abandoning the original focus (prevents swapping over
     /// trivial HP differences).
     pub swap_hp_margin: f32,
+    /// Tempo-reset window (Warrior, U9): after a movement-impairing CC ends,
+    /// how many seconds the melee falls back toward its healer instead of
+    /// face-chasing (while its gap closer is on cooldown and it is out of
+    /// melee). Bounded — never a permanent retreat; normal pursuit resumes when
+    /// the window lapses or the gap closer comes up.
+    pub reset_window: f32,
 }
 
 impl Default for MeleeMovementConfig {
@@ -308,6 +314,7 @@ impl Default for MeleeMovementConfig {
             swap_range: 4.0,
             swap_hysteresis: 2.0,
             swap_hp_margin: 0.15,
+            reset_window: 3.0,
         }
     }
 }
@@ -513,6 +520,12 @@ impl MovementConfig {
             issues.push(format!(
                 "melee.swap_hp_margin must be within [0.0, 1.0], got {}",
                 m.swap_hp_margin
+            ));
+        }
+        if !(m.reset_window > 0.0) || !m.reset_window.is_finite() {
+            issues.push(format!(
+                "melee.reset_window must be a positive finite number, got {}",
+                m.reset_window
             ));
         }
 
@@ -782,20 +795,22 @@ mod tests {
 
     #[test]
     fn shipped_los_weights_default_off() {
-        // `los_seek` stays disabled everywhere until U9 (the attacker knob).
-        // `cover_pull` was turned on for the three healers in U8 (deny posture)
-        // and stays off for the DPS kiters — pin both so an accidental change
-        // is caught.
+        // `los_seek` is the U9 attacker knob: ON for the DPS kiters (Mage 2.0 /
+        // Hunter 1.0 — seek a sighted angle when occluded in shot range) and
+        // OFF for the healers (they deny LoS via `cover_pull`, they don't seek
+        // it). `cover_pull` was turned on for the three healers in U8 (deny
+        // posture) and stays off for the DPS kiters — pin both so an accidental
+        // change is caught.
         let config = load_movement_config().expect("assets/config/movement.ron must load");
         for (name, w) in [
             ("priest", &config.priest.weights),
             ("paladin", &config.paladin.weights),
             ("shaman", &config.shaman.weights),
-            ("mage", &config.mage.weights),
-            ("hunter", &config.hunter.weights),
         ] {
-            assert_eq!(w.los_seek, 0.0, "{name}.los_seek must ship at 0.0 until U9");
+            assert_eq!(w.los_seek, 0.0, "{name}.los_seek must ship at 0.0 (healers deny, don't seek)");
         }
+        assert_eq!(config.mage.weights.los_seek, 2.0, "mage.los_seek (U9 seek knob)");
+        assert_eq!(config.hunter.weights.los_seek, 1.0, "hunter.los_seek (U9 seek knob)");
         // U8 deny-posture weights: healers cover, DPS kiters do not. Each stays
         // below its block's threat_repulsion so denial shapes the retreat
         // without overriding escape.

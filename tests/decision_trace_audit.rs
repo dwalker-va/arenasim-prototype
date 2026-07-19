@@ -114,6 +114,8 @@ const EXPECTED_MOVEMENT_TRIGGERS: &[&str] = &[
     "FormationShift",
     "KiteEnter",
     "KiteExit",
+    "SeekLos",
+    "MeleeReset",
 ];
 
 /// One reference matchup: team configs + seed + label for error messages.

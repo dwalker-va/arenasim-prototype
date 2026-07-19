@@ -178,6 +178,25 @@ pub struct KitePosture {
     pub dip_until: f32,
 }
 
+/// Persistent melee "tempo reset" state (Warrior, U9). When a melee's go is
+/// stopped by a movement-impairing CC (Root/Stun/Incapacitate) and its gap
+/// closer is on cooldown, it falls back toward its healer for a bounded window
+/// instead of face-chasing a kited target into more CC. The window is *armed*
+/// while under CC and stays available for `melee.reset_window` seconds after
+/// the CC ends, so the reset actually runs once the root drops (a rooted
+/// warrior can't move). Survives directive expiry, like the posture states.
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct MeleeResetState {
+    /// Absolute sim-time until which a movement-CC keeps the reset available.
+    /// Set to `now + melee.reset_window` every frame the warrior is under a
+    /// movement-impairing CC. `0.0` = never armed.
+    pub armed_until: f32,
+    /// Whether the reset directive was issued last evaluation — the edge used
+    /// to emit the `MeleeReset` trace only on activation (not every frame) and
+    /// to know a fallback directive is ours to clear on deactivation.
+    pub active: bool,
+}
+
 impl KitePosture {
     /// Fresh posture state at sim-time `now` (ENGAGE, no hold).
     pub fn new(now: f32) -> Self {
