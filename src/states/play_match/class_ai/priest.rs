@@ -33,7 +33,7 @@ use crate::states::play_match::utils::{combatant_id, log_ability_use, spawn_spee
 use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
 use super::healer_postures::{
     compound_pressure_trigger, escape_tick, escape_window_from, healer_pressured_tick_shared,
-    start_movement_event, start_movement_event_with_target,
+    medic_chase_override, medic_chase_tick, start_movement_event, start_movement_event_with_target,
 };
 
 use super::CombatContext;
@@ -1502,25 +1502,39 @@ pub fn evaluate_priest_posture(
     }
 
     let mut scream_dip = ScreamDipPlan::Rotation;
-    match next {
-        Posture::Escape => escape_tick(
-            commands, entity, my_pos, ctx, state, directive, shared,
-            &movement.priest.weights, decision_trace, transitioned, prev,
-        ),
-        Posture::Pressured => pressured_tick(
-            commands, entity, combatant, my_pos, ctx, state, directive, movement, now,
-            decision_trace, transitioned, prev,
-        ),
-        Posture::Dip => {
-            scream_dip = priest_dip_tick(
-                commands, abilities, entity, my_pos, ctx, state, directive, now,
-                decision_trace, transitioned, prev,
-            );
+    // Medic chase (shared) overrides FREE formation / PRESSURED denial when a
+    // dying teammate is occluded — walk around cover to regain sight and heal.
+    if let Some(ally) = medic_chase_override(entity, my_pos, next, ctx, shared) {
+        medic_chase_tick(
+            commands, entity, my_pos, ally, state, directive, shared, now, decision_trace, ctx,
+        );
+    } else {
+        if state.medic_target.is_some() {
+            // Sight regained (or the ally recovered / died): drop the chase walk
+            // so the normal tick re-anchors.
+            commands.entity(entity).remove::<MovementDirective>();
+            state.medic_target = None;
         }
-        _ => free_tick(
-            commands, abilities, entity, combatant, my_pos, ctx, state, directive, movement, now,
-            decision_trace, transitioned, prev,
-        ),
+        match next {
+            Posture::Escape => escape_tick(
+                commands, entity, my_pos, ctx, state, directive, shared,
+                &movement.priest.weights, decision_trace, transitioned, prev,
+            ),
+            Posture::Pressured => pressured_tick(
+                commands, entity, combatant, my_pos, ctx, state, directive, movement, now,
+                decision_trace, transitioned, prev,
+            ),
+            Posture::Dip => {
+                scream_dip = priest_dip_tick(
+                    commands, abilities, entity, my_pos, ctx, state, directive, now,
+                    decision_trace, transitioned, prev,
+                );
+            }
+            _ => free_tick(
+                commands, abilities, entity, combatant, my_pos, ctx, state, directive, movement, now,
+                decision_trace, transitioned, prev,
+            ),
+        }
     }
 
     if needs_insert {

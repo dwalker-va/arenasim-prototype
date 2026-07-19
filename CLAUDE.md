@@ -312,6 +312,19 @@ with the context-steering mask refactor.
 - `los_seek` (0.0 for healers; Mage 2.0 / Hunter 1.0) — reward for candidate steps that have/restore line of sight to the kill target; drives occluded-in-range casters to orbit to a sighted angle instead of idling
 - `cover_pull` (Priest/Shaman 1.5, Paladin 1.0, 0.0 for DPS) — reward for candidate steps occluded from threats; drives pressured-healer pillar denial. Kept below `threat_repulsion` so denial shapes retreat direction without overriding escape; zeroed when a healable teammate is below `urgency_hp_threshold` or the team is pressing (`press_advantage_margin`)
 
+**Medic chase (heal-seeking movement)** — shared across Priest/Paladin/Shaman
+(`healer_postures::medic_chase_override` / `medic_chase_tick`; no RON knob,
+reuses `urgency_hp_threshold`). When a living non-pet teammate is below
+`urgency_hp_threshold` AND occluded from the healer, a direct
+`MovementGoal::Point` walk toward that ally (most-injured occluded one)
+OVERRIDES FREE formation and PRESSURED cover-denial so the healer walks around
+cover to regain sight and heal — never during DIP (its teammate-HP abort
+composes) or the committed ESCAPE window, and never while the healer is
+hard-CC'd (`is_ccd`, Root included). Keyed on OCCLUSION, not range, so it is a
+provable no-op on obstacle-free maps (BasicArena stays byte-identical). Traced
+via the existing `SeekLos` trigger with a `point` goal and the ally in the
+target view.
+
 **DPS kiter blocks** (`mage:` / `hunter:` — the shared ENGAGE/KITE machine, `DpsMovementConfig`):
 - `weights:` (above) plus `range_band_min`/`max` (orbit ring; min = SAFE_KITING_DISTANCE / HUNTER_DEAD_ZONE 8), `kite_hold` (anti-strobe hysteresis), `directive_ttl` (must cover the longest cast), `commit_window`.
 - `kite_entry_radius`/`kite_sustain_radius` — proximity-gated kiters only (Hunter: KITE when a melee is within entry, exit when kited past sustain). The Mage is aura-gated (KITE keys off its own root/slow), so it ignores these.
@@ -321,6 +334,8 @@ with the context-steering mask refactor.
 - `fallback_range: 15.0` — PRESSURED retreat range (instead of face-tanking at melee)
 - `dip_budget: 6.0` — DIP walk-stun-return duration budget in seconds
 - `healing_heavy_hp: 0.6` — lowest team HP fraction (self included, pets excluded) below which the Paladin pulls to fallback range even before it is focused
+
+The Paladin's **while-CC Divine Shield** (`try_divine_shield_while_cc`, the CC-break path) fires when self HP is below `DIVINE_SHIELD_HP_THRESHOLD` (0.3, unchanged) OR — the widened teammate trigger — a non-self ally is below `LOW_HP_THRESHOLD` (0.5) AND the max remaining incapacitation on the Paladin is `>= DIVINE_SHIELD_MIN_CC_REMAINING` (2.0s). The bubble purges the Paladin's own CC, so it is the fear-break tool; the CC-remaining floor keeps the 5-minute cooldown from burning when the break would buy no real acting time. Decision seam: pure `divine_shield_while_cc_should_fire`. This changes behavior on ALL maps where the trigger actually fires (fear + low ally, BasicArena included) — intended, like the melee tempo reset.
 
 After editing, validate and sweep:
 ```bash

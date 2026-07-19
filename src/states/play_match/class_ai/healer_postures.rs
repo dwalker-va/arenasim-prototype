@@ -244,6 +244,144 @@ pub(super) fn select_sticky_anchor<'c>(
     anchor_info
 }
 
+// ============================================================================
+// Medic chase (heal-seeking movement)
+// ============================================================================
+//
+// R5 made heals LoS-gated but nothing moves the healer to REGAIN sight of a
+// dying ally: FREE formation-follow has no sight requirement, and the
+// PRESSURED anchor mask only constrains SCORED steps (and the all-masked
+// fallback ladder drops the anchor constraint first). A healer standing
+// pillar-side from a sub-urgency ally therefore has nothing pulling it around
+// the pillar — the ally dies with heals silently LoS-rejected at cast start.
+//
+// The medic chase closes that gap: when a living, healable, non-pet teammate
+// is below `urgency_hp_threshold` AND occluded from the healer, a direct
+// `MovementGoal::Point` walk toward the ally's live position overrides the
+// FREE formation / PRESSURED cover-deny movement (the existing urgency
+// suppression already encodes ally-dying > healer-hiding; this extends it to
+// ally-dying > formation/denial). Keying on OCCLUSION (not range) makes this a
+// provable no-op on obstacle-free maps — BasicArena has no obstacles, so
+// `has_line_of_sight` is always true and the chase never arms. The chase ends
+// naturally when sight is regained (predicate false → normal posture logic
+// resumes and the heal fires).
+
+/// Pure medic-chase target pick: among `(entity, health_pct, occluded)`
+/// candidates in deterministic (BTree entity) order, the most-injured one that
+/// is BOTH below `threshold` AND occluded. Ties (equal health) resolve to the
+/// earlier candidate (lowest entity), consistent with the sticky-anchor
+/// convention. `None` when nothing qualifies.
+fn pick_medic_target(candidates: &[(Entity, f32, bool)], threshold: f32) -> Option<Entity> {
+    let mut best: Option<(Entity, f32)> = None;
+    for &(e, hp, occluded) in candidates {
+        if hp >= threshold || !occluded {
+            continue;
+        }
+        best = match best {
+            Some((_, bhp)) if bhp <= hp => best,
+            _ => Some((e, hp)),
+        };
+    }
+    best.map(|(e, _)| e)
+}
+
+/// Medic-chase target: the most-injured living non-pet teammate (excluding
+/// self) below `urgency_hp_threshold` AND currently OCCLUDED from the healer
+/// (EYE_HEIGHT endpoints, same LoS convention as everywhere). `None` when no
+/// such ally exists — including on every obstacle-free map, where sight always
+/// holds. Out-of-range-but-sighted allies are deliberately NOT chased: the
+/// anchor/formation machinery already keeps the healer near them; only a broken
+/// SIGHT line needs the walk-around-cover behavior.
+pub(super) fn medic_chase_target<'c>(
+    entity: Entity,
+    my_pos: Vec3,
+    ctx: &'c CombatContext,
+    shared: &SharedMovementConfig,
+) -> Option<&'c CombatantInfo> {
+    let my_eye = Vec3::new(my_pos.x, EYE_HEIGHT, my_pos.z);
+    let candidates: Vec<(Entity, f32, bool)> = ctx
+        .alive_allies()
+        .into_iter()
+        .filter(|a| a.entity != entity && !a.is_pet)
+        .map(|a| {
+            let ally_eye = Vec3::new(a.position.x, EYE_HEIGHT, a.position.z);
+            let occluded = !has_line_of_sight(ctx.obstacles, my_eye, ally_eye);
+            (a.entity, a.health_pct(), occluded)
+        })
+        .collect();
+    let target = pick_medic_target(&candidates, shared.urgency_hp_threshold)?;
+    ctx.combatants.get(&target)
+}
+
+/// Whether the medic chase should override the normal movement tick this frame:
+/// current posture FREE or PRESSURED (never DIP — its own teammate-HP abort
+/// composes, handing control back so the medic picks up the next decision — nor
+/// the committed ESCAPE window), the healer not itself hard-CC'd (a CC'd healer
+/// can't move, and the directive would be stale on release; `is_ccd` includes
+/// Root, which blocks movement too), and a dying occluded teammate exists.
+/// Returns that ally.
+pub(super) fn medic_chase_override<'c>(
+    entity: Entity,
+    my_pos: Vec3,
+    next: Posture,
+    ctx: &'c CombatContext,
+    shared: &SharedMovementConfig,
+) -> Option<&'c CombatantInfo> {
+    if !matches!(next, Posture::Free | Posture::Pressured) || ctx.is_ccd(entity) {
+        return None;
+    }
+    medic_chase_target(entity, my_pos, ctx, shared)
+}
+
+/// Issue/refresh the medic-chase directive toward `ally`'s live position and
+/// emit the `SeekLos` movement event (reusing the attacker-chase convention:
+/// SeekLos trigger + Point goal + the ally in the target view). Re-targets the
+/// ally per commit window — mirrors the DPS direct chase in `dps_postures.rs`.
+/// Sets `state.medic_target` so a first-arm / target-swap forces an immediate
+/// re-target even mid-commit-window (a leftover formation/PRESSURED directive
+/// never suppresses the takeover).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn medic_chase_tick(
+    commands: &mut Commands,
+    entity: Entity,
+    my_pos: Vec3,
+    ally: &CombatantInfo,
+    state: &mut HealerPosture,
+    directive: Option<&MovementDirective>,
+    shared: &SharedMovementConfig,
+    now: f32,
+    decision_trace: &mut DecisionTrace,
+    ctx: &CombatContext,
+) {
+    let recommit = state.medic_target != Some(ally.entity)
+        || directive.map_or(true, |d| now >= d.committed_until || now >= d.expires);
+    if !recommit {
+        return; // still committed toward this ally — the walk continues, no re-emit
+    }
+
+    commands.entity(entity).try_insert(MovementDirective {
+        goal: MovementGoal::Point(ally.position),
+        expires: now + shared.directive_ttl,
+        committed_until: now + shared.commit_window,
+    });
+    state.medic_target = Some(ally.entity);
+    // No scored direction / formation point governs a chase — clear both so the
+    // normal tick re-anchors cleanly once sight is regained.
+    state.last_direction = None;
+    state.last_point = None;
+
+    if let Some(mut builder) =
+        start_movement_event_with_target(decision_trace, ctx, ally.entity, my_pos)
+    {
+        builder.direction_change(
+            state.posture.into(),
+            MovementTrigger::SeekLos,
+            MovementGoalKind::Point,
+        );
+        builder.finish();
+    }
+}
+
 /// ESCAPE tick (R7): on entry, score one direction with attacker repulsion
 /// dominant — threats are the impaired proximate attackers; the formation
 /// and wand pulls are OFF so repulsion is the only directional soft term,
@@ -682,5 +820,66 @@ mod tests {
         assert_eq!(cover_pull_term(chosen, &occluded, 1.5), 1.5);
         // Suppressed (effective weight 0) → 0 contribution even when occluded.
         assert_eq!(cover_pull_term(chosen, &occluded, 0.0), 0.0);
+    }
+
+    // ------------------------------------------------------------------------
+    // Fix 1: medic-chase target selection (`pick_medic_target`)
+    // ------------------------------------------------------------------------
+
+    fn e(raw: u32) -> Entity {
+        Entity::from_raw(raw)
+    }
+
+    /// A candidate must be BOTH below the threshold AND occluded to qualify.
+    #[test]
+    fn medic_target_requires_low_hp_and_occlusion() {
+        let threshold = 0.5;
+        // Below threshold but SIGHTED → not a chase target (formation/anchor
+        // machinery handles a sighted low ally). No obstacle-free map ever
+        // produces an occluded candidate, so this is also the BasicArena no-op.
+        assert_eq!(pick_medic_target(&[(e(1), 0.2, false)], threshold), None);
+        // Occluded but healthy → not in danger.
+        assert_eq!(pick_medic_target(&[(e(1), 0.8, true)], threshold), None);
+        // Occluded AND low → chase.
+        assert_eq!(pick_medic_target(&[(e(1), 0.2, true)], threshold), Some(e(1)));
+        // Exactly at the threshold does NOT qualify (strict <).
+        assert_eq!(pick_medic_target(&[(e(1), 0.5, true)], threshold), None);
+    }
+
+    /// Among qualifying (low + occluded) allies the MOST-injured is chosen.
+    #[test]
+    fn medic_target_picks_most_injured_qualifier() {
+        let threshold = 0.5;
+        // e(2) is more injured than e(1); both occluded and below threshold.
+        let cands = [(e(1), 0.4, true), (e(2), 0.1, true)];
+        assert_eq!(pick_medic_target(&cands, threshold), Some(e(2)));
+        // A more-injured but SIGHTED ally must not steal the pick from a
+        // less-injured OCCLUDED one — occlusion is a hard gate.
+        let cands = [(e(1), 0.05, false), (e(2), 0.3, true)];
+        assert_eq!(pick_medic_target(&cands, threshold), Some(e(2)));
+    }
+
+    /// Ties (equal HP) resolve to the earlier candidate (caller passes BTree
+    /// entity order), keeping selection deterministic.
+    #[test]
+    fn medic_target_tie_breaks_on_entity_order() {
+        let threshold = 0.5;
+        let cands = [(e(3), 0.2, true), (e(7), 0.2, true)];
+        assert_eq!(pick_medic_target(&cands, threshold), Some(e(3)));
+        // Order-independence of the tie-break: reversing input still yields the
+        // lowest-entity candidate because the caller sorts by entity, but verify
+        // the "keep earlier on tie" rule directly with the reversed slice.
+        let cands_rev = [(e(7), 0.2, true), (e(3), 0.2, true)];
+        assert_eq!(pick_medic_target(&cands_rev, threshold), Some(e(7)));
+    }
+
+    /// No candidates / no qualifiers → None (the common every-frame case).
+    #[test]
+    fn medic_target_none_when_nothing_qualifies() {
+        assert_eq!(pick_medic_target(&[], 0.5), None);
+        assert_eq!(
+            pick_medic_target(&[(e(1), 0.9, false), (e(2), 0.7, true)], 0.5),
+            None
+        );
     }
 }

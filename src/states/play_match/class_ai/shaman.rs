@@ -32,7 +32,7 @@ use crate::states::play_match::movement_config::MovementConfig;
 use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
 use super::healer_postures::{
     compound_pressure_trigger, escape_tick, escape_window_from, healer_pressured_tick_shared,
-    start_movement_event,
+    medic_chase_override, medic_chase_tick, start_movement_event,
 };
 use super::super::utils::log_ability_use;
 use super::CombatContext;
@@ -698,19 +698,31 @@ pub fn evaluate_shaman_posture(
         }
     }
 
-    match next {
-        Posture::Escape => escape_tick(
-            commands, entity, my_pos, ctx, state, directive, shared,
-            &movement.shaman.weights, decision_trace, transitioned, prev,
-        ),
-        Posture::Pressured => shaman_pressured_tick(
-            commands, entity, combatant, my_pos, ctx, state, directive, movement, now,
-            decision_trace, transitioned, prev,
-        ),
-        _ => shaman_free_tick(
-            commands, entity, combatant, my_pos, ctx, state, directive, movement, now,
-            decision_trace, transitioned, prev,
-        ),
+    // Medic chase (shared) overrides FREE formation / PRESSURED denial when a
+    // dying teammate is occluded — walk around cover to regain sight and heal.
+    if let Some(ally) = medic_chase_override(entity, my_pos, next, ctx, shared) {
+        medic_chase_tick(
+            commands, entity, my_pos, ally, state, directive, shared, now, decision_trace, ctx,
+        );
+    } else {
+        if state.medic_target.is_some() {
+            commands.entity(entity).remove::<MovementDirective>();
+            state.medic_target = None;
+        }
+        match next {
+            Posture::Escape => escape_tick(
+                commands, entity, my_pos, ctx, state, directive, shared,
+                &movement.shaman.weights, decision_trace, transitioned, prev,
+            ),
+            Posture::Pressured => shaman_pressured_tick(
+                commands, entity, combatant, my_pos, ctx, state, directive, movement, now,
+                decision_trace, transitioned, prev,
+            ),
+            _ => shaman_free_tick(
+                commands, entity, combatant, my_pos, ctx, state, directive, movement, now,
+                decision_trace, transitioned, prev,
+            ),
+        }
     }
 
     if needs_insert {

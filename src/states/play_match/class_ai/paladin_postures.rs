@@ -24,7 +24,7 @@ use crate::states::play_match::movement_config::{MovementConfig, SharedMovementC
 use super::cast_guard::{pre_cast_ok, PreCastOpts};
 use super::healer_postures::{
     compound_pressure_trigger, escape_tick, escape_window_from, healer_pressured_tick_shared,
-    start_movement_event, start_movement_event_with_target,
+    medic_chase_override, medic_chase_tick, start_movement_event, start_movement_event_with_target,
 };
 use super::paladin::{
     dip_target_candidate, hoj_target_eligible, rotation_hoj_allowed, HojPlan, PaladinMovementPlan,
@@ -214,26 +214,40 @@ pub fn evaluate_paladin_posture(
 
     let mut plan = PaladinMovementPlan::default();
 
-    match next {
-        Posture::Escape => {
-            escape_tick(
-                commands, entity, my_pos, ctx, state, directive, shared,
-                &pal.weights, decision_trace, transitioned, prev,
-            );
-            plan.cast_defer = Some(shared.urgency_hp_threshold);
+    // Medic chase (shared) overrides FREE legacy pursuit / PRESSURED denial when
+    // a dying teammate is occluded — walk around cover to regain sight and heal.
+    if let Some(ally) = medic_chase_override(entity, my_pos, next, ctx, shared) {
+        medic_chase_tick(
+            commands, entity, my_pos, ally, state, directive, shared, now, decision_trace, ctx,
+        );
+    } else {
+        if state.medic_target.is_some() {
+            // Sight regained (or the ally recovered / died): drop the chase walk
+            // so FREE hands movement back to legacy pursuit / PRESSURED re-scores.
+            commands.entity(entity).remove::<MovementDirective>();
+            state.medic_target = None;
         }
-        Posture::Pressured => paladin_pressured_tick(
-            commands, entity, my_pos, ctx, state, directive, movement, now,
-            decision_trace, transitioned, prev,
-        ),
-        Posture::Dip => {
-            plan.cast_defer = Some(shared.urgency_hp_threshold);
-            plan.hoj = paladin_dip_tick(
-                commands, abilities, entity, my_pos, ctx, state, directive, now,
+        match next {
+            Posture::Escape => {
+                escape_tick(
+                    commands, entity, my_pos, ctx, state, directive, shared,
+                    &pal.weights, decision_trace, transitioned, prev,
+                );
+                plan.cast_defer = Some(shared.urgency_hp_threshold);
+            }
+            Posture::Pressured => paladin_pressured_tick(
+                commands, entity, my_pos, ctx, state, directive, movement, now,
                 decision_trace, transitioned, prev,
-            );
+            ),
+            Posture::Dip => {
+                plan.cast_defer = Some(shared.urgency_hp_threshold);
+                plan.hoj = paladin_dip_tick(
+                    commands, abilities, entity, my_pos, ctx, state, directive, now,
+                    decision_trace, transitioned, prev,
+                );
+            }
+            _ => paladin_free_tick(commands, entity, ctx, decision_trace, transitioned, prev),
         }
-        _ => paladin_free_tick(commands, entity, ctx, decision_trace, transitioned, prev),
     }
 
     // HoJ reservation (R8) — unless the dip tick already claimed the cast.

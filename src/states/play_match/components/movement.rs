@@ -130,6 +130,13 @@ pub struct HealerPosture {
     /// DIP budget deadline: absolute sim-time at which the walk-stun-return
     /// cycle aborts (budget exceeded). `0.0` = no live dip.
     pub dip_until: f32,
+    /// Medic-chase target: the dying, occluded teammate the healer is currently
+    /// walking toward to regain line of sight (and heal). `Some` only while the
+    /// medic chase overrides the normal FREE/PRESSURED movement tick; `None`
+    /// otherwise. A change here (or `None` → `Some`) forces the chase directive
+    /// to re-target the ally's live position. Always `None` on obstacle-free
+    /// maps (no ally is ever occluded, so the chase never arms).
+    pub medic_target: Option<Entity>,
 }
 
 impl HealerPosture {
@@ -145,6 +152,7 @@ impl HealerPosture {
             last_point: None,
             dip_target: None,
             dip_until: 0.0,
+            medic_target: None,
         }
     }
 }
