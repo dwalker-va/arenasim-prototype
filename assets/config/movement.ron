@@ -56,6 +56,8 @@
             wand_pull: 0.5,
             burn_pull: 1.0,           // FREE clamp toward Mana Burn range of the ENEMY healer while the burn window is open
             commitment_bonus: 1.5,
+            los_seek: 0.0,            // bonus for a step with sight to the kill target (U8/U9 tune; obstacle maps only)
+            cover_pull: 0.0,          // bonus per threat a step is occluded from (U8/U9 tune; obstacle maps only)
         ),
         // FREE-directive tuning (formerly hardcoded consts in priest.rs).
         formation_shift_threshold: 3.0, // re-target the formation point past this XZ move
@@ -72,6 +74,8 @@
             wand_pull: 0.0,           // Paladin has no wand
             burn_pull: 0.0,           // Paladin has no Mana Burn
             commitment_bonus: 1.5,
+            los_seek: 0.0,            // bonus for a step with sight to the kill target (U8/U9 tune; obstacle maps only)
+            cover_pull: 0.0,          // bonus per threat a step is occluded from (U8/U9 tune; obstacle maps only)
         ),
         // PRESSURED retreat range (instead of face-tanking at melee).
         fallback_range: 15.0,
@@ -94,6 +98,8 @@
             wand_pull: 1.0,           // stronger than the Priest (0.5): pull toward Lightning Bolt range of the kill target
             burn_pull: 0.0,           // Shaman has no Mana Burn
             commitment_bonus: 1.5,
+            los_seek: 0.0,            // bonus for a step with sight to the kill target (U8/U9 tune; obstacle maps only)
+            cover_pull: 0.0,          // bonus per threat a step is occluded from (U8/U9 tune; obstacle maps only)
         ),
         // FREE-directive tuning (mirrors the priest block).
         formation_shift_threshold: 3.0, // re-target the formation point past this XZ move
@@ -118,6 +124,8 @@
             wand_pull: 0.0,        // Mage has no wand
             range_band: 2.0,       // ring attraction toward the kill target
             commitment_bonus: 1.5,
+            los_seek: 0.0,         // bonus for a step with sight to the kill target (U8/U9 tune; obstacle maps only)
+            cover_pull: 0.0,       // bonus per threat a step is occluded from (U8/U9 tune; obstacle maps only)
         ),
         range_band_min: 8.0,       // SAFE_KITING_DISTANCE — stay out of melee of the kill target
         range_band_max: 30.0,      // within AUTO_SHOT_RANGE — keep the kill target in cast range
@@ -141,6 +149,8 @@
             range_band: 0.5,        // gentle keep-in-range, not an orbit
             flee: 6.0,              // distance-max flee from the nearest chaser (the kiter's core)
             commitment_bonus: 1.5,
+            los_seek: 0.0,          // bonus for a step with sight to the kill target (U8/U9 tune; obstacle maps only)
+            cover_pull: 0.0,        // bonus per threat a step is occluded from (U8/U9 tune; obstacle maps only)
         ),
         range_band_min: 8.0,       // HUNTER_DEAD_ZONE — can't shoot inside this
         range_band_max: 34.0,      // ~AUTO_SHOT_RANGE — only pull in near the shot-range edge

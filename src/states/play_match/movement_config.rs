@@ -65,6 +65,16 @@ pub struct MovementWeights {
     /// Bonus toward the previously committed direction, applied only AT
     /// re-evaluation while the commitment window is open (R11).
     pub commitment_bonus: f32,
+    /// Bonus for a candidate step position that has line of sight to the kill
+    /// target (`los_target`) — a ranged attacker steers toward angles it can
+    /// actually shoot from. `0.0` disables (default; U8/U9 tune it). No-op on
+    /// obstacle-free maps.
+    pub los_seek: f32,
+    /// Bonus per threat a candidate step position is OCCLUDED from (line of
+    /// sight to the threat is broken by an obstacle) — pulls a pressured unit
+    /// into cover. `0.0` disables (default; U8/U9 tune it). No-op on
+    /// obstacle-free maps.
+    pub cover_pull: f32,
 }
 
 impl Default for MovementWeights {
@@ -81,6 +91,8 @@ impl Default for MovementWeights {
             range_band: 0.0,
             flee: 0.0,
             commitment_bonus: 1.5,
+            los_seek: 0.0,
+            cover_pull: 0.0,
         }
     }
 }
@@ -357,6 +369,8 @@ impl Default for DpsMovementConfig {
                 burn_pull: 0.0,
                 range_band: 2.0,
                 commitment_bonus: 1.5,
+                los_seek: 0.0,
+                cover_pull: 0.0,
             },
             range_band_min: 8.0,   // SAFE_KITING_DISTANCE / HUNTER_DEAD_ZONE
             range_band_max: 30.0,  // within AUTO_SHOT_RANGE
@@ -518,6 +532,8 @@ impl MovementConfig {
                 ("range_band", weights.range_band),
                 ("flee", weights.flee),
                 ("commitment_bonus", weights.commitment_bonus),
+                ("los_seek", weights.los_seek),
+                ("cover_pull", weights.cover_pull),
             ];
             for (name, value) in terms {
                 if value < 0.0 || !value.is_finite() {
@@ -748,6 +764,37 @@ mod tests {
         MovementConfig::default()
             .validate()
             .expect("built-in defaults must be internally consistent");
+    }
+
+    #[test]
+    fn validate_rejects_negative_los_weight() {
+        // los_seek / cover_pull are interest weights — a negative value is a
+        // config bug, caught the same way as every other scorer term.
+        let mut config = MovementConfig::default();
+        config.priest.weights.los_seek = -1.0;
+        let issues = config.validate().expect_err("negative los_seek must fail");
+        assert!(
+            issues.iter().any(|i| i.contains("priest.weights.los_seek")),
+            "issues should name los_seek: {:?}",
+            issues
+        );
+    }
+
+    #[test]
+    fn shipped_los_weights_default_off() {
+        // U7 ships the LoS terms present-but-disabled (0.0) in every block;
+        // U8/U9 tune them. Pin that so an accidental non-zero is caught.
+        let config = load_movement_config().expect("assets/config/movement.ron must load");
+        for (name, w) in [
+            ("priest", &config.priest.weights),
+            ("paladin", &config.paladin.weights),
+            ("shaman", &config.shaman.weights),
+            ("mage", &config.mage.weights),
+            ("hunter", &config.hunter.weights),
+        ] {
+            assert_eq!(w.los_seek, 0.0, "{name}.los_seek must ship at 0.0");
+            assert_eq!(w.cover_pull, 0.0, "{name}.cover_pull must ship at 0.0");
+        }
     }
 
     #[test]

@@ -182,6 +182,15 @@ pub enum EventPayload {
         /// field. Present only when the scorer ran.
         #[serde(skip_serializing_if = "Option::is_none")]
         masked: Option<u16>,
+        /// Optional LoS-only subset of `masked`: bit `i` set when candidate `i`
+        /// was eliminated specifically by the obstacle mask (`MASK_LOS` — a step
+        /// that walks into a wall). A strict subset of `masked`, surfaced
+        /// separately so consumers can attribute obstacle-driven divergence
+        /// without decoding the combined mask. Emitted only when nonzero, so
+        /// obstacle-free (BasicArena) traces never carry it and stay
+        /// byte-identical to pre-LoS traces.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        los_masked: Option<u16>,
     },
 }
 

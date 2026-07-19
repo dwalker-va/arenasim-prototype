@@ -259,6 +259,19 @@ pub fn resolve_movement(obstacles: &[ObstacleVolume], pos: Vec3, desired: Vec3) 
     Vec3::new(slid_xz.x, desired.y, slid_xz.y)
 }
 
+/// Whether a mover standing at `p` would penetrate any obstacle's footprint —
+/// the movement-blocking test the scorer's obstacle mask uses to reject a
+/// candidate step that walks into a wall. Consistent with [`resolve_movement`]:
+/// same strict (touching = allowed) footprint test, honoring [`MOVER_RADIUS`]
+/// and each volume's `y` span, walked in slice order. Empty obstacle lists
+/// (e.g. BasicArena) always return `false`, so the mask is a no-op there.
+pub fn position_blocked(obstacles: &[ObstacleVolume], p: Vec3) -> bool {
+    let p_xz = Vec2::new(p.x, p.z);
+    obstacles
+        .iter()
+        .any(|v| penetrates_footprint(v, p_xz, p.y))
+}
+
 /// Whether the mover's XZ collision disc strictly penetrates the volume's
 /// footprint (only when the mover's `y` overlaps the volume's span). Strict, so
 /// a mover resting flush on the expanded boundary is *not* penetrating

@@ -14,7 +14,8 @@
 use bevy::prelude::*;
 
 use crate::states::play_match::combat_core::{
-    compass_directions_16, mask_bitmask, score_directions, AnchorConstraint, ScorerInputs,
+    compass_directions_16, los_mask_bitmask, mask_bitmask, score_directions, AnchorConstraint,
+    ScorerInputs,
 };
 use crate::states::play_match::components::{HealerPosture, MovementDirective, MovementGoal, Posture};
 use crate::states::play_match::decision_trace::{
@@ -231,6 +232,10 @@ pub(super) fn escape_tick(
         range_band: None,
         nearest_threat: None,
         committed_direction: None,
+        obstacles: ctx.obstacles.to_vec(),
+        // No kill target tracked during an escape — repulsion, not LoS-seek,
+        // drives the direction (and los_seek is 0.0 for healers regardless).
+        los_target: None,
     };
     let chosen = score_directions(&compass_directions_16(), &inputs, weights);
     if chosen == Vec2::ZERO {
@@ -253,6 +258,10 @@ pub(super) fn escape_tick(
         );
         builder.chosen_direction([chosen.x, chosen.y]);
         builder.masked(mask_bitmask(&compass_directions_16(), &inputs));
+        let los = los_mask_bitmask(&compass_directions_16(), &inputs);
+        if los != 0 {
+            builder.los_masked(los);
+        }
         builder.finish();
     }
 }
@@ -370,6 +379,14 @@ pub(super) fn healer_pressured_tick_shared(
         .filter(|i| i.is_alive)
         .map(|i| i.position);
 
+    // LoS-seek target: the kill target the healer tracks (unfiltered — keeping
+    // sight of it matters even when it is itself a threat). los_seek is 0.0 for
+    // healers today, so this is faithful wiring, not yet a behavior change.
+    let los_target = wand_kill_target
+        .and_then(|t| ctx.combatants.get(&t))
+        .filter(|i| i.is_alive)
+        .map(|i| i.position);
+
     let inputs = ScorerInputs {
         my_pos,
         lookahead: SCORER_LOOKAHEAD,
@@ -391,6 +408,8 @@ pub(super) fn healer_pressured_tick_shared(
         // therefore identical to the old penalty scheme here, with or without a
         // guard; adding one would only inject a real (unwanted) trajectory delta.
         committed_direction: state.last_direction,
+        obstacles: ctx.obstacles.to_vec(),
+        los_target,
     };
     let chosen = score_directions(&compass_directions_16(), &inputs, weights);
     if chosen == Vec2::ZERO {
@@ -436,6 +455,10 @@ pub(super) fn healer_pressured_tick_shared(
             }
             builder.chosen_direction([chosen.x, chosen.y]);
             builder.masked(mask_bitmask(&compass_directions_16(), &inputs));
+            let los = los_mask_bitmask(&compass_directions_16(), &inputs);
+            if los != 0 {
+                builder.los_masked(los);
+            }
             builder.finish();
         }
     }

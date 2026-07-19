@@ -23,7 +23,8 @@
 use bevy::prelude::*;
 
 use crate::states::play_match::combat_core::{
-    compass_directions_16, mask_bitmask, score_directions, RangeBand, ScorerInputs,
+    compass_directions_16, los_mask_bitmask, mask_bitmask, score_directions, RangeBand,
+    ScorerInputs,
 };
 use crate::states::play_match::components::{
     AuraType, DpsPosture, KitePosture, MovementDirective, MovementGoal,
@@ -282,14 +283,17 @@ pub fn evaluate_dps_posture(
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-    let range_band = kill_target
+    let kill_target_info = kill_target
         .and_then(|t| ctx.combatants.get(&t))
-        .filter(|i| i.is_alive)
-        .map(|i| RangeBand {
-            target: i.position,
-            min: config.range_band_min,
-            max: config.range_band_max,
-        });
+        .filter(|i| i.is_alive);
+    let range_band = kill_target_info.map(|i| RangeBand {
+        target: i.position,
+        min: config.range_band_min,
+        max: config.range_band_max,
+    });
+    // LoS-seek target: the kill target the kiter shoots. los_seek is 0.0 today
+    // (U8/U9 tune it), so this is faithful wiring, not yet a behavior change.
+    let los_target = kill_target_info.map(|i| i.position);
 
     let committed_direction = directive
         .filter(|d| now < d.committed_until)
@@ -306,6 +310,8 @@ pub fn evaluate_dps_posture(
         range_band,
         nearest_threat,
         committed_direction,
+        obstacles: ctx.obstacles.to_vec(),
+        los_target,
     };
     let chosen = score_directions(&compass_directions_16(), &inputs, &config.weights);
     if chosen == Vec2::ZERO {
@@ -344,6 +350,10 @@ pub fn evaluate_dps_posture(
             }
             builder.chosen_direction([chosen.x, chosen.y]);
             builder.masked(mask_bitmask(&compass_directions_16(), &inputs));
+            let los = los_mask_bitmask(&compass_directions_16(), &inputs);
+            if los != 0 {
+                builder.los_masked(los);
+            }
             builder.finish();
         }
     }
