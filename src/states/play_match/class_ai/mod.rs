@@ -40,6 +40,7 @@ use super::ability_config::AbilityDefinitions;
 use super::components::{Aura, ActiveAuras, Combatant, AuraType, DispelPending, PetType, DRCategory, DRTracker};
 use super::constants::GCD;
 use super::{is_spell_school_locked, is_silenced};
+use super::map_geometry::ObstacleVolume;
 use super::utils::log_ability_use;
 
 /// Per-frame snapshot of a single combatant, used for AI decision making.
@@ -153,6 +154,12 @@ pub struct CombatContext<'a> {
     /// the pet's cooldown state without holding a mutable handle to pet
     /// `Combatant`. `BTreeMap` (nested) for determinism.
     pub ability_cooldowns: &'a BTreeMap<Entity, BTreeMap<AbilityType, f32>>,
+    /// The active map's obstacle volumes, in declaration order. Empty on maps
+    /// with no cover (BasicArena) — where every line-of-sight query is
+    /// trivially clear, so the LoS gates are a no-op. Threaded through the
+    /// snapshot from `ActiveMapGeometry`; consumed by the cast-start LoS guard
+    /// (and, in later units, the movement scorer).
+    pub obstacles: &'a [ObstacleVolume],
     /// The combatant making the decision
     pub self_entity: Entity,
 }

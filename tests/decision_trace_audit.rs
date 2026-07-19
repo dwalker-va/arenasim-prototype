@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use arenasim::headless::runner::TraceConfig;
 use arenasim::headless::{run_headless_match_with, HeadlessMatchConfig};
 
-fn create_config(team1: Vec<&str>, team2: Vec<&str>, seed: Option<u64>) -> HeadlessMatchConfig {
+fn create_config(team1: Vec<&str>, team2: Vec<&str>, seed: Option<u64>, map: &str) -> HeadlessMatchConfig {
     HeadlessMatchConfig {
         team1: team1.into_iter().map(String::from).collect(),
         team2: team2.into_iter().map(String::from).collect(),
@@ -24,6 +24,7 @@ fn create_config(team1: Vec<&str>, team2: Vec<&str>, seed: Option<u64>) -> Headl
         // root-induced Charge rejections) to develop.
         max_duration_secs: 180.0,
         random_seed: seed,
+        map: map.to_string(),
         ..Default::default()
     }
 }
@@ -72,6 +73,9 @@ const EXPECTED_REJECTION_REASONS: &[&str] = &[
     "PreconditionUnmet",
     "LowHealthHeel",
     "Rooted",
+    // Emitted by the cast-start LoS guard when a pillar blocks the
+    // caster→target segment; exercised by the PillaredArena reference matchup.
+    "LosBlocked",
 ];
 
 /// Variants of `TargetRejectionReason` that production code currently emits.
@@ -118,6 +122,10 @@ struct ReferenceMatch {
     team1: Vec<&'static str>,
     team2: Vec<&'static str>,
     seed: u64,
+    /// Arena map name (parsed by `HeadlessMatchConfig`). Most matchups run on
+    /// "BasicArena" (no obstacles); the LoS-coverage matchup runs on
+    /// "PillaredArena" so the cast-start LoS guard fires.
+    map: &'static str,
 }
 
 fn reference_matchups() -> Vec<ReferenceMatch> {
@@ -127,24 +135,28 @@ fn reference_matchups() -> Vec<ReferenceMatch> {
             team1: vec!["Warrior"],
             team2: vec!["Mage"],
             seed: 42,
+            map: "BasicArena",
         },
         ReferenceMatch {
             label: "Rogue v Paladin",
             team1: vec!["Rogue"],
             team2: vec!["Paladin"],
             seed: 100,
+            map: "BasicArena",
         },
         ReferenceMatch {
             label: "Priest v Warlock (covers Felhunter pet)",
             team1: vec!["Priest"],
             team2: vec!["Warlock"],
             seed: 200,
+            map: "BasicArena",
         },
         ReferenceMatch {
             label: "Hunter v Warrior (covers Hunter pets)",
             team1: vec!["Hunter"],
             team2: vec!["Warrior"],
             seed: 300,
+            map: "BasicArena",
         },
         // 2v2 needed to exercise multi-actor variants:
         // - LowerScoreThanChosen / Stealthed: multiple visible enemies + a stealthed Rogue
@@ -156,12 +168,28 @@ fn reference_matchups() -> Vec<ReferenceMatch> {
             team1: vec!["Mage", "Rogue"],
             team2: vec!["Paladin", "Warrior"],
             seed: 400,
+            map: "BasicArena",
         },
         ReferenceMatch {
             label: "Hunter+Warlock v Mage+Priest (root + dispel + friendly-CC)",
             team1: vec!["Hunter", "Warlock"],
             team2: vec!["Mage", "Priest"],
             seed: 500,
+            map: "BasicArena",
+        },
+        // LoS coverage on PillaredArena. The slot-1 combatants spawn on z=0 —
+        // the same axis as the two pillars at (±9, 0) — so the Mage's Frostbolt
+        // attempts across the arena repeatedly cross a pillar and emit
+        // LosBlocked. (A 1v1 spawns both units at z=-3, just clear of the
+        // pillars' ±2.5 radius, so it never blocks — the 2v2 is required.)
+        // Every tested seed fires the variant hundreds of times; seed 7 fires
+        // it the most and finishes well under the duration cap.
+        ReferenceMatch {
+            label: "Mage+Priest v Warrior+Priest on PillaredArena (covers LosBlocked)",
+            team1: vec!["Mage", "Priest"],
+            team2: vec!["Warrior", "Priest"],
+            seed: 7,
+            map: "PillaredArena",
         },
     ]
 }
@@ -247,7 +275,7 @@ fn reason_enum_variants_all_emitted_by_reference_matches() {
         let path = tmp.path().to_path_buf();
         drop(tmp);
 
-        let config = create_config(matchup.team1.clone(), matchup.team2.clone(), Some(matchup.seed));
+        let config = create_config(matchup.team1.clone(), matchup.team2.clone(), Some(matchup.seed), matchup.map);
         let _result = run_headless_match_with(
             config,
             true, // suppress .txt log

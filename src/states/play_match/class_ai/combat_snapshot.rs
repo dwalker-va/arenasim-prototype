@@ -25,6 +25,7 @@ use crate::states::play_match::components::{
     ActiveAuras, Aura, CastingState, ChannelingState, ChargingState, Combatant, DisengagingState,
     DRTracker, Pet,
 };
+use crate::states::play_match::map_geometry::ObstacleVolume;
 
 /// Per-frame snapshot of every combatant's stats, auras, and DR state.
 ///
@@ -44,6 +45,11 @@ pub struct CombatSnapshot {
     /// mutable handle to the pet `Combatant`. Cloned from `Combatant.ability_cooldowns`
     /// (which is a `HashMap`) into a `BTreeMap` for deterministic iteration.
     pub ability_cooldowns: BTreeMap<Entity, BTreeMap<AbilityType, f32>>,
+    /// The active map's obstacle volumes (from `ActiveMapGeometry`), cloned in
+    /// once per frame. Handed to every `CombatContext` this snapshot vends so
+    /// the cast-start LoS guard can test caster→target sight. Empty on maps
+    /// with no cover, making the guard a no-op there.
+    pub obstacles: Vec<ObstacleVolume>,
 }
 
 impl CombatSnapshot {
@@ -76,6 +82,7 @@ impl CombatSnapshot {
         >,
         dr_tracker_query: &Query<(Entity, &DRTracker)>,
         pet_query: &Query<&Pet>,
+        obstacles: &[ObstacleVolume],
     ) -> Self {
         let mut combatants: BTreeMap<Entity, CombatantInfo> = BTreeMap::new();
         let mut active_auras: BTreeMap<Entity, Vec<Aura>> = BTreeMap::new();
@@ -171,7 +178,7 @@ impl CombatSnapshot {
             .map(|(entity, tracker)| (entity, tracker.clone()))
             .collect();
 
-        Self { combatants, active_auras, dr_trackers, ability_cooldowns }
+        Self { combatants, active_auras, dr_trackers, ability_cooldowns, obstacles: obstacles.to_vec() }
     }
 
     /// Borrow a `CombatContext` view of this snapshot for the given combatant.
@@ -183,6 +190,7 @@ impl CombatSnapshot {
             active_auras: &self.active_auras,
             dr_trackers: &self.dr_trackers,
             ability_cooldowns: &self.ability_cooldowns,
+            obstacles: &self.obstacles,
             self_entity,
         }
     }

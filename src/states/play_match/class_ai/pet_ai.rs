@@ -53,6 +53,7 @@ pub fn pet_ai_system(
     all_combatants: Query<(Entity, &Combatant, &Transform, Option<&ActiveAuras>), Without<Pet>>,
     dr_tracker_query: Query<(Entity, &DRTracker)>,
     celebration: Option<Res<VictoryCelebration>>,
+    map_geometry: Res<crate::states::play_match::map_config::ActiveMapGeometry>,
     mut decision_trace: ResMut<DecisionTrace>,
 ) {
     if celebration.is_some() {
@@ -196,6 +197,7 @@ pub fn pet_ai_system(
             active_auras: &active_auras_map,
             dr_trackers: &dr_trackers,
             ability_cooldowns: &ability_cooldowns,
+            obstacles: &map_geometry.volumes,
             self_entity: entity,
         };
 

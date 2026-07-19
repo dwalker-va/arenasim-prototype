@@ -14,6 +14,7 @@ use super::CombatContext;
 use crate::states::play_match::abilities::{is_silenced, is_spell_school_locked, AbilityType};
 use crate::states::play_match::ability_config::AbilityConfig;
 use crate::states::play_match::components::{ActiveAuras, Combatant};
+use crate::states::play_match::map_geometry::has_line_of_sight;
 
 /// Opt-in guards layered on top of the universal pre-cast checks.
 ///
@@ -65,6 +66,10 @@ pub struct PreCastOpts {
 /// 6. per-ability cooldown
 /// 7. mana / range / min-range / stealth (via `can_cast_config` for
 ///    targeted casts; mana-only for self-targeted)
+/// 8. line-of-sight from caster to target (targeted casts only; skipped for
+///    self-targeted / ground-placed casts). Runs AFTER `can_cast_config` so
+///    an out-of-range target fails on range, not LoS. A no-op on maps with no
+///    obstacles (empty `ctx.obstacles`).
 pub fn pre_cast_ok(
     ability: AbilityType,
     def: &AbilityConfig,
@@ -100,10 +105,20 @@ pub fn pre_cast_ok(
     }
 
     match target {
-        Some((_, target_pos)) => ability.can_cast_config(caster, target_pos, caster_pos, def),
-        // Self-targeted / no-target casts intentionally skip range. Callers like
-        // Frost Nova or Paladin Aura enforce range themselves during target
-        // selection; for genuine self-buffs there is no range to check.
+        Some((_, target_pos)) => {
+            if !ability.can_cast_config(caster, target_pos, caster_pos, def) {
+                return false;
+            }
+            // Line-of-sight gate — a DISTINCT predicate placed immediately
+            // after can_cast_config (so range wins precedence). Segment runs
+            // from the caster's origin to the target's origin (both ~center of
+            // mass at y≈1.0). Empty obstacle lists → always clear (no-op).
+            has_line_of_sight(ctx.obstacles, caster_pos, target_pos)
+        }
+        // Self-targeted / no-target casts intentionally skip range AND
+        // line-of-sight. Callers like Frost Nova or Paladin Aura enforce range
+        // themselves during target selection; for genuine self-buffs there is
+        // no target segment to test.
         None => caster.current_mana >= def.mana_cost,
     }
 }
@@ -192,6 +207,13 @@ pub fn classify_pre_cast_failure(
                 return RejectionReason::PreconditionUnmet {
                     note: "stealth required (Ambush/CheapShot)".into(),
                 };
+            }
+            // Line-of-sight — the same relative position as in `pre_cast_ok`
+            // (after can_cast_config's mana/range/min_range/stealth, mirrored
+            // here as the inlined checks above). Keep this AFTER the stealth
+            // check so the predicate order stays lockstep with pre_cast_ok.
+            if !has_line_of_sight(ctx.obstacles, caster_pos, target_pos) {
+                return RejectionReason::LosBlocked;
             }
         }
         None => {

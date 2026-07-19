@@ -384,6 +384,13 @@ pub enum RejectionReason {
     /// execution. Hunter-dispatched PetCommands targeting this pet are
     /// despawned without execution under the same flag.
     LowHealthHeel,
+    /// A targeted cast (hostile or friendly) was rejected because an obstacle
+    /// volume blocks the straight line from the caster to the target. Checked
+    /// at cast start in `pre_cast_ok`, AFTER `can_cast_config`, so range / mana
+    /// / stealth take precedence (an out-of-range target reports `OutOfRange`,
+    /// not this). Adding this variant requires updating
+    /// `tests/decision_trace_audit.rs::EXPECTED_REJECTION_REASONS`.
+    LosBlocked,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

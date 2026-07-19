@@ -27,6 +27,11 @@ pub use super::utils::spawn_speech_bubble;
 pub struct AbilityDispatchExtras<'w, 's> {
     celebration: Option<Res<'w, VictoryCelebration>>,
     totems: Query<'w, 's, &'static Totem>,
+    /// Active map obstacle geometry — bundled here (rather than a bare
+    /// `Res` argument) so `decide_abilities` stays within Bevy's 16
+    /// system-param limit. Fed to `CombatSnapshot::build` for the cast-start
+    /// LoS guard.
+    map_geometry: Res<'w, super::map_config::ActiveMapGeometry>,
 }
 
 pub fn acquire_targets(
@@ -551,6 +556,7 @@ pub fn decide_abilities(
         &channeling_auras,
         &dr_tracker_query,
         &pet_query,
+        &extras.map_geometry.volumes,
     );
 
     // Queue for instant ability attacks (Ambush, Sinister Strike, Mortal Strike)
