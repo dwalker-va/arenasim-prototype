@@ -42,6 +42,49 @@ use super::CombatContext;
 /// One scorer-lookahead step distance (matches the healer scorer).
 const SCORER_LOOKAHEAD: f32 = 2.0;
 
+/// Out-of-mana wand gate (Mage only). Carries the two values the hysteresis
+/// latch needs — current mana and the primary-nuke cost (read from
+/// `AbilityDefinitions`, never hardcoded). The Mage's `combat_ai` arm passes
+/// `Some(..)`; the Hunter passes `None`, which leaves the latch `false`.
+///
+/// `evaluate_dps_posture` folds this into the persistent `KitePosture::wand_oom`
+/// latch each evaluation. The latch itself is consumed by the pursuit executor
+/// (`move_to_target`), NOT by the posture scorer: while it is set, a Mage in
+/// ENGAGE closes to (and holds at) wand range instead of parking at its
+/// Frostbolt-safe preferred range (38yd, outside the 30yd wand range), so its
+/// equipped wand auto-attack fires instead of idling the mana refractory. A
+/// direct radial pursuit is used rather than the KITE orbit scorer on purpose:
+/// the orbit's LoS-preserving lateral meander is slow to corner a juking target.
+#[derive(Clone, Copy, Debug)]
+pub struct WandPullGate {
+    /// The kiter's current mana this tick.
+    pub current_mana: f32,
+    /// Mana cost of the primary nuke (Frostbolt) the wand falls back FROM.
+    pub nuke_cost: f32,
+}
+
+/// OOM wand hysteresis latch. Given the previous latch state and the current
+/// mana / nuke cost, returns the new latch:
+/// - **inactive → active** once a nuke is unaffordable (`mana < nuke_cost`):
+///   the Mage can no longer Frostbolt, so it should close to wand range.
+/// - **active → inactive** only once mana recovers to a two-cast buffer
+///   (`mana >= 2 * nuke_cost`): holding across the `[cost, 2*cost)` band stops
+///   the standoff range strobing 38↔30 as mana sawtooths across exactly one
+///   nuke's worth (regen up, one cast down) in a drawn-out war of attrition.
+///
+/// Deterministic and pure (mana/cost only). `nuke_cost <= 0` (a free nuke)
+/// can never be unaffordable, so the latch stays whatever it was — in practice
+/// it starts and stays `false`.
+pub fn update_oom_wand_latch(active: bool, current_mana: f32, nuke_cost: f32) -> bool {
+    if active {
+        // Hold the pull until a comfortable two-cast buffer is restored.
+        current_mana < 2.0 * nuke_cost
+    } else {
+        // Engage the pull only once the primary nuke is unaffordable.
+        current_mana < nuke_cost
+    }
+}
+
 /// Does any alive enemy carry an aura the Mage itself applied of a
 /// movement-impairing kind (Root / MovementSpeedSlow), optionally restricted to
 /// within `max_dist` of `my_pos`? Used for KITE entry (melee-range) and the
@@ -443,6 +486,7 @@ pub fn evaluate_dps_posture(
     config: &DpsMovementConfig,
     entry_trigger: bool,
     sustain: bool,
+    wand_gate: Option<WandPullGate>,
     now: f32,
     decision_trace: &mut DecisionTrace,
 ) {
@@ -453,6 +497,15 @@ pub fn evaluate_dps_posture(
         Some(p) => p,
         None => &mut local,
     };
+
+    // OOM wand latch (Mage only; the Hunter passes `wand_gate == None`, leaving
+    // the latch `false`). Fold the hysteresis into the persistent state each
+    // evaluation so it survives directive expiry. The latch is READ by
+    // `move_to_target`, which drops the Mage's pursuit stop distance to wand
+    // range while it is set — this posture machine only maintains it.
+    if let Some(gate) = wand_gate {
+        state.wand_oom = update_oom_wand_latch(state.wand_oom, gate.current_mana, gate.nuke_cost);
+    }
 
     let prev = state.posture;
 
@@ -685,9 +738,58 @@ pub fn evaluate_dps_posture(
 
 #[cfg(test)]
 mod tests {
-    use super::{is_kite_threat, seek_chase_accumulate};
+    use super::{is_kite_threat, seek_chase_accumulate, update_oom_wand_latch};
     use crate::states::play_match::match_config::CharacterClass;
     use bevy::prelude::Entity;
+
+    /// The OOM wand-pull hysteresis latch. Frostbolt costs 20 in this table:
+    /// engage below one cast (20), release only above two casts (40), and hold
+    /// across the `[20, 40)` band so the mana sawtooth of a war of attrition
+    /// doesn't strobe the pull.
+    #[test]
+    fn oom_wand_latch_enters_low_and_exits_high() {
+        const COST: f32 = 20.0;
+
+        // Inactive → active only once a nuke is unaffordable.
+        assert!(!update_oom_wand_latch(false, 25.0, COST), "affordable: stays off");
+        assert!(!update_oom_wand_latch(false, 20.0, COST), "exactly one cast: still affordable, off");
+        assert!(update_oom_wand_latch(false, 19.9, COST), "below one cast: engages");
+        assert!(update_oom_wand_latch(false, 0.0, COST), "empty: engages");
+
+        // Active → stays active across the whole hysteresis band, releasing only
+        // at the two-cast buffer.
+        assert!(update_oom_wand_latch(true, 0.0, COST), "empty: holds");
+        assert!(update_oom_wand_latch(true, 20.0, COST), "one cast recovered: still holds (in band)");
+        assert!(update_oom_wand_latch(true, 39.9, COST), "just under two casts: still holds");
+        assert!(!update_oom_wand_latch(true, 40.0, COST), "two-cast buffer restored: releases");
+        assert!(!update_oom_wand_latch(true, 50.0, COST), "comfortably above: released");
+    }
+
+    /// The band between one and two casts holds whatever state it was in — the
+    /// property that kills strobing as mana sawtooths (regen up, one cast down)
+    /// across exactly one nuke's worth.
+    #[test]
+    fn oom_wand_latch_is_sticky_in_the_hysteresis_band() {
+        const COST: f32 = 20.0;
+        for mana in [20.0f32, 25.0, 30.0, 35.0, 39.0] {
+            assert!(
+                update_oom_wand_latch(true, mana, COST),
+                "active latch holds at mana {mana} (in [cost, 2*cost))",
+            );
+            assert!(
+                !update_oom_wand_latch(false, mana, COST),
+                "inactive latch stays off at mana {mana} (in [cost, 2*cost))",
+            );
+        }
+    }
+
+    /// A free nuke (`nuke_cost <= 0`) is never unaffordable, so the latch never
+    /// engages from rest — the wand-pull can't fire spuriously if a cost is
+    /// misconfigured to zero.
+    #[test]
+    fn oom_wand_latch_never_engages_for_a_free_nuke() {
+        assert!(!update_oom_wand_latch(false, 0.0, 0.0), "free nuke never engages the latch");
+    }
 
     /// Fixed simulation step (headless `TimeUpdateStrategy::ManualDuration`).
     const DT: f32 = 1.0 / 60.0;

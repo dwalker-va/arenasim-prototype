@@ -4138,7 +4138,11 @@ mod u9_seek_reset {
     /// retiring seeds 48/54. The leaky-bucket occlusion accumulator then closed
     /// the pillar gap faster at seed 20, dropping its LosBlocked events below the
     /// vacuity floor (the fix working — fewer fizzles) so seed 20 was re-pinned to
-    /// 27. Seeds 27/24 are seeds where the enemy healer still stays behind long
+    /// 27. The OOM wand fallback (Mage closes to wand range when out of mana for
+    /// a Frostbolt) then shifted seed 24: the closer standoff sidesteps the
+    /// pillar dance it used to exercise, dropping its LosBlocked events to 0, so
+    /// seed 24 was re-pinned to 33 (391 blocks, seek + cast recovery intact).
+    /// Seeds 27/33 are seeds where the enemy healer still stays behind long
     /// enough to deny sight and drive the Mage's seek.
     fn assert_mage_repositions_and_casts(seed: u64) {
         let lines = run_traced_lines(
@@ -4182,8 +4186,8 @@ mod u9_seek_reset {
     }
 
     #[test]
-    fn mage_repositions_and_casts_despite_occlusion_seed_24() {
-        assert_mage_repositions_and_casts(24);
+    fn mage_repositions_and_casts_despite_occlusion_seed_33() {
+        assert_mage_repositions_and_casts(33);
     }
 
     /// Tight anti-stall bound at a canonical occlusion seed. Absent a persistent
@@ -5711,5 +5715,202 @@ mod medic_chase {
     #[test]
     fn medic_bounds_distressed_ally_seed_b() {
         assert_medic_bounds_distressed_ally(MEDIC_SEED_B);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Mage OOM wand-pull fallback probe
+//
+// When the Mage runs out of mana for its primary nuke (Frostbolt), its ENGAGE
+// pursuit stop distance drops to wand range so its equipped wand auto-attack
+// fires — instead of parking at preferred range (38yd), outside wand range
+// (30yd), and idling the mana refractory. Reproduced on Mage+Priest vs
+// Warrior+Shaman on PillaredArena at seed 1: after the Warrior dies (~42s the
+// diagnosis), the lone-Shaman 2v1 dragged because the Mage stood at ~36yd
+// dealing damage once per ~20s. The OOM fallback closes it to 30yd and lets
+// the wand chip fill the refractory.
+// ---------------------------------------------------------------------------
+
+mod oom_wand {
+    use super::*;
+    use arenasim::states::play_match::constants::WAND_RANGE;
+
+    /// The seed the diagnosis reproduced the lone-Shaman OOM drag on.
+    const SEED: u64 = 1;
+
+    /// One damage event parsed from the combat log: `(wall_time, is_wand)`.
+    struct MageDamage {
+        wall_time: f32,
+        is_wand: bool,
+    }
+
+    /// Parsed match: result, position timeline, the Warrior death time, and the
+    /// Mage's combat-log damage events (wall-clock; wand auto-attacks are never
+    /// traced, so they are recovered from the log).
+    struct Parsed {
+        result: MatchResult,
+        timeline: Timeline,
+        /// Warrior death time (wall clock) — the lone-Shaman 2v1 opens here.
+        warrior_death_wall: Option<f32>,
+        mage_damage: Vec<MageDamage>,
+    }
+
+    fn config() -> HeadlessMatchConfig {
+        HeadlessMatchConfig {
+            team1: vec!["Mage".into(), "Priest".into()],
+            team2: vec!["Warrior".into(), "Shaman".into()],
+            map: "PillaredArena".into(),
+            max_duration_secs: 300.0,
+            random_seed: Some(SEED),
+            ..Default::default()
+        }
+    }
+
+    /// Parse a `[  12.34s] ...` leading timestamp (wall clock) off a log line.
+    fn log_time(line: &str) -> Option<f32> {
+        let open = line.find('[')?;
+        let close = line[open..].find("s]")? + open;
+        line[open + 1..close].trim().parse::<f32>().ok()
+    }
+
+    fn run(config: HeadlessMatchConfig) -> Parsed {
+        // The OOM wand fallback is a movement mechanism (pursuit stop distance),
+        // not a traced decision — and wand auto-attacks are never traced either.
+        // So the probe recovers the Mage's damage timing from the COMBAT LOG,
+        // written to a temp `output_path`.
+        let log_tmp = tempfile::NamedTempFile::new().unwrap();
+        let log_path = log_tmp.path().to_path_buf();
+        drop(log_tmp);
+
+        let mut cfg = config;
+        cfg.output_path = Some(log_path.to_string_lossy().into_owned());
+
+        // suppress_log MUST be false so the match-end system writes the combat
+        // log to `output_path`. suppress_log gates output only, not the RNG/sim,
+        // so the outcome is identical to a suppressed run.
+        let mut timeline = Timeline::default();
+        let result = run_headless_match_observed(cfg, false, None, |frame| timeline.record(frame))
+            .expect("observed match failed");
+
+        let log_body = std::fs::read_to_string(&log_path).expect("read combat log");
+        let _ = std::fs::remove_file(&log_path);
+
+        let mut warrior_death_wall = None;
+        let mut mage_damage = Vec::new();
+        for line in log_body.lines() {
+            if warrior_death_wall.is_none()
+                && line.contains("[DEATH]")
+                && line.contains("Team 2 Warrior")
+            {
+                warrior_death_wall = log_time(line);
+            }
+            if line.contains("[DMG]") && line.contains("Team 1 Mage's") {
+                if let Some(t) = log_time(line) {
+                    mage_damage.push(MageDamage {
+                        wall_time: t,
+                        is_wand: line.contains("Wand Shot"),
+                    });
+                }
+            }
+        }
+
+        Parsed { result, timeline, warrior_death_wall, mage_damage }
+    }
+
+    fn xz_distance(a: Vec3, b: Vec3) -> f32 {
+        let (dx, dz) = (a.x - b.x, a.z - b.z);
+        (dx * dx + dz * dz).sqrt()
+    }
+
+    /// The whole fix, end to end. The lone-Shaman 2v1 must occur (vacuity
+    /// guard), the Mage must close to wand range of the Shaman within a bounded
+    /// time and land wand shots (impossible unless it went OOM and closed — at
+    /// healthy mana it parks at preferred range, 38yd, and never wands a lone
+    /// ranged target), it must deal damage through the window the mana-only
+    /// refractory previously left dead, and the 2v1 must resolve faster than the
+    /// knob-disabled baseline (71.0s combat; see the OOM findings) with headroom.
+    #[test]
+    fn mage_oom_closes_to_wand_range_and_breaks_the_dead_window() {
+        let p = run(config());
+
+        // (0) Vacuity: the lone-Shaman 2v1 actually opened.
+        let warrior_death = p
+            .warrior_death_wall
+            .expect("Warrior death not found in the combat log — no lone-Shaman 2v1 opened");
+
+        let mage = p.timeline.find(1, CharacterClass::Mage, false);
+        let shaman = p.timeline.find(2, CharacterClass::Shaman, false);
+        let mage_s = p.timeline.samples.get(&mage).cloned().unwrap_or_default();
+        let shaman_s = p.timeline.samples.get(&shaman).cloned().unwrap_or_default();
+        // Post-death samples where both are alive (the lone-Shaman dance).
+        let lone: Vec<(f32, Vec3, Vec3)> = {
+            let mut out = Vec::new();
+            let (mut i, mut j) = (0usize, 0usize);
+            while i < mage_s.len() && j < shaman_s.len() {
+                let (tm, pm) = mage_s[i];
+                let (ts, ps) = shaman_s[j];
+                if (tm - ts).abs() < 1e-4 {
+                    if tm >= warrior_death {
+                        out.push((tm, pm, ps));
+                    }
+                    i += 1;
+                    j += 1;
+                } else if tm < ts {
+                    i += 1;
+                } else {
+                    j += 1;
+                }
+            }
+            out
+        };
+        assert_min_occurrences("lone-Shaman (Mage,Shaman) samples", lone.len(), 200);
+
+        // (a) The Mage closes to within wand range of the lone Shaman, within a
+        // bounded time of the 2v1 opening — the whole point is to stop parking at
+        // preferred range (38yd) outside wand range (30yd). The Mage may burn its
+        // last mana first, so the bound is generous relative to the Warrior death.
+        let first_in_range = lone
+            .iter()
+            .find(|(_, pm, ps)| xz_distance(*pm, *ps) <= WAND_RANGE + 0.5)
+            .map(|(t, _, _)| *t);
+        let reached = first_in_range
+            .unwrap_or_else(|| panic!("Mage never reached wand range of the lone Shaman"));
+        assert!(
+            reached - warrior_death <= 20.0,
+            "Mage took {:.1}s after the 2v1 opened to reach wand range (> 20s bound)",
+            reached - warrior_death
+        );
+
+        // (b) The Mage deals damage — wand chip included — through the
+        // lone-Shaman window the mana-only refractory previously left dead.
+        // Before the fix this window held ~5 Mage damage events (with a ~20s dead
+        // tail) and ZERO wand shots (it parked out of wand range).
+        let post: Vec<&MageDamage> =
+            p.mage_damage.iter().filter(|d| d.wall_time >= warrior_death).collect();
+        let wand_shots = post.iter().filter(|d| d.is_wand).count();
+        // Floors sit between the disabled baseline (0 wand shots, ~5 total
+        // events) and the fixed run (7 wand shots, ~11 total events) with
+        // headroom on both sides. The wand-shot floor is also the OOM proof:
+        // a healthy-mana Mage never wands a lone ranged target.
+        assert!(
+            wand_shots >= 4,
+            "Mage landed only {wand_shots} wand shots in the lone-Shaman window — the OOM \
+             fallback is not closing it to wand range (baseline: 0)"
+        );
+        assert!(
+            post.len() >= 9,
+            "Mage dealt only {} damage events in the lone-Shaman window — the dead refractory \
+             was not filled (baseline: ~5)",
+            post.len()
+        );
+
+        // Outcome proxy: the 2v1 resolves for team 1, faster than the
+        // knob-disabled baseline (71.0s combat) with headroom.
+        assert_eq!(p.result.winner, Some(1), "team 1 (Mage+Priest) should win the 2v1");
+        assert!(
+            p.result.match_time < 68.0,
+            "2v1 took {:.1}s combat — no faster than the OOM-idle baseline (71.0s)",
+            p.result.match_time
+        );
     }
 }

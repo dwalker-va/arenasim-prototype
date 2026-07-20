@@ -127,7 +127,7 @@
             threat_repulsion: 3.0,
             formation_pull: 0.0,   // Mage has no backline formation point
             corner_penalty: 4.0,
-            wand_pull: 0.0,        // Mage has no wand
+            wand_pull: 0.0,        // Unused by the Mage scorer. The Mage HAS a wand (WandOfShadows) and DOES fall back to it when out of mana — but via the pursuit stop-distance (move_to_target drops to wand range while KitePosture.wand_oom is latched), NOT this orbit-scorer term, whose LoS-preserving meander is slow to corner a juking target
             range_band: 2.0,       // ring attraction toward the kill target
             commitment_bonus: 1.5,
             los_seek: 2.0,         // Orbit to a sighted angle when occluded in cast range (matches range_band so LoS and distance trade evenly); obstacle maps only

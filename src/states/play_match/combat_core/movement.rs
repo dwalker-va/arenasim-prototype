@@ -3,7 +3,8 @@
 use bevy::prelude::*;
 use super::super::components::*;
 use super::clamp_to_arena;
-use super::super::{MELEE_RANGE, DISENGAGE_SPEED};
+use super::super::match_config::CharacterClass;
+use super::super::{MELEE_RANGE, WAND_RANGE, DISENGAGE_SPEED};
 use super::super::map_config::ActiveMapGeometry;
 use super::super::map_geometry::{resolve_movement, ObstacleVolume};
 
@@ -29,6 +30,10 @@ pub fn move_to_target(
     mut combatants: Query<(Entity, &mut Transform, &Combatant, Option<&ActiveAuras>, Option<&CastingState>, Option<&ChargingState>, Option<&ChannelingState>, Option<&DisengagingState>, Option<&MovementDirective>)>,
     orbs: Query<&Transform, (With<ShadowSightOrb>, Without<Combatant>)>,
     pet_query: Query<&Pet>,
+    // OOM wand-fallback latch (Mage): when set, the Mage's ENGAGE pursuit stops
+    // at wand range instead of its Frostbolt-safe preferred range so the wand
+    // auto-attack fires. Read-only; owned/updated by `evaluate_dps_posture`.
+    kite_query: Query<&KitePosture>,
     map_geometry: Res<ActiveMapGeometry>,
 ) {
     // Don't allow movement until gates open
@@ -379,6 +384,17 @@ pub fn move_to_target(
         // Use class-specific preferred range, or pet-type preferred range for pets
         let stop_distance = if let Ok(pet) = pet_query.get(entity) {
             pet.pet_type.preferred_range()
+        } else if combatant.class == CharacterClass::Mage
+            && kite_query.get(entity).map(|k| k.wand_oom).unwrap_or(false)
+        {
+            // Out-of-mana Mage wand fallback: close to wand range (30) instead
+            // of the Frostbolt-safe preferred range (38, outside wand range) so
+            // the equipped wand auto-attack fires and chips the kill target
+            // through the mana refractory. The latch has hysteresis (see
+            // `update_oom_wand_latch`), so this standoff does not strobe 38<->30
+            // as mana sawtooths across one Frostbolt's worth. Inert at healthy
+            // mana (latch false) — pursuit is byte-identical there.
+            WAND_RANGE
         } else {
             combatant.class.preferred_range()
         };

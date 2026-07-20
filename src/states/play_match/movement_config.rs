@@ -406,8 +406,12 @@ impl Default for DpsMovementConfig {
             weights: MovementWeights {
                 // Kiter profile: strong repulsion, ring attraction on, no
                 // healer terms (formation/wand) and a light corner penalty.
-                // `flee` defaults off (Mage orbits a rooted target); the Hunter
-                // block in movement.ron turns it up for distance-max kiting.
+                // The Mage's out-of-mana wand fallback is NOT a scorer term —
+                // it drops the pursuit stop distance to wand range
+                // (move_to_target reads KitePosture.wand_oom), which corners a
+                // juking target far better than an orbit-scorer pull. `flee`
+                // defaults off (Mage orbits a rooted target); the Hunter block
+                // in movement.ron turns it up for distance-max kiting.
                 threat_repulsion: 3.0,
                 formation_pull: 0.0,
                 flee: 0.0,

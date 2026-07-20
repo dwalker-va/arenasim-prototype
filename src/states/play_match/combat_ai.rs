@@ -730,6 +730,16 @@ pub fn decide_abilities(
                         let entry = class_ai::dps_postures::mage_kite_entry(&ctx, entity, my_pos);
                         let sustain =
                             class_ai::dps_postures::mage_kite_sustain(&ctx, entity, my_pos, cfg.range_band_max);
+                        // OOM wand-pull gate: pull to wand range once the Mage
+                        // can't afford a Frostbolt, so its wand auto-attack fires
+                        // instead of idling the mana refractory. Cost read from
+                        // config, never hardcoded.
+                        let wand_gate = Some(class_ai::dps_postures::WandPullGate {
+                            current_mana: combatant.current_mana,
+                            nuke_cost: abilities
+                                .get_unchecked(&AbilityType::Frostbolt)
+                                .mana_cost,
+                        });
                         class_ai::dps_postures::evaluate_dps_posture(
                             &mut commands,
                             entity,
@@ -741,6 +751,7 @@ pub fn decide_abilities(
                             cfg,
                             entry,
                             sustain,
+                            wand_gate,
                             time.elapsed_secs(),
                             &mut decision_trace,
                         );
@@ -1012,6 +1023,9 @@ pub fn decide_abilities(
                                 cfg,
                                 entry,
                                 sustain,
+                                // No wand gate: the Hunter has no wand and shoots,
+                                // it doesn't fall back to a wand when OOM.
+                                None,
                                 time.elapsed_secs(),
                                 &mut decision_trace,
                             );

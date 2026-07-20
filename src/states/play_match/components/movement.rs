@@ -205,6 +205,15 @@ pub struct KitePosture {
     /// live dip. While a dip is live the Hunter arm skips the ENGAGE/KITE
     /// evaluation so the dip directive owns movement.
     pub dip_until: f32,
+    /// OOM wand-pull hysteresis latch (Mage only). `true` while the Mage is
+    /// out of mana for its primary nuke and should pull toward wand range so
+    /// its equipped wand auto-attack can fire. Set/cleared by
+    /// `update_oom_wand_latch` (enter when a Frostbolt is unaffordable, exit
+    /// only once a two-cast buffer is restored — hysteresis against strobing as
+    /// mana crosses exactly one nuke's worth). Always `false` for the Hunter
+    /// (its arm passes no wand gate) and for a healthy-mana Mage, keeping
+    /// healthy-mana movement byte-identical.
+    pub wand_oom: bool,
 }
 
 /// Persistent melee "tempo reset" state (Warrior). When a melee's go is
@@ -238,6 +247,7 @@ impl KitePosture {
             occluded_target: None,
             dip_target: None,
             dip_until: 0.0,
+            wand_oom: false,
         }
     }
 
