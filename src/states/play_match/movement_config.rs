@@ -377,7 +377,27 @@ pub struct DpsMovementConfig {
     /// occluded). `0.0` disables the chase (the kiter keeps orbit-seeking). No
     /// effect on obstacle-free maps — sight never breaks, so the timer never
     /// arms.
+    ///
+    /// With the leaky-bucket accumulator (`seek_chase_decay`) this is the
+    /// ARM THRESHOLD in accumulated occlusion units: the chase arms once the
+    /// occlusion accumulator (fills at 1.0/sec while occluded, drains at
+    /// `seek_chase_decay`/sec while sighted) reaches this value. For a target
+    /// under continuous occlusion the accumulator fills at 1.0/sec, so this is
+    /// still "seconds of continuous occlusion" — the static pillar-hug case is
+    /// unchanged. Intermittent jukes (occlude mid-cast, flash back between
+    /// casts) now accrue toward the threshold instead of resetting each flicker.
     pub seek_chase_timeout: f32,
+    /// Leaky-bucket drain rate (occlusion units/sec) for the occlusion
+    /// accumulator while the kiter has line of sight to its kill target. The
+    /// accumulator fills at a fixed 1.0/sec while occluded and drains at this
+    /// rate while sighted, clamped at 0. Lower = the accumulator "remembers"
+    /// occlusion longer across sight flickers (a juking target still arms the
+    /// chase); higher = flickers bleed it off faster. `0.0` = never drains
+    /// (once the threshold is crossed the chase stays armed until a target
+    /// change/death resets it). A value `>= 1.0` drains at least as fast as it
+    /// fills, effectively restoring continuous-only arming semantics. Must be
+    /// non-negative and finite.
+    pub seek_chase_decay: f32,
 }
 
 impl Default for DpsMovementConfig {
@@ -407,7 +427,8 @@ impl Default for DpsMovementConfig {
             kite_entry_radius: 20.0,   // Hunter closing-range band
             kite_sustain_radius: 24.0, // hold a touch past entry
             dip_budget: 0.0,           // Mage default off; Hunter ron turns it on
-            seek_chase_timeout: 3.5,   // abandon orbit-seek → direct chase after this many occluded seconds
+            seek_chase_timeout: 3.5,   // accumulated occlusion units before the chase arms
+            seek_chase_decay: 0.5,     // drains this per sighted second (< fill, so jukes still accrue)
         }
     }
 }
@@ -630,6 +651,15 @@ impl MovementConfig {
                     m.seek_chase_timeout
                 ));
             }
+            // Leaky-bucket drain rate: non-negative and finite (0.0 = never
+            // drains, permanent arm once the threshold is crossed).
+            if m.seek_chase_decay < 0.0 || !m.seek_chase_decay.is_finite() {
+                issues.push(format!(
+                    "{class}.seek_chase_decay ({}) must be non-negative and finite \
+                     (0.0 = never drains)",
+                    m.seek_chase_decay
+                ));
+            }
         }
 
         if issues.is_empty() {
@@ -845,6 +875,11 @@ mod tests {
         // (re-opening the pillar-hug stall) is caught.
         assert_eq!(config.mage.seek_chase_timeout, 3.5, "mage.seek_chase_timeout");
         assert_eq!(config.hunter.seek_chase_timeout, 3.5, "hunter.seek_chase_timeout");
+        // Leaky-bucket drain rate: both kiters ship at 0.5/sec (below the 1.0/sec
+        // fill, so a juking target still accrues occlusion toward the arm
+        // threshold). Pinned so an accidental RON edit is caught.
+        assert_eq!(config.mage.seek_chase_decay, 0.5, "mage.seek_chase_decay");
+        assert_eq!(config.hunter.seek_chase_decay, 0.5, "hunter.seek_chase_decay");
         // Deny-posture weights: healers cover, DPS kiters do not. Each stays
         // below its block's threat_repulsion so denial shapes the retreat
         // without overriding escape.

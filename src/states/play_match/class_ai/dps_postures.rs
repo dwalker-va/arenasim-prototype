@@ -26,15 +26,16 @@ use crate::states::play_match::combat_core::{
     compass_directions_16, mask_and_los_bitmask, score_directions, RangeBand, ScorerInputs,
 };
 use crate::states::play_match::components::{
-    AuraType, DpsPosture, KitePosture, MovementDirective, MovementGoal,
+    AuraType, Combatant, DpsPosture, KitePosture, MatchCountdown, MovementDirective, MovementGoal,
 };
 use crate::states::play_match::constants::MELEE_RANGE;
-use crate::states::play_match::map_geometry::{has_line_of_sight, EYE_HEIGHT};
+use crate::states::play_match::map_config::ActiveMapGeometry;
+use crate::states::play_match::map_geometry::{has_line_of_sight, ObstacleVolume, EYE_HEIGHT};
 use crate::states::play_match::match_config::CharacterClass;
 use crate::states::play_match::decision_trace::{
     ActorView, DecisionTrace, MovementGoalKind, MovementTrigger, Posture as TracePosture,
 };
-use crate::states::play_match::movement_config::DpsMovementConfig;
+use crate::states::play_match::movement_config::{DpsMovementConfig, MovementConfig};
 
 use super::CombatContext;
 
@@ -194,52 +195,151 @@ fn should_seek_los(
     let Some(info) = kill_target.and_then(|t| ctx.combatants.get(&t)) else {
         return false;
     };
-    if !info.is_alive {
-        return false;
-    }
-    if my_pos.distance(info.position) > my_class.preferred_range() {
-        return false; // pursuit closes the gap and clears the pillar on its own
-    }
-    let my_eye = Vec3::new(my_pos.x, EYE_HEIGHT, my_pos.z);
-    let tgt_eye = Vec3::new(info.position.x, EYE_HEIGHT, info.position.z);
-    // Occluded from an in-range kill target → reposition to regain sight.
-    !has_line_of_sight(ctx.obstacles, my_eye, tgt_eye)
+    occluded_in_range(ctx.obstacles, my_pos, my_class, info.position, info.is_alive)
 }
 
-/// Occlusion-timeout chase arm/reset/decide seam (pure, unit-tested).
+/// Occluded-in-shot-range test from raw primitives (no `CombatContext`). Shared
+/// by `should_seek_los` (ctx-based, ability pass) and `tick_kite_occlusion`
+/// (per-frame accumulator, which has no snapshot). True when the kill target is
+/// alive, within the kiter's preferred (idle/shot) range, and NOT in line of
+/// sight — the R10 stall where a kiter stands in range yet every cast is
+/// LoS-blocked. False when dead, beyond preferred range (pursuit closes the gap
+/// and the collision resolver slides around the pillar), or sighted. Always
+/// false on obstacle-free maps: sight holds, so nothing is ever occluded.
+fn occluded_in_range(
+    obstacles: &[ObstacleVolume],
+    my_pos: Vec3,
+    my_class: CharacterClass,
+    target_pos: Vec3,
+    target_alive: bool,
+) -> bool {
+    if !target_alive {
+        return false;
+    }
+    if my_pos.distance(target_pos) > my_class.preferred_range() {
+        return false;
+    }
+    let my_eye = Vec3::new(my_pos.x, EYE_HEIGHT, my_pos.z);
+    let tgt_eye = Vec3::new(target_pos.x, EYE_HEIGHT, target_pos.z);
+    !has_line_of_sight(obstacles, my_eye, tgt_eye)
+}
+
+/// Leaky-bucket occlusion accumulator update (pure, unit-tested).
 ///
-/// `seeking` is the in-shot-range-and-occluded stall signal (`should_seek_los`),
-/// which already folds in "target alive" and "target in range" — so a dead
-/// target, an out-of-range target, or regained sight all present as
-/// `seeking == false`. Given the previous continuous-occlusion clock
-/// (`prev_since`) and the target that clock was tracking (`prev_target`),
-/// returns the updated `(occluded_since, chase)`:
-/// - `seeking == false` → reset the clock (`None`), never chase.
-/// - `seeking == true`, target changed → restart the clock at `now` (a swap must
-///   re-earn the timeout even if the new target is also occluded).
-/// - `seeking == true`, same target → keep the clock; chase once it has run for
-///   `timeout` seconds.
+/// The chase's arm signal. Replaces the old continuous-occlusion clock: instead
+/// of requiring UNBROKEN occlusion, occlusion accrues into a bucket that fills
+/// while occluded and drains (sub-fill) while sighted, so an intermittently
+/// juking target — occlude mid-cast, flash back between casts — still ratchets
+/// toward the arm threshold rather than resetting on every flicker.
 ///
-/// `timeout == 0.0` disables the chase (the kiter keeps orbit-seeking). The
-/// caller stores `occluded_target = kill_target` when `seeking`, else `None`.
-fn seek_chase_decision(
-    prev_since: Option<f32>,
+/// `occluded` is the in-shot-range-and-occluded signal (`occluded_in_range`),
+/// which already folds in "target alive" and "target in range" — a dead target,
+/// an out-of-range target, or regained sight all present as `occluded == false`.
+/// `kill_target` is the current LIVING kill target (the caller passes `None`
+/// when there is no living target, which resets the bucket and unbinds).
+///
+/// Given the previous bucket (`prev_accum`) and the target it was bound to
+/// (`prev_target`), returns the updated `(accum, bound_target)`:
+/// - `kill_target == None` → reset to 0, unbind.
+/// - target changed from the bound target → reset to 0 first (the swapped-to
+///   target must re-earn the threshold), then apply this frame's fill/drain.
+/// - `occluded` → fill by `dt` (a fixed 1.0/sec).
+/// - sighted / out of range → drain by `decay * dt`, clamped at 0.
+///
+/// The caller ARMS the chase when the returned `accum >= timeout`
+/// (`timeout == 0.0` disables the chase). Under CONTINUOUS occlusion the bucket
+/// fills at 1.0/sec, so it arms at exactly `timeout` seconds — the static
+/// pillar-hug case is byte-identical to the old clock. `decay == 0.0` never
+/// drains (permanent arm once crossed); `decay >= 1.0` drains at least as fast
+/// as it fills, restoring continuous-only arming.
+fn seek_chase_accumulate(
+    prev_accum: f32,
     prev_target: Option<Entity>,
     kill_target: Option<Entity>,
-    seeking: bool,
-    now: f32,
-    timeout: f32,
-) -> (Option<f32>, bool) {
-    if !seeking {
-        return (None, false);
-    }
-    let since = if prev_target != kill_target {
-        now // target swap (or first arm) restarts the continuous-occlusion clock
-    } else {
-        prev_since.unwrap_or(now)
+    occluded: bool,
+    dt: f32,
+    decay: f32,
+) -> (f32, Option<Entity>) {
+    let Some(target) = kill_target else {
+        return (0.0, None); // no living target → reset + unbind
     };
-    let chase = timeout > 0.0 && now - since >= timeout;
-    (Some(since), chase)
+    // A target swap (or first bind) resets the bucket so the new target re-earns
+    // the threshold even if it is also occluded.
+    let base = if prev_target == Some(target) { prev_accum } else { 0.0 };
+    let accum = if occluded {
+        base + dt
+    } else {
+        (base - decay * dt).max(0.0)
+    };
+    (accum.max(0.0), Some(target))
+}
+
+/// Per-frame occlusion accumulator tick — the SOLE owner of
+/// `KitePosture::occlusion_accum` / `occluded_target`. Runs every frame for
+/// every living Mage/Hunter kiter REGARDLESS of casting state, so the mid-cast
+/// juke (which the `Without<CastingState>` ability-decision query never sees) is
+/// still observed and accrued. `evaluate_dps_posture` only READS the bucket to
+/// decide whether the chase is armed.
+///
+/// Gated on gates-open (no pre-match accrual). Deterministic: uses fixed-step
+/// `Time::delta_secs` and a `BTreeMap`-free direct target lookup. Provable no-op
+/// on obstacle-free maps — `occluded_in_range` is always false there, so the
+/// bucket only ever drains toward 0 and the chase never arms. A kiter without a
+/// `KitePosture` yet (before its first ENGAGE evaluation inserts one) is simply
+/// not matched by the query; the component lands before its first cast, so the
+/// juke window is always covered.
+pub fn tick_kite_occlusion(
+    countdown: Res<MatchCountdown>,
+    time: Res<Time>,
+    movement_config: Res<MovementConfig>,
+    map_geometry: Res<ActiveMapGeometry>,
+    mut kiters: Query<(&Transform, &Combatant, &mut KitePosture)>,
+    others: Query<(&Transform, &Combatant)>,
+) {
+    if !countdown.gates_opened {
+        return;
+    }
+    let dt = time.delta_secs();
+    let now = time.elapsed_secs();
+
+    for (transform, combatant, mut kite) in kiters.iter_mut() {
+        if !combatant.is_alive() {
+            continue;
+        }
+        let cfg = match combatant.class {
+            CharacterClass::Mage => &movement_config.mage,
+            CharacterClass::Hunter => &movement_config.hunter,
+            _ => continue, // only the two kiter classes carry a bucket
+        };
+        // While a Hunter Freezing-Trap dip owns movement, the ENGAGE/KITE
+        // machine is skipped, so the chase can't fire; freeze the bucket rather
+        // than accrue dip-walk occlusion into it.
+        if kite.dipping(now) {
+            continue;
+        }
+
+        let my_pos = transform.translation;
+        // Resolve the LIVING kill target's position, if any.
+        let target = combatant
+            .target
+            .and_then(|t| others.get(t).ok().map(|(tf, c)| (t, tf.translation, c.is_alive())))
+            .filter(|(_, _, alive)| *alive);
+        let kill_target = target.map(|(e, _, _)| e);
+        let occluded = target.is_some_and(|(_, tpos, alive)| {
+            occluded_in_range(&map_geometry.volumes, my_pos, combatant.class, tpos, alive)
+        });
+
+        let (accum, bound) = seek_chase_accumulate(
+            kite.occlusion_accum,
+            kite.occluded_target,
+            kill_target,
+            occluded,
+            dt,
+            cfg.seek_chase_decay,
+        );
+        kite.occlusion_accum = accum;
+        kite.occluded_target = bound;
+    }
 }
 
 /// `los_seek` contribution of the winning direction: the weight when the
@@ -399,22 +499,17 @@ pub fn evaluate_dps_posture(
         // on obstacle-free maps (never occluded).
         let seeking = should_seek_los(ctx, entity, my_pos, kill_target);
 
-        // Occlusion-timeout direct chase: track how long the seek stall has
-        // persisted (updated every tick, before the recommit gate). When it
-        // exceeds `seek_chase_timeout`, orbit-seeking (a greedy per-step
-        // `los_seek` with no gradient once every candidate is occluded) is
-        // abandoned in favor of walking straight at the target — the collision
-        // resolver slides the chaser around the pillar until sight returns.
-        let (occluded_since, chase) = seek_chase_decision(
-            state.occluded_since,
-            state.occluded_target,
-            kill_target,
-            seeking,
-            now,
-            config.seek_chase_timeout,
-        );
-        state.occluded_since = occluded_since;
-        state.occluded_target = if seeking { kill_target } else { None };
+        // Occlusion-chase arm: READ the leaky-bucket accumulator that
+        // `tick_kite_occlusion` fills every frame (including mid-cast). The
+        // chase is armed once the bucket reaches `seek_chase_timeout`; it fires
+        // only while ALSO currently occluded (`seeking`). Armed-but-sighted
+        // proceeds to normal ENGAGE casting — each chase leg ratchets range
+        // down, so the kiter casts from progressively closer as sight returns.
+        // The bucket itself is the hysteresis; no extra latch. This branch does
+        // NOT mutate the accumulator — `tick_kite_occlusion` owns it.
+        let armed = config.seek_chase_timeout > 0.0
+            && state.occlusion_accum >= config.seek_chase_timeout;
+        let chase = armed && seeking;
 
         if !seeking {
             if directive.is_some() {
@@ -590,55 +685,153 @@ pub fn evaluate_dps_posture(
 
 #[cfg(test)]
 mod tests {
-    use super::{is_kite_threat, seek_chase_decision};
+    use super::{is_kite_threat, seek_chase_accumulate};
     use crate::states::play_match::match_config::CharacterClass;
     use bevy::prelude::Entity;
 
-    /// The occlusion-timeout chase arm/reset/decide seam. Covers: arm-and-hold
-    /// until the timeout, fire at/after it, reset on regained sight, reset on a
-    /// dead/out-of-range target (both surface as `seeking == false`), restart on
-    /// a target swap, and the `0.0` = disabled convention.
+    /// Fixed simulation step (headless `TimeUpdateStrategy::ManualDuration`).
+    const DT: f32 = 1.0 / 60.0;
+    /// Shipped arm threshold (occlusion units) and drain rate.
+    const TIMEOUT: f32 = 3.5;
+    const DECAY: f32 = 0.5;
+
+    /// Fill / drain / clamp / reset-on-target-change / reset-on-death for the
+    /// pure leaky-bucket accumulator.
     #[test]
-    fn seek_chase_decision_arms_fires_and_resets() {
+    fn seek_chase_accumulate_fills_drains_and_resets() {
         let t0 = Entity::from_raw(7);
         let t1 = Entity::from_raw(9);
-        let timeout = 3.5;
 
-        // First occluded tick: arm the clock at `now`, do not chase yet.
-        let (since, chase) = seek_chase_decision(None, None, Some(t0), true, 10.0, timeout);
-        assert_eq!(since, Some(10.0), "clock arms at the first occluded tick");
-        assert!(!chase, "no chase before the timeout elapses");
+        // First occluded frame: bind + fill by dt.
+        let (accum, bound) = seek_chase_accumulate(0.0, None, Some(t0), true, DT, DECAY);
+        assert!((accum - DT).abs() < 1e-6, "fills by dt on the first occluded frame");
+        assert_eq!(bound, Some(t0), "binds to the occluded target");
 
-        // Still occluded, same target, before the timeout: hold, no chase.
-        let (since, chase) =
-            seek_chase_decision(Some(10.0), Some(t0), Some(t0), true, 13.0, timeout);
-        assert_eq!(since, Some(10.0), "clock persists while continuously occluded");
-        assert!(!chase, "3.0s < 3.5s timeout — still no chase");
+        // Occluded, same target: keeps filling by dt.
+        let (accum, bound) = seek_chase_accumulate(1.0, Some(t0), Some(t0), true, DT, DECAY);
+        assert!((accum - (1.0 + DT)).abs() < 1e-6, "continues filling while occluded");
+        assert_eq!(bound, Some(t0));
 
-        // Timeout reached: chase, clock unchanged.
-        let (since, chase) =
-            seek_chase_decision(Some(10.0), Some(t0), Some(t0), true, 13.5, timeout);
-        assert_eq!(since, Some(10.0));
-        assert!(chase, "occluded for exactly the timeout → chase");
+        // Sighted, same target: drains by decay*dt (does NOT reset — survives a
+        // sight flicker, the whole point of the bucket).
+        let (accum, bound) = seek_chase_accumulate(1.0, Some(t0), Some(t0), false, DT, DECAY);
+        assert!((accum - (1.0 - DECAY * DT)).abs() < 1e-6, "drains by decay*dt while sighted");
+        assert_eq!(bound, Some(t0), "a sight flicker does not unbind");
 
-        // Sight regained (seeking == false, e.g. LoS clear / target dead / out
-        // of range): reset the clock, never chase.
-        let (since, chase) =
-            seek_chase_decision(Some(10.0), Some(t0), Some(t0), false, 14.0, timeout);
-        assert_eq!(since, None, "regained sight / lost target resets the clock");
-        assert!(!chase);
+        // Drain clamps at 0 (never negative).
+        let (accum, _) = seek_chase_accumulate(0.0, Some(t0), Some(t0), false, DT, DECAY);
+        assert_eq!(accum, 0.0, "drain clamps at 0");
 
-        // Target swap while still occluded: restart the clock, do not chase on
-        // the swap tick even though the old clock had aged past the timeout.
-        let (since, chase) =
-            seek_chase_decision(Some(10.0), Some(t0), Some(t1), true, 15.0, timeout);
-        assert_eq!(since, Some(15.0), "a target swap restarts the continuous-occlusion clock");
-        assert!(!chase, "the swapped-to target must re-earn the timeout");
+        // Target swap: reset to 0, then this frame's fill applies to the new
+        // target — the swapped-to target re-earns the threshold from scratch.
+        let (accum, bound) = seek_chase_accumulate(3.0, Some(t0), Some(t1), true, DT, DECAY);
+        assert!((accum - DT).abs() < 1e-6, "a target swap resets the bucket to 0 before filling");
+        assert_eq!(bound, Some(t1));
 
-        // `0.0` disables the chase even when occluded far past any window.
-        let (_since, chase) =
-            seek_chase_decision(Some(0.0), Some(t0), Some(t0), true, 100.0, 0.0);
-        assert!(!chase, "seek_chase_timeout == 0.0 disables the direct chase");
+        // No living target (death / none): reset to 0 and unbind.
+        let (accum, bound) = seek_chase_accumulate(3.4, Some(t0), None, false, DT, DECAY);
+        assert_eq!(accum, 0.0, "a dead/absent kill target resets the bucket");
+        assert_eq!(bound, None, "and unbinds");
+    }
+
+    /// Continuous occlusion arms at EXACTLY `TIMEOUT` seconds — byte-identical
+    /// to the old continuous clock's "3.5 uninterrupted seconds", proving the
+    /// static pillar-hug case is unchanged.
+    #[test]
+    fn continuous_occlusion_arms_at_timeout_like_the_old_clock() {
+        let t = Entity::from_raw(3);
+        let mut accum = 0.0f32;
+        let mut prev = None;
+        let mut frames_to_arm = None;
+        // 5 simulated seconds of unbroken occlusion.
+        for frame in 1..=300 {
+            let (a, b) = seek_chase_accumulate(accum, prev, Some(t), true, DT, DECAY);
+            accum = a;
+            prev = b;
+            if frames_to_arm.is_none() && accum >= TIMEOUT {
+                frames_to_arm = Some(frame);
+            }
+        }
+        let armed_at = frames_to_arm.expect("continuous occlusion must arm");
+        // 3.5s / (1/60) = 210 frames ideally; summing 1/60 in f32 crosses 3.5 on
+        // frame 211 (the old clock compared f32 `elapsed_secs` deltas, so it
+        // rounds through the exact same path) — the static case is unchanged.
+        assert!(
+            (210..=211).contains(&armed_at),
+            "continuous fill arms at ~3.5s (210–211 frames), like the clock; got {armed_at}",
+        );
+    }
+
+    /// Run a fill/drain cadence frame-by-frame; return the frame at which the
+    /// bucket first reaches `TIMEOUT`, or `None` if it never arms over `secs`.
+    /// `segments` is `[(occluded, seconds), ...]` repeated to fill the horizon.
+    fn frames_to_arm(segments: &[(bool, f32)], decay: f32, secs: f32) -> Option<usize> {
+        let t = Entity::from_raw(1);
+        let total = (secs / DT) as usize;
+        let mut accum = 0.0f32;
+        let mut prev = None;
+        // Build a per-frame occluded schedule by repeating the cadence.
+        let mut schedule: Vec<bool> = Vec::new();
+        while schedule.len() < total {
+            for &(occ, dur) in segments {
+                for _ in 0..((dur / DT).round() as usize) {
+                    schedule.push(occ);
+                }
+            }
+        }
+        for (frame, &occ) in schedule.iter().take(total).enumerate() {
+            let (a, b) = seek_chase_accumulate(accum, prev, Some(t), occ, DT, decay);
+            accum = a;
+            prev = b;
+            if accum >= TIMEOUT {
+                return Some(frame + 1);
+            }
+        }
+        None
+    }
+
+    /// The observed mid-cast juke cadence: ~1.5s occluded (a Frostbolt started
+    /// sighted, juked mid-cast) then ~1.5s sighted (the flash-back between
+    /// casts). Table-driven over a few plausible sighted gaps.
+    ///
+    /// - At the shipped `decay = 0.5` (drain < fill) the bucket ratchets up and
+    ///   arms within a handful of cycles — the fix.
+    /// - Under a drain fast enough to EMPTY the bucket during each sighted gap
+    ///   (the analog of the old clock's reset-on-flicker) the same cadence NEVER
+    ///   arms: each 1.5s occluded segment alone is below the 3.5s threshold and
+    ///   nothing carries across the gap — exactly the failure the old continuous
+    ///   clock exhibited on a juking target, and precisely what the sub-fill
+    ///   drain fixes.
+    #[test]
+    fn juke_cadence_arms_at_shipped_decay_but_never_when_flicker_empties_the_bucket() {
+        // Net per cycle at decay 0.5 = 1.5 - 0.5*gap > 0 for every gap here, so
+        // the bucket ratchets up regardless of the exact between-cast gap.
+        let cases = [1.0f32, 1.5, 2.0];
+        for gap in cases {
+            let cadence = [(true, 1.5f32), (false, gap)];
+
+            // decay 0.5: arms within a handful of cycles (each cycle is
+            // 1.5+gap s; a "handful" ≤ 8 cycles even at the widest gap).
+            let armed = frames_to_arm(&cadence, 0.5, 300.0)
+                .unwrap_or_else(|| panic!("gap {gap}: juke must arm at decay 0.5"));
+            let cycle_secs = 1.5 + gap;
+            let cycles = armed as f32 * DT / cycle_secs;
+            assert!(
+                cycles <= 8.0,
+                "gap {gap}: armed after {:.1} juke cycles (> 8) — not a handful",
+                cycles
+            );
+
+            // A very large drain empties the bucket well within any sighted gap,
+            // so occlusion never carries across a flicker — the reset-on-flicker
+            // behavior of the old clock. Each 1.5s occluded window < 3.5s → never
+            // arms.
+            assert_eq!(
+                frames_to_arm(&cadence, 100.0, 300.0),
+                None,
+                "gap {gap}: a flicker-emptying drain must never arm on a juking target",
+            );
+        }
     }
 
     /// Regression guard for the melee-only kite filter: the Hunter kites ONLY

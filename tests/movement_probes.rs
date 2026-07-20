@@ -4135,8 +4135,11 @@ mod u9_seek_reset {
     /// turned the enemy Priest's LoS denial OFF whenever its team leads (retiring
     /// seeds 3, 7), and the medic chase (fix 1) shifts PillaredArena trajectories
     /// so the enemy Priest is pulled around pillars toward its dying Warrior,
-    /// retiring seeds 48/54. Seeds 20/24 are seeds where the enemy healer still
-    /// stays behind long enough to deny sight and drive the Mage's seek.
+    /// retiring seeds 48/54. The leaky-bucket occlusion accumulator then closed
+    /// the pillar gap faster at seed 20, dropping its LosBlocked events below the
+    /// vacuity floor (the fix working — fewer fizzles) so seed 20 was re-pinned to
+    /// 27. Seeds 27/24 are seeds where the enemy healer still stays behind long
+    /// enough to deny sight and drive the Mage's seek.
     fn assert_mage_repositions_and_casts(seed: u64) {
         let lines = run_traced_lines(
             vec!["Mage", "Priest"],
@@ -4174,8 +4177,8 @@ mod u9_seek_reset {
     }
 
     #[test]
-    fn mage_repositions_and_casts_despite_occlusion_seed_20() {
-        assert_mage_repositions_and_casts(20);
+    fn mage_repositions_and_casts_despite_occlusion_seed_27() {
+        assert_mage_repositions_and_casts(27);
     }
 
     #[test]
@@ -4186,24 +4189,24 @@ mod u9_seek_reset {
     /// Tight anti-stall bound at a canonical occlusion seed. Absent a persistent
     /// enemy-healer juke, an occluded Mage recovers to a cast quickly: the
     /// longest contiguous LosBlocked run is well under 10 sim-seconds. Seed
-    /// re-pinned to 20 (seeds 7/48 no longer occlude after press-when-ahead and
-    /// the medic chase reshaped trajectories — see
-    /// `assert_mage_repositions_and_casts`); seed 20 keeps the enemy healer
-    /// denying while staying inside the bound (observed longest run ~2.9s).
+    /// re-pinned to 27 (seed 20 dropped below the occlusion floor once the
+    /// leaky-bucket chase closed the pillar gap faster — see
+    /// `assert_mage_repositions_and_casts`); seed 27 keeps the enemy healer
+    /// denying while staying inside the bound (observed longest run ~4.0s).
     #[test]
-    fn mage_recovers_to_cast_within_bound_seed_20() {
+    fn mage_recovers_to_cast_within_bound_seed_27() {
         let lines = run_traced_lines(
             vec!["Mage", "Priest"],
             vec!["Warrior", "Priest"],
-            20,
+            27,
             "PillaredArena",
         );
         let blocked = mage_frostbolt_times(&lines, "", Some("LosBlocked"));
-        assert!(blocked.len() >= 3, "seed 20 must exercise occlusion, got {}", blocked.len());
+        assert!(blocked.len() >= 3, "seed 27 must exercise occlusion, got {}", blocked.len());
         let span = max_contiguous_block_span(&lines);
         assert!(
             span <= 10.0,
-            "seed 20: longest contiguous LosBlocked run was {:.2}s (> 10s) — Mage stalled",
+            "seed 27: longest contiguous LosBlocked run was {:.2}s (> 10s) — Mage stalled",
             span
         );
     }
@@ -4212,11 +4215,12 @@ mod u9_seek_reset {
     /// ENGAGE seek decisions during occluded windows.
     #[test]
     fn mage_seek_emits_los_seek_scorer_term() {
-        // Seed re-pinned to 20 (7/48 no longer occlude in this comp).
+        // Seed re-pinned to 27 (seed 20 dropped below the occlusion floor once
+        // the leaky-bucket chase closed the pillar gap faster).
         let lines = run_traced_lines(
             vec!["Mage", "Priest"],
             vec!["Warrior", "Priest"],
-            20,
+            27,
             "PillaredArena",
         );
         let seek_with_term = lines
@@ -5115,6 +5119,256 @@ mod chase_los {
     //            ENABLED  → team-1 elimination at ~104s, 6.7s longest window.
     const SEED_A: u64 = 26;
     const SEED_B: u64 = 23;
+}
+
+// ---------------------------------------------------------------------------
+// Leaky-bucket occlusion chase — the mid-cast JUKE dance (Mage vs Shaman)
+// ---------------------------------------------------------------------------
+//
+// The residual defect (over commit 22e771c's continuous-occlusion clock): a
+// lone kiting Shaman that JUKES — steps behind a pillar DURING the Mage's 1.5s
+// Frostbolt cast, then flashes back sighted between casts. Sight is intermittent
+// by construction, so the continuous clock (which reset on every flicker) never
+// armed the chase; each cast started sighted (start gate passed) and fizzled at
+// completion ("fails to cast ... line of sight"). The observed defect match had
+// 7 such Mage fizzles across a ~40s 2v1 window before dampening decided it.
+//
+// The leaky-bucket accumulator fills while occluded (1.0/sec, INCLUDING mid-cast
+// — `tick_kite_occlusion` ticks casting kiters that the ability pass skips) and
+// drains sub-fill while sighted, so intermittent occlusion still ratchets to the
+// arm threshold. The chase then closes distance until the angular juke can no
+// longer break sight within a cast.
+//
+// The position timeline carries no cast events, so this probe uses a geometric
+// PROXY for fizzles: contiguous occluded (Mage↔Shaman) runs lasting at least a
+// Frostbolt cast (>= FIZZLE_WINDOW s) during the 2v1 — each is a window in which
+// a started Frostbolt would fizzle at completion. We assert that count is
+// bounded and that the 2v1 resolves by elimination before the cap. (True fizzle
+// counts, from `--headless` match logs, are reported in the change writeup.)
+mod juke_chase {
+    use super::*;
+
+    use arenasim::states::match_config::ArenaMap;
+    use arenasim::states::play_match::map_config::load_map_geometry_config;
+    use arenasim::states::play_match::map_geometry::{has_line_of_sight, ObstacleVolume, EYE_HEIGHT};
+
+    /// A contiguous occluded run at least this long (sim-seconds) spans a full
+    /// 1.5s Frostbolt cast → a completion fizzle. Slightly under the cast time so
+    /// a juke that occludes for most (not quite all) of a cast still counts.
+    const FIZZLE_WINDOW: f32 = 1.4;
+
+    fn juke_config(seed: u64) -> HeadlessMatchConfig {
+        HeadlessMatchConfig {
+            // Mage+Priest vs Warrior+Shaman — the comp that RELIABLY produces a
+            // lone kiting Shaman: the Warrior dies early (it has no LoS-denial
+            // partner keeping it alive), leaving the Shaman to kite the Mage
+            // around a pillar. The originally-suggested Paladin+Mage vs
+            // Warlock+Shaman comp does NOT reliably reach this state — the
+            // Mage/Paladin focus the Shaman as the healer kill-target, so the
+            // Shaman usually dies before the Warlock (no lone-Shaman endgame).
+            team1: vec!["Mage".into(), "Priest".into()],
+            team2: vec!["Warrior".into(), "Shaman".into()],
+            max_duration_secs: 300.0,
+            random_seed: Some(seed),
+            map: "PillaredArena".to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn sees(obstacles: &[ObstacleVolume], a: Vec3, b: Vec3) -> bool {
+        has_line_of_sight(
+            obstacles,
+            Vec3::new(a.x, EYE_HEIGHT, a.z),
+            Vec3::new(b.x, EYE_HEIGHT, b.z),
+        )
+    }
+
+    struct JukeStats {
+        winner: Option<u8>,
+        duration: f32,
+        /// Warrior death time (`None` if it survived) — the 2v1 opens here.
+        warrior_death: Option<f32>,
+        /// Matched (Mage, Shaman) samples during the 2v1 (Warrior dead, both
+        /// still alive) — vacuity for "the lone-Shaman dance occurred".
+        lone_samples: usize,
+        /// Total occluded sim-seconds during the 2v1 (vacuity: dance started).
+        total_occluded: f32,
+        /// Count of contiguous occluded runs >= FIZZLE_WINDOW during the 2v1 —
+        /// the geometric fizzle proxy.
+        fizzle_windows: usize,
+    }
+
+    fn measure(seed: u64) -> JukeStats {
+        let obstacles = load_map_geometry_config()
+            .expect("maps.ron loads")
+            .active_for(ArenaMap::PillaredArena)
+            .volumes;
+        assert!(!obstacles.is_empty(), "PillaredArena must carry cover volumes");
+
+        let (result, timeline) = run_observed_collecting(juke_config(seed));
+        let gate = timeline.gates_open_time.expect("gates opened");
+
+        let mage = timeline.find(1, CharacterClass::Mage, false);
+        let warrior = timeline.find(2, CharacterClass::Warrior, false);
+        let shaman = timeline.find(2, CharacterClass::Shaman, false);
+
+        let mage_s = timeline.samples.get(&mage).cloned().unwrap_or_default();
+        let warrior_s = timeline.samples.get(&warrior).cloned().unwrap_or_default();
+        let shaman_s = timeline.samples.get(&shaman).cloned().unwrap_or_default();
+
+        // Warrior death = its last alive sample, if it predates the Mage's end
+        // (samples are alive-only). The 2v1 opens there.
+        let mage_end = mage_s.last().map(|(t, _)| *t).unwrap_or(gate);
+        let warrior_death = warrior_s.last().map(|(t, _)| *t).filter(|t| *t < mage_end - 0.5);
+        let death_t = warrior_death.unwrap_or(f32::INFINITY);
+
+        // Walk the post-death Mage/Shaman slice on identical frame stamps,
+        // tracking contiguous occluded runs.
+        let mut total_occluded = 0.0f32;
+        let mut lone_samples = 0usize;
+        let mut fizzle_windows = 0usize;
+        let mut run_start: Option<f32> = None;
+        let mut prev_t: Option<f32> = None;
+        let (mut i, mut j) = (0usize, 0usize);
+        while i < mage_s.len() && j < shaman_s.len() {
+            let (tm, pm) = mage_s[i];
+            let (ts, ps) = shaman_s[j];
+            if tm == ts {
+                if tm > death_t {
+                    lone_samples += 1;
+                    if !sees(&obstacles, pm, ps) {
+                        if let Some(pt) = prev_t {
+                            total_occluded += tm - pt;
+                        }
+                        let start = *run_start.get_or_insert(tm);
+                        // Count the run once, when it first crosses the window.
+                        if tm - start >= FIZZLE_WINDOW
+                            && prev_t.is_some_and(|pt| pt - start < FIZZLE_WINDOW)
+                        {
+                            fizzle_windows += 1;
+                        }
+                    } else {
+                        run_start = None;
+                    }
+                    prev_t = Some(tm);
+                }
+                i += 1;
+                j += 1;
+            } else if tm < ts {
+                i += 1;
+            } else {
+                j += 1;
+            }
+        }
+
+        JukeStats {
+            winner: result.winner,
+            duration: result.match_time,
+            warrior_death,
+            lone_samples,
+            total_occluded,
+            fizzle_windows,
+        }
+    }
+
+    /// Exploratory seed scan — prints per-seed stats so the pinned seeds below
+    /// can be (re)chosen when trajectories drift. Ignored by default.
+    #[test]
+    #[ignore]
+    fn scan_seeds() {
+        for seed in 0u64..60 {
+            let s = measure(seed);
+            let flag = if s.warrior_death.is_some() && s.lone_samples >= 200 && s.total_occluded >= 2.0
+            {
+                " <-- CANDIDATE"
+            } else {
+                ""
+            };
+            eprintln!(
+                "seed {seed:2}: winner={:?} dur={:5.1} wdeath={:>6} lone={:4} occl={:5.1} fizz_win={:2}{}",
+                s.winner,
+                s.duration,
+                s.warrior_death.map(|t| format!("{t:.1}")).unwrap_or_else(|| "none".into()),
+                s.lone_samples,
+                s.total_occluded,
+                s.fizzle_windows,
+                flag,
+            );
+        }
+    }
+
+    /// The leaky-bucket chase bounds the mid-cast juke dance: at pinned seeds
+    /// where the Warlock dies early and the surviving Shaman kites a pillar, the
+    /// Mage's fizzle-length occlusion windows during the 2v1 are FEW (the chase
+    /// closes distance so the angular juke stops breaking sight mid-cast), and
+    /// the 2v1 resolves by ELIMINATION well before the dampening cap.
+    fn assert_juke_bounded(seed: u64, max_fizzle_windows: usize) {
+        let s = measure(seed);
+
+        // Vacuity: the Warrior must die early AND a lone-Shaman dance with real
+        // occlusion must occur, or the bounds below prove nothing.
+        assert!(
+            s.warrior_death.is_some(),
+            "seed {seed}: Warrior never died — no lone-Shaman 2v1 to bound",
+        );
+        assert_min_occurrences(&format!("seed {seed} 2v1 (Mage,Shaman) samples"), s.lone_samples, 200);
+        assert!(
+            s.total_occluded >= 1.0,
+            "seed {seed}: only {:.2}s occlusion in the 2v1 — the juke dance did not start",
+            s.total_occluded,
+        );
+
+        // (a) Fizzle proxy bounded — the chase closes the range so few casts
+        // fizzle. The defect match had 7 true fizzles; the proxy ceiling here is
+        // derived from observation with headroom.
+        assert!(
+            s.fizzle_windows <= max_fizzle_windows,
+            "seed {seed}: {} fizzle-length occlusion windows in the 2v1 (> {}) — the leaky-bucket \
+             chase is not closing on the juking Shaman",
+            s.fizzle_windows,
+            max_fizzle_windows,
+        );
+
+        // (b) Resolves by elimination (team 1) well before the cap.
+        assert_eq!(
+            s.winner,
+            Some(1),
+            "seed {seed}: expected team 1 (Mage+Priest) to win by elimination, got {:?}",
+            s.winner,
+        );
+        assert!(
+            s.duration <= 200.0,
+            "seed {seed}: match ran {:.1}s (> 200s) — the lone Shaman was not caught promptly",
+            s.duration,
+        );
+    }
+
+    #[test]
+    fn juke_bounded_seed_a() {
+        // seed 28 after-fix proxy is 5 fizzle-windows; bound 8 leaves headroom
+        // and still catches a regression to the continuous clock (which left ~10
+        // fizzle-length windows / 11 true fizzles here).
+        assert_juke_bounded(JUKE_SEED_A, 8);
+    }
+
+    #[test]
+    fn juke_bounded_seed_b() {
+        // seed 23 after-fix proxy is 3 fizzle-windows; bound 6 leaves headroom.
+        assert_juke_bounded(JUKE_SEED_B, 6);
+    }
+
+    // Pinned by `scan_seeds` (run with `--ignored`): seeds where the enemy
+    // Warrior dies before the Shaman, leaving a lone kiting Shaman for the Mage
+    // to chase around a pillar. Before/after TRUE Mage LoS fizzles (from
+    // `--headless` match logs), continuous-clock → leaky-bucket:
+    //   seed 28: 11 fizzles / 88.1s grind → 6 fizzles / 40.9s (proxy 5);
+    //   seed 23:  3 fizzles / 103.7s      → 0 fizzles / 70.5s (proxy 3).
+    // Both resolve by team-1 elimination; the bucket cuts the worst-case fizzle
+    // grind and shortens the endgame. (The geometric fizzle-window PROXY the
+    // probe asserts on runs slightly above the true log-fizzle count — it counts
+    // any occluded run >= a cast length, whether or not a cast completed in it.)
+    const JUKE_SEED_A: u64 = 28;
+    const JUKE_SEED_B: u64 = 23;
 }
 
 // ---------------------------------------------------------------------------

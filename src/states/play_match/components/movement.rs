@@ -175,18 +175,26 @@ pub struct KitePosture {
     /// bonus at the next re-evaluation. `None` before the first directional
     /// decision and after posture transitions.
     pub last_direction: Option<Vec2>,
-    /// Occlusion-timeout direct chase (ENGAGE): absolute sim-time at which the
-    /// kiter FIRST became continuously occluded from its kill target while in
-    /// shot range (the `should_seek_los` stall). Once the stall persists past
-    /// `seek_chase_timeout` the kiter abandons orbit-seeking and walks straight
-    /// at the target until sight is regained. Reset to `None` whenever sight is
-    /// regained, the kill target changes (see `occluded_target`), or the target
-    /// dies / leaves range. `None` = not currently occlusion-stalled. Always
-    /// `None` on obstacle-free maps (sight never breaks).
-    pub occluded_since: Option<f32>,
-    /// The kill target the `occluded_since` clock is tracking. A change here
-    /// (target swap) restarts the continuous-occlusion clock even if the new
-    /// target is also occluded. `None` when not stalled.
+    /// Occlusion-chase leaky-bucket accumulator (ENGAGE), in occlusion units.
+    /// FILLS at a fixed 1.0/sec of sim time while the kiter is occluded from its
+    /// kill target in shot range (the `should_seek_los` stall), and DRAINS at
+    /// `seek_chase_decay`/sec while it has sight, clamped at 0. The direct chase
+    /// ARMS once this reaches `seek_chase_timeout`. Because a juking target
+    /// (occlude mid-cast, flash back between casts) fills faster than the
+    /// sub-fill drain bleeds it, intermittent occlusion still accrues toward the
+    /// threshold instead of resetting each flicker — the fix for the mid-cast
+    /// juke that the old continuous-clock missed. A target under continuous
+    /// occlusion fills at 1.0/sec, so the static pillar-hug arms at exactly
+    /// `seek_chase_timeout` seconds, identical to the old clock. Reset to 0 on
+    /// kill-target change or death (see `occluded_target`). Ticked every frame
+    /// (including mid-cast) by `tick_kite_occlusion`, which OWNS this field;
+    /// `evaluate_dps_posture` only reads it. Always 0.0 on obstacle-free maps
+    /// (sight never breaks).
+    pub occlusion_accum: f32,
+    /// The kill target the `occlusion_accum` bucket is bound to. A change here
+    /// (target swap) or the target's death resets the accumulator to 0 so the
+    /// swapped-to target must re-earn the arm threshold. `None` when unbound
+    /// (no living kill target).
     pub occluded_target: Option<Entity>,
     /// Freezing Trap DIP target (Hunter only): the enemy healer the committed
     /// trap-setup walk is pursuing. `None` outside a dip. Mirrors the Paladin
@@ -226,7 +234,7 @@ impl KitePosture {
             since: now,
             hold_until: 0.0,
             last_direction: None,
-            occluded_since: None,
+            occlusion_accum: 0.0,
             occluded_target: None,
             dip_target: None,
             dip_until: 0.0,

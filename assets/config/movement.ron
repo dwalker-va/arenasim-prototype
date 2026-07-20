@@ -140,7 +140,8 @@
         commit_window: 0.6,        // anti-zigzag committed-direction window
         kite_entry_radius: 20.0,   // (unused: Mage is aura-gated)
         kite_sustain_radius: 24.0, // (unused: Mage is aura-gated)
-        seek_chase_timeout: 3.5,   // occluded in cast range this long → abandon orbit-seek, walk straight at the target until sight returns (0.0 disables); obstacle maps only
+        seek_chase_timeout: 3.5,   // accumulated occlusion units before the chase arms (continuous fill 1.0/sec → still 3.5s continuous; 0.0 disables); obstacle maps only
+        seek_chase_decay: 0.5,     // accumulator drain per sighted second (< 1.0 fill, so a juking target still accrues toward the arm threshold); 0.0 never drains
     ),
     // Hunter ENGAGE/KITE (proximity-gated): kites an un-rooted melee, so unlike
     // the Mage's orbit it must be FLEE-DOMINANT — strong threat_repulsion drives
@@ -167,6 +168,7 @@
         kite_entry_radius: 20.0,   // closing-range band — a melee within this opens KITE
         kite_sustain_radius: 24.0, // hold KITE a touch past entry (anti-strobe)
         dip_budget: 6.0,           // walk up to 6s toward an out-of-range enemy healer to set a trap on it (0 disables)
-        seek_chase_timeout: 3.5,   // occluded in shot range this long → abandon orbit-seek, walk straight at the target until sight returns (0.0 disables); obstacle maps only
+        seek_chase_timeout: 3.5,   // accumulated occlusion units before the chase arms (continuous fill 1.0/sec → still 3.5s continuous; 0.0 disables); obstacle maps only
+        seek_chase_decay: 0.5,     // accumulator drain per sighted second (< 1.0 fill, so a juking target still accrues toward the arm threshold); 0.0 never drains
     ),
 )

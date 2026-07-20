@@ -50,6 +50,7 @@ pub use super::auras::process_aura_breaks;
 pub use super::combat_ai::acquire_targets;
 pub use super::shadow_sight::check_orb_pickups;
 pub use super::shadow_sight::cleanup_consumed_orbs;
+pub use super::class_ai::dps_postures::tick_kite_occlusion;
 pub use super::combat_ai::decide_abilities;
 pub use super::class_ai::pet_ai::pet_ai_system;
 pub use super::combat_ai::check_interrupts;
@@ -185,6 +186,11 @@ where
             acquire_targets,
             check_orb_pickups,
             cleanup_consumed_orbs,
+            // Per-frame occlusion accumulator for the Mage/Hunter kiters. MUST
+            // run before decide_abilities so the chase reads a fresh bucket, and
+            // it ticks casting kiters too (they're excluded from decide_abilities'
+            // query), capturing the mid-cast juke the ability pass never sees.
+            tick_kite_occlusion,
             decide_abilities,
             ApplyDeferred, // Flush PetCommand components spawned by Hunter
                             // AI in decide_abilities so pet_ai_system sees
