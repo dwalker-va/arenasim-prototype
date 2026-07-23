@@ -5455,15 +5455,23 @@ mod juke_chase {
 
     #[test]
     fn juke_bounded_seed_a() {
-        // seed 6 after-steering proxy is 4 fizzle-windows; bound 8 leaves headroom
-        // and still catches a regression to the continuous clock (or to the
-        // pre-steering ooze) that would leave many more fizzle-length windows.
-        assert_juke_bounded(JUKE_SEED_A, 8);
+        // seed 6 proxy is 10 fizzle-windows; bound 15 leaves headroom and still
+        // catches a regression to the continuous clock (or to the pre-steering
+        // ooze) that would leave many more fizzle-length windows.
+        //
+        // Re-pinned 2026-07-23 (was 8, proxy 4): the "mana charged only on
+        // successful cast completion" fix keeps the Mage's mana healthy through
+        // the whole 2v1, so it sustains ranged Frostbolt casting instead of
+        // bankrupting itself and closing to wand range. Standing at Frostbolt
+        // range keeps it at pillar-occluded angles longer, so the geometric
+        // occlusion proxy rose (4 -> 10) even though the load-bearing assertions
+        // — team-1 elimination win, resolved well before the cap — still hold.
+        assert_juke_bounded(JUKE_SEED_A, 15);
     }
 
     #[test]
     fn juke_bounded_seed_b() {
-        // seed 2 after-steering proxy is 2 fizzle-windows; bound 6 leaves headroom.
+        // seed 2 proxy is 3 fizzle-windows (was 2 pre-mana-fix); bound 6 leaves headroom.
         assert_juke_bounded(JUKE_SEED_B, 6);
     }
 
@@ -5473,9 +5481,11 @@ mod juke_chase {
     // 28/23 the pursuing Mage now rounds the pillar cleanly and the mid-cast juke
     // dance collapses to ~1.4s / 0.0s residual occlusion (below the vacuity
     // floor) — the fix working. Seeds 6/2 still produce a real lone-Shaman juke
-    // window, now held to few fizzle-length windows and resolved by elimination:
-    //   seed 6: 23.5s total occlusion, 4 fizzle-length windows, team-1 win at ~105s.
-    //   seed 2: 10.7s total occlusion, 2 fizzle-length windows, team-1 win at ~61s.
+    // window, now held to a bounded number of fizzle-length windows and resolved
+    // by elimination (numbers as of the 2026-07-23 mana-on-completion fix, which
+    // keeps the Mage casting from range instead of bankrupting to wand):
+    //   seed 6: 38.7s total occlusion, 10 fizzle-length windows, team-1 win at ~88s.
+    //   seed 2: 11.7s total occlusion, 3 fizzle-length windows, team-1 win at ~54s.
     // (The geometric fizzle-window PROXY the probe asserts on counts any occluded
     // run >= a cast length, whether or not a cast completed in it.)
     const JUKE_SEED_A: u64 = 6;
@@ -5837,25 +5847,31 @@ mod medic_chase {
 // When the Mage runs out of mana for its primary nuke (Frostbolt), its ENGAGE
 // pursuit stop distance drops to wand range so its equipped wand auto-attack
 // fires — instead of parking at preferred range (38yd), outside wand range
-// (30yd), and idling the mana refractory. Reproduced on Mage+Priest vs
-// Warrior+Shaman on PillaredArena at seed 1: after the Warrior dies (~42s the
-// diagnosis), the lone-Shaman 2v1 dragged because the Mage stood at ~36yd
-// dealing damage once per ~20s. The OOM fallback closes it to 30yd and lets
-// the wand chip fill the refractory.
+// (30yd), and idling the mana refractory. Originally diagnosed on Mage+Priest
+// vs Warrior+Shaman on PillaredArena: after the Warrior dies, the lone-Shaman
+// 2v1 dragged because the Mage stood at ~36yd dealing damage once per ~20s. The
+// OOM fallback closes it to 30yd and lets the wand chip fill the refractory.
+//
+// NOTE (2026-07-23): the "mana charged only on successful cast completion" fix
+// means the Mage reaches OOM far LESS (juked Frostbolts no longer drain it), so
+// the lone-Shaman endgame is now dampening-gated rather than mana-gated. The
+// fallback still fires when the Mage eventually goes OOM; the probe's duration
+// speedup proxy was retired (see the outcome assertion) and the fallback is now
+// pinned by the close-to-wand-range + wand-chip assertions.
 // ---------------------------------------------------------------------------
 
 mod oom_wand {
     use super::*;
     use arenasim::states::play_match::constants::WAND_RANGE;
 
-    /// The seed the lone-Shaman OOM drag is reproduced on. Re-pinned from 1 after
-    /// tangent steering: at seed 1 the OOM wand mechanism still fires (the Mage
-    /// closes to wand range and lands its wand shots), but the pursuing Mage now
-    /// rounds the pillar and the lone-Shaman endgame runs long enough (108s) that
-    /// the "resolves faster than the OOM-idle baseline (< 68s)" bound no longer
-    /// holds there. Seed 22 keeps the full end-to-end mechanism — Warrior dies at
-    /// ~38.7s, Mage closes to wand range, lands 11 wand shots / 15 post-death
-    /// damage events, and team 1 wins at ~50.5s.
+    /// The seed the lone-Shaman OOM drag is reproduced on. Seed 22 keeps the full
+    /// end-to-end mechanism — the Warrior dies at ~35s, the Mage closes to wand
+    /// range of the lone Shaman, and the wand chip fills the window (post
+    /// 2026-07-23 mana-on-completion fix: 8 wand shots / 13 post-death damage
+    /// events, team 1 wins by elimination at ~109s). The endgame is now
+    /// dampening-gated rather than mana-gated, so the probe validates the OOM
+    /// wand fallback via the close + wand chip, not via a faster resolution — see
+    /// the outcome assertion for why the old "< 68s" speedup proxy was retired.
     const SEED: u64 = 22;
 
     /// One damage event parsed from the combat log: `(wall_time, is_wand)`.
@@ -6013,8 +6029,8 @@ mod oom_wand {
             p.mage_damage.iter().filter(|d| d.wall_time >= warrior_death).collect();
         let wand_shots = post.iter().filter(|d| d.is_wand).count();
         // Floors sit between the disabled baseline (0 wand shots, ~5 total
-        // events) and the fixed run (7 wand shots, ~11 total events) with
-        // headroom on both sides. The wand-shot floor is also the OOM proof:
+        // events) and the fixed run (8 wand shots, 13 total events post-mana-fix)
+        // with headroom on both sides. The wand-shot floor is also the OOM proof:
         // a healthy-mana Mage never wands a lone ranged target.
         assert!(
             wand_shots >= 4,
@@ -6028,12 +6044,24 @@ mod oom_wand {
             post.len()
         );
 
-        // Outcome proxy: the 2v1 resolves for team 1, faster than the
-        // knob-disabled baseline (71.0s combat) with headroom.
+        // Outcome: the 2v1 resolves for team 1 by elimination, well under the cap.
+        //
+        // The old "faster than the OOM-idle baseline (< 68s)" speedup proxy was
+        // RETIRED on 2026-07-23 with the "mana charged only on successful cast
+        // completion" fix. That fix stopped the Mage bankrupting itself on juked
+        // Frostbolts, so it now sustains ranged casting far longer and the
+        // lone-Shaman endgame is DAMPENING-gated (the Shaman out-heals until
+        // arena dampening crushes its healing ~t=115), not mana-gated: seed 22
+        // resolves at ~109s regardless of the wand fallback. The fallback is
+        // still fully exercised and validated by (a) closing to wand range and
+        // (b) the wand chip filling the window (8 wand shots / 13 events here) —
+        // duration is simply no longer a proxy for it. Bound the duration only
+        // loosely, well under the 300s cap.
         assert_eq!(p.result.winner, Some(1), "team 1 (Mage+Priest) should win the 2v1");
         assert!(
-            p.result.match_time < 68.0,
-            "2v1 took {:.1}s combat — no faster than the OOM-idle baseline (71.0s)",
+            p.result.match_time < 200.0,
+            "2v1 took {:.1}s combat — the dampening-gated endgame should still resolve \
+             well under the cap",
             p.result.match_time
         );
     }

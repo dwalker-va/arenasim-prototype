@@ -135,7 +135,21 @@ For deeper context, see these focused references:
 ### Combat Flow
 1. **Pre-match** (10s countdown): Combatants can buff, mana restored each frame
 2. **Gates open**: Combat begins, AI takes over
-3. **Combat loop**: Target acquisition → ability decisions → casting → damage/healing
+3. **Combat loop**: Target acquisition → ability decisions → casting → damage/healing.
+   **Mana is charged only when a completed cast actually LANDS** (WoW-faithful):
+   `process_casting` (`combat_core/casting.rs`) deducts `mana_cost` at the cast's
+   resolution point in pass 2 — the projectile-spawn site, or after an
+   instant-effect passes the alive + line-of-sight completion gates. A cast that
+   fizzles at completion (target juked out of LoS, or target dead) costs NO mana,
+   and an interrupted cast never reaches completion so it costs nothing either.
+   Self-cast buffs always land (self is alive and in LoS of itself), so they still
+   cost mana. This means juking a caster into fizzles CANNOT drain its mana. The
+   damage/crit RNG pre-calc stays in pass 1 and runs for every completed cast
+   (fizzle or land), so the `game_rng` draw order is independent of the mana
+   charge site. NOTE: instant abilities (0 cast time, applied in class AI without
+   a `CastingState`) charge mana atomically at their application site and are
+   unaffected. Channels (Drain Life) pay the full cost up-front at channel start
+   (WoW-faithful — an interrupted channel is not refunded).
 4. **Arena dampening**: starting `DAMPENING_START_SECS` (75s) after gates, ALL healing,
    absorb shields, and lifesteal ramp linearly to zero over `DAMPENING_RAMP_SECS` (120s;
    both in `constants.rs`). Ticked by `match_flow::update_dampening` into the

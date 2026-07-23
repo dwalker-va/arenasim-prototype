@@ -152,7 +152,7 @@ pub fn process_casting(
     let mut completed_casts = Vec::new();
 
     // First pass: update cast timers and collect completed casts
-    for (caster_entity, caster_transform, mut caster, casting_state, caster_auras) in combatants.iter_mut() {
+    for (caster_entity, caster_transform, caster, casting_state, caster_auras) in combatants.iter_mut() {
         let Some(mut casting) = casting_state else {
             continue;
         };
@@ -218,8 +218,16 @@ pub fn process_casting(
             let def = abilities.get_unchecked(&ability);
             let target_entity = casting.target;
 
-            // Consume mana
-            caster.current_mana -= def.mana_cost;
+            // NOTE: mana is NOT consumed here. A completed cast only pays when it
+            // actually LANDS (projectile spawns, or instant effect passes the
+            // alive+LoS completion gates). The cost is carried forward in the
+            // completed-cast tuple and charged at the resolution point in pass 2,
+            // so a cast juked out of LoS or onto a dead target at completion
+            // fizzles for zero mana. See charge sites below.
+            //
+            // The RNG pre-calc below is UNCHANGED and still runs in pass 1 for
+            // every completed cast (fizzle or land) — moving only the mana line
+            // leaves the game_rng draw order/count untouched.
 
             // Pre-calculate damage/healing (using caster's stats + dynamic aura bonuses)
             let ap_bonus = super::get_attack_power_bonus(caster_auras.as_deref());
@@ -270,6 +278,7 @@ pub fn process_casting(
                 is_crit_damage,
                 is_crit_heal,
                 caster.spell_power,
+                def.mana_cost,
             ));
 
             // Remove casting state
@@ -286,9 +295,15 @@ pub fn process_casting(
     let mut cooldown_updates: Vec<(Entity, AbilityType, f32)> = Vec::new();
     // Track casters who should have stealth broken (offensive abilities)
     let mut break_stealth: Vec<Entity> = Vec::new();
+    // Mana charged only for casts that actually resolve (land). Collected here
+    // and applied after the loop — deferring avoids the borrow conflict between
+    // the caster mana fetch and the target fetch on the instant path (self-cast
+    // = caster is the target), and nothing in pass 2 re-reads caster mana, so
+    // end-of-system application is equivalent and order-independent.
+    let mut mana_charges: Vec<(Entity, f32)> = Vec::new();
 
     // Process completed casts
-    for (caster_entity, caster_team, caster_class, caster_pos, ability_damage, ability_healing, ability, target_entity, is_crit_damage, is_crit_heal, caster_spell_power) in completed_casts {
+    for (caster_entity, caster_team, caster_class, caster_pos, ability_damage, ability_healing, ability, target_entity, is_crit_damage, is_crit_heal, caster_spell_power, mana_cost) in completed_casts {
         let def = abilities.get_unchecked(&ability);
 
         // Get target
@@ -313,6 +328,11 @@ pub fn process_casting(
                     continue;
                 }
             }
+
+            // The cast completed and the bolt flies → pay now. A launched
+            // projectile lands regardless of later LoS (R7), so mana is charged
+            // at spawn, after the LoS-at-completion gate above.
+            mana_charges.push((caster_entity, mana_cost));
 
             // Spawn projectile with Transform (required for move_projectiles to work in headless mode)
             // Visual mesh/material is added by spawn_projectile_visuals in graphical mode
@@ -353,6 +373,13 @@ pub fn process_casting(
             log_los_fizzle(&mut combat_log, caster_team, caster_class, &def.name);
             continue;
         }
+
+        // Both completion gates (alive + LoS) passed → the instant cast lands, so
+        // pay now, before any effect applies. Self-cast buffs route here with
+        // target == caster (always alive, always in LoS of self), so they still
+        // cost mana exactly as before. Anything that fizzled above `continue`d
+        // without reaching this line and costs nothing.
+        mana_charges.push((caster_entity, mana_cost));
 
         let target_pos = target_transform.translation;
         let text_position = target_transform.translation + Vec3::new(0.0, FCT_HEIGHT, 0.0);
@@ -756,6 +783,13 @@ pub fn process_casting(
                 Some(combatant_id(caster_team, caster_class)),
                 message,
             );
+        }
+    }
+
+    // Charge mana for casts that landed (fizzled/interrupted casts never pushed here)
+    for (caster_entity, cost) in mana_charges {
+        if let Ok((_, _, mut caster, _, _)) = combatants.get_mut(caster_entity) {
+            caster.current_mana -= cost;
         }
     }
 

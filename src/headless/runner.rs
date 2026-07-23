@@ -57,6 +57,11 @@ pub struct ObservedCombatant {
     pub current_health: f32,
     /// Maximum health (read-only). Pair with `current_health` for HP fraction.
     pub max_health: f32,
+    /// Current mana/resource (read-only). Lets probes assert a caster's mana
+    /// trajectory — e.g. that it does not bankrupt itself on juked fizzles.
+    pub current_mana: f32,
+    /// Maximum mana/resource (read-only). Pair with `current_mana` for a fraction.
+    pub max_mana: f32,
     /// Active aura effect types on this combatant, in `ActiveAuras` vec order.
     /// Lets probes assert a combatant carries (or does not carry) a totem buff
     /// without `&World` access. Empty when the entity has no `ActiveAuras`.
@@ -756,6 +761,8 @@ fn observe_frame(world: &World) -> FrameObservation {
                 alive: combatant.is_alive(),
                 current_health: combatant.current_health,
                 max_health: combatant.max_health,
+                current_mana: combatant.current_mana,
+                max_mana: combatant.max_mana,
                 aura_types,
             },
         );
