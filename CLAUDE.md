@@ -325,6 +325,35 @@ provable no-op on obstacle-free maps (BasicArena stays byte-identical). Traced
 via the existing `SeekLos` trigger with a `point` goal and the ally in the
 target view.
 
+**Tangent steering (goal-directed pillar rounding)** — `map_geometry::steer_toward_goal`
+(pure, unit-tested; no RON knob). When a mover with a DESTINATION has the
+straight line to it blocked by an obstacle, it aims at the obstacle's TANGENT
+POINT on the better-progress side (for a cylinder: the external tangent to the
+`radius + MOVER_RADIUS` circle; for a box: the nearer visible silhouette corner)
+instead of pointing at the goal through the obstacle — so it rounds the pillar in
+a clean full-speed arc rather than oozing along the surface. Without it,
+`slide_against` removed only the inward step component, leaving a near-zero
+tangential sliver whenever the goal sat directly behind a pillar (the "stuck to
+the pillar" ooze). `resolve_movement` stays the final no-clip backstop; steering
+just keeps the mover off the surface so the resolver rarely bites (`slide_against`
+was left unchanged — the tangent aim already preserves full speed, and touching it
+risked the collision probes / byte-identity). Wired into the FOUR goal-directed
+branches of `move_to_target`: `MovementGoal::Point` (chase/medic/formation walks,
+incl. the `seek_chase_timeout` direct chase), `MovementGoal::Entity` (DIP chases),
+normal pursuit-to-target, and pet-follow-to-owner. NOT applied to
+`MovementGoal::Direction` (scorer output — the context-steering mask already
+avoids obstacles), fear/polymorph wander, or Charge/Disengage (scripted dashes).
+Side commitment is emergent, not stored: the better-progress tangent is
+self-reinforcing (once off the center line, that side keeps winning) and a
+`STEER_TIE_EPS` fixed default resolves the only symmetric instant, so it cannot
+flip-flop — no per-frame committed-side state. The helper's first line is
+`if obstacles.is_empty() { return None }` and each caller falls back to its exact
+legacy direct-normalize on `None`, so **BasicArena stays byte-identical**. This
+makes competent pursuers (melee and Mage) round pillars cleanly; a documented
+consequence is that a pressured healer's `cover_pull` LoS-denial buys far less
+sustained occlusion against a steered melee trainer (a competent melee now
+re-acquires around the pillar quickly — see the `u8_healer_cover` probe note).
+
 **DPS kiter blocks** (`mage:` / `hunter:` — the shared ENGAGE/KITE machine, `DpsMovementConfig`):
 - `weights:` (above) plus `range_band_min`/`max` (orbit ring; min = SAFE_KITING_DISTANCE / HUNTER_DEAD_ZONE 8), `kite_hold` (anti-strobe hysteresis), `directive_ttl` (must cover the longest cast), `commit_window`.
 - `kite_entry_radius`/`kite_sustain_radius` — proximity-gated kiters only (Hunter: KITE when a melee is within entry, exit when kited past sustain). The Mage is aura-gated (KITE keys off its own root/slow), so it ignores these.

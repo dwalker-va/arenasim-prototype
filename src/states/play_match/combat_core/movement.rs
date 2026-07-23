@@ -6,7 +6,7 @@ use super::clamp_to_arena;
 use super::super::match_config::CharacterClass;
 use super::super::{MELEE_RANGE, WAND_RANGE, DISENGAGE_SPEED};
 use super::super::map_config::ActiveMapGeometry;
-use super::super::map_geometry::{resolve_movement, ObstacleVolume};
+use super::super::map_geometry::{resolve_movement, steer_toward_goal, ObstacleVolume};
 
 
 /// How close a `MovementGoal::Point` directive walks before stopping (units).
@@ -262,13 +262,33 @@ pub fn move_to_target(
                     } else {
                         // Don't overshoot the point this frame.
                         move_distance = move_distance.min(distance);
-                        to_point.normalize_or_zero()
+                        // Tangent-steer around any obstacle between here and the
+                        // point (chase/medic/formation walks); direct otherwise.
+                        steer_toward_goal(
+                            &map_geometry.volumes,
+                            Vec2::new(my_pos.x, my_pos.z),
+                            Vec2::new(point.x, point.z),
+                            my_pos.y,
+                        )
+                        .map(|s| Vec3::new(s.x, 0.0, s.y))
+                        .unwrap_or_else(|| to_point.normalize_or_zero())
                     }
                 }
                 MovementGoal::Entity(target) => {
                     if let Some(&(target_pos, _)) = positions.get(&target) {
-                        Vec3::new(target_pos.x - my_pos.x, 0.0, target_pos.z - my_pos.z)
-                            .normalize_or_zero()
+                        // Tangent-steer around any obstacle between here and the
+                        // pursued entity (DIP chase); direct otherwise.
+                        steer_toward_goal(
+                            &map_geometry.volumes,
+                            Vec2::new(my_pos.x, my_pos.z),
+                            Vec2::new(target_pos.x, target_pos.z),
+                            my_pos.y,
+                        )
+                        .map(|s| Vec3::new(s.x, 0.0, s.y))
+                        .unwrap_or_else(|| {
+                            Vec3::new(target_pos.x - my_pos.x, 0.0, target_pos.z - my_pos.z)
+                                .normalize_or_zero()
+                        })
                     } else {
                         // Target despawned — hold; the directive's TTL or the
                         // issuing AI's abort logic cleans it up.
@@ -298,9 +318,18 @@ pub fn move_to_target(
                 if let Some(&(owner_pos, _)) = positions.get(&pet.owner) {
                     let dist_to_owner = my_pos.distance(owner_pos);
                     if dist_to_owner > 3.0 {
-                        let direction = Vec3::new(
+                        // Tangent-steer around any obstacle between the pet and
+                        // its owner; direct otherwise.
+                        let direction = steer_toward_goal(
+                            &map_geometry.volumes,
+                            Vec2::new(my_pos.x, my_pos.z),
+                            Vec2::new(owner_pos.x, owner_pos.z),
+                            my_pos.y,
+                        )
+                        .map(|s| Vec3::new(s.x, 0.0, s.y))
+                        .unwrap_or_else(|| Vec3::new(
                             owner_pos.x - my_pos.x, 0.0, owner_pos.z - my_pos.z,
-                        ).normalize_or_zero();
+                        ).normalize_or_zero());
                         if direction != Vec3::ZERO {
                             let mut movement_speed = combatant.base_movement_speed;
                             if let Some(auras) = auras {
@@ -401,12 +430,22 @@ pub fn move_to_target(
 
         // If out of range, move towards target
         if distance > stop_distance {
-            // Calculate direction to target (only in XZ plane, keep Y constant)
-            let direction = Vec3::new(
+            // Calculate direction to target (only in XZ plane, keep Y constant).
+            // Tangent-steer around any obstacle between here and the target so a
+            // pursuer rounds a pillar in a clean arc instead of oozing along its
+            // surface; direct pursuit otherwise (and on obstacle-free maps).
+            let direction = steer_toward_goal(
+                &map_geometry.volumes,
+                Vec2::new(my_pos.x, my_pos.z),
+                Vec2::new(target_pos.x, target_pos.z),
+                my_pos.y,
+            )
+            .map(|s| Vec3::new(s.x, 0.0, s.y))
+            .unwrap_or_else(|| Vec3::new(
                 target_pos.x - my_pos.x,
                 0.0, // Don't move vertically
                 target_pos.z - my_pos.z,
-            ).normalize_or_zero();
+            ).normalize_or_zero());
 
             if direction != Vec3::ZERO {
                 // Calculate effective movement speed (base * aura modifiers)

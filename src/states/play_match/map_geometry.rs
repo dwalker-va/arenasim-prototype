@@ -370,6 +370,223 @@ fn slide_against(volume: &ObstacleVolume, pos_xz: Vec2, desired_xz: Vec2) -> Vec
     }
 }
 
+/// Tangent-steering angular slack (radians). When the two cylinder tangents make
+/// near-equal progress toward the goal — the goal sits almost directly behind the
+/// obstacle center — the side choice is a coin flip that float noise could flip
+/// frame to frame. Within this band we take the deterministic default (the
+/// `+alpha` / left tangent) so the mover commits to one side instead of jittering
+/// across the center line.
+const STEER_TIE_EPS: f32 = 1e-4;
+
+/// Entry parameter `t ∈ [0,1]` at which a mover's swept disc first penetrates a
+/// volume's MOVER_RADIUS-inflated footprint along the segment `from → to`, or
+/// `None` if the path stays clear. This is the *movement* footprint test
+/// (touching = allowed, radius inflated by [`MOVER_RADIUS`]) — the sweep analog
+/// of [`penetrates_footprint`] — NOT the eye-height line-of-sight test. Used to
+/// decide whether a goal-directed mover can walk straight at its goal, and to
+/// pick the nearest obstacle in the way. Honors each volume's `y` span, so an
+/// elevated platform never blocks a ground path.
+fn footprint_sweep_entry(volume: &ObstacleVolume, from: Vec2, to: Vec2, mover_y: f32) -> Option<f32> {
+    if !volume.y_span_contains(mover_y) {
+        return None;
+    }
+    match *volume {
+        ObstacleVolume::Cylinder {
+            center_xz, radius, ..
+        } => {
+            let eff = radius + MOVER_RADIUS;
+            let d = to - from;
+            let f = from - center_xz;
+            let a2 = d.dot(d);
+            if a2 <= 1e-12 {
+                // No motion: blocked iff the start point is strictly inside the
+                // inflated circle (touching the skin is allowed).
+                return if f.length_squared() < eff * eff - TOUCH_EPS {
+                    Some(0.0)
+                } else {
+                    None
+                };
+            }
+            let b2 = 2.0 * f.dot(d);
+            let c2 = f.dot(f) - eff * eff;
+            let disc = b2 * b2 - 4.0 * a2 * c2;
+            // disc <= 0 ⇒ the segment misses or is exactly tangent; a tangent
+            // graze is "touching = allowed" for movement, so treat it as clear.
+            if disc <= 0.0 {
+                return None;
+            }
+            let sq = disc.sqrt();
+            let t0 = (-b2 - sq) / (2.0 * a2);
+            let t1 = (-b2 + sq) / (2.0 * a2);
+            if t1 < 0.0 || t0 > 1.0 {
+                return None;
+            }
+            Some(t0.max(0.0))
+        }
+        ObstacleVolume::Aabb { min, max } => {
+            let (mnx, mxx) = (min.x - MOVER_RADIUS, max.x + MOVER_RADIUS);
+            let (mnz, mxz) = (min.z - MOVER_RADIUS, max.z + MOVER_RADIUS);
+            let d = to - from;
+            let mut lo = 0.0_f32;
+            let mut hi = 1.0_f32;
+            // Slab method in XZ against the inflated box (Vec2.y carries world Z).
+            for (a_c, d_c, mn, mx) in [(from.x, d.x, mnx, mxx), (from.y, d.y, mnz, mxz)] {
+                if d_c.abs() <= 1e-12 {
+                    // Parallel to this slab: outside (or flush on) it ⇒ clear.
+                    if a_c <= mn || a_c >= mx {
+                        return None;
+                    }
+                } else {
+                    let t0 = (mn - a_c) / d_c;
+                    let t1 = (mx - a_c) / d_c;
+                    lo = lo.max(t0.min(t1));
+                    hi = hi.min(t0.max(t1));
+                }
+            }
+            // Strict overlap: a single-point graze (lo == hi) is touching = clear.
+            if lo < hi {
+                Some(lo.max(0.0))
+            } else {
+                None
+            }
+        }
+    }
+}
+
+/// Steer a goal-directed mover around a blocking obstacle instead of oozing along
+/// its surface.
+///
+/// Returns the unit XZ direction the mover should travel *this frame*:
+/// - `None` — the straight segment `from → goal` is clear of every obstacle (or
+///   there are no obstacles), so the caller should head directly at the goal.
+///   Returning `None` rather than the direct vector lets the caller reuse its own
+///   existing normalization, keeping obstacle-free maps byte-identical.
+/// - `Some(dir)` — the direct line is blocked; `dir` aims at the tangent point of
+///   the nearest blocking obstacle on the side that makes better progress toward
+///   the goal, so the mover travels at full speed along a path that clears the
+///   obstacle and resumes direct pursuit once the line opens up.
+///
+/// Purely geometric and deterministic (plain `f32`, obstacles walked in slice
+/// order, deterministic side tie-break). The [`resolve_movement`] collision
+/// resolver remains the final no-clip guarantee downstream; steering merely aims
+/// the step along a clear tangent so the resolver rarely has to bite.
+///
+/// **Side commitment is emergent, not stored.** The "better progress" tangent is
+/// self-reinforcing: once the mover steps off the center line toward one side,
+/// that side's tangent keeps winning the progress comparison, so the choice holds
+/// without any per-frame committed-side state. The only ambiguous instant — the
+/// goal exactly behind the obstacle center — is resolved by [`STEER_TIE_EPS`] to a
+/// fixed default, so the selection is a stable function of geometry that cannot
+/// flip-flop. (The unit tests simulate the step loop and assert convergence,
+/// which would fail on any oscillation.)
+pub fn steer_toward_goal(
+    obstacles: &[ObstacleVolume],
+    from: Vec2,
+    goal: Vec2,
+    mover_y: f32,
+) -> Option<Vec2> {
+    if obstacles.is_empty() {
+        return None;
+    }
+    let to_goal = goal - from;
+    if to_goal.length_squared() <= 1e-12 {
+        return None;
+    }
+
+    // Nearest blocker along the segment: smallest entry parameter; ties (and the
+    // empty case) resolved by slice order — the first-declared volume wins.
+    let mut best: Option<(f32, usize)> = None;
+    for (i, v) in obstacles.iter().enumerate() {
+        if let Some(t) = footprint_sweep_entry(v, from, goal, mover_y) {
+            match best {
+                Some((bt, _)) if t >= bt => {}
+                _ => best = Some((t, i)),
+            }
+        }
+    }
+    let (_, idx) = best?; // path clear ⇒ go direct
+
+    Some(match obstacles[idx] {
+        ObstacleVolume::Cylinder {
+            center_xz, radius, ..
+        } => steer_around_cylinder(center_xz, radius, from, goal),
+        ObstacleVolume::Aabb { min, max } => steer_around_box(min, max, from, goal, mover_y),
+    })
+}
+
+/// Unit direction toward the better-progress tangent point of a cylinder (radius
+/// inflated by [`MOVER_RADIUS`]). See [`steer_toward_goal`].
+fn steer_around_cylinder(center: Vec2, radius: f32, from: Vec2, goal: Vec2) -> Vec2 {
+    let eff = radius + MOVER_RADIUS;
+    let goal_dir = (goal - from).normalize_or_zero();
+    let d = center - from;
+    let dist = d.length();
+
+    if dist <= eff {
+        // Already at/inside the collision skin (a hugging chase): there are no
+        // external tangents — peel off perpendicular to the center direction on
+        // whichever side heads more toward the goal.
+        let dn = if dist > 1e-6 { d / dist } else { goal_dir };
+        let dn = dn.normalize_or(Vec2::X);
+        let perp = Vec2::new(-dn.y, dn.x);
+        let s = if goal_dir.dot(perp) >= 0.0 { 1.0 } else { -1.0 };
+        return perp * s;
+    }
+
+    let dn = d / dist;
+    // Half-angle subtended by the inflated circle from `from`.
+    let alpha = (eff / dist).clamp(-1.0, 1.0).asin();
+    let (sin_a, cos_a) = alpha.sin_cos();
+    // Rotate the center direction by ±alpha to get the two tangent directions.
+    let t_left = Vec2::new(dn.x * cos_a - dn.y * sin_a, dn.x * sin_a + dn.y * cos_a);
+    let t_right = Vec2::new(dn.x * cos_a + dn.y * sin_a, -dn.x * sin_a + dn.y * cos_a);
+
+    let dot_l = t_left.dot(goal_dir);
+    let dot_r = t_right.dot(goal_dir);
+    if (dot_l - dot_r).abs() < STEER_TIE_EPS {
+        // Goal ~directly behind the center: deterministic default (left tangent).
+        t_left
+    } else if dot_l >= dot_r {
+        t_left
+    } else {
+        t_right
+    }
+}
+
+/// Unit direction toward the best visible (silhouette) corner of a box (inflated
+/// by [`MOVER_RADIUS`]) — the box analog of a tangent point. Boxes are the stub
+/// map's primitive; this keeps the mover rounding the correct side without the
+/// full rounded-rectangle tangent geometry. See [`steer_toward_goal`].
+fn steer_around_box(min: Vec3, max: Vec3, from: Vec2, goal: Vec2, mover_y: f32) -> Vec2 {
+    let goal_dir = (goal - from).normalize_or_zero();
+    let (mnx, mxx) = (min.x - MOVER_RADIUS, max.x + MOVER_RADIUS);
+    let (mnz, mxz) = (min.z - MOVER_RADIUS, max.z + MOVER_RADIUS);
+    let corners = [
+        Vec2::new(mnx, mnz),
+        Vec2::new(mnx, mxz),
+        Vec2::new(mxx, mnz),
+        Vec2::new(mxx, mxz),
+    ];
+    let mut best = goal_dir;
+    let mut best_dot = f32::NEG_INFINITY;
+    for c in corners {
+        // A far-side corner's segment passes through the box interior (blocked);
+        // a visible silhouette/near corner only grazes the boundary at its
+        // endpoint (clear). Round toward the visible corner most aligned with the
+        // goal. Fixed corner order gives a deterministic tie-break.
+        if footprint_sweep_entry(&ObstacleVolume::Aabb { min, max }, from, c, mover_y).is_some() {
+            continue;
+        }
+        let dir = (c - from).normalize_or_zero();
+        let dot = dir.dot(goal_dir);
+        if dot > best_dot {
+            best_dot = dot;
+            best = dir;
+        }
+    }
+    best
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -625,5 +842,145 @@ mod tests {
             out, desired,
             "a platform whose y-span excludes the mover must not block ground movement"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Tangent steering (steer_toward_goal)
+    // -----------------------------------------------------------------------
+
+    /// Perpendicular distance from `center` to the infinite ray `from + t·dir`.
+    fn ray_clearance(center: Vec2, from: Vec2, dir: Vec2) -> f32 {
+        (center - from).perp_dot(dir).abs()
+    }
+
+    /// A clear straight line to the goal yields `None` (caller goes direct).
+    #[test]
+    fn steer_clear_line_returns_none() {
+        let pillar = cylinder(0.0, 0.0, 2.5, 0.0, 5.0);
+        // A path that passes well clear of the pillar (offset far in +z).
+        let from = Vec2::new(-20.0, 20.0);
+        let goal = Vec2::new(20.0, 20.0);
+        assert_eq!(steer_toward_goal(&[pillar], from, goal, 1.0), None);
+    }
+
+    /// No obstacles ⇒ always `None`, regardless of geometry.
+    #[test]
+    fn steer_no_obstacles_returns_none() {
+        let from = Vec2::new(-20.0, 0.0);
+        let goal = Vec2::new(20.0, 0.0);
+        assert_eq!(steer_toward_goal(&[], from, goal, 1.0), None);
+    }
+
+    /// Goal directly behind a cylinder ⇒ steer toward a TANGENT point, not the
+    /// center: the returned direction is offset from straight-at-goal, and the
+    /// ray along it clears the solid pillar (perpendicular distance ≥ radius).
+    #[test]
+    fn steer_goal_behind_cylinder_aims_at_tangent() {
+        let pillar = cylinder(0.0, 0.0, 2.5, 0.0, 5.0);
+        let from = Vec2::new(-20.0, 0.0);
+        let goal = Vec2::new(20.0, 0.0);
+        let dir = steer_toward_goal(&[pillar], from, goal, 1.0).expect("path is blocked");
+        assert!((dir.length() - 1.0).abs() < 1e-4, "direction must be unit, got {dir:?}");
+
+        let goal_dir = (goal - from).normalize();
+        assert!(
+            dir.dot(goal_dir) < 1.0 - 1e-6,
+            "steering must deflect off the straight-at-goal line, got dot {}",
+            dir.dot(goal_dir)
+        );
+        // The ray from `from` along `dir` must clear the solid pillar (radius
+        // 2.5); the tangent is against the MOVER_RADIUS-inflated circle so the
+        // clearance is ~eff = 3.0.
+        let clr = ray_clearance(Vec2::ZERO, from, dir);
+        assert!(
+            clr >= 2.5,
+            "tangent ray must clear the r=2.5 pillar, clearance was {clr}"
+        );
+    }
+
+    /// The side choice takes the SHORTER way around: with the goal offset to +z,
+    /// the mover steers to the +z tangent (dir.y > 0).
+    #[test]
+    fn steer_picks_shorter_side() {
+        let pillar = cylinder(0.0, 0.0, 2.5, 0.0, 5.0);
+        let from = Vec2::new(-20.0, 0.0);
+        let goal = Vec2::new(20.0, 3.0); // slightly +z beyond the pillar
+        let dir = steer_toward_goal(&[pillar], from, goal, 1.0).expect("path is blocked");
+        assert!(
+            dir.y > 0.0,
+            "goal offset +z ⇒ round the +z side (dir.y > 0), got {dir:?}"
+        );
+    }
+
+    /// A mover that repeatedly steps along the steering direction reaches a point
+    /// with a clear straight line to the goal in a bounded number of steps, and
+    /// never enters the pillar footprint on the way. This is the anti-oscillation
+    /// guarantee: a flip-flopping selection would never converge.
+    #[test]
+    fn steer_converges_and_never_clips() {
+        let pillar = cylinder(0.0, 0.0, 2.5, 0.0, 5.0);
+        let goal = Vec2::new(20.0, 0.0);
+        let mut pos = Vec2::new(-20.0, 0.0);
+        let step = 0.5;
+        let mut steps = 0;
+        loop {
+            assert!(
+                pos.distance(Vec2::ZERO) >= 2.5 - 1e-3,
+                "mover clipped the pillar at {pos:?}"
+            );
+            match steer_toward_goal(&[pillar], pos, goal, 1.0) {
+                None => break, // straight line to goal is clear — arrived at sight
+                Some(dir) => {
+                    pos += dir * step;
+                    steps += 1;
+                    assert!(steps < 500, "steering did not converge (oscillation?)");
+                }
+            }
+        }
+        // Sanity: convergence took real work but a bounded amount (a clean arc
+        // around a r=3 inflated circle from 20yd out is well under 200 steps).
+        assert!(steps > 0, "the path should have been blocked initially");
+        assert!(steps < 200, "convergence took {steps} steps — unexpectedly long");
+    }
+
+    /// Box analog: goal behind an AABB ⇒ steer toward a visible silhouette corner
+    /// (off the straight-at-goal line), making forward progress toward the goal.
+    #[test]
+    fn steer_around_box_aims_at_corner() {
+        let box_vol = aabb(-2.5, 0.0, -2.5, 2.5, 3.0, 2.5);
+        let from = Vec2::new(-20.0, 0.0);
+        let goal = Vec2::new(20.0, 0.0);
+        let dir = steer_toward_goal(&[box_vol], from, goal, 1.0).expect("path is blocked");
+        assert!((dir.length() - 1.0).abs() < 1e-4, "unit direction, got {dir:?}");
+        assert!(dir.x > 0.0, "must still make +x progress toward the goal, got {dir:?}");
+        assert!(
+            dir.y.abs() > 1e-3,
+            "must deflect off-axis toward a corner, got {dir:?}"
+        );
+    }
+
+    /// A mover already at the collision skin of a cylinder (a hugging chase) has
+    /// no external tangent; it peels off perpendicular toward the goal side, and
+    /// the direction is unit and non-degenerate.
+    #[test]
+    fn steer_from_inside_skin_peels_perpendicular() {
+        let pillar = cylinder(0.0, 0.0, 2.5, 0.0, 5.0);
+        // Just inside the inflated skin (eff = 3.0) on the -x side.
+        let from = Vec2::new(-2.9, 0.0);
+        let goal = Vec2::new(20.0, 0.0); // straight through the pillar
+        let dir = steer_toward_goal(&[pillar], from, goal, 1.0).expect("path is blocked");
+        assert!((dir.length() - 1.0).abs() < 1e-4, "unit direction, got {dir:?}");
+        // Perpendicular to the center direction (which is +x here) ⇒ ~pure ±z.
+        assert!(dir.y.abs() > 0.9, "should peel sideways (±z), got {dir:?}");
+    }
+
+    /// An elevated platform whose y-span excludes the mover does not trigger
+    /// steering — a ground path under it is clear.
+    #[test]
+    fn steer_platform_above_mover_does_not_deflect() {
+        let platform = aabb(-5.0, 5.0, -5.0, 5.0, 7.0, 5.0); // y ∈ [5, 7]
+        let from = Vec2::new(-20.0, 0.0);
+        let goal = Vec2::new(20.0, 0.0); // XZ crosses the platform, but at ground y
+        assert_eq!(steer_toward_goal(&[platform], from, goal, 1.0), None);
     }
 }
