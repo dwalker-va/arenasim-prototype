@@ -81,11 +81,17 @@ impl Plugin for StatesPlugin {
                 Update,
                 keybindings_ui.run_if(in_state(GameState::Keybindings)),
             )
-            // Configure match systems (defined in configure_match_ui module)
+            // Configure match systems (defined in configure_match_ui module).
+            // The live arena preview is a render-to-texture scene set up/torn
+            // down with the state; `update_map_preview` rebuilds it on map
+            // change. Graphical-only (no headless registration).
+            .add_systems(OnEnter(GameState::ConfigureMatch), configure_match_ui::setup_map_preview)
+            .add_systems(OnExit(GameState::ConfigureMatch), configure_match_ui::cleanup_map_preview)
             .add_systems(
                 Update,
                 (
                     configure_match_ui::load_class_icons,
+                    configure_match_ui::update_map_preview,
                     configure_match_ui::configure_match_ui,
                 )
                     .chain()

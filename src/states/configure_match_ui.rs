@@ -19,10 +19,19 @@
 //! 5. Clicks "START MATCH" when all slots filled
 
 use bevy::prelude::*;
+use bevy::core_pipeline::bloom::Bloom;
+use bevy::core_pipeline::tonemapping::Tonemapping;
+use bevy::render::camera::RenderTarget;
+use bevy::render::render_asset::RenderAssetUsages;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages};
+use bevy::render::view::RenderLayers;
 use bevy_egui::{egui, EguiContexts};
 use std::collections::HashMap;
-use super::{GameState, match_config::{self, MatchConfig}};
+use super::{GameState, match_config::{self, MatchConfig, ArenaMap}};
 use super::view_combatant_ui::ViewCombatantState;
+use super::play_match::map_config::MapGeometryConfig;
+use super::play_match::map_geometry::ObstacleVolume;
+use super::play_match::{spawn_arena_environment, ARENA_FLOOR_HALF_X, ARENA_FLOOR_HALF_Z, ARENA_FLOOR_CORNER_CUT};
 
 /// Resource storing loaded class icon textures for egui rendering.
 /// Maps CharacterClass to egui TextureId for efficient icon display.
@@ -105,13 +114,29 @@ pub struct CharacterPickerState {
     pub slot: usize,
 }
 
-/// Main UI system for the Configure Match screen.
-/// 
-/// Renders:
-/// - Header with back button and title
-/// - Three-column layout (Team 1, Map, Team 2)
-/// - Start Match button (enabled when config is valid)
-/// - Character picker modal (when active)
+/// A user action produced by the Configure Match screen that requires ECS
+/// side effects (state transitions, resource inserts). Everything that only
+/// mutates `MatchConfig` / `CharacterPickerState` is handled inside the pure
+/// draw function; only these bubble out to the Bevy wrapper.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigureMatchAction {
+    /// Return to the main menu.
+    Back,
+    /// Begin the match with the current config.
+    StartMatch,
+    /// Open the View Combatant screen for a filled slot.
+    ViewCombatant {
+        class: match_config::CharacterClass,
+        team: u8,
+        slot: usize,
+    },
+}
+
+/// Main UI system for the Configure Match screen (Bevy wrapper).
+///
+/// Grabs the egui context and resources, drives the pure
+/// [`draw_configure_match`] renderer, and applies the returned
+/// [`ConfigureMatchAction`] via ECS.
 pub fn configure_match_ui(
     mut contexts: EguiContexts,
     mut config: ResMut<MatchConfig>,
@@ -121,6 +146,8 @@ pub fn configure_match_ui(
     keybindings: Res<crate::keybindings::Keybindings>,
     keyboard: Res<ButtonInput<KeyCode>>,
     class_icons: Res<ClassIcons>,
+    map_geometry: Res<MapGeometryConfig>,
+    map_preview: Option<Res<MapPreview>>,
 ) {
     use crate::keybindings::GameAction;
 
@@ -133,12 +160,6 @@ pub fn configure_match_ui(
     let Some(ctx) = contexts.try_ctx_mut() else {
         return;
     };
-
-    // Configure dark theme
-    let mut style = (*ctx.style()).clone();
-    style.visuals.window_fill = egui::Color32::from_rgb(20, 20, 30);
-    style.visuals.panel_fill = egui::Color32::from_rgb(20, 20, 30);
-    ctx.set_style(style);
 
     // Handle Back key - close modal if open, otherwise return to main menu
     if keybindings.action_just_pressed(GameAction::Back, &keyboard) {
@@ -153,6 +174,64 @@ pub fn configure_match_ui(
         }
     }
 
+    // The pure renderer needs a live picker state; if the resource was only
+    // just queued this frame, fall back to a scratch one so the screen still
+    // draws (the resource lands next frame).
+    let mut scratch_picker = CharacterPickerState::default();
+    let picker: &mut CharacterPickerState = match picker_state {
+        Some(ref mut p) => p,
+        None => &mut scratch_picker,
+    };
+
+    // Show the live 3D preview texture once it's registered and rendering the
+    // currently-selected map; otherwise the pure renderer falls back to the
+    // vector schematic (which is also what the offscreen egui harness sees).
+    let preview_texture = map_preview
+        .as_ref()
+        .filter(|p| p.rendered_map == config.map)
+        .map(|p| p.texture_id);
+
+    match draw_configure_match(ctx, &mut config, picker, &class_icons, &map_geometry, preview_texture) {
+        Some(ConfigureMatchAction::Back) => {
+            next_state.set(GameState::MainMenu);
+        }
+        Some(ConfigureMatchAction::StartMatch) => {
+            info!("Starting match with config: {:?}", *config);
+            next_state.set(GameState::PlayMatch);
+        }
+        Some(ConfigureMatchAction::ViewCombatant { class, team, slot }) => {
+            commands.insert_resource(ViewCombatantState { class, team, slot });
+            next_state.set(GameState::ViewCombatant);
+        }
+        None => {}
+    }
+}
+
+/// Render the entire Configure Match screen into `ctx`, returning any action
+/// that needs ECS side effects (see [`ConfigureMatchAction`]).
+///
+/// This is deliberately free of Bevy ECS system params (it takes plain
+/// references) so it can be driven directly by an egui harness — see
+/// `tests/configure_match_snapshot.rs`, which renders it offscreen with
+/// `egui_kittest` for a fast, human-free visual-iteration loop. All state that
+/// only mutates the config or the picker modal is applied in place here; only
+/// state transitions bubble out through the return value.
+pub fn draw_configure_match(
+    ctx: &egui::Context,
+    config: &mut MatchConfig,
+    picker: &mut CharacterPickerState,
+    class_icons: &ClassIcons,
+    map_geometry: &MapGeometryConfig,
+    preview_texture: Option<egui::TextureId>,
+) -> Option<ConfigureMatchAction> {
+    // Configure dark theme
+    let mut style = (*ctx.style()).clone();
+    style.visuals.window_fill = egui::Color32::from_rgb(20, 20, 30);
+    style.visuals.panel_fill = egui::Color32::from_rgb(20, 20, 30);
+    ctx.set_style(style);
+
+    let mut action: Option<ConfigureMatchAction> = None;
+
     egui::CentralPanel::default()
         .frame(
             egui::Frame::new()
@@ -166,18 +245,28 @@ pub fn configure_match_ui(
         )
         .show(ctx, |ui| {
             ui.add_space(10.0);
-            
-            // Back button - positioned in top-left
+
+            // Back button - custom-painted to match the rest of the (painted)
+            // screen instead of egui's default chrome.
             let back_rect = egui::Rect::from_min_size(
-                egui::pos2(20.0, 20.0),
-                egui::vec2(80.0, 36.0)
+                egui::pos2(20.0, 18.0),
+                egui::vec2(96.0, 38.0)
             );
             ui.allocate_new_ui(egui::UiBuilder::new().max_rect(back_rect), |ui| {
-                if ui.button(egui::RichText::new("BACK").size(20.0)).clicked() {
-                    next_state.set(GameState::MainMenu);
+                let back = egui::Button::new(
+                    egui::RichText::new("‹  BACK")
+                        .size(18.0)
+                        .color(egui::Color32::from_rgb(200, 205, 220)),
+                )
+                .fill(egui::Color32::from_rgb(38, 40, 54))
+                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(70, 74, 92)))
+                .corner_radius(6.0)
+                .min_size(egui::vec2(96.0, 38.0));
+                if ui.add(back).clicked() {
+                    action = Some(ConfigureMatchAction::Back);
                 }
             });
-            
+
             // Title - centered relative to full width
             ui.vertical_centered(|ui| {
                 ui.heading(
@@ -187,7 +276,7 @@ pub fn configure_match_ui(
                 );
             });
 
-            ui.add_space(30.0);
+            ui.add_space(24.0);
 
             // Main content area with 3 panels
             // Calculate widths to prevent overflow
@@ -195,70 +284,151 @@ pub fn configure_match_ui(
             let margins_and_spacing = 30.0 + 40.0; // Margins + column spacing
             let content_width = screen_width - margins_and_spacing;
             let col_width = content_width / 3.0;
-            
-            ui.horizontal(|ui| {
+
+            ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = 20.0;
-                let panel_width = col_width - 10.0; // Account for borders/padding
+                let panel_width = col_width - 34.0; // account for the framed inner margin + stroke
 
-                // Team 1 column
-                ui.vertical(|ui| {
-                    ui.set_width(col_width);
-                    ui.add_space(5.0);
-                    render_team_panel(ui, &mut config, 1, &mut picker_state, panel_width, &class_icons, &mut commands, &mut next_state);
+                // Team 1 column (blue side)
+                team_column_frame(ui, 1, col_width, |ui| {
+                    if let Some(a) = render_team_panel(ui, config, 1, picker, panel_width, class_icons) {
+                        action = Some(a);
+                    }
                 });
 
-                // Map column
-                ui.vertical(|ui| {
-                    ui.set_width(col_width);
-                    ui.add_space(5.0);
-                    render_map_panel(ui, &mut config, panel_width);
+                // Map column (neutral center) — leads with the VS badge so it
+                // sits between the two team headers.
+                center_column_frame(ui, col_width, |ui| {
+                    render_map_panel(ui, config, panel_width, map_geometry, preview_texture);
                 });
 
-                // Team 2 column
-                ui.vertical(|ui| {
-                    ui.set_width(col_width);
-                    ui.add_space(5.0);
-                    render_team_panel(ui, &mut config, 2, &mut picker_state, panel_width, &class_icons, &mut commands, &mut next_state);
+                // Team 2 column (red side)
+                team_column_frame(ui, 2, col_width, |ui| {
+                    if let Some(a) = render_team_panel(ui, config, 2, picker, panel_width, class_icons) {
+                        action = Some(a);
+                    }
                 });
             });
 
-            ui.add_space(30.0);
+            // Push the action bar to the bottom of the panel so the primary
+            // CTA reads as a docked footer instead of floating in dead space.
+            let footer_height = 96.0;
+            let remaining = ui.available_height();
+            if remaining > footer_height {
+                ui.add_space(remaining - footer_height);
+            } else {
+                ui.add_space(22.0);
+            }
 
-            // Start Match button - centered, only enabled when valid
+            // Bottom action bar: a full-width separator, then the primary
+            // Start button so it reads as a committed footer action rather
+            // than floating in dead space.
+            let sep_color = egui::Color32::from_rgb(48, 50, 64);
+            let sep_y = ui.cursor().top();
+            let sep_rect = egui::Rect::from_min_max(
+                egui::pos2(ui.max_rect().left(), sep_y),
+                egui::pos2(ui.max_rect().right(), sep_y + 1.0),
+            );
+            ui.painter().rect_filled(sep_rect, 0.0, sep_color);
+            ui.add_space(20.0);
+
             ui.vertical_centered(|ui| {
                 let is_valid = config.is_valid();
                 let button_text = if is_valid {
                     "START MATCH"
                 } else {
-                    "SELECT CHARACTERS"
+                    "SELECT CHARACTERS TO CONTINUE"
                 };
-                
+
+                let (fill, text_color, stroke) = if is_valid {
+                    (
+                        egui::Color32::from_rgb(46, 110, 66),
+                        egui::Color32::from_rgb(235, 248, 235),
+                        egui::Stroke::new(1.5, egui::Color32::from_rgb(96, 176, 116)),
+                    )
+                } else {
+                    (
+                        egui::Color32::from_rgb(38, 40, 52),
+                        egui::Color32::from_rgb(120, 120, 132),
+                        egui::Stroke::new(1.0, egui::Color32::from_rgb(56, 58, 72)),
+                    )
+                };
+
                 let button = egui::Button::new(
-                    egui::RichText::new(button_text)
-                        .size(24.0)
-                        .color(if is_valid {
-                            egui::Color32::from_rgb(230, 242, 230)
-                        } else {
-                            egui::Color32::from_rgb(102, 102, 102)
-                        }),
+                    egui::RichText::new(button_text).size(24.0).strong().color(text_color),
                 )
-                .min_size(egui::vec2(250.0, 50.0));
+                .fill(fill)
+                .stroke(stroke)
+                .corner_radius(8.0)
+                .min_size(egui::vec2(300.0, 54.0));
 
                 if ui.add_enabled(is_valid, button).clicked() {
-                    info!("Starting match with config: {:?}", *config);
-                    next_state.set(GameState::PlayMatch);
+                    action = Some(ConfigureMatchAction::StartMatch);
                 }
             });
 
-            ui.add_space(20.0);
+            ui.add_space(10.0);
         });
 
     // Character picker modal - shown when active
-    if let Some(ref mut picker) = picker_state {
-        if picker.active {
-            render_character_picker_modal(ctx, &mut config, picker, &class_icons);
-        }
+    if picker.active {
+        render_character_picker_modal(ctx, config, picker, class_icons);
     }
+
+    action
+}
+
+/// Wrap a team column in a team-tinted, team-bordered frame so the blue side
+/// and red side read as distinct at a glance (peripheral-vision identity).
+fn team_column_frame(
+    ui: &mut egui::Ui,
+    team: u8,
+    col_width: f32,
+    add_contents: impl FnOnce(&mut egui::Ui),
+) {
+    let (fill, stroke) = if team == 1 {
+        (
+            egui::Color32::from_rgb(26, 32, 48),
+            egui::Color32::from_rgb(51, 102, 204),
+        )
+    } else {
+        (
+            egui::Color32::from_rgb(46, 28, 32),
+            egui::Color32::from_rgb(204, 51, 51),
+        )
+    };
+
+    egui::Frame::new()
+        .fill(fill)
+        .stroke(egui::Stroke::new(2.0, stroke.gamma_multiply(0.85)))
+        .corner_radius(10.0)
+        .inner_margin(egui::Margin::same(14))
+        .show(ui, |ui| {
+            ui.vertical(|ui| {
+                ui.set_width(col_width - 28.0);
+                add_contents(ui);
+            });
+        });
+}
+
+/// Wrap the center (map) column in a neutral framed panel to match the two
+/// team columns' visual weight.
+fn center_column_frame(
+    ui: &mut egui::Ui,
+    col_width: f32,
+    add_contents: impl FnOnce(&mut egui::Ui),
+) {
+    egui::Frame::new()
+        .fill(egui::Color32::from_rgb(24, 24, 34))
+        .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(58, 58, 74)))
+        .corner_radius(10.0)
+        .inner_margin(egui::Margin::same(14))
+        .show(ui, |ui| {
+            ui.vertical(|ui| {
+                ui.set_width(col_width - 28.0);
+                add_contents(ui);
+            });
+        });
 }
 
 /// Render the character picker modal window.
@@ -281,7 +451,21 @@ fn render_character_picker_modal(
         .show(ctx, |ui| {
             ui.set_min_width(500.0);
 
+            // The class currently assigned to the slot being edited, so it can
+            // be marked in the list.
+            let current_class = if picker.team == 1 {
+                config.team1.get(picker.slot).copied().flatten()
+            } else {
+                config.team2.get(picker.slot).copied().flatten()
+            };
+
+            // Scroll so the 8-class list never overflows a short window.
+            egui::ScrollArea::vertical()
+                .max_height(560.0)
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
             for class in match_config::CharacterClass::all() {
+                let is_current = current_class == Some(*class);
                 let color = class.color();
                 let color32 = egui::Color32::from_rgb(
                     (color.to_srgba().red * 255.0) as u8,
@@ -295,8 +479,11 @@ fn render_character_picker_modal(
                     egui::Sense::click()
                 );
 
-                // Background with hover effect
-                let bg_color = if response.hovered() {
+                // Background with hover effect; the current selection reads
+                // brighter with a full-strength class-colored border.
+                let bg_color = if is_current {
+                    egui::Color32::from_rgb(58, 70, 84)
+                } else if response.hovered() {
                     egui::Color32::from_rgb(64, 77, 89)
                 } else {
                     egui::Color32::from_rgb(51, 51, 64)
@@ -306,7 +493,10 @@ fn render_character_picker_modal(
                 ui.painter().rect_stroke(
                     rect,
                     8.0,
-                    egui::Stroke::new(2.0, color32.gamma_multiply(0.5)),
+                    egui::Stroke::new(
+                        if is_current { 2.5 } else { 2.0 },
+                        if is_current { color32 } else { color32.gamma_multiply(0.5) },
+                    ),
                     egui::StrokeKind::Outside,
                 );
 
@@ -356,6 +546,17 @@ fn render_character_picker_modal(
                     egui::Color32::from_rgb(153, 153, 153),
                 );
 
+                // "Selected" marker on the currently-assigned class.
+                if is_current {
+                    ui.painter().text(
+                        egui::pos2(rect.right() - 16.0, rect.center().y),
+                        egui::Align2::RIGHT_CENTER,
+                        "SELECTED",
+                        egui::FontId::proportional(13.0),
+                        color32,
+                    );
+                }
+
                 // Handle click - assign character to slot
                 if response.clicked() {
                     if picker.team == 1 {
@@ -372,6 +573,7 @@ fn render_character_picker_modal(
 
                 ui.add_space(12.0);
             }
+                });
 
             ui.add_space(10.0);
 
@@ -390,12 +592,12 @@ fn render_team_panel(
     ui: &mut egui::Ui,
     config: &mut MatchConfig,
     team: u8,
-    picker_state: &mut Option<ResMut<CharacterPickerState>>,
+    picker: &mut CharacterPickerState,
     max_width: f32,
     class_icons: &ClassIcons,
-    commands: &mut Commands,
-    next_state: &mut ResMut<NextState<GameState>>,
-) {
+) -> Option<ConfigureMatchAction> {
+    let mut action: Option<ConfigureMatchAction> = None;
+
     let team_color = if team == 1 {
         egui::Color32::from_rgb(51, 102, 204)
     } else {
@@ -449,7 +651,9 @@ fn render_team_panel(
         let character = team_slots.get(slot).and_then(|c| *c);
         let is_active = slot < team_size;
 
-        render_character_slot(ui, config, team, slot, character, is_active, team_color, picker_state, max_width, class_icons, commands, next_state);
+        if let Some(a) = render_character_slot(ui, config, team, slot, character, is_active, team_color, picker, max_width, class_icons) {
+            action = Some(a);
+        }
 
         if slot < 2 {
             ui.add_space(12.0);
@@ -476,25 +680,38 @@ fn render_team_panel(
             config.team2_kill_target
         };
         
-        // Show enemy characters as kill target options
+        // Show enemy characters as kill target options. Selected = filled
+        // team-color chip with light text; unselected = outlined chip so the
+        // whole group reads as toggles, not disabled labels.
         for slot in 0..enemy_team_size {
             if let Some(Some(enemy_class)) = enemy_slots.get(slot) {
                 let is_selected = current_kill_target == Some(slot);
-                
+
                 let button_text = format!("{}. {}", slot + 1, enemy_class.name());
-                let button_color = if is_selected {
-                    team_color
+                let (fill, text_color, stroke) = if is_selected {
+                    (
+                        team_color.gamma_multiply(0.9),
+                        egui::Color32::from_rgb(240, 244, 250),
+                        egui::Stroke::new(1.5, team_color),
+                    )
                 } else {
-                    egui::Color32::from_rgb(102, 102, 102)
+                    (
+                        egui::Color32::from_rgb(40, 42, 54),
+                        egui::Color32::from_rgb(180, 184, 196),
+                        egui::Stroke::new(1.0, egui::Color32::from_rgb(66, 70, 88)),
+                    )
                 };
-                
+
                 let button = egui::Button::new(
                     egui::RichText::new(button_text)
                         .size(14.0)
-                        .color(button_color)
+                        .color(text_color)
                 )
+                .fill(fill)
+                .stroke(stroke)
+                .corner_radius(5.0)
                 .min_size(egui::vec2(max_width, 30.0));
-                
+
                 if ui.add(button).clicked() {
                     // Toggle selection
                     if is_selected {
@@ -529,6 +746,8 @@ fn render_team_panel(
             );
         }
     });
+
+    action
 }
 
 /// Render a single character slot.
@@ -545,12 +764,10 @@ fn render_character_slot(
     character: Option<match_config::CharacterClass>,
     is_active: bool,
     team_color: egui::Color32,
-    picker_state: &mut Option<ResMut<CharacterPickerState>>,
+    picker: &mut CharacterPickerState,
     max_width: f32,
     class_icons: &ClassIcons,
-    commands: &mut Commands,
-    next_state: &mut ResMut<NextState<GameState>>,
-) {
+) -> Option<ConfigureMatchAction> {
     let bg_color = if is_active {
         if character.is_some() {
             egui::Color32::from_rgb(64, 77, 89)
@@ -679,23 +896,38 @@ fn render_character_slot(
             btn_color,
         );
 
+        // Card-hover affordance: signal that clicking the card (anywhere but
+        // the corner button) opens the combatant detail screen. Without this,
+        // the click-to-view action is invisible.
+        if response.hovered() && !btn_hovered {
+            ui.painter().text(
+                egui::pos2(rect.right() - 12.0, rect.bottom() - 10.0),
+                egui::Align2::RIGHT_BOTTOM,
+                "View ›",
+                egui::FontId::proportional(12.0),
+                egui::Color32::from_rgb(170, 176, 190),
+            );
+        }
+
         // Handle X button click - open picker to change selection
         if btn_hovered && response.clicked() {
-            if let Some(ref mut picker) = picker_state {
-                picker.active = true;
-                picker.team = team;
-                picker.slot = slot;
-            }
-            return; // Don't navigate to View Combatant
+            picker.active = true;
+            picker.team = team;
+            picker.slot = slot;
+            return None; // Don't navigate to View Combatant
         }
     } else if is_active {
-        // Empty active slot - show prompt
+        // Empty active slot - inviting prompt with an add glyph.
         ui.painter().text(
             content_rect.center(),
             egui::Align2::CENTER_CENTER,
-            "Click to select character",
+            "+  Add character",
             egui::FontId::proportional(18.0),
-            egui::Color32::from_rgb(128, 128, 128),
+            if response.hovered() {
+                egui::Color32::from_rgb(180, 186, 200)
+            } else {
+                egui::Color32::from_rgb(128, 128, 128)
+            },
         );
     } else {
         // Inactive slot - show dash
@@ -712,98 +944,134 @@ fn render_character_slot(
     if is_active && response.clicked() {
         if let Some(class) = character {
             // Filled slot - navigate to view combatant screen
-            commands.insert_resource(ViewCombatantState { class, team, slot });
-            next_state.set(GameState::ViewCombatant);
-        } else if let Some(ref mut picker) = picker_state {
+            return Some(ConfigureMatchAction::ViewCombatant { class, team, slot });
+        } else {
             // Empty slot - open picker modal
             picker.active = true;
             picker.team = team;
             picker.slot = slot;
         }
     }
+
+    None
 }
 
-/// Render the map selection panel.
-/// 
-/// Shows:
+/// Render the map selection panel (center column).
+///
+/// Shows, top to bottom:
+/// - A prominent VS badge (aligned with the two team headers — this is the
+///   visual divider between the blue and red sides)
 /// - Arena title
-/// - Map preview placeholder
+/// - A top-down schematic preview drawn from the map's real obstacle geometry
 /// - Map navigation controls (◀ name ▶)
 /// - Map description
-/// - VS text separator
-fn render_map_panel(ui: &mut egui::Ui, config: &mut MatchConfig, max_width: f32) {
+fn render_map_panel(
+    ui: &mut egui::Ui,
+    config: &mut MatchConfig,
+    max_width: f32,
+    map_geometry: &MapGeometryConfig,
+    preview_texture: Option<egui::TextureId>,
+) {
     ui.vertical_centered(|ui| {
+        // VS badge — the emotional beat, sitting between the team headers.
         ui.heading(
-            egui::RichText::new("ARENA")
-                .size(20.0)
+            egui::RichText::new("VS")
+                .size(48.0)
+                .strong()
                 .color(egui::Color32::from_rgb(230, 204, 153)),
         );
 
-        ui.add_space(20.0);
+        ui.add_space(14.0);
 
-        // Map preview placeholder
-        let preview_width = (max_width * 0.8).min(180.0);
-        let preview_height = preview_width * 0.75;
-        
+        ui.label(
+            egui::RichText::new("ARENA")
+                .size(16.0)
+                .color(egui::Color32::from_rgb(180, 168, 140)),
+        );
+
+        ui.add_space(12.0);
+
+        // Map preview — real top-down geometry for the selected map.
+        // Arena floor aspect ratio (x:z) keeps the schematic true to scale.
+        let world_w = ARENA_FLOOR_HALF_X * 2.0;
+        let world_h = ARENA_FLOOR_HALF_Z * 2.0;
+        let preview_width = (max_width * 0.92).min(230.0);
+        let preview_height = preview_width * (world_h / world_w);
+
         let (rect, _response) = ui.allocate_exact_size(
             egui::vec2(preview_width, preview_height),
             egui::Sense::hover(),
         );
-        ui.painter().rect_filled(rect, 8.0, egui::Color32::from_rgb(38, 38, 46));
+        // Backing panel behind the preview.
+        ui.painter().rect_filled(rect, 8.0, egui::Color32::from_rgb(16, 16, 24));
         ui.painter().rect_stroke(
             rect,
             8.0,
-            egui::Stroke::new(2.0, egui::Color32::from_rgb(77, 77, 77)),
+            egui::Stroke::new(1.5, egui::Color32::from_rgb(70, 74, 92)),
             egui::StrokeKind::Outside,
         );
-
-        ui.add_space(20.0);
-        
-        // Map selection controls - centered to match preview width
-        let button_width = 25.0;
-        let spacing = 8.0;
-        let label_width = preview_width - (button_width * 2.0) - (spacing * 2.0);
-        
-        ui.horizontal(|ui| {
-            let available = ui.available_width();
-            let controls_width = button_width + spacing + label_width + spacing + button_width;
-            let padding = ((available - controls_width) / 2.0).max(0.0);
-            
-            ui.add_space(padding);
-            
-            // Previous map button
-            if ui.button("◀").clicked() {
-                let maps = match_config::ArenaMap::all();
-                let current_idx = maps.iter().position(|m| *m == config.map).unwrap_or(0);
-                let new_idx = if current_idx == 0 {
-                    maps.len() - 1
-                } else {
-                    current_idx - 1
-                };
-                config.map = maps[new_idx];
-            }
-
-            ui.add_space(spacing);
-            
-            // Map name label (fixed width)
-            ui.allocate_ui_with_layout(
-                egui::vec2(label_width, ui.spacing().interact_size.y),
-                egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-                |ui| {
-                    ui.label(egui::RichText::new(config.map.name()).size(16.0));
-                },
+        if let Some(tex) = preview_texture {
+            // Live 3D render of the arena (fixed-camera offscreen pass).
+            ui.painter().image(
+                tex,
+                rect.shrink(3.0),
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
             );
-            
-            ui.add_space(spacing);
+        } else {
+            // Fallback: vector top-down schematic (also what the egui harness
+            // renders, since Bevy render-to-texture isn't available there).
+            draw_map_preview(ui.painter(), rect.shrink(10.0), config.map, map_geometry);
+        }
 
-            // Next map button
-            if ui.button("▶").clicked() {
-                let maps = match_config::ArenaMap::all();
-                let current_idx = maps.iter().position(|m| *m == config.map).unwrap_or(0);
-                let new_idx = (current_idx + 1) % maps.len();
-                config.map = maps[new_idx];
-            }
-        });
+        ui.add_space(16.0);
+
+        // Map selection controls. Laid out in a fixed-width row equal to the
+        // preview width, with exact widget sizes and zero item spacing, so the
+        // row centers under the preview exactly (the enclosing
+        // `vertical_centered` centers the whole allocation). The previous
+        // manual-padding approach drifted because egui's default item spacing
+        // and button padding aren't accounted for in the width math.
+        let button_width = 32.0;
+        let ctrl_h = 30.0;
+        let label_width = preview_width - button_width * 2.0;
+        let mut nav: i32 = 0;
+
+        ui.allocate_ui_with_layout(
+            egui::vec2(preview_width, ctrl_h),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+
+                if ui.add_sized([button_width, ctrl_h], egui::Button::new("◀")).clicked() {
+                    nav = -1;
+                }
+
+                ui.allocate_ui_with_layout(
+                    egui::vec2(label_width, ctrl_h),
+                    egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+                    |ui| {
+                        ui.label(
+                            egui::RichText::new(config.map.name())
+                                .size(16.0)
+                                .strong()
+                                .color(egui::Color32::from_rgb(220, 224, 235)),
+                        );
+                    },
+                );
+
+                if ui.add_sized([button_width, ctrl_h], egui::Button::new("▶")).clicked() {
+                    nav = 1;
+                }
+            },
+        );
+
+        if nav != 0 {
+            let maps = match_config::ArenaMap::all();
+            let current_idx = maps.iter().position(|m| *m == config.map).unwrap_or(0);
+            let new_idx = (current_idx as i32 + nav).rem_euclid(maps.len() as i32) as usize;
+            config.map = maps[new_idx];
+        }
 
         ui.add_space(12.0);
 
@@ -813,15 +1081,267 @@ fn render_map_panel(ui: &mut egui::Ui, config: &mut MatchConfig, max_width: f32)
                 .size(12.0)
                 .color(egui::Color32::from_rgb(153, 153, 153)),
         );
-
-        ui.add_space(30.0);
-        
-        // VS separator
-        ui.heading(
-            egui::RichText::new("VS")
-                .size(36.0)
-                .color(egui::Color32::from_rgb(128, 115, 102)),
-        );
     });
+}
+
+/// Draw a top-down schematic of `map` into `rect`, using the map's real
+/// obstacle geometry (cylinders → circles, boxes → rectangles) scaled to fit.
+///
+/// World coordinates: x ∈ [-`ARENA_FLOOR_HALF_X`, +], z ∈ [-`ARENA_FLOOR_HALF_Z`, +].
+/// World x maps to the schematic's horizontal axis and world z to its vertical
+/// axis, preserving aspect. Pure painter work so it renders identically in the
+/// egui harness and the real client.
+fn draw_map_preview(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    map: match_config::ArenaMap,
+    map_geometry: &MapGeometryConfig,
+) {
+    let world_w = ARENA_FLOOR_HALF_X * 2.0;
+    let world_h = ARENA_FLOOR_HALF_Z * 2.0;
+    let scale = (rect.width() / world_w).min(rect.height() / world_h);
+    let center = rect.center();
+
+    // World (x, z) -> screen point.
+    let to_screen = |x: f32, z: f32| egui::pos2(center.x + x * scale, center.y + z * scale);
+
+    // Arena floor: the cut-corner octagon (matches the 3D floor mesh).
+    let hx = ARENA_FLOOR_HALF_X;
+    let hz = ARENA_FLOOR_HALF_Z;
+    let cut = ARENA_FLOOR_CORNER_CUT;
+    let floor: Vec<egui::Pos2> = vec![
+        to_screen(-hx + cut, -hz),
+        to_screen(hx - cut, -hz),
+        to_screen(hx, -hz + cut),
+        to_screen(hx, hz - cut),
+        to_screen(hx - cut, hz),
+        to_screen(-hx + cut, hz),
+        to_screen(-hx, hz - cut),
+        to_screen(-hx, -hz + cut),
+    ];
+    painter.add(egui::Shape::convex_polygon(
+        floor,
+        egui::Color32::from_rgb(34, 36, 48),
+        egui::Stroke::new(1.5, egui::Color32::from_rgb(90, 96, 120)),
+    ));
+
+    // Obstacles for the selected map.
+    let obstacle_fill = egui::Color32::from_rgb(96, 102, 128);
+    let obstacle_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(150, 156, 180));
+    let active = map_geometry.active_for(map);
+    for volume in &active.volumes {
+        match volume {
+            ObstacleVolume::Cylinder { center_xz, radius, .. } => {
+                painter.circle(
+                    to_screen(center_xz.x, center_xz.y),
+                    radius * scale,
+                    obstacle_fill,
+                    obstacle_stroke,
+                );
+            }
+            ObstacleVolume::Aabb { min, max } => {
+                let r = egui::Rect::from_two_pos(
+                    to_screen(min.x, min.z),
+                    to_screen(max.x, max.z),
+                );
+                painter.rect(r, 2.0, obstacle_fill, obstacle_stroke, egui::StrokeKind::Inside);
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Live arena preview (render-to-texture)
+//
+// A dedicated offscreen camera renders the real arena meshes (floor + walls +
+// the selected map's obstacles) to an image from a fixed 3/4 top-down angle;
+// the image is registered with egui and drawn into the preview pane. The
+// scene lives on its own `RenderLayers` so it never leaks into any other
+// camera, and it is torn down when the state exits. This is graphical-only —
+// the egui snapshot harness has no Bevy renderer, so it keeps the vector
+// schematic fallback in `draw_map_preview`.
+// ============================================================================
+
+/// Isolated render layer for the preview scene (camera + light + meshes),
+/// so it is invisible to every window-facing camera and vice versa.
+const PREVIEW_LAYER: usize = 3;
+/// Offscreen render-target size. Aspect matches the arena floor (x:z) so the
+/// arena fills the frame without letterboxing.
+const PREVIEW_TEX_W: u32 = 640;
+const PREVIEW_TEX_H: u32 = 388;
+
+/// Marks every entity in the offscreen preview scene (camera, light, meshes)
+/// for teardown on state exit.
+#[derive(Component)]
+pub struct PreviewSceneEntity;
+
+/// Marks just the arena-environment meshes, which are rebuilt when the
+/// selected map changes (the camera and light persist across map switches).
+#[derive(Component)]
+pub struct PreviewEnvEntity;
+
+/// Handle + egui texture id for the live arena preview render target, plus the
+/// map currently rendered into it (so the UI only shows the texture once it
+/// matches the selection, and the env is rebuilt when the selection changes).
+#[derive(Resource)]
+pub struct MapPreview {
+    image: Handle<Image>,
+    texture_id: egui::TextureId,
+    rendered_map: ArenaMap,
+}
+
+/// Fixed 3/4 top-down camera framing the whole arena (76 × 46 world units).
+fn preview_camera_transform() -> Transform {
+    Transform::from_xyz(0.0, 52.0, 40.0).looking_at(Vec3::ZERO, Vec3::Y)
+}
+
+/// Spawn the arena environment for `map` onto the preview render layer, tagged
+/// for rebuild. Reuses the same mesh builder the real match uses.
+fn spawn_preview_environment(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    images: &mut Assets<Image>,
+    map: ArenaMap,
+    map_geometry: &MapGeometryConfig,
+) {
+    let active = map_geometry.active_for(map);
+    for entity in spawn_arena_environment(commands, meshes, materials, images, &active.volumes) {
+        commands
+            .entity(entity)
+            .insert((RenderLayers::layer(PREVIEW_LAYER), PreviewEnvEntity, PreviewSceneEntity));
+    }
+}
+
+/// `OnEnter(ConfigureMatch)`: build the offscreen render target, camera, light,
+/// and arena environment, then register the texture with egui.
+pub fn setup_map_preview(
+    mut commands: Commands,
+    mut contexts: EguiContexts,
+    mut images: ResMut<Assets<Image>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    config: Res<MatchConfig>,
+    map_geometry: Res<MapGeometryConfig>,
+) {
+    // Offscreen render-target image.
+    let size = Extent3d {
+        width: PREVIEW_TEX_W,
+        height: PREVIEW_TEX_H,
+        depth_or_array_layers: 1,
+    };
+    let mut image = Image::new_fill(
+        size,
+        TextureDimension::D2,
+        &[0, 0, 0, 0],
+        TextureFormat::Bgra8UnormSrgb,
+        RenderAssetUsages::default(),
+    );
+    image.texture_descriptor.usage =
+        TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST | TextureUsages::RENDER_ATTACHMENT;
+    let image_handle = images.add(image);
+    let texture_id = contexts.add_image(image_handle.clone());
+
+    // Preview camera: renders only PREVIEW_LAYER into the image. `order` is
+    // negative so it resolves before any window camera; its target is the
+    // image, so it never composites to the window.
+    commands.spawn((
+        Camera3d::default(),
+        Camera {
+            target: RenderTarget::Image(image_handle.clone().into()),
+            hdr: true,
+            order: -1,
+            clear_color: ClearColorConfig::Custom(Color::srgb(0.05, 0.06, 0.09)),
+            ..default()
+        },
+        Tonemapping::TonyMcMapface,
+        Bloom::NATURAL,
+        preview_camera_transform(),
+        RenderLayers::layer(PREVIEW_LAYER),
+        PreviewSceneEntity,
+    ));
+
+    // Warm key light on the preview layer (the match sun is on layer 0).
+    commands.spawn((
+        DirectionalLight {
+            color: Color::srgb(1.0, 0.95, 0.85),
+            illuminance: 12000.0,
+            shadows_enabled: false,
+            ..default()
+        },
+        Transform::from_xyz(25.0, 45.0, 20.0).looking_at(Vec3::ZERO, Vec3::Y),
+        RenderLayers::layer(PREVIEW_LAYER),
+        PreviewSceneEntity,
+    ));
+
+    // Ambient fill so the shadowed sides aren't crushed (removed on exit).
+    commands.insert_resource(AmbientLight {
+        color: Color::srgb(0.9, 0.85, 0.7),
+        brightness: 300.0,
+        affects_lightmapped_meshes: true,
+    });
+
+    spawn_preview_environment(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        &mut images,
+        config.map,
+        &map_geometry,
+    );
+
+    commands.insert_resource(MapPreview {
+        image: image_handle,
+        texture_id,
+        rendered_map: config.map,
+    });
+}
+
+/// `Update` while in ConfigureMatch: when the selected map changes, rebuild the
+/// preview environment meshes for the new map.
+pub fn update_map_preview(
+    mut commands: Commands,
+    config: Res<MatchConfig>,
+    map_geometry: Res<MapGeometryConfig>,
+    map_preview: Option<ResMut<MapPreview>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    env_entities: Query<Entity, With<PreviewEnvEntity>>,
+) {
+    let Some(mut preview) = map_preview else { return };
+    if preview.rendered_map == config.map {
+        return;
+    }
+
+    for entity in &env_entities {
+        commands.entity(entity).despawn();
+    }
+    spawn_preview_environment(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        &mut images,
+        config.map,
+        &map_geometry,
+    );
+    preview.rendered_map = config.map;
+}
+
+/// `OnExit(ConfigureMatch)`: tear the preview scene down and drop its resources.
+pub fn cleanup_map_preview(
+    mut commands: Commands,
+    mut contexts: EguiContexts,
+    map_preview: Option<Res<MapPreview>>,
+    scene_entities: Query<Entity, With<PreviewSceneEntity>>,
+) {
+    for entity in &scene_entities {
+        commands.entity(entity).despawn();
+    }
+    if let Some(preview) = map_preview {
+        contexts.remove_image(&preview.image);
+    }
+    commands.remove_resource::<MapPreview>();
+    commands.remove_resource::<AmbientLight>();
 }
 
