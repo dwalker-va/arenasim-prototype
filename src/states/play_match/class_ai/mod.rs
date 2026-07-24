@@ -40,6 +40,7 @@ use super::ability_config::AbilityDefinitions;
 use super::components::{Aura, ActiveAuras, Combatant, AuraType, DispelPending, PetType, DRCategory, DRTracker};
 use super::constants::GCD;
 use super::{is_spell_school_locked, is_silenced};
+use super::map_geometry::ObstacleVolume;
 use super::utils::log_ability_use;
 
 /// Per-frame snapshot of a single combatant, used for AI decision making.
@@ -153,6 +154,12 @@ pub struct CombatContext<'a> {
     /// the pet's cooldown state without holding a mutable handle to pet
     /// `Combatant`. `BTreeMap` (nested) for determinism.
     pub ability_cooldowns: &'a BTreeMap<Entity, BTreeMap<AbilityType, f32>>,
+    /// The active map's obstacle volumes, in declaration order. Empty on maps
+    /// with no cover (BasicArena) — where every line-of-sight query is
+    /// trivially clear, so the LoS gates are a no-op. Threaded through the
+    /// snapshot from `ActiveMapGeometry`; consumed by the cast-start LoS guard
+    /// (and, in later units, the movement scorer).
+    pub obstacles: &'a [ObstacleVolume],
     /// The combatant making the decision
     pub self_entity: Entity,
 }
@@ -298,6 +305,31 @@ impl<'a> CombatContext<'a> {
     /// Returns true if all allies are above the given HP threshold.
     pub fn is_team_healthy(&self, threshold: f32, my_pos: Vec3) -> bool {
         self.lowest_health_ally_below(threshold, f32::MAX, my_pos).is_none()
+    }
+
+    /// Team-HP-fraction advantage of the deciding combatant's team — the
+    /// press-when-ahead signal. Own team's summed alive-member health fraction
+    /// minus the sum of every other team's: positive = ahead, negative = behind,
+    /// `0.0` = level (or self missing from the snapshot). Pets excluded and dead
+    /// members contribute 0, mirroring [`is_team_healthy`]'s conventions.
+    ///
+    /// Deterministic: the per-team sums accumulate in BTreeMap (entity) order
+    /// via [`team_hp_sums`], so seeded replays agree to the bit and the two
+    /// teams' advantages are exact negations of one another (same summands,
+    /// opposite sign). Cheap enough to call per decision — the snapshot holds a
+    /// handful of combatants — so it needs no cached field on the context.
+    pub fn team_hp_advantage(&self) -> f32 {
+        let Some(my_team) = self.self_info().map(|i| i.team) else {
+            return 0.0;
+        };
+        let sums = team_hp_sums(self.combatants);
+        let own = sums.get(&my_team).copied().unwrap_or(0.0);
+        let enemy: f32 = sums
+            .iter()
+            .filter(|(team, _)| **team != my_team)
+            .map(|(_, sum)| *sum)
+            .sum();
+        own - enemy
     }
 
     /// Check if `entity` currently has a specific aura type.
@@ -510,6 +542,36 @@ impl<'a> CombatContext<'a> {
             .map(|info| TargetView::from_info(info, my_pos));
         Some(decision_trace.start_ability_decision(actor_view, target_view))
     }
+}
+
+// ============================================================================
+// Shared Team-State Utilities
+// ============================================================================
+
+/// Summed health fraction of each team's alive, non-pet members, keyed by team
+/// id. The press-when-ahead advantage signal derives from these sums;
+/// [`CombatContext::team_hp_advantage`] is own-team minus the rest. Deterministic
+/// — accumulates in BTreeMap (entity) order. Mirrors
+/// [`CombatContext::is_team_healthy`]'s alive/`!is_pet` conventions; a dead
+/// member contributes 0 (excluded), so a wiped team sums to `0.0`.
+pub fn team_hp_sums(combatants: &BTreeMap<Entity, CombatantInfo>) -> BTreeMap<u8, f32> {
+    let mut sums: BTreeMap<u8, f32> = BTreeMap::new();
+    for info in combatants.values() {
+        if info.is_alive && !info.is_pet {
+            *sums.entry(info.team).or_insert(0.0) += info.health_pct();
+        }
+    }
+    sums
+}
+
+/// Press-when-ahead predicate: own team leads by at least the margin. A plain
+/// `>=` threshold with no hysteresis band — team-HP sums change only on discrete
+/// damage/heal events, so the differential does not strobe frame-to-frame the
+/// way a positional signal would, and a stateful schmitt latch would be dead
+/// weight. Shared by the healer deny postures and the Warrior tempo reset (both
+/// "stop the defensive behavior when clearly ahead"). Pure for unit testing.
+pub(crate) fn pressing_when_ahead(advantage: f32, margin: f32) -> bool {
+    advantage >= margin
 }
 
 // ============================================================================

@@ -490,6 +490,121 @@ fn trace_file_is_deterministic_at_same_seed() {
     std::fs::remove_file(&path2).ok();
 }
 
+/// Assert two MatchResults are equal to sim tolerance (winner, duration, and
+/// per-combatant final HP / damage dealt+taken). Shared by the PillaredArena
+/// determinism guards below.
+fn assert_results_equal(a: &MatchResult, b: &MatchResult, ctx: &str) {
+    assert_eq!(a.winner, b.winner, "{ctx}: winner differs");
+    assert!(
+        (a.match_time - b.match_time).abs() < 0.01,
+        "{ctx}: match_time drift {} vs {}",
+        a.match_time,
+        b.match_time
+    );
+    assert_eq!(
+        a.team1_combatants.len(),
+        b.team1_combatants.len(),
+        "{ctx}: team1 length"
+    );
+    assert_eq!(
+        a.team2_combatants.len(),
+        b.team2_combatants.len(),
+        "{ctx}: team2 length"
+    );
+    for (side, (ca, cb)) in [(1u8, (&a.team1_combatants, &b.team1_combatants)), (2, (&a.team2_combatants, &b.team2_combatants))] {
+        for (i, (x, y)) in ca.iter().zip(cb.iter()).enumerate() {
+            assert_eq!(x.class_name, y.class_name, "{ctx}: team{side} slot {i} class");
+            assert!(
+                (x.final_health - y.final_health).abs() < 0.01,
+                "{ctx}: team{side} slot {i} final_health {} vs {}",
+                x.final_health,
+                y.final_health
+            );
+            assert!(
+                (x.damage_dealt - y.damage_dealt).abs() < 0.01,
+                "{ctx}: team{side} slot {i} damage_dealt {} vs {}",
+                x.damage_dealt,
+                y.damage_dealt
+            );
+            assert!(
+                (x.damage_taken - y.damage_taken).abs() < 0.01,
+                "{ctx}: team{side} slot {i} damage_taken {} vs {}",
+                x.damage_taken,
+                y.damage_taken
+            );
+        }
+    }
+}
+
+/// Always-on within-build determinism guard on PillaredArena: a single 2v2
+/// match run twice at the same seed must produce identical MatchResults with
+/// line-of-sight obstacles active. The BasicArena guards above cannot catch a
+/// non-determinism source that only fires with obstacles (LoS queries,
+/// collision resolution, the LoS scorer mask), so this cheap PillaredArena run
+/// is the front-line canary for that class of regression. The exhaustive
+/// obstacle sweep lives in the `#[ignore]`d test below.
+#[test]
+fn pillared_arena_same_seed_is_deterministic() {
+    let make = || {
+        let mut cfg = create_config(vec!["Warrior", "Priest"], vec!["Mage", "Priest"], Some(7));
+        cfg.map = "PillaredArena".to_string();
+        cfg
+    };
+    let r1 = run_headless_match_with(make(), true, None).expect("first PillaredArena run");
+    let r2 = run_headless_match_with(make(), true, None).expect("second PillaredArena run");
+    assert_results_equal(&r1, &r2, "PillaredArena Warrior+Priest v Mage+Priest seed 7");
+}
+
+/// Within-build determinism with obstacles active, including the decision
+/// trace: a PillaredArena pairing run twice at the same seed must produce both
+/// byte-identical MatchResults AND byte-identical trace files. The BasicArena
+/// all-pairings sweeps (`trace_*_all_class_pairings`) never exercise the
+/// obstacle code paths; this is the obstacle-active companion. `#[ignore]`d
+/// because it writes and diffs trace files (a few seconds); opt in via
+/// `cargo test -- --ignored`.
+#[test]
+#[ignore = "obstacle-active determinism; run via `cargo test -- --ignored`"]
+fn pillared_arena_determinism_with_trace() {
+    let seed = 7_u64;
+    let make = || {
+        let mut cfg = create_config(vec!["Warrior", "Priest"], vec!["Mage", "Priest"], Some(seed));
+        cfg.map = "PillaredArena".to_string();
+        cfg
+    };
+
+    let tmp1 = tempfile::NamedTempFile::new().unwrap();
+    let path1 = tmp1.path().to_path_buf();
+    drop(tmp1);
+    let tmp2 = tempfile::NamedTempFile::new().unwrap();
+    let path2 = tmp2.path().to_path_buf();
+    drop(tmp2);
+
+    let r1 = run_headless_match_with(
+        make(),
+        true,
+        Some(TraceConfig { output_path: path1.clone() }),
+    )
+    .expect("first traced PillaredArena run");
+    let r2 = run_headless_match_with(
+        make(),
+        true,
+        Some(TraceConfig { output_path: path2.clone() }),
+    )
+    .expect("second traced PillaredArena run");
+
+    assert_results_equal(&r1, &r2, "PillaredArena traced seed 7");
+
+    let t1 = std::fs::read_to_string(&path1).expect("read trace 1");
+    let t2 = std::fs::read_to_string(&path2).expect("read trace 2");
+    assert_eq!(
+        t1, t2,
+        "PillaredArena trace files differ at same seed — non-deterministic event ordering with obstacles active"
+    );
+
+    std::fs::remove_file(&path1).ok();
+    std::fs::remove_file(&path2).ok();
+}
+
 /// Different seeds should produce different matches (or at least, this seed
 /// pair should — chosen empirically). Guards against accidentally hard-coding
 /// outcomes independent of the seed.

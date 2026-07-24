@@ -10,6 +10,8 @@ use super::super::ability_config::AbilityDefinitions;
 use super::super::constants::CRIT_DAMAGE_MULTIPLIER;
 use super::super::utils::get_next_fct_offset;
 use super::super::{MELEE_RANGE, WAND_RANGE, HUNTER_DEAD_ZONE, AUTO_SHOT_RANGE, FCT_HEIGHT};
+use super::super::map_config::ActiveMapGeometry;
+use super::super::map_geometry::has_line_of_sight;
 use super::damage::{roll_crit, apply_damage_with_absorb, get_physical_damage_reduction, get_divine_shield_damage_penalty};
 
 /// Auto-attack system: Process attacks based on attack speed timers.
@@ -34,6 +36,7 @@ pub fn combat_auto_attack(
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
     auto_attack_pet_query: Query<&Pet>,
+    map_geometry: Res<ActiveMapGeometry>,
 ) {
     // Don't deal damage during victory celebration
     if celebration.is_some() {
@@ -230,6 +233,20 @@ pub fn combat_auto_attack(
                     if attacker_class == match_config::CharacterClass::Hunter
                         && !attacker_is_melee
                         && distance < HUNTER_DEAD_ZONE
+                    {
+                        continue;
+                    }
+                    // Line-of-sight gate: ranged autos (Hunter Auto Shot,
+                    // caster wand shots) require an unobstructed line to the
+                    // target. Occlusion skips the swing exactly like an
+                    // out-of-range tick — the timer keeps building so the shot
+                    // fires the instant the target clears cover. MELEE autos are
+                    // deliberately excluded: two melee units flanking a
+                    // thin obstacle edge can still trade hits. Empty obstacle
+                    // lists → always clear, so this is a byte-identical no-op on
+                    // BasicArena / obstacle-free maps.
+                    if !attacker_is_melee
+                        && !has_line_of_sight(&map_geometry.volumes, my_pos, target_pos)
                     {
                         continue;
                     }

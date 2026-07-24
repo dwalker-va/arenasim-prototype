@@ -14,19 +14,103 @@
 use bevy::prelude::*;
 
 use crate::states::play_match::combat_core::{
-    compass_directions_16, mask_bitmask, score_directions, AnchorConstraint, ScorerInputs,
+    compass_directions_16, mask_and_los_bitmask, score_directions, AnchorConstraint, ScorerInputs,
 };
 use crate::states::play_match::components::{HealerPosture, MovementDirective, MovementGoal, Posture};
 use crate::states::play_match::decision_trace::{
     ActorView, DecisionTrace, MovementEventBuilder, MovementGoalKind, MovementTrigger,
     Posture as TracePosture, TargetView,
 };
+use crate::states::play_match::map_geometry::{has_line_of_sight, EYE_HEIGHT};
 use crate::states::play_match::movement_config::{MovementWeights, SharedMovementConfig};
 
-use super::{CombatContext, CombatantInfo};
+use super::{pressing_when_ahead, CombatContext, CombatantInfo};
 
 /// Distance ahead at which the position scorer evaluates candidate steps.
 pub(super) const SCORER_LOOKAHEAD: f32 = 2.0;
+
+// ============================================================================
+// Deny-posture cover_pull: urgency suppression + trace term
+// ============================================================================
+
+/// Urgency suppression predicate (settled requirement R11 — the AE4
+/// counter): is a living non-pet TEAMMATE (excluding self) below
+/// `urgency_hp_threshold` AND within heal range — someone this healer must save
+/// rather than hide from? Self being low is deliberately NOT a trigger: a low
+/// healer taking cover is correct self-preservation, not abandonment of a dying
+/// ally.
+pub(super) fn teammate_needs_saving(
+    entity: Entity,
+    my_pos: Vec3,
+    ctx: &CombatContext,
+    shared: &SharedMovementConfig,
+) -> bool {
+    ctx.alive_allies().into_iter().any(|a| {
+        a.entity != entity
+            && !a.is_pet
+            && a.health_pct() < shared.urgency_hp_threshold
+            && my_pos.distance(a.position) <= shared.heal_range
+    })
+}
+
+/// Zero `cover_pull` when denial should be OFF this tick; otherwise the weights
+/// pass through unchanged. The `suppress` decision is either urgency (a teammate
+/// needs saving, R11) OR press (own team is clearly ahead) — both mean
+/// "stop hiding". Pure over the boolean so the seam is unit-testable without
+/// building a snapshot. When `cover_pull` is already 0 (the DPS blocks, or a
+/// class with denial disabled) this is a no-op copy, so nothing off the deny
+/// path is disturbed.
+pub(super) fn apply_cover_suppression(
+    weights: &MovementWeights,
+    suppress: bool,
+) -> MovementWeights {
+    if suppress && weights.cover_pull > 0.0 {
+        MovementWeights { cover_pull: 0.0, ..*weights }
+    } else {
+        *weights
+    }
+}
+
+/// The scorer weights for one PRESSURED/ESCAPE decision: the class weights with
+/// `cover_pull` suppressed while a teammate needs saving OR the team is
+/// pressing its advantage. Short-circuits the snapshot scan when denial
+/// is disabled for the class (`cover_pull == 0`).
+fn deny_weights(
+    entity: Entity,
+    my_pos: Vec3,
+    ctx: &CombatContext,
+    shared: &SharedMovementConfig,
+    weights: &MovementWeights,
+) -> MovementWeights {
+    if weights.cover_pull <= 0.0 {
+        return *weights;
+    }
+    let suppress = teammate_needs_saving(entity, my_pos, ctx, shared)
+        || pressing_when_ahead(ctx.team_hp_advantage(), shared.press_advantage_margin);
+    apply_cover_suppression(weights, suppress)
+}
+
+/// Cover-pull contribution of the winning direction — the *effective*
+/// `cover_pull` weight times the number of threats the lookahead step is
+/// occluded from. Emitted as the `cover_pull` scorer term so the deny posture
+/// is trace-visible: a `0.0` here means either no cover was available at the
+/// chosen step or the urgency suppression zeroed the weight this tick. Pure;
+/// mirrors the `cover_pull` block in `score_direction` (obstacle-free ⇒ 0).
+fn cover_pull_term(chosen: Vec2, inputs: &ScorerInputs, cover_weight: f32) -> f32 {
+    if cover_weight <= 0.0 {
+        return 0.0;
+    }
+    let next = inputs.my_pos + Vec3::new(chosen.x, 0.0, chosen.y) * inputs.lookahead;
+    let cand_eye = Vec3::new(next.x, EYE_HEIGHT, next.z);
+    let occluded = inputs
+        .threats
+        .iter()
+        .filter(|t| {
+            !has_line_of_sight(&inputs.obstacles, cand_eye, Vec3::new(t.x, EYE_HEIGHT, t.z))
+        })
+        .count();
+    cover_weight * occluded as f32
+}
 
 /// ESCAPE window math (R7), pure for unit testing.
 ///
@@ -160,6 +244,144 @@ pub(super) fn select_sticky_anchor<'c>(
     anchor_info
 }
 
+// ============================================================================
+// Medic chase (heal-seeking movement)
+// ============================================================================
+//
+// R5 made heals LoS-gated but nothing moves the healer to REGAIN sight of a
+// dying ally: FREE formation-follow has no sight requirement, and the
+// PRESSURED anchor mask only constrains SCORED steps (and the all-masked
+// fallback ladder drops the anchor constraint first). A healer standing
+// pillar-side from a sub-urgency ally therefore has nothing pulling it around
+// the pillar — the ally dies with heals silently LoS-rejected at cast start.
+//
+// The medic chase closes that gap: when a living, healable, non-pet teammate
+// is below `urgency_hp_threshold` AND occluded from the healer, a direct
+// `MovementGoal::Point` walk toward the ally's live position overrides the
+// FREE formation / PRESSURED cover-deny movement (the existing urgency
+// suppression already encodes ally-dying > healer-hiding; this extends it to
+// ally-dying > formation/denial). Keying on OCCLUSION (not range) makes this a
+// provable no-op on obstacle-free maps — BasicArena has no obstacles, so
+// `has_line_of_sight` is always true and the chase never arms. The chase ends
+// naturally when sight is regained (predicate false → normal posture logic
+// resumes and the heal fires).
+
+/// Pure medic-chase target pick: among `(entity, health_pct, occluded)`
+/// candidates in deterministic (BTree entity) order, the most-injured one that
+/// is BOTH below `threshold` AND occluded. Ties (equal health) resolve to the
+/// earlier candidate (lowest entity), consistent with the sticky-anchor
+/// convention. `None` when nothing qualifies.
+fn pick_medic_target(candidates: &[(Entity, f32, bool)], threshold: f32) -> Option<Entity> {
+    let mut best: Option<(Entity, f32)> = None;
+    for &(e, hp, occluded) in candidates {
+        if hp >= threshold || !occluded {
+            continue;
+        }
+        best = match best {
+            Some((_, bhp)) if bhp <= hp => best,
+            _ => Some((e, hp)),
+        };
+    }
+    best.map(|(e, _)| e)
+}
+
+/// Medic-chase target: the most-injured living non-pet teammate (excluding
+/// self) below `urgency_hp_threshold` AND currently OCCLUDED from the healer
+/// (EYE_HEIGHT endpoints, same LoS convention as everywhere). `None` when no
+/// such ally exists — including on every obstacle-free map, where sight always
+/// holds. Out-of-range-but-sighted allies are deliberately NOT chased: the
+/// anchor/formation machinery already keeps the healer near them; only a broken
+/// SIGHT line needs the walk-around-cover behavior.
+pub(super) fn medic_chase_target<'c>(
+    entity: Entity,
+    my_pos: Vec3,
+    ctx: &'c CombatContext,
+    shared: &SharedMovementConfig,
+) -> Option<&'c CombatantInfo> {
+    let my_eye = Vec3::new(my_pos.x, EYE_HEIGHT, my_pos.z);
+    let candidates: Vec<(Entity, f32, bool)> = ctx
+        .alive_allies()
+        .into_iter()
+        .filter(|a| a.entity != entity && !a.is_pet)
+        .map(|a| {
+            let ally_eye = Vec3::new(a.position.x, EYE_HEIGHT, a.position.z);
+            let occluded = !has_line_of_sight(ctx.obstacles, my_eye, ally_eye);
+            (a.entity, a.health_pct(), occluded)
+        })
+        .collect();
+    let target = pick_medic_target(&candidates, shared.urgency_hp_threshold)?;
+    ctx.combatants.get(&target)
+}
+
+/// Whether the medic chase should override the normal movement tick this frame:
+/// current posture FREE or PRESSURED (never DIP — its own teammate-HP abort
+/// composes, handing control back so the medic picks up the next decision — nor
+/// the committed ESCAPE window), the healer not itself hard-CC'd (a CC'd healer
+/// can't move, and the directive would be stale on release; `is_ccd` includes
+/// Root, which blocks movement too), and a dying occluded teammate exists.
+/// Returns that ally.
+pub(super) fn medic_chase_override<'c>(
+    entity: Entity,
+    my_pos: Vec3,
+    next: Posture,
+    ctx: &'c CombatContext,
+    shared: &SharedMovementConfig,
+) -> Option<&'c CombatantInfo> {
+    if !matches!(next, Posture::Free | Posture::Pressured) || ctx.is_ccd(entity) {
+        return None;
+    }
+    medic_chase_target(entity, my_pos, ctx, shared)
+}
+
+/// Issue/refresh the medic-chase directive toward `ally`'s live position and
+/// emit the `SeekLos` movement event (reusing the attacker-chase convention:
+/// SeekLos trigger + Point goal + the ally in the target view). Re-targets the
+/// ally per commit window — mirrors the DPS direct chase in `dps_postures.rs`.
+/// Sets `state.medic_target` so a first-arm / target-swap forces an immediate
+/// re-target even mid-commit-window (a leftover formation/PRESSURED directive
+/// never suppresses the takeover).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn medic_chase_tick(
+    commands: &mut Commands,
+    entity: Entity,
+    my_pos: Vec3,
+    ally: &CombatantInfo,
+    state: &mut HealerPosture,
+    directive: Option<&MovementDirective>,
+    shared: &SharedMovementConfig,
+    now: f32,
+    decision_trace: &mut DecisionTrace,
+    ctx: &CombatContext,
+) {
+    let recommit = state.medic_target != Some(ally.entity)
+        || directive.map_or(true, |d| now >= d.committed_until || now >= d.expires);
+    if !recommit {
+        return; // still committed toward this ally — the walk continues, no re-emit
+    }
+
+    commands.entity(entity).try_insert(MovementDirective {
+        goal: MovementGoal::Point(ally.position),
+        expires: now + shared.directive_ttl,
+        committed_until: now + shared.commit_window,
+    });
+    state.medic_target = Some(ally.entity);
+    // No scored direction / formation point governs a chase — clear both so the
+    // normal tick re-anchors cleanly once sight is regained.
+    state.last_direction = None;
+    state.last_point = None;
+
+    if let Some(mut builder) =
+        start_movement_event_with_target(decision_trace, ctx, ally.entity, my_pos)
+    {
+        builder.direction_change(
+            state.posture.into(),
+            MovementTrigger::SeekLos,
+            MovementGoalKind::Point,
+        );
+        builder.finish();
+    }
+}
+
 /// ESCAPE tick (R7): on entry, score one direction with attacker repulsion
 /// dominant — threats are the impaired proximate attackers; the formation
 /// and wand pulls are OFF so repulsion is the only directional soft term,
@@ -231,8 +453,15 @@ pub(super) fn escape_tick(
         range_band: None,
         nearest_threat: None,
         committed_direction: None,
+        obstacles: ctx.obstacles.to_vec(),
+        // No kill target tracked during an escape — repulsion, not LoS-seek,
+        // drives the direction (and los_seek is 0.0 for healers regardless).
+        los_target: None,
     };
-    let chosen = score_directions(&compass_directions_16(), &inputs, weights);
+    // Deny posture: use cover to break attacker LoS while escaping, unless a
+    // teammate needs saving (urgency suppression zeroes cover_pull that tick).
+    let eff_weights = deny_weights(entity, my_pos, ctx, shared, weights);
+    let chosen = score_directions(&compass_directions_16(), &inputs, &eff_weights);
     if chosen == Vec2::ZERO {
         return; // defensive — 16 candidates always yield a direction
     }
@@ -252,7 +481,12 @@ pub(super) fn escape_tick(
             MovementGoalKind::Direction,
         );
         builder.chosen_direction([chosen.x, chosen.y]);
-        builder.masked(mask_bitmask(&compass_directions_16(), &inputs));
+        let (masked, los) = mask_and_los_bitmask(&compass_directions_16(), &inputs);
+        builder.masked(masked);
+        builder.scorer_term("cover_pull", cover_pull_term(chosen, &inputs, eff_weights.cover_pull));
+        if los != 0 {
+            builder.los_masked(los);
+        }
         builder.finish();
     }
 }
@@ -370,6 +604,14 @@ pub(super) fn healer_pressured_tick_shared(
         .filter(|i| i.is_alive)
         .map(|i| i.position);
 
+    // LoS-seek target: the kill target the healer tracks (unfiltered — keeping
+    // sight of it matters even when it is itself a threat). los_seek is 0.0 for
+    // healers today, so this is faithful wiring, not yet a behavior change.
+    let los_target = wand_kill_target
+        .and_then(|t| ctx.combatants.get(&t))
+        .filter(|i| i.is_alive)
+        .map(|i| i.position);
+
     let inputs = ScorerInputs {
         my_pos,
         lookahead: SCORER_LOOKAHEAD,
@@ -391,8 +633,14 @@ pub(super) fn healer_pressured_tick_shared(
         // therefore identical to the old penalty scheme here, with or without a
         // guard; adding one would only inject a real (unwanted) trajectory delta.
         committed_direction: state.last_direction,
+        obstacles: ctx.obstacles.to_vec(),
+        los_target,
     };
-    let chosen = score_directions(&compass_directions_16(), &inputs, weights);
+    // Deny posture: prefer a step that breaks attacker LoS (cover_pull),
+    // unless a teammate needs saving — then urgency suppression zeroes it so the
+    // healer is never pulled into cover while an ally is dying (R11).
+    let eff_weights = deny_weights(entity, my_pos, ctx, shared, weights);
+    let chosen = score_directions(&compass_directions_16(), &inputs, &eff_weights);
     if chosen == Vec2::ZERO {
         return; // defensive — 16 candidates always yield a direction
     }
@@ -435,7 +683,12 @@ pub(super) fn healer_pressured_tick_shared(
                 );
             }
             builder.chosen_direction([chosen.x, chosen.y]);
-            builder.masked(mask_bitmask(&compass_directions_16(), &inputs));
+            let (masked, los) = mask_and_los_bitmask(&compass_directions_16(), &inputs);
+            builder.masked(masked);
+            builder.scorer_term("cover_pull", cover_pull_term(chosen, &inputs, eff_weights.cover_pull));
+            if los != 0 {
+                builder.los_masked(los);
+            }
             builder.finish();
         }
     }
@@ -466,4 +719,167 @@ pub(super) fn start_movement_event_with_target<'t>(
         .get(&goal)
         .map(|info| TargetView::from_info(info, my_pos));
     Some(decision_trace.start_movement_decision(actor, target))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::states::play_match::map_geometry::ObstacleVolume;
+
+    fn priest_like() -> MovementWeights {
+        MovementWeights { cover_pull: 1.5, threat_repulsion: 3.0, ..MovementWeights::default() }
+    }
+
+    /// Scenario 1 (the suppression seam): while a teammate needs saving, the
+    /// effective weights zero `cover_pull` — the healer must not be pulled into
+    /// cover — and every other term is untouched.
+    #[test]
+    fn cover_suppressed_when_teammate_needs_saving() {
+        let w = priest_like();
+        let eff = apply_cover_suppression(&w, true);
+        assert_eq!(eff.cover_pull, 0.0, "cover_pull must be zeroed under urgency");
+        assert_eq!(eff.threat_repulsion, w.threat_repulsion, "threat_repulsion untouched");
+        assert_eq!(eff.corner_penalty, w.corner_penalty, "corner_penalty untouched");
+        assert_eq!(eff.commitment_bonus, w.commitment_bonus, "commitment_bonus untouched");
+    }
+
+    /// No teammate in danger → weights pass through unchanged (denial stays on).
+    #[test]
+    fn cover_active_when_team_healthy() {
+        let w = priest_like();
+        let eff = apply_cover_suppression(&w, false);
+        assert_eq!(eff.cover_pull, w.cover_pull, "cover_pull stays on when no teammate is dying");
+    }
+
+    /// A class with denial disabled (`cover_pull == 0`) is a no-op copy even
+    /// while a teammate is dying — no accidental sign flips off the deny path.
+    #[test]
+    fn suppression_noop_when_cover_disabled() {
+        let w = MovementWeights { cover_pull: 0.0, ..MovementWeights::default() };
+        assert_eq!(apply_cover_suppression(&w, true).cover_pull, 0.0);
+    }
+
+    /// Press gate: the margin is a `>=` threshold. Exactly-at-margin
+    /// presses (denial off); a hair below does not.
+    #[test]
+    fn pressing_when_ahead_is_inclusive_at_margin() {
+        let margin = 0.2;
+        assert!(pressing_when_ahead(margin, margin), ">= is inclusive at the margin");
+        assert!(pressing_when_ahead(0.5, margin), "clearly ahead presses");
+        assert!(!pressing_when_ahead(margin - 1e-4, margin), "just under the margin does not press");
+        assert!(!pressing_when_ahead(0.0, margin), "level does not press");
+        assert!(!pressing_when_ahead(-0.5, margin), "behind never presses");
+    }
+
+    /// Press at the suppression seam: an ahead-by-margin team zeroes `cover_pull`
+    /// (press = denial off), exactly as the urgency path does; a level/behind
+    /// team leaves it on. Drives `apply_cover_suppression` through the same
+    /// boolean `deny_weights` computes from the press predicate.
+    #[test]
+    fn press_zeroes_cover_pull_only_when_ahead() {
+        let w = priest_like();
+        let margin = 0.2;
+        // Ahead by the margin → suppressed.
+        let ahead = apply_cover_suppression(&w, pressing_when_ahead(0.4, margin));
+        assert_eq!(ahead.cover_pull, 0.0, "pressing zeroes cover_pull");
+        // Level → denial stays on.
+        let level = apply_cover_suppression(&w, pressing_when_ahead(0.0, margin));
+        assert_eq!(level.cover_pull, w.cover_pull, "level team keeps denying");
+        // Behind → denial stays on.
+        let behind = apply_cover_suppression(&w, pressing_when_ahead(-0.5, margin));
+        assert_eq!(behind.cover_pull, w.cover_pull, "trailing team keeps denying");
+    }
+
+    /// The `cover_pull` trace term reports 0 on an obstacle-free map (no
+    /// occlusion possible) and `weight × occluded-count` when a pillar hides the
+    /// chosen step from the threat — and 0 once the effective weight is
+    /// suppressed, so the trace shows the suppression directly.
+    #[test]
+    fn cover_pull_term_counts_occluded_threats() {
+        let threat = Vec3::new(0.0, 1.0, 10.0);
+        let base = ScorerInputs {
+            my_pos: Vec3::new(0.0, 1.0, -3.0),
+            lookahead: 2.0,
+            threats: vec![threat],
+            ..Default::default()
+        };
+        let chosen = Vec2::new(0.0, 1.0); // +Z: steps to (0, -1), on the axis
+        // Obstacle-free: never occluded → 0 regardless of weight.
+        assert_eq!(cover_pull_term(chosen, &base, 1.5), 0.0);
+
+        // A thin pillar between the step and the threat occludes it → weight × 1.
+        let occluded = ScorerInputs {
+            obstacles: vec![ObstacleVolume::Cylinder {
+                center_xz: Vec2::new(0.0, 3.0),
+                radius: 0.5,
+                base_y: 0.0,
+                height: 10.0,
+            }],
+            ..base.clone()
+        };
+        assert_eq!(cover_pull_term(chosen, &occluded, 1.5), 1.5);
+        // Suppressed (effective weight 0) → 0 contribution even when occluded.
+        assert_eq!(cover_pull_term(chosen, &occluded, 0.0), 0.0);
+    }
+
+    // ------------------------------------------------------------------------
+    // Fix 1: medic-chase target selection (`pick_medic_target`)
+    // ------------------------------------------------------------------------
+
+    fn e(raw: u32) -> Entity {
+        Entity::from_raw(raw)
+    }
+
+    /// A candidate must be BOTH below the threshold AND occluded to qualify.
+    #[test]
+    fn medic_target_requires_low_hp_and_occlusion() {
+        let threshold = 0.5;
+        // Below threshold but SIGHTED → not a chase target (formation/anchor
+        // machinery handles a sighted low ally). No obstacle-free map ever
+        // produces an occluded candidate, so this is also the BasicArena no-op.
+        assert_eq!(pick_medic_target(&[(e(1), 0.2, false)], threshold), None);
+        // Occluded but healthy → not in danger.
+        assert_eq!(pick_medic_target(&[(e(1), 0.8, true)], threshold), None);
+        // Occluded AND low → chase.
+        assert_eq!(pick_medic_target(&[(e(1), 0.2, true)], threshold), Some(e(1)));
+        // Exactly at the threshold does NOT qualify (strict <).
+        assert_eq!(pick_medic_target(&[(e(1), 0.5, true)], threshold), None);
+    }
+
+    /// Among qualifying (low + occluded) allies the MOST-injured is chosen.
+    #[test]
+    fn medic_target_picks_most_injured_qualifier() {
+        let threshold = 0.5;
+        // e(2) is more injured than e(1); both occluded and below threshold.
+        let cands = [(e(1), 0.4, true), (e(2), 0.1, true)];
+        assert_eq!(pick_medic_target(&cands, threshold), Some(e(2)));
+        // A more-injured but SIGHTED ally must not steal the pick from a
+        // less-injured OCCLUDED one — occlusion is a hard gate.
+        let cands = [(e(1), 0.05, false), (e(2), 0.3, true)];
+        assert_eq!(pick_medic_target(&cands, threshold), Some(e(2)));
+    }
+
+    /// Ties (equal HP) resolve to the earlier candidate (caller passes BTree
+    /// entity order), keeping selection deterministic.
+    #[test]
+    fn medic_target_tie_breaks_on_entity_order() {
+        let threshold = 0.5;
+        let cands = [(e(3), 0.2, true), (e(7), 0.2, true)];
+        assert_eq!(pick_medic_target(&cands, threshold), Some(e(3)));
+        // Order-independence of the tie-break: reversing input still yields the
+        // lowest-entity candidate because the caller sorts by entity, but verify
+        // the "keep earlier on tie" rule directly with the reversed slice.
+        let cands_rev = [(e(7), 0.2, true), (e(3), 0.2, true)];
+        assert_eq!(pick_medic_target(&cands_rev, threshold), Some(e(7)));
+    }
+
+    /// No candidates / no qualifiers → None (the common every-frame case).
+    #[test]
+    fn medic_target_none_when_nothing_qualifies() {
+        assert_eq!(pick_medic_target(&[], 0.5), None);
+        assert_eq!(
+            pick_medic_target(&[(e(1), 0.9, false), (e(2), 0.7, true)], 0.5),
+            None
+        );
+    }
 }

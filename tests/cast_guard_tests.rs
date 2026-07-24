@@ -12,6 +12,7 @@ use bevy::prelude::*;
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::class_ai::cast_guard::{pre_cast_ok, PreCastOpts};
 use arenasim::states::play_match::class_ai::{CombatContext, CombatantInfo};
+use arenasim::states::play_match::map_geometry::ObstacleVolume;
 use arenasim::states::play_match::{
     AbilityDefinitions, AbilityType, ActiveAuras, Aura, AuraType, Combatant, DRTracker, DispelType, ResourceType,
     SpellSchool,
@@ -74,6 +75,7 @@ struct TestWorld {
     active_auras: BTreeMap<Entity, Vec<Aura>>,
     dr_trackers: BTreeMap<Entity, DRTracker>,
     ability_cooldowns: BTreeMap<Entity, BTreeMap<AbilityType, f32>>,
+    obstacles: Vec<ObstacleVolume>,
 }
 
 impl TestWorld {
@@ -96,6 +98,7 @@ impl TestWorld {
             active_auras: BTreeMap::new(),
             dr_trackers: BTreeMap::new(),
             ability_cooldowns: BTreeMap::new(),
+            obstacles: Vec::new(),
         }
     }
 
@@ -105,6 +108,7 @@ impl TestWorld {
             active_auras: &self.active_auras,
             dr_trackers: &self.dr_trackers,
             ability_cooldowns: &self.ability_cooldowns,
+            obstacles: &self.obstacles,
             self_entity: self.caster,
         }
     }
@@ -454,6 +458,7 @@ fn classify_returns_friendly_breakable_cc_when_opt_in_and_friendly_cc_present() 
         active_auras: &active_auras_map,
         dr_trackers: &world.dr_trackers,
         ability_cooldowns: &world.ability_cooldowns,
+        obstacles: &world.obstacles,
         self_entity: world.caster,
     };
 
@@ -572,4 +577,163 @@ fn classify_returns_out_of_range_when_only_range_fails() {
         "expected OutOfRange when only range fails, got: {:?}",
         reason
     );
+}
+
+// ============================================================================
+// Line-of-sight gate — a targeted cast fails fast when an obstacle volume
+// blocks the caster→target segment. Runs AFTER can_cast_config, so range wins
+// precedence; empty obstacle lists (BasicArena) are a no-op.
+// ============================================================================
+
+/// A pillar centered on the x-axis midway between the default caster (origin)
+/// and target (5, 0, 0). Tall enough in y to span the y≈0 segment.
+fn blocking_pillar() -> ObstacleVolume {
+    ObstacleVolume::Cylinder {
+        center_xz: Vec2::new(2.5, 0.0),
+        radius: 1.0,
+        base_y: -1.0,
+        height: 10.0,
+    }
+}
+
+/// AE1: caster and target on opposite sides of a pillar — a targeted hostile
+/// cast is rejected, and classify attributes it to LosBlocked.
+#[test]
+fn los_blocks_hostile_cast_across_pillar() {
+    let mut world = TestWorld::new(CharacterClass::Mage);
+    world.obstacles = vec![blocking_pillar()];
+    let combatant = caster_combatant(CharacterClass::Mage);
+    let abilities = defs();
+    let def = abilities.get_unchecked(&AbilityType::Frostbolt);
+
+    assert!(
+        !pre_cast_ok(
+            AbilityType::Frostbolt,
+            def,
+            &combatant,
+            world.caster_pos,
+            None,
+            Some((world.target, world.target_pos)),
+            &world.ctx(),
+            PreCastOpts::default(),
+        ),
+        "a pillar between caster and target must reject the cast",
+    );
+
+    let reason = classify_pre_cast_failure(
+        AbilityType::Frostbolt,
+        def,
+        &combatant,
+        world.caster_pos,
+        None,
+        Some((world.target, world.target_pos)),
+        &world.ctx(),
+        PreCastOpts::default(),
+    );
+    assert!(matches!(reason, RejectionReason::LosBlocked), "got: {:?}", reason);
+}
+
+/// A friendly heal to an ally behind a pillar is rejected too — the gate is
+/// target-based, not hostility-based.
+#[test]
+fn los_blocks_friendly_heal_across_pillar() {
+    let mut world = TestWorld::new(CharacterClass::Priest);
+    world.obstacles = vec![blocking_pillar()];
+    let combatant = caster_combatant(CharacterClass::Priest);
+    let abilities = defs();
+    let def = abilities.get_unchecked(&AbilityType::FlashHeal);
+
+    assert!(
+        !pre_cast_ok(
+            AbilityType::FlashHeal,
+            def,
+            &combatant,
+            world.caster_pos,
+            None,
+            Some((world.target, world.target_pos)),
+            &world.ctx(),
+            PreCastOpts::default(),
+        ),
+        "a heal to an ally behind a pillar must be rejected",
+    );
+}
+
+/// No false positives at short range: with a pillar off the caster→target
+/// axis, a close-in target still has clear sight and the cast passes.
+#[test]
+fn los_clear_for_short_range_target_with_pillar_off_axis() {
+    let mut world = TestWorld::new(CharacterClass::Mage);
+    world.target_pos = Vec3::new(1.0, 0.0, 0.0);
+    // Pillar well off the (0,0)→(1,0) segment.
+    world.obstacles = vec![ObstacleVolume::Cylinder {
+        center_xz: Vec2::new(2.5, 5.0),
+        radius: 1.0,
+        base_y: -1.0,
+        height: 10.0,
+    }];
+    let combatant = caster_combatant(CharacterClass::Mage);
+    let abilities = defs();
+    let def = abilities.get_unchecked(&AbilityType::Frostbolt);
+
+    assert!(pre_cast_ok(
+        AbilityType::Frostbolt,
+        def,
+        &combatant,
+        world.caster_pos,
+        None,
+        Some((world.target, world.target_pos)),
+        &world.ctx(),
+        PreCastOpts::default(),
+    ));
+}
+
+/// Precedence: a target BOTH out of range AND behind a pillar reports
+/// OutOfRange (range is checked inside can_cast_config, before the LoS gate).
+#[test]
+fn los_yields_to_out_of_range_precedence() {
+    let mut world = TestWorld::new(CharacterClass::Mage);
+    world.target_pos = Vec3::new(100.0, 0.0, 0.0); // beyond Frostbolt range
+    world.obstacles = vec![blocking_pillar()];
+    let mut combatant = caster_combatant(CharacterClass::Mage);
+    combatant.current_mana = 100.0;
+    let abilities = defs();
+    let def = abilities.get_unchecked(&AbilityType::Frostbolt);
+
+    let reason = classify_pre_cast_failure(
+        AbilityType::Frostbolt,
+        def,
+        &combatant,
+        world.caster_pos,
+        None,
+        Some((world.target, world.target_pos)),
+        &world.ctx(),
+        PreCastOpts::default(),
+    );
+    assert!(
+        matches!(reason, RejectionReason::OutOfRange { .. }),
+        "range must win over LoS, got: {:?}",
+        reason
+    );
+}
+
+/// Empty obstacle list (BasicArena): a targeted cast passes exactly as before
+/// — zero behavior change on maps with no cover.
+#[test]
+fn empty_obstacles_never_block_los() {
+    let world = TestWorld::new(CharacterClass::Mage); // obstacles default empty
+    assert!(world.obstacles.is_empty());
+    let combatant = caster_combatant(CharacterClass::Mage);
+    let abilities = defs();
+    let def = abilities.get_unchecked(&AbilityType::Frostbolt);
+
+    assert!(pre_cast_ok(
+        AbilityType::Frostbolt,
+        def,
+        &combatant,
+        world.caster_pos,
+        None,
+        Some((world.target, world.target_pos)),
+        &world.ctx(),
+        PreCastOpts::default(),
+    ));
 }

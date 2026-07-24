@@ -24,7 +24,7 @@ cargo run --release -- --headless /tmp/test.json
 
 **Config options:**
 - `team1`, `team2`: Arrays of class names (Warrior, Mage, Rogue, Priest, Warlock, Paladin, Hunter)
-- `map`: "BasicArena" or "PillaredArena"
+- `map`: "BasicArena", "PillaredArena", or "TestVerticality" (a headless-only LoS test asset with a raised platform and ramp; `--matrix` rejects it and it never appears in the graphical map-select list)
 - `team1_kill_target`, `team2_kill_target`: Priority target index (0-based)
 - `max_duration_secs`: Timeout (default 300)
 
@@ -135,7 +135,21 @@ For deeper context, see these focused references:
 ### Combat Flow
 1. **Pre-match** (10s countdown): Combatants can buff, mana restored each frame
 2. **Gates open**: Combat begins, AI takes over
-3. **Combat loop**: Target acquisition → ability decisions → casting → damage/healing
+3. **Combat loop**: Target acquisition → ability decisions → casting → damage/healing.
+   **Mana is charged only when a completed cast actually LANDS** (WoW-faithful):
+   `process_casting` (`combat_core/casting.rs`) deducts `mana_cost` at the cast's
+   resolution point in pass 2 — the projectile-spawn site, or after an
+   instant-effect passes the alive + line-of-sight completion gates. A cast that
+   fizzles at completion (target juked out of LoS, or target dead) costs NO mana,
+   and an interrupted cast never reaches completion so it costs nothing either.
+   Self-cast buffs always land (self is alive and in LoS of itself), so they still
+   cost mana. This means juking a caster into fizzles CANNOT drain its mana. The
+   damage/crit RNG pre-calc stays in pass 1 and runs for every completed cast
+   (fizzle or land), so the `game_rng` draw order is independent of the mana
+   charge site. NOTE: instant abilities (0 cast time, applied in class AI without
+   a `CastingState`) charge mana atomically at their application site and are
+   unaffected. Channels (Drain Life) pay the full cost up-front at channel start
+   (WoW-faithful — an interrupted channel is not refunded).
 4. **Arena dampening**: starting `DAMPENING_START_SECS` (75s) after gates, ALL healing,
    absorb shields, and lifesteal ramp linearly to zero over `DAMPENING_RAMP_SECS` (120s;
    both in `constants.rs`). Ticked by `match_flow::update_dampening` into the
@@ -294,6 +308,7 @@ fractions in 0..1; values below are the shipped defaults):
 - `urgency_hp_threshold: 0.5` — defer non-critical casts during ESCAPE/DIP unless an ally is below this HP fraction
 - `anchor_switch_margin: 0.1` — sticky-anchor switch requires this HP-fraction injury margin
 - `wand_range: 30.0` — wand-range pull target distance (Priest)
+- `press_advantage_margin: 0.2` — team-HP-fraction lead at/above which a team "presses": its healers' `cover_pull` zeroes and the melee tempo reset stays disarmed (denial is reserved for the trailing side)
 
 **Per-class scorer weights** (`priest.weights:` / `paladin.weights:` —
 `score_directions` term weights; `0.0` disables a term). All terms here are
@@ -304,19 +319,67 @@ with the context-steering mask refactor.
 - `threat_repulsion` (3.0/3.0) — pull away per visible threat, weighted by proximity
 - `formation_pull` (Priest 2.0 / Paladin 0.0) — pull toward the FREE backline point (Paladin keeps its melee identity, so 0 disables it)
 - `corner_penalty` (Priest 6.0 / Paladin 4.0) — graded penalty approaching arena corners
-- `wand_pull` (Priest 0.5 / Paladin 0.0) — low-weight pull toward wand range of the kill target (`0.0` disables it for the wandless Paladin)
+- `wand_pull` (Priest 0.5 / Paladin 0.0 / Mage 0.0) — low-weight pull toward wand range of the kill target (`0.0` disables it for the wandless Paladin). The Mage keeps this at `0.0`: it HAS a wand and DOES fall back to it when out of mana, but via the pursuit stop distance (see the DPS kiter OOM wand fallback below), not this orbit-scorer term — the term's LoS-preserving lateral meander is slow to corner a juking target
 - `range_band` (0.0 for healers; Mage/Hunter 2.0 / 0.5) — ring-attraction toward the kill target's `[min, max]` band; disabled for healers
 - `flee` (0.0 for healers + Mage; Hunter 6.0) — constant pull away from the nearest threat, NOT proximity-weighted (distance-maximization), so a chased ranged DPS outruns an un-impaired chaser at all ranges. Hunter's `corner_penalty` (8.0) must EXCEED `flee` or the kiter flees into corners.
 - `commitment_bonus` (1.5/1.5) — bonus toward the committed direction during the commit window
+- `los_seek` (0.0 for healers; Mage 2.0 / Hunter 1.0) — reward for candidate steps that have/restore line of sight to the kill target; drives occluded-in-range casters to orbit to a sighted angle instead of idling
+- `cover_pull` (Priest/Shaman 1.5, Paladin 1.0, 0.0 for DPS) — reward for candidate steps occluded from threats; drives pressured-healer pillar denial. Kept below `threat_repulsion` so denial shapes retreat direction without overriding escape; zeroed when a healable teammate is below `urgency_hp_threshold` or the team is pressing (`press_advantage_margin`)
+
+**Medic chase (heal-seeking movement)** — shared across Priest/Paladin/Shaman
+(`healer_postures::medic_chase_override` / `medic_chase_tick`; no RON knob,
+reuses `urgency_hp_threshold`). When a living non-pet teammate is below
+`urgency_hp_threshold` AND occluded from the healer, a direct
+`MovementGoal::Point` walk toward that ally (most-injured occluded one)
+OVERRIDES FREE formation and PRESSURED cover-denial so the healer walks around
+cover to regain sight and heal — never during DIP (its teammate-HP abort
+composes) or the committed ESCAPE window, and never while the healer is
+hard-CC'd (`is_ccd`, Root included). Keyed on OCCLUSION, not range, so it is a
+provable no-op on obstacle-free maps (BasicArena stays byte-identical). Traced
+via the existing `SeekLos` trigger with a `point` goal and the ally in the
+target view.
+
+**Tangent steering (goal-directed pillar rounding)** — `map_geometry::steer_toward_goal`
+(pure, unit-tested; no RON knob). When a mover with a DESTINATION has the
+straight line to it blocked by an obstacle, it aims at the obstacle's TANGENT
+POINT on the better-progress side (for a cylinder: the external tangent to the
+`radius + MOVER_RADIUS` circle; for a box: the nearer visible silhouette corner)
+instead of pointing at the goal through the obstacle — so it rounds the pillar in
+a clean full-speed arc rather than oozing along the surface. Without it,
+`slide_against` removed only the inward step component, leaving a near-zero
+tangential sliver whenever the goal sat directly behind a pillar (the "stuck to
+the pillar" ooze). `resolve_movement` stays the final no-clip backstop; steering
+just keeps the mover off the surface so the resolver rarely bites (`slide_against`
+was left unchanged — the tangent aim already preserves full speed, and touching it
+risked the collision probes / byte-identity). Wired into the FOUR goal-directed
+branches of `move_to_target`: `MovementGoal::Point` (chase/medic/formation walks,
+incl. the `seek_chase_timeout` direct chase), `MovementGoal::Entity` (DIP chases),
+normal pursuit-to-target, and pet-follow-to-owner. NOT applied to
+`MovementGoal::Direction` (scorer output — the context-steering mask already
+avoids obstacles), fear/polymorph wander, or Charge/Disengage (scripted dashes).
+Side commitment is emergent, not stored: the better-progress tangent is
+self-reinforcing (once off the center line, that side keeps winning) and a
+`STEER_TIE_EPS` fixed default resolves the only symmetric instant, so it cannot
+flip-flop — no per-frame committed-side state. The helper's first line is
+`if obstacles.is_empty() { return None }` and each caller falls back to its exact
+legacy direct-normalize on `None`, so **BasicArena stays byte-identical**. This
+makes competent pursuers (melee and Mage) round pillars cleanly; a documented
+consequence is that a pressured healer's `cover_pull` LoS-denial buys far less
+sustained occlusion against a steered melee trainer (a competent melee now
+re-acquires around the pillar quickly — see the `u8_healer_cover` probe note).
 
 **DPS kiter blocks** (`mage:` / `hunter:` — the shared ENGAGE/KITE machine, `DpsMovementConfig`):
 - `weights:` (above) plus `range_band_min`/`max` (orbit ring; min = SAFE_KITING_DISTANCE / HUNTER_DEAD_ZONE 8), `kite_hold` (anti-strobe hysteresis), `directive_ttl` (must cover the longest cast), `commit_window`.
 - `kite_entry_radius`/`kite_sustain_radius` — proximity-gated kiters only (Hunter: KITE when a melee is within entry, exit when kited past sustain). The Mage is aura-gated (KITE keys off its own root/slow), so it ignores these.
+- **Mage OOM wand fallback** (no config knob — behavior, like the melee tempo reset). A Mage out of mana for a Frostbolt parks at its Frostbolt-safe preferred range (38yd), which is OUTSIDE its equipped wand's range (30yd), so it idles the mana refractory dealing ~1 damage event per 20s (the lone-Shaman 2v1 drag). Fix: while out of mana, the Mage's ENGAGE pursuit stop distance drops to wand range so `move_to_target` closes it to 30yd and the wand auto-attack chips through the refractory. Gated by a hysteresis latch on `KitePosture::wand_oom`: `update_oom_wand_latch` engages it when a Frostbolt is unaffordable (`mana < cost`, cost read from `AbilityDefinitions`, never hardcoded) and releases it only once mana recovers to a two-cast buffer (`>= 2*cost`), so the standoff doesn't strobe 38↔30 as mana sawtooths across one cast's worth. `evaluate_dps_posture` folds the latch each evaluation (via `WandPullGate`; the Hunter passes `None`); `move_to_target` reads it. A DIRECT radial pursuit is used, not the KITE orbit scorer, because the orbit's LoS-preserving lateral meander is slow to corner a juking target — and because it only touches the SIGHTED-parking case, the occluded juke-chase seeds are byte-identical. Inert at healthy mana (latch false → preferred range 38, unchanged).
+- `seek_chase_timeout` (mage/hunter 3.5) / `seek_chase_decay` (mage/hunter 0.5) — the leaky-bucket occlusion-chase arm. An ENGAGE kiter accumulates "occlusion units" while occluded from its kill target in shot range (the `los_seek` orbit-seek stall): the bucket **fills** at a fixed 1.0/sec and **drains** at `seek_chase_decay`/sec while it has sight, clamped at 0. Once the bucket reaches `seek_chase_timeout` the chase arms — the kiter abandons orbit-seeking and walks straight at the target's live position (a `Point` directive, TTL = `directive_ttl`) while it remains occluded, until sight returns. This counters a target hugging a thin pillar, where `los_seek` gives no gradient because every candidate step is occluded. The bucket is the fix for a JUKING target (occlude mid-cast, flash back between casts) that the old continuous clock never armed against — because `seek_chase_decay` (0.5) is below the 1.0 fill, intermittent occlusion still ratchets to the threshold instead of resetting on each sight flicker. A target under CONTINUOUS occlusion fills at 1.0/sec, so it still arms at exactly `seek_chase_timeout` seconds — the static pillar-hug case is unchanged. `seek_chase_timeout` `0.0` disables the chase; `seek_chase_decay` `0.0` never drains (permanent arm once crossed) and `>= 1.0` restores continuous-only arming. The bucket (`KitePosture::occlusion_accum`) is owned by the per-frame `tick_kite_occlusion` system, which ticks even CASTING kiters (excluded from the ability-decision query) so the mid-cast juke is observed; `evaluate_dps_posture` only reads it. No-op on obstacle-free maps (never occluded → bucket stays 0). Traced via the existing `SeekLos` trigger; a `goal_kind` of `point` distinguishes chase from the `direction` orbit-seek.
 
 **Paladin-only block** (`paladin:` — alongside its `weights:`):
 - `fallback_range: 15.0` — PRESSURED retreat range (instead of face-tanking at melee)
 - `dip_budget: 6.0` — DIP walk-stun-return duration budget in seconds
 - `healing_heavy_hp: 0.6` — lowest team HP fraction (self included, pets excluded) below which the Paladin pulls to fallback range even before it is focused
+
+The Paladin's **while-CC Divine Shield** (`try_divine_shield_while_cc`, the CC-break path) fires when self HP is below `DIVINE_SHIELD_HP_THRESHOLD` (0.3, unchanged) OR — the widened teammate trigger — a non-self ally is below `LOW_HP_THRESHOLD` (0.5) AND the max remaining incapacitation on the Paladin is `>= DIVINE_SHIELD_MIN_CC_REMAINING` (2.0s). The bubble purges the Paladin's own CC, so it is the fear-break tool; the CC-remaining floor keeps the 5-minute cooldown from burning when the break would buy no real acting time. Decision seam: pure `divine_shield_while_cc_should_fire`. This changes behavior on ALL maps where the trigger actually fires (fear + low ally, BasicArena included) — intended, like the melee tempo reset.
 
 After editing, validate and sweep:
 ```bash
@@ -426,12 +489,22 @@ jq -c 'select(.kind == "movement_decision" and .actor.entity_id == 7) | {t: .sim
 jq -c 'select(.kind == "movement_decision" and .actor.class == "Priest" and .scorer_terms != null) | {t: .sim_time, posture, dir: .chosen_direction, terms: .scorer_terms}' $T
 
 # Masked candidates — the `masked` field is a u16 bitmask over the 16 compass
-# directions (bit i set when candidate i was eliminated by the boundary or
-# ally-anchor mask). Present only when the scorer ran. A value of 65535
-# (0xFFFF) is an all-masked frame, where the fallback ladder fired — the ONLY
-# legitimate source of Part A behavior divergence from the old penalty scheme,
-# so this is the query R6 byte-identity attribution uses on a divergent cell.
+# directions (bit i set when candidate i was eliminated by the boundary,
+# ally-anchor, or obstacle (MASK_LOS) mask). Present only when the scorer ran.
+# A value of 65535 (0xFFFF) is an all-masked frame, where the fallback ladder
+# fired (lift order: anchor -> LoS -> boundary) — the ONLY legitimate source
+# of Part A behavior divergence from the old penalty scheme, so this is the
+# query R6 byte-identity attribution uses on a divergent cell.
 jq -c 'select(.kind == "movement_decision" and .masked == 65535) | {t: .sim_time, class: .actor.class, entity: .actor.entity_id, posture}' $T
+
+# LoS-only eliminations — `los_masked` is a strict subset of `masked` carrying
+# just the obstacle-blocked candidates; emitted only when nonzero, so it never
+# appears on obstacle-free maps (BasicArena traces are unchanged).
+jq -c 'select(.kind == "movement_decision" and .los_masked != null) | {t: .sim_time, class: .actor.class, masked, los_masked}' $T
+
+# Why didn't the Mage cast? LoS rejections by ability (fires on PillaredArena /
+# TestVerticality when a pillar blocks the segment at cast start)
+jq -c 'select(.actor.class == "Mage") | .candidates[]? | select(.status == "rejected" and .reason == "LosBlocked") | .ability' $T | sort | uniq -c
 
 # Paladin HoJ dips: DipEnter carries the goal entity (the enemy healer) in
 # the event's `target` view; DipComplete fires when HoJ lands, DipAbort when

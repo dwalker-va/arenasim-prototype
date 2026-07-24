@@ -160,6 +160,7 @@ pub(super) struct MovementDecisionDetails {
     pub chosen_direction: Option<[f32; 2]>,
     pub scorer_terms: Option<std::collections::BTreeMap<std::borrow::Cow<'static, str>, f32>>,
     pub masked: Option<u16>,
+    pub los_masked: Option<u16>,
 }
 
 impl<'a> MovementEventBuilder<'a> {
@@ -180,6 +181,7 @@ impl<'a> MovementEventBuilder<'a> {
             chosen_direction: None,
             scorer_terms: None,
             masked: None,
+            los_masked: None,
         });
     }
 
@@ -201,6 +203,7 @@ impl<'a> MovementEventBuilder<'a> {
             chosen_direction: None,
             scorer_terms: None,
             masked: None,
+            los_masked: None,
         });
     }
 
@@ -219,6 +222,16 @@ impl<'a> MovementEventBuilder<'a> {
     pub fn masked(&mut self, mask: u16) {
         if let Some(decision) = self.decision.as_mut() {
             decision.masked = Some(mask);
+        }
+    }
+
+    /// Attach the LoS-only subset of the mask bitmask (candidates eliminated by
+    /// the obstacle mask specifically). Callers emit this only when nonzero, so
+    /// obstacle-free traces never carry the field. No-op until a decision has
+    /// been recorded.
+    pub fn los_masked(&mut self, mask: u16) {
+        if let Some(decision) = self.decision.as_mut() {
+            decision.los_masked = Some(mask);
         }
     }
 
@@ -259,6 +272,7 @@ impl<'a> MovementEventBuilder<'a> {
                 position,
                 scorer_terms: decision.scorer_terms,
                 masked: decision.masked,
+                los_masked: decision.los_masked,
             },
         };
         self.trace.pending_events.push(event);

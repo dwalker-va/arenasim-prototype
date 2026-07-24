@@ -12,7 +12,7 @@ use arenasim::cli;
 use arenasim::combat::CombatPlugin;
 use arenasim::headless;
 use arenasim::settings::{GameSettings, SettingsPlugin};
-use arenasim::states::play_match::{AbilityConfigPlugin, MovementConfigPlugin};
+use arenasim::states::play_match::{AbilityConfigPlugin, MapConfigPlugin, MovementConfigPlugin};
 use arenasim::states::play_match::equipment::EquipmentPlugin;
 use arenasim::states::{GameState, StatesPlugin};
 use arenasim::ui::UiPlugin;
@@ -37,7 +37,7 @@ fn main() {
         // 7×7 matchup matrix mode — defaults to trace `on` so every cell's
         // trace is on disk when an anomaly surfaces; explicit `off` opts out.
         let trace_mode = args.trace_mode.unwrap_or(cli::TraceMode::On);
-        if let Err(e) = headless::run_matrix(n, args.seed_base, args.save_logs, trace_mode) {
+        if let Err(e) = headless::run_matrix(n, args.seed_base, args.save_logs, trace_mode, args.matrix_map) {
             eprintln!("Matrix run failed: {}", e);
             std::process::exit(1);
         }
@@ -136,6 +136,7 @@ fn run_graphical_mode() {
             SettingsPlugin,
             AbilityConfigPlugin,
             MovementConfigPlugin,
+            MapConfigPlugin,
             EquipmentPlugin,
             StatesPlugin,
             CameraPlugin,

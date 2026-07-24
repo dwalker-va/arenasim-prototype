@@ -36,6 +36,17 @@
 //!   hard `committed_until` window on `MovementDirective` decides WHEN
 //!   re-evaluation happens; this term applies only at that moment — the two
 //!   never stack.
+//! - **LoS-seek** — flat bonus for a step that has line of sight to the kill
+//!   target (`los_target`); weight 0 disables. Obstacle maps only.
+//! - **Cover-pull** — flat bonus per threat a step is occluded from (sight to
+//!   the threat broken by an obstacle); weight 0 disables. Obstacle maps only.
+//!
+//! **Obstacles** are handled two ways. A candidate STEP that walks into an
+//! obstacle footprint is masked (`MASK_LOS`, agrees with the collision
+//! resolver's touching-allowed policy), and the ally-anchor constraint requires
+//! an unobstructed line to the anchor, not just distance. All obstacle-aware
+//! logic is a no-op on obstacle-free maps (empty `obstacles` slice), so
+//! BasicArena scoring is byte-identical.
 //!
 //! **Hard constraints are masks, not penalties.** Boundary and ally-anchor
 //! are evaluated as a boolean *mask pass* that removes violating candidates
@@ -51,13 +62,20 @@
 use bevy::prelude::*;
 
 use super::is_in_arena_bounds;
+use super::super::map_geometry::{has_line_of_sight, position_blocked, ObstacleVolume, EYE_HEIGHT};
 use super::super::movement_config::MovementWeights;
 use super::super::ARENA_CORNER_SUM;
 
 /// Mask bit: candidate's lookahead position is out of arena bounds.
 pub const MASK_BOUNDARY: u16 = 1 << 0;
-/// Mask bit: candidate's lookahead position leaves heal range of the anchor.
+/// Mask bit: candidate's lookahead position leaves heal range of the anchor —
+/// now *also* set when an obstacle occludes the anchor from that position (a
+/// healer must both stay in range AND keep sight of the ally it heals).
 pub const MASK_ANCHOR: u16 = 1 << 1;
+/// Mask bit: candidate's lookahead step walks into an obstacle volume (the
+/// movement-blocking footprint test, [`position_blocked`]). Always clear on
+/// obstacle-free maps, so BasicArena scoring is unaffected.
+pub const MASK_LOS: u16 = 1 << 2;
 
 /// Where the graded corner penalty starts biting, as |x|+|z|. Below this the
 /// term is zero; it ramps linearly to full weight at the corner wall
@@ -135,6 +153,16 @@ pub struct ScorerInputs {
     /// window is open — the caller passes `None` outside it, which disables
     /// the term entirely.
     pub committed_direction: Option<Vec2>,
+    /// The active map's obstacle volumes (owned, matching the struct's
+    /// owned-field idiom; cheap — a handful of pillars). Empty on obstacle-free
+    /// maps (BasicArena), which makes every obstacle-aware check a no-op. Feeds
+    /// the `MASK_LOS` step check, the anchor LoS constraint, and the
+    /// `los_seek` / `cover_pull` interest terms.
+    pub obstacles: Vec<ObstacleVolume>,
+    /// Kill-target position for the `los_seek` term (keep sight of the target
+    /// you shoot). `None` disables the term (no kill target, or a scorer that
+    /// does not seek LoS).
+    pub los_target: Option<Vec3>,
 }
 
 fn xz(v: Vec3) -> Vec2 {
@@ -150,8 +178,19 @@ pub fn candidate_mask(candidate: Vec2, inputs: &ScorerInputs) -> u16 {
     if !is_in_arena_bounds(next) {
         mask |= MASK_BOUNDARY;
     }
+    // Obstacle mask: reject a step that walks into a wall (movement-blocking
+    // footprint test — agrees with `resolve_movement`, touching = allowed).
+    if position_blocked(&inputs.obstacles, next) {
+        mask |= MASK_LOS;
+    }
     if let Some(anchor) = inputs.anchor {
-        if xz(next).distance(xz(anchor.pos)) > anchor.heal_range {
+        // The anchor constraint is distance AND sight: a healer must stay in
+        // heal range of the ally AND keep an unobstructed line to it. Probe LoS
+        // at eye height on both ends to match the cast/heal gates.
+        let out_of_range = xz(next).distance(xz(anchor.pos)) > anchor.heal_range;
+        let cand_eye = Vec3::new(next.x, EYE_HEIGHT, next.z);
+        let anchor_eye = Vec3::new(anchor.pos.x, EYE_HEIGHT, anchor.pos.z);
+        if out_of_range || !has_line_of_sight(&inputs.obstacles, cand_eye, anchor_eye) {
             mask |= MASK_ANCHOR;
         }
     }
@@ -246,6 +285,32 @@ pub fn score_direction(candidate: Vec2, inputs: &ScorerInputs, weights: &Movemen
         score += weights.commitment_bonus * candidate.dot(prev).max(0.0);
     }
 
+    // LoS-seek: flat bonus for a step that can see the kill target — a ranged
+    // attacker steers toward angles it can actually shoot from. Weight 0
+    // disables; no-op on obstacle-free maps (sight always holds).
+    if weights.los_seek > 0.0 {
+        if let Some(target) = inputs.los_target {
+            let cand_eye = Vec3::new(next.x, EYE_HEIGHT, next.z);
+            let target_eye = Vec3::new(target.x, EYE_HEIGHT, target.z);
+            if has_line_of_sight(&inputs.obstacles, cand_eye, target_eye) {
+                score += weights.los_seek;
+            }
+        }
+    }
+
+    // Cover-pull: flat bonus per threat this step is OCCLUDED from (sight to the
+    // threat is broken by an obstacle) — pulls a pressured unit into cover.
+    // Weight 0 disables; no-op on obstacle-free maps (never occluded).
+    if weights.cover_pull > 0.0 {
+        let cand_eye = Vec3::new(next.x, EYE_HEIGHT, next.z);
+        for threat in &inputs.threats {
+            let threat_eye = Vec3::new(threat.x, EYE_HEIGHT, threat.z);
+            if !has_line_of_sight(&inputs.obstacles, cand_eye, threat_eye) {
+                score += weights.cover_pull;
+            }
+        }
+    }
+
     score
 }
 
@@ -273,13 +338,13 @@ fn argmax_interest(
     best.map(|(dir, _)| dir)
 }
 
-/// Bitmask over `candidates` (≤16): bit `i` is set when candidate `i` is
-/// eliminated by any hard constraint. Feeds the `masked` trace field; a value
-/// of `0xFFFF` over the full compass means an all-masked frame (the R6
-/// byte-identity attribution signal).
-pub fn mask_bitmask(candidates: &[Vec2], inputs: &ScorerInputs) -> u16 {
+/// Bitmask over `candidates` (≤16): bit `i` is set when candidate `i`'s hard
+/// constraint mask intersects `bits`. The shared fold behind [`mask_bitmask`]
+/// (`bits = u16::MAX`, any constraint) and [`los_mask_bitmask`]
+/// (`bits = MASK_LOS`, obstacle only).
+fn bitmask_matching(candidates: &[Vec2], inputs: &ScorerInputs, bits: u16) -> u16 {
     candidates.iter().enumerate().fold(0u16, |acc, (i, &c)| {
-        if candidate_mask(c, inputs) != 0 {
+        if candidate_mask(c, inputs) & bits != 0 {
             acc | (1u16 << i)
         } else {
             acc
@@ -287,13 +352,50 @@ pub fn mask_bitmask(candidates: &[Vec2], inputs: &ScorerInputs) -> u16 {
     })
 }
 
+/// Bitmask over `candidates` (≤16): bit `i` is set when candidate `i` is
+/// eliminated by any hard constraint. Feeds the `masked` trace field; a value
+/// of `0xFFFF` over the full compass means an all-masked frame (the R6
+/// byte-identity attribution signal).
+pub fn mask_bitmask(candidates: &[Vec2], inputs: &ScorerInputs) -> u16 {
+    bitmask_matching(candidates, inputs, u16::MAX)
+}
+
+/// Bitmask over `candidates` (≤16) of only the candidates eliminated by the
+/// obstacle mask (`MASK_LOS` — a step that walks into a wall). A strict subset
+/// of [`mask_bitmask`], surfaced separately for the `los_masked` trace field so
+/// consumers can attribute obstacle-driven divergence without decoding the
+/// combined mask. Always `0` on obstacle-free maps.
+pub fn los_mask_bitmask(candidates: &[Vec2], inputs: &ScorerInputs) -> u16 {
+    bitmask_matching(candidates, inputs, MASK_LOS)
+}
+
+/// Both [`mask_bitmask`] and [`los_mask_bitmask`] in one pass, computing each
+/// candidate's mask exactly once. Returns `(combined, los_only)` — bit-identical
+/// to calling the two individually, but the production trace call sites emit
+/// both fields together, so this halves the `candidate_mask` work.
+pub fn mask_and_los_bitmask(candidates: &[Vec2], inputs: &ScorerInputs) -> (u16, u16) {
+    candidates
+        .iter()
+        .enumerate()
+        .fold((0u16, 0u16), |(all, los), (i, &c)| {
+            let mask = candidate_mask(c, inputs);
+            let bit = 1u16 << i;
+            (
+                if mask != 0 { all | bit } else { all },
+                if mask & MASK_LOS != 0 { los | bit } else { los },
+            )
+        })
+}
+
 /// Pick a movement direction by argmax of the interest pass over candidates
 /// that survive the hard-constraint mask pass (typically
 /// [`compass_directions_16`]).
 ///
-/// Fallback ladder when every candidate is masked: (1) allow ally-anchor
-/// violations and rescore (heal range becomes a preference once it is
-/// unsatisfiable); (2) if still none, lift the boundary mask too and run the
+/// Fallback ladder when every candidate is masked, lifting constraints in
+/// increasing order of harm so a unit is never stranded: (1) allow ally-anchor
+/// violations (heal range/sight become a preference once unsatisfiable); (2) if
+/// still none, also allow the obstacle mask (a step into a wall the collision
+/// resolver will then slide); (3) finally lift the boundary mask too and run the
 /// full interest pass — the executor clamps the resulting step back into the
 /// arena. Returns `Vec2::ZERO` only for an empty candidate set.
 pub fn score_directions(
@@ -309,8 +411,12 @@ pub fn score_directions(
     if let Some(dir) = argmax_interest(candidates, inputs, weights, MASK_ANCHOR) {
         return dir;
     }
-    // Fallback rung 2: lift everything; executor clamps the step in-bounds.
-    argmax_interest(candidates, inputs, weights, MASK_BOUNDARY | MASK_ANCHOR)
+    // Fallback rung 2: also drop the obstacle mask (resolver slides the step).
+    if let Some(dir) = argmax_interest(candidates, inputs, weights, MASK_ANCHOR | MASK_LOS) {
+        return dir;
+    }
+    // Fallback rung 3: lift everything; executor clamps the step in-bounds.
+    argmax_interest(candidates, inputs, weights, MASK_BOUNDARY | MASK_ANCHOR | MASK_LOS)
         .unwrap_or(Vec2::ZERO)
 }
 
@@ -441,6 +547,8 @@ mod tests {
             flee: 0.0,
             burn_pull: 0.0,
             commitment_bonus: 0.5,
+            los_seek: 0.0,
+            cover_pull: 0.0,
         };
         let dirs = compass_directions_16();
         let ideal_away = dirs[8]; // ~(-1, 0): exactly away from a +X threat
@@ -730,6 +838,8 @@ mod tests {
             flee: 6.0,
             burn_pull: 0.0,
             commitment_bonus: 0.0,
+            los_seek: 0.0,
+            cover_pull: 0.0,
         };
         let dirs = compass_directions_16();
         // Near the +X/+Z corner (|x|+|z| = 48, just inside ARENA_CORNER_SUM),
@@ -797,5 +907,268 @@ mod tests {
         let chosen = score_directions(&dirs, &inputs, &weights);
         assert_ne!(chosen, Vec2::ZERO, "boundary-lift fallback must return a direction");
         assert!(chosen.is_finite(), "chosen direction must be finite, got {chosen:?}");
+    }
+
+    // ---- obstacle (LoS) mask + terms ----------------------------------
+
+    /// A tall cylinder pillar spanning ground height, centered at `(cx, cz)`.
+    fn pillar(cx: f32, cz: f32, r: f32) -> ObstacleVolume {
+        ObstacleVolume::Cylinder {
+            center_xz: Vec2::new(cx, cz),
+            radius: r,
+            base_y: 0.0,
+            height: 10.0,
+        }
+    }
+
+    fn zeroed_weights() -> MovementWeights {
+        MovementWeights {
+            threat_repulsion: 0.0,
+            formation_pull: 0.0,
+            corner_penalty: 0.0,
+            wand_pull: 0.0,
+            burn_pull: 0.0,
+            range_band: 0.0,
+            flee: 0.0,
+            commitment_bonus: 0.0,
+            los_seek: 0.0,
+            cover_pull: 0.0,
+        }
+    }
+
+    /// A candidate whose step walks into a pillar is `MASK_LOS`-masked,
+    /// while an open direction survives the mask pass.
+    #[test]
+    fn step_into_pillar_is_los_masked() {
+        // Pillar centered at origin (r=5); the mover sits just west of it.
+        let inputs = ScorerInputs {
+            my_pos: Vec3::new(-6.0, 1.0, 0.0),
+            lookahead: 2.0,
+            obstacles: vec![pillar(0.0, 0.0, 5.0)],
+            ..Default::default()
+        };
+        // +X steps to (-4, 0), inside the r=5 footprint (+ mover radius) → blocked.
+        let into = Vec2::new(1.0, 0.0);
+        assert_ne!(
+            candidate_mask(into, &inputs) & MASK_LOS,
+            0,
+            "a step into the pillar must set MASK_LOS",
+        );
+        // -X steps to (-8, 0), clear of the footprint → no LoS mask, survives.
+        let away = Vec2::new(-1.0, 0.0);
+        assert_eq!(candidate_mask(away, &inputs), 0, "an open step must be unmasked");
+    }
+
+    /// The fallback ladder drops the ANCHOR mask before the LoS mask.
+    /// Two candidates — one anchor-only-masked, one LoS-masked — with none
+    /// clear: the ladder must pick the anchor-only one (LoS bit still clear).
+    #[test]
+    fn ladder_drops_anchor_before_los() {
+        let weights = zeroed_weights();
+        // Anchor far west; +X leaves heal range (anchor mask), -X steps into a
+        // pillar (LoS mask). No candidate is clear.
+        let inputs = ScorerInputs {
+            my_pos: Vec3::new(0.0, 1.0, 0.0),
+            lookahead: 2.0,
+            anchor: Some(AnchorConstraint { pos: Vec3::new(-10.0, 1.0, 0.0), heal_range: 11.0 }),
+            obstacles: vec![pillar(-2.0, 0.0, 1.0)],
+            ..Default::default()
+        };
+        let a = Vec2::new(1.0, 0.0); // +X: out of heal range → anchor-masked
+        let b = Vec2::new(-1.0, 0.0); // -X: into the pillar → LoS-masked
+        assert_ne!(candidate_mask(a, &inputs) & MASK_ANCHOR, 0, "setup: +X anchor-masked");
+        assert_ne!(candidate_mask(b, &inputs) & MASK_LOS, 0, "setup: -X LoS-masked");
+        // Ladder: rung 1 drops anchor → +X becomes eligible while -X (LoS) does not.
+        let chosen = score_directions(&[a, b], &inputs, &weights);
+        assert_eq!(chosen, a, "anchor must lift before LoS, choosing the anchor-only candidate");
+    }
+
+    /// The fallback ladder drops the LoS mask before the BOUNDARY mask.
+    /// One candidate LoS-masked (in bounds), one boundary-masked: the ladder
+    /// must pick the LoS one.
+    #[test]
+    fn ladder_drops_los_before_boundary() {
+        let weights = zeroed_weights();
+        // Near the +X wall: +X exits bounds; -Z steps into a pillar (in bounds).
+        let inputs = ScorerInputs {
+            my_pos: Vec3::new(35.0, 1.0, 0.0),
+            lookahead: 2.0,
+            obstacles: vec![pillar(35.0, -4.0, 2.0)],
+            ..Default::default()
+        };
+        let c = Vec2::new(0.0, -1.0); // -Z: into the pillar, still in bounds
+        let d = Vec2::new(1.0, 0.0); // +X: out of arena bounds
+        assert_eq!(candidate_mask(c, &inputs), MASK_LOS, "setup: -Z LoS-masked only");
+        assert_eq!(candidate_mask(d, &inputs), MASK_BOUNDARY, "setup: +X boundary-masked only");
+        let chosen = score_directions(&[c, d], &inputs, &weights);
+        assert_eq!(chosen, c, "LoS must lift before boundary, choosing the in-bounds candidate");
+    }
+
+    /// With every candidate masked, the ladder still returns a direction
+    /// (never strands the unit).
+    #[test]
+    fn all_masked_ladder_returns_direction() {
+        let weights = zeroed_weights();
+        // Far outside the arena AND inside a giant pillar: every compass step is
+        // both boundary- and LoS-masked.
+        let inputs = ScorerInputs {
+            my_pos: Vec3::new(500.0, 1.0, 500.0),
+            lookahead: 2.0,
+            obstacles: vec![pillar(500.0, 500.0, 50.0)],
+            ..Default::default()
+        };
+        let dirs = compass_directions_16();
+        assert!(
+            dirs.iter().all(|&d| candidate_mask(d, &inputs) != 0),
+            "setup: every candidate masked",
+        );
+        let chosen = score_directions(&dirs, &inputs, &weights);
+        assert_ne!(chosen, Vec2::ZERO, "the ladder must never strand the unit");
+    }
+
+    /// The anchor constraint is distance AND sight. A candidate within
+    /// heal range but OCCLUDED from the anchor is anchor-masked; removing the
+    /// pillar clears it (proving occlusion, not distance, caused the mask).
+    #[test]
+    fn anchor_masked_when_occluded_in_range() {
+        let anchor = AnchorConstraint { pos: Vec3::new(0.0, 1.0, -5.0), heal_range: 40.0 };
+        let candidate = Vec2::new(0.0, 1.0); // +Z: steps to (0, 2), 7yd from anchor (in range)
+        let occluded = ScorerInputs {
+            my_pos: Vec3::new(0.0, 1.0, 0.0),
+            lookahead: 2.0,
+            anchor: Some(anchor),
+            obstacles: vec![pillar(0.0, -2.0, 1.0)], // between the step and the anchor
+            ..Default::default()
+        };
+        assert_ne!(
+            candidate_mask(candidate, &occluded) & MASK_ANCHOR,
+            0,
+            "in range but occluded → anchor-masked",
+        );
+        let clear = ScorerInputs { obstacles: vec![], ..occluded.clone() };
+        assert_eq!(
+            candidate_mask(candidate, &clear) & MASK_ANCHOR,
+            0,
+            "same geometry without the pillar is NOT anchor-masked — occlusion caused it",
+        );
+    }
+
+    /// (reverse) a candidate in clear LoS but OUT of heal range is still
+    /// anchor-masked (distance half of the AND).
+    #[test]
+    fn anchor_masked_when_out_of_range_in_sight() {
+        let inputs = ScorerInputs {
+            my_pos: Vec3::new(0.0, 1.0, 0.0),
+            lookahead: 2.0,
+            anchor: Some(AnchorConstraint { pos: Vec3::new(0.0, 1.0, -50.0), heal_range: 10.0 }),
+            obstacles: vec![], // clear sight
+            ..Default::default()
+        };
+        let candidate = Vec2::new(0.0, 1.0); // steps AWAY from the anchor
+        assert_ne!(
+            candidate_mask(candidate, &inputs) & MASK_ANCHOR,
+            0,
+            "out of range (even in clear sight) → anchor-masked",
+        );
+    }
+
+    /// `cover_pull` scores a step that hides from a threat above an
+    /// exposed one; `los_seek` scores a step that sees the target above an
+    /// occluded one. Same geometry, opposite sign.
+    #[test]
+    fn cover_pull_and_los_seek_shape() {
+        let point = Vec3::new(0.0, 1.0, 10.0); // the threat / the kill target
+        let my_pos = Vec3::new(0.0, 1.0, -3.0);
+        let obstacles = vec![pillar(0.0, 5.0, 0.5)]; // thin pillar between us and the point
+        let hiding = Vec2::new(0.0, 1.0); // +Z: stays on the axis, occluded by the pillar
+        let exposed = Vec2::new(1.0, 0.0); // +X: steps off-axis, clear line
+
+        // cover_pull: hiding (occluded from the threat) beats exposed.
+        let cover_inputs = ScorerInputs {
+            my_pos,
+            lookahead: 2.0,
+            threats: vec![point],
+            obstacles: obstacles.clone(),
+            ..Default::default()
+        };
+        let cover_w = MovementWeights { cover_pull: 1.0, ..zeroed_weights() };
+        assert!(
+            score_direction(hiding, &cover_inputs, &cover_w)
+                > score_direction(exposed, &cover_inputs, &cover_w),
+            "cover_pull must reward the occluded (hiding) direction",
+        );
+
+        // los_seek: exposed (sees the target) beats hiding (occluded).
+        let seek_inputs = ScorerInputs {
+            my_pos,
+            lookahead: 2.0,
+            los_target: Some(point),
+            obstacles,
+            ..Default::default()
+        };
+        let seek_w = MovementWeights { los_seek: 1.0, ..zeroed_weights() };
+        assert!(
+            score_direction(exposed, &seek_inputs, &seek_w)
+                > score_direction(hiding, &seek_inputs, &seek_w),
+            "los_seek must reward the direction that keeps sight of the target",
+        );
+    }
+
+    /// Mask bits are deterministic — identical across repeated evaluation
+    /// of the same inputs.
+    #[test]
+    fn mask_bits_are_deterministic() {
+        let inputs = ScorerInputs {
+            my_pos: Vec3::new(-6.0, 1.0, 0.0),
+            lookahead: 2.0,
+            anchor: Some(AnchorConstraint { pos: Vec3::new(-20.0, 1.0, 0.0), heal_range: 18.0 }),
+            obstacles: vec![pillar(0.0, 0.0, 5.0), pillar(-10.0, 4.0, 2.0)],
+            ..Default::default()
+        };
+        let dirs = compass_directions_16();
+        let first = mask_bitmask(&dirs, &inputs);
+        let first_los = los_mask_bitmask(&dirs, &inputs);
+        for _ in 0..8 {
+            assert_eq!(mask_bitmask(&dirs, &inputs), first, "combined mask must be stable");
+            assert_eq!(los_mask_bitmask(&dirs, &inputs), first_los, "LoS mask must be stable");
+        }
+        // The LoS-only mask is a subset of the combined mask.
+        assert_eq!(first_los & !first, 0, "los_mask must be a subset of mask");
+    }
+
+    /// Obstacle-free no-op. With no obstacles, MASK_LOS is never set, and
+    /// the new `los_seek`/`cover_pull` terms (even at high weight) do not change
+    /// the chosen direction versus zero-weight — the BasicArena byte-identity
+    /// guarantee at the scorer level.
+    #[test]
+    fn obstacle_free_is_a_noop() {
+        let dirs = compass_directions_16();
+        let threat = Vec3::new(5.0, 1.0, 0.0);
+        let base = ScorerInputs {
+            my_pos: Vec3::new(0.0, 1.0, 0.0),
+            lookahead: 2.0,
+            threats: vec![threat],
+            wand_range: 30.0,
+            obstacles: vec![], // BasicArena
+            ..Default::default()
+        };
+        // No candidate can ever be LoS-masked without obstacles.
+        assert!(
+            dirs.iter().all(|&d| candidate_mask(d, &base) & MASK_LOS == 0),
+            "empty obstacles must never set MASK_LOS",
+        );
+        let weights = priest_weights();
+        let chosen_plain = score_directions(&dirs, &base, &weights);
+
+        // Same inputs + a target, with los_seek/cover_pull turned way up: on an
+        // obstacle-free map cover_pull never fires and los_seek adds a uniform
+        // constant, so the argmax is unchanged.
+        let with_target = ScorerInputs { los_target: Some(threat), ..base.clone() };
+        let loud = MovementWeights { los_seek: 100.0, cover_pull: 100.0, ..weights };
+        let chosen_loud = score_directions(&dirs, &with_target, &loud);
+        assert_eq!(
+            chosen_plain, chosen_loud,
+            "obstacle-free scoring must be invariant to the new terms",
+        );
     }
 }

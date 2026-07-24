@@ -27,6 +27,11 @@ pub use super::utils::spawn_speech_bubble;
 pub struct AbilityDispatchExtras<'w, 's> {
     celebration: Option<Res<'w, VictoryCelebration>>,
     totems: Query<'w, 's, &'static Totem>,
+    /// Active map obstacle geometry — bundled here (rather than a bare
+    /// `Res` argument) so `decide_abilities` stays within Bevy's 16
+    /// system-param limit. Fed to `CombatSnapshot::build` for the cast-start
+    /// LoS guard.
+    map_geometry: Res<'w, super::map_config::ActiveMapGeometry>,
 }
 
 pub fn acquire_targets(
@@ -505,13 +510,15 @@ pub fn decide_abilities(
     channeling_auras: Query<(Entity, &Combatant, &Transform, Option<&ActiveAuras>, &ChannelingState), (With<ChannelingState>, Without<CastingState>)>,
     dr_tracker_query: Query<(Entity, &DRTracker)>,
     // Posture state + standing directive read-back (movement AI). One query
-    // for both healer (HealerPosture) and DPS-kiter (KitePosture) postures —
-    // kept single to stay under Bevy's 16 system-param limit. Disjoint from
+    // for the healer (HealerPosture), DPS-kiter (KitePosture), and Warrior
+    // tempo-reset (MeleeResetState) states plus the shared directive — kept
+    // single to stay under Bevy's 16 system-param limit. Disjoint from
     // `combatants` component-wise, so the two coexist.
     mut posture_movement: Query<(
         Option<&mut HealerPosture>,
         Option<&mut KitePosture>,
         Option<&MovementDirective>,
+        Option<&mut MeleeResetState>,
     )>,
     mut fct_states: Query<&mut FloatingTextState>,
     extras: AbilityDispatchExtras,
@@ -551,6 +558,7 @@ pub fn decide_abilities(
         &channeling_auras,
         &dr_tracker_query,
         &pet_query,
+        &extras.map_geometry.volumes,
     );
 
     // Queue for instant ability attacks (Ambush, Sinister Strike, Mortal Strike)
@@ -716,12 +724,22 @@ pub fn decide_abilities(
                 // `combatants` query filter, so KITE exit can lag one GCD — an
                 // accepted pilot simplification.
                 if countdown.gates_opened {
-                    if let Ok((_healer, mage_posture, directive)) = posture_movement.get_mut(entity) {
+                    if let Ok((_healer, mage_posture, directive, _reset)) = posture_movement.get_mut(entity) {
                         // Mage: aura-gated KITE (a melee enemy it rooted/slowed).
                         let cfg = &movement_config.mage;
                         let entry = class_ai::dps_postures::mage_kite_entry(&ctx, entity, my_pos);
                         let sustain =
                             class_ai::dps_postures::mage_kite_sustain(&ctx, entity, my_pos, cfg.range_band_max);
+                        // OOM wand-pull gate: pull to wand range once the Mage
+                        // can't afford a Frostbolt, so its wand auto-attack fires
+                        // instead of idling the mana refractory. Cost read from
+                        // config, never hardcoded.
+                        let wand_gate = Some(class_ai::dps_postures::WandPullGate {
+                            current_mana: combatant.current_mana,
+                            nuke_cost: abilities
+                                .get_unchecked(&AbilityType::Frostbolt)
+                                .mana_cost,
+                        });
                         class_ai::dps_postures::evaluate_dps_posture(
                             &mut commands,
                             entity,
@@ -733,6 +751,7 @@ pub fn decide_abilities(
                             cfg,
                             entry,
                             sustain,
+                            wand_gate,
                             time.elapsed_secs(),
                             &mut decision_trace,
                         );
@@ -768,7 +787,7 @@ pub fn decide_abilities(
                 // window.
                 let mut plan = class_ai::priest::PriestMovementPlan::default();
                 if countdown.gates_opened {
-                    if let Ok((healer_posture, _mage, directive)) = posture_movement.get_mut(entity) {
+                    if let Ok((healer_posture, _mage, directive, _reset)) = posture_movement.get_mut(entity) {
                         plan = class_ai::priest::evaluate_priest_posture(
                             &mut commands,
                             entity,
@@ -802,20 +821,45 @@ pub fn decide_abilities(
                     &mut decision_trace,
                 )
             },
-            match_config::CharacterClass::Warrior => class_ai::warrior::decide_warrior_action(
-                &mut commands,
-                &mut combat_log,
-                &mut game_rng,
-                &abilities,
-                entity,
-                &mut combatant,
-                my_pos,
-                auras.as_deref(),
-                &ctx,
-                &mut instant_attacks,
-                &mut battle_shouted_this_frame,
-                &mut decision_trace,
-            ),
+            match_config::CharacterClass::Warrior => {
+                // Tempo-reset movement pre-pass — mirrors the Mage arm:
+                // runs BEFORE the ability pass and OUTSIDE decide_warrior_action's
+                // GCD short-circuit (legs aren't on the GCD), gated on
+                // gates_opened, never for casting/CC'd warriors (query excludes
+                // CastingState; move_to_target ignores the directive under CC).
+                if countdown.gates_opened {
+                    if let Ok((_healer, _mage, directive, reset)) = posture_movement.get_mut(entity) {
+                        class_ai::warrior::evaluate_warrior_reset(
+                            &mut commands,
+                            entity,
+                            &combatant,
+                            my_pos,
+                            auras.as_deref(),
+                            &ctx,
+                            reset.map(bevy::prelude::Mut::into_inner),
+                            directive,
+                            &movement_config.melee,
+                            movement_config.shared.press_advantage_margin,
+                            time.elapsed_secs(),
+                            &mut decision_trace,
+                        );
+                    }
+                }
+                class_ai::warrior::decide_warrior_action(
+                    &mut commands,
+                    &mut combat_log,
+                    &mut game_rng,
+                    &abilities,
+                    entity,
+                    &mut combatant,
+                    my_pos,
+                    auras.as_deref(),
+                    &ctx,
+                    &mut instant_attacks,
+                    &mut battle_shouted_this_frame,
+                    &mut decision_trace,
+                )
+            }
             match_config::CharacterClass::Rogue => class_ai::rogue::decide_rogue_action(
                 &mut commands,
                 &mut combat_log,
@@ -853,7 +897,7 @@ pub fn decide_abilities(
                 let durations = totem_durations.get(&entity).copied().unwrap_or([0.0; 4]);
                 let mut plan = class_ai::shaman::ShamanMovementPlan::default();
                 if countdown.gates_opened {
-                    if let Ok((healer_posture, _mage, directive)) = posture_movement.get_mut(entity) {
+                    if let Ok((healer_posture, _mage, directive, _reset)) = posture_movement.get_mut(entity) {
                         plan = class_ai::shaman::evaluate_shaman_posture(
                             &mut commands,
                             entity,
@@ -896,7 +940,7 @@ pub fn decide_abilities(
                 // enemy-healer dip; `DipCast` on dip arrival).
                 let mut plan = class_ai::paladin::PaladinMovementPlan::default();
                 if countdown.gates_opened {
-                    if let Ok((healer_posture, _mage, directive)) = posture_movement.get_mut(entity) {
+                    if let Ok((healer_posture, _mage, directive, _reset)) = posture_movement.get_mut(entity) {
                         plan = class_ai::paladin::evaluate_paladin_posture(
                             &mut commands,
                             &abilities,
@@ -945,7 +989,7 @@ pub fn decide_abilities(
                 // and KITE runs unchanged.
                 let mut dip_plan = class_ai::hunter_dip::HunterDipPlan::Rotation;
                 if countdown.gates_opened {
-                    if let Ok((_healer, mut kite_posture, directive)) = posture_movement.get_mut(entity) {
+                    if let Ok((_healer, mut kite_posture, directive, _reset)) = posture_movement.get_mut(entity) {
                         let cfg = &movement_config.hunter;
                         dip_plan = class_ai::hunter_dip::evaluate_hunter_dip(
                             &mut commands,
@@ -979,6 +1023,9 @@ pub fn decide_abilities(
                                 cfg,
                                 entry,
                                 sustain,
+                                // No wand gate: the Hunter has no wand and shoots,
+                                // it doesn't fall back to a wand when OOM.
+                                None,
                                 time.elapsed_secs(),
                                 &mut decision_trace,
                             );

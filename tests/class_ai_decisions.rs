@@ -16,7 +16,7 @@ use bevy::prelude::*;
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::class_ai::combat_snapshot::CombatSnapshot;
 use arenasim::states::play_match::class_ai::{
-    dispel_priority, purge_priority, CombatantInfo, PURGE_MIN_PRIORITY,
+    dispel_priority, purge_priority, team_hp_sums, CombatantInfo, PURGE_MIN_PRIORITY,
 };
 use arenasim::states::play_match::{Aura, AuraType, DRCategory, DRTracker, DispelType, PetType};
 
@@ -86,6 +86,7 @@ fn snapshot_for(self_entity: Entity, team: u8, class: CharacterClass) -> CombatS
         active_auras: BTreeMap::new(),
         dr_trackers: BTreeMap::new(),
         ability_cooldowns: BTreeMap::new(),
+        obstacles: Vec::new(),
     }
 }
 
@@ -927,5 +928,107 @@ fn movement_slow_multiplier_stacks_multiplicatively() {
         (ctx.movement_slow_multiplier(me) - 0.35).abs() < 1e-6,
         "two slows multiply: got {}",
         ctx.movement_slow_multiplier(me)
+    );
+}
+
+// ============================================================================
+// team_hp_sums / team_hp_advantage — press-when-ahead signal
+// ============================================================================
+
+/// A full-HP `info` scaled to `hp_frac` of its max (0.0..=1.0).
+fn injured(entity: Entity, team: u8, class: CharacterClass, hp_frac: f32) -> CombatantInfo {
+    CombatantInfo { current_health: 100.0 * hp_frac, ..info(entity, team, class) }
+}
+
+/// Snapshot holding exactly the given members (self-entity is chosen per test
+/// via `context_for`).
+fn snapshot_with(members: &[CombatantInfo]) -> CombatSnapshot {
+    let mut combatants = BTreeMap::new();
+    for m in members {
+        combatants.insert(m.entity, *m);
+    }
+    CombatSnapshot {
+        combatants,
+        active_auras: BTreeMap::new(),
+        dr_trackers: BTreeMap::new(),
+        ability_cooldowns: BTreeMap::new(),
+        obstacles: Vec::new(),
+    }
+}
+
+#[test]
+fn team_hp_sums_excludes_pets_and_dead() {
+    let warrior = info(Entity::from_raw(1), 0, CharacterClass::Warrior);
+    let pet = pet_info(Entity::from_raw(2), 0, CharacterClass::Hunter);
+    let mut dead = info(Entity::from_raw(3), 0, CharacterClass::Priest);
+    dead.is_alive = false;
+    let enemy = injured(Entity::from_raw(4), 1, CharacterClass::Mage, 0.5);
+
+    let snap = snapshot_with(&[warrior, pet, dead, enemy]);
+    let sums = team_hp_sums(&snap.combatants);
+
+    // Team 0: only the full-HP warrior counts — the pet and the dead Priest
+    // are both excluded, mirroring is_team_healthy's conventions.
+    assert_eq!(sums.get(&0).copied(), Some(1.0));
+    // Team 1: the half-HP mage contributes its fraction.
+    assert_eq!(sums.get(&1).copied(), Some(0.5));
+}
+
+#[test]
+fn team_hp_advantage_zero_for_equal_teams() {
+    let a = info(Entity::from_raw(1), 0, CharacterClass::Warrior);
+    let b = info(Entity::from_raw(2), 1, CharacterClass::Mage);
+    let snap = snapshot_with(&[a, b]);
+    assert_eq!(snap.context_for(a.entity).team_hp_advantage(), 0.0);
+    assert_eq!(snap.context_for(b.entity).team_hp_advantage(), 0.0);
+}
+
+#[test]
+fn team_hp_advantage_signs_and_symmetry() {
+    // Team 0 full (1.0) vs team 1 at half (0.5): +0.5 for team 0, and the exact
+    // negation for team 1.
+    let a = info(Entity::from_raw(1), 0, CharacterClass::Warrior);
+    let b = injured(Entity::from_raw(2), 1, CharacterClass::Mage, 0.5);
+    let snap = snapshot_with(&[a, b]);
+    assert_eq!(snap.context_for(a.entity).team_hp_advantage(), 0.5);
+    assert_eq!(snap.context_for(b.entity).team_hp_advantage(), -0.5);
+}
+
+#[test]
+fn team_hp_advantage_dead_member_drags_own_sum() {
+    // A 2v1 where one of the pair is dead collapses the advantage to level:
+    // team 0 (one full member) vs team 1 (one full member) → 0.0.
+    let alive = info(Entity::from_raw(1), 0, CharacterClass::Warrior);
+    let mut dead = info(Entity::from_raw(2), 0, CharacterClass::Priest);
+    dead.is_alive = false;
+    let enemy = info(Entity::from_raw(3), 1, CharacterClass::Mage);
+    let snap = snapshot_with(&[alive, dead, enemy]);
+    assert_eq!(snap.context_for(alive.entity).team_hp_advantage(), 0.0);
+}
+
+#[test]
+fn team_hp_advantage_deterministic_across_rebuild() {
+    let members = [
+        injured(Entity::from_raw(1), 0, CharacterClass::Warrior, 0.7),
+        injured(Entity::from_raw(2), 0, CharacterClass::Priest, 0.9),
+        injured(Entity::from_raw(3), 1, CharacterClass::Mage, 0.4),
+    ];
+    let s1 = snapshot_with(&members);
+    let s2 = snapshot_with(&members);
+    assert_eq!(
+        s1.context_for(members[0].entity).team_hp_advantage(),
+        s2.context_for(members[0].entity).team_hp_advantage(),
+        "rebuilding the snapshot must not change the differential (determinism)",
+    );
+}
+
+#[test]
+fn team_hp_advantage_zero_when_self_absent() {
+    // Self missing from the snapshot → no team known → 0.0 (never presses).
+    let a = info(Entity::from_raw(1), 0, CharacterClass::Warrior);
+    let snap = snapshot_with(&[a]);
+    assert_eq!(
+        snap.context_for(Entity::from_raw(999)).team_hp_advantage(),
+        0.0
     );
 }

@@ -24,8 +24,8 @@ use crate::states::play_match::ability_config::{AbilityConfig, AbilityDefinition
 use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::components::*;
 use crate::states::play_match::constants::{
-    CRITICAL_HP_THRESHOLD, DIVINE_SHIELD_HP_THRESHOLD, GCD, HEALTHY_HP_THRESHOLD,
-    HOLY_SHOCK_DAMAGE_RANGE, LOW_HP_THRESHOLD, SAFE_HEAL_MAX_THRESHOLD,
+    CRITICAL_HP_THRESHOLD, DIVINE_SHIELD_HP_THRESHOLD, DIVINE_SHIELD_MIN_CC_REMAINING, GCD,
+    HEALTHY_HP_THRESHOLD, HOLY_SHOCK_DAMAGE_RANGE, LOW_HP_THRESHOLD, SAFE_HEAL_MAX_THRESHOLD,
 };
 use crate::states::play_match::decision_trace::{
     DecisionEventBuilder, DecisionTrace, MovementGoalKind, MovementTrigger,
@@ -368,6 +368,35 @@ pub fn try_divine_shield(
     true
 }
 
+/// Pure while-CC Divine Shield decision (fix seam): should the CC-break bubble
+/// fire this frame?
+///
+/// - **Self trigger** (unchanged): self HP fraction below
+///   `DIVINE_SHIELD_HP_THRESHOLD` — the Paladin bubbles to survive regardless
+///   of the ally state or how much CC is left.
+/// - **Teammate trigger** (widened): an ally is genuinely in danger
+///   (`lowest_ally_hp_pct < LOW_HP_THRESHOLD`, was `< DIVINE_SHIELD_HP_THRESHOLD`)
+///   AND enough incapacitation remains to buy real acting time
+///   (`max_incap_remaining >= DIVINE_SHIELD_MIN_CC_REMAINING`). The bubble
+///   purges the Paladin's own CC, so it is the fear-break tool — but a 5-minute
+///   cooldown is only worth spending when the break actually lets the Paladin
+///   heal for a meaningful window. `lowest_ally_hp_pct` excludes self (the self
+///   trigger owns that) and is `f32::INFINITY` when no living teammate exists.
+///
+/// NOTE: widening the teammate trigger changes behavior on ALL maps (a feared
+/// Paladin with a low ally happens on BasicArena too, not just PillaredArena) —
+/// intended and accepted, like the melee tempo reset.
+pub fn divine_shield_while_cc_should_fire(
+    self_hp_pct: f32,
+    lowest_ally_hp_pct: f32,
+    max_incap_remaining: f32,
+) -> bool {
+    let self_in_danger = self_hp_pct < DIVINE_SHIELD_HP_THRESHOLD;
+    let teammate_in_danger = lowest_ally_hp_pct < LOW_HP_THRESHOLD
+        && max_incap_remaining >= DIVINE_SHIELD_MIN_CC_REMAINING;
+    self_in_danger || teammate_in_danger
+}
+
 /// Try to use Divine Shield while incapacitated (CC break path).
 ///
 /// Called from `combat_ai.rs` before the incapacitation gate. The caller owns
@@ -400,12 +429,29 @@ pub fn try_divine_shield_while_cc(
         return false;
     }
 
-    let teammate_in_danger = ctx.combatants.values().any(|info| {
-        info.team == combatant.team
-            && info.current_health > 0.0
-            && info.max_health > 0.0
-            && !info.is_pet
-            && (info.current_health / info.max_health) < DIVINE_SHIELD_HP_THRESHOLD
+    // Lowest ally HP fraction, EXCLUDING self (the self trigger owns self HP).
+    // f32::INFINITY when no living teammate exists (1v1 / last alive).
+    let lowest_ally_hp_pct = ctx
+        .combatants
+        .values()
+        .filter(|info| {
+            info.team == combatant.team
+                && info.entity != entity
+                && info.current_health > 0.0
+                && info.max_health > 0.0
+                && !info.is_pet
+        })
+        .map(|info| info.current_health / info.max_health)
+        .fold(f32::INFINITY, f32::min);
+
+    // Max remaining incapacitation across self's cast-preventing CC auras — how
+    // much acting time the bubble's CC-purge would actually free up.
+    let max_incap_remaining = auras.map_or(0.0, |a| {
+        a.auras
+            .iter()
+            .filter(|aura| crate::states::play_match::utils::is_incapacitating(&aura.effect_type))
+            .map(|aura| aura.duration)
+            .fold(0.0_f32, f32::max)
     });
 
     let self_hp_pct = if combatant.max_health > 0.0 {
@@ -413,13 +459,19 @@ pub fn try_divine_shield_while_cc(
     } else {
         1.0
     };
-    let self_in_danger = self_hp_pct < DIVINE_SHIELD_HP_THRESHOLD;
 
-    if !teammate_in_danger && !self_in_danger {
+    if !divine_shield_while_cc_should_fire(self_hp_pct, lowest_ally_hp_pct, max_incap_remaining) {
         builder.reject(
             ability,
             RejectionReason::PreconditionUnmet {
-                note: "no teammate (or self) in critical HP — not worth burning Divine Shield while CC'd".into(),
+                note: format!(
+                    "no self-critical HP, and no ally < {:.0}% with >= {:.1}s CC remaining \
+                     (ally {:.0}%, {:.1}s left) — not worth burning Divine Shield while CC'd",
+                    LOW_HP_THRESHOLD * 100.0,
+                    DIVINE_SHIELD_MIN_CC_REMAINING,
+                    lowest_ally_hp_pct * 100.0,
+                    max_incap_remaining,
+                ),
             },
         );
         return false;
@@ -1063,3 +1115,68 @@ fn try_paladin_aura(
 // entry point and `dip_should_abort` are re-exported so the public
 // `class_ai::paladin::` paths used by `combat_ai` and the probe suite hold.
 pub use super::paladin_postures::{dip_should_abort, evaluate_paladin_posture};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ------------------------------------------------------------------------
+    // Fix 2: while-CC Divine Shield trigger widening
+    // ------------------------------------------------------------------------
+    //
+    // The bubble purges the Paladin's own CC, so the while-CC teammate trigger
+    // is the fear-break tool. It was previously gated on an ally below the 30%
+    // survival threshold (too late — the fear was over before the ally crossed
+    // it). Widened to LOW_HP_THRESHOLD (50%) AND a meaningful chunk of CC still
+    // remaining, so the 5-minute cooldown only burns when the break buys real
+    // acting time.
+
+    /// Feared Paladin (3s remaining), ally at 45% → the teammate trigger fires.
+    #[test]
+    fn while_cc_teammate_fires_when_ally_low_and_cc_remains() {
+        assert!(
+            divine_shield_while_cc_should_fire(0.9, 0.45, 3.0),
+            "ally < 50% with 3s CC remaining should fire the CC-break bubble"
+        );
+    }
+
+    /// Ally at 60% (not genuinely in danger) → rejected even with CC remaining.
+    #[test]
+    fn while_cc_teammate_rejected_when_ally_not_low() {
+        assert!(
+            !divine_shield_while_cc_should_fire(0.9, 0.60, 3.0),
+            "ally above LOW_HP_THRESHOLD is not in danger — do not burn Divine Shield"
+        );
+    }
+
+    /// Ally at 45% but only 1s of CC left → rejected: the break wouldn't buy
+    /// meaningful acting time (below DIVINE_SHIELD_MIN_CC_REMAINING = 2.0s).
+    #[test]
+    fn while_cc_teammate_rejected_when_cc_nearly_over() {
+        assert!(
+            !divine_shield_while_cc_should_fire(0.9, 0.45, 1.0),
+            "1s of CC left is not worth a 5-minute cooldown"
+        );
+        // Exactly at the 2.0s floor fires (>= boundary).
+        assert!(
+            divine_shield_while_cc_should_fire(0.9, 0.45, DIVINE_SHIELD_MIN_CC_REMAINING),
+            "exactly the minimum CC-remaining floor should fire"
+        );
+    }
+
+    /// The self-HP trigger is unchanged and independent of ally state: a
+    /// self-critical Paladin bubbles regardless of ally HP or remaining CC.
+    #[test]
+    fn while_cc_self_trigger_fires_regardless_of_ally() {
+        // Self critical, ally full, no CC remaining → still fires (self path).
+        assert!(
+            divine_shield_while_cc_should_fire(0.2, 1.0, 0.0),
+            "self below the survival threshold fires regardless of ally/CC state"
+        );
+        // Self healthy, no living teammate (INFINITY), no CC → does not fire.
+        assert!(
+            !divine_shield_while_cc_should_fire(0.9, f32::INFINITY, 0.0),
+            "healthy Paladin, no endangered ally → no fire"
+        );
+    }
+}

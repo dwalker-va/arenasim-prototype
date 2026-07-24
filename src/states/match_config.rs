@@ -364,10 +364,19 @@ pub enum ArenaMap {
     #[default]
     BasicArena,
     PillaredArena,
+    /// Line-of-sight test asset (raised platform, stepped ramp, pillar).
+    /// Deliberately EXCLUDED from [`ArenaMap::all()`] so it never appears in
+    /// the map-select UI (`configure_match_ui.rs`) — it is reachable only via
+    /// the headless config string "TestVerticality" for LoS probes/sweeps.
+    TestVerticality,
 }
 
 impl ArenaMap {
-    /// Get all available maps
+    /// Get all available maps.
+    ///
+    /// NOTE: `TestVerticality` is intentionally omitted — it is a headless-only
+    /// test asset and must not surface in the map-select UI, which iterates
+    /// this list.
     pub fn all() -> &'static [ArenaMap] {
         &[ArenaMap::BasicArena, ArenaMap::PillaredArena]
     }
@@ -377,6 +386,7 @@ impl ArenaMap {
         match self {
             ArenaMap::BasicArena => "Basic Arena",
             ArenaMap::PillaredArena => "Pillared Arena",
+            ArenaMap::TestVerticality => "Test Verticality",
         }
     }
 
@@ -385,6 +395,7 @@ impl ArenaMap {
         match self {
             ArenaMap::BasicArena => "Simple rectangular arena",
             ArenaMap::PillaredArena => "Arena with pillars for cover",
+            ArenaMap::TestVerticality => "LoS test asset: platform, ramp, pillar",
         }
     }
 }

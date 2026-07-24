@@ -65,6 +65,16 @@ pub struct MovementWeights {
     /// Bonus toward the previously committed direction, applied only AT
     /// re-evaluation while the commitment window is open (R11).
     pub commitment_bonus: f32,
+    /// Bonus for a candidate step position that has line of sight to the kill
+    /// target (`los_target`) — a ranged attacker steers toward angles it can
+    /// actually shoot from. `0.0` disables (default). No-op on
+    /// obstacle-free maps.
+    pub los_seek: f32,
+    /// Bonus per threat a candidate step position is OCCLUDED from (line of
+    /// sight to the threat is broken by an obstacle) — pulls a pressured unit
+    /// into cover. `0.0` disables (default). No-op on
+    /// obstacle-free maps.
+    pub cover_pull: f32,
 }
 
 impl Default for MovementWeights {
@@ -81,6 +91,8 @@ impl Default for MovementWeights {
             range_band: 0.0,
             flee: 0.0,
             commitment_bonus: 1.5,
+            los_seek: 0.0,
+            cover_pull: 0.0,
         }
     }
 }
@@ -130,6 +142,15 @@ pub struct SharedMovementConfig {
     pub anchor_switch_margin: f32,
     /// Wand-range pull target distance (Priest wand range).
     pub wand_range: f32,
+    /// Press-when-ahead margin, in summed team-HP-fraction units: a team
+    /// whose `team_hp_advantage` (own alive-member HP fraction sum minus the
+    /// enemy's) reaches this turns denial OFF — its healers stop pulling into
+    /// cover and its Warrior stops resetting tempo, so a clearly-winning team
+    /// seeks the fight instead of LoS-stalling into the dampening endgame. A
+    /// plain `>=` threshold (no hysteresis band): team-HP sums move only on
+    /// discrete damage/heal events, so the differential does not oscillate
+    /// frame-to-frame the way a positional signal would.
+    pub press_advantage_margin: f32,
 }
 
 impl Default for SharedMovementConfig {
@@ -147,6 +168,7 @@ impl Default for SharedMovementConfig {
             urgency_hp_threshold: 0.5,
             anchor_switch_margin: 0.1,
             wand_range: 30.0,
+            press_advantage_margin: 0.2,
         }
     }
 }
@@ -288,6 +310,12 @@ pub struct MeleeMovementConfig {
     /// target to justify abandoning the original focus (prevents swapping over
     /// trivial HP differences).
     pub swap_hp_margin: f32,
+    /// Tempo-reset window (Warrior): after a movement-impairing CC ends,
+    /// how many seconds the melee falls back toward its healer instead of
+    /// face-chasing (while its gap closer is on cooldown and it is out of
+    /// melee). Bounded — never a permanent retreat; normal pursuit resumes when
+    /// the window lapses or the gap closer comes up.
+    pub reset_window: f32,
 }
 
 impl Default for MeleeMovementConfig {
@@ -296,6 +324,7 @@ impl Default for MeleeMovementConfig {
             swap_range: 4.0,
             swap_hysteresis: 2.0,
             swap_hp_margin: 0.15,
+            reset_window: 3.0,
         }
     }
 }
@@ -339,6 +368,36 @@ pub struct DpsMovementConfig {
     /// in-range traps on the healer). Mirrors the Paladin/Priest `dip_budget`.
     /// Ignored by the Mage.
     pub dip_budget: f32,
+    /// Occlusion-timeout direct chase: seconds an ENGAGE kiter may stay
+    /// continuously occluded from its kill target while in shot range (the
+    /// orbit-seek stall) before it abandons orbit-seeking and walks straight at
+    /// the target's live position until sight is regained. Counters the
+    /// geometrically-unwinnable orbit-flank against a target hugging a thin
+    /// pillar (`los_seek` gives no gradient when every candidate step is
+    /// occluded). `0.0` disables the chase (the kiter keeps orbit-seeking). No
+    /// effect on obstacle-free maps — sight never breaks, so the timer never
+    /// arms.
+    ///
+    /// With the leaky-bucket accumulator (`seek_chase_decay`) this is the
+    /// ARM THRESHOLD in accumulated occlusion units: the chase arms once the
+    /// occlusion accumulator (fills at 1.0/sec while occluded, drains at
+    /// `seek_chase_decay`/sec while sighted) reaches this value. For a target
+    /// under continuous occlusion the accumulator fills at 1.0/sec, so this is
+    /// still "seconds of continuous occlusion" — the static pillar-hug case is
+    /// unchanged. Intermittent jukes (occlude mid-cast, flash back between
+    /// casts) now accrue toward the threshold instead of resetting each flicker.
+    pub seek_chase_timeout: f32,
+    /// Leaky-bucket drain rate (occlusion units/sec) for the occlusion
+    /// accumulator while the kiter has line of sight to its kill target. The
+    /// accumulator fills at a fixed 1.0/sec while occluded and drains at this
+    /// rate while sighted, clamped at 0. Lower = the accumulator "remembers"
+    /// occlusion longer across sight flickers (a juking target still arms the
+    /// chase); higher = flickers bleed it off faster. `0.0` = never drains
+    /// (once the threshold is crossed the chase stays armed until a target
+    /// change/death resets it). A value `>= 1.0` drains at least as fast as it
+    /// fills, effectively restoring continuous-only arming semantics. Must be
+    /// non-negative and finite.
+    pub seek_chase_decay: f32,
 }
 
 impl Default for DpsMovementConfig {
@@ -347,8 +406,12 @@ impl Default for DpsMovementConfig {
             weights: MovementWeights {
                 // Kiter profile: strong repulsion, ring attraction on, no
                 // healer terms (formation/wand) and a light corner penalty.
-                // `flee` defaults off (Mage orbits a rooted target); the Hunter
-                // block in movement.ron turns it up for distance-max kiting.
+                // The Mage's out-of-mana wand fallback is NOT a scorer term —
+                // it drops the pursuit stop distance to wand range
+                // (move_to_target reads KitePosture.wand_oom), which corners a
+                // juking target far better than an orbit-scorer pull. `flee`
+                // defaults off (Mage orbits a rooted target); the Hunter block
+                // in movement.ron turns it up for distance-max kiting.
                 threat_repulsion: 3.0,
                 formation_pull: 0.0,
                 flee: 0.0,
@@ -357,6 +420,8 @@ impl Default for DpsMovementConfig {
                 burn_pull: 0.0,
                 range_band: 2.0,
                 commitment_bonus: 1.5,
+                los_seek: 0.0,
+                cover_pull: 0.0,
             },
             range_band_min: 8.0,   // SAFE_KITING_DISTANCE / HUNTER_DEAD_ZONE
             range_band_max: 30.0,  // within AUTO_SHOT_RANGE
@@ -366,6 +431,8 @@ impl Default for DpsMovementConfig {
             kite_entry_radius: 20.0,   // Hunter closing-range band
             kite_sustain_radius: 24.0, // hold a touch past entry
             dip_budget: 0.0,           // Mage default off; Hunter ron turns it on
+            seek_chase_timeout: 3.5,   // accumulated occlusion units before the chase arms
+            seek_chase_decay: 0.5,     // drains this per sighted second (< fill, so jukes still accrue)
         }
     }
 }
@@ -400,6 +467,7 @@ impl MovementConfig {
             ("shared.pressured_hold", s.pressured_hold),
             ("shared.directive_ttl", s.directive_ttl),
             ("shared.wand_range", s.wand_range),
+            ("shared.press_advantage_margin", s.press_advantage_margin),
             ("paladin.fallback_range", self.paladin.fallback_range),
             ("paladin.dip_budget", self.paladin.dip_budget),
             ("priest.dip_budget", self.priest.dip_budget),
@@ -501,6 +569,12 @@ impl MovementConfig {
                 m.swap_hp_margin
             ));
         }
+        if !(m.reset_window > 0.0) || !m.reset_window.is_finite() {
+            issues.push(format!(
+                "melee.reset_window must be a positive finite number, got {}",
+                m.reset_window
+            ));
+        }
 
         for (class, weights) in [
             ("priest", &self.priest.weights),
@@ -518,6 +592,8 @@ impl MovementConfig {
                 ("range_band", weights.range_band),
                 ("flee", weights.flee),
                 ("commitment_bonus", weights.commitment_bonus),
+                ("los_seek", weights.los_seek),
+                ("cover_pull", weights.cover_pull),
             ];
             for (name, value) in terms {
                 if value < 0.0 || !value.is_finite() {
@@ -570,6 +646,22 @@ impl MovementConfig {
                 issues.push(format!(
                     "{class}.kite_sustain_radius ({}) must be >= kite_entry_radius ({})",
                     m.kite_sustain_radius, m.kite_entry_radius
+                ));
+            }
+            // Occlusion-chase timeout: non-negative and finite (0.0 = disabled).
+            if m.seek_chase_timeout < 0.0 || !m.seek_chase_timeout.is_finite() {
+                issues.push(format!(
+                    "{class}.seek_chase_timeout ({}) must be non-negative and finite (0.0 disables)",
+                    m.seek_chase_timeout
+                ));
+            }
+            // Leaky-bucket drain rate: non-negative and finite (0.0 = never
+            // drains, permanent arm once the threshold is crossed).
+            if m.seek_chase_decay < 0.0 || !m.seek_chase_decay.is_finite() {
+                issues.push(format!(
+                    "{class}.seek_chase_decay ({}) must be non-negative and finite \
+                     (0.0 = never drains)",
+                    m.seek_chase_decay
                 ));
             }
         }
@@ -748,6 +840,71 @@ mod tests {
         MovementConfig::default()
             .validate()
             .expect("built-in defaults must be internally consistent");
+    }
+
+    #[test]
+    fn validate_rejects_negative_los_weight() {
+        // los_seek / cover_pull are interest weights — a negative value is a
+        // config bug, caught the same way as every other scorer term.
+        let mut config = MovementConfig::default();
+        config.priest.weights.los_seek = -1.0;
+        let issues = config.validate().expect_err("negative los_seek must fail");
+        assert!(
+            issues.iter().any(|i| i.contains("priest.weights.los_seek")),
+            "issues should name los_seek: {:?}",
+            issues
+        );
+    }
+
+    #[test]
+    fn shipped_los_weights_default_off() {
+        // `los_seek` is the attacker knob: ON for the DPS kiters (Mage 2.0 /
+        // Hunter 1.0 — seek a sighted angle when occluded in shot range) and
+        // OFF for the healers (they deny LoS via `cover_pull`, they don't seek
+        // it). `cover_pull` was turned on for the three healers (deny
+        // posture) and stays off for the DPS kiters — pin both so an accidental
+        // change is caught.
+        let config = load_movement_config().expect("assets/config/movement.ron must load");
+        for (name, w) in [
+            ("priest", &config.priest.weights),
+            ("paladin", &config.paladin.weights),
+            ("shaman", &config.shaman.weights),
+        ] {
+            assert_eq!(w.los_seek, 0.0, "{name}.los_seek must ship at 0.0 (healers deny, don't seek)");
+        }
+        assert_eq!(config.mage.weights.los_seek, 2.0, "mage.los_seek (U9 seek knob)");
+        assert_eq!(config.hunter.weights.los_seek, 1.0, "hunter.los_seek (U9 seek knob)");
+        // Occlusion-timeout direct chase: both kiters ship at 3.5s (0.0 would
+        // disable). Pinned so an accidental RON edit that turns the chase off
+        // (re-opening the pillar-hug stall) is caught.
+        assert_eq!(config.mage.seek_chase_timeout, 3.5, "mage.seek_chase_timeout");
+        assert_eq!(config.hunter.seek_chase_timeout, 3.5, "hunter.seek_chase_timeout");
+        // Leaky-bucket drain rate: both kiters ship at 0.5/sec (below the 1.0/sec
+        // fill, so a juking target still accrues occlusion toward the arm
+        // threshold). Pinned so an accidental RON edit is caught.
+        assert_eq!(config.mage.seek_chase_decay, 0.5, "mage.seek_chase_decay");
+        assert_eq!(config.hunter.seek_chase_decay, 0.5, "hunter.seek_chase_decay");
+        // Deny-posture weights: healers cover, DPS kiters do not. Each stays
+        // below its block's threat_repulsion so denial shapes the retreat
+        // without overriding escape.
+        assert_eq!(config.priest.weights.cover_pull, 1.5, "priest.cover_pull (U8)");
+        assert_eq!(config.paladin.weights.cover_pull, 1.0, "paladin.cover_pull (U8, melee identity → lower)");
+        assert_eq!(config.shaman.weights.cover_pull, 1.5, "shaman.cover_pull (U8)");
+        assert_eq!(config.mage.weights.cover_pull, 0.0, "mage.cover_pull off (U9)");
+        assert_eq!(config.hunter.weights.cover_pull, 0.0, "hunter.cover_pull off (U9)");
+        for (name, w) in [
+            ("priest", &config.priest.weights),
+            ("paladin", &config.paladin.weights),
+            ("shaman", &config.shaman.weights),
+        ] {
+            assert!(
+                w.cover_pull < w.threat_repulsion,
+                "{name}.cover_pull ({}) must stay below threat_repulsion ({}) — denial shapes \
+                 the retreat direction, it never overrides escape",
+                w.cover_pull,
+                w.threat_repulsion,
+            );
+        }
     }
 
     #[test]

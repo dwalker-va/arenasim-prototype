@@ -3,12 +3,25 @@
 use bevy::prelude::*;
 use super::super::components::*;
 use super::clamp_to_arena;
-use super::super::{MELEE_RANGE, DISENGAGE_SPEED};
+use super::super::match_config::CharacterClass;
+use super::super::{MELEE_RANGE, WAND_RANGE, DISENGAGE_SPEED};
+use super::super::map_config::ActiveMapGeometry;
+use super::super::map_geometry::{resolve_movement, steer_toward_goal, ObstacleVolume};
 
 
 /// How close a `MovementGoal::Point` directive walks before stopping (units).
 /// Prevents oscillation around the exact formation point.
 pub const DIRECTIVE_POINT_EPSILON: f32 = 0.25;
+
+/// Slide a proposed step off any obstacle, THEN clamp to arena bounds — the
+/// order every mutation site in `move_to_target` uses (obstacle resolution
+/// first, arena clamp last). `resolve_movement` never returns a position inside
+/// a volume and tangent-slides a blocked step; with no obstacles (BasicArena)
+/// it returns `to` unchanged, so this reduces to the prior `clamp_to_arena(to)`
+/// and the whole feature is a provable no-op on obstacle-free maps.
+fn resolve_and_clamp(volumes: &[ObstacleVolume], from: Vec3, to: Vec3) -> Vec3 {
+    clamp_to_arena(resolve_movement(volumes, from, to))
+}
 
 pub fn move_to_target(
     countdown: Res<MatchCountdown>,
@@ -17,6 +30,11 @@ pub fn move_to_target(
     mut combatants: Query<(Entity, &mut Transform, &Combatant, Option<&ActiveAuras>, Option<&CastingState>, Option<&ChargingState>, Option<&ChannelingState>, Option<&DisengagingState>, Option<&MovementDirective>)>,
     orbs: Query<&Transform, (With<ShadowSightOrb>, Without<Combatant>)>,
     pet_query: Query<&Pet>,
+    // OOM wand-fallback latch (Mage): when set, the Mage's ENGAGE pursuit stops
+    // at wand range instead of its Frostbolt-safe preferred range so the wand
+    // auto-attack fires. Read-only; owned/updated by `evaluate_dps_posture`.
+    kite_query: Query<&KitePosture>,
+    map_geometry: Res<ActiveMapGeometry>,
 ) {
     // Don't allow movement until gates open
     if !countdown.gates_opened {
@@ -99,11 +117,10 @@ pub fn move_to_target(
                 // Feared targets run at normal movement speed (no slows applied during fear)
                 let move_distance = combatant.base_movement_speed * dt;
 
-                // Move in fear direction
-                transform.translation += direction * move_distance;
-
-                // Clamp to arena bounds
-                transform.translation = clamp_to_arena(transform.translation);
+                // Move in fear direction (slide off obstacles, then clamp to arena)
+                let from = transform.translation;
+                let proposed = from + direction * move_distance;
+                transform.translation = resolve_and_clamp(&map_geometry.volumes, from, proposed);
 
                 // Rotate to face direction of travel
                 let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
@@ -121,11 +138,10 @@ pub fn move_to_target(
                 // Polymorphed targets wander at 20% of normal movement speed (sheep waddle slowly!)
                 let move_distance = combatant.base_movement_speed * 0.2 * dt;
 
-                // Move in polymorph direction
-                transform.translation += direction * move_distance;
-
-                // Clamp to arena bounds
-                transform.translation = clamp_to_arena(transform.translation);
+                // Move in polymorph direction (slide off obstacles, then clamp to arena)
+                let from = transform.translation;
+                let proposed = from + direction * move_distance;
+                transform.translation = resolve_and_clamp(&map_geometry.volumes, from, proposed);
 
                 // Rotate to face direction of travel
                 let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
@@ -171,11 +187,12 @@ pub fn move_to_target(
                 let charge_speed = combatant.base_movement_speed * CHARGE_SPEED_MULTIPLIER;
                 let move_distance = charge_speed * dt;
 
-                // Move towards target
-                transform.translation += direction * move_distance;
-
-                // Clamp position to arena bounds
-                transform.translation = clamp_to_arena(transform.translation);
+                // Move towards target (slide off obstacles, then clamp to arena).
+                // The mid-dash resolve is the safety net; the trigger-time path
+                // check in warrior AI rejects Charge across an obstacle up front.
+                let from = transform.translation;
+                let proposed = from + direction * move_distance;
+                transform.translation = resolve_and_clamp(&map_geometry.volumes, from, proposed);
 
                 // Rotate to face target
                 let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
@@ -189,10 +206,11 @@ pub fn move_to_target(
         if let Some(disengage) = disengaging_state {
             if disengage.distance_remaining > 0.0 {
                 let move_amount = DISENGAGE_SPEED * dt;
-                let new_pos = transform.translation + disengage.direction * move_amount;
+                let from = transform.translation;
+                let new_pos = from + disengage.direction * move_amount;
 
-                // Clamp to arena bounds
-                transform.translation = clamp_to_arena(new_pos);
+                // Slide off obstacles, then clamp to arena bounds
+                transform.translation = resolve_and_clamp(&map_geometry.volumes, from, new_pos);
 
                 // Decrement distance remaining
                 let remaining = disengage.distance_remaining - move_amount;
@@ -244,13 +262,33 @@ pub fn move_to_target(
                     } else {
                         // Don't overshoot the point this frame.
                         move_distance = move_distance.min(distance);
-                        to_point.normalize_or_zero()
+                        // Tangent-steer around any obstacle between here and the
+                        // point (chase/medic/formation walks); direct otherwise.
+                        steer_toward_goal(
+                            &map_geometry.volumes,
+                            Vec2::new(my_pos.x, my_pos.z),
+                            Vec2::new(point.x, point.z),
+                            my_pos.y,
+                        )
+                        .map(|s| Vec3::new(s.x, 0.0, s.y))
+                        .unwrap_or_else(|| to_point.normalize_or_zero())
                     }
                 }
                 MovementGoal::Entity(target) => {
                     if let Some(&(target_pos, _)) = positions.get(&target) {
-                        Vec3::new(target_pos.x - my_pos.x, 0.0, target_pos.z - my_pos.z)
-                            .normalize_or_zero()
+                        // Tangent-steer around any obstacle between here and the
+                        // pursued entity (DIP chase); direct otherwise.
+                        steer_toward_goal(
+                            &map_geometry.volumes,
+                            Vec2::new(my_pos.x, my_pos.z),
+                            Vec2::new(target_pos.x, target_pos.z),
+                            my_pos.y,
+                        )
+                        .map(|s| Vec3::new(s.x, 0.0, s.y))
+                        .unwrap_or_else(|| {
+                            Vec3::new(target_pos.x - my_pos.x, 0.0, target_pos.z - my_pos.z)
+                                .normalize_or_zero()
+                        })
                     } else {
                         // Target despawned — hold; the directive's TTL or the
                         // issuing AI's abort logic cleans it up.
@@ -260,8 +298,10 @@ pub fn move_to_target(
             };
 
             if direction != Vec3::ZERO {
-                transform.translation += direction * move_distance;
-                transform.translation = clamp_to_arena(transform.translation);
+                // Slide off obstacles, then clamp to arena bounds
+                let from = transform.translation;
+                let proposed = from + direction * move_distance;
+                transform.translation = resolve_and_clamp(&map_geometry.volumes, from, proposed);
 
                 // Rotate to face direction of travel
                 let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
@@ -278,9 +318,18 @@ pub fn move_to_target(
                 if let Some(&(owner_pos, _)) = positions.get(&pet.owner) {
                     let dist_to_owner = my_pos.distance(owner_pos);
                     if dist_to_owner > 3.0 {
-                        let direction = Vec3::new(
+                        // Tangent-steer around any obstacle between the pet and
+                        // its owner; direct otherwise.
+                        let direction = steer_toward_goal(
+                            &map_geometry.volumes,
+                            Vec2::new(my_pos.x, my_pos.z),
+                            Vec2::new(owner_pos.x, owner_pos.z),
+                            my_pos.y,
+                        )
+                        .map(|s| Vec3::new(s.x, 0.0, s.y))
+                        .unwrap_or_else(|| Vec3::new(
                             owner_pos.x - my_pos.x, 0.0, owner_pos.z - my_pos.z,
-                        ).normalize_or_zero();
+                        ).normalize_or_zero());
                         if direction != Vec3::ZERO {
                             let mut movement_speed = combatant.base_movement_speed;
                             if let Some(auras) = auras {
@@ -291,8 +340,10 @@ pub fn move_to_target(
                                 }
                             }
                             let move_distance = movement_speed * dt;
-                            transform.translation += direction * move_distance;
-                            transform.translation = clamp_to_arena(transform.translation);
+                            // Slide off obstacles, then clamp to arena bounds
+                            let from = transform.translation;
+                            let proposed = from + direction * move_distance;
+                            transform.translation = resolve_and_clamp(&map_geometry.volumes, from, proposed);
                             let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
                             transform.rotation = target_rotation;
                         }
@@ -338,12 +389,11 @@ pub fn move_to_target(
                         }
                     }
 
-                    // Move towards destination
+                    // Move towards destination (slide off obstacles, then clamp to arena)
                     let move_distance = movement_speed * dt;
-                    transform.translation += direction * move_distance;
-
-                    // Clamp position to arena bounds
-                    transform.translation = clamp_to_arena(transform.translation);
+                    let from = transform.translation;
+                    let proposed = from + direction * move_distance;
+                    transform.translation = resolve_and_clamp(&map_geometry.volumes, from, proposed);
 
                     // Rotate to face destination
                     let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
@@ -363,18 +413,39 @@ pub fn move_to_target(
         // Use class-specific preferred range, or pet-type preferred range for pets
         let stop_distance = if let Ok(pet) = pet_query.get(entity) {
             pet.pet_type.preferred_range()
+        } else if combatant.class == CharacterClass::Mage
+            && kite_query.get(entity).map(|k| k.wand_oom).unwrap_or(false)
+        {
+            // Out-of-mana Mage wand fallback: close to wand range (30) instead
+            // of the Frostbolt-safe preferred range (38, outside wand range) so
+            // the equipped wand auto-attack fires and chips the kill target
+            // through the mana refractory. The latch has hysteresis (see
+            // `update_oom_wand_latch`), so this standoff does not strobe 38<->30
+            // as mana sawtooths across one Frostbolt's worth. Inert at healthy
+            // mana (latch false) — pursuit is byte-identical there.
+            WAND_RANGE
         } else {
             combatant.class.preferred_range()
         };
 
         // If out of range, move towards target
         if distance > stop_distance {
-            // Calculate direction to target (only in XZ plane, keep Y constant)
-            let direction = Vec3::new(
+            // Calculate direction to target (only in XZ plane, keep Y constant).
+            // Tangent-steer around any obstacle between here and the target so a
+            // pursuer rounds a pillar in a clean arc instead of oozing along its
+            // surface; direct pursuit otherwise (and on obstacle-free maps).
+            let direction = steer_toward_goal(
+                &map_geometry.volumes,
+                Vec2::new(my_pos.x, my_pos.z),
+                Vec2::new(target_pos.x, target_pos.z),
+                my_pos.y,
+            )
+            .map(|s| Vec3::new(s.x, 0.0, s.y))
+            .unwrap_or_else(|| Vec3::new(
                 target_pos.x - my_pos.x,
                 0.0, // Don't move vertically
                 target_pos.z - my_pos.z,
-            ).normalize_or_zero();
+            ).normalize_or_zero());
 
             if direction != Vec3::ZERO {
                 // Calculate effective movement speed (base * aura modifiers)
@@ -387,12 +458,11 @@ pub fn move_to_target(
                     }
                 }
 
-                // Move towards target
+                // Move towards target (slide off obstacles, then clamp to arena)
                 let move_distance = movement_speed * dt;
-                transform.translation += direction * move_distance;
-
-                // Clamp position to arena bounds
-                transform.translation = clamp_to_arena(transform.translation);
+                let from = transform.translation;
+                let proposed = from + direction * move_distance;
+                transform.translation = resolve_and_clamp(&map_geometry.volumes, from, proposed);
 
                 // Rotate to face target
                 let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));

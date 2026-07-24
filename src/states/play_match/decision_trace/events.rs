@@ -182,6 +182,15 @@ pub enum EventPayload {
         /// field. Present only when the scorer ran.
         #[serde(skip_serializing_if = "Option::is_none")]
         masked: Option<u16>,
+        /// Optional LoS-only subset of `masked`: bit `i` set when candidate `i`
+        /// was eliminated specifically by the obstacle mask (`MASK_LOS` — a step
+        /// that walks into a wall). A strict subset of `masked`, surfaced
+        /// separately so consumers can attribute obstacle-driven divergence
+        /// without decoding the combined mask. Emitted only when nonzero, so
+        /// obstacle-free (BasicArena) traces never carry it and stay
+        /// byte-identical to pre-LoS traces.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        los_masked: Option<u16>,
     },
 }
 
@@ -268,6 +277,16 @@ pub enum MovementTrigger {
     /// hold has elapsed (Mage: no Mage-owned root/slow on a visible enemy;
     /// Hunter: no melee-DPS threat within the sustain radius).
     KiteExit,
+    /// DPS-kiter ENGAGE seek-LoS: the kiter is idle in shot range of the
+    /// kill target but OCCLUDED from it, so it ran the scorer (los_seek term) to
+    /// reposition to a sighted angle instead of stalling behind cover. Emitted
+    /// within the ENGAGE posture (no transition), so no `previous_posture`.
+    /// Obstacle maps only.
+    SeekLos,
+    /// Melee tempo reset (Warrior): a CC'd melee with its gap closer down
+    /// and out of melee range fell back toward its healer for a bounded window
+    /// instead of face-chasing. Emitted on the activation edge only.
+    MeleeReset,
 }
 
 /// Shape of the movement goal carried by the directive this decision issued.
@@ -384,6 +403,13 @@ pub enum RejectionReason {
     /// execution. Hunter-dispatched PetCommands targeting this pet are
     /// despawned without execution under the same flag.
     LowHealthHeel,
+    /// A targeted cast (hostile or friendly) was rejected because an obstacle
+    /// volume blocks the straight line from the caster to the target. Checked
+    /// at cast start in `pre_cast_ok`, AFTER `can_cast_config`, so range / mana
+    /// / stealth take precedence (an out-of-range target reports `OutOfRange`,
+    /// not this). Adding this variant requires updating
+    /// `tests/decision_trace_audit.rs::EXPECTED_REJECTION_REASONS`.
+    LosBlocked,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

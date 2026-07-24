@@ -8,6 +8,8 @@ use super::super::components::*;
 use super::super::abilities::AbilityType;
 use super::super::abilities::SpellSchool;
 use super::super::ability_config::AbilityDefinitions;
+use super::super::map_config::ActiveMapGeometry;
+use super::super::map_geometry::has_line_of_sight;
 use super::super::constants::{CRIT_DAMAGE_MULTIPLIER, CRIT_HEALING_MULTIPLIER};
 use super::super::utils::{spawn_speech_bubble, get_next_fct_offset, combatant_id};
 use super::super::FCT_HEIGHT;
@@ -99,6 +101,26 @@ pub fn update_stealth_visuals(
     }
 }
 
+/// Log a cast that fizzled because the target left line of sight during the
+/// cast. Shared by the projectile and instant-effect LoS re-check sites in
+/// `process_casting`, which build the identical `MatchEvent` message.
+fn log_los_fizzle(
+    combat_log: &mut CombatLog,
+    team: u8,
+    class: match_config::CharacterClass,
+    ability_name: &str,
+) {
+    combat_log.log(
+        CombatLogEventType::MatchEvent,
+        format!(
+            "Team {} {} fails to cast {}: target out of line of sight",
+            team,
+            class.name(),
+            ability_name
+        ),
+    );
+}
+
 /// Process casting: update cast timers and apply effects when casts complete.
 ///
 /// When a cast completes:
@@ -114,6 +136,7 @@ pub fn process_casting(
     abilities: Res<AbilityDefinitions>,
     mut game_rng: ResMut<GameRng>,
     dampening: Res<ArenaDampening>,
+    map_geometry: Res<ActiveMapGeometry>,
     mut combatants: Query<(Entity, &Transform, &mut Combatant, Option<&mut CastingState>, Option<&mut ActiveAuras>)>,
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
@@ -129,7 +152,7 @@ pub fn process_casting(
     let mut completed_casts = Vec::new();
 
     // First pass: update cast timers and collect completed casts
-    for (caster_entity, caster_transform, mut caster, casting_state, caster_auras) in combatants.iter_mut() {
+    for (caster_entity, caster_transform, caster, casting_state, caster_auras) in combatants.iter_mut() {
         let Some(mut casting) = casting_state else {
             continue;
         };
@@ -195,8 +218,16 @@ pub fn process_casting(
             let def = abilities.get_unchecked(&ability);
             let target_entity = casting.target;
 
-            // Consume mana
-            caster.current_mana -= def.mana_cost;
+            // NOTE: mana is NOT consumed here. A completed cast only pays when it
+            // actually LANDS (projectile spawns, or instant effect passes the
+            // alive+LoS completion gates). The cost is carried forward in the
+            // completed-cast tuple and charged at the resolution point in pass 2,
+            // so a cast juked out of LoS or onto a dead target at completion
+            // fizzles for zero mana. See charge sites below.
+            //
+            // The RNG pre-calc below is UNCHANGED and still runs in pass 1 for
+            // every completed cast (fizzle or land) — moving only the mana line
+            // leaves the game_rng draw order/count untouched.
 
             // Pre-calculate damage/healing (using caster's stats + dynamic aura bonuses)
             let ap_bonus = super::get_attack_power_bonus(caster_auras.as_deref());
@@ -247,6 +278,7 @@ pub fn process_casting(
                 is_crit_damage,
                 is_crit_heal,
                 caster.spell_power,
+                def.mana_cost,
             ));
 
             // Remove casting state
@@ -263,9 +295,15 @@ pub fn process_casting(
     let mut cooldown_updates: Vec<(Entity, AbilityType, f32)> = Vec::new();
     // Track casters who should have stealth broken (offensive abilities)
     let mut break_stealth: Vec<Entity> = Vec::new();
+    // Mana charged only for casts that actually resolve (land). Collected here
+    // and applied after the loop — deferring avoids the borrow conflict between
+    // the caster mana fetch and the target fetch on the instant path (self-cast
+    // = caster is the target), and nothing in pass 2 re-reads caster mana, so
+    // end-of-system application is equivalent and order-independent.
+    let mut mana_charges: Vec<(Entity, f32)> = Vec::new();
 
     // Process completed casts
-    for (caster_entity, caster_team, caster_class, caster_pos, ability_damage, ability_healing, ability, target_entity, is_crit_damage, is_crit_heal, caster_spell_power) in completed_casts {
+    for (caster_entity, caster_team, caster_class, caster_pos, ability_damage, ability_healing, ability, target_entity, is_crit_damage, is_crit_heal, caster_spell_power, mana_cost) in completed_casts {
         let def = abilities.get_unchecked(&ability);
 
         // Get target
@@ -275,6 +313,27 @@ pub fn process_casting(
 
         // If this ability uses a projectile, spawn it and skip immediate effect application
         if let Some(projectile_speed) = def.projectile_speed {
+            // LoS re-check, projectile path: a cast whose target left line
+            // of sight during the cast fizzles at completion — BEFORE the
+            // projectile spawns (once launched, a projectile lands regardless of
+            // LoS). Scoped here (rather than before this branch) so the instant
+            // path re-check below is the single authority for instant abilities.
+            // Read the target position in a scoped immutable borrow; if the
+            // target no longer resolves, skip the gate and fall through to the
+            // existing spawn behavior. Empty obstacle lists → always clear, so
+            // this is byte-identical on BasicArena / obstacle-free maps.
+            if let Ok((_, target_transform, ..)) = combatants.get(target_entity) {
+                if !has_line_of_sight(&map_geometry.volumes, caster_pos, target_transform.translation) {
+                    log_los_fizzle(&mut combat_log, caster_team, caster_class, &def.name);
+                    continue;
+                }
+            }
+
+            // The cast completed and the bolt flies → pay now. A launched
+            // projectile lands regardless of later LoS (R7), so mana is charged
+            // at spawn, after the LoS-at-completion gate above.
+            mana_charges.push((caster_entity, mana_cost));
+
             // Spawn projectile with Transform (required for move_projectiles to work in headless mode)
             // Visual mesh/material is added by spawn_projectile_visuals in graphical mode
             commands.spawn((
@@ -303,6 +362,24 @@ pub fn process_casting(
         if !target.is_alive() {
             continue;
         }
+
+        // LoS re-check, instant-effect path: mirror the projectile branch
+        // — a target that left line of sight during the cast fizzles before any
+        // effect applies. Placed AFTER the dead-target short-circuit above, so a
+        // target that is both dead AND out of LoS fizzles as a dead target (the
+        // is_alive check wins by placement). Same caster→target segment and
+        // no-op-on-empty semantics as the cast-start gate.
+        if !has_line_of_sight(&map_geometry.volumes, caster_pos, target_transform.translation) {
+            log_los_fizzle(&mut combat_log, caster_team, caster_class, &def.name);
+            continue;
+        }
+
+        // Both completion gates (alive + LoS) passed → the instant cast lands, so
+        // pay now, before any effect applies. Self-cast buffs route here with
+        // target == caster (always alive, always in LoS of self), so they still
+        // cost mana exactly as before. Anything that fizzled above `continue`d
+        // without reaching this line and costs nothing.
+        mana_charges.push((caster_entity, mana_cost));
 
         let target_pos = target_transform.translation;
         let text_position = target_transform.translation + Vec3::new(0.0, FCT_HEIGHT, 0.0);
@@ -706,6 +783,13 @@ pub fn process_casting(
                 Some(combatant_id(caster_team, caster_class)),
                 message,
             );
+        }
+    }
+
+    // Charge mana for casts that landed (fizzled/interrupted casts never pushed here)
+    for (caster_entity, cost) in mana_charges {
+        if let Ok((_, _, mut caster, _, _)) = combatants.get_mut(caster_entity) {
+            caster.current_mana -= cost;
         }
     }
 

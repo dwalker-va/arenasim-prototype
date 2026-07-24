@@ -147,6 +147,13 @@ pub const DIVINE_SHIELD_DAMAGE_PENALTY: f32 = 0.5;
 /// HP threshold for AI to activate Divine Shield (30% HP)
 pub const DIVINE_SHIELD_HP_THRESHOLD: f32 = 0.3;
 
+/// Minimum remaining incapacitation (seconds) required for the while-CC Divine
+/// Shield teammate trigger to fire. The bubble purges the Paladin's own CC, so
+/// firing it only buys meaningful acting time when a real chunk of the
+/// incapacitation is left — below this we let the CC run out rather than burn a
+/// 5-minute cooldown for a sliver of freed time.
+pub const DIVINE_SHIELD_MIN_CC_REMAINING: f32 = 2.0;
+
 // ============================================================================
 // Timing
 // ============================================================================

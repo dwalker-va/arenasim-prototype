@@ -124,12 +124,19 @@ pub struct HealerPosture {
     /// meaningfully). `None` before the first formation directive and after
     /// posture transitions.
     pub last_point: Option<Vec2>,
-    /// DIP target (Paladin only, U8): the enemy healer the committed Hammer
+    /// DIP target (Paladin only): the enemy healer the committed Hammer
     /// of Justice walk is pursuing. `None` outside DIP.
     pub dip_target: Option<Entity>,
     /// DIP budget deadline: absolute sim-time at which the walk-stun-return
     /// cycle aborts (budget exceeded). `0.0` = no live dip.
     pub dip_until: f32,
+    /// Medic-chase target: the dying, occluded teammate the healer is currently
+    /// walking toward to regain line of sight (and heal). `Some` only while the
+    /// medic chase overrides the normal FREE/PRESSURED movement tick; `None`
+    /// otherwise. A change here (or `None` → `Some`) forces the chase directive
+    /// to re-target the ally's live position. Always `None` on obstacle-free
+    /// maps (no ally is ever occluded, so the chase never arms).
+    pub medic_target: Option<Entity>,
 }
 
 impl HealerPosture {
@@ -145,6 +152,7 @@ impl HealerPosture {
             last_point: None,
             dip_target: None,
             dip_until: 0.0,
+            medic_target: None,
         }
     }
 }
@@ -167,6 +175,27 @@ pub struct KitePosture {
     /// bonus at the next re-evaluation. `None` before the first directional
     /// decision and after posture transitions.
     pub last_direction: Option<Vec2>,
+    /// Occlusion-chase leaky-bucket accumulator (ENGAGE), in occlusion units.
+    /// FILLS at a fixed 1.0/sec of sim time while the kiter is occluded from its
+    /// kill target in shot range (the `should_seek_los` stall), and DRAINS at
+    /// `seek_chase_decay`/sec while it has sight, clamped at 0. The direct chase
+    /// ARMS once this reaches `seek_chase_timeout`. Because a juking target
+    /// (occlude mid-cast, flash back between casts) fills faster than the
+    /// sub-fill drain bleeds it, intermittent occlusion still accrues toward the
+    /// threshold instead of resetting each flicker — the fix for the mid-cast
+    /// juke that the old continuous-clock missed. A target under continuous
+    /// occlusion fills at 1.0/sec, so the static pillar-hug arms at exactly
+    /// `seek_chase_timeout` seconds, identical to the old clock. Reset to 0 on
+    /// kill-target change or death (see `occluded_target`). Ticked every frame
+    /// (including mid-cast) by `tick_kite_occlusion`, which OWNS this field;
+    /// `evaluate_dps_posture` only reads it. Always 0.0 on obstacle-free maps
+    /// (sight never breaks).
+    pub occlusion_accum: f32,
+    /// The kill target the `occlusion_accum` bucket is bound to. A change here
+    /// (target swap) or the target's death resets the accumulator to 0 so the
+    /// swapped-to target must re-earn the arm threshold. `None` when unbound
+    /// (no living kill target).
+    pub occluded_target: Option<Entity>,
     /// Freezing Trap DIP target (Hunter only): the enemy healer the committed
     /// trap-setup walk is pursuing. `None` outside a dip. Mirrors the Paladin
     /// `HealerPosture::dip_target`; the Mage never sets it.
@@ -176,6 +205,34 @@ pub struct KitePosture {
     /// live dip. While a dip is live the Hunter arm skips the ENGAGE/KITE
     /// evaluation so the dip directive owns movement.
     pub dip_until: f32,
+    /// OOM wand-pull hysteresis latch (Mage only). `true` while the Mage is
+    /// out of mana for its primary nuke and should pull toward wand range so
+    /// its equipped wand auto-attack can fire. Set/cleared by
+    /// `update_oom_wand_latch` (enter when a Frostbolt is unaffordable, exit
+    /// only once a two-cast buffer is restored — hysteresis against strobing as
+    /// mana crosses exactly one nuke's worth). Always `false` for the Hunter
+    /// (its arm passes no wand gate) and for a healthy-mana Mage, keeping
+    /// healthy-mana movement byte-identical.
+    pub wand_oom: bool,
+}
+
+/// Persistent melee "tempo reset" state (Warrior). When a melee's go is
+/// stopped by a movement-impairing CC (Root/Stun/Incapacitate) and its gap
+/// closer is on cooldown, it falls back toward its healer for a bounded window
+/// instead of face-chasing a kited target into more CC. The window is *armed*
+/// while under CC and stays available for `melee.reset_window` seconds after
+/// the CC ends, so the reset actually runs once the root drops (a rooted
+/// warrior can't move). Survives directive expiry, like the posture states.
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct MeleeResetState {
+    /// Absolute sim-time until which a movement-CC keeps the reset available.
+    /// Set to `now + melee.reset_window` every frame the warrior is under a
+    /// movement-impairing CC. `0.0` = never armed.
+    pub armed_until: f32,
+    /// Whether the reset directive was issued last evaluation — the edge used
+    /// to emit the `MeleeReset` trace only on activation (not every frame) and
+    /// to know a fallback directive is ours to clear on deactivation.
+    pub active: bool,
 }
 
 impl KitePosture {
@@ -186,8 +243,11 @@ impl KitePosture {
             since: now,
             hold_until: 0.0,
             last_direction: None,
+            occlusion_accum: 0.0,
+            occluded_target: None,
             dip_target: None,
             dip_until: 0.0,
+            wand_oom: false,
         }
     }
 
