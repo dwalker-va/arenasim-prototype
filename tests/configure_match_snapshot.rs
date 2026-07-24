@@ -69,7 +69,7 @@ fn configure_match_2v2() {
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
 fn configure_match_picker_open() {
     let mut config = mock_config();
-    // Open on Team 2 slot 0 (the Mage) so the "✓ SELECTED" marker is exercised.
+    // Open on Team 2 slot 0 (the Mage) so the "SELECTED" marker is exercised.
     let mut picker = CharacterPickerState {
         active: true,
         team: 2,
