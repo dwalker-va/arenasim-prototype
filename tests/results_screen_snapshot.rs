@@ -90,6 +90,7 @@ fn results_screen_value_combos() {
 fn cs(class: CharacterClass, dmg: f32, heal: f32, tkn: f32, survived: bool) -> CombatantStats {
     CombatantStats {
         class,
+        slot: 0,
         damage_dealt: dmg,
         damage_taken: tkn,
         healing_done: heal,
@@ -105,6 +106,7 @@ fn mock_results() -> MatchResults {
         team1_combatants: vec![
             CombatantStats {
                 class: CharacterClass::Rogue,
+                slot: 0,
                 damage_dealt: 956.0,
                 damage_taken: 334.0,
                 healing_done: 0.0,
@@ -112,6 +114,7 @@ fn mock_results() -> MatchResults {
             },
             CombatantStats {
                 class: CharacterClass::Priest,
+                slot: 1,
                 damage_dealt: 451.0,
                 damage_taken: 301.0,
                 healing_done: 1820.0,
@@ -121,6 +124,7 @@ fn mock_results() -> MatchResults {
         team2_combatants: vec![
             CombatantStats {
                 class: CharacterClass::Warlock,
+                slot: 0,
                 damage_dealt: 612.0,
                 damage_taken: 956.0,
                 healing_done: 0.0,
@@ -128,6 +132,7 @@ fn mock_results() -> MatchResults {
             },
             CombatantStats {
                 class: CharacterClass::Priest,
+                slot: 1,
                 damage_dealt: 388.0,
                 damage_taken: 451.0,
                 healing_done: 1340.0,
@@ -143,10 +148,11 @@ fn mock_results() -> MatchResults {
 fn mock_combat_log() -> CombatLog {
     let mut log = CombatLog::default();
 
-    let rogue = "Team 1 Rogue".to_string();
-    let t1_priest = "Team 1 Priest".to_string();
-    let warlock = "Team 2 Warlock".to_string();
-    let t2_priest = "Team 2 Priest".to_string();
+    // Ids carry the 1-based slot suffix, matching mock_results()'s slots.
+    let rogue = "Team 1 Rogue #1".to_string();
+    let t1_priest = "Team 1 Priest #2".to_string();
+    let warlock = "Team 2 Warlock #1".to_string();
+    let t2_priest = "Team 2 Priest #2".to_string();
 
     for (ability, amount, kb) in [
         ("Sinister Strike", 50.0, false),

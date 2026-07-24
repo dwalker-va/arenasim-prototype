@@ -351,7 +351,7 @@ pub fn try_divine_shield(
 
     builder.choose(ability, Some(entity), true);
 
-    let caster_id = combatant_id(combatant.team, combatant.class);
+    let caster_id = combatant_id(combatant.team, combatant.slot, combatant.class);
     info!("{} activates Divine Shield!", caster_id);
 
     commands.spawn(DivineShieldPending {
@@ -363,7 +363,7 @@ pub fn try_divine_shield(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.class, "Divine Shield", None, "casts");
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Divine Shield", None, "casts");
 
     true
 }
@@ -479,7 +479,7 @@ pub fn try_divine_shield_while_cc(
 
     builder.choose(ability, Some(entity), true);
 
-    let caster_id = combatant_id(combatant.team, combatant.class);
+    let caster_id = combatant_id(combatant.team, combatant.slot, combatant.class);
     info!("{} breaks CC with Divine Shield!", caster_id);
 
     commands.spawn(DivineShieldPending {
@@ -491,7 +491,7 @@ pub fn try_divine_shield_while_cc(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.class, "Divine Shield", None, "casts");
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Divine Shield", None, "casts");
 
     true
 }
@@ -551,6 +551,7 @@ fn try_flash_of_light(
     };
     let target_entity = target_info.entity;
     let target_class = target_info.class;
+    let target_slot = target_info.slot;
     let target_pos = target_info.position;
 
     if let Some(threshold) = cast_defer {
@@ -587,7 +588,7 @@ fn try_flash_of_light(
 
     commands.entity(entity).insert(CastingState::new(ability, target_entity, cast_time));
 
-    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, Some((combatant.team, target_class)), "begins casting");
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, Some((combatant.team, target_slot, target_class)), "begins casting");
 
     true
 }
@@ -650,6 +651,7 @@ fn try_holy_light(
     }
     let target_entity = target_info.entity;
     let target_class = target_info.class;
+    let target_slot = target_info.slot;
     let target_pos = target_info.position;
 
     let opts = PreCastOpts::default();
@@ -674,7 +676,7 @@ fn try_holy_light(
 
     commands.entity(entity).insert(CastingState::new(ability, target_entity, cast_time));
 
-    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, Some((combatant.team, target_class)), "begins casting");
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, Some((combatant.team, target_slot, target_class)), "begins casting");
 
     true
 }
@@ -708,6 +710,7 @@ fn try_holy_shock_heal(
     };
     let target_entity = target_info.entity;
     let target_class = target_info.class;
+    let target_slot = target_info.slot;
 
     builder.choose(ability, Some(target_entity), true);
 
@@ -715,12 +718,13 @@ fn try_holy_shock_heal(
     combatant.global_cooldown = GCD;
     combatant.ability_cooldowns.insert(ability, def.cooldown);
 
-    log_ability_use(combat_log, combatant.team, combatant.class, "Holy Shock (Heal)", Some((combatant.team, target_class)), "casts");
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Holy Shock (Heal)", Some((combatant.team, target_slot, target_class)), "casts");
 
     commands.spawn(HolyShockHealPending {
         caster_spell_power: combatant.spell_power,
         caster_crit_chance: combatant.crit_chance,
         caster_team: combatant.team,
+        caster_slot: combatant.slot,
         caster_class: combatant.class,
         target: target_entity,
     });
@@ -759,13 +763,13 @@ fn try_holy_shock_damage(
         .filter(|(e, _)| !ctx.entity_is_immune(**e))
         .find_map(|(e, info)| {
             if my_pos.distance(info.position) <= HOLY_SHOCK_DAMAGE_RANGE {
-                Some((e, info.position, info.class))
+                Some((e, info.position, info.slot, info.class))
             } else {
                 None
             }
         });
 
-    let Some((target_entity, target_pos, target_class)) = damage_target else {
+    let Some((target_entity, target_pos, target_slot, target_class)) = damage_target else {
         builder.reject(ability, RejectionReason::NoValidTarget);
         return false;
     };
@@ -796,12 +800,13 @@ fn try_holy_shock_damage(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
 
     let enemy_team = if combatant.team == 1 { 2 } else { 1 };
-    log_ability_use(combat_log, combatant.team, combatant.class, "Holy Shock (Damage)", Some((enemy_team, target_class)), "casts");
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Holy Shock (Damage)", Some((enemy_team, target_slot, target_class)), "casts");
 
     commands.spawn(HolyShockDamagePending {
         caster_spell_power: combatant.spell_power,
         caster_crit_chance: combatant.crit_chance,
         caster_team: combatant.team,
+        caster_slot: combatant.slot,
         caster_class: combatant.class,
         target: *target_entity,
     });
@@ -834,12 +839,12 @@ fn try_hammer_of_justice(
         return false;
     }
 
-    let enemies_in_range: Vec<(&Entity, CharacterClass)> = ctx.combatants
+    let enemies_in_range: Vec<(&Entity, u8, CharacterClass)> = ctx.combatants
         .iter()
         .filter(|(e, _)| hoj_target_eligible(ctx, combatant.team, **e))
         .filter_map(|(e, info)| {
             if my_pos.distance(info.position) <= def.range {
-                Some((e, info.class))
+                Some((e, info.slot, info.class))
             } else {
                 None
             }
@@ -848,17 +853,17 @@ fn try_hammer_of_justice(
 
     let stun_target = enemies_in_range
         .iter()
-        .find(|(_, class)| class.is_healer())
+        .find(|(_, _, class)| class.is_healer())
         .or_else(|| enemies_in_range.first())
         .copied();
 
-    let Some((target_entity, target_class)) = stun_target else {
+    let Some((target_entity, target_slot, target_class)) = stun_target else {
         builder.reject(ability, RejectionReason::NoValidTarget);
         return false;
     };
 
     cast_hammer_of_justice(
-        commands, combat_log, def, combatant, *target_entity, target_class,
+        commands, combat_log, def, combatant, *target_entity, target_slot, target_class,
         same_frame_cc_queue, builder,
     );
 
@@ -906,7 +911,7 @@ fn try_dip_hammer_of_justice(
     }
 
     cast_hammer_of_justice(
-        commands, combat_log, def, combatant, target, info.class,
+        commands, combat_log, def, combatant, target, info.slot, info.class,
         same_frame_cc_queue, builder,
     );
 
@@ -923,6 +928,7 @@ fn cast_hammer_of_justice(
     def: &AbilityConfig,
     combatant: &mut Combatant,
     target_entity: Entity,
+    target_slot: u8,
     target_class: CharacterClass,
     same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
     builder: &mut DecisionEventBuilder<'_>,
@@ -933,10 +939,10 @@ fn cast_hammer_of_justice(
     combatant.global_cooldown = GCD;
     combatant.ability_cooldowns.insert(AbilityType::HammerOfJustice, def.cooldown);
 
-    let caster_id = combatant_id(combatant.team, combatant.class);
+    let caster_id = combatant_id(combatant.team, combatant.slot, combatant.class);
     let enemy_team = if combatant.team == 1 { 2 } else { 1 };
-    let target_id = format!("Team {} {}", enemy_team, target_class.name());
-    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, Some((enemy_team, target_class)), "casts");
+    let target_id = combatant_id(enemy_team, target_slot, target_class);
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, Some((enemy_team, target_slot, target_class)), "casts");
 
     if let Some(aura_def) = def.applies_aura.as_ref() {
         combat_log.log_crowd_control(
@@ -1095,7 +1101,7 @@ fn try_paladin_aura(
 
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.class, aura_name, None, "casts");
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, aura_name, None, "casts");
 
     for ally_entity in allies_to_buff {
         paladin_aura_this_frame.insert(*ally_entity);

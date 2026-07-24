@@ -606,6 +606,8 @@ pub struct Projectile {
     pub speed: f32,
     /// Team of the caster (for combat log)
     pub caster_team: u8,
+    /// Owner-relative slot of the caster (for the unique combat-log id).
+    pub caster_slot: u8,
     /// Class of the caster (for combat log)
     pub caster_class: match_config::CharacterClass,
 }
@@ -620,6 +622,7 @@ pub struct HolyShockHealPending {
     pub caster_spell_power: f32,
     pub caster_crit_chance: f32,
     pub caster_team: u8,
+    pub caster_slot: u8,
     pub caster_class: match_config::CharacterClass,
     pub target: Entity,
 }
@@ -630,6 +633,7 @@ pub struct HolyShockDamagePending {
     pub caster_spell_power: f32,
     pub caster_crit_chance: f32,
     pub caster_team: u8,
+    pub caster_slot: u8,
     pub caster_class: match_config::CharacterClass,
     pub target: Entity,
 }
@@ -668,6 +672,7 @@ pub struct ManaBurnPending {
     /// Mana destroyed (clamped to the target's current mana at processing time)
     pub amount: f32,
     pub caster_team: u8,
+    pub caster_slot: u8,
     pub caster_class: match_config::CharacterClass,
 }
 

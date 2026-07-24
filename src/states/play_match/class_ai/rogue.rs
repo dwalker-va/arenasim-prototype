@@ -416,6 +416,7 @@ fn try_ambush(
         target: target_entity,
         damage,
         attacker_team: combatant.team,
+        attacker_slot: combatant.slot,
         attacker_class: combatant.class,
         ability,
         is_crit,
@@ -423,8 +424,8 @@ fn try_ambush(
 
     let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| (info.team, info.class));
-    log_ability_use(combat_log, combatant.team, combatant.class, "Ambush", target_tuple, "uses");
+        .map(|info| (info.team, info.slot, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Ambush", target_tuple, "uses");
 
     info!(
         "Team {} {} uses {} from stealth!",
@@ -477,8 +478,8 @@ fn try_cheap_shot(
 
     let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| (info.team, info.class));
-    log_ability_use(combat_log, combatant.team, combatant.class, "Cheap Shot", target_tuple, "uses");
+        .map(|info| (info.team, info.slot, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Cheap Shot", target_tuple, "uses");
 
     if let Some(aura) = def.applies_aura.as_ref() {
         if let Some(aura_pending) = AuraPending::from_ability(target_entity, entity, def) {
@@ -497,8 +498,8 @@ fn try_cheap_shot(
                 info.class.name()
             );
             combat_log.log_crowd_control(
-                combatant_id(combatant.team, combatant.class),
-                combatant_id(info.team, info.class),
+                combatant_id(combatant.team, combatant.slot, combatant.class),
+                combatant_id(info.team, info.slot, info.class),
                 cc_type,
                 aura.duration,
                 message,
@@ -557,8 +558,8 @@ fn try_kidney_shot(
 
     let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| (info.team, info.class));
-    log_ability_use(combat_log, combatant.team, combatant.class, "Kidney Shot", target_tuple, "uses");
+        .map(|info| (info.team, info.slot, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Kidney Shot", target_tuple, "uses");
 
     if let Some(aura) = def.applies_aura.as_ref() {
         if let Some(aura_pending) = AuraPending::from_ability(target_entity, entity, def) {
@@ -577,8 +578,8 @@ fn try_kidney_shot(
                 info.class.name()
             );
             combat_log.log_crowd_control(
-                combatant_id(combatant.team, combatant.class),
-                combatant_id(info.team, info.class),
+                combatant_id(combatant.team, combatant.slot, combatant.class),
+                combatant_id(info.team, info.slot, info.class),
                 cc_type,
                 aura.duration,
                 message,
@@ -644,6 +645,7 @@ fn try_sinister_strike(
         target: target_entity,
         damage,
         attacker_team: combatant.team,
+        attacker_slot: combatant.slot,
         attacker_class: combatant.class,
         ability,
         is_crit,
@@ -651,8 +653,8 @@ fn try_sinister_strike(
 
     let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| (info.team, info.class));
-    log_ability_use(combat_log, combatant.team, combatant.class, "Sinister Strike", target_tuple, "uses");
+        .map(|info| (info.team, info.slot, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Sinister Strike", target_tuple, "uses");
 
     info!(
         "Team {} {} uses {}!",

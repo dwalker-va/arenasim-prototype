@@ -35,9 +35,9 @@ pub fn process_mana_burn(
 
                 let msg = format!(
                     "[MANA BURN] {}'s Mana Burn destroys {:.0} mana on {} ({:.0}/{:.0} remaining)",
-                    combatant_id(pending.caster_team, pending.caster_class),
+                    combatant_id(pending.caster_team, pending.caster_slot, pending.caster_class),
                     burned,
-                    combatant_id(target.team, target.class),
+                    combatant_id(target.team, target.slot, target.class),
                     target.current_mana,
                     target.max_mana,
                 );
@@ -67,6 +67,7 @@ mod tests {
                 target,
                 amount,
                 caster_team: 1,
+                caster_slot: 0,
                 caster_class: CharacterClass::Priest,
             })
             .id()

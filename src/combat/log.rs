@@ -15,8 +15,11 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
-/// Unique identifier for a combatant in the combat log
-/// Format: "Team {team} {class}" e.g. "Team 1 Warrior"
+/// Unique identifier for a combatant in the combat log.
+/// Format: "Team {team} {class} #{slot+1}" e.g. "Team 1 Warrior #1"
+/// (pets use their type name and the owner's slot, e.g. "Team 1 Spider #2").
+/// Built by `states::play_match::utils::combat_log_id` and its wrappers; the
+/// 1-based slot suffix keeps same-class teammates distinct.
 pub type CombatantId = String;
 
 /// A single entry in the combat log

@@ -200,7 +200,7 @@ fn try_ice_barrier(
     combatant.ability_cooldowns.insert(ice_barrier, barrier_def.cooldown);
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.class, "Ice Barrier", None, "casts");
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Ice Barrier", None, "casts");
 
     if let Some(aura_pending) = AuraPending::from_ability(entity, entity, barrier_def) {
         commands.spawn(aura_pending);
@@ -261,7 +261,7 @@ fn try_mage_armor(
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, None, "casts");
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, None, "casts");
 
     if let Some(aura_pending) = AuraPending::from_ability(entity, entity, def) {
         commands.spawn(aura_pending);
@@ -350,8 +350,8 @@ fn try_arcane_intellect(
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
 
-    let target_tuple = ctx.combatants.get(&buff_target).map(|info| (info.team, info.class));
-    log_ability_use(combat_log, combatant.team, combatant.class, "Arcane Intellect", target_tuple, "casts");
+    let target_tuple = ctx.combatants.get(&buff_target).map(|info| (info.team, info.slot, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Arcane Intellect", target_tuple, "casts");
 
     if let Some(aura_pending) = AuraPending::from_ability(buff_target, entity, def) {
         commands.spawn(aura_pending);
@@ -416,14 +416,14 @@ fn try_frost_nova(
     combatant.ability_cooldowns.insert(frost_nova, nova_def.cooldown);
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.class, "Frost Nova", None, "casts");
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Frost Nova", None, "casts");
 
-    let mut frost_nova_targets: Vec<(Entity, Vec3, u8, CharacterClass)> = Vec::new();
+    let mut frost_nova_targets: Vec<(Entity, Vec3, u8, u8, CharacterClass)> = Vec::new();
     for (enemy_entity, info) in ctx.combatants.iter() {
         if info.team != combatant.team && info.is_alive {
             let distance = my_pos.distance(info.position);
             if distance <= nova_def.range {
-                frost_nova_targets.push((*enemy_entity, info.position, info.team, info.class));
+                frost_nova_targets.push((*enemy_entity, info.position, info.team, info.slot, info.class));
             }
         }
     }
@@ -434,7 +434,7 @@ fn try_frost_nova(
     // ally Shaman's Flametongue totem) — matching the generic hardcast path.
     let sp_bonus = get_spell_power_bonus_from_slice(self_auras);
     let crit_bonus = get_crit_chance_bonus_from_slice(self_auras);
-    for (target_entity, target_pos, target_team, target_class) in &frost_nova_targets {
+    for (target_entity, target_pos, target_team, target_slot, target_class) in &frost_nova_targets {
         let mut damage = combatant.calculate_ability_damage_config(nova_def, game_rng, ap_bonus, sp_bonus);
         let is_crit = roll_crit(combatant.crit_chance + crit_bonus, game_rng);
         if is_crit { damage *= CRIT_DAMAGE_MULTIPLIER; }
@@ -443,6 +443,7 @@ fn try_frost_nova(
             target: *target_entity,
             damage,
             caster_team: combatant.team,
+            caster_slot: combatant.slot,
             caster_class: combatant.class,
             target_pos: *target_pos,
             is_crit,
@@ -465,8 +466,8 @@ fn try_frost_nova(
                     aura.duration
                 );
                 combat_log.log_crowd_control(
-                    combatant_id(combatant.team, combatant.class),
-                    combatant_id(*target_team, *target_class),
+                    combatant_id(combatant.team, combatant.slot, combatant.class),
+                    combatant_id(*target_team, *target_slot, *target_class),
                     "Root".to_string(),
                     aura.duration,
                     message,
@@ -608,8 +609,8 @@ fn try_polymorph(
 
     let target_tuple = ctx.combatants
         .get(&cc_target)
-        .map(|info| (info.team, info.class));
-    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, target_tuple, "begins casting");
+        .map(|info| (info.team, info.slot, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, target_tuple, "begins casting");
 
     info!(
         "Team {} {} starts casting {} on cc_target",
@@ -716,8 +717,8 @@ fn try_frostbolt(
 
     let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| (info.team, info.class));
-    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, target_tuple, "begins casting");
+        .map(|info| (info.team, info.slot, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, target_tuple, "begins casting");
 
     info!(
         "Team {} {} starts casting {} on enemy",

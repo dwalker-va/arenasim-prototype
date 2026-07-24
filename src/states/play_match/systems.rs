@@ -77,7 +77,7 @@ pub use super::combat_core::combat_auto_attack;
 pub use super::decision_trace::flush_decision_trace_system;
 
 // === Utilities ===
-pub use super::utils::combatant_id;
+pub use super::utils::{combatant_id, pet_combatant_id};
 
 // === Components and Resources ===
 pub use super::components::{

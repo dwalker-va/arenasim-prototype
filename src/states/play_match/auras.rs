@@ -861,15 +861,15 @@ pub fn process_dot_ticks(
     
     // Build a map of entity -> (team, class) for quick lookups
     // Include BOTH combatants with auras AND combatants without auras (like the Warrior caster)
-    let mut combatant_info: std::collections::HashMap<Entity, (u8, match_config::CharacterClass)> = 
+    let mut combatant_info: std::collections::HashMap<Entity, (u8, u8, match_config::CharacterClass)> = 
         combatants_with_auras
             .iter()
-            .map(|(entity, combatant, _, _)| (entity, (combatant.team, combatant.class)))
+            .map(|(entity, combatant, _, _)| (entity, (combatant.team, combatant.slot, combatant.class)))
             .collect();
     
     // Add combatants without auras to the map
     for (entity, combatant) in combatants_without_auras.iter() {
-        combatant_info.insert(entity, (combatant.team, combatant.class));
+        combatant_info.insert(entity, (combatant.team, combatant.slot, combatant.class));
     }
     
     // Build a map of entity -> position
@@ -880,7 +880,7 @@ pub fn process_dot_ticks(
     
     // Track DoT damage to apply (to avoid borrow issues)
     // Format: (target_entity, caster_entity, damage, target_pos, caster_team, caster_class, ability_name, spell_school)
-    let mut dot_damage_to_apply: Vec<(Entity, Entity, f32, Vec3, u8, match_config::CharacterClass, String, super::abilities::SpellSchool)> = Vec::new();
+    let mut dot_damage_to_apply: Vec<(Entity, Entity, f32, Vec3, u8, u8, match_config::CharacterClass, String, super::abilities::SpellSchool)> = Vec::new();
     
     // First pass: tick down DoT timers and queue damage
     for (entity, combatant, _transform, mut active_auras) in combatants_with_auras.iter_mut() {
@@ -911,13 +911,14 @@ pub fn process_dot_ticks(
 
                 // Get caster info (if still exists)
                 if let Some(caster_entity) = aura.caster {
-                    if let Some(&(caster_team, caster_class)) = combatant_info.get(&caster_entity) {
+                    if let Some(&(caster_team, caster_slot, caster_class)) = combatant_info.get(&caster_entity) {
                         dot_damage_to_apply.push((
                             entity,
                             caster_entity,
                             damage,
                             target_pos,
                             caster_team,
+                            caster_slot,
                             caster_class,
                             aura.ability_name.clone(),
                             aura.spell_school.unwrap_or(super::abilities::SpellSchool::None),
@@ -937,7 +938,7 @@ pub fn process_dot_ticks(
     let mut caster_damage_updates: Vec<(Entity, f32)> = Vec::new();
     
     // Second pass: apply queued DoT damage to targets
-    for (target_entity, caster_entity, damage, target_pos, caster_team, caster_class, ability_name, spell_school) in dot_damage_to_apply {
+    for (target_entity, caster_entity, damage, target_pos, caster_team, caster_slot, caster_class, ability_name, spell_school) in dot_damage_to_apply {
         // Get target combatant
         let Ok((_, mut target, _, mut target_auras)) = combatants_with_auras.get_mut(target_entity) else {
             continue;
@@ -949,6 +950,7 @@ pub fn process_dot_ticks(
 
         let target_team = target.team;
         let target_class = target.class;
+        let target_slot = target.slot;
 
         // Apply damage with absorb shield consideration
         let (actual_damage, absorbed) = super::combat_core::apply_damage_with_absorb(
@@ -1040,8 +1042,8 @@ pub fn process_dot_ticks(
             )
         };
         combat_log.log_damage(
-            combatant_id(caster_team, caster_class),
-            combatant_id(target_team, target_class),
+            combatant_id(caster_team, caster_slot, caster_class),
+            combatant_id(target_team, target_slot, target_class),
             ability_name.clone(),
             actual_damage,
             is_killing_blow,
@@ -1061,8 +1063,8 @@ pub fn process_dot_ticks(
                 target_class.name()
             );
             combat_log.log_death(
-                combatant_id(target_team, target_class),
-                Some(combatant_id(caster_team, caster_class)),
+                combatant_id(target_team, target_slot, target_class),
+                Some(combatant_id(caster_team, caster_slot, caster_class)),
                 death_message,
             );
         }
@@ -1109,13 +1111,13 @@ pub fn process_hot_ticks(
     // Build a map of entity -> (team, class) for caster attribution lookups.
     // Include BOTH combatants with auras AND combatants without auras (a caster
     // may have shed all of its own auras while its totem buff lives on an ally).
-    let mut combatant_info: std::collections::HashMap<Entity, (u8, match_config::CharacterClass)> =
+    let mut combatant_info: std::collections::HashMap<Entity, (u8, u8, match_config::CharacterClass)> =
         combatants_with_auras
             .iter()
-            .map(|(entity, combatant, _, _)| (entity, (combatant.team, combatant.class)))
+            .map(|(entity, combatant, _, _)| (entity, (combatant.team, combatant.slot, combatant.class)))
             .collect();
     for (entity, combatant) in combatants_without_auras.iter() {
-        combatant_info.insert(entity, (combatant.team, combatant.class));
+        combatant_info.insert(entity, (combatant.team, combatant.slot, combatant.class));
     }
 
     // Build a map of entity -> position
@@ -1126,7 +1128,7 @@ pub fn process_hot_ticks(
 
     // Track HoT healing to apply (to avoid borrow issues)
     // Format: (target_entity, caster_entity, healing, target_pos, caster_team, caster_class, ability_name)
-    let mut hot_healing_to_apply: Vec<(Entity, Entity, f32, Vec3, u8, match_config::CharacterClass, String)> = Vec::new();
+    let mut hot_healing_to_apply: Vec<(Entity, Entity, f32, Vec3, u8, u8, match_config::CharacterClass, String)> = Vec::new();
 
     // First pass: tick down HoT timers and queue healing
     for (entity, combatant, _transform, mut active_auras) in combatants_with_auras.iter_mut() {
@@ -1155,13 +1157,14 @@ pub fn process_hot_ticks(
 
                 // Get caster info (if still exists) for attribution
                 if let Some(caster_entity) = aura.caster {
-                    if let Some(&(caster_team, caster_class)) = combatant_info.get(&caster_entity) {
+                    if let Some(&(caster_team, caster_slot, caster_class)) = combatant_info.get(&caster_entity) {
                         hot_healing_to_apply.push((
                             entity,
                             caster_entity,
                             healing,
                             target_pos,
                             caster_team,
+                            caster_slot,
                             caster_class,
                             aura.ability_name.clone(),
                         ));
@@ -1180,7 +1183,7 @@ pub fn process_hot_ticks(
     let mut caster_healing_updates: Vec<(Entity, f32)> = Vec::new();
 
     // Second pass: apply queued HoT healing to bearers
-    for (target_entity, caster_entity, healing, target_pos, caster_team, caster_class, ability_name) in hot_healing_to_apply {
+    for (target_entity, caster_entity, healing, target_pos, caster_team, caster_slot, caster_class, ability_name) in hot_healing_to_apply {
         // Get target combatant (the bearer of the HoT)
         let Ok((_, mut target, _, _)) = combatants_with_auras.get_mut(target_entity) else {
             continue;
@@ -1192,6 +1195,7 @@ pub fn process_hot_ticks(
 
         let target_team = target.team;
         let target_class = target.class;
+        let target_slot = target.slot;
 
         // Arena dampening: time-ramped reduction of all healing (HoT ticks and
         // Healing Stream Totem pulses included — free sustain must dampen too)
@@ -1233,8 +1237,8 @@ pub fn process_hot_ticks(
             actual_healing
         );
         combat_log.log_healing(
-            combatant_id(caster_team, caster_class),
-            combatant_id(target_team, target_class),
+            combatant_id(caster_team, caster_slot, caster_class),
+            combatant_id(target_team, target_slot, target_class),
             ability_name.clone(),
             actual_healing,
             false, // is_crit - HoT ticks never crit

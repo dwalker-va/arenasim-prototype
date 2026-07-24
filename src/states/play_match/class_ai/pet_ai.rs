@@ -16,6 +16,8 @@ use crate::states::play_match::decision_trace::{
 use crate::states::play_match::utils::spawn_speech_bubble;
 use crate::states::match_config::CharacterClass;
 use super::CombatContext;
+use super::super::utils::pet_combatant_id;
+use super::super::constants::PET_SLOT_BASE;
 
 /// Render a PetType variant into a stable string for pet_decision events.
 fn pet_type_str(pt: PetType) -> &'static str {
@@ -514,7 +516,7 @@ fn execute_spell_lock(
 
     combatant.ability_cooldowns.insert(ability, def.cooldown);
 
-    let caster_id = format!("Team {} Felhunter", combatant.team);
+    let caster_id = pet_combatant_id(combatant.team, combatant.slot - PET_SLOT_BASE, PetType::Felhunter);
     combat_log.log_ability_cast(
         caster_id,
         ability_name.to_string(),
@@ -588,7 +590,7 @@ fn try_devour_magic(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = super::super::constants::GCD;
 
-    let caster_id = format!("Team {} Felhunter", combatant.team);
+    let caster_id = pet_combatant_id(combatant.team, combatant.slot - PET_SLOT_BASE, PetType::Felhunter);
     combat_log.log_ability_cast(
         caster_id,
         def.name.to_string(),
@@ -637,6 +639,7 @@ fn execute_spider_web(
             ability,
             speed: projectile_speed,
             caster_team: combatant.team,
+            caster_slot: combatant.slot - PET_SLOT_BASE,
             caster_class: combatant.class,
         },
         Transform::from_translation(my_pos + Vec3::new(0.0, 0.5, 0.0)),
@@ -646,7 +649,7 @@ fn execute_spider_web(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = super::super::constants::GCD;
 
-    let caster_id = format!("Team {} Spider", combatant.team);
+    let caster_id = pet_combatant_id(combatant.team, combatant.slot - PET_SLOT_BASE, PetType::Spider);
     combat_log.log_ability_cast(
         caster_id,
         def.name.to_string(),
@@ -677,7 +680,7 @@ fn execute_boar_charge(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = super::super::constants::GCD;
 
-    let caster_id = format!("Team {} Boar", combatant.team);
+    let caster_id = pet_combatant_id(combatant.team, combatant.slot - PET_SLOT_BASE, PetType::Boar);
     combat_log.log_ability_cast(
         caster_id,
         def.name.to_string(),
@@ -723,7 +726,7 @@ fn execute_masters_call(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = super::super::constants::GCD;
 
-    let caster_id = format!("Team {} Bird", combatant.team);
+    let caster_id = pet_combatant_id(combatant.team, combatant.slot - PET_SLOT_BASE, PetType::Bird);
     combat_log.log_ability_cast(
         caster_id,
         def.name.to_string(),

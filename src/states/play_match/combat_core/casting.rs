@@ -168,7 +168,7 @@ pub fn process_casting(
         let is_incapacitated = super::super::utils::is_incapacitated(caster_auras.as_deref());
         if is_incapacitated {
             let ability_def = abilities.get_unchecked(&casting.ability);
-            let caster_id = format!("Team {} {}", caster.team, caster.class.name());
+            let caster_id = combatant_id(caster.team, caster.slot, caster.class);
             combat_log.mark_cast_interrupted(&caster_id, &ability_def.name);
             combat_log.log(
                 CombatLogEventType::CrowdControl,
@@ -185,7 +185,7 @@ pub fn process_casting(
         if super::super::abilities::is_silenced(&caster, caster_auras.as_deref())
             && ability_def.mana_cost > 0.0
         {
-            let caster_id = format!("Team {} {}", caster.team, caster.class.name());
+            let caster_id = combatant_id(caster.team, caster.slot, caster.class);
             combat_log.mark_cast_interrupted(&caster_id, &ability_def.name);
             combat_log.log(
                 CombatLogEventType::CrowdControl,
@@ -269,6 +269,7 @@ pub fn process_casting(
             completed_casts.push((
                 caster_entity,
                 caster.team,
+                caster.slot,
                 caster.class,
                 caster_transform.translation,
                 ability_damage,
@@ -303,7 +304,7 @@ pub fn process_casting(
     let mut mana_charges: Vec<(Entity, f32)> = Vec::new();
 
     // Process completed casts
-    for (caster_entity, caster_team, caster_class, caster_pos, ability_damage, ability_healing, ability, target_entity, is_crit_damage, is_crit_heal, caster_spell_power, mana_cost) in completed_casts {
+    for (caster_entity, caster_team, caster_slot, caster_class, caster_pos, ability_damage, ability_healing, ability, target_entity, is_crit_damage, is_crit_heal, caster_spell_power, mana_cost) in completed_casts {
         let def = abilities.get_unchecked(&ability);
 
         // Get target
@@ -343,6 +344,7 @@ pub fn process_casting(
                     ability,
                     speed: projectile_speed,
                     caster_team,
+                    caster_slot,
                     caster_class,
                 },
                 Transform::from_translation(caster_pos + Vec3::new(0.0, 1.5, 0.0)), // Spawn at chest height
@@ -392,6 +394,7 @@ pub fn process_casting(
                 target: target_entity,
                 amount: def.mana_burn_amount,
                 caster_team,
+                caster_slot,
                 caster_class,
             });
         }
@@ -547,8 +550,8 @@ pub fn process_casting(
                 )
             };
             combat_log.log_damage(
-                combatant_id(caster_team, caster_class),
-                combatant_id(target.team, target.class),
+                combatant_id(caster_team, caster_slot, caster_class),
+                combatant_id(target.team, target.slot, target.class),
                 def.name.to_string(),
                 total_damage_dealt, // Total damage including absorbed
                 is_killing_blow,
@@ -567,8 +570,8 @@ pub fn process_casting(
                     target.class.name()
                 );
                 combat_log.log_death(
-                    combatant_id(target.team, target.class),
-                    Some(combatant_id(caster_team, caster_class)),
+                    combatant_id(target.team, target.slot, target.class),
+                    Some(combatant_id(caster_team, caster_slot, caster_class)),
                     death_message,
                 );
             }
@@ -636,8 +639,8 @@ pub fn process_casting(
                 actual_healing
             );
             combat_log.log_healing(
-                combatant_id(caster_team, caster_class),
-                combatant_id(target.team, target.class),
+                combatant_id(caster_team, caster_slot, caster_class),
+                combatant_id(target.team, target.slot, target.class),
                 def.name.to_string(),
                 actual_healing,
                 is_crit_heal,
@@ -694,8 +697,8 @@ pub fn process_casting(
                         aura.duration
                     );
                     combat_log.log_crowd_control(
-                        combatant_id(caster_team, caster_class),
-                        combatant_id(target.team, target.class),
+                        combatant_id(caster_team, caster_slot, caster_class),
+                        combatant_id(target.team, target.slot, target.class),
                         "Fear".to_string(),
                         aura.duration,
                         message,
@@ -712,8 +715,8 @@ pub fn process_casting(
                         aura.duration
                     );
                     combat_log.log_crowd_control(
-                        combatant_id(caster_team, caster_class),
-                        combatant_id(target.team, target.class),
+                        combatant_id(caster_team, caster_slot, caster_class),
+                        combatant_id(target.team, target.slot, target.class),
                         "Root".to_string(),
                         aura.duration,
                         message,
@@ -730,8 +733,8 @@ pub fn process_casting(
                         aura.duration
                     );
                     combat_log.log_crowd_control(
-                        combatant_id(caster_team, caster_class),
-                        combatant_id(target.team, target.class),
+                        combatant_id(caster_team, caster_slot, caster_class),
+                        combatant_id(target.team, target.slot, target.class),
                         "Stun".to_string(),
                         aura.duration,
                         message,
@@ -748,8 +751,8 @@ pub fn process_casting(
                         aura.duration
                     );
                     combat_log.log_crowd_control(
-                        combatant_id(caster_team, caster_class),
-                        combatant_id(target.team, target.class),
+                        combatant_id(caster_team, caster_slot, caster_class),
+                        combatant_id(target.team, target.slot, target.class),
                         "Polymorph".to_string(),
                         aura.duration,
                         message,
@@ -779,8 +782,8 @@ pub fn process_casting(
                 target.class.name()
             );
             combat_log.log_death(
-                combatant_id(target.team, target.class),
-                Some(combatant_id(caster_team, caster_class)),
+                combatant_id(target.team, target.slot, target.class),
+                Some(combatant_id(caster_team, caster_slot, caster_class)),
                 message,
             );
         }
@@ -858,17 +861,17 @@ pub fn process_channeling(
     // Track updates to apply after the loop
     let mut remove_channel: Vec<Entity> = Vec::new();
     let mut caster_healing_updates: Vec<(Entity, f32)> = Vec::new();
-    // (caster_entity, target_entity, damage, caster_team, caster_class, spell_school)
-    let mut damage_to_apply: Vec<(Entity, Entity, f32, u8, match_config::CharacterClass, SpellSchool)> = Vec::new();
+    // (caster_entity, target_entity, damage, caster_team, caster_slot, caster_class, spell_school)
+    let mut damage_to_apply: Vec<(Entity, Entity, f32, u8, u8, match_config::CharacterClass, SpellSchool)> = Vec::new();
 
     // Build a snapshot of positions and health for lookups
     let positions: std::collections::HashMap<Entity, Vec3> = combatants
         .iter()
         .map(|(entity, transform, _, _, _)| (entity, transform.translation))
         .collect();
-    let health_info: std::collections::HashMap<Entity, (bool, u8, match_config::CharacterClass)> = combatants
+    let health_info: std::collections::HashMap<Entity, (bool, u8, u8, match_config::CharacterClass)> = combatants
         .iter()
-        .map(|(entity, _, combatant, _, _)| (entity, (combatant.is_alive(), combatant.team, combatant.class)))
+        .map(|(entity, _, combatant, _, _)| (entity, (combatant.is_alive(), combatant.team, combatant.slot, combatant.class)))
         .collect();
     // Snapshot target immunity status for Drain Life healing suppression
     let immunity_info: std::collections::HashSet<Entity> = combatants
@@ -904,7 +907,7 @@ pub fn process_channeling(
         let is_incapacitated = super::super::utils::is_incapacitated(caster_auras.as_deref());
         if is_incapacitated {
             let ability_def = abilities.get_unchecked(&channeling.ability);
-            let caster_id = format!("Team {} {}", caster.team, caster.class.name());
+            let caster_id = combatant_id(caster.team, caster.slot, caster.class);
             combat_log.mark_cast_interrupted(&caster_id, &ability_def.name);
             combat_log.log(
                 CombatLogEventType::CrowdControl,
@@ -920,7 +923,7 @@ pub fn process_channeling(
         if super::super::abilities::is_silenced(&caster, caster_auras.as_deref())
             && channel_def.mana_cost > 0.0
         {
-            let caster_id = format!("Team {} {}", caster.team, caster.class.name());
+            let caster_id = combatant_id(caster.team, caster.slot, caster.class);
             combat_log.mark_cast_interrupted(&caster_id, &channel_def.name);
             combat_log.log(
                 CombatLogEventType::CrowdControl,
@@ -933,7 +936,7 @@ pub fn process_channeling(
         // Check if target died or no longer exists
         let target_alive = health_info
             .get(&channeling.target)
-            .map(|(alive, _, _)| *alive)
+            .map(|(alive, _, _, _)| *alive)
             .unwrap_or(false);
         if !target_alive {
             remove_channel.push(caster_entity);
@@ -952,7 +955,7 @@ pub fn process_channeling(
             let damage = ability_def.damage_base_min;
 
             // Track damage to apply later (includes target entity and caster info for death logging)
-            damage_to_apply.push((caster_entity, channeling.target, damage, caster.team, caster.class, ability_def.spell_school));
+            damage_to_apply.push((caster_entity, channeling.target, damage, caster.team, caster.slot, caster.class, ability_def.spell_school));
 
             // Track healing for caster (Drain Life heals 0 if target has DamageImmunity)
             let healing = ability_def.channel_healing_per_tick;
@@ -962,7 +965,7 @@ pub fn process_channeling(
             }
 
             // Log the tick
-            if let Some(&(_, target_team, target_class)) = health_info.get(&channeling.target) {
+            if let Some(&(_, target_team, target_slot, target_class)) = health_info.get(&channeling.target) {
                 let damage_message = format!(
                     "Team {} {}'s {} ticks on Team {} {} for {:.0} damage",
                     caster.team,
@@ -973,8 +976,8 @@ pub fn process_channeling(
                     damage
                 );
                 combat_log.log_damage(
-                    combatant_id(caster.team, caster.class),
-                    combatant_id(target_team, target_class),
+                    combatant_id(caster.team, caster.slot, caster.class),
+                    combatant_id(target_team, target_slot, target_class),
                     format!("{} (tick)", ability_def.name),
                     damage,
                     false, // Not a killing blow check here - will be handled when applying damage
@@ -991,8 +994,8 @@ pub fn process_channeling(
                         healing
                     );
                     combat_log.log_healing(
-                        combatant_id(caster.team, caster.class),
-                        combatant_id(caster.team, caster.class),
+                        combatant_id(caster.team, caster.slot, caster.class),
+                        combatant_id(caster.team, caster.slot, caster.class),
                         format!("{} (tick)", ability_def.name),
                         healing,
                         false, // is_crit - channel ticks never crit
@@ -1042,7 +1045,7 @@ pub fn process_channeling(
     }
 
     // Apply damage to targets and update caster stats
-    for (caster_entity, target_entity, damage, caster_team, caster_class, spell_school) in damage_to_apply {
+    for (caster_entity, target_entity, damage, caster_team, caster_slot, caster_class, spell_school) in damage_to_apply {
         // Apply damage to target
         if let Ok((_, target_transform, mut target, _, mut target_auras)) = combatants.get_mut(target_entity) {
             if target.is_alive() {
@@ -1101,8 +1104,8 @@ pub fn process_channeling(
                         target.class.name()
                     );
                     combat_log.log_death(
-                        combatant_id(target.team, target.class),
-                        Some(combatant_id(caster_team, caster_class)),
+                        combatant_id(target.team, target.slot, target.class),
+                        Some(combatant_id(caster_team, caster_slot, caster_class)),
                         death_message,
                     );
                 }

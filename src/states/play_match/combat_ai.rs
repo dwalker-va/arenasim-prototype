@@ -1060,6 +1060,7 @@ pub fn decide_abilities(
             target: target_entity,
             damage,
             attacker_team,
+            attacker_slot,
             attacker_class,
             ability,
             is_crit,
@@ -1093,6 +1094,7 @@ pub fn decide_abilities(
                 actual_damage = dmg;
                 let target_team = target.team;
                 let target_class = target.class;
+                let target_slot = target.slot;
 
                 // Warriors generate Rage from taking damage (only on actual health damage)
                 if actual_damage > 0.0 && target.resource_type == ResourceType::Rage {
@@ -1187,8 +1189,8 @@ pub fn decide_abilities(
                     )
                 };
                 combat_log.log_damage(
-                    combatant_id(attacker_team, attacker_class),
-                    combatant_id(target_team, target_class),
+                    combatant_id(attacker_team, attacker_slot, attacker_class),
+                    combatant_id(target_team, target_slot, target_class),
                     ability_name.to_string(),
                     actual_damage,
                     is_killing_blow,
@@ -1208,8 +1210,8 @@ pub fn decide_abilities(
                         target_class.name()
                     );
                     combat_log.log_death(
-                        combatant_id(target_team, target_class),
-                        Some(combatant_id(attacker_team, attacker_class)),
+                        combatant_id(target_team, target_slot, target_class),
+                        Some(combatant_id(attacker_team, attacker_slot, attacker_class)),
                         death_message,
                     );
                 }
@@ -1229,6 +1231,7 @@ pub fn decide_abilities(
             target: target_entity,
             damage,
             caster_team,
+            caster_slot,
             caster_class,
             target_pos: _target_pos,
             is_crit,
@@ -1253,6 +1256,7 @@ pub fn decide_abilities(
                 actual_damage = dmg;
                 let target_team = target.team;
                 let target_class = target.class;
+                let target_slot = target.slot;
 
                 // Warriors generate Rage from taking damage (only on actual health damage)
                 if actual_damage > 0.0 && target.resource_type == ResourceType::Rage {
@@ -1335,8 +1339,8 @@ pub fn decide_abilities(
                     )
                 };
                 combat_log.log_damage(
-                    combatant_id(caster_team, caster_class),
-                    combatant_id(target_team, target_class),
+                    combatant_id(caster_team, caster_slot, caster_class),
+                    combatant_id(target_team, target_slot, target_class),
                     "Frost Nova".to_string(),
                     actual_damage,
                     is_killing_blow,
@@ -1356,8 +1360,8 @@ pub fn decide_abilities(
                         target_class.name()
                     );
                     combat_log.log_death(
-                        combatant_id(target_team, target_class),
-                        Some(combatant_id(caster_team, caster_class)),
+                        combatant_id(target_team, target_slot, target_class),
+                        Some(combatant_id(caster_team, caster_slot, caster_class)),
                         death_message,
                     );
                 }
@@ -1552,7 +1556,7 @@ pub fn check_interrupts(
         // Interrupts do NOT trigger GCD in WoW!
 
         // Log ability cast for timeline
-        log_ability_use(&mut combat_log, combatant.team, combatant.class, &ability_def.name, None, "uses");
+        log_ability_use(&mut combat_log, combatant.team, combatant.slot, combatant.class, &ability_def.name, None, "uses");
 
         // Queue the interrupt for processing
         // Note: The actual interrupt result (with school lockout info) is logged in process_interrupts

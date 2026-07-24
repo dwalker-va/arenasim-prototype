@@ -6,7 +6,7 @@
 use bevy::prelude::*;
 use crate::combat::log::{CombatLog, CombatantId};
 use super::match_config::{self, CharacterClass};
-use super::components::{FloatingTextState, SpeechBubble, PlayMatchEntity};
+use super::components::{FloatingTextState, SpeechBubble, PlayMatchEntity, PetType};
 
 /// Floating combat text horizontal spread (multiplied by -0.5 to +0.5 range)
 /// Adjust this to control how far left/right numbers can appear from their spawn point
@@ -16,11 +16,46 @@ pub const FCT_HORIZONTAL_SPREAD: f32 = 1.2;
 /// Adjust this to control the vertical stagger of numbers
 pub const FCT_VERTICAL_SPREAD: f32 = 0.8;
 
-/// Helper to generate a consistent combatant ID for the combat log.
+/// Helper to generate a consistent, per-entity-unique combatant ID for the
+/// combat log.
 ///
-/// Format: "Team {team} {class}" e.g., "Team 1 Warrior"
-pub fn combatant_id(team: u8, class: match_config::CharacterClass) -> CombatantId {
-    format!("Team {} {}", team, class.name())
+/// Format: `"Team {team} {class} #{slot+1}"` e.g. `"Team 1 Warrior #1"`. The
+/// 1-based slot suffix (matching the `Slot N` numbering in the saved match
+/// report) disambiguates same-class teammates, which would otherwise share an
+/// identity and have their damage/healing/CC/kills silently merged in every
+/// `CombatLog` aggregation and on the Results screen.
+pub fn combatant_id(team: u8, slot: u8, class: match_config::CharacterClass) -> CombatantId {
+    combat_log_id(team, slot, class.name())
+}
+
+/// Base combat-log id builder from an already-resolved display name (class name
+/// or pet type name). `combatant_id` / `pet_combatant_id` delegate here; call it
+/// directly only where the name is already a string (e.g. the auto-attack
+/// snapshot, which resolves owner-vs-pet naming once up front).
+pub fn combat_log_id(team: u8, slot: u8, display_name: &str) -> CombatantId {
+    format!("Team {} {} #{}", team, display_name, slot + 1)
+}
+
+/// Combat-log ID for a pet, keyed to its OWNER's slot so it lines up with the
+/// owner's id (e.g. `"Team 1 Spider #2"` belongs to `"Team 1 Hunter #2"`).
+///
+/// `owner_slot` is the owner's team slot (0-based). A pet's own `Combatant.slot`
+/// is `PET_SLOT_BASE + owner_slot`, so callers holding the pet's combatant pass
+/// `pet.slot - PET_SLOT_BASE`.
+///
+/// KNOWN LIMITATION: sites that log a pet as a *target* (AoE completion —
+/// Frost Nova, Psychic Scream, Frost Shock) still build the target id from the
+/// pet's raw `Combatant` via [`combatant_id`], where `class` is the owner's
+/// class and `slot` is the un-adjusted `PET_SLOT_BASE + owner_slot`. That id
+/// (`"Team 2 Warlock #11"`) matches neither the pet's registered id nor the
+/// owner's, so CC/damage dealt *to* an enemy pet is orphaned from the
+/// structured log. It corrupts no displayed number today (pets have no Results
+/// row; the TKN column reads a live counter, not the log; and a primary's
+/// CC-received is now *more* accurate for excluding pet CC). Fixing it needs a
+/// pet-aware target-id path (owner slot + `pet_type`) threaded into the
+/// borrow-sensitive casting/projectile systems — deferred as a separate change.
+pub fn pet_combatant_id(team: u8, owner_slot: u8, pet_type: PetType) -> CombatantId {
+    combat_log_id(team, owner_slot, pet_type.name())
 }
 
 /// Helper to log an ability cast with consistent formatting.
@@ -34,13 +69,14 @@ pub fn combatant_id(team: u8, class: match_config::CharacterClass) -> CombatantI
 pub fn log_ability_use(
     combat_log: &mut CombatLog,
     caster_team: u8,
+    caster_slot: u8,
     caster_class: CharacterClass,
     ability_name: &str,
-    target: Option<(u8, CharacterClass)>,
+    target: Option<(u8, u8, CharacterClass)>,
     verb: &str,
 ) {
-    let caster_id = combatant_id(caster_team, caster_class);
-    let target_id = target.map(|(team, class)| combatant_id(team, class));
+    let caster_id = combatant_id(caster_team, caster_slot, caster_class);
+    let target_id = target.map(|(team, slot, class)| combatant_id(team, slot, class));
     let message = match &target_id {
         Some(tid) => format!("{} {} {} on {}", caster_id, verb, ability_name, tid),
         None => format!("{} {} {}", caster_id, verb, ability_name),
@@ -106,11 +142,20 @@ mod tests {
 
     #[test]
     fn test_combatant_id_format() {
-        let id = combatant_id(1, match_config::CharacterClass::Warrior);
-        assert_eq!(id, "Team 1 Warrior");
+        let id = combatant_id(1, 0, match_config::CharacterClass::Warrior);
+        assert_eq!(id, "Team 1 Warrior #1");
 
-        let id2 = combatant_id(2, match_config::CharacterClass::Mage);
-        assert_eq!(id2, "Team 2 Mage");
+        let id2 = combatant_id(2, 2, match_config::CharacterClass::Mage);
+        assert_eq!(id2, "Team 2 Mage #3");
+    }
+
+    #[test]
+    fn test_pet_combatant_id_matches_owner_slot() {
+        // A pet's suffix uses the OWNER's slot, so it lines up with the owner id.
+        let owner = combatant_id(1, 1, match_config::CharacterClass::Hunter);
+        let pet = pet_combatant_id(1, 1, PetType::Spider);
+        assert_eq!(owner, "Team 1 Hunter #2");
+        assert_eq!(pet, "Team 1 Spider #2");
     }
 
     #[test]

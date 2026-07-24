@@ -4,24 +4,32 @@
     vsync: true,
     keybindings: (
         bindings: {
-            CameraZoomIn: (
-                primary: "Equal",
-                secondary: Some("NumpadAdd"),
+            CycleCameraMode: (
+                primary: "Tab",
+                secondary: None,
+            ),
+            SpeedNormal: (
+                primary: "Digit2",
+                secondary: None,
+            ),
+            CameraMoveBackward: (
+                primary: "KeyS",
+                secondary: None,
+            ),
+            Confirm: (
+                primary: "Enter",
+                secondary: None,
+            ),
+            CameraMoveForward: (
+                primary: "KeyW",
+                secondary: None,
             ),
             CameraMoveLeft: (
                 primary: "KeyA",
                 secondary: None,
             ),
-            SpeedVeryFast: (
-                primary: "Digit4",
-                secondary: None,
-            ),
-            ToggleAuraIcons: (
-                primary: "KeyV",
-                secondary: None,
-            ),
-            SpeedNormal: (
-                primary: "Digit2",
+            ResetCamera: (
+                primary: "KeyC",
                 secondary: None,
             ),
             Back: (
@@ -32,43 +40,40 @@
                 primary: "Space",
                 secondary: None,
             ),
+            SpeedSlow: (
+                primary: "Digit1",
+                secondary: None,
+            ),
+            ToggleCombatPanel: (
+                primary: "KeyL",
+                secondary: None,
+            ),
+            ToggleAuraIcons: (
+                primary: "KeyV",
+                secondary: None,
+            ),
             SpeedFast: (
                 primary: "Digit3",
                 secondary: None,
             ),
-            CycleCameraMode: (
-                primary: "Tab",
+            SpeedVeryFast: (
+                primary: "Digit4",
                 secondary: None,
             ),
-            CameraMoveRight: (
-                primary: "KeyD",
-                secondary: None,
-            ),
-            Confirm: (
-                primary: "Enter",
-                secondary: None,
-            ),
-            CameraMoveBackward: (
-                primary: "KeyS",
-                secondary: None,
-            ),
-            SpeedSlow: (
-                primary: "Digit1",
-                secondary: None,
+            CameraZoomIn: (
+                primary: "Equal",
+                secondary: Some("NumpadAdd"),
             ),
             CameraZoomOut: (
                 primary: "Minus",
                 secondary: Some("NumpadSubtract"),
             ),
-            ResetCamera: (
-                primary: "KeyC",
-                secondary: None,
-            ),
-            CameraMoveForward: (
-                primary: "KeyW",
+            CameraMoveRight: (
+                primary: "KeyD",
                 secondary: None,
             ),
         },
     ),
     show_aura_icons: true,
+    show_combat_panel: false,
 )

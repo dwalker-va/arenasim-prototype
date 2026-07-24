@@ -69,6 +69,7 @@ pub fn process_holy_shock_heals(
 
             let target_team = target.team;
             let target_class = target.class;
+            let target_slot = target.slot;
 
             // Spawn floating combat text (green for healing)
             let text_position = target_transform.translation + Vec3::new(0.0, super::super::FCT_HEIGHT, 0.0);
@@ -90,7 +91,7 @@ pub fn process_holy_shock_heals(
             ));
 
             // Log the heal with caster attribution
-            let caster_id = combatant_id(pending.caster_team, pending.caster_class);
+            let caster_id = combatant_id(pending.caster_team, pending.caster_slot, pending.caster_class);
             let verb = if is_crit { "CRITICALLY heals" } else { "heals" };
             let message = format!(
                 "{}'s Holy Shock {} Team {} {} for {:.0}",
@@ -102,7 +103,7 @@ pub fn process_holy_shock_heals(
             );
             combat_log.log_healing(
                 caster_id.clone(),
-                combatant_id(target_team, target_class),
+                combatant_id(target_team, target_slot, target_class),
                 "Holy Shock".to_string(),
                 actual_heal,
                 is_crit,
@@ -160,6 +161,7 @@ pub fn process_holy_shock_damage(
 
             let target_team = target.team;
             let target_class = target.class;
+            let target_slot = target.slot;
 
             // Track damage for aura breaking
             commands.entity(pending.target).insert(DamageTakenThisFrame {
@@ -212,7 +214,7 @@ pub fn process_holy_shock_damage(
             }
 
             // Log damage with caster attribution
-            let caster_id = combatant_id(pending.caster_team, pending.caster_class);
+            let caster_id = combatant_id(pending.caster_team, pending.caster_slot, pending.caster_class);
             let is_killing_blow = !target.is_alive();
             let is_first_death = is_killing_blow && !target.is_dead;
             if is_first_death {
@@ -241,7 +243,7 @@ pub fn process_holy_shock_damage(
             };
             combat_log.log_damage(
                 caster_id.clone(),
-                combatant_id(target_team, target_class),
+                combatant_id(target_team, target_slot, target_class),
                 "Holy Shock".to_string(),
                 actual_damage,
                 is_killing_blow,
@@ -262,7 +264,7 @@ pub fn process_holy_shock_damage(
                     caster_id
                 );
                 combat_log.log_death(
-                    combatant_id(target_team, target_class),
+                    combatant_id(target_team, target_slot, target_class),
                     Some(caster_id),
                     death_message,
                 );

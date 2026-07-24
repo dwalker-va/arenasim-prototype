@@ -157,7 +157,7 @@ pub fn decide_hunter_action(
                 combatant.ability_cooldowns.insert(disengage, def.cooldown);
                 combatant.global_cooldown = GCD;
 
-                log_ability_use(combat_log, combatant.team, combatant.class, "Disengage", None, "uses");
+                log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Disengage", None, "uses");
                 builder.finish();
                 return true;
             }
@@ -519,7 +519,7 @@ fn try_place_trap_at(
             },
             PlayMatchEntity,
         ));
-        log_ability_use(combat_log, combatant.team, combatant.class, trap_name, None, "uses");
+        log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, trap_name, None, "uses");
     } else {
         commands.spawn((
             Transform::from_translation(Vec3::new(position.x, 0.0, position.z)),
@@ -533,7 +533,7 @@ fn try_place_trap_at(
             },
             PlayMatchEntity,
         ));
-        log_ability_use(combat_log, combatant.team, combatant.class, trap_name, None, "uses");
+        log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, trap_name, None, "uses");
     }
 
     combatant.current_mana -= def.mana_cost;
@@ -593,6 +593,7 @@ fn try_concussive_shot(
             ability,
             speed: projectile_speed,
             caster_team: combatant.team,
+            caster_slot: combatant.slot,
             caster_class: combatant.class,
         },
         Transform::from_translation(my_pos + Vec3::new(0.0, 1.5, 0.0)),
@@ -603,7 +604,7 @@ fn try_concussive_shot(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, Some((target_info.team, target_info.class)), "fires");
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, Some((target_info.team, target_info.slot, target_info.class)), "fires");
 
     true
 }
@@ -649,7 +650,7 @@ fn try_aimed_shot(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, Some((target_info.team, target_info.class)), "begins casting");
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, Some((target_info.team, target_info.slot, target_info.class)), "begins casting");
 
     true
 }
@@ -698,6 +699,7 @@ fn try_arcane_shot(
             ability,
             speed: projectile_speed,
             caster_team: combatant.team,
+            caster_slot: combatant.slot,
             caster_class: combatant.class,
         },
         Transform::from_translation(my_pos + Vec3::new(0.0, 1.5, 0.0)),
@@ -708,7 +710,7 @@ fn try_arcane_shot(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, Some((target_info.team, target_info.class)), "fires");
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, Some((target_info.team, target_info.slot, target_info.class)), "fires");
 
     true
 }
@@ -818,6 +820,7 @@ fn try_serpent_sting(
             ability,
             speed: projectile_speed,
             caster_team: combatant.team,
+            caster_slot: combatant.slot,
             caster_class: combatant.class,
         },
         Transform::from_translation(my_pos + Vec3::new(0.0, 1.5, 0.0)),
@@ -827,7 +830,7 @@ fn try_serpent_sting(
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, Some((target_info.team, target_info.class)), "fires");
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, Some((target_info.team, target_info.slot, target_info.class)), "fires");
 
     true
 }

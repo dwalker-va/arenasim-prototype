@@ -16,7 +16,7 @@ use crate::states::play_match::map_config::{load_map_geometry_config, MapGeometr
 use crate::states::play_match::equipment::{EquipmentPlugin, ItemDefinitions, DefaultLoadouts, resolve_loadout, enforce_two_hand_conflicts, format_loadout, load_item_definitions, load_default_loadouts};
 // Use the stable systems API instead of importing internal functions directly
 use crate::states::play_match::systems::{
-    self, combatant_id, ArenaDampening, Combatant, FloatingTextState, GameRng, MatchCountdown,
+    self, combatant_id, pet_combatant_id, ArenaDampening, Combatant, FloatingTextState, GameRng, MatchCountdown,
     ShadowSightState, SimulationSpeed,
 };
 use crate::states::play_match::components::{ActiveAuras, AuraType, Pet, PetType, DRTracker, Totem, TotemElement};
@@ -269,7 +269,7 @@ fn headless_setup_match(
     let team1_spawn_x = -35.0;
     for (i, character_opt) in config.team1.iter().enumerate() {
         if let Some(character) = character_opt {
-            combat_log.register_combatant(combatant_id(1, *character));
+            combat_log.register_combatant(combatant_id(1, i as u8, *character));
             let rogue_opener = config.team1_rogue_openers.get(i).copied().unwrap_or_default();
             let rogue_poison = config.team1_rogue_poisons.get(i).copied().unwrap_or_default();
             let warlock_curse_prefs = config.team1_warlock_curse_prefs.get(i).cloned().unwrap_or_default();
@@ -302,7 +302,7 @@ fn headless_setup_match(
             // Log equipment loadout
             combat_log.log(
                 CombatLogEventType::MatchEvent,
-                format!("[EQUIPMENT] {}: {}", combatant_id(1, *character), format_loadout(&loadout, &item_defs)),
+                format!("[EQUIPMENT] {}: {}", combatant_id(1, i as u8, *character), format_loadout(&loadout, &item_defs)),
             );
 
             // Spawn Felhunter pet for Warlocks
@@ -317,7 +317,7 @@ fn headless_setup_match(
                     Pet { owner: entity, pet_type: PetType::Felhunter },
                     FloatingTextState { next_pattern_index: 0 },
                 ));
-                combat_log.register_combatant(format!("Team 1 Felhunter"));
+                combat_log.register_combatant(pet_combatant_id(1, i as u8, PetType::Felhunter));
             }
 
             // Spawn pet for Hunters
@@ -339,7 +339,7 @@ fn headless_setup_match(
                     Pet { owner: entity, pet_type },
                     FloatingTextState { next_pattern_index: 0 },
                 ));
-                combat_log.register_combatant(format!("Team 1 {}", pet_type.name()));
+                combat_log.register_combatant(pet_combatant_id(1, i as u8, pet_type));
             }
         } else {
             warn!("Team 1 slot {} is empty — skipping spawn", i);
@@ -350,7 +350,7 @@ fn headless_setup_match(
     let team2_spawn_x = 35.0;
     for (i, character_opt) in config.team2.iter().enumerate() {
         if let Some(character) = character_opt {
-            combat_log.register_combatant(combatant_id(2, *character));
+            combat_log.register_combatant(combatant_id(2, i as u8, *character));
             let rogue_opener = config.team2_rogue_openers.get(i).copied().unwrap_or_default();
             let rogue_poison = config.team2_rogue_poisons.get(i).copied().unwrap_or_default();
             let warlock_curse_prefs = config.team2_warlock_curse_prefs.get(i).cloned().unwrap_or_default();
@@ -383,7 +383,7 @@ fn headless_setup_match(
             // Log equipment loadout
             combat_log.log(
                 CombatLogEventType::MatchEvent,
-                format!("[EQUIPMENT] {}: {}", combatant_id(2, *character), format_loadout(&loadout, &item_defs)),
+                format!("[EQUIPMENT] {}: {}", combatant_id(2, i as u8, *character), format_loadout(&loadout, &item_defs)),
             );
 
             // Spawn Felhunter pet for Warlocks
@@ -398,7 +398,7 @@ fn headless_setup_match(
                     Pet { owner: entity, pet_type: PetType::Felhunter },
                     FloatingTextState { next_pattern_index: 0 },
                 ));
-                combat_log.register_combatant(format!("Team 2 Felhunter"));
+                combat_log.register_combatant(pet_combatant_id(2, i as u8, PetType::Felhunter));
             }
 
             // Spawn pet for Hunters
@@ -420,7 +420,7 @@ fn headless_setup_match(
                     Pet { owner: entity, pet_type },
                     FloatingTextState { next_pattern_index: 0 },
                 ));
-                combat_log.register_combatant(format!("Team 2 {}", pet_type.name()));
+                combat_log.register_combatant(pet_combatant_id(2, i as u8, pet_type));
             }
         } else {
             warn!("Team 2 slot {} is empty — skipping spawn", i);

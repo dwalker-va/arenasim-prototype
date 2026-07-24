@@ -564,7 +564,10 @@ fn tag(ui: &mut egui::Ui, text: &str, bg: egui::Color32, fg: egui::Color32) {
 // --- Pure helpers ---
 
 fn combatant_id(team: u8, stats: &CombatantStats) -> String {
-    format!("Team {} {}", team, stats.class.name())
+    // Delegate to the canonical builder so this stays byte-for-byte identical to
+    // the ids the combat log is written under (a divergent format here would
+    // silently break the kill-count / ability-breakdown lookups below).
+    super::play_match::combatant_id(team, stats.slot, stats.class)
 }
 
 /// `8400.0 -> "8.4k"`, values under 1000 stay exact.

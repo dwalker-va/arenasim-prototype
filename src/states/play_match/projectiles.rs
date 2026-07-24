@@ -156,8 +156,8 @@ pub fn process_projectile_hits(
     const HIT_DISTANCE: f32 = 0.5; // Projectile hits when within 0.5 units of target
     
     // Collect hits to process (to avoid borrow checker issues)
-    // Format: (projectile_entity, caster_entity, target_entity, ability, caster_team, caster_class, caster_pos, target_pos, ability_damage, ability_healing, is_crit)
-    let mut hits_to_process: Vec<(Entity, Entity, Entity, AbilityType, u8, match_config::CharacterClass, Vec3, Vec3, f32, f32, bool)> = Vec::new();
+    // Format: (projectile_entity, caster_entity, target_entity, ability, caster_team, caster_slot, caster_class, caster_pos, target_pos, ability_damage, ability_healing, is_crit)
+    let mut hits_to_process: Vec<(Entity, Entity, Entity, AbilityType, u8, u8, match_config::CharacterClass, Vec3, Vec3, f32, f32, bool)> = Vec::new();
     
     for (projectile_entity, projectile, projectile_transform) in projectiles.iter() {
         // Get target position (immutable borrow)
@@ -213,6 +213,7 @@ pub fn process_projectile_hits(
                 projectile.target,
                 projectile.ability,
                 projectile.caster_team,
+                projectile.caster_slot,
                 projectile.caster_class,
                 caster_pos,
                 target_world_pos,
@@ -224,7 +225,7 @@ pub fn process_projectile_hits(
     }
     
     // Process all queued hits
-    for (projectile_entity, caster_entity, target_entity, ability, caster_team, caster_class, caster_pos, target_pos, ability_damage, _ability_healing, is_crit) in hits_to_process {
+    for (projectile_entity, caster_entity, target_entity, ability, caster_team, caster_slot, caster_class, caster_pos, target_pos, ability_damage, _ability_healing, is_crit) in hits_to_process {
         let def = abilities.get_unchecked(&ability);
         let text_position = target_pos + Vec3::new(0.0, super::FCT_HEIGHT, 0.0);
         let _ability_range = caster_pos.distance(target_pos);
@@ -235,7 +236,7 @@ pub fn process_projectile_hits(
             let damage = ability_damage;
 
             // Get target info and apply damage
-            let (actual_damage, absorbed, target_team, target_class, is_killing_blow, is_first_death) = {
+            let (actual_damage, absorbed, target_team, target_slot, target_class, is_killing_blow, is_first_death) = {
                 let Ok((_, mut target, mut target_auras)) = combatants.get_mut(target_entity) else {
                     commands.entity(projectile_entity).despawn();
                     continue;
@@ -265,7 +266,7 @@ pub fn process_projectile_hits(
                 if is_first_death {
                     target.is_dead = true;
                 }
-                (actual_damage, absorbed, target.team, target.class, is_killing_blow, is_first_death)
+                (actual_damage, absorbed, target.team, target.slot, target.class, is_killing_blow, is_first_death)
             }; // target borrow dropped here
 
             // Update caster damage dealt (include absorbed damage - caster dealt it)
@@ -286,7 +287,7 @@ pub fn process_projectile_hits(
                     caster.current_health = (caster.current_health + lifesteal).min(caster.max_health);
                     caster.healing_done += effective;
                     if effective > 0.0 {
-                        let id = combatant_id(caster_team, caster_class);
+                        let id = combatant_id(caster_team, caster_slot, caster_class);
                         combat_log.log_healing(
                             id.clone(),
                             id,
@@ -370,8 +371,8 @@ pub fn process_projectile_hits(
                 )
             };
             combat_log.log_damage(
-                combatant_id(caster_team, caster_class),
-                combatant_id(target_team, target_class),
+                combatant_id(caster_team, caster_slot, caster_class),
+                combatant_id(target_team, target_slot, target_class),
                 def.name.to_string(),
                 actual_damage + absorbed, // Total damage dealt (including absorbed)
                 is_killing_blow,
@@ -391,8 +392,8 @@ pub fn process_projectile_hits(
                     target_class.name()
                 );
                 combat_log.log_death(
-                    combatant_id(target_team, target_class),
-                    Some(combatant_id(caster_team, caster_class)),
+                    combatant_id(target_team, target_slot, target_class),
+                    Some(combatant_id(caster_team, caster_slot, caster_class)),
                     death_message,
                 );
             }

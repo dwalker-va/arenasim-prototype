@@ -269,7 +269,7 @@ fn try_battle_shout(
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.class, "Battle Shout", None, "uses");
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Battle Shout", None, "uses");
 
     for target in targets {
         shouted_this_frame.insert(target);
@@ -345,7 +345,7 @@ fn try_demoralizing_shout(
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.class, "Demoralizing Shout", None, "uses");
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Demoralizing Shout", None, "uses");
 
     for target in targets {
         shouted_this_frame.insert(target);
@@ -421,7 +421,7 @@ fn try_commanding_shout(
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.class, "Commanding Shout", None, "uses");
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Commanding Shout", None, "uses");
 
     for target in targets {
         shouted_this_frame.insert(target);
@@ -523,8 +523,8 @@ fn try_charge(
     // Log
     let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| (info.team, info.class));
-    log_ability_use(combat_log, combatant.team, combatant.class, "Charge", target_tuple, "uses");
+        .map(|info| (info.team, info.slot, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Charge", target_tuple, "uses");
 
     info!(
         "Team {} {} uses Charge on enemy (distance: {:.1} units)",
@@ -601,8 +601,8 @@ fn try_rend(
     // Log
     let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| (info.team, info.class));
-    log_ability_use(combat_log, combatant.team, combatant.class, "Rend", target_tuple, "uses");
+        .map(|info| (info.team, info.slot, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Rend", target_tuple, "uses");
 
     // Apply DoT aura
     if let Some(aura_pending) = AuraPending::from_ability(target_entity, entity, rend_def) {
@@ -691,7 +691,7 @@ fn try_mortal_strike(
     combatant.global_cooldown = GCD;
 
     // Log
-    log_ability_use(combat_log, combatant.team, combatant.class, "Mortal Strike", Some((target_info.team, target_info.class)), "uses");
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Mortal Strike", Some((target_info.team, target_info.slot, target_info.class)), "uses");
 
     // Calculate and queue damage (with dynamic aura bonuses)
     let self_auras = ctx.active_auras.get(&entity).map(|v| v.as_slice()).unwrap_or(&[]);
@@ -705,6 +705,7 @@ fn try_mortal_strike(
         target: target_entity,
         damage,
         attacker_team: combatant.team,
+        attacker_slot: combatant.slot,
         attacker_class: combatant.class,
         ability: mortal_strike,
         is_crit,
@@ -861,7 +862,7 @@ pub fn try_berserker_rage_while_cc(
 
     builder.choose(ability, Some(entity), true);
 
-    let caster_id = combatant_id(combatant.team, combatant.class);
+    let caster_id = combatant_id(combatant.team, combatant.slot, combatant.class);
     info!("{} breaks fear with Berserker Rage!", caster_id);
 
     commands.spawn(BerserkerRagePending {
@@ -873,7 +874,7 @@ pub fn try_berserker_rage_while_cc(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.class, "Berserker Rage", None, "uses");
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Berserker Rage", None, "uses");
 
     true
 }

@@ -11,6 +11,7 @@ use crate::combat::log::{CombatLog, CombatLogEventType};
 use super::components::*;
 use super::constants::*;
 use super::abilities::SpellSchool;
+use super::utils::combatant_id;
 
 /// Single system handling the full trap lifecycle:
 /// 1. Decrement arm_timer, consider armed when timer hits 0
@@ -65,7 +66,7 @@ pub fn trap_system(
                 triggered_by = Some((
                     target_entity,
                     target_combatant.team,
-                    format!("Team {} {}", target_combatant.team, target_combatant.class.name()),
+                    combatant_id(target_combatant.team, target_combatant.slot, target_combatant.class),
                 ));
                 break; // First enemy in range triggers it
             }

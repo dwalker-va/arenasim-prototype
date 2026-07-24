@@ -89,6 +89,7 @@ pub struct QueuedInstantAttack {
     pub target: Entity,
     pub damage: f32,
     pub attacker_team: u8,
+    pub attacker_slot: u8,
     pub attacker_class: CharacterClass,
     pub ability: AbilityType,
     pub is_crit: bool,
@@ -101,6 +102,7 @@ pub struct QueuedAoeDamage {
     pub target: Entity,
     pub damage: f32,
     pub caster_team: u8,
+    pub caster_slot: u8,
     pub caster_class: CharacterClass,
     pub target_pos: Vec3,
     pub is_crit: bool,
@@ -797,8 +799,8 @@ pub fn try_dispel_ally(
     combatant.global_cooldown = GCD;
 
     // Log
-    let target_tuple = ctx.combatants.get(&dispel_target).map(|info| (info.team, info.class));
-    log_ability_use(combat_log, combatant.team, combatant.class, log_name, target_tuple, "casts");
+    let target_tuple = ctx.combatants.get(&dispel_target).map(|info| (info.team, info.slot, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, log_name, target_tuple, "casts");
 
     // Spawn pending dispel
     commands.spawn(DispelPending {
@@ -944,8 +946,8 @@ pub fn try_purge_enemy(
         combatant.ability_cooldowns.insert(ability, def.cooldown);
     }
 
-    let target_tuple = ctx.combatants.get(&target_entity).map(|info| (info.team, info.class));
-    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, target_tuple, "casts");
+    let target_tuple = ctx.combatants.get(&target_entity).map(|info| (info.team, info.slot, info.class));
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, target_tuple, "casts");
 
     // Pin the filter to the chosen (highest-priority) buff type so process_dispels
     // targets that valuable buff rather than any purgeable aura. If the enemy
