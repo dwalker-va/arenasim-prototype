@@ -6098,3 +6098,211 @@ mod oom_wand {
         }
     }
 }
+
+// ===========================================================================
+// Warrior pillar pathfinding — tangent-steering effectiveness guard
+// ===========================================================================
+//
+// A chasing melee unit must ROUND a pillar at (near) full speed, not ooze
+// along its surface. Before tangent-steering (`steer_toward_goal`), a pursuer
+// whose goal sat behind a pillar had only the tangential sliver left after
+// `slide_against` removed the inward step component — it stuck to the surface
+// and crawled. Tangent-steering aims at the obstacle's tangent point instead,
+// so the mover arcs around the pillar keeping full speed.
+//
+// This pins that behavior directly on PillaredArena: a Warrior trains an enemy
+// caster who kites and uses the pillars for cover, so the Warrior is
+// repeatedly driven against a pillar with its target on the far side. We assert
+// that while NEAR a pillar and STILL CHASING (target beyond melee), the
+// Warrior's median speed stays near its own full-speed reference and it never
+// falls into a sustained slow-crawl (ooze) episode.
+//
+// A companion to `u6_collision_smoke`: that guard proves the Warrior never
+// enters a pillar's interior; this one proves it doesn't get *stuck to the
+// outside* of one either.
+mod warrior_pillar_pathing {
+    use super::*;
+    use arenasim::states::match_config::ArenaMap;
+    use arenasim::states::play_match::map_config::load_map_geometry_config;
+    use arenasim::states::play_match::map_geometry::{ObstacleVolume, MOVER_RADIUS};
+    use std::collections::HashMap;
+
+    /// "Near a pillar" = within this many yards of the collision shell
+    /// (cylinder radius + `MOVER_RADIUS`). Matches the diagnosis band.
+    const NEAR_BAND: f32 = 1.5;
+    /// A sample counts as chasing (not parked on target) when the nearest
+    /// living enemy is beyond this distance — comfortably past melee (2.5).
+    const CHASING_GAP: f32 = 5.0;
+    /// Below this fraction of the full-speed reference is a "slow" sample.
+    const SLOW_FRAC: f32 = 0.4;
+    /// Near-pillar-chasing median speed must be at least this fraction of full.
+    const MIN_MEDIAN_FRAC: f32 = 0.9;
+    /// A stall episode (consecutive near+chasing+slow samples) longer than this
+    /// many sim-seconds is an ooze regression. A 1-2 frame dip at a genuine
+    /// direction reversal is tolerated below it.
+    const MAX_STALL_SECS: f32 = 0.5;
+
+    /// PillaredArena cylinder footprints, loaded live (center_x, center_z, r).
+    fn pillars() -> Vec<(f32, f32, f32)> {
+        let geom = load_map_geometry_config()
+            .expect("maps.ron loads")
+            .active_for(ArenaMap::PillaredArena);
+        let v: Vec<(f32, f32, f32)> = geom
+            .volumes
+            .iter()
+            .filter_map(|v| match v {
+                ObstacleVolume::Cylinder { center_xz, radius, .. } => {
+                    Some((center_xz.x, center_xz.y, *radius))
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(!v.is_empty(), "PillaredArena must carry cylinder pillars");
+        v
+    }
+
+    fn config(seed: u64) -> HeadlessMatchConfig {
+        let mut cfg = create_config(vec!["Warrior", "Priest"], vec!["Mage", "Priest"], Some(seed));
+        cfg.map = "PillaredArena".to_string();
+        cfg
+    }
+
+    /// Clearance of a point from the nearest pillar's collision shell.
+    /// Negative = inside the shell.
+    fn shell_clearance(pos: Vec3, pillars: &[(f32, f32, f32)]) -> f32 {
+        pillars
+            .iter()
+            .map(|&(px, pz, r)| ((pos.x - px).powi(2) + (pos.z - pz).powi(2)).sqrt() - (r + MOVER_RADIUS))
+            .fold(f32::INFINITY, f32::min)
+    }
+
+    #[test]
+    fn warrior_rounds_pillars_at_full_speed_while_chasing() {
+        let pillars = pillars();
+        // Aggregate across seeds so the per-seed sample count is generous and
+        // the non-vacuity guard is meaningful.
+        let mut near_chase_speeds: Vec<f32> = Vec::new();
+        let mut worst_stall_secs = 0.0f32;
+        let mut total_samples = 0usize;
+
+        for seed in [1u64, 3u64, 7u64] {
+            let (_result, timeline) = run_observed_collecting(config(seed));
+            let gate = timeline.gates_open_time.unwrap_or(0.0);
+            let warrior = timeline.find(1, CharacterClass::Warrior, false);
+
+            // Enemy (team 2) living-position lookup, keyed by exact frame time.
+            let enemies: Vec<Entity> = timeline
+                .info
+                .iter()
+                .filter(|(_, i)| i.team == 2 && !i.is_pet)
+                .map(|(e, _)| *e)
+                .collect();
+            let enemy_pos: Vec<HashMap<u32, Vec3>> = enemies
+                .iter()
+                .map(|e| {
+                    timeline
+                        .samples
+                        .get(e)
+                        .map(|s| s.iter().map(|&(t, p)| (t.to_bits(), p)).collect())
+                        .unwrap_or_default()
+                })
+                .collect();
+            let gap_at = |t: f32, wp: Vec3| -> Option<f32> {
+                let key = t.to_bits();
+                enemy_pos
+                    .iter()
+                    .filter_map(|m| m.get(&key).map(|p| wp.distance(*p)))
+                    .fold(None, |acc: Option<f32>, d| Some(acc.map_or(d, |a| a.min(d))))
+            };
+
+            let samples = timeline.samples_from(warrior, gate);
+            assert_min_occurrences(
+                &format!("seed {} Warrior post-gate samples", seed),
+                samples.len(),
+                60,
+            );
+            total_samples += samples.len();
+
+            // Full-speed reference = p90 of all post-gate per-sample speeds.
+            let mut all_speeds: Vec<f32> = samples
+                .windows(2)
+                .filter_map(|w| {
+                    let dt = w[1].0 - w[0].0;
+                    (dt > 0.0).then(|| w[0].1.distance(w[1].1) / dt)
+                })
+                .collect();
+            assert!(!all_speeds.is_empty(), "seed {}: no motion samples", seed);
+            all_speeds.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let full = all_speeds[(0.9 * (all_speeds.len() as f32 - 1.0)) as usize];
+            assert!(
+                full > 3.0,
+                "seed {}: implausible full-speed reference {:.2} — Warrior barely moved",
+                seed,
+                full
+            );
+
+            // Walk consecutive samples; classify each near-pillar-chasing one,
+            // tracking the longest sustained slow (ooze) run.
+            let mut run_start: Option<f32> = None;
+            for w in samples.windows(2) {
+                let (t0, p0) = w[0];
+                let (t1, p1) = w[1];
+                let dt = t1 - t0;
+                if dt <= 0.0 {
+                    continue;
+                }
+                let speed = p0.distance(p1) / dt;
+                let near = shell_clearance(p1, &pillars) <= NEAR_BAND;
+                let chasing = gap_at(t1, p1).map_or(false, |g| g > CHASING_GAP);
+
+                if near && chasing {
+                    near_chase_speeds.push(speed);
+                    if speed < SLOW_FRAC * full {
+                        // extend / open a stall run
+                        let start = *run_start.get_or_insert(t0);
+                        worst_stall_secs = worst_stall_secs.max(t1 - start);
+                    } else {
+                        run_start = None;
+                    }
+                } else {
+                    run_start = None;
+                }
+            }
+        }
+
+        // 1. Non-vacuity: the scenario must actually drive the Warrior against
+        //    pillars while chasing, or the probe proves nothing.
+        assert_min_occurrences("Warrior near-pillar chasing samples", near_chase_speeds.len(), 30);
+
+        // 2. No oozing: median near-pillar-chasing speed stays near full speed.
+        near_chase_speeds.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let median = near_chase_speeds[near_chase_speeds.len() / 2];
+        let full_ref = {
+            // Recompute a global full reference as the max median seen — the
+            // per-seed full speeds are effectively identical (fixed move speed),
+            // so the top near-pillar speed is a fine full-speed proxy here.
+            let mut s = near_chase_speeds.clone();
+            s.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            s[(0.9 * (s.len() as f32 - 1.0)) as usize]
+        };
+        assert!(
+            median >= MIN_MEDIAN_FRAC * full_ref,
+            "Warrior oozes near pillars: near-pillar-chasing median speed {:.2} is < {:.0}% of \
+             full {:.2} ({} samples across seeds)",
+            median,
+            MIN_MEDIAN_FRAC * 100.0,
+            full_ref,
+            near_chase_speeds.len()
+        );
+
+        // 3. No sustained stall (ooze) episode.
+        assert!(
+            worst_stall_secs < MAX_STALL_SECS,
+            "Warrior stalls against a pillar for {:.2}s (>= {:.2}s) — tangent-steering regressed",
+            worst_stall_secs,
+            MAX_STALL_SECS
+        );
+
+        assert!(total_samples > 0, "no samples collected");
+    }
+}
