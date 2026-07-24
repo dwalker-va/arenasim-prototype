@@ -152,12 +152,12 @@ pub fn draw_results_screen(
                 render_team_panel(
                     &mut columns[0], "TEAM 1", 1, &results.team1_combatants, combat_log,
                     class_icons, egui::Color32::from_rgb(90, 140, 230),
-                    results.winner, max_damage,
+                    results.winner, max_damage, &results.pet_damage_links,
                 );
                 render_team_panel(
                     &mut columns[1], "TEAM 2", 2, &results.team2_combatants, combat_log,
                     class_icons, egui::Color32::from_rgb(230, 90, 90),
-                    results.winner, max_damage,
+                    results.winner, max_damage, &results.pet_damage_links,
                 );
             });
 
@@ -227,6 +227,7 @@ fn render_team_panel(
     team_color: egui::Color32,
     winner: Option<u8>,
     max_damage: f32,
+    pet_links: &std::collections::HashMap<String, (String, String)>,
 ) {
     let is_winner = winner == Some(team);
     let is_loser = winner.is_some() && !is_winner;
@@ -286,7 +287,7 @@ fn render_team_panel(
 
             // Combatant rows.
             for stats in combatants {
-                combatant_block(ui, stats, team, combat_log, class_icons, max_damage, dimf);
+                combatant_block(ui, stats, team, combat_log, class_icons, max_damage, dimf, pet_links);
             }
 
             // Σ TOTAL row.
@@ -303,6 +304,7 @@ fn combatant_block(
     class_icons: &ClassIcons,
     max_damage: f32,
     dimf: f32,
+    pet_links: &std::collections::HashMap<String, (String, String)>,
 ) {
     let cid = combatant_id(team, stats);
     let class_color = dim(class_color32(stats.class), dimf);
@@ -353,7 +355,7 @@ fn combatant_block(
     )
     .id_salt(&cid)
     .show(ui, |ui| {
-        render_ability_details(ui, &cid, combat_log, dimf);
+        render_ability_details(ui, &cid, combat_log, dimf, pet_links);
     });
 
     ui.add_space(8.0);
@@ -404,10 +406,16 @@ fn total_row(
 }
 
 /// Per-ability damage/healing bars + CC received, shown inside the expander.
-fn render_ability_details(ui: &mut egui::Ui, cid: &str, combat_log: &CombatLog, dimf: f32) {
+fn render_ability_details(
+    ui: &mut egui::Ui,
+    cid: &str,
+    combat_log: &CombatLog,
+    dimf: f32,
+    pet_links: &std::collections::HashMap<String, (String, String)>,
+) {
     ui.add_space(2.0);
 
-    let damage = combat_log.damage_by_ability(cid);
+    let damage = combat_log.damage_by_ability_including_pets(cid, pet_links);
     if !damage.is_empty() {
         ui.label(egui::RichText::new("Damage").size(10.0).color(dim(C_DMG, dimf)));
         render_ability_bars(ui, &damage, dim(C_DMG, dimf), dim(BAR_TEXT, dimf));

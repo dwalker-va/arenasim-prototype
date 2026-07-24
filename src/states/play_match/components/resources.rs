@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy_egui::egui;
 use rand::prelude::*;
 use rand::rngs::StdRng;
+use std::collections::HashMap;
 use super::super::match_config;
 
 // ============================================================================
@@ -246,6 +247,16 @@ pub struct MatchResults {
     pub team1_combatants: Vec<CombatantStats>,
     /// Stats for all Team 2 combatants
     pub team2_combatants: Vec<CombatantStats>,
+    /// Maps a pet's combat-log source id (e.g. `"Team 1 Spider"`) to its
+    /// owner's source id and display name (e.g. `("Team 1 Hunter", "Spider")`).
+    /// Lets the Results screen fold pet damage into the owner's per-ability
+    /// breakdown (labelled `"<Pet>: <ability>"`) so the breakdown accounts for
+    /// pet damage the same way the top-line DMG column already does (which rolls
+    /// pet damage into the owner — see `match_flow`). The two totals are summed
+    /// from independent sources (live per-entity counters vs. `CombatLog`
+    /// amounts), so they track together but are not guaranteed equal to the
+    /// point. Empty when no pets fought.
+    pub pet_damage_links: HashMap<String, (String, String)>,
 }
 
 /// Statistics for a single combatant at the end of a match.

@@ -63,6 +63,7 @@ fn results_screen_value_combos() {
             cs(CharacterClass::Priest, 388.0, 13400.0, 451.0, false),
             cs(CharacterClass::Hunter, 0.0, 0.0, 7.0, false),
         ],
+        pet_damage_links: Default::default(),
     };
 
     // Vary killing-blow counts so the K column spans 1- and 2-digit widths.
@@ -133,6 +134,7 @@ fn mock_results() -> MatchResults {
                 survived: false,
             },
         ],
+        pet_damage_links: Default::default(),
     }
 }
 

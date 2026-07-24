@@ -245,8 +245,19 @@ pub fn check_match_end(
         // TAKEN — pets aren't shown as their own card in the report, so their
         // contribution would otherwise be invisible.
         let mut pet_damage_by_owner: std::collections::HashMap<Entity, f32> = std::collections::HashMap::new();
+        // Also map each pet's combat-log source id to its owner's id + display
+        // name, so the Results screen can fold pet damage into the owner's
+        // per-ability breakdown (which reads the CombatLog by source string).
+        let mut pet_damage_links: std::collections::HashMap<String, (String, String)> =
+            std::collections::HashMap::new();
         for (pet_combatant, pet) in pets.iter() {
             *pet_damage_by_owner.entry(pet.owner).or_insert(0.0) += pet_combatant.damage_dealt;
+            if let Ok((_, owner, _)) = combatants.get(pet.owner) {
+                let pet_name = pet.pet_type.name();
+                let pet_id = format!("Team {} {}", pet_combatant.team, pet_name);
+                let owner_id = format!("Team {} {}", owner.team, owner.class.name());
+                pet_damage_links.insert(pet_id, (owner_id, pet_name.to_string()));
+            }
         }
 
         for (entity, combatant, transform) in combatants.iter() {
@@ -357,6 +368,7 @@ pub fn check_match_end(
                 duration_secs: combat_log.match_time,
                 team1_combatants: team1_stats,
                 team2_combatants: team2_stats,
+                pet_damage_links,
             },
         });
         

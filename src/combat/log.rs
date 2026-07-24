@@ -358,6 +358,36 @@ impl CombatLog {
         result
     }
 
+    /// Like [`Self::damage_by_ability`], but also folds in damage dealt by the
+    /// combatant's pets. `pet_links` maps a pet's source id (e.g.
+    /// `"Team 1 Spider"`) to `(owner_id, pet_display_name)`; any log entry whose
+    /// source maps to `owner_id` is credited to the owner under the label
+    /// `"<pet_display_name>: <ability>"` (e.g. `"Spider: Auto Attack"`), keeping
+    /// it distinct from the owner's own abilities. Entries sourced directly by
+    /// `owner_id` are counted unchanged. With an empty `pet_links` this is
+    /// identical to `damage_by_ability`.
+    pub fn damage_by_ability_including_pets(
+        &self,
+        owner_id: &str,
+        pet_links: &HashMap<String, (String, String)>,
+    ) -> HashMap<String, f32> {
+        let mut result: HashMap<String, f32> = HashMap::new();
+
+        for entry in &self.entries {
+            if let Some(StructuredEventData::Damage { source, ability, amount, .. }) = &entry.structured_data {
+                if source == owner_id {
+                    *result.entry(ability.clone()).or_insert(0.0) += amount;
+                } else if let Some((mapped_owner, pet_name)) = pet_links.get(source) {
+                    if mapped_owner == owner_id {
+                        *result.entry(format!("{pet_name}: {ability}")).or_insert(0.0) += amount;
+                    }
+                }
+            }
+        }
+
+        result
+    }
+
     /// Get total healing done by a combatant, broken down by ability
     /// Returns HashMap<AbilityName, TotalHealing>
     pub fn healing_by_ability(&self, combatant_id: &str) -> HashMap<String, f32> {
@@ -697,3 +727,64 @@ pub struct CombatantMetadata {
     pub final_position: (f32, f32, f32),
 }
 
+
+#[cfg(test)]
+mod pet_attribution_tests {
+    use super::*;
+
+    fn dmg(log: &mut CombatLog, source: &str, ability: &str, amount: f32) {
+        log.log_damage(
+            source.to_string(),
+            "Team 2 Warrior".to_string(),
+            ability.to_string(),
+            amount,
+            false,
+            false,
+            String::new(),
+        );
+    }
+
+    #[test]
+    fn folds_pet_damage_into_owner_with_labelled_abilities() {
+        let mut log = CombatLog::default();
+        dmg(&mut log, "Team 1 Hunter", "Aimed Shot", 100.0);
+        dmg(&mut log, "Team 1 Hunter", "Auto Shot", 40.0);
+        dmg(&mut log, "Team 1 Spider", "Auto Attack", 30.0);
+        dmg(&mut log, "Team 1 Spider", "Auto Attack", 20.0);
+        dmg(&mut log, "Team 1 Spider", "Web", 5.0);
+        // Unrelated team-2 damage must never leak into team 1's breakdown.
+        dmg(&mut log, "Team 2 Mage", "Frostbolt", 999.0);
+
+        let mut links = HashMap::new();
+        links.insert(
+            "Team 1 Spider".to_string(),
+            ("Team 1 Hunter".to_string(), "Spider".to_string()),
+        );
+
+        let breakdown = log.damage_by_ability_including_pets("Team 1 Hunter", &links);
+
+        assert_eq!(breakdown.get("Aimed Shot"), Some(&100.0));
+        assert_eq!(breakdown.get("Auto Shot"), Some(&40.0));
+        // Same-ability pet hits accumulate under one labelled key.
+        assert_eq!(breakdown.get("Spider: Auto Attack"), Some(&50.0));
+        assert_eq!(breakdown.get("Spider: Web"), Some(&5.0));
+        assert!(breakdown.get("Frostbolt").is_none());
+        // Breakdown total now matches the owner's damage + pet damage.
+        let total: f32 = breakdown.values().sum();
+        assert_eq!(total, 195.0);
+    }
+
+    #[test]
+    fn empty_links_matches_plain_damage_by_ability() {
+        let mut log = CombatLog::default();
+        dmg(&mut log, "Team 1 Hunter", "Aimed Shot", 100.0);
+        dmg(&mut log, "Team 1 Spider", "Auto Attack", 30.0);
+
+        let empty = HashMap::new();
+        let with_pets = log.damage_by_ability_including_pets("Team 1 Hunter", &empty);
+        let plain = log.damage_by_ability("Team 1 Hunter");
+        assert_eq!(with_pets, plain);
+        // Pet damage is absent without a link entry.
+        assert!(with_pets.get("Spider: Auto Attack").is_none());
+    }
+}
