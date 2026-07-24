@@ -291,7 +291,7 @@ fn render_team_panel(
             }
 
             // Σ TOTAL row.
-            total_row(ui, combatants, combat_log, team, dimf);
+            total_row(ui, combatants, combat_log, team, dimf, pet_links);
         });
 }
 
@@ -308,7 +308,7 @@ fn combatant_block(
 ) {
     let cid = combatant_id(team, stats);
     let class_color = dim(class_color32(stats.class), dimf);
-    let kills = combat_log.killing_blows(&cid);
+    let kills = combat_log.killing_blows_including_pets(&cid, pet_links);
 
     // Stat row (name left, stats right-aligned to the panel edge).
     ui.horizontal(|ui| {
@@ -368,13 +368,14 @@ fn total_row(
     combat_log: &CombatLog,
     team: u8,
     dimf: f32,
+    pet_links: &std::collections::HashMap<String, (String, String)>,
 ) {
     let dmg: f32 = combatants.iter().map(|s| s.damage_dealt).sum();
     let heal: f32 = combatants.iter().map(|s| s.healing_done).sum();
     let tkn: f32 = combatants.iter().map(|s| s.damage_taken).sum();
     let kills: u32 = combatants
         .iter()
-        .map(|s| combat_log.killing_blows(&combatant_id(team, s)))
+        .map(|s| combat_log.killing_blows_including_pets(&combatant_id(team, s), pet_links))
         .sum();
 
     let (rect, _) =

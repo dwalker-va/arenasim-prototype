@@ -444,6 +444,36 @@ impl CombatLog {
         count
     }
 
+    /// Like [`Self::killing_blows`], but also credits killing blows dealt by the
+    /// combatant's pets to the owner. `pet_links` maps a pet's source id (e.g.
+    /// `"Team 1 Spider"`) to `(owner_id, pet_display_name)` — the same map the
+    /// Results screen uses for the damage breakdown. A killing blow whose source
+    /// maps to `owner_id` counts toward the owner. With an empty `pet_links` this
+    /// is identical to `killing_blows`. Mirrors
+    /// [`Self::damage_by_ability_including_pets`] so the K column accounts for
+    /// pet kills the same way the DMG column already folds in pet damage.
+    pub fn killing_blows_including_pets(
+        &self,
+        owner_id: &str,
+        pet_links: &HashMap<String, (String, String)>,
+    ) -> u32 {
+        let mut count = 0;
+
+        for entry in &self.entries {
+            if let Some(StructuredEventData::Damage { source, is_killing_blow: true, .. }) = &entry.structured_data {
+                let credited = source == owner_id
+                    || pet_links
+                        .get(source)
+                        .is_some_and(|(mapped_owner, _)| mapped_owner == owner_id);
+                if credited {
+                    count += 1;
+                }
+            }
+        }
+
+        count
+    }
+
     /// Get total CC time done by a combatant (in seconds)
     pub fn cc_done_seconds(&self, combatant_id: &str) -> f32 {
         let mut total = 0.0;
@@ -744,6 +774,18 @@ mod pet_attribution_tests {
         );
     }
 
+    fn killing_blow(log: &mut CombatLog, source: &str, ability: &str) {
+        log.log_damage(
+            source.to_string(),
+            "Team 2 Warrior".to_string(),
+            ability.to_string(),
+            50.0,
+            true,
+            false,
+            String::new(),
+        );
+    }
+
     #[test]
     fn folds_pet_damage_into_owner_with_labelled_abilities() {
         let mut log = CombatLog::default();
@@ -786,5 +828,42 @@ mod pet_attribution_tests {
         assert_eq!(with_pets, plain);
         // Pet damage is absent without a link entry.
         assert!(with_pets.get("Spider: Auto Attack").is_none());
+    }
+
+    #[test]
+    fn credits_pet_killing_blows_to_the_owner() {
+        let mut log = CombatLog::default();
+        killing_blow(&mut log, "Team 1 Hunter", "Aimed Shot"); // owner's own kill
+        killing_blow(&mut log, "Team 1 Spider", "Auto Attack"); // pet's kill -> owner
+        dmg(&mut log, "Team 1 Spider", "Auto Attack", 30.0); // non-lethal pet hit, ignored
+        killing_blow(&mut log, "Team 2 Mage", "Frostbolt"); // enemy kill, must not leak
+
+        let mut links = HashMap::new();
+        links.insert(
+            "Team 1 Spider".to_string(),
+            ("Team 1 Hunter".to_string(), "Spider".to_string()),
+        );
+
+        // Owner is credited with its own kill + the pet's kill.
+        assert_eq!(log.killing_blows_including_pets("Team 1 Hunter", &links), 2);
+        // The plain method still only sees the owner's own kill.
+        assert_eq!(log.killing_blows("Team 1 Hunter"), 1);
+        // Enemy kills never leak into the owner's count.
+        assert_eq!(log.killing_blows_including_pets("Team 2 Mage", &links), 1);
+    }
+
+    #[test]
+    fn empty_links_kills_match_plain_killing_blows() {
+        let mut log = CombatLog::default();
+        killing_blow(&mut log, "Team 1 Hunter", "Aimed Shot");
+        killing_blow(&mut log, "Team 1 Spider", "Auto Attack");
+
+        let empty = HashMap::new();
+        // Without links the pet's kill is not credited — identical to the plain method.
+        assert_eq!(
+            log.killing_blows_including_pets("Team 1 Hunter", &empty),
+            log.killing_blows("Team 1 Hunter"),
+        );
+        assert_eq!(log.killing_blows_including_pets("Team 1 Hunter", &empty), 1);
     }
 }
