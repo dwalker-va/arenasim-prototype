@@ -3200,7 +3200,8 @@ mod hunter_postures {
         let log = run_capturing_log(vec!["Hunter"], vec!["Warrior"]);
         let spider_hits = log
             .lines()
-            .filter(|l| l.contains("Spider's Auto Attack hits"))
+            // Ids carry a "#slot" suffix now (e.g. "Team 1 Spider #1's Auto Attack ...").
+            .filter(|l| l.contains("Spider #") && l.contains("Auto Attack hits"))
             .count();
         assert_min_occurrences("Spider auto-attack hits on the enemy", spider_hits, 1);
     }
@@ -3223,7 +3224,7 @@ mod hunter_postures {
         // The next Spider auto-attack on the enemy after the Web lands.
         let next_spider_hit = log
             .lines()
-            .filter(|l| l.contains("Spider's Auto Attack hits Team 2"))
+            .filter(|l| l.contains("Spider #") && l.contains("Auto Attack hits Team 2"))
             .filter_map(log_timestamp)
             .find(|&t| t >= web_applied);
         if let Some(t) = next_spider_hit {
@@ -5944,7 +5945,8 @@ mod oom_wand {
             {
                 warrior_death_wall = log_time(line);
             }
-            if line.contains("[DMG]") && line.contains("Team 1 Mage's") {
+            // Ids carry a "#slot" suffix now ("Team 1 Mage #1's Frostbolt ...").
+            if line.contains("[DMG]") && line.contains("Team 1 Mage #") {
                 if let Some(t) = log_time(line) {
                     mage_damage.push(MageDamage {
                         wall_time: t,

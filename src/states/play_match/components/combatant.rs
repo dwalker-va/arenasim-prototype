@@ -374,6 +374,16 @@ impl Combatant {
         self.current_health > 0.0 && !self.is_dead
     }
 
+    /// The owner-relative team slot for a pet — the discriminator its combat-log
+    /// id uses so it lines up with its owner (`Team 1 Spider #2` ↔ `Team 1 Hunter
+    /// #2`). A pet's `slot` is `PET_SLOT_BASE + owner_slot` (set at spawn); this
+    /// recovers `owner_slot`. `saturating_sub` keeps a mis-constructed non-pet
+    /// slot from panicking (debug) or wrapping (release) — callers only invoke
+    /// this on Pet-gated entities, so the clamp is a belt-and-suspenders guard.
+    pub fn owner_relative_slot(&self) -> u8 {
+        self.slot.saturating_sub(super::super::constants::PET_SLOT_BASE)
+    }
+
     /// Get the resistance value for a given spell school.
     pub fn get_resistance(&self, school: SpellSchool) -> f32 {
         match school {
@@ -606,10 +616,17 @@ pub struct Projectile {
     pub speed: f32,
     /// Team of the caster (for combat log)
     pub caster_team: u8,
-    /// Owner-relative slot of the caster (for the unique combat-log id).
+    /// Owner-relative slot of the caster (for the unique combat-log id). For a
+    /// pet caster this is already the OWNER's slot (see `caster_pet_type`).
     pub caster_slot: u8,
-    /// Class of the caster (for combat log)
+    /// Class of the caster (for combat log). For a pet this is the owner's class
+    /// and must NOT be used to build the caster id — see `caster_pet_type`.
     pub caster_class: match_config::CharacterClass,
+    /// `Some` when the caster is a pet (e.g. a Spider's Spider Web). The hit
+    /// handler resolves the caster's combat-log id via `pet_combatant_id` so the
+    /// projectile's damage attributes to the pet (`"Team 1 Spider #2"`), not the
+    /// owner — keeping cast and impact under one id and inside #88's pet fold.
+    pub caster_pet_type: Option<PetType>,
 }
 
 // ============================================================================
@@ -645,6 +662,7 @@ pub struct HolyShockDamagePending {
 pub struct DivineShieldPending {
     pub caster: Entity,
     pub caster_team: u8,
+    pub caster_slot: u8,
     pub caster_class: match_config::CharacterClass,
 }
 
@@ -657,6 +675,7 @@ pub struct DivineShieldPending {
 pub struct BerserkerRagePending {
     pub caster: Entity,
     pub caster_team: u8,
+    pub caster_slot: u8,
     pub caster_class: match_config::CharacterClass,
 }
 

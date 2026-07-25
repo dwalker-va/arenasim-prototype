@@ -11,7 +11,7 @@ use super::super::ability_config::AbilityDefinitions;
 use super::super::map_config::ActiveMapGeometry;
 use super::super::map_geometry::has_line_of_sight;
 use super::super::constants::{CRIT_DAMAGE_MULTIPLIER, CRIT_HEALING_MULTIPLIER};
-use super::super::utils::{spawn_speech_bubble, get_next_fct_offset, combatant_id};
+use super::super::utils::{spawn_speech_bubble, get_next_fct_offset, combatant_id, combat_log_id_for};
 use super::super::FCT_HEIGHT;
 use super::damage::{roll_crit, apply_damage_with_absorb, get_physical_damage_reduction, get_divine_shield_damage_penalty};
 
@@ -138,6 +138,7 @@ pub fn process_casting(
     dampening: Res<ArenaDampening>,
     map_geometry: Res<ActiveMapGeometry>,
     mut combatants: Query<(Entity, &Transform, &mut Combatant, Option<&mut CastingState>, Option<&mut ActiveAuras>)>,
+    pet_query: Query<&Pet>,
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
@@ -346,6 +347,7 @@ pub fn process_casting(
                     caster_team,
                     caster_slot,
                     caster_class,
+                    caster_pet_type: None,
                 },
                 Transform::from_translation(caster_pos + Vec3::new(0.0, 1.5, 0.0)), // Spawn at chest height
                 PlayMatchEntity,
@@ -364,6 +366,12 @@ pub fn process_casting(
         if !target.is_alive() {
             continue;
         }
+
+        // Resolved, pet-aware combat-log ids for this cast, reused by every
+        // damage/heal/CC log below so same-class teammates and pets are
+        // distinguishable in the saved report, not just the structured fields.
+        let caster_id = combatant_id(caster_team, caster_slot, caster_class);
+        let target_id = combat_log_id_for(&target, pet_query.get(target_entity).ok());
 
         // LoS re-check, instant-effect path: mirror the projectile branch
         // — a target that left line of sight during the cast fizzles before any
@@ -527,31 +535,18 @@ pub fn process_casting(
             let verb = if is_crit_damage { "CRITS" } else { "hits" };
             let message = if absorbed > 0.0 {
                 format!(
-                    "Team {} {}'s {} {} Team {} {} for {:.0} damage ({:.0} absorbed)",
-                    caster_team,
-                    caster_class.name(),
-                    def.name,
-                    verb,
-                    target.team,
-                    target.class.name(),
-                    actual_damage,
-                    absorbed
+                    "{}'s {} {} {} for {:.0} damage ({:.0} absorbed)",
+                    caster_id, def.name, verb, target_id, actual_damage, absorbed
                 )
             } else {
                 format!(
-                    "Team {} {}'s {} {} Team {} {} for {:.0} damage",
-                    caster_team,
-                    caster_class.name(),
-                    def.name,
-                    verb,
-                    target.team,
-                    target.class.name(),
-                    actual_damage
+                    "{}'s {} {} {} for {:.0} damage",
+                    caster_id, def.name, verb, target_id, actual_damage
                 )
             };
             combat_log.log_damage(
-                combatant_id(caster_team, caster_slot, caster_class),
-                combatant_id(target.team, target.slot, target.class),
+                caster_id.clone(),
+                target_id.clone(),
                 def.name.to_string(),
                 total_damage_dealt, // Total damage including absorbed
                 is_killing_blow,
@@ -564,14 +559,10 @@ pub fn process_casting(
                 commands.entity(target_entity).remove::<CastingState>();
                 commands.entity(target_entity).remove::<ChannelingState>();
 
-                let death_message = format!(
-                    "Team {} {} has been eliminated",
-                    target.team,
-                    target.class.name()
-                );
+                let death_message = format!("{} has been eliminated", target_id);
                 combat_log.log_death(
-                    combatant_id(target.team, target.slot, target.class),
-                    Some(combatant_id(caster_team, caster_slot, caster_class)),
+                    target_id.clone(),
+                    Some(caster_id.clone()),
                     death_message,
                 );
             }
@@ -629,18 +620,12 @@ pub fn process_casting(
             // Log the healing with structured data
             let verb = if is_crit_heal { "CRITICALLY heals" } else { "heals" };
             let message = format!(
-                "Team {} {}'s {} {} Team {} {} for {:.0}",
-                caster_team,
-                caster_class.name(),
-                def.name,
-                verb,
-                target.team,
-                target.class.name(),
-                actual_healing
+                "{}'s {} {} {} for {:.0}",
+                caster_id, def.name, verb, target_id, actual_healing
             );
             combat_log.log_healing(
-                combatant_id(caster_team, caster_slot, caster_class),
-                combatant_id(target.team, target.slot, target.class),
+                caster_id.clone(),
+                target_id.clone(),
                 def.name.to_string(),
                 actual_healing,
                 is_crit_heal,
@@ -687,72 +672,40 @@ pub fn process_casting(
             match aura.aura_type {
                 AuraType::Fear => {
                     spawn_speech_bubble(&mut commands, caster_entity, "Fear");
-                    let message = format!(
-                        "Team {} {}'s {} lands on Team {} {} ({:.1}s)",
-                        caster_team,
-                        caster_class.name(),
-                        def.name,
-                        target.team,
-                        target.class.name(),
-                        aura.duration
-                    );
+                    let message = format!("{}'s {} lands on {} ({:.1}s)", caster_id, def.name, target_id, aura.duration);
                     combat_log.log_crowd_control(
-                        combatant_id(caster_team, caster_slot, caster_class),
-                        combatant_id(target.team, target.slot, target.class),
+                        caster_id.clone(),
+                        target_id.clone(),
                         "Fear".to_string(),
                         aura.duration,
                         message,
                     );
                 }
                 AuraType::Root => {
-                    let message = format!(
-                        "Team {} {}'s {} roots Team {} {} ({:.1}s)",
-                        caster_team,
-                        caster_class.name(),
-                        def.name,
-                        target.team,
-                        target.class.name(),
-                        aura.duration
-                    );
+                    let message = format!("{}'s {} roots {} ({:.1}s)", caster_id, def.name, target_id, aura.duration);
                     combat_log.log_crowd_control(
-                        combatant_id(caster_team, caster_slot, caster_class),
-                        combatant_id(target.team, target.slot, target.class),
+                        caster_id.clone(),
+                        target_id.clone(),
                         "Root".to_string(),
                         aura.duration,
                         message,
                     );
                 }
                 AuraType::Stun => {
-                    let message = format!(
-                        "Team {} {}'s {} stuns Team {} {} ({:.1}s)",
-                        caster_team,
-                        caster_class.name(),
-                        def.name,
-                        target.team,
-                        target.class.name(),
-                        aura.duration
-                    );
+                    let message = format!("{}'s {} stuns {} ({:.1}s)", caster_id, def.name, target_id, aura.duration);
                     combat_log.log_crowd_control(
-                        combatant_id(caster_team, caster_slot, caster_class),
-                        combatant_id(target.team, target.slot, target.class),
+                        caster_id.clone(),
+                        target_id.clone(),
                         "Stun".to_string(),
                         aura.duration,
                         message,
                     );
                 }
                 AuraType::Polymorph => {
-                    let message = format!(
-                        "Team {} {}'s {} polymorphs Team {} {} ({:.1}s)",
-                        caster_team,
-                        caster_class.name(),
-                        def.name,
-                        target.team,
-                        target.class.name(),
-                        aura.duration
-                    );
+                    let message = format!("{}'s {} polymorphs {} ({:.1}s)", caster_id, def.name, target_id, aura.duration);
                     combat_log.log_crowd_control(
-                        combatant_id(caster_team, caster_slot, caster_class),
-                        combatant_id(target.team, target.slot, target.class),
+                        caster_id.clone(),
+                        target_id.clone(),
                         "Polymorph".to_string(),
                         aura.duration,
                         message,
@@ -776,14 +729,10 @@ pub fn process_casting(
             commands.entity(target_entity).remove::<CastingState>();
             commands.entity(target_entity).remove::<ChannelingState>();
 
-            let message = format!(
-                "Team {} {} has been eliminated",
-                target.team,
-                target.class.name()
-            );
+            let message = format!("{} has been eliminated", target_id);
             combat_log.log_death(
-                combatant_id(target.team, target.slot, target.class),
-                Some(combatant_id(caster_team, caster_slot, caster_class)),
+                target_id.clone(),
+                Some(caster_id.clone()),
                 message,
             );
         }
@@ -848,6 +797,7 @@ pub fn process_channeling(
     abilities: Res<AbilityDefinitions>,
     dampening: Res<ArenaDampening>,
     mut combatants: Query<(Entity, &Transform, &mut Combatant, Option<&mut ChannelingState>, Option<&mut ActiveAuras>)>,
+    pet_query: Query<&Pet>,
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
@@ -869,9 +819,13 @@ pub fn process_channeling(
         .iter()
         .map(|(entity, transform, _, _, _)| (entity, transform.translation))
         .collect();
-    let health_info: std::collections::HashMap<Entity, (bool, u8, u8, match_config::CharacterClass)> = combatants
+    // (is_alive, pet-aware combat-log id) — the id is resolved once here so the
+    // channel-tick log below attributes to a pet target correctly.
+    let health_info: std::collections::HashMap<Entity, (bool, crate::combat::log::CombatantId)> = combatants
         .iter()
-        .map(|(entity, _, combatant, _, _)| (entity, (combatant.is_alive(), combatant.team, combatant.slot, combatant.class)))
+        .map(|(entity, _, combatant, _, _)| {
+            (entity, (combatant.is_alive(), combat_log_id_for(combatant, pet_query.get(entity).ok())))
+        })
         .collect();
     // Snapshot target immunity status for Drain Life healing suppression
     let immunity_info: std::collections::HashSet<Entity> = combatants
@@ -936,7 +890,7 @@ pub fn process_channeling(
         // Check if target died or no longer exists
         let target_alive = health_info
             .get(&channeling.target)
-            .map(|(alive, _, _, _)| *alive)
+            .map(|(alive, _)| *alive)
             .unwrap_or(false);
         if !target_alive {
             remove_channel.push(caster_entity);
@@ -965,19 +919,15 @@ pub fn process_channeling(
             }
 
             // Log the tick
-            if let Some(&(_, target_team, target_slot, target_class)) = health_info.get(&channeling.target) {
+            if let Some((_, target_id)) = health_info.get(&channeling.target) {
+                let caster_id = combatant_id(caster.team, caster.slot, caster.class);
                 let damage_message = format!(
-                    "Team {} {}'s {} ticks on Team {} {} for {:.0} damage",
-                    caster.team,
-                    caster.class.name(),
-                    ability_def.name,
-                    target_team,
-                    target_class.name(),
-                    damage
+                    "{}'s {} ticks on {} for {:.0} damage",
+                    caster_id, ability_def.name, target_id, damage
                 );
                 combat_log.log_damage(
-                    combatant_id(caster.team, caster.slot, caster.class),
-                    combatant_id(target_team, target_slot, target_class),
+                    caster_id.clone(),
+                    target_id.clone(),
                     format!("{} (tick)", ability_def.name),
                     damage,
                     false, // Not a killing blow check here - will be handled when applying damage
@@ -987,15 +937,12 @@ pub fn process_channeling(
 
                 if healing > 0.0 {
                     let heal_message = format!(
-                        "Team {} {}'s {} heals for {:.0}",
-                        caster.team,
-                        caster.class.name(),
-                        ability_def.name,
-                        healing
+                        "{}'s {} heals for {:.0}",
+                        caster_id, ability_def.name, healing
                     );
                     combat_log.log_healing(
-                        combatant_id(caster.team, caster.slot, caster.class),
-                        combatant_id(caster.team, caster.slot, caster.class),
+                        caster_id.clone(),
+                        caster_id.clone(),
                         format!("{} (tick)", ability_def.name),
                         healing,
                         false, // is_crit - channel ticks never crit
@@ -1098,13 +1045,10 @@ pub fn process_channeling(
                     commands.entity(target_entity).remove::<CastingState>();
                     commands.entity(target_entity).remove::<ChannelingState>();
 
-                    let death_message = format!(
-                        "Team {} {} has been eliminated",
-                        target.team,
-                        target.class.name()
-                    );
+                    let target_id = combat_log_id_for(&target, pet_query.get(target_entity).ok());
+                    let death_message = format!("{} has been eliminated", target_id);
                     combat_log.log_death(
-                        combatant_id(target.team, target.slot, target.class),
+                        target_id,
                         Some(combatant_id(caster_team, caster_slot, caster_class)),
                         death_message,
                     );

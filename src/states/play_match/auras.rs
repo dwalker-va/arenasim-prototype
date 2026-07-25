@@ -14,7 +14,7 @@ use bevy_egui::egui;
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use super::match_config;
 use super::components::*;
-use super::utils::{combatant_id, get_next_fct_offset};
+use super::utils::{combatant_id, combat_log_id_for, get_next_fct_offset};
 
 /// Update all active auras - tick down durations and remove expired ones.
 ///
@@ -850,6 +850,7 @@ pub fn process_dot_ticks(
     mut combat_log: ResMut<CombatLog>,
     mut combatants_with_auras: Query<(Entity, &mut Combatant, &Transform, &mut ActiveAuras)>,
     combatants_without_auras: Query<(Entity, &Combatant), Without<ActiveAuras>>,
+    pet_query: Query<&Pet>,
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
@@ -948,9 +949,11 @@ pub fn process_dot_ticks(
             continue;
         }
 
-        let target_team = target.team;
-        let target_class = target.class;
-        let target_slot = target.slot;
+        // Pet-aware ids for structured fields + message text. The DoT caster is
+        // always a primary (a pet can't apply a DoT), so its id comes from the
+        // queued (team, slot, class); the target may be a pet.
+        let caster_id = combatant_id(caster_team, caster_slot, caster_class);
+        let target_id = combat_log_id_for(&target, pet_query.get(target_entity).ok());
 
         // Apply damage with absorb shield consideration
         let (actual_damage, absorbed) = super::combat_core::apply_damage_with_absorb(
@@ -1021,29 +1024,18 @@ pub fn process_dot_ticks(
         }
         let message = if absorbed > 0.0 {
             format!(
-                "Team {} {}'s {} ticks for {:.0} damage on Team {} {} ({:.0} absorbed)",
-                caster_team,
-                caster_class.name(),
-                ability_name,
-                actual_damage,
-                target_team,
-                target_class.name(),
-                absorbed
+                "{}'s {} ticks for {:.0} damage on {} ({:.0} absorbed)",
+                caster_id, ability_name, actual_damage, target_id, absorbed
             )
         } else {
             format!(
-                "Team {} {}'s {} ticks for {:.0} damage on Team {} {}",
-                caster_team,
-                caster_class.name(),
-                ability_name,
-                actual_damage,
-                target_team,
-                target_class.name()
+                "{}'s {} ticks for {:.0} damage on {}",
+                caster_id, ability_name, actual_damage, target_id
             )
         };
         combat_log.log_damage(
-            combatant_id(caster_team, caster_slot, caster_class),
-            combatant_id(target_team, target_slot, target_class),
+            caster_id.clone(),
+            target_id.clone(),
             ability_name.clone(),
             actual_damage,
             is_killing_blow,
@@ -1057,14 +1049,10 @@ pub fn process_dot_ticks(
             commands.entity(target_entity).remove::<CastingState>();
             commands.entity(target_entity).remove::<ChannelingState>();
 
-            let death_message = format!(
-                "Team {} {} has been eliminated",
-                target_team,
-                target_class.name()
-            );
+            let death_message = format!("{} has been eliminated", target_id);
             combat_log.log_death(
-                combatant_id(target_team, target_slot, target_class),
-                Some(combatant_id(caster_team, caster_slot, caster_class)),
+                target_id.clone(),
+                Some(caster_id.clone()),
                 death_message,
             );
         }
@@ -1226,19 +1214,17 @@ pub fn process_hot_ticks(
             PlayMatchEntity,
         ));
 
-        // Log to combat log with structured data
+        // Log to combat log with structured data. HoTs only ever target allies
+        // (primaries), so the ally id is the plain slot-suffixed combatant id.
+        let caster_id = combatant_id(caster_team, caster_slot, caster_class);
+        let target_id = combatant_id(target_team, target_slot, target_class);
         let message = format!(
-            "Team {} {}'s {} heals Team {} {} for {:.0}",
-            caster_team,
-            caster_class.name(),
-            ability_name,
-            target_team,
-            target_class.name(),
-            actual_healing
+            "{}'s {} heals {} for {:.0}",
+            caster_id, ability_name, target_id, actual_healing
         );
         combat_log.log_healing(
-            combatant_id(caster_team, caster_slot, caster_class),
-            combatant_id(target_team, target_slot, target_class),
+            caster_id.clone(),
+            target_id,
             ability_name.clone(),
             actual_healing,
             false, // is_crit - HoT ticks never crit

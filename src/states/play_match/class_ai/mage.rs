@@ -13,7 +13,7 @@
 
 use bevy::prelude::*;
 use crate::combat::log::CombatLog;
-use crate::states::match_config::{CharacterClass, MageArmor};
+use crate::states::match_config::MageArmor;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
@@ -418,12 +418,14 @@ fn try_frost_nova(
 
     log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Frost Nova", None, "casts");
 
-    let mut frost_nova_targets: Vec<(Entity, Vec3, u8, u8, CharacterClass)> = Vec::new();
+    // Carry each target's pet-aware combat-log id so the root-CC log below
+    // attributes correctly when Frost Nova catches an enemy pet.
+    let mut frost_nova_targets: Vec<(Entity, Vec3, crate::combat::log::CombatantId)> = Vec::new();
     for (enemy_entity, info) in ctx.combatants.iter() {
         if info.team != combatant.team && info.is_alive {
             let distance = my_pos.distance(info.position);
             if distance <= nova_def.range {
-                frost_nova_targets.push((*enemy_entity, info.position, info.team, info.slot, info.class));
+                frost_nova_targets.push((*enemy_entity, info.position, info.log_id()));
             }
         }
     }
@@ -434,7 +436,7 @@ fn try_frost_nova(
     // ally Shaman's Flametongue totem) — matching the generic hardcast path.
     let sp_bonus = get_spell_power_bonus_from_slice(self_auras);
     let crit_bonus = get_crit_chance_bonus_from_slice(self_auras);
-    for (target_entity, target_pos, target_team, target_slot, target_class) in &frost_nova_targets {
+    for (target_entity, target_pos, target_id) in &frost_nova_targets {
         let mut damage = combatant.calculate_ability_damage_config(nova_def, game_rng, ap_bonus, sp_bonus);
         let is_crit = roll_crit(combatant.crit_chance + crit_bonus, game_rng);
         if is_crit { damage *= CRIT_DAMAGE_MULTIPLIER; }
@@ -456,18 +458,14 @@ fn try_frost_nova(
                     commands.spawn(aura_pending);
                 }
 
+                let caster_id = combatant_id(combatant.team, combatant.slot, combatant.class);
                 let message = format!(
-                    "Team {} {}'s {} roots Team {} {} ({:.1}s)",
-                    combatant.team,
-                    combatant.class.name(),
-                    nova_def.name,
-                    target_team,
-                    target_class.name(),
-                    aura.duration
+                    "{}'s {} roots {} ({:.1}s)",
+                    caster_id, nova_def.name, target_id, aura.duration
                 );
                 combat_log.log_crowd_control(
-                    combatant_id(combatant.team, combatant.slot, combatant.class),
-                    combatant_id(*target_team, *target_slot, *target_class),
+                    caster_id,
+                    target_id.clone(),
                     "Root".to_string(),
                     aura.duration,
                     message,

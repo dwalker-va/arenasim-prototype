@@ -6,7 +6,7 @@
 use bevy::prelude::*;
 use crate::combat::log::{CombatLog, CombatantId};
 use super::match_config::{self, CharacterClass};
-use super::components::{FloatingTextState, SpeechBubble, PlayMatchEntity, PetType};
+use super::components::{FloatingTextState, SpeechBubble, PlayMatchEntity, PetType, Combatant, Pet};
 
 /// Floating combat text horizontal spread (multiplied by -0.5 to +0.5 range)
 /// Adjust this to control how far left/right numbers can appear from their spawn point
@@ -20,10 +20,12 @@ pub const FCT_VERTICAL_SPREAD: f32 = 0.8;
 /// combat log.
 ///
 /// Format: `"Team {team} {class} #{slot+1}"` e.g. `"Team 1 Warrior #1"`. The
-/// 1-based slot suffix (matching the `Slot N` numbering in the saved match
-/// report) disambiguates same-class teammates, which would otherwise share an
-/// identity and have their damage/healing/CC/kills silently merged in every
-/// `CombatLog` aggregation and on the Results screen.
+/// 1-based `slot` suffix disambiguates same-class teammates, which would
+/// otherwise share an identity and have their damage/healing/CC/kills silently
+/// merged in every `CombatLog` aggregation and on the Results screen. NOTE: the
+/// suffix is `combatant.slot + 1`, which is NOT the `Slot N` line in the saved
+/// match report — that report numbers by Bevy query iteration order, and config
+/// slots can be sparse, so `#2` here need not be `Slot 2` there.
 pub fn combatant_id(team: u8, slot: u8, class: match_config::CharacterClass) -> CombatantId {
     combat_log_id(team, slot, class.name())
 }
@@ -41,21 +43,29 @@ pub fn combat_log_id(team: u8, slot: u8, display_name: &str) -> CombatantId {
 ///
 /// `owner_slot` is the owner's team slot (0-based). A pet's own `Combatant.slot`
 /// is `PET_SLOT_BASE + owner_slot`, so callers holding the pet's combatant pass
-/// `pet.slot - PET_SLOT_BASE`.
+/// `combatant.owner_relative_slot()`.
 ///
-/// KNOWN LIMITATION: sites that log a pet as a *target* (AoE completion —
-/// Frost Nova, Psychic Scream, Frost Shock) still build the target id from the
-/// pet's raw `Combatant` via [`combatant_id`], where `class` is the owner's
-/// class and `slot` is the un-adjusted `PET_SLOT_BASE + owner_slot`. That id
-/// (`"Team 2 Warlock #11"`) matches neither the pet's registered id nor the
-/// owner's, so CC/damage dealt *to* an enemy pet is orphaned from the
-/// structured log. It corrupts no displayed number today (pets have no Results
-/// row; the TKN column reads a live counter, not the log; and a primary's
-/// CC-received is now *more* accurate for excluding pet CC). Fixing it needs a
-/// pet-aware target-id path (owner slot + `pet_type`) threaded into the
-/// borrow-sensitive casting/projectile systems — deferred as a separate change.
+/// Building a pet id from the pet's raw `Combatant` via [`combatant_id`] is a
+/// bug (`class` is the OWNER's class and `slot` is the un-adjusted
+/// `PET_SLOT_BASE + owner_slot`, giving an impossible `"Team 2 Warlock #11"`).
+/// To resolve a *target*'s id pet-aware without special-casing, use
+/// [`super::CombatantInfo::log_id`] (from a snapshot) or
+/// [`combat_log_id_for`] (from a live `&Combatant` + `Option<&Pet>`).
 pub fn pet_combatant_id(team: u8, owner_slot: u8, pet_type: PetType) -> CombatantId {
     combat_log_id(team, owner_slot, pet_type.name())
+}
+
+/// Pet-aware combat-log id for a live combatant + its optional `Pet` marker.
+/// The counterpart to [`super::CombatantInfo::log_id`] for the systems that hold
+/// a `&Combatant`/`Option<&Pet>` rather than a snapshot (damage/heal application
+/// in `casting`/`projectiles`/`combat_ai`/`auras`). A pet routes to
+/// [`pet_combatant_id`] so its damage/CC attributes to its own registered id
+/// instead of an impossible `"<OwnerClass> #<raw slot>"`.
+pub fn combat_log_id_for(combatant: &Combatant, pet: Option<&Pet>) -> CombatantId {
+    match pet {
+        Some(p) => pet_combatant_id(combatant.team, combatant.owner_relative_slot(), p.pet_type),
+        None => combatant_id(combatant.team, combatant.slot, combatant.class),
+    }
 }
 
 /// Helper to log an ability cast with consistent formatting.

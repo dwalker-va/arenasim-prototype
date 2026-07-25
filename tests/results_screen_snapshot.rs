@@ -54,27 +54,29 @@ fn results_screen_value_combos() {
         winner: Some(1),
         duration_secs: 187.0,
         team1_combatants: vec![
-            cs(CharacterClass::Rogue, 956.0, 0.0, 334.0, true),
-            cs(CharacterClass::Mage, 8.0, 0.0, 5.0, true),
-            cs(CharacterClass::Priest, 451.0, 1820.0, 301.0, true),
+            cs(CharacterClass::Rogue, 0, 956.0, 0.0, 334.0, true),
+            cs(CharacterClass::Mage, 1, 8.0, 0.0, 5.0, true),
+            cs(CharacterClass::Priest, 2, 451.0, 1820.0, 301.0, true),
         ],
         team2_combatants: vec![
-            cs(CharacterClass::Warlock, 1234.0, 0.0, 12345.0, false),
-            cs(CharacterClass::Priest, 388.0, 13400.0, 451.0, false),
-            cs(CharacterClass::Hunter, 0.0, 0.0, 7.0, false),
+            cs(CharacterClass::Warlock, 0, 1234.0, 0.0, 12345.0, false),
+            cs(CharacterClass::Priest, 1, 388.0, 13400.0, 451.0, false),
+            cs(CharacterClass::Hunter, 2, 0.0, 0.0, 7.0, false),
         ],
         pet_damage_links: Default::default(),
     };
 
     // Vary killing-blow counts so the K column spans 1- and 2-digit widths.
+    // The K column reads killing-blow *Damage* events (not Death events), and
+    // ids carry the #slot suffix, so seed those to match the rows above.
     let mut log = CombatLog::default();
-    let rogue = "Team 1 Rogue".to_string();
-    let warlock = "Team 2 Warlock".to_string();
+    let rogue = "Team 1 Rogue #1".to_string();
+    let warlock = "Team 2 Warlock #1".to_string();
     for _ in 0..2 {
-        log.log_death("Team 2 Priest".to_string(), Some(rogue.clone()), String::new());
+        log.log_damage(rogue.clone(), "Team 2 Priest #2".to_string(), "Eviscerate".to_string(), 100.0, true, false, String::new());
     }
     for _ in 0..11 {
-        log.log_death("Team 1 Mage".to_string(), Some(warlock.clone()), String::new());
+        log.log_damage(warlock.clone(), "Team 1 Mage #2".to_string(), "Shadow Bolt".to_string(), 100.0, true, false, String::new());
     }
 
     let icons = ClassIcons::default();
@@ -87,10 +89,10 @@ fn results_screen_value_combos() {
     harness.snapshot("results_screen_value_combos");
 }
 
-fn cs(class: CharacterClass, dmg: f32, heal: f32, tkn: f32, survived: bool) -> CombatantStats {
+fn cs(class: CharacterClass, slot: u8, dmg: f32, heal: f32, tkn: f32, survived: bool) -> CombatantStats {
     CombatantStats {
         class,
-        slot: 0,
+        slot,
         damage_dealt: dmg,
         damage_taken: tkn,
         healing_done: heal,

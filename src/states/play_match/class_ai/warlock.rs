@@ -674,6 +674,7 @@ fn try_death_coil(
             caster_team: combatant.team,
             caster_slot: combatant.slot,
             caster_class: combatant.class,
+            caster_pet_type: None,
         },
         Transform::from_translation(my_pos + Vec3::new(0.0, 1.5, 0.0)),
         PlayMatchEntity,

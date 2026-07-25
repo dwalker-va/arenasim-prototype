@@ -357,6 +357,7 @@ pub fn try_divine_shield(
     commands.spawn(DivineShieldPending {
         caster: entity,
         caster_team: combatant.team,
+        caster_slot: combatant.slot,
         caster_class: combatant.class,
     });
 
@@ -485,6 +486,7 @@ pub fn try_divine_shield_while_cc(
     commands.spawn(DivineShieldPending {
         caster: entity,
         caster_team: combatant.team,
+        caster_slot: combatant.slot,
         caster_class: combatant.class,
     });
 

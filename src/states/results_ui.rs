@@ -306,7 +306,7 @@ fn combatant_block(
     dimf: f32,
     pet_links: &std::collections::HashMap<String, (String, String)>,
 ) {
-    let cid = combatant_id(team, stats);
+    let cid = stats_log_id(team, stats);
     let class_color = dim(class_color32(stats.class), dimf);
     let kills = combat_log.killing_blows_including_pets(&cid, pet_links);
 
@@ -375,7 +375,7 @@ fn total_row(
     let tkn: f32 = combatants.iter().map(|s| s.damage_taken).sum();
     let kills: u32 = combatants
         .iter()
-        .map(|s| combat_log.killing_blows_including_pets(&combatant_id(team, s), pet_links))
+        .map(|s| combat_log.killing_blows_including_pets(&stats_log_id(team, s), pet_links))
         .sum();
 
     let (rect, _) =
@@ -563,10 +563,12 @@ fn tag(ui: &mut egui::Ui, text: &str, bg: egui::Color32, fg: egui::Color32) {
 
 // --- Pure helpers ---
 
-fn combatant_id(team: u8, stats: &CombatantStats) -> String {
-    // Delegate to the canonical builder so this stays byte-for-byte identical to
-    // the ids the combat log is written under (a divergent format here would
-    // silently break the kill-count / ability-breakdown lookups below).
+/// This combatant's combat-log id, from its team + slot + class. Delegates to
+/// the canonical builder so it stays byte-for-byte identical to the ids the
+/// combat log is written under (a divergent format here would silently break
+/// the kill-count / ability-breakdown lookups). Named distinctly so it does not
+/// shadow the imported `play_match::combatant_id`.
+fn stats_log_id(team: u8, stats: &CombatantStats) -> String {
     super::play_match::combatant_id(team, stats.slot, stats.class)
 }
 

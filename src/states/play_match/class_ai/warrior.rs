@@ -868,6 +868,7 @@ pub fn try_berserker_rage_while_cc(
     commands.spawn(BerserkerRagePending {
         caster: entity,
         caster_team: combatant.team,
+        caster_slot: combatant.slot,
         caster_class: combatant.class,
     });
 

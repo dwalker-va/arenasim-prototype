@@ -109,6 +109,24 @@ pub struct QueuedAoeDamage {
 }
 
 impl CombatantInfo {
+    /// This combatant's combat-log id, pet-aware. A pet resolves to its own
+    /// display id keyed to its owner's slot (`"Team 1 Spider #2"`), NOT the raw
+    /// `combatant_id` (which for a pet would use the owner's class and the
+    /// un-adjusted `PET_SLOT_BASE + owner_slot`, yielding an id like
+    /// `"Team 1 Hunter #12"` that matches nothing registered). Use this
+    /// everywhere a target id is built from a snapshot, so pet targets attribute
+    /// correctly and never leak an impossible slot number into log text.
+    pub fn log_id(&self) -> crate::combat::log::CombatantId {
+        match self.pet_type {
+            Some(pt) => super::utils::pet_combatant_id(
+                self.team,
+                self.slot.saturating_sub(super::constants::PET_SLOT_BASE),
+                pt,
+            ),
+            None => super::utils::combatant_id(self.team, self.slot, self.class),
+        }
+    }
+
     /// Health as a percentage (0.0 to 1.0)
     pub fn health_pct(&self) -> f32 {
         if self.max_health > 0.0 {

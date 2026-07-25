@@ -312,7 +312,7 @@ fn try_psychic_scream(
     // real threat are still feared — this only blocks a pet-only cast.
     let has_real_threat = targets
         .iter()
-        .any(|(e, _, _, _)| ctx.combatants.get(e).map_or(false, |i| !i.is_pet));
+        .any(|(e, _)| ctx.combatants.get(e).map_or(false, |i| !i.is_pet));
     if !has_real_threat {
         builder.reject(scream, RejectionReason::NoValidTarget);
         return false;
@@ -332,13 +332,15 @@ fn scream_targets(
     entity: Entity,
     my_pos: Vec3,
     radius: f32,
-) -> Vec<(Entity, u8, u8, CharacterClass)> {
+) -> Vec<(Entity, crate::combat::log::CombatantId)> {
     ctx.visible_enemies_within(entity, my_pos, radius)
         .into_iter()
         .filter(|info| {
             !ctx.entity_is_immune(info.entity) && !ctx.is_dr_immune(info.entity, DRCategory::Fears)
         })
-        .map(|info| (info.entity, info.team, info.slot, info.class))
+        // Carry each target's pet-aware combat-log id so the fear-CC log
+        // attributes correctly when Scream catches an enemy pet.
+        .map(|info| (info.entity, info.log_id()))
         .collect()
 }
 
@@ -353,7 +355,7 @@ fn fire_psychic_scream(
     entity: Entity,
     combatant: &mut Combatant,
     same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
-    targets: &[(Entity, u8, u8, CharacterClass)],
+    targets: &[(Entity, crate::combat::log::CombatantId)],
     builder: &mut DecisionEventBuilder<'_>,
 ) {
     builder.choose(AbilityType::PsychicScream, None, true);
@@ -379,23 +381,20 @@ fn fire_psychic_scream(
     log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Psychic Scream", None, "casts");
 
     let fear_duration = scream_def.applies_aura.as_ref().map(|a| a.duration).unwrap_or(0.0);
-    for (target_entity, target_team, target_slot, target_class) in targets {
+    let caster_id = combatant_id(combatant.team, combatant.slot, combatant.class);
+    for (target_entity, target_id) in targets {
         if let Some(aura_pending) = AuraPending::from_ability(*target_entity, entity, scream_def) {
             same_frame_cc_queue.push((*target_entity, aura_pending.aura.clone()));
             commands.spawn(aura_pending);
         }
 
         let message = format!(
-            "Team {} {}'s Psychic Scream fears Team {} {} ({:.1}s)",
-            combatant.team,
-            combatant.class.name(),
-            target_team,
-            target_class.name(),
-            fear_duration
+            "{}'s Psychic Scream fears {} ({:.1}s)",
+            caster_id, target_id, fear_duration
         );
         combat_log.log_crowd_control(
-            combatant_id(combatant.team, combatant.slot, combatant.class),
-            combatant_id(*target_team, *target_slot, *target_class),
+            caster_id.clone(),
+            target_id.clone(),
             "Fear".to_string(),
             fear_duration,
             message,

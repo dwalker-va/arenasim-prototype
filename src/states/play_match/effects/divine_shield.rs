@@ -86,7 +86,7 @@ pub fn process_divine_shield(
                 0
             };
 
-            let caster_id = combatant_id(pending.caster_team, combatant.slot, pending.caster_class);
+            let caster_id = combatant_id(pending.caster_team, pending.caster_slot, pending.caster_class);
 
             // Log activation
             combat_log.log(

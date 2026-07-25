@@ -7,7 +7,7 @@ use super::super::match_config;
 use super::super::components::*;
 use super::super::abilities::{AbilityType, SpellSchool};
 use super::super::ability_config::AbilityDefinitions;
-use super::super::constants::{CRIT_DAMAGE_MULTIPLIER, PET_SLOT_BASE};
+use super::super::constants::CRIT_DAMAGE_MULTIPLIER;
 use super::super::utils::{get_next_fct_offset, combat_log_id};
 use super::super::{MELEE_RANGE, WAND_RANGE, HUNTER_DEAD_ZONE, AUTO_SHOT_RANGE, FCT_HEIGHT};
 use super::super::map_config::ActiveMapGeometry;
@@ -67,7 +67,7 @@ pub fn combat_auto_attack(
         .iter()
         .map(|(entity, _, combatant, _, _, _)| {
             let (display_name, is_melee, slot_label) = if let Ok(pet) = auto_attack_pet_query.get(entity) {
-                (pet.pet_type.name().to_string(), pet.pet_type.is_melee(), combatant.slot - PET_SLOT_BASE)
+                (pet.pet_type.name().to_string(), pet.pet_type.is_melee(), combatant.owner_relative_slot())
             } else {
                 (combatant.class.name().to_string(), combatant.class.is_melee(), combatant.slot)
             };
@@ -467,34 +467,21 @@ pub fn combat_auto_attack(
                     } else {
                         "Wand Shot"
                     };
+                    let attacker_id = combat_log_id(*attacker_team, *attacker_slot, attacker_name);
+                    let target_id = combat_log_id(*target_team, *target_slot, target_name);
+
                     let verb = if is_crit { "CRITS" } else { "hits" };
                     let message = if absorbed > 0.0 {
                         format!(
-                            "Team {} {}'s {} {} Team {} {} for {:.0} damage ({:.0} absorbed)",
-                            attacker_team,
-                            attacker_name,
-                            attack_name,
-                            verb,
-                            target_team,
-                            target_name,
-                            actual_damage,
-                            absorbed
+                            "{}'s {} {} {} for {:.0} damage ({:.0} absorbed)",
+                            attacker_id, attack_name, verb, target_id, actual_damage, absorbed
                         )
                     } else {
                         format!(
-                            "Team {} {}'s {} {} Team {} {} for {:.0} damage",
-                            attacker_team,
-                            attacker_name,
-                            attack_name,
-                            verb,
-                            target_team,
-                            target_name,
-                            actual_damage
+                            "{}'s {} {} {} for {:.0} damage",
+                            attacker_id, attack_name, verb, target_id, actual_damage
                         )
                     };
-
-                    let attacker_id = combat_log_id(*attacker_team, *attacker_slot, attacker_name);
-                    let target_id = combat_log_id(*target_team, *target_slot, target_name);
 
                     let is_killing_blow = !target.is_alive();
                     combat_log.log_damage(
@@ -526,11 +513,7 @@ pub fn combat_auto_attack(
                         commands.entity(target_entity).remove::<CastingState>();
                         commands.entity(target_entity).remove::<ChannelingState>();
 
-                        let death_message = format!(
-                            "Team {} {} has been eliminated",
-                            target_team,
-                            target_name
-                        );
+                        let death_message = format!("{} has been eliminated", target_id);
                         combat_log.log_death(
                             target_id,
                             Some(attacker_id),

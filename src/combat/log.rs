@@ -345,30 +345,24 @@ impl CombatLog {
     // Aggregation Methods for Results Scene
     // =========================================================================
 
-    /// Get total damage dealt by a combatant, broken down by ability
-    /// Returns HashMap<AbilityName, TotalDamage>
+    /// Get total damage dealt by a combatant, broken down by ability.
+    /// Returns HashMap<AbilityName, TotalDamage>. Thin wrapper over
+    /// [`Self::damage_by_ability_including_pets`] with no pet links, so the two
+    /// can never drift out of sync (a split like that was the original results
+    /// bug).
     pub fn damage_by_ability(&self, combatant_id: &str) -> HashMap<String, f32> {
-        let mut result: HashMap<String, f32> = HashMap::new();
-
-        for entry in &self.entries {
-            if let Some(StructuredEventData::Damage { source, ability, amount, .. }) = &entry.structured_data {
-                if source == combatant_id {
-                    *result.entry(ability.clone()).or_insert(0.0) += amount;
-                }
-            }
-        }
-
-        result
+        self.damage_by_ability_including_pets(combatant_id, &HashMap::new())
     }
 
     /// Like [`Self::damage_by_ability`], but also folds in damage dealt by the
     /// combatant's pets. `pet_links` maps a pet's source id (e.g.
-    /// `"Team 1 Spider"`) to `(owner_id, pet_display_name)`; any log entry whose
-    /// source maps to `owner_id` is credited to the owner under the label
+    /// `"Team 1 Spider #2"`) to `(owner_id, pet_display_name)` (e.g.
+    /// `("Team 1 Hunter #2", "Spider")`); any log entry whose source maps to
+    /// `owner_id` is credited to the owner under the label
     /// `"<pet_display_name>: <ability>"` (e.g. `"Spider: Auto Attack"`), keeping
     /// it distinct from the owner's own abilities. Entries sourced directly by
-    /// `owner_id` are counted unchanged. With an empty `pet_links` this is
-    /// identical to `damage_by_ability`.
+    /// `owner_id` are counted unchanged. With an empty `pet_links` this is a
+    /// plain per-ability damage tally.
     pub fn damage_by_ability_including_pets(
         &self,
         owner_id: &str,
@@ -432,29 +426,22 @@ impl CombatLog {
         total
     }
 
-    /// Get number of killing blows by a combatant
+    /// Get number of killing blows by a combatant. Thin wrapper over
+    /// [`Self::killing_blows_including_pets`] with no pet links, so the plain
+    /// and pet-aware counts can never drift apart.
     pub fn killing_blows(&self, combatant_id: &str) -> u32 {
-        let mut count = 0;
-
-        for entry in &self.entries {
-            if let Some(StructuredEventData::Damage { source, is_killing_blow: true, .. }) = &entry.structured_data {
-                if source == combatant_id {
-                    count += 1;
-                }
-            }
-        }
-
-        count
+        self.killing_blows_including_pets(combatant_id, &HashMap::new())
     }
 
     /// Like [`Self::killing_blows`], but also credits killing blows dealt by the
     /// combatant's pets to the owner. `pet_links` maps a pet's source id (e.g.
-    /// `"Team 1 Spider"`) to `(owner_id, pet_display_name)` — the same map the
-    /// Results screen uses for the damage breakdown. A killing blow whose source
-    /// maps to `owner_id` counts toward the owner. With an empty `pet_links` this
-    /// is identical to `killing_blows`. Mirrors
-    /// [`Self::damage_by_ability_including_pets`] so the K column accounts for
-    /// pet kills the same way the DMG column already folds in pet damage.
+    /// `"Team 1 Spider #2"`) to `(owner_id, pet_display_name)` (e.g.
+    /// `("Team 1 Hunter #2", "Spider")`) — the same map the Results screen uses
+    /// for the damage breakdown. A killing blow whose source maps to `owner_id`
+    /// counts toward the owner. With an empty `pet_links` this is a plain
+    /// killing-blow tally. Mirrors [`Self::damage_by_ability_including_pets`] so
+    /// the K column accounts for pet kills the way the DMG column folds in pet
+    /// damage.
     pub fn killing_blows_including_pets(
         &self,
         owner_id: &str,
