@@ -612,16 +612,14 @@ fn try_rend(
     combat_log.log(
         CombatLogEventType::Buff,
         format!(
-            "Team {} {} applies Rend to enemy (8 damage per 3s for 15s)",
-            combatant.team,
-            combatant.class.name()
+            "{} applies Rend to enemy (8 damage per 3s for 15s)",
+            combatant_id(combatant.team, combatant.slot, combatant.class)
         ),
     );
 
     info!(
-        "Team {} {} applies Rend to enemy (8 damage per 3s for 15s)",
-        combatant.team,
-        combatant.class.name()
+        "{} applies Rend to enemy (8 damage per 3s for 15s)",
+        combatant_id(combatant.team, combatant.slot, combatant.class)
     );
 
     true

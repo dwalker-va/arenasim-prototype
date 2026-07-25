@@ -34,7 +34,7 @@ use super::healer_postures::{
     compound_pressure_trigger, escape_tick, escape_window_from, healer_pressured_tick_shared,
     medic_chase_override, medic_chase_tick, start_movement_event,
 };
-use super::super::utils::log_ability_use;
+use super::super::utils::{combatant_id, log_ability_use};
 use super::CombatContext;
 
 /// Emergency heal trigger — a teammate below this HP fraction is healed before
@@ -548,7 +548,7 @@ fn try_totem(
 
     combat_log.log(
         CombatLogEventType::Buff,
-        format!("[TOTEM] Team {} Shaman drops {}", team, element.buff_name()),
+        format!("[TOTEM] {} drops {}", combatant_id(team, combatant.slot, combatant.class), element.buff_name()),
     );
     log_ability_use(combat_log, team, combatant.slot, combatant.class, &def.name, None, "drops");
 

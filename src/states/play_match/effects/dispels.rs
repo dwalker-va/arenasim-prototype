@@ -9,6 +9,7 @@ use smallvec::SmallVec;
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use crate::states::play_match::components::*;
 use crate::states::play_match::effects::backlash::BacklashPending;
+use crate::states::play_match::utils::combat_log_id_for;
 
 /// Process pending dispels from Dispel Magic, Cleanse, or Devour Magic.
 ///
@@ -19,6 +20,7 @@ pub fn process_dispels(
     mut combat_log: ResMut<CombatLog>,
     pending_dispels: Query<(Entity, &DispelPending)>,
     mut combatants: Query<(&mut Combatant, &mut ActiveAuras)>,
+    pet_query: Query<&Pet>,
     // Separate read-only Combatant query for the backlash team-comparison guard.
     // The mutable `combatants` query requires `&mut ActiveAuras`, which excludes
     // any combatant without an ActiveAuras component (e.g., a Warlock UA-caster
@@ -74,14 +76,14 @@ pub fn process_dispels(
                 let removed_aura = active_auras.auras.remove(idx_to_remove);
 
                 // Log the dispel using the provided log prefix
+                let target_id = combat_log_id_for(&combatant, pet_query.get(pending.target).ok());
                 combat_log.log(
                     CombatLogEventType::Buff,
                     format!(
-                        "{} {} removed from Team {} {}",
+                        "{} {} removed from {}",
                         pending.log_prefix,
                         removed_aura.ability_name,
-                        combatant.team,
-                        combatant.class.name()
+                        target_id
                     ),
                 );
 
@@ -143,13 +145,13 @@ pub fn process_dispels(
             heal_combatant.current_health = (old_hp + heal_amount).min(heal_combatant.max_health);
             let actual_heal = heal_combatant.current_health - old_hp;
             if actual_heal > 0.0 {
+                // Devour Magic is a Felhunter (pet) self-heal — resolve pet-aware.
+                let healer_id = combat_log_id_for(&heal_combatant, pet_query.get(heal_entity).ok());
                 combat_log.log(
                     CombatLogEventType::Healing,
                     format!(
-                        "[DEVOUR] Team {} {} heals for {:.0} from Devour Magic",
-                        heal_combatant.team,
-                        heal_combatant.class.name(),
-                        actual_heal
+                        "[DEVOUR] {} heals for {:.0} from Devour Magic",
+                        healer_id, actual_heal
                     ),
                 );
             }

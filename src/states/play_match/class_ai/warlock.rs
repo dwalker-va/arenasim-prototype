@@ -33,7 +33,7 @@ use crate::states::play_match::decision_trace::{
 
 use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
 
-use crate::states::play_match::utils::log_ability_use;
+use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
 use super::CombatContext;
 
@@ -412,16 +412,14 @@ fn try_corruption(
     combat_log.log(
         CombatLogEventType::Buff,
         format!(
-            "Team {} {} applies Corruption to enemy (10 damage per 3s for 18s)",
-            combatant.team,
-            combatant.class.name()
+            "{} applies Corruption to enemy (10 damage per 3s for 18s)",
+            combatant_id(combatant.team, combatant.slot, combatant.class)
         ),
     );
 
     info!(
-        "Team {} {} applies Corruption to enemy (10 damage per 3s for 18s)",
-        combatant.team,
-        combatant.class.name()
+        "{} applies Corruption to enemy (10 damage per 3s for 18s)",
+        combatant_id(combatant.team, combatant.slot, combatant.class)
     );
 
     true
@@ -976,18 +974,16 @@ fn try_cast_curse(
     combat_log.log(
         CombatLogEventType::Buff,
         format!(
-            "Team {} {} applies {} to enemy ({})",
-            combatant.team,
-            combatant.class.name(),
+            "{} applies {} to enemy ({})",
+            combatant_id(combatant.team, combatant.slot, combatant.class),
             ability_name,
             effect_description
         ),
     );
 
     info!(
-        "Team {} {} applies {} to enemy ({})",
-        combatant.team,
-        combatant.class.name(),
+        "{} applies {} to enemy ({})",
+        combatant_id(combatant.team, combatant.slot, combatant.class),
         ability_name,
         effect_description
     );

@@ -8,6 +8,7 @@ use bevy::prelude::*;
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use super::components::*;
 use super::PlayMatchEntity;
+use super::utils::combatant_id;
 
 /// Time after gates open before Shadow Sight orbs spawn (seconds)
 pub const SHADOW_SIGHT_SPAWN_TIME: f32 = 90.0;
@@ -190,9 +191,8 @@ pub fn check_orb_pickups(
                 combat_log.log(
                     CombatLogEventType::Buff,
                     format!(
-                        "Team {} {} picks up Shadow Sight!",
-                        combatant.team,
-                        combatant.class.name()
+                        "{} picks up Shadow Sight!",
+                        combatant_id(combatant.team, combatant.slot, combatant.class)
                     ),
                 );
 

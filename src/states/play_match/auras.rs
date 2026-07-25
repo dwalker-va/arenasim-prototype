@@ -237,6 +237,11 @@ pub fn apply_pending_auras(
             continue;
         };
 
+        // The target's pet-aware combat-log id, resolved once for every
+        // buff/CC/IMMUNE log below (the id depends only on team/slot/class/pet,
+        // none of which the aura mutates, so an early resolve is stable).
+        let target_id = combat_log_id_for(&target_combatant, pet_query.get(pending.target).ok());
+
         // Don't apply auras to dead combatants
         if !target_combatant.is_alive() {
             commands.entity(pending_entity).despawn();
@@ -284,16 +289,14 @@ pub fn apply_pending_auras(
             combat_log.log(
                 CombatLogEventType::MatchEvent,
                 format!(
-                    "Team {} {}'s {} is immune (charging)",
-                    target_combatant.team,
-                    target_combatant.class.name(),
+                    "{}'s {} is immune (charging)",
+                    target_id,
                     cc_name
                 )
             );
             info!(
-                "Team {} {} is immune to {} (charging)",
-                target_combatant.team,
-                target_combatant.class.name(),
+                "{} is immune to {} (charging)",
+                target_id,
                 cc_name
             );
 
@@ -374,7 +377,7 @@ pub fn apply_pending_auras(
                 format!(
                     "{} IMMUNE on {} (Berserker Rage)",
                     pending.aura.ability_name,
-                    combat_log_id_for(&target_combatant, pet_query.get(pending.target).ok()),
+                    target_id,
                 ),
             );
 
@@ -408,7 +411,6 @@ pub fn apply_pending_auras(
                         PlayMatchEntity,
                     ));
 
-                    let target_id = combat_log_id_for(&target_combatant, pet_query.get(pending.target).ok());
                     let message = format!(
                         "{} IMMUNE on {} (DR immune)",
                         pending.aura.ability_name,
@@ -498,16 +500,9 @@ pub fn apply_pending_auras(
             target_combatant.max_health += hp_bonus;
             target_combatant.current_health += hp_bonus; // Give them the extra HP
 
-            let display_name = if let Ok(pet) = pet_query.get(pending.target) {
-                pet.pet_type.name().to_string()
-            } else {
-                target_combatant.class.name().to_string()
-            };
-
             info!(
-                "Team {} {} receives Power Word: Fortitude (+{:.0} max HP, now {:.0}/{:.0})",
-                target_combatant.team,
-                display_name,
+                "{} receives Power Word: Fortitude (+{:.0} max HP, now {:.0}/{:.0})",
+                target_id,
                 hp_bonus,
                 target_combatant.current_health,
                 target_combatant.max_health
@@ -517,9 +512,8 @@ pub fn apply_pending_auras(
             combat_log.log(
                 CombatLogEventType::Buff,
                 format!(
-                    "Team {} {} gains Power Word: Fortitude (+{:.0} max HP)",
-                    target_combatant.team,
-                    display_name,
+                    "{} gains Power Word: Fortitude (+{:.0} max HP)",
+                    target_id,
                     hp_bonus
                 )
             );
@@ -532,9 +526,8 @@ pub fn apply_pending_auras(
             target_combatant.current_mana += mana_bonus; // Give them the extra mana
 
             info!(
-                "Team {} {} receives Arcane Intellect (+{:.0} max mana, now {:.0}/{:.0})",
-                target_combatant.team,
-                target_combatant.class.name(),
+                "{} receives Arcane Intellect (+{:.0} max mana, now {:.0}/{:.0})",
+                target_id,
                 mana_bonus,
                 target_combatant.current_mana,
                 target_combatant.max_mana
@@ -544,9 +537,8 @@ pub fn apply_pending_auras(
             combat_log.log(
                 CombatLogEventType::Buff,
                 format!(
-                    "Team {} {} gains Arcane Intellect (+{:.0} max mana)",
-                    target_combatant.team,
-                    target_combatant.class.name(),
+                    "{} gains Arcane Intellect (+{:.0} max mana)",
+                    target_id,
                     mana_bonus
                 )
             );
@@ -557,18 +549,16 @@ pub fn apply_pending_auras(
             let ap_bonus = pending.aura.magnitude;
 
             info!(
-                "Team {} {} receives Battle Shout (+{:.0} attack power)",
-                target_combatant.team,
-                target_combatant.class.name(),
+                "{} receives Battle Shout (+{:.0} attack power)",
+                target_id,
                 ap_bonus,
             );
 
             combat_log.log(
                 CombatLogEventType::Buff,
                 format!(
-                    "Team {} {} gains Battle Shout (+{:.0} attack power)",
-                    target_combatant.team,
-                    target_combatant.class.name(),
+                    "{} gains Battle Shout (+{:.0} attack power)",
+                    target_id,
                     ap_bonus
                 )
             );
@@ -581,9 +571,8 @@ pub fn apply_pending_auras(
             combat_log.log(
                 CombatLogEventType::Buff,
                 format!(
-                    "Team {} {} suffers {} (-{:.0} attack power)",
-                    target_combatant.team,
-                    target_combatant.class.name(),
+                    "{} suffers {} (-{:.0} attack power)",
+                    target_id,
                     pending.aura.ability_name,
                     ap_reduction
                 )
@@ -595,9 +584,8 @@ pub fn apply_pending_auras(
             combat_log.log(
                 CombatLogEventType::Buff,
                 format!(
-                    "Team {} {} gains {} (+{:.0}% crit chance)",
-                    target_combatant.team,
-                    target_combatant.class.name(),
+                    "{} gains {} (+{:.0}% crit chance)",
+                    target_id,
                     pending.aura.ability_name,
                     pending.aura.magnitude * 100.0
                 )
@@ -609,9 +597,8 @@ pub fn apply_pending_auras(
             combat_log.log(
                 CombatLogEventType::Buff,
                 format!(
-                    "Team {} {} gains {} (+{:.0} mana/s)",
-                    target_combatant.team,
-                    target_combatant.class.name(),
+                    "{} gains {} (+{:.0} mana/s)",
+                    target_id,
                     pending.aura.ability_name,
                     pending.aura.magnitude
                 )
@@ -623,9 +610,8 @@ pub fn apply_pending_auras(
             combat_log.log(
                 CombatLogEventType::Buff,
                 format!(
-                    "Team {} {} gains {}",
-                    target_combatant.team,
-                    target_combatant.class.name(),
+                    "{} gains {}",
+                    target_id,
                     pending.aura.ability_name,
                 )
             );
@@ -639,9 +625,8 @@ pub fn apply_pending_auras(
             combat_log.log(
                 CombatLogEventType::Buff,
                 format!(
-                    "Team {} {} gains {}",
-                    target_combatant.team,
-                    target_combatant.class.name(),
+                    "{} gains {}",
+                    target_id,
                     pending.aura.ability_name,
                 )
             );
@@ -653,9 +638,8 @@ pub fn apply_pending_auras(
             combat_log.log(
                 CombatLogEventType::Buff,
                 format!(
-                    "Team {} {} gains {} ({}% shorter interrupt lockouts)",
-                    target_combatant.team,
-                    target_combatant.class.name(),
+                    "{} gains {} ({}% shorter interrupt lockouts)",
+                    target_id,
                     pending.aura.ability_name,
                     reduction_pct
                 )
@@ -668,9 +652,8 @@ pub fn apply_pending_auras(
             combat_log.log(
                 CombatLogEventType::Buff,
                 format!(
-                    "Team {} {} gains {} ({}% damage reduction)",
-                    target_combatant.team,
-                    target_combatant.class.name(),
+                    "{} gains {} ({}% damage reduction)",
+                    target_id,
                     pending.aura.ability_name,
                     reduction_percent
                 )
@@ -692,7 +675,6 @@ pub fn apply_pending_auras(
 
         // Log DR info for CC auras
         if let Some(category) = dr_category {
-            let target_id = combat_log_id_for(&target_combatant, pet_query.get(pending.target).ok());
             let dr_pct = (dr_multiplier * 100.0) as i32;
             let message = format!(
                 "{} on {} ({:.1}s, DR: {}%)",
@@ -744,6 +726,7 @@ pub fn process_aura_breaks(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
     mut combatants: Query<(Entity, &Combatant, &mut ActiveAuras, Option<&DamageTakenThisFrame>)>,
+    pet_query: Query<&Pet>,
 ) {
     for (entity, combatant, mut active_auras, damage_taken) in combatants.iter_mut() {
         let Some(damage_taken) = damage_taken else {
@@ -797,9 +780,8 @@ pub fn process_aura_breaks(
                     };
 
                     let message = format!(
-                        "Team {} {}'s {} broke from damage ({:.0}/{:.0})",
-                        combatant.team,
-                        combatant.class.name(),
+                        "{}'s {} broke from damage ({:.0}/{:.0})",
+                        combat_log_id_for(combatant, pet_query.get(entity).ok()),
                         aura_name,
                         aura.accumulated_damage,
                         aura.break_on_damage_threshold

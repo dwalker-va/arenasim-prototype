@@ -18,6 +18,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use super::components::*;
+use super::utils::combat_log_id_for;
 
 /// Short window (seconds) the buff aura is refreshed to each pulse. Allies that
 /// leave the radius keep the buff for at most this long before it expires.
@@ -61,6 +62,7 @@ pub fn totem_pulse_system(
     mut combat_log: ResMut<CombatLog>,
     mut totems: Query<(Entity, &mut Totem, &Transform)>,
     mut combatants: Query<(Entity, &Combatant, &Transform, Option<&mut ActiveAuras>), Without<Totem>>,
+    pet_query: Query<&Pet>,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
     // Don't pulse totems during victory celebration (mirrors slow_zone_system).
@@ -144,8 +146,8 @@ pub fn totem_pulse_system(
                     combat_log.log(
                         CombatLogEventType::Buff,
                         format!(
-                            "[TOTEM] {} buffs Team {} {}",
-                            buff_name, ally.team, ally.class.name()
+                            "[TOTEM] {} buffs {}",
+                            buff_name, combat_log_id_for(ally, pet_query.get(ally_entity).ok())
                         ),
                     );
                 }
@@ -159,8 +161,8 @@ pub fn totem_pulse_system(
                 combat_log.log(
                     CombatLogEventType::Buff,
                     format!(
-                        "[TOTEM] {} buffs Team {} {}",
-                        buff_name, ally.team, ally.class.name()
+                        "[TOTEM] {} buffs {}",
+                        buff_name, combat_log_id_for(ally, pet_query.get(ally_entity).ok())
                     ),
                 );
             }
