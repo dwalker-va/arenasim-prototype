@@ -38,6 +38,15 @@ pub fn combat_log_id(team: u8, slot: u8, display_name: &str) -> CombatantId {
     format!("Team {} {} #{}", team, display_name, slot + 1)
 }
 
+/// The owner-relative team slot for a pet, from its raw `Combatant`/`CombatantInfo`
+/// slot (`PET_SLOT_BASE + owner_slot`). Single source of truth for the
+/// subtraction — [`super::components::Combatant::owner_relative_slot`] and
+/// [`super::CombatantInfo::log_id`] both delegate here. `saturating_sub` keeps a
+/// mis-constructed non-pet slot from panicking (debug) or wrapping (release).
+pub fn owner_relative_slot(slot: u8) -> u8 {
+    slot.saturating_sub(super::constants::PET_SLOT_BASE)
+}
+
 /// Combat-log ID for a pet, keyed to its OWNER's slot so it lines up with the
 /// owner's id (e.g. `"Team 1 Spider #2"` belongs to `"Team 1 Hunter #2"`).
 ///
@@ -55,6 +64,23 @@ pub fn pet_combatant_id(team: u8, owner_slot: u8, pet_type: PetType) -> Combatan
     combat_log_id(team, owner_slot, pet_type.name())
 }
 
+/// Pet-aware combat-log id from `Copy` parts (`team`, raw `slot`, `class`, and
+/// the optional `pet_type`). The single resolver all the others delegate to;
+/// callers that only have `Copy` fields (e.g. a per-frame snapshot that must not
+/// allocate) use this directly and defer the `String` to the one entity that
+/// needs it.
+pub fn log_id_from_parts(
+    team: u8,
+    slot: u8,
+    class: match_config::CharacterClass,
+    pet_type: Option<PetType>,
+) -> CombatantId {
+    match pet_type {
+        Some(pt) => pet_combatant_id(team, owner_relative_slot(slot), pt),
+        None => combatant_id(team, slot, class),
+    }
+}
+
 /// Pet-aware combat-log id for a live combatant + its optional `Pet` marker.
 /// The counterpart to [`super::CombatantInfo::log_id`] for the systems that hold
 /// a `&Combatant`/`Option<&Pet>` rather than a snapshot (damage/heal application
@@ -62,10 +88,7 @@ pub fn pet_combatant_id(team: u8, owner_slot: u8, pet_type: PetType) -> Combatan
 /// [`pet_combatant_id`] so its damage/CC attributes to its own registered id
 /// instead of an impossible `"<OwnerClass> #<raw slot>"`.
 pub fn combat_log_id_for(combatant: &Combatant, pet: Option<&Pet>) -> CombatantId {
-    match pet {
-        Some(p) => pet_combatant_id(combatant.team, combatant.owner_relative_slot(), p.pet_type),
-        None => combatant_id(combatant.team, combatant.slot, combatant.class),
-    }
+    log_id_from_parts(combatant.team, combatant.slot, combatant.class, pet.map(|p| p.pet_type))
 }
 
 /// Helper to log an ability cast with consistent formatting.
@@ -82,11 +105,14 @@ pub fn log_ability_use(
     caster_slot: u8,
     caster_class: CharacterClass,
     ability_name: &str,
-    target: Option<(u8, u8, CharacterClass)>,
+    // Already-resolved, pet-aware target id (via `CombatantInfo::log_id` /
+    // `combat_log_id_for`). Taking a resolved id — not a `(team, slot, class)`
+    // tuple — makes a pet target unrepresentable-as-wrong at the ~40 call sites:
+    // the tuple's `class` would be the owner's and its `slot` the raw pet slot.
+    target_id: Option<CombatantId>,
     verb: &str,
 ) {
     let caster_id = combatant_id(caster_team, caster_slot, caster_class);
-    let target_id = target.map(|(team, slot, class)| combatant_id(team, slot, class));
     let message = match &target_id {
         Some(tid) => format!("{} {} {} on {}", caster_id, verb, ability_name, tid),
         None => format!("{} {} {}", caster_id, verb, ability_name),

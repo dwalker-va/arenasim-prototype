@@ -402,7 +402,7 @@ fn try_corruption(
 
     let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| (info.team, info.slot, info.class));
+        .map(|info| info.log_id());
     log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Corruption", target_tuple, "casts");
 
     if let Some(aura_pending) = AuraPending::from_ability(target_entity, entity, corruption_def) {
@@ -480,7 +480,7 @@ fn try_unstable_affliction(
 
     let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| (info.team, info.slot, info.class));
+        .map(|info| info.log_id());
     log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Unstable Affliction", target_tuple, "begins casting");
 
     info!(
@@ -545,7 +545,7 @@ fn try_immolate(
 
     let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| (info.team, info.slot, info.class));
+        .map(|info| info.log_id());
     log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Immolate", target_tuple, "begins casting");
 
     info!(
@@ -615,7 +615,7 @@ fn try_fear(
 
     let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| (info.team, info.slot, info.class));
+        .map(|info| info.log_id());
     log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Fear", target_tuple, "begins casting");
 
     info!(
@@ -686,7 +686,7 @@ fn try_death_coil(
 
     let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| (info.team, info.slot, info.class));
+        .map(|info| info.log_id());
     log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Death Coil", target_tuple, "fires");
 
     info!(
@@ -739,7 +739,7 @@ fn try_shadowbolt(
 
     let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| (info.team, info.slot, info.class));
+        .map(|info| info.log_id());
     log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Shadow Bolt", target_tuple, "begins casting");
 
     info!(
@@ -831,7 +831,7 @@ fn try_drain_life(
 
     let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| (info.team, info.slot, info.class));
+        .map(|info| info.log_id());
     log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Drain Life", target_tuple, "begins channeling");
 
     info!(
@@ -959,7 +959,7 @@ fn try_cast_curse(
 
     let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| (info.team, info.slot, info.class));
+        .map(|info| info.log_id());
     log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, ability_name, target_tuple, "casts");
 
     if let Some(aura_pending) = AuraPending::from_ability(target_entity, entity, ability_def) {

@@ -6,7 +6,7 @@ use super::super::components::*;
 use super::super::abilities::SpellSchool;
 use super::super::ability_config::AbilityDefinitions;
 use super::super::constants::DIVINE_SHIELD_DAMAGE_PENALTY;
-use super::super::utils::combatant_id;
+use super::super::utils::{combatant_id, combat_log_id_for};
 use super::get_lockout_duration_reduction;
 
 /// Roll a critical strike check. Returns true if the roll is a crit.
@@ -299,17 +299,13 @@ fn apply_interrupt_lockout(
     interrupted_spell_name: &str,
     lockout_reduction: f32,
 ) {
-    // Get caster info for logging
-    let caster_info = if let Ok(caster) = combatants.get(interrupt.caster) {
-        let display_name = if let Ok(pet) = pet_query.get(interrupt.caster) {
-            pet.pet_type.name().to_string()
-        } else {
-            caster.class.name().to_string()
-        };
-        (caster.team, display_name)
-    } else {
-        (0, "Unknown".to_string()) // Fallback
-    };
+    // Pet-aware interrupter id (Pummel/Wind Shear can come from a pet).
+    let caster_id = combatants
+        .get(interrupt.caster)
+        .map(|caster| combat_log_id_for(caster, pet_query.get(interrupt.caster).ok()))
+        .unwrap_or_else(|_| "Unknown".to_string());
+    // The interrupted combatant's id (target_combatant == interrupt.target).
+    let target_id = combat_log_id_for(target_combatant, pet_query.get(interrupt.target).ok());
 
     // Apply spell school lockout aura. The locked school is stored in the aura's
     // `magnitude` (the lockout aura has no dedicated school slot); the AI decodes
@@ -354,14 +350,8 @@ fn apply_interrupt_lockout(
     };
 
     let message = format!(
-        "Team {} {} interrupts Team {} {}'s {} - {} school locked for {:.1}s",
-        caster_info.0,
-        caster_info.1,
-        target_combatant.team,
-        target_combatant.class.name(),
-        interrupted_spell_name,
-        school_name,
-        effective_lockout
+        "{} interrupts {}'s {} - {} school locked for {:.1}s",
+        caster_id, target_id, interrupted_spell_name, school_name, effective_lockout
     );
     combat_log.log(CombatLogEventType::AbilityUsed, message);
 

@@ -512,7 +512,7 @@ fn try_fortitude(
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
 
-    let target_tuple = ctx.combatants.get(&buff_target).map(|info| (info.team, info.slot, info.class));
+    let target_tuple = ctx.combatants.get(&buff_target).map(|info| info.log_id());
     log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Power Word: Fortitude", target_tuple, "casts");
 
     if let Some(aura_pending) = AuraPending::from_ability(buff_target, entity, def) {
@@ -617,7 +617,7 @@ fn try_power_word_shield(
     combatant.current_mana -= pw_shield_def.mana_cost;
     combatant.global_cooldown = GCD;
 
-    let target_tuple = ctx.combatants.get(&shield_entity).map(|info| (info.team, info.slot, info.class));
+    let target_tuple = ctx.combatants.get(&shield_entity).map(|info| info.log_id());
     log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Power Word: Shield", target_tuple, "casts");
 
     // Absorb scales with the Priest's effective spell power (base + gear +
@@ -755,7 +755,7 @@ fn try_flash_heal(
 
     let target_tuple = ctx.combatants
         .get(&heal_target)
-        .map(|info| (info.team, info.slot, info.class));
+        .map(|info| info.log_id());
     log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, target_tuple, "begins casting");
 
     info!(
@@ -840,7 +840,7 @@ fn try_mind_blast(
 
     let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| (info.team, info.slot, info.class));
+        .map(|info| info.log_id());
     log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, target_tuple, "begins casting");
 
     info!(
@@ -1096,7 +1096,7 @@ fn try_mana_burn(
 
     let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| (info.team, info.slot, info.class));
+        .map(|info| info.log_id());
     log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, target_tuple, "begins casting");
 
     info!(

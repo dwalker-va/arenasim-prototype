@@ -350,7 +350,7 @@ fn try_arcane_intellect(
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
 
-    let target_tuple = ctx.combatants.get(&buff_target).map(|info| (info.team, info.slot, info.class));
+    let target_tuple = ctx.combatants.get(&buff_target).map(|info| info.log_id());
     log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Arcane Intellect", target_tuple, "casts");
 
     if let Some(aura_pending) = AuraPending::from_ability(buff_target, entity, def) {
@@ -607,7 +607,7 @@ fn try_polymorph(
 
     let target_tuple = ctx.combatants
         .get(&cc_target)
-        .map(|info| (info.team, info.slot, info.class));
+        .map(|info| info.log_id());
     log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, target_tuple, "begins casting");
 
     info!(
@@ -715,7 +715,7 @@ fn try_frostbolt(
 
     let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| (info.team, info.slot, info.class));
+        .map(|info| info.log_id());
     log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, target_tuple, "begins casting");
 
     info!(

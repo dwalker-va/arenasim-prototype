@@ -222,7 +222,7 @@ fn try_lesser_healing_wave(
     let cast_time = calculate_cast_time(def.cast_time, auras);
     commands.entity(entity).insert(CastingState::new(ability, heal_target, cast_time));
 
-    let target_tuple = ctx.combatants.get(&heal_target).map(|info| (info.team, info.slot, info.class));
+    let target_tuple = ctx.combatants.get(&heal_target).map(|info| info.log_id());
     log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, target_tuple, "begins casting");
 
     true
@@ -329,7 +329,7 @@ fn try_frost_shock(
     let cast_time = calculate_cast_time(def.cast_time, auras); // 0.0 — completes immediately
     commands.entity(entity).insert(CastingState::new(ability, target_entity, cast_time));
 
-    let target_tuple = ctx.combatants.get(&target_entity).map(|info| (info.team, info.slot, info.class));
+    let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());
     log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, target_tuple, "casts");
 
     true
@@ -393,7 +393,7 @@ fn try_lightning_bolt(
     let cast_time = calculate_cast_time(def.cast_time, auras);
     commands.entity(entity).insert(CastingState::new(ability, target_entity, cast_time));
 
-    let target_tuple = ctx.combatants.get(&target_entity).map(|info| (info.team, info.slot, info.class));
+    let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());
     log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, target_tuple, "begins casting");
 
     true

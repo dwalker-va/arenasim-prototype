@@ -523,7 +523,7 @@ fn try_charge(
     // Log
     let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| (info.team, info.slot, info.class));
+        .map(|info| info.log_id());
     log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Charge", target_tuple, "uses");
 
     info!(
@@ -601,7 +601,7 @@ fn try_rend(
     // Log
     let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| (info.team, info.slot, info.class));
+        .map(|info| info.log_id());
     log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Rend", target_tuple, "uses");
 
     // Apply DoT aura
@@ -691,7 +691,7 @@ fn try_mortal_strike(
     combatant.global_cooldown = GCD;
 
     // Log
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Mortal Strike", Some((target_info.team, target_info.slot, target_info.class)), "uses");
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Mortal Strike", Some(target_info.log_id()), "uses");
 
     // Calculate and queue damage (with dynamic aura bonuses)
     let self_auras = ctx.active_auras.get(&entity).map(|v| v.as_slice()).unwrap_or(&[]);

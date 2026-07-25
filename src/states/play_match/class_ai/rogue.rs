@@ -424,7 +424,7 @@ fn try_ambush(
 
     let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| (info.team, info.slot, info.class));
+        .map(|info| info.log_id());
     log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Ambush", target_tuple, "uses");
 
     info!(
@@ -478,7 +478,7 @@ fn try_cheap_shot(
 
     let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| (info.team, info.slot, info.class));
+        .map(|info| info.log_id());
     log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Cheap Shot", target_tuple, "uses");
 
     if let Some(aura) = def.applies_aura.as_ref() {
@@ -489,17 +489,12 @@ fn try_cheap_shot(
 
         if let Some(info) = ctx.combatants.get(&target_entity) {
             let cc_type = format!("{:?}", aura.aura_type);
-            let message = format!(
-                "Team {} {} uses {} on Team {} {}",
-                combatant.team,
-                combatant.class.name(),
-                def.name,
-                info.team,
-                info.class.name()
-            );
+            let caster_id = combatant_id(combatant.team, combatant.slot, combatant.class);
+            let target_id = info.log_id();
+            let message = format!("{} uses {} on {}", caster_id, def.name, target_id);
             combat_log.log_crowd_control(
-                combatant_id(combatant.team, combatant.slot, combatant.class),
-                combatant_id(info.team, info.slot, info.class),
+                caster_id.clone(),
+                target_id,
                 cc_type,
                 aura.duration,
                 message,
@@ -558,7 +553,7 @@ fn try_kidney_shot(
 
     let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| (info.team, info.slot, info.class));
+        .map(|info| info.log_id());
     log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Kidney Shot", target_tuple, "uses");
 
     if let Some(aura) = def.applies_aura.as_ref() {
@@ -569,17 +564,12 @@ fn try_kidney_shot(
 
         if let Some(info) = ctx.combatants.get(&target_entity) {
             let cc_type = format!("{:?}", aura.aura_type);
-            let message = format!(
-                "Team {} {} uses {} on Team {} {}",
-                combatant.team,
-                combatant.class.name(),
-                def.name,
-                info.team,
-                info.class.name()
-            );
+            let caster_id = combatant_id(combatant.team, combatant.slot, combatant.class);
+            let target_id = info.log_id();
+            let message = format!("{} uses {} on {}", caster_id, def.name, target_id);
             combat_log.log_crowd_control(
-                combatant_id(combatant.team, combatant.slot, combatant.class),
-                combatant_id(info.team, info.slot, info.class),
+                caster_id.clone(),
+                target_id,
                 cc_type,
                 aura.duration,
                 message,
@@ -653,7 +643,7 @@ fn try_sinister_strike(
 
     let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| (info.team, info.slot, info.class));
+        .map(|info| info.log_id());
     log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Sinister Strike", target_tuple, "uses");
 
     info!(

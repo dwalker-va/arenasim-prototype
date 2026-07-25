@@ -372,10 +372,9 @@ pub fn apply_pending_auras(
             combat_log.log(
                 CombatLogEventType::CrowdControl,
                 format!(
-                    "{} IMMUNE on Team {} {} (Berserker Rage)",
+                    "{} IMMUNE on {} (Berserker Rage)",
                     pending.aura.ability_name,
-                    target_combatant.team,
-                    target_combatant.class.name(),
+                    combat_log_id_for(&target_combatant, pet_query.get(pending.target).ok()),
                 ),
             );
 
@@ -409,17 +408,11 @@ pub fn apply_pending_auras(
                         PlayMatchEntity,
                     ));
 
-                    let display_name = if let Ok(pet) = pet_query.get(pending.target) {
-                        pet.pet_type.name().to_string()
-                    } else {
-                        target_combatant.class.name().to_string()
-                    };
-
+                    let target_id = combat_log_id_for(&target_combatant, pet_query.get(pending.target).ok());
                     let message = format!(
-                        "{} IMMUNE on Team {} {} (DR immune)",
+                        "{} IMMUNE on {} (DR immune)",
                         pending.aura.ability_name,
-                        target_combatant.team,
-                        display_name,
+                        target_id,
                     );
                     combat_log.log(CombatLogEventType::CrowdControl, message);
 
@@ -699,18 +692,12 @@ pub fn apply_pending_auras(
 
         // Log DR info for CC auras
         if let Some(category) = dr_category {
-            let display_name = if let Ok(pet) = pet_query.get(pending.target) {
-                pet.pet_type.name().to_string()
-            } else {
-                target_combatant.class.name().to_string()
-            };
-
+            let target_id = combat_log_id_for(&target_combatant, pet_query.get(pending.target).ok());
             let dr_pct = (dr_multiplier * 100.0) as i32;
             let message = format!(
-                "{} on Team {} {} ({:.1}s, DR: {}%)",
+                "{} on {} ({:.1}s, DR: {}%)",
                 aura_to_add.ability_name,
-                target_combatant.team,
-                display_name,
+                target_id,
                 aura_to_add.duration,
                 dr_pct,
             );
@@ -1087,6 +1074,7 @@ pub fn process_hot_ticks(
     dampening: Res<ArenaDampening>,
     mut combatants_with_auras: Query<(Entity, &mut Combatant, &Transform, &mut ActiveAuras)>,
     combatants_without_auras: Query<(Entity, &Combatant), Without<ActiveAuras>>,
+    pet_query: Query<&Pet>,
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
@@ -1181,9 +1169,9 @@ pub fn process_hot_ticks(
             continue;
         }
 
-        let target_team = target.team;
-        let target_class = target.class;
-        let target_slot = target.slot;
+        // Pet-aware: a HoT bearer CAN be a pet — Healing Stream Totem pulses its
+        // HoT onto every ally in radius, pets included.
+        let target_id = combat_log_id_for(&target, pet_query.get(target_entity).ok());
 
         // Arena dampening: time-ramped reduction of all healing (HoT ticks and
         // Healing Stream Totem pulses included — free sustain must dampen too)
@@ -1214,10 +1202,8 @@ pub fn process_hot_ticks(
             PlayMatchEntity,
         ));
 
-        // Log to combat log with structured data. HoTs only ever target allies
-        // (primaries), so the ally id is the plain slot-suffixed combatant id.
+        // Log to combat log with structured data.
         let caster_id = combatant_id(caster_team, caster_slot, caster_class);
-        let target_id = combatant_id(target_team, target_slot, target_class);
         let message = format!(
             "{}'s {} heals {} for {:.0}",
             caster_id, ability_name, target_id, actual_healing

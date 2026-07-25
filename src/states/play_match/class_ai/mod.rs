@@ -120,7 +120,7 @@ impl CombatantInfo {
         match self.pet_type {
             Some(pt) => super::utils::pet_combatant_id(
                 self.team,
-                self.slot.saturating_sub(super::constants::PET_SLOT_BASE),
+                super::utils::owner_relative_slot(self.slot),
                 pt,
             ),
             None => super::utils::combatant_id(self.team, self.slot, self.class),
@@ -817,7 +817,7 @@ pub fn try_dispel_ally(
     combatant.global_cooldown = GCD;
 
     // Log
-    let target_tuple = ctx.combatants.get(&dispel_target).map(|info| (info.team, info.slot, info.class));
+    let target_tuple = ctx.combatants.get(&dispel_target).map(|info| info.log_id());
     log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, log_name, target_tuple, "casts");
 
     // Spawn pending dispel
@@ -964,7 +964,7 @@ pub fn try_purge_enemy(
         combatant.ability_cooldowns.insert(ability, def.cooldown);
     }
 
-    let target_tuple = ctx.combatants.get(&target_entity).map(|info| (info.team, info.slot, info.class));
+    let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());
     log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, target_tuple, "casts");
 
     // Pin the filter to the chosen (highest-priority) buff type so process_dispels

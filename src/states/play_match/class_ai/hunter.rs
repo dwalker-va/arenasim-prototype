@@ -605,7 +605,7 @@ fn try_concussive_shot(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, Some((target_info.team, target_info.slot, target_info.class)), "fires");
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, Some(target_info.log_id()), "fires");
 
     true
 }
@@ -651,7 +651,7 @@ fn try_aimed_shot(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, Some((target_info.team, target_info.slot, target_info.class)), "begins casting");
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, Some(target_info.log_id()), "begins casting");
 
     true
 }
@@ -712,7 +712,7 @@ fn try_arcane_shot(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, Some((target_info.team, target_info.slot, target_info.class)), "fires");
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, Some(target_info.log_id()), "fires");
 
     true
 }
@@ -833,7 +833,7 @@ fn try_serpent_sting(
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, Some((target_info.team, target_info.slot, target_info.class)), "fires");
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, Some(target_info.log_id()), "fires");
 
     true
 }

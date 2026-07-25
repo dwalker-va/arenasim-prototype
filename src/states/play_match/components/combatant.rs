@@ -381,7 +381,7 @@ impl Combatant {
     /// slot from panicking (debug) or wrapping (release) — callers only invoke
     /// this on Pet-gated entities, so the clamp is a belt-and-suspenders guard.
     pub fn owner_relative_slot(&self) -> u8 {
-        self.slot.saturating_sub(super::super::constants::PET_SLOT_BASE)
+        super::super::utils::owner_relative_slot(self.slot)
     }
 
     /// Get the resistance value for a given spell school.

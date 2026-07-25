@@ -107,15 +107,15 @@ pub fn update_stealth_visuals(
 fn log_los_fizzle(
     combat_log: &mut CombatLog,
     team: u8,
+    slot: u8,
     class: match_config::CharacterClass,
     ability_name: &str,
 ) {
     combat_log.log(
         CombatLogEventType::MatchEvent,
         format!(
-            "Team {} {} fails to cast {}: target out of line of sight",
-            team,
-            class.name(),
+            "{} fails to cast {}: target out of line of sight",
+            combatant_id(team, slot, class),
             ability_name
         ),
     );
@@ -326,7 +326,7 @@ pub fn process_casting(
             // this is byte-identical on BasicArena / obstacle-free maps.
             if let Ok((_, target_transform, ..)) = combatants.get(target_entity) {
                 if !has_line_of_sight(&map_geometry.volumes, caster_pos, target_transform.translation) {
-                    log_los_fizzle(&mut combat_log, caster_team, caster_class, &def.name);
+                    log_los_fizzle(&mut combat_log, caster_team, caster_slot, caster_class, &def.name);
                     continue;
                 }
             }
@@ -380,7 +380,7 @@ pub fn process_casting(
         // is_alive check wins by placement). Same caster→target segment and
         // no-op-on-empty semantics as the cast-start gate.
         if !has_line_of_sight(&map_geometry.volumes, caster_pos, target_transform.translation) {
-            log_los_fizzle(&mut combat_log, caster_team, caster_class, &def.name);
+            log_los_fizzle(&mut combat_log, caster_team, caster_slot, caster_class, &def.name);
             continue;
         }
 
@@ -819,12 +819,15 @@ pub fn process_channeling(
         .iter()
         .map(|(entity, transform, _, _, _)| (entity, transform.translation))
         .collect();
-    // (is_alive, pet-aware combat-log id) — the id is resolved once here so the
-    // channel-tick log below attributes to a pet target correctly.
-    let health_info: std::collections::HashMap<Entity, (bool, crate::combat::log::CombatantId)> = combatants
+    // (is_alive, team, slot, class, pet_type) — all `Copy`, so this per-frame
+    // snapshot allocates nothing; the pet-aware id `String` is resolved lazily
+    // below only for the one target that actually ticks (Drain Life is the sole
+    // channel, so most frames tick nothing).
+    let health_info: std::collections::HashMap<Entity, (bool, u8, u8, match_config::CharacterClass, Option<PetType>)> = combatants
         .iter()
         .map(|(entity, _, combatant, _, _)| {
-            (entity, (combatant.is_alive(), combat_log_id_for(combatant, pet_query.get(entity).ok())))
+            let pet_type = pet_query.get(entity).ok().map(|p| p.pet_type);
+            (entity, (combatant.is_alive(), combatant.team, combatant.slot, combatant.class, pet_type))
         })
         .collect();
     // Snapshot target immunity status for Drain Life healing suppression
@@ -890,7 +893,7 @@ pub fn process_channeling(
         // Check if target died or no longer exists
         let target_alive = health_info
             .get(&channeling.target)
-            .map(|(alive, _)| *alive)
+            .map(|(alive, ..)| *alive)
             .unwrap_or(false);
         if !target_alive {
             remove_channel.push(caster_entity);
@@ -919,8 +922,9 @@ pub fn process_channeling(
             }
 
             // Log the tick
-            if let Some((_, target_id)) = health_info.get(&channeling.target) {
+            if let Some(&(_, t_team, t_slot, t_class, t_pet)) = health_info.get(&channeling.target) {
                 let caster_id = combatant_id(caster.team, caster.slot, caster.class);
+                let target_id = super::super::utils::log_id_from_parts(t_team, t_slot, t_class, t_pet);
                 let damage_message = format!(
                     "{}'s {} ticks on {} for {:.0} damage",
                     caster_id, ability_def.name, target_id, damage
