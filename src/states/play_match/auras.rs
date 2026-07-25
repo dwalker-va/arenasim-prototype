@@ -237,16 +237,17 @@ pub fn apply_pending_auras(
             continue;
         };
 
-        // The target's pet-aware combat-log id, resolved once for every
-        // buff/CC/IMMUNE log below (the id depends only on team/slot/class/pet,
-        // none of which the aura mutates, so an early resolve is stable).
-        let target_id = combat_log_id_for(&target_combatant, pet_query.get(pending.target).ok());
-
         // Don't apply auras to dead combatants
         if !target_combatant.is_alive() {
             commands.entity(pending_entity).despawn();
             continue;
         }
+
+        // The target's pet-aware combat-log id, resolved once for the buff / CC /
+        // IMMUNE log lines below. Placed after the dead-target bail-out so an aura
+        // landing on a corpse doesn't allocate. (Depends only on
+        // team/slot/class/pet, none of which the aura mutations touch.)
+        let target_id = combat_log_id_for(&target_combatant, pet_query.get(pending.target).ok());
 
         // Check for CC immunity: Charging combatants are immune to crowd control
         let is_cc_aura = matches!(

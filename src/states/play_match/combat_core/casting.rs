@@ -1050,10 +1050,16 @@ pub fn process_channeling(
                     commands.entity(target_entity).remove::<ChannelingState>();
 
                     let target_id = combat_log_id_for(&target, pet_query.get(target_entity).ok());
+                    let caster_id = combatant_id(caster_team, caster_slot, caster_class);
+                    // Credit the kill: this tick's Damage event was logged with
+                    // is_killing_blow=false in the pass above (death is only known
+                    // here), so back-patch it — else the Warlock's K column
+                    // undercounts Drain Life finishes.
+                    combat_log.mark_last_damage_killing_blow(&caster_id, &target_id);
                     let death_message = format!("{} has been eliminated", target_id);
                     combat_log.log_death(
                         target_id,
-                        Some(combatant_id(caster_team, caster_slot, caster_class)),
+                        Some(caster_id),
                         death_message,
                     );
                 }

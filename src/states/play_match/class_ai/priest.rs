@@ -312,14 +312,14 @@ fn try_psychic_scream(
     // real threat are still feared — this only blocks a pet-only cast.
     let has_real_threat = targets
         .iter()
-        .any(|(e, _)| ctx.combatants.get(e).map_or(false, |i| !i.is_pet));
+        .any(|e| ctx.combatants.get(e).map_or(false, |i| !i.is_pet));
     if !has_real_threat {
         builder.reject(scream, RejectionReason::NoValidTarget);
         return false;
     }
 
     fire_psychic_scream(
-        commands, combat_log, scream_def, entity, combatant, same_frame_cc_queue, &targets, builder,
+        commands, combat_log, scream_def, entity, combatant, same_frame_cc_queue, &targets, ctx, builder,
     );
     true
 }
@@ -332,15 +332,17 @@ fn scream_targets(
     entity: Entity,
     my_pos: Vec3,
     radius: f32,
-) -> Vec<(Entity, crate::combat::log::CombatantId)> {
+) -> Vec<Entity> {
+    // Returns just entities (Copy) — this is a per-tick *predicate* helper whose
+    // result is usually discarded, so it must not allocate. The pet-aware id is
+    // resolved lazily in `fire_psychic_scream`, which only runs on the committed
+    // cast.
     ctx.visible_enemies_within(entity, my_pos, radius)
         .into_iter()
         .filter(|info| {
             !ctx.entity_is_immune(info.entity) && !ctx.is_dr_immune(info.entity, DRCategory::Fears)
         })
-        // Carry each target's pet-aware combat-log id so the fear-CC log
-        // attributes correctly when Scream catches an enemy pet.
-        .map(|info| (info.entity, info.log_id()))
+        .map(|info| info.entity)
         .collect()
 }
 
@@ -355,7 +357,8 @@ fn fire_psychic_scream(
     entity: Entity,
     combatant: &mut Combatant,
     same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
-    targets: &[(Entity, crate::combat::log::CombatantId)],
+    targets: &[Entity],
+    ctx: &CombatContext,
     builder: &mut DecisionEventBuilder<'_>,
 ) {
     builder.choose(AbilityType::PsychicScream, None, true);
@@ -382,19 +385,21 @@ fn fire_psychic_scream(
 
     let fear_duration = scream_def.applies_aura.as_ref().map(|a| a.duration).unwrap_or(0.0);
     let caster_id = combatant_id(combatant.team, combatant.slot, combatant.class);
-    for (target_entity, target_id) in targets {
+    for target_entity in targets {
         if let Some(aura_pending) = AuraPending::from_ability(*target_entity, entity, scream_def) {
             same_frame_cc_queue.push((*target_entity, aura_pending.aura.clone()));
             commands.spawn(aura_pending);
         }
 
+        // Resolve the pet-aware id here (committed cast only, not per predicate tick).
+        let target_id = ctx.combatants.get(target_entity).map(|i| i.log_id()).unwrap_or_default();
         let message = format!(
             "{}'s Psychic Scream fears {} ({:.1}s)",
             caster_id, target_id, fear_duration
         );
         combat_log.log_crowd_control(
             caster_id.clone(),
-            target_id.clone(),
+            target_id,
             "Fear".to_string(),
             fear_duration,
             message,
@@ -446,7 +451,7 @@ fn try_dip_psychic_scream(
     }
 
     fire_psychic_scream(
-        commands, combat_log, scream_def, entity, combatant, same_frame_cc_queue, &targets, builder,
+        commands, combat_log, scream_def, entity, combatant, same_frame_cc_queue, &targets, ctx, builder,
     );
     true
 }

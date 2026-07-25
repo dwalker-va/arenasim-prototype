@@ -837,12 +837,15 @@ fn try_hammer_of_justice(
         return false;
     }
 
-    let enemies_in_range: Vec<(&Entity, u8, CharacterClass)> = ctx.combatants
+    // Carry the pet-aware id (hoj_target_eligible already excludes pets, but the
+    // id is resolved via log_id so this can't silently break if that changes);
+    // class is kept only for the healer-preferring pick.
+    let enemies_in_range: Vec<(&Entity, CharacterClass, crate::combat::log::CombatantId)> = ctx.combatants
         .iter()
         .filter(|(e, _)| hoj_target_eligible(ctx, combatant.team, **e))
         .filter_map(|(e, info)| {
             if my_pos.distance(info.position) <= def.range {
-                Some((e, info.slot, info.class))
+                Some((e, info.class, info.log_id()))
             } else {
                 None
             }
@@ -851,17 +854,17 @@ fn try_hammer_of_justice(
 
     let stun_target = enemies_in_range
         .iter()
-        .find(|(_, _, class)| class.is_healer())
+        .find(|(_, class, _)| class.is_healer())
         .or_else(|| enemies_in_range.first())
-        .copied();
+        .cloned();
 
-    let Some((target_entity, target_slot, target_class)) = stun_target else {
+    let Some((target_entity, _target_class, target_id)) = stun_target else {
         builder.reject(ability, RejectionReason::NoValidTarget);
         return false;
     };
 
     cast_hammer_of_justice(
-        commands, combat_log, def, combatant, *target_entity, target_slot, target_class,
+        commands, combat_log, def, combatant, *target_entity, target_id,
         same_frame_cc_queue, builder,
     );
 
@@ -909,7 +912,7 @@ fn try_dip_hammer_of_justice(
     }
 
     cast_hammer_of_justice(
-        commands, combat_log, def, combatant, target, info.slot, info.class,
+        commands, combat_log, def, combatant, target, info.log_id(),
         same_frame_cc_queue, builder,
     );
 
@@ -926,8 +929,7 @@ fn cast_hammer_of_justice(
     def: &AbilityConfig,
     combatant: &mut Combatant,
     target_entity: Entity,
-    target_slot: u8,
-    target_class: CharacterClass,
+    target_id: crate::combat::log::CombatantId,
     same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
     builder: &mut DecisionEventBuilder<'_>,
 ) {
@@ -938,8 +940,6 @@ fn cast_hammer_of_justice(
     combatant.ability_cooldowns.insert(AbilityType::HammerOfJustice, def.cooldown);
 
     let caster_id = combatant_id(combatant.team, combatant.slot, combatant.class);
-    let enemy_team = if combatant.team == 1 { 2 } else { 1 };
-    let target_id = combatant_id(enemy_team, target_slot, target_class);
     log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, Some(target_id.clone()), "casts");
 
     if let Some(aura_def) = def.applies_aura.as_ref() {

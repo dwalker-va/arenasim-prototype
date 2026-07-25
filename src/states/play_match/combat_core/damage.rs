@@ -6,7 +6,7 @@ use super::super::components::*;
 use super::super::abilities::SpellSchool;
 use super::super::ability_config::AbilityDefinitions;
 use super::super::constants::DIVINE_SHIELD_DAMAGE_PENALTY;
-use super::super::utils::{combatant_id, combat_log_id_for};
+use super::super::utils::combat_log_id_for;
 use super::get_lockout_duration_reduction;
 
 /// Roll a critical strike check. Returns true if the roll is a crit.
@@ -219,7 +219,7 @@ pub fn process_interrupts(
                 cast_state.interrupted_display_time = 0.5; // Show "INTERRUPTED" for 0.5 seconds
 
                 // Mark the ability cast as interrupted in the combat log (for timeline visualization)
-                let interrupted_caster_id = combatant_id(target_combatant.team, target_combatant.slot, target_combatant.class);
+                let interrupted_caster_id = combat_log_id_for(target_combatant, pet_query.get(interrupt.target).ok());
                 combat_log.mark_cast_interrupted(&interrupted_caster_id, interrupted_spell_name);
 
                 // Check for lockout duration reduction (Concentration Aura)
@@ -258,7 +258,7 @@ pub fn process_interrupts(
                     channel_state.interrupted_display_time = 0.5; // Show "INTERRUPTED" for 0.5 seconds
 
                     // Mark the ability as interrupted in the combat log (for timeline visualization)
-                    let interrupted_caster_id = combatant_id(target_combatant.team, target_combatant.slot, target_combatant.class);
+                    let interrupted_caster_id = combat_log_id_for(target_combatant, pet_query.get(interrupt.target).ok());
                     combat_log.mark_cast_interrupted(&interrupted_caster_id, interrupted_spell_name);
 
                     // Check for lockout duration reduction (Concentration Aura)

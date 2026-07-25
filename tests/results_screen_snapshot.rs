@@ -53,9 +53,12 @@ fn results_screen_value_combos() {
     let results = MatchResults {
         winner: Some(1),
         duration_secs: 187.0,
+        // Two Rogues (slots 0/1) exercise the duplicate-class case: adjacent
+        // rows with the same class, distinguished only by the "#N" suffix +
+        // widened name cell.
         team1_combatants: vec![
             cs(CharacterClass::Rogue, 0, 956.0, 0.0, 334.0, true),
-            cs(CharacterClass::Mage, 1, 8.0, 0.0, 5.0, true),
+            cs(CharacterClass::Rogue, 1, 8.0, 0.0, 5.0, true),
             cs(CharacterClass::Priest, 2, 451.0, 1820.0, 301.0, true),
         ],
         team2_combatants: vec![
@@ -76,7 +79,7 @@ fn results_screen_value_combos() {
         log.log_damage(rogue.clone(), "Team 2 Priest #2".to_string(), "Eviscerate".to_string(), 100.0, true, false, String::new());
     }
     for _ in 0..11 {
-        log.log_damage(warlock.clone(), "Team 1 Mage #2".to_string(), "Shadow Bolt".to_string(), 100.0, true, false, String::new());
+        log.log_damage(warlock.clone(), "Team 1 Rogue #2".to_string(), "Shadow Bolt".to_string(), 100.0, true, false, String::new());
     }
 
     let icons = ClassIcons::default();

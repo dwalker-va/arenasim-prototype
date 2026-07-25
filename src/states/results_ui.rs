@@ -285,18 +285,12 @@ fn render_team_panel(
             });
             ui.add_space(4.0);
 
-            // Combatant rows. When a team fields two of the same class, their
-            // rows carry the same class name but different (correct) numbers —
-            // append the "#slot" suffix so they're tellable apart, matching the
-            // combat-log ids. Single-of-a-class rows stay unadorned.
-            let mut class_counts: std::collections::HashMap<CharacterClass, u8> =
-                std::collections::HashMap::new();
-            for s in combatants {
-                *class_counts.entry(s.class).or_insert(0) += 1;
-            }
+            // Combatant rows. Every row carries the "#slot" suffix, matching the
+            // combat-log ids unconditionally — so a reader cross-referencing the
+            // saved report to this screen always finds the same label, and two
+            // same-class teammates are never ambiguous.
             for stats in combatants {
-                let show_slot = class_counts.get(&stats.class).copied().unwrap_or(0) > 1;
-                combatant_block(ui, stats, team, combat_log, class_icons, max_damage, dimf, pet_links, show_slot);
+                combatant_block(ui, stats, team, combat_log, class_icons, max_damage, dimf, pet_links);
             }
 
             // Σ TOTAL row.
@@ -314,16 +308,11 @@ fn combatant_block(
     max_damage: f32,
     dimf: f32,
     pet_links: &std::collections::HashMap<String, (String, String)>,
-    show_slot: bool,
 ) {
     let cid = stats_log_id(team, stats);
     let class_color = dim(class_color32(stats.class), dimf);
     let kills = combat_log.killing_blows_including_pets(&cid, pet_links);
-    let row_label = if show_slot {
-        format!("{} #{}", stats.class.name(), stats.slot + 1)
-    } else {
-        stats.class.name().to_string()
-    };
+    let row_label = format!("{} #{}", stats.class.name(), stats.slot + 1);
 
     // Stat row (name left, stats right-aligned to the panel edge).
     ui.horizontal(|ui| {

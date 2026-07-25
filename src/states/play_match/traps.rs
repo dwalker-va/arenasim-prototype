@@ -76,7 +76,12 @@ pub fn trap_system(
         // Phase 3: Apply effect if triggered
         if let Some((target_entity, _target_team, target_name)) = triggered_by {
             trap.triggered = true;
-            let owner_name = format!("Team {}", trap.owner_team);
+            // The trap owner's own id (a Hunter, but resolve pet-aware for
+            // uniformity) so a Hunter+Hunter mirror shows which one's trap fired.
+            let owner_name = combatants
+                .get(trap.owner)
+                .map(|(_, c, _)| combat_log_id_for(c, pet_query.get(trap.owner).ok()))
+                .unwrap_or_else(|_| format!("Team {}", trap.owner_team));
 
             // Traps break stealth on trigger
             if let Ok((_, mut target_combatant, _)) = combatants.get_mut(target_entity) {

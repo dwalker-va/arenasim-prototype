@@ -70,9 +70,12 @@ Totem drops are also logged with a `[TOTEM]` note (drop + per-ally pulse):
 
 ```bash
 grep "\[TOTEM\]" $LOG | head
-# [  1.50s] [BUFF] [TOTEM] Team 1 Shaman drops Healing Stream Totem
-# [  1.52s] [BUFF] [TOTEM] Healing Stream Totem buffs Team 1 Warrior
+# [  1.50s] [BUFF] [TOTEM] Team 1 Shaman #1 drops Healing Stream Totem
+# [  1.52s] [BUFF] [TOTEM] Healing Stream Totem buffs Team 1 Warrior #1
 ```
+
+Combat-log combatant ids carry a 1-based `#slot` suffix (e.g. `Team 1 Shaman
+#1`) so same-class teammates are distinguishable — allow for it when grepping.
 
 ## Purge target strips
 
@@ -88,8 +91,8 @@ jq -c 'select(.kind == "ability_decision" and .actor.class == "Shaman"
 
 # What each Purge actually stripped (combat log) — buff name + victim
 grep "\[PURGE\]" $LOG
-# [ 13.93s] [BUFF] [PURGE] Power Word: Shield removed from Team 2 Priest
-# [ 16.97s] [BUFF] [PURGE] Ice Barrier removed from Team 2 Mage
+# [ 13.93s] [BUFF] [PURGE] Power Word: Shield removed from Team 2 Priest #1
+# [ 16.97s] [BUFF] [PURGE] Ice Barrier removed from Team 2 Mage #1
 ```
 
 Purge rejections (e.g. no enemy carries a purgeable buff → `NoValidTarget`):
@@ -109,11 +112,12 @@ no `action_taken` for `WindShear` in the trace. Diagnose interrupts from the
 combat log instead — `process_interrupts` writes a school-lockout line:
 
 ```bash
-grep "Shaman interrupts" $LOG
-# Team 1 Shaman interrupts Team 2 Mage's Frostbolt - Frost school locked for 4.0s
+# The interrupter id carries a "#slot" suffix now, so match it with a regex.
+grep -E "Shaman #[0-9]+ interrupts" $LOG
+# Team 1 Shaman #1 interrupts Team 2 Mage #1's Frostbolt - Frost school locked for 4.0s
 
 # Count interrupts landed this match
-grep -c "Shaman interrupts" $LOG
+grep -cE "Shaman #[0-9]+ interrupts" $LOG
 ```
 
 A silent Wind Shear (the Shaman never interrupting) is usually a range or

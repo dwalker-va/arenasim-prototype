@@ -279,6 +279,27 @@ impl CombatLog {
         });
     }
 
+    /// Flag the most recent `source -> target` damage entry as a killing blow.
+    ///
+    /// Channel ticks (Drain Life) log their damage in one pass and only learn
+    /// the target died in a later application pass, so the tick's `Damage` event
+    /// is written with `is_killing_blow: false`. Since `killing_blows` counts the
+    /// `Damage` flag (not `Death` events), that kill would go uncredited. This
+    /// back-patches the flag on the just-logged tick — the same shape as
+    /// [`Self::mark_cast_interrupted`]. Idempotent; a no-op if no match exists.
+    pub fn mark_last_damage_killing_blow(&mut self, source_id: &str, target_id: &str) {
+        for entry in self.entries.iter_mut().rev() {
+            if let Some(StructuredEventData::Damage { source, target, is_killing_blow, .. }) =
+                &mut entry.structured_data
+            {
+                if source == source_id && target == target_id {
+                    *is_killing_blow = true;
+                    return;
+                }
+            }
+        }
+    }
+
     /// Mark the most recent ability cast by a combatant as interrupted
     pub fn mark_cast_interrupted(&mut self, caster_id: &str, ability_name: &str) {
         // Find the most recent matching ability cast and mark it interrupted
@@ -840,6 +861,26 @@ mod pet_attribution_tests {
         assert_eq!(log.killing_blows("Team 1 Hunter"), 1);
         // Enemy kills never leak into the owner's count.
         assert_eq!(log.killing_blows_including_pets("Team 2 Mage", &links), 1);
+    }
+
+    #[test]
+    fn mark_last_damage_killing_blow_credits_the_channel_finish() {
+        // Mirrors Drain Life: the tick's Damage lands with is_killing_blow=false,
+        // then the application pass learns the target died and back-patches it.
+        let mut log = CombatLog::default();
+        dmg(&mut log, "Team 1 Warlock #1", "Drain Life (tick)", 30.0);
+        dmg(&mut log, "Team 1 Warlock #1", "Drain Life (tick)", 30.0); // the lethal one
+        assert_eq!(log.killing_blows("Team 1 Warlock #1"), 0);
+
+        // Back-patch the most recent Warlock -> Warrior damage entry.
+        log.mark_last_damage_killing_blow("Team 1 Warlock #1", "Team 2 Warrior");
+        assert_eq!(log.killing_blows("Team 1 Warlock #1"), 1);
+        // Only the most-recent matching entry is flagged.
+        let flagged = log.entries.iter().filter(|e| matches!(
+            &e.structured_data,
+            Some(StructuredEventData::Damage { is_killing_blow: true, .. })
+        )).count();
+        assert_eq!(flagged, 1);
     }
 
     #[test]

@@ -1092,10 +1092,9 @@ pub fn decide_abilities(
                     ability_spell_school,
                 );
                 actual_damage = dmg;
-                let target_team = target.team;
-                let target_class = target.class;
-                // Pet-aware target id (structured fields + message text).
+                // Pet-aware ids for structured fields + message/trace text.
                 let target_id = combat_log_id_for(&target, pet_query.get(target_entity).ok());
+                let attacker_id = combatant_id(attacker_team, attacker_slot, attacker_class);
 
                 // Warriors generate Rage from taking damage (only on actual health damage)
                 if actual_damage > 0.0 && target.resource_type == ResourceType::Rage {
@@ -1109,13 +1108,8 @@ pub fn decide_abilities(
                 });
 
                 info!(
-                    "Team {} {}'s {} hits Team {} {} for {:.0} damage!",
-                    attacker_team,
-                    attacker_class.name(),
-                    ability_name,
-                    target_team,
-                    target_class.name(),
-                    actual_damage
+                    "{}'s {} hits {} for {:.0} damage!",
+                    attacker_id, ability_name, target_id, actual_damage
                 );
 
                 // Spawn floating combat text (yellow for abilities)
@@ -1164,7 +1158,6 @@ pub fn decide_abilities(
                 if is_first_death {
                     target.is_dead = true;
                 }
-                let attacker_id = combatant_id(attacker_team, attacker_slot, attacker_class);
                 let verb = if is_crit { "CRITS" } else { "hits" };
                 let message = if absorbed > 0.0 {
                     format!(

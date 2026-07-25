@@ -88,11 +88,10 @@ pub fn process_dispels(
                 );
 
                 info!(
-                    "{} {} removed from Team {} {}",
+                    "{} {} removed from {}",
                     pending.log_prefix,
                     removed_aura.ability_name,
-                    combatant.team,
-                    combatant.class.name()
+                    target_id
                 );
 
                 // Spawn dispel visual effect — the spiraling ribbon above the
