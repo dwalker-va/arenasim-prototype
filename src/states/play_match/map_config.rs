@@ -25,8 +25,8 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use super::arena_bounds::ArenaBounds;
 use super::map_geometry::{contains_point, ObstacleVolume};
-use super::{ARENA_HALF_X, ARENA_HALF_Z};
 use crate::states::match_config::ArenaMap;
 
 /// RON-friendly obstacle-volume declaration. Mirrors [`ObstacleVolume`] using
@@ -46,6 +46,18 @@ pub enum VolumeDef {
     Aabb {
         min: (f32, f32, f32),
         max: (f32, f32, f32),
+    },
+    /// Vertical prism over a regular `sides`-gon inscribed in a circle of
+    /// `circumradius` at XZ `center`, first vertex at `rotation_deg` degrees,
+    /// spanning `y ∈ [base_y, base_y + height]`. Degrees (not radians) because
+    /// this is a hand-tuned authoring surface.
+    Prism {
+        center: (f32, f32),
+        circumradius: f32,
+        sides: u32,
+        rotation_deg: f32,
+        base_y: f32,
+        height: f32,
     },
 }
 
@@ -68,6 +80,21 @@ impl VolumeDef {
                 min: Vec3::new(min.0, min.1, min.2),
                 max: Vec3::new(max.0, max.1, max.2),
             },
+            VolumeDef::Prism {
+                center,
+                circumradius,
+                sides,
+                rotation_deg,
+                base_y,
+                height,
+            } => ObstacleVolume::Prism {
+                center_xz: Vec2::new(center.0, center.1),
+                circumradius,
+                sides,
+                rotation: rotation_deg.to_radians(),
+                base_y,
+                height,
+            },
         }
     }
 }
@@ -78,6 +105,10 @@ impl VolumeDef {
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct MapDef {
+    /// The walkable region's shape. Defaults to the historical 76×46 cut-corner
+    /// octagon, so a map that omits it behaves exactly as it did before bounds
+    /// became per-map data.
+    pub bounds: ArenaBounds,
     /// Obstacle volumes in declaration order (walked in order — determinism).
     pub volumes: Vec<VolumeDef>,
     /// Cover anchor points (XZ) hand-authored positions a healer can duck
@@ -94,6 +125,7 @@ pub struct MapDef {
 pub struct MapGeometryConfig {
     pub basic_arena: MapDef,
     pub pillared_arena: MapDef,
+    pub twin_pillars: MapDef,
     pub test_verticality: MapDef,
 }
 
@@ -102,9 +134,17 @@ impl Default for MapGeometryConfig {
         Self {
             // BasicArena: no obstacles.
             basic_arena: MapDef::default(),
-            // PillaredArena: two full-height cylinders, mirrored about
-            // x=0, radius 2.5, floor to y=5.
-            pillared_arena: MapDef {
+            // PillaredArena: the Nagrand Arena replica. Four octagonal pillars in
+            // a 40yd (lateral) × 80yd (gate-to-gate) rectangle inside a ~120yd
+            // circular bowl, with a 10yd starting room at each gate. See
+            // NAGRAND_* below for where each number comes from.
+            pillared_arena: nagrand_arena(),
+            // TwinPillars: the original two-cylinder cover map — two full-height
+            // pillars mirrored about x=0 in the historical octagon. Preserved
+            // verbatim (centres, radius, height, bounds) because the LoS probe
+            // suite and the 2026-07-23 balance baseline are calibrated to it.
+            twin_pillars: MapDef {
+                bounds: ArenaBounds::default(),
                 volumes: vec![
                     VolumeDef::Cylinder {
                         center: (9.0, 0.0),
@@ -125,6 +165,8 @@ impl Default for MapGeometryConfig {
             // ramp ascending to it, and one pillar. Test asset — all inside
             // arena gameplay bounds.
             test_verticality: MapDef {
+                // Headless LoS test asset — keeps the original octagon bounds.
+                bounds: ArenaBounds::default(),
                 volumes: vec![
                     // Raised platform, top surface at y=3.
                     VolumeDef::Aabb {
@@ -159,12 +201,90 @@ impl Default for MapGeometryConfig {
     }
 }
 
+// ============================================================================
+// Nagrand Arena dimensions
+//
+// Every number here is a tuning knob: `assets/config/maps.ron` overrides them
+// without a rebuild, and `tests/arena_layout_snapshot.rs` renders the result
+// annotated so the layout can be eyeballed against a reference screenshot.
+// These Rust values are the fallback when the RON file omits the map.
+// ============================================================================
+
+/// Pillar center offset along x (gate-to-gate axis). The two pillars on one side
+/// of the arena sit at ±`NAGRAND_PILLAR_Z`, and the far pair mirrors across x=0,
+/// giving 2 × 40 = 80yd between the near and far pairs.
+const NAGRAND_PILLAR_X: f32 = 40.0;
+
+/// Pillar center offset along z. The pair on each side is 2 × 20 = 40yd apart.
+const NAGRAND_PILLAR_Z: f32 = 20.0;
+
+/// Pillar circumradius (12yd across). Set by COVER DENSITY, not by looks: over
+/// random combat-range (<30yd) sightlines, r=2.5 blocks 4.3%, r=4.0 blocks 7.5%,
+/// r=6.0 blocks 11.9%. The old 2-cylinder PillaredArena sat at 12.7%, so this
+/// preserves roughly today's amount of line-of-sight play. Pillar *spacing*
+/// barely moves cover at all (4.3-5.2% from 24yd to 80yd apart), so this is the
+/// knob to reach for. See `assets/config/maps.ron` for the full note.
+const NAGRAND_PILLAR_RADIUS: f32 = 6.0;
+
+/// Pillars are octagonal in Nagrand, not round.
+const NAGRAND_PILLAR_SIDES: u32 = 8;
+
+/// Half-step turn (360/8/2), so a flat face — not a vertex — points down each
+/// axis. This is gameplay-relevant: it pulls the pillar's axial reach in from the
+/// circumradius (2.5) to the apothem (≈2.31).
+const NAGRAND_PILLAR_ROTATION_DEG: f32 = 22.5;
+
+/// Pillar height. Full-height cover, as the old cylinders were.
+const NAGRAND_PILLAR_HEIGHT: f32 = 5.0;
+
+/// Bowl radius: the pillar at (40, 20) is √2000 ≈ 44.72yd from center, and the
+/// wall sits ~15yd beyond it at its nearest (radial) point.
+const NAGRAND_BOWL_RADIUS: f32 = 59.72;
+
+/// Starting-room depth beyond the bowl wall.
+const NAGRAND_ROOM_DEPTH: f32 = 10.0;
+
+/// Starting-room half-width. Wide enough for a 3v3 line abreast at the 3yd slot
+/// spacing `setup_play_match` uses.
+const NAGRAND_ROOM_HALF_WIDTH: f32 = 8.0;
+
+/// The Nagrand Arena replica: a circular bowl with two gate alcoves, and four
+/// octagonal pillars in a symmetric rectangle.
+fn nagrand_arena() -> MapDef {
+    let pillar = |x: f32, z: f32| VolumeDef::Prism {
+        center: (x, z),
+        circumradius: NAGRAND_PILLAR_RADIUS,
+        sides: NAGRAND_PILLAR_SIDES,
+        rotation_deg: NAGRAND_PILLAR_ROTATION_DEG,
+        base_y: 0.0,
+        height: NAGRAND_PILLAR_HEIGHT,
+    };
+    MapDef {
+        bounds: ArenaBounds::Bowl {
+            semi_x: NAGRAND_BOWL_RADIUS,
+            semi_z: NAGRAND_BOWL_RADIUS,
+            alcove_depth: NAGRAND_ROOM_DEPTH,
+            alcove_half_width: NAGRAND_ROOM_HALF_WIDTH,
+        },
+        // Declaration order is deterministic and load-bearing (slice-order tie
+        // breaks in steering / nearest-blocker); listed -x pair first, then +x.
+        volumes: vec![
+            pillar(-NAGRAND_PILLAR_X, -NAGRAND_PILLAR_Z),
+            pillar(-NAGRAND_PILLAR_X, NAGRAND_PILLAR_Z),
+            pillar(NAGRAND_PILLAR_X, -NAGRAND_PILLAR_Z),
+            pillar(NAGRAND_PILLAR_X, NAGRAND_PILLAR_Z),
+        ],
+        cover_anchors: Vec::new(),
+    }
+}
+
 impl MapGeometryConfig {
     /// The [`MapDef`] for a given [`ArenaMap`].
     fn map_def(&self, map: ArenaMap) -> &MapDef {
         match map {
             ArenaMap::BasicArena => &self.basic_arena,
             ArenaMap::PillaredArena => &self.pillared_arena,
+            ArenaMap::TwinPillars => &self.twin_pillars,
             ArenaMap::TestVerticality => &self.test_verticality,
         }
     }
@@ -174,6 +294,7 @@ impl MapGeometryConfig {
     pub fn active_for(&self, map: ArenaMap) -> ActiveMapGeometry {
         let def = self.map_def(map);
         ActiveMapGeometry {
+            bounds: def.bounds,
             volumes: def.volumes.iter().map(|v| v.to_volume()).collect(),
             cover_anchors: def
                 .cover_anchors
@@ -190,6 +311,7 @@ impl MapGeometryConfig {
         for (name, def) in [
             ("basic_arena", &self.basic_arena),
             ("pillared_arena", &self.pillared_arena),
+            ("twin_pillars", &self.twin_pillars),
             ("test_verticality", &self.test_verticality),
         ] {
             validate_map(name, def, &mut issues);
@@ -202,13 +324,16 @@ impl MapGeometryConfig {
     }
 }
 
-/// Whether an XZ point lies within the arena's rectangular gameplay bounds.
-fn in_arena_bounds(x: f32, z: f32) -> bool {
-    x >= -ARENA_HALF_X && x <= ARENA_HALF_X && z >= -ARENA_HALF_Z && z <= ARENA_HALF_Z
+/// Whether an XZ point lies within the map's own walkable bounds, at standing
+/// height. Per-map now, so a Nagrand pillar at x=40 is legal there while still
+/// being rejected on the smaller octagon maps.
+fn in_arena_bounds(bounds: &ArenaBounds, x: f32, z: f32) -> bool {
+    bounds.contains(Vec3::new(x, 1.0, z))
 }
 
 /// Validate one map's volumes and cover anchors, pushing every violation.
 fn validate_map(map: &str, def: &MapDef, issues: &mut Vec<String>) {
+    let bounds = &def.bounds;
     for (i, volume) in def.volumes.iter().enumerate() {
         match *volume {
             VolumeDef::Cylinder {
@@ -233,12 +358,12 @@ fn validate_map(map: &str, def: &MapDef, issues: &mut Vec<String>) {
                     ));
                 }
                 if radius.is_finite()
-                    && (!in_arena_bounds(center.0 - radius, center.1 - radius)
-                        || !in_arena_bounds(center.0 + radius, center.1 + radius))
+                    && (!in_arena_bounds(bounds, center.0 - radius, center.1 - radius)
+                        || !in_arena_bounds(bounds, center.0 + radius, center.1 + radius))
                 {
                     issues.push(format!(
                         "{map}.volumes[{i}] cylinder center {center:?} ± radius {radius} extends \
-                         outside arena bounds (±{ARENA_HALF_X} x, ±{ARENA_HALF_Z} z)"
+                         outside {map} bounds {bounds:?}"
                     ));
                 }
             }
@@ -259,10 +384,55 @@ fn validate_map(map: &str, def: &MapDef, issues: &mut Vec<String>) {
                         "{map}.volumes[{i}] box min {min:?} / max {max:?} must be finite"
                     ));
                 }
-                if finite && (!in_arena_bounds(min.0, min.2) || !in_arena_bounds(max.0, max.2)) {
+                if finite && (!in_arena_bounds(bounds, min.0, min.2) || !in_arena_bounds(bounds, max.0, max.2)) {
                     issues.push(format!(
-                        "{map}.volumes[{i}] box [{min:?}, {max:?}] extends outside arena bounds \
-                         (±{ARENA_HALF_X} x, ±{ARENA_HALF_Z} z)"
+                        "{map}.volumes[{i}] box [{min:?}, {max:?}] extends \
+                         outside {map} bounds {bounds:?}"
+                    ));
+                }
+            }
+            VolumeDef::Prism {
+                center,
+                circumradius,
+                sides,
+                rotation_deg,
+                base_y,
+                height,
+            } => {
+                if sides < 3 {
+                    issues.push(format!(
+                        "{map}.volumes[{i}] prism needs at least 3 sides, got {sides}"
+                    ));
+                }
+                if !(circumradius > 0.0) || !circumradius.is_finite() {
+                    issues.push(format!(
+                        "{map}.volumes[{i}] prism circumradius must be positive and finite, \
+                         got {circumradius}"
+                    ));
+                }
+                if !(height > 0.0) || !height.is_finite() {
+                    issues.push(format!(
+                        "{map}.volumes[{i}] prism height must be positive and finite, got {height}"
+                    ));
+                }
+                if !base_y.is_finite() {
+                    issues.push(format!(
+                        "{map}.volumes[{i}] prism base_y must be finite, got {base_y}"
+                    ));
+                }
+                if !rotation_deg.is_finite() {
+                    issues.push(format!(
+                        "{map}.volumes[{i}] prism rotation_deg must be finite, got {rotation_deg}"
+                    ));
+                }
+                // Bounded by the circumcircle, so the cylinder check applies.
+                if circumradius.is_finite()
+                    && (!in_arena_bounds(bounds, center.0 - circumradius, center.1 - circumradius)
+                        || !in_arena_bounds(bounds, center.0 + circumradius, center.1 + circumradius))
+                {
+                    issues.push(format!(
+                        "{map}.volumes[{i}] prism center {center:?} ± circumradius {circumradius} \
+                         extends outside {map} bounds {bounds:?}"
                     ));
                 }
             }
@@ -270,9 +440,9 @@ fn validate_map(map: &str, def: &MapDef, issues: &mut Vec<String>) {
     }
 
     for (i, &(x, z)) in def.cover_anchors.iter().enumerate() {
-        if !in_arena_bounds(x, z) {
+        if !in_arena_bounds(bounds, x, z) {
             issues.push(format!(
-                "{map}.cover_anchors[{i}] ({x}, {z}) is outside arena bounds"
+                "{map}.cover_anchors[{i}] ({x}, {z}) is outside {map} bounds {bounds:?}"
             ));
         }
         // A cover anchor is a standing position (ground unit at y≈1.0); it must
@@ -292,6 +462,9 @@ fn validate_map(map: &str, def: &MapDef, issues: &mut Vec<String>) {
 /// setup (both modes) from [`MapGeometryConfig::active_for`].
 #[derive(Resource, Clone, Debug, Default, PartialEq)]
 pub struct ActiveMapGeometry {
+    /// The active map's walkable region. Read by the movement clamp, the scorer's
+    /// boundary mask, and the AI's point-placement helpers.
+    pub bounds: ArenaBounds,
     /// Obstacle volumes, in declaration order (deterministic slice walks).
     pub volumes: Vec<ObstacleVolume>,
     /// Cover anchor positions (XZ).
@@ -382,12 +555,14 @@ mod tests {
         );
     }
 
-    /// Scenario 3: a pillar centered outside arena bounds is rejected.
+    /// Scenario 3: a pillar centered outside the map's own bounds is rejected.
+    /// Bounds are per-map now, so this deliberately exceeds Nagrand's bowl
+    /// (radius ≈59.7 + a 10yd room) rather than the retired global constant.
     #[test]
     fn validate_rejects_out_of_bounds_pillar() {
         let mut config = MapGeometryConfig::default();
         config.pillared_arena.volumes = vec![VolumeDef::Cylinder {
-            center: (ARENA_HALF_X + 5.0, 0.0),
+            center: (200.0, 0.0),
             radius: 2.5,
             base_y: 0.0,
             height: 5.0,
@@ -397,7 +572,7 @@ mod tests {
             .expect_err("out-of-bounds pillar must fail validation");
         assert!(
             issues.iter().any(|i| i.contains("pillared_arena.volumes[0]")
-                && i.contains("outside arena bounds")),
+                && i.contains("outside pillared_arena bounds")),
             "issues should flag the out-of-bounds pillar: {:?}",
             issues
         );
@@ -407,7 +582,8 @@ mod tests {
     #[test]
     fn validate_rejects_cover_anchor_inside_volume() {
         let mut config = MapGeometryConfig::default();
-        config.pillared_arena.cover_anchors = vec![(9.0, 0.0)]; // dead center of a pillar
+        // Dead center of a Nagrand pillar.
+        config.pillared_arena.cover_anchors = vec![(40.0, 20.0)];
         let issues = config
             .validate()
             .expect_err("cover anchor inside a pillar must fail");
@@ -437,8 +613,11 @@ mod tests {
         )
         .expect("partial config must parse");
         assert_eq!(config.basic_arena.volumes.len(), 1);
-        // PillaredArena is untouched → default two cylinders.
-        assert_eq!(config.pillared_arena.volumes.len(), 2);
+        // PillaredArena is untouched → default Nagrand layout (four pillars).
+        assert_eq!(config.pillared_arena.volumes.len(), 4);
+        // ...and BasicArena, which declared no `bounds`, falls back to the
+        // historical octagon rather than inheriting anything from Nagrand.
+        assert_eq!(config.basic_arena.bounds, ArenaBounds::default());
         // TestVerticality untouched → default geometry present.
         assert!(!config.test_verticality.volumes.is_empty());
     }
@@ -456,24 +635,61 @@ mod tests {
     /// Scenario 7: PillaredArena's loaded volumes are exactly two cylinders at
     /// (±9, 0), from the shipped file via active_for.
     #[test]
-    fn pillared_arena_has_two_mirrored_cylinders() {
+    fn pillared_arena_is_the_nagrand_layout() {
         let config = load_map_geometry_config().expect("maps.ron must load");
         let active = config.active_for(ArenaMap::PillaredArena);
-        assert_eq!(active.volumes.len(), 2, "expected exactly two pillars");
-        let mut centers: Vec<f32> = active
+        assert_eq!(active.volumes.len(), 4, "Nagrand has four pillars");
+
+        // Every pillar is an identical octagonal prism; collect their centers.
+        let mut centers: Vec<(f32, f32)> = active
             .volumes
             .iter()
             .map(|v| match v {
-                ObstacleVolume::Cylinder { center_xz, radius, .. } => {
-                    assert_eq!(*radius, 2.5, "pillar radius");
-                    assert_eq!(center_xz.y, 0.0, "pillar z");
-                    center_xz.x
+                ObstacleVolume::Prism {
+                    center_xz,
+                    circumradius,
+                    sides,
+                    rotation,
+                    ..
+                } => {
+                    assert_eq!(*sides, 8, "Nagrand pillars are octagonal");
+                    // Sized for cover density, not looks — see NAGRAND_PILLAR_RADIUS.
+                    assert_eq!(*circumradius, 6.0, "pillar circumradius");
+                    // Half-step turn: a face, not a vertex, faces each axis.
+                    assert!(
+                        (*rotation - 22.5_f32.to_radians()).abs() < 1e-5,
+                        "pillar rotation should be a 22.5° half step, got {rotation}"
+                    );
+                    (center_xz.x, center_xz.y)
                 }
-                other => panic!("expected a cylinder, got {:?}", other),
+                other => panic!("expected an octagonal prism, got {:?}", other),
             })
             .collect();
         centers.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        assert_eq!(centers, vec![-9.0, 9.0], "mirrored pillar x-centers");
+        assert_eq!(
+            centers,
+            vec![(-40.0, -20.0), (-40.0, 20.0), (40.0, -20.0), (40.0, 20.0)],
+            "pillars form a symmetric 40yd (lateral) x 80yd (gate-to-gate) rectangle"
+        );
+
+        // The spacings the layout is specified by, asserted directly so a future
+        // retune that breaks the intended geometry fails loudly.
+        let lateral = (centers[1].1 - centers[0].1).abs();
+        let long_axis = (centers[2].0 - centers[0].0).abs();
+        assert_eq!(lateral, 40.0, "same-side pillar pair spacing");
+        assert_eq!(long_axis, 80.0, "near-pair to far-pair spacing");
+
+        // The bowl clears the pillars by ~15yd at the nearest (radial) point.
+        let ArenaBounds::Bowl { semi_x, semi_z, .. } = active.bounds else {
+            panic!("Nagrand must use Bowl bounds, got {:?}", active.bounds);
+        };
+        assert_eq!(semi_x, semi_z, "the bowl is circular");
+        let pillar_radius = (40.0_f32.powi(2) + 20.0_f32.powi(2)).sqrt();
+        assert!(
+            ((semi_x - pillar_radius) - 15.0).abs() < 0.05,
+            "wall should clear the pillars by ~15yd, got {}",
+            semi_x - pillar_radius
+        );
     }
 
     /// BasicArena resolves to an empty obstacle set.

@@ -64,6 +64,7 @@ use bevy::prelude::*;
 use super::is_in_arena_bounds;
 use super::super::map_geometry::{has_line_of_sight, position_blocked, ObstacleVolume, EYE_HEIGHT};
 use super::super::movement_config::MovementWeights;
+use super::super::arena_bounds::ArenaBounds;
 use super::super::ARENA_CORNER_SUM;
 
 /// Mask bit: candidate's lookahead position is out of arena bounds.
@@ -124,6 +125,10 @@ pub struct AnchorConstraint {
 /// direction — is deterministic at a fixed seed.
 #[derive(Clone, Debug, Default)]
 pub struct ScorerInputs {
+    /// The active map's walkable region, for the boundary mask and the
+    /// edge/corner penalty. Per-map data, so the same tuned `corner_penalty`
+    /// weight works on the octagon maps and on Nagrand's circular bowl.
+    pub bounds: ArenaBounds,
     /// Scoring entity's world position.
     pub my_pos: Vec3,
     /// Distance ahead at which candidate positions are evaluated (units).
@@ -175,7 +180,7 @@ fn xz(v: Vec3) -> Vec2 {
 pub fn candidate_mask(candidate: Vec2, inputs: &ScorerInputs) -> u16 {
     let next = inputs.my_pos + Vec3::new(candidate.x, 0.0, candidate.y) * inputs.lookahead;
     let mut mask = 0u16;
-    if !is_in_arena_bounds(next) {
+    if !is_in_arena_bounds(&inputs.bounds, next) {
         mask |= MASK_BOUNDARY;
     }
     // Obstacle mask: reject a step that walks into a wall (movement-blocking
@@ -228,11 +233,12 @@ pub fn score_direction(candidate: Vec2, inputs: &ScorerInputs, weights: &Movemen
         }
     }
 
-    // Corner penalty: graded ramp toward the octagon's diagonal corner walls
-    // (|x|+|z|), normalized to 0..1 between onset and the wall itself. A soft
-    // interest term (not a hard mask) — it shapes the least-bad choice.
-    let corner_closeness =
-        ((next.x.abs() + next.z.abs()) - CORNER_PENALTY_ONSET) / (ARENA_CORNER_SUM - CORNER_PENALTY_ONSET);
+    // Corner penalty: graded ramp toward the arena wall, normalized to 0..1
+    // between the onset fraction and the wall itself. A soft interest term (not a
+    // hard mask) — it shapes the least-bad choice. Shape-specific (the octagon
+    // measures |x|+|z| toward its diagonal corners; the bowl measures normalized
+    // ellipse radius), but identically normalized so the weight transfers.
+    let corner_closeness = inputs.bounds.edge_closeness(next.x, next.z);
     if corner_closeness > 0.0 {
         score -= weights.corner_penalty * corner_closeness;
     }

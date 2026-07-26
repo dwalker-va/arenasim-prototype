@@ -82,6 +82,7 @@ fn snapshot_for(self_entity: Entity, team: u8, class: CharacterClass) -> CombatS
     let mut combatants = BTreeMap::new();
     combatants.insert(self_entity, info(self_entity, team, class));
     CombatSnapshot {
+        bounds: Default::default(),
         combatants,
         active_auras: BTreeMap::new(),
         dr_trackers: BTreeMap::new(),
@@ -948,6 +949,7 @@ fn snapshot_with(members: &[CombatantInfo]) -> CombatSnapshot {
         combatants.insert(m.entity, *m);
     }
     CombatSnapshot {
+        bounds: Default::default(),
         combatants,
         active_auras: BTreeMap::new(),
         dr_trackers: BTreeMap::new(),

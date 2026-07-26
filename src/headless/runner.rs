@@ -250,7 +250,8 @@ fn headless_setup_match(
     commands.insert_resource(ShadowSightState::default());
 
     // Derive the obstacle geometry for the selected map (line-of-sight).
-    commands.insert_resource(map_geometry.active_for(config.map));
+    let active_map_geometry = map_geometry.active_for(config.map);
+    commands.insert_resource(active_map_geometry.clone());
 
     // Initialize GameRng with seed if provided (deterministic mode)
     let game_rng = match headless_state.random_seed {
@@ -265,8 +266,13 @@ fn headless_setup_match(
     };
     commands.insert_resource(game_rng);
 
-    // Spawn combatants for Team 1
-    let team1_spawn_x = -35.0;
+    // Spawn combatants for Team 1.
+    //
+    // Per-map, from the active map's bounds — MUST match the graphical path in
+    // `setup_play_match` (this repo's dual-mode registration failure class). Teams
+    // start outboard of the cover so closing to engage carries them past it.
+    let spawn_x = active_map_geometry.bounds.team_spawn_x();
+    let team1_spawn_x = -spawn_x;
     for (i, character_opt) in config.team1.iter().enumerate() {
         if let Some(character) = character_opt {
             combat_log.register_combatant(combatant_id(1, i as u8, *character));
@@ -347,7 +353,7 @@ fn headless_setup_match(
     }
 
     // Spawn combatants for Team 2
-    let team2_spawn_x = 35.0;
+    let team2_spawn_x = spawn_x;
     for (i, character_opt) in config.team2.iter().enumerate() {
         if let Some(character) = character_opt {
             combat_log.register_combatant(combatant_id(2, i as u8, *character));

@@ -93,7 +93,15 @@ pub fn setup_menu_scene(
 
     // The title backdrop is an open arena — no obstacle meshes.
     for entity in
-        spawn_arena_environment(&mut commands, &mut meshes, &mut materials, &mut images, &[])
+        spawn_arena_environment(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            &mut images,
+            // Menu backdrop: the classic octagon, independent of map selection.
+            &Default::default(),
+            &[],
+        )
     {
         commands.entity(entity).insert(MenuSceneEntity);
     }

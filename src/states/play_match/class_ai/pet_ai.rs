@@ -199,6 +199,7 @@ pub fn pet_ai_system(
             dr_trackers: &dr_trackers,
             ability_cooldowns: &ability_cooldowns,
             obstacles: &map_geometry.volumes,
+            bounds: map_geometry.bounds,
             self_entity: entity,
         };
 

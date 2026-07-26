@@ -438,6 +438,7 @@ pub(super) fn escape_tick(
     }
 
     let inputs = ScorerInputs {
+        bounds: ctx.bounds,
         my_pos,
         lookahead: SCORER_LOOKAHEAD,
         threats: threat_positions.into_values().collect(),
@@ -613,6 +614,7 @@ pub(super) fn healer_pressured_tick_shared(
         .map(|i| i.position);
 
     let inputs = ScorerInputs {
+        bounds: ctx.bounds,
         my_pos,
         lookahead: SCORER_LOOKAHEAD,
         threats: threat_positions.into_values().collect(),
@@ -640,6 +642,7 @@ pub(super) fn healer_pressured_tick_shared(
     // unless a teammate needs saving — then urgency suppression zeroes it so the
     // healer is never pulled into cover while an ally is dying (R11).
     let eff_weights = deny_weights(entity, my_pos, ctx, shared, weights);
+
     let chosen = score_directions(&compass_directions_16(), &inputs, &eff_weights);
     if chosen == Vec2::ZERO {
         return; // defensive — 16 candidates always yield a direction

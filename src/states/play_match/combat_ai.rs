@@ -559,6 +559,7 @@ pub fn decide_abilities(
         &dr_tracker_query,
         &pet_query,
         &extras.map_geometry.volumes,
+        extras.map_geometry.bounds,
     );
 
     // Queue for instant ability attacks (Ambush, Sinister Strike, Mortal Strike)

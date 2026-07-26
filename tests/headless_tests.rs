@@ -547,7 +547,7 @@ fn assert_results_equal(a: &MatchResult, b: &MatchResult, ctx: &str) {
 fn pillared_arena_same_seed_is_deterministic() {
     let make = || {
         let mut cfg = create_config(vec!["Warrior", "Priest"], vec!["Mage", "Priest"], Some(7));
-        cfg.map = "PillaredArena".to_string();
+        cfg.map = "TwinPillars".to_string();
         cfg
     };
     let r1 = run_headless_match_with(make(), true, None).expect("first PillaredArena run");
@@ -568,7 +568,7 @@ fn pillared_arena_determinism_with_trace() {
     let seed = 7_u64;
     let make = || {
         let mut cfg = create_config(vec!["Warrior", "Priest"], vec!["Mage", "Priest"], Some(seed));
-        cfg.map = "PillaredArena".to_string();
+        cfg.map = "TwinPillars".to_string();
         cfg
     };
 

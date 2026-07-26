@@ -450,6 +450,7 @@ fn build_kiter_inputs(
     let los_target = kill_target_info.map(|i| i.position);
 
     ScorerInputs {
+        bounds: ctx.bounds,
         my_pos,
         lookahead: SCORER_LOOKAHEAD,
         threats,

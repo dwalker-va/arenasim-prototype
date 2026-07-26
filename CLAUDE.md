@@ -24,7 +24,13 @@ cargo run --release -- --headless /tmp/test.json
 
 **Config options:**
 - `team1`, `team2`: Arrays of class names (Warrior, Mage, Rogue, Priest, Warlock, Paladin, Hunter)
-- `map`: "BasicArena", "PillaredArena", or "TestVerticality" (a headless-only LoS test asset with a raised platform and ramp; `--matrix` rejects it and it never appears in the graphical map-select list)
+- `map`: "BasicArena", "TwinPillars", "PillaredArena", or "TestVerticality"
+  ("PillaredArena" is the Nagrand Arena replica — a ~120yd circular bowl with four
+  octagonal pillars and 10yd starting rooms; "TwinPillars" is the original
+  two-cylinder cover map, which the line-of-sight probe suite is calibrated
+  against; "TestVerticality" is a headless-only LoS test asset with a raised
+  platform and ramp — `--matrix` rejects it and it never appears in the graphical
+  map-select list)
 - `team1_kill_target`, `team2_kill_target`: Priority target index (0-based)
 - `max_duration_secs`: Timeout (default 300)
 

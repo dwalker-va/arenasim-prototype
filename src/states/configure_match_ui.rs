@@ -30,8 +30,8 @@ use std::collections::HashMap;
 use super::{GameState, match_config::{self, MatchConfig, ArenaMap}};
 use super::view_combatant_ui::ViewCombatantState;
 use super::play_match::map_config::MapGeometryConfig;
-use super::play_match::map_geometry::ObstacleVolume;
-use super::play_match::{spawn_arena_environment, ARENA_FLOOR_HALF_X, ARENA_FLOOR_HALF_Z, ARENA_FLOOR_CORNER_CUT};
+use super::play_match::map_geometry::{prism_vertices_world, ObstacleVolume};
+use super::play_match::{spawn_arena_environment, WALL_ARC_SEGMENTS};
 
 /// Resource storing loaded class icon textures for egui rendering.
 /// Maps CharacterClass to egui TextureId for efficient icon display.
@@ -993,8 +993,11 @@ fn render_map_panel(
 
         // Map preview — real top-down geometry for the selected map.
         // Arena floor aspect ratio (x:z) keeps the schematic true to scale.
-        let world_w = ARENA_FLOOR_HALF_X * 2.0;
-        let world_h = ARENA_FLOOR_HALF_Z * 2.0;
+        // Preview pane aspect follows the SELECTED map's extents, so Nagrand's
+        // near-square bowl is not letterboxed into the old 76x46 frame.
+        let map_half = map_geometry.active_for(config.map).bounds.half_extents();
+        let world_w = map_half.x * 2.0;
+        let world_h = map_half.y * 2.0;
         let preview_width = (max_width * 0.92).min(230.0);
         let preview_height = preview_width * (world_h / world_w);
 
@@ -1087,7 +1090,7 @@ fn render_map_panel(
 /// Draw a top-down schematic of `map` into `rect`, using the map's real
 /// obstacle geometry (cylinders → circles, boxes → rectangles) scaled to fit.
 ///
-/// World coordinates: x ∈ [-`ARENA_FLOOR_HALF_X`, +], z ∈ [-`ARENA_FLOOR_HALF_Z`, +].
+/// World coordinates come from the map's own `ArenaBounds::outline`.
 /// World x maps to the schematic's horizontal axis and world z to its vertical
 /// axis, preserving aspect. Pure painter work so it renders identically in the
 /// egui harness and the real client.
@@ -1097,38 +1100,37 @@ fn draw_map_preview(
     map: match_config::ArenaMap,
     map_geometry: &MapGeometryConfig,
 ) {
-    let world_w = ARENA_FLOOR_HALF_X * 2.0;
-    let world_h = ARENA_FLOOR_HALF_Z * 2.0;
-    let scale = (rect.width() / world_w).min(rect.height() / world_h);
+    let active = map_geometry.active_for(map);
+
+    // Fit the selected map's OWN outline — maps no longer share one shape, so a
+    // fixed 76x46 frame would crop Nagrand and mis-scale its pillars.
+    let outline = active.bounds.outline(WALL_ARC_SEGMENTS);
+    let half = outline
+        .iter()
+        .fold(Vec2::ZERO, |acc, p| acc.max(p.abs()))
+        .max(Vec2::splat(1.0));
+    let scale = (rect.width() / (half.x * 2.0)).min(rect.height() / (half.y * 2.0));
     let center = rect.center();
 
     // World (x, z) -> screen point.
     let to_screen = |x: f32, z: f32| egui::pos2(center.x + x * scale, center.y + z * scale);
 
-    // Arena floor: the cut-corner octagon (matches the 3D floor mesh).
-    let hx = ARENA_FLOOR_HALF_X;
-    let hz = ARENA_FLOOR_HALF_Z;
-    let cut = ARENA_FLOOR_CORNER_CUT;
-    let floor: Vec<egui::Pos2> = vec![
-        to_screen(-hx + cut, -hz),
-        to_screen(hx - cut, -hz),
-        to_screen(hx, -hz + cut),
-        to_screen(hx, hz - cut),
-        to_screen(hx - cut, hz),
-        to_screen(-hx + cut, hz),
-        to_screen(-hx, hz - cut),
-        to_screen(-hx, -hz + cut),
-    ];
-    painter.add(egui::Shape::convex_polygon(
+    // Arena floor: the same outline the 3D floor mesh is built from.
+    //
+    // Filled as a closed path rather than `convex_polygon` because the
+    // bowl-with-alcoves outline is CONCAVE, and egui's tessellator emits spurious
+    // triangles across a concavity when told the path is convex.
+    let floor: Vec<egui::Pos2> = outline.iter().map(|p| to_screen(p.x, p.y)).collect();
+    let mut floor_path = egui::epaint::PathShape::closed_line(
         floor,
-        egui::Color32::from_rgb(34, 36, 48),
         egui::Stroke::new(1.5, egui::Color32::from_rgb(90, 96, 120)),
-    ));
+    );
+    floor_path.fill = egui::Color32::from_rgb(34, 36, 48);
+    painter.add(floor_path);
 
     // Obstacles for the selected map.
     let obstacle_fill = egui::Color32::from_rgb(96, 102, 128);
     let obstacle_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(150, 156, 180));
-    let active = map_geometry.active_for(map);
     for volume in &active.volumes {
         match volume {
             ObstacleVolume::Cylinder { center_xz, radius, .. } => {
@@ -1145,6 +1147,23 @@ fn draw_map_preview(
                     to_screen(max.x, max.z),
                 );
                 painter.rect(r, 2.0, obstacle_fill, obstacle_stroke, egui::StrokeKind::Inside);
+            }
+            ObstacleVolume::Prism {
+                center_xz,
+                circumradius,
+                sides,
+                rotation,
+                ..
+            } => {
+                // Same outline helper the collision math and the 3D mesh use, so
+                // the schematic shows the real footprint, not a circle standing in
+                // for one.
+                let pts: Vec<egui::Pos2> =
+                    prism_vertices_world(*center_xz, *circumradius, *sides, *rotation)
+                        .into_iter()
+                        .map(|v| to_screen(v.x, v.y))
+                        .collect();
+                painter.add(egui::Shape::convex_polygon(pts, obstacle_fill, obstacle_stroke));
             }
         }
     }
@@ -1206,7 +1225,7 @@ fn spawn_preview_environment(
     map_geometry: &MapGeometryConfig,
 ) {
     let active = map_geometry.active_for(map);
-    for entity in spawn_arena_environment(commands, meshes, materials, images, &active.volumes) {
+    for entity in spawn_arena_environment(commands, meshes, materials, images, &active.bounds, &active.volumes) {
         commands
             .entity(entity)
             .insert((RenderLayers::layer(PREVIEW_LAYER), PreviewEnvEntity, PreviewSceneEntity));

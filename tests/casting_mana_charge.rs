@@ -47,6 +47,9 @@ fn harness_app(obstacles: Vec<ObstacleVolume>) -> App {
         .insert_resource(AbilityDefinitions::default())
         .insert_resource(ArenaDampening::default())
         .insert_resource(ActiveMapGeometry {
+            // Bounds are per-map data now; these probes only exercise obstacle
+            // geometry, so keep the historical octagon.
+            bounds: Default::default(),
             volumes: obstacles,
             cover_anchors: Vec::new(),
         })

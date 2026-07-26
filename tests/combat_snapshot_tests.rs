@@ -68,6 +68,7 @@ fn empty_snapshot_with(caster: Entity, target: Entity) -> CombatSnapshot {
     combatants.insert(caster, target_info(caster, 1, CharacterClass::Mage));
     combatants.insert(target, target_info(target, 2, CharacterClass::Warrior));
     CombatSnapshot {
+        bounds: Default::default(),
         combatants,
         active_auras: BTreeMap::new(),
         dr_trackers: BTreeMap::new(),
@@ -204,7 +205,7 @@ fn build_snapshot_from_world(world: &mut World) -> CombatSnapshot {
         Query<&'static Pet>,
     )> = SystemState::new(world);
     let (aura_q, casting_q, channeling_q, dr_q, pet_q) = state.get_mut(world);
-    CombatSnapshot::build(&aura_q, &casting_q, &channeling_q, &dr_q, &pet_q, &[])
+    CombatSnapshot::build(&aura_q, &casting_q, &channeling_q, &dr_q, &pet_q, &[], Default::default())
 }
 
 fn spawn_combatant(world: &mut World, team: u8, slot: u8, class: CharacterClass, pos: Vec3) -> Entity {

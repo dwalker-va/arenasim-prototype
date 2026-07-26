@@ -13,6 +13,7 @@
 use bevy::prelude::*;
 
 use crate::combat::log::CombatLog;
+use super::super::arena_bounds::ArenaBounds;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
@@ -96,7 +97,7 @@ pub fn decide_hunter_action(
                 .unwrap_or(my_pos);
             if try_place_trap_at(
                 commands, combat_log, abilities, entity, combatant, my_pos,
-                landing, TrapType::Freezing, &mut builder,
+                landing, TrapType::Freezing, &ctx.bounds, &mut builder,
             ) {
                 builder.finish();
                 commands.entity(entity).try_insert(completed_state);
@@ -166,7 +167,7 @@ pub fn decide_hunter_action(
         // Priority 2: Frost Trap at feet
         if try_place_trap_at(
             commands, combat_log, abilities, entity, combatant, my_pos, my_pos,
-            TrapType::Frost, &mut builder,
+            TrapType::Frost, &ctx.bounds, &mut builder,
         ) {
             builder.finish();
             return true;
@@ -203,7 +204,7 @@ pub fn decide_hunter_action(
             let midpoint = (my_pos + anchor_pos) / 2.0;
             if try_place_trap_at(
                 commands, combat_log, abilities, entity, combatant, my_pos, midpoint,
-                TrapType::Frost, &mut builder,
+                TrapType::Frost, &ctx.bounds, &mut builder,
             ) {
                 builder.finish();
                 return true;
@@ -307,7 +308,7 @@ pub fn decide_hunter_action(
                 builder.reject(AbilityType::FreezingTrap, RejectionReason::FriendlyBreakableCC);
             } else if try_place_trap_at(
                 commands, combat_log, abilities, entity, combatant, my_pos,
-                landing, TrapType::Freezing, &mut builder,
+                landing, TrapType::Freezing, &ctx.bounds, &mut builder,
             ) {
                 builder.finish();
                 return true;
@@ -330,7 +331,7 @@ pub fn decide_hunter_action(
             } else if try_place_trap_at(
                 commands, combat_log, abilities, entity, combatant, my_pos,
                 (my_pos + trap_target_info.position) / 2.0,
-                TrapType::Freezing, &mut builder,
+                TrapType::Freezing, &ctx.bounds, &mut builder,
             ) {
                 builder.finish();
                 return true;
@@ -464,6 +465,7 @@ fn try_place_trap_at(
     my_pos: Vec3,
     position: Vec3,
     trap_type: TrapType,
+    bounds: &ArenaBounds,
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = match trap_type {
@@ -490,7 +492,7 @@ fn try_place_trap_at(
     builder.choose(ability, None, true);
 
     // Clamp to octagonal arena bounds (midpoint can land outside corners)
-    let position = crate::states::play_match::combat_core::clamp_to_arena(position);
+    let position = crate::states::play_match::combat_core::clamp_to_arena(bounds, position);
 
     let trap_name = trap_type.name();
 

@@ -253,9 +253,10 @@ impl HeadlessMatchConfig {
         match name {
             "BasicArena" => Ok(ArenaMap::BasicArena),
             "PillaredArena" => Ok(ArenaMap::PillaredArena),
+            "TwinPillars" => Ok(ArenaMap::TwinPillars),
             "TestVerticality" => Ok(ArenaMap::TestVerticality),
             _ => Err(format!(
-                "Unknown map: '{}'. Valid maps: BasicArena, PillaredArena, TestVerticality",
+                "Unknown map: '{}'. Valid maps: BasicArena, PillaredArena, TwinPillars, TestVerticality",
                 name
             )),
         }

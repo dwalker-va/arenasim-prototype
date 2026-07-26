@@ -2584,6 +2584,7 @@ mod paladin_unit {
         let mut combatants = BTreeMap::new();
         combatants.insert(self_entity, info(self_entity, 1, CharacterClass::Paladin, Vec3::ZERO));
         CombatSnapshot {
+            bounds: Default::default(),
             combatants,
             active_auras: BTreeMap::new(),
             dr_trackers: BTreeMap::new(),
@@ -2842,6 +2843,7 @@ mod bucket_a_unit {
         }
         (
             CombatSnapshot {
+            bounds: Default::default(),
                 combatants,
                 active_auras,
                 dr_trackers: BTreeMap::new(),
@@ -3715,7 +3717,7 @@ mod u6_collision_smoke {
     use super::*;
     use arenasim::states::match_config::ArenaMap;
     use arenasim::states::play_match::map_config::load_map_geometry_config;
-    use arenasim::states::play_match::map_geometry::ObstacleVolume;
+    use arenasim::states::play_match::map_geometry::{prism_apothem, ObstacleVolume};
 
     /// The shipped PillaredArena cylinder footprints as (center_x, center_z,
     /// radius), loaded live so the smoke test tracks the real map geometry
@@ -3723,7 +3725,7 @@ mod u6_collision_smoke {
     fn pillar_footprints() -> Vec<(f32, f32, f32)> {
         let geom = load_map_geometry_config()
             .expect("maps.ron loads")
-            .active_for(ArenaMap::PillaredArena);
+            .active_for(ArenaMap::TwinPillars);
         let pillars: Vec<(f32, f32, f32)> = geom
             .volumes
             .iter()
@@ -3731,10 +3733,24 @@ mod u6_collision_smoke {
                 ObstacleVolume::Cylinder { center_xz, radius, .. } => {
                     Some((center_xz.x, center_xz.y, *radius))
                 }
+                // Octagonal pillars: the closest a unit may legally come to the
+                // center is the APOTHEM (flush against a flat face), which is
+                // inside the circumradius — using the circumradius here would
+                // false-positive on any unit standing against a face.
+                ObstacleVolume::Prism {
+                    center_xz,
+                    circumradius,
+                    sides,
+                    ..
+                } => Some((
+                    center_xz.x,
+                    center_xz.y,
+                    prism_apothem(*circumradius, *sides),
+                )),
                 _ => None,
             })
             .collect();
-        assert!(!pillars.is_empty(), "PillaredArena must carry cylinder pillars");
+        assert!(!pillars.is_empty(), "PillaredArena must carry pillar volumes");
         pillars
     }
 
@@ -3744,7 +3760,7 @@ mod u6_collision_smoke {
             vec!["Warlock", "Priest"],
             Some(seed),
         );
-        cfg.map = "PillaredArena".to_string();
+        cfg.map = "TwinPillars".to_string();
         cfg
     }
 
@@ -3800,7 +3816,7 @@ mod u8_healer_cover {
     fn train_config(seed: u64) -> HeadlessMatchConfig {
         let mut cfg =
             create_config(vec!["Warrior", "Priest"], vec!["Priest", "Mage"], Some(seed));
-        cfg.map = "PillaredArena".to_string();
+        cfg.map = "TwinPillars".to_string();
         cfg.team1_kill_target = Some(0); // team-1 focuses team-2's Priest
         cfg
     }
@@ -3864,7 +3880,7 @@ mod u8_healer_cover {
     fn measure(seed: u64) -> CoverStats {
         let geom = load_map_geometry_config()
             .expect("maps.ron loads")
-            .active_for(ArenaMap::PillaredArena);
+            .active_for(ArenaMap::TwinPillars);
         let obstacles = geom.volumes;
         assert!(!obstacles.is_empty(), "PillaredArena must carry cover volumes");
 
@@ -4181,7 +4197,7 @@ mod u9_seek_reset {
             vec!["Mage", "Priest"],
             vec!["Warrior", "Priest"],
             seed,
-            "PillaredArena",
+            "TwinPillars",
         );
         let blocked = mage_frostbolt_times(&lines, "", Some("LosBlocked"));
         let casts = mage_frostbolt_times(&lines, "chosen", None);
@@ -4235,7 +4251,7 @@ mod u9_seek_reset {
             vec!["Mage", "Priest"],
             vec!["Warrior", "Priest"],
             13,
-            "PillaredArena",
+            "TwinPillars",
         );
         let blocked = mage_frostbolt_times(&lines, "", Some("LosBlocked"));
         assert!(blocked.len() >= 3, "seed 13 must exercise occlusion, got {}", blocked.len());
@@ -4257,7 +4273,7 @@ mod u9_seek_reset {
             vec!["Mage", "Priest"],
             vec!["Warrior", "Priest"],
             13,
-            "PillaredArena",
+            "TwinPillars",
         );
         let seek_with_term = lines
             .iter()
@@ -4397,6 +4413,7 @@ mod u9_seek_reset {
         let obstacles = Vec::new();
 
         let ctx = CombatContext {
+            bounds: Default::default(),
             combatants: &combatants,
             active_auras: &active_auras,
             dr_trackers: &dr_trackers,
@@ -4499,7 +4516,7 @@ mod u9_seek_reset {
                 vec!["Mage", "Priest"],
                 vec!["Warrior", "Priest"],
                 seed,
-                "PillaredArena",
+                "TwinPillars",
             );
             let blocked = mage_frostbolt_times(&lines, "", Some("LosBlocked"));
             let casts = mage_frostbolt_times(&lines, "chosen", None);
@@ -4563,7 +4580,7 @@ mod u10_press {
             team2: vec!["Warlock".into(), "Priest".into()],
             max_duration_secs: 300.0,
             random_seed: Some(seed),
-            map: "PillaredArena".to_string(),
+            map: "TwinPillars".to_string(),
             ..Default::default()
         };
         let mut frames: Vec<FrameObservation> = Vec::new();
@@ -4895,7 +4912,7 @@ mod los_probes {
         drop(tmp);
         let mut cfg =
             create_config(vec!["Mage", "Priest"], vec!["Warrior", "Priest"], Some(seed));
-        cfg.map = "PillaredArena".to_string();
+        cfg.map = "TwinPillars".to_string();
         cfg.max_duration_secs = 120.0;
         cfg.output_path = Some(path.to_string_lossy().into_owned());
         // suppress_log = false so the .txt log is written to output_path.
@@ -5007,7 +5024,7 @@ mod chase_los {
             // reopened the stall would visibly run long instead of being capped).
             max_duration_secs: 300.0,
             random_seed: Some(seed),
-            map: "PillaredArena".to_string(),
+            map: "TwinPillars".to_string(),
             ..Default::default()
         }
     }
@@ -5044,7 +5061,7 @@ mod chase_los {
     fn measure(seed: u64) -> ChaseStats {
         let obstacles = load_map_geometry_config()
             .expect("maps.ron loads")
-            .active_for(ArenaMap::PillaredArena)
+            .active_for(ArenaMap::TwinPillars)
             .volumes;
         assert!(!obstacles.is_empty(), "PillaredArena must carry cover volumes");
 
@@ -5281,7 +5298,7 @@ mod juke_chase {
             team2: vec!["Warrior".into(), "Shaman".into()],
             max_duration_secs: 300.0,
             random_seed: Some(seed),
-            map: "PillaredArena".to_string(),
+            map: "TwinPillars".to_string(),
             ..Default::default()
         }
     }
@@ -5312,7 +5329,7 @@ mod juke_chase {
     fn measure(seed: u64) -> JukeStats {
         let obstacles = load_map_geometry_config()
             .expect("maps.ron loads")
-            .active_for(ArenaMap::PillaredArena)
+            .active_for(ArenaMap::TwinPillars)
             .volumes;
         assert!(!obstacles.is_empty(), "PillaredArena must carry cover volumes");
 
@@ -5543,7 +5560,7 @@ mod medic_chase {
             team2: vec!["Warrior".into(), "Shaman".into()],
             max_duration_secs: 200.0,
             random_seed: Some(seed),
-            map: "PillaredArena".to_string(),
+            map: "TwinPillars".to_string(),
             ..Default::default()
         }
     }
@@ -5716,7 +5733,7 @@ mod medic_chase {
     fn measure(seed: u64) -> SeedStats {
         let obstacles = load_map_geometry_config()
             .expect("maps.ron loads")
-            .active_for(ArenaMap::PillaredArena)
+            .active_for(ArenaMap::TwinPillars)
             .volumes;
         assert!(!obstacles.is_empty(), "PillaredArena must carry cover volumes");
 
@@ -5896,7 +5913,7 @@ mod oom_wand {
         HeadlessMatchConfig {
             team1: vec!["Mage".into(), "Priest".into()],
             team2: vec!["Warrior".into(), "Shaman".into()],
-            map: "PillaredArena".into(),
+            map: "TwinPillars".into(),
             max_duration_secs: 300.0,
             random_seed: Some(seed),
             ..Default::default()
@@ -6148,7 +6165,7 @@ mod warrior_pillar_pathing {
     fn pillars() -> Vec<(f32, f32, f32)> {
         let geom = load_map_geometry_config()
             .expect("maps.ron loads")
-            .active_for(ArenaMap::PillaredArena);
+            .active_for(ArenaMap::TwinPillars);
         let v: Vec<(f32, f32, f32)> = geom
             .volumes
             .iter()
@@ -6165,7 +6182,7 @@ mod warrior_pillar_pathing {
 
     fn config(seed: u64) -> HeadlessMatchConfig {
         let mut cfg = create_config(vec!["Warrior", "Priest"], vec!["Mage", "Priest"], Some(seed));
-        cfg.map = "PillaredArena".to_string();
+        cfg.map = "TwinPillars".to_string();
         cfg
     }
 

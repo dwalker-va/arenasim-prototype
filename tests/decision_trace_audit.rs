@@ -126,7 +126,7 @@ struct ReferenceMatch {
     seed: u64,
     /// Arena map name (parsed by `HeadlessMatchConfig`). Most matchups run on
     /// "BasicArena" (no obstacles); the LoS-coverage matchup runs on
-    /// "PillaredArena" so the cast-start LoS guard fires.
+    /// "TwinPillars" so the cast-start LoS guard fires.
     map: &'static str,
 }
 
@@ -191,7 +191,7 @@ fn reference_matchups() -> Vec<ReferenceMatch> {
             team1: vec!["Mage", "Priest"],
             team2: vec!["Warrior", "Priest"],
             seed: 7,
-            map: "PillaredArena",
+            map: "TwinPillars",
         },
     ]
 }

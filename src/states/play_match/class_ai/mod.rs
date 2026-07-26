@@ -40,6 +40,7 @@ use super::ability_config::AbilityDefinitions;
 use super::components::{Aura, ActiveAuras, Combatant, AuraType, DispelPending, PetType, DRCategory, DRTracker};
 use super::constants::GCD;
 use super::{is_spell_school_locked, is_silenced};
+use super::arena_bounds::ArenaBounds;
 use super::map_geometry::ObstacleVolume;
 use super::utils::log_ability_use;
 
@@ -180,6 +181,11 @@ pub struct CombatContext<'a> {
     /// snapshot from `ActiveMapGeometry`; consumed by the cast-start LoS guard
     /// (and, in later units, the movement scorer).
     pub obstacles: &'a [ObstacleVolume],
+    /// The active map's walkable region, threaded from `ActiveMapGeometry`
+    /// alongside `obstacles`. Consumed wherever the AI places a world point it
+    /// expects to be reachable (formation points, trap positions), so those
+    /// points respect the selected map's shape rather than a global octagon.
+    pub bounds: ArenaBounds,
     /// The combatant making the decision
     pub self_entity: Entity,
 }
