@@ -231,7 +231,8 @@ const NAGRAND_PILLAR_SIDES: u32 = 8;
 
 /// Half-step turn (360/8/2), so a flat face — not a vertex — points down each
 /// axis. This is gameplay-relevant: it pulls the pillar's axial reach in from the
-/// circumradius (2.5) to the apothem (≈2.31).
+/// circumradius (6.0) to the apothem (≈5.54), which changes which grazing
+/// sightlines the pillar blocks.
 const NAGRAND_PILLAR_ROTATION_DEG: f32 = 22.5;
 
 /// Pillar height. Full-height cover, as the old cylinders were.
@@ -331,9 +332,73 @@ fn in_arena_bounds(bounds: &ArenaBounds, x: f32, z: f32) -> bool {
     bounds.contains(Vec3::new(x, 1.0, z))
 }
 
-/// Validate one map's volumes and cover anchors, pushing every violation.
+/// Validate a map's [`ArenaBounds`], pushing every violation.
+///
+/// `bounds` became RON-authored data with the Nagrand rework, so it needs the same
+/// startup gate the volumes already had. Degenerate values are not merely ugly:
+/// a zero `corner_sum` makes [`ArenaBounds::edge_closeness`] divide by zero and
+/// feed NaN into the movement scorer (which then silently picks the last
+/// candidate), and a non-positive `half_x` inverts `team_spawn_x` so the two teams
+/// spawn on each other's side of the arena.
+fn validate_bounds(map: &str, bounds: &ArenaBounds, issues: &mut Vec<String>) {
+    /// Push an issue unless `v` is a usable dimension. Returns whether it is, so
+    /// the cross-field checks below can skip comparing garbage.
+    fn positive(map: &str, name: &str, v: f32, issues: &mut Vec<String>) -> bool {
+        if v > 0.0 && v.is_finite() {
+            return true;
+        }
+        issues.push(format!(
+            "{map}.bounds {name} must be positive and finite, got {v}"
+        ));
+        false
+    }
+    match *bounds {
+        ArenaBounds::Octagon {
+            half_x,
+            half_z,
+            corner_sum,
+        } => {
+            let hx = positive(map, "octagon half_x", half_x, issues);
+            let hz = positive(map, "octagon half_z", half_z, issues);
+            let cs = positive(map, "octagon corner_sum", corner_sum, issues);
+            // The chamfer constraint |x| + |z| <= corner_sum must leave a region
+            // at least as wide as the longer axis, or the diagonals cut the arena
+            // down to a sliver (or away entirely).
+            if hx && hz && cs && corner_sum <= half_x.max(half_z) {
+                issues.push(format!(
+                    "{map}.bounds octagon corner_sum {corner_sum} must exceed \
+                     max(half_x, half_z) = {}, or the corner chamfers cut the arena away",
+                    half_x.max(half_z)
+                ));
+            }
+        }
+        ArenaBounds::Bowl {
+            semi_x,
+            semi_z,
+            alcove_depth,
+            alcove_half_width,
+        } => {
+            positive(map, "bowl semi_x", semi_x, issues);
+            let sz = positive(map, "bowl semi_z", semi_z, issues);
+            positive(map, "bowl alcove_depth", alcove_depth, issues);
+            let aw = positive(map, "bowl alcove_half_width", alcove_half_width, issues);
+            // The gate mouths must be strictly narrower than the bowl, or
+            // `outline` degenerates: the arc between the two mouths vanishes and
+            // the floor fan/wall loop collapse onto coincident points.
+            if sz && aw && alcove_half_width >= semi_z {
+                issues.push(format!(
+                    "{map}.bounds bowl alcove_half_width {alcove_half_width} must be less than \
+                     semi_z {semi_z}, or the gate mouths swallow the bowl wall"
+                ));
+            }
+        }
+    }
+}
+
+/// Validate one map's bounds, volumes, and cover anchors, pushing every violation.
 fn validate_map(map: &str, def: &MapDef, issues: &mut Vec<String>) {
     let bounds = &def.bounds;
+    validate_bounds(map, bounds, issues);
     for (i, volume) in def.volumes.iter().enumerate() {
         match *volume {
             VolumeDef::Cylinder {
@@ -576,6 +641,107 @@ mod tests {
             "issues should flag the out-of-bounds pillar: {:?}",
             issues
         );
+    }
+
+    /// Degenerate `bounds` must be rejected at startup like any other bad map
+    /// data. A zero `corner_sum` in particular makes `edge_closeness` divide by
+    /// zero and feeds NaN into the movement scorer, which is invisible at runtime.
+    #[test]
+    fn validate_rejects_degenerate_bounds() {
+        let cases: Vec<(ArenaBounds, &str)> = vec![
+            (
+                ArenaBounds::Octagon {
+                    half_x: 36.5,
+                    half_z: 21.5,
+                    corner_sum: 0.0,
+                },
+                "octagon corner_sum",
+            ),
+            (
+                ArenaBounds::Octagon {
+                    half_x: -36.5,
+                    half_z: 21.5,
+                    corner_sum: 48.88,
+                },
+                "octagon half_x",
+            ),
+            (
+                ArenaBounds::Octagon {
+                    half_x: 36.5,
+                    half_z: 21.5,
+                    // Inside the rectangle but below its long axis: the chamfers
+                    // would cut the arena down to a sliver.
+                    corner_sum: 30.0,
+                },
+                "must exceed",
+            ),
+            (
+                ArenaBounds::Bowl {
+                    semi_x: 59.72,
+                    semi_z: 59.72,
+                    alcove_depth: 0.0,
+                    alcove_half_width: 8.0,
+                },
+                "bowl alcove_depth",
+            ),
+            (
+                ArenaBounds::Bowl {
+                    semi_x: 59.72,
+                    semi_z: 8.0,
+                    alcove_depth: 10.0,
+                    // Mouth as wide as the bowl: `outline` degenerates.
+                    alcove_half_width: 8.0,
+                },
+                "alcove_half_width",
+            ),
+        ];
+        for (bounds, expected) in cases {
+            let mut config = MapGeometryConfig::default();
+            config.basic_arena.bounds = bounds;
+            let issues = match config.validate() {
+                Err(issues) => issues,
+                Ok(()) => panic!("{bounds:?} must fail validation"),
+            };
+            assert!(
+                issues.iter().any(|i| i.contains("basic_arena") && i.contains(expected)),
+                "{bounds:?} should be flagged with {expected:?}: {issues:?}"
+            );
+        }
+    }
+
+    /// TwinPillars is the map the whole line-of-sight probe suite and the
+    /// 2026-07-23 balance baseline are calibrated against, so its shipped geometry
+    /// is a pinned invariant — "preserved verbatim" needs a test, not a comment.
+    #[test]
+    fn twin_pillars_geometry_is_preserved_verbatim() {
+        let config = load_map_geometry_config().expect("maps.ron must load");
+        let active = config.active_for(ArenaMap::TwinPillars);
+        assert_eq!(
+            active.bounds,
+            ArenaBounds::default(),
+            "TwinPillars must keep the historical 76x46 octagon"
+        );
+        let mut centers: Vec<f32> = active
+            .volumes
+            .iter()
+            .map(|v| match v {
+                ObstacleVolume::Cylinder {
+                    center_xz,
+                    radius,
+                    base_y,
+                    height,
+                } => {
+                    assert_eq!(*radius, 2.5, "pillar radius");
+                    assert_eq!(center_xz.y, 0.0, "pillar z");
+                    assert_eq!(*base_y, 0.0, "pillar base");
+                    assert_eq!(*height, 5.0, "pillar height");
+                    center_xz.x
+                }
+                other => panic!("TwinPillars pillars must be cylinders, got {other:?}"),
+            })
+            .collect();
+        centers.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert_eq!(centers, vec![-9.0, 9.0], "mirrored pillar x-centers");
     }
 
     /// A cover anchor inside a volume is rejected.

@@ -64,7 +64,7 @@ use bevy::prelude::*;
 use super::is_in_arena_bounds;
 use super::super::map_geometry::{has_line_of_sight, position_blocked, ObstacleVolume, EYE_HEIGHT};
 use super::super::movement_config::MovementWeights;
-use super::super::arena_bounds::ArenaBounds;
+use super::super::arena_bounds::{ArenaBounds, EDGE_PENALTY_ONSET_FRACTION};
 use super::super::ARENA_CORNER_SUM;
 
 /// Mask bit: candidate's lookahead position is out of arena bounds.
@@ -78,11 +78,17 @@ pub const MASK_ANCHOR: u16 = 1 << 1;
 /// obstacle-free maps, so BasicArena scoring is unaffected.
 pub const MASK_LOS: u16 = 1 << 2;
 
-/// Where the graded corner penalty starts biting, as |x|+|z|. Below this the
-/// term is zero; it ramps linearly to full weight at the corner wall
-/// (`ARENA_CORNER_SUM`). ~70% of the wall keeps the center half of the arena
-/// penalty-free.
-pub const CORNER_PENALTY_ONSET: f32 = ARENA_CORNER_SUM * 0.7;
+/// Where the graded corner penalty starts biting on the HISTORICAL octagon, as
+/// |x|+|z|. Below this the term is zero; it ramps linearly to full weight at the
+/// corner wall (`ARENA_CORNER_SUM`). ~70% of the wall keeps the center half of the
+/// arena penalty-free.
+///
+/// The scorer itself reads `ArenaBounds::edge_closeness`, which is per-map; this is
+/// the same onset expressed as an absolute |x|+|z| threshold for the octagon-only
+/// movement probes to assert against. It shares
+/// [`EDGE_PENALTY_ONSET_FRACTION`] with `edge_closeness` rather than restating
+/// 0.7, so retuning the onset cannot move the scorer without moving the probes.
+pub const CORNER_PENALTY_ONSET: f32 = ARENA_CORNER_SUM * EDGE_PENALTY_ONSET_FRACTION;
 
 /// The 16 compass candidate directions (unit XZ vectors, TAU/16 apart). Index
 /// order is fixed, so argmax tie-breaks are deterministic.

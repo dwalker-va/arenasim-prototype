@@ -28,7 +28,7 @@ use bevy::prelude::*;
 use bevy_egui::egui;
 
 use super::match_config::ArenaMap;
-use super::play_match::arena_bounds::{ArenaBounds, WALL_OFFSET};
+use super::play_match::arena_bounds::{outline_half_extents, ArenaBounds, WALL_OFFSET};
 use super::play_match::map_config::MapGeometryConfig;
 use super::play_match::map_geometry::{prism_vertices_world, ObstacleVolume};
 
@@ -41,7 +41,12 @@ const CLEARANCE_PROBE_STEP: f32 = 0.05;
 /// A pillar's footprint reduced to what the annotations need.
 struct Pillar {
     center: Vec2,
-    outline: Vec<Vec2>,
+    /// Greatest distance from `center` to the footprint's edge, so the wall
+    /// clearance label can report pillar-EDGE to wall as well as centre to wall.
+    /// Carried explicitly rather than derived from an outline, because a cylinder
+    /// has no vertex list and folding an empty one yields 0 — which silently made
+    /// the "from edge" figure equal to the "from centre" figure on TwinPillars.
+    edge_radius: f32,
 }
 
 /// Shortest distance from `from` to the edge of `bounds`, found by marching
@@ -105,10 +110,7 @@ pub fn draw_arena_layout(
 
     // Fit the walls (not just the gameplay bounds) plus room for edge labels.
     let outline = bounds.outline(96);
-    let half = outline
-        .iter()
-        .fold(Vec2::ZERO, |acc, p| acc.max(p.abs()))
-        .max(Vec2::splat(1.0));
+    let half = outline_half_extents(&outline);
     let label_margin = 46.0;
     let inner = rect.shrink(label_margin);
     let scale = (inner.width() / (half.x * 2.0)).min(inner.height() / (half.y * 2.0));
@@ -232,7 +234,8 @@ pub fn draw_arena_layout(
                 ));
                 pillars.push(Pillar {
                     center: center_xz,
-                    outline: verts,
+                    // Vertices sit on the circumcircle, so that IS the edge reach.
+                    edge_radius: circumradius,
                 });
             }
             ObstacleVolume::Cylinder {
@@ -246,7 +249,7 @@ pub fn draw_arena_layout(
                 );
                 pillars.push(Pillar {
                     center: center_xz,
-                    outline: Vec::new(),
+                    edge_radius: radius,
                 });
             }
             ObstacleVolume::Aabb { min, max } => {
@@ -316,14 +319,12 @@ pub fn draw_arena_layout(
         if let Some(clear) = distance_to_wall(&bounds, p.center, max_probe) {
             // Subtract the footprint so the number reads as pillar-edge to wall
             // as well as center-to-wall.
-            let edge = p
-                .outline
-                .iter()
-                .map(|v| v.distance(p.center))
-                .fold(0.0_f32, f32::max);
             label(
                 p.center,
-                format!("\n wall {clear:.1} from center\n ({:.1} from edge)", clear - edge),
+                format!(
+                    "\n wall {clear:.1} from center\n ({:.1} from edge)",
+                    clear - p.edge_radius
+                ),
                 accent,
                 egui::Align2::LEFT_TOP,
             );

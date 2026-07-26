@@ -185,6 +185,16 @@ pub(crate) fn create_surface_texture(base: [f32; 3], blotch_amp: f32, grain_amp:
     image
 }
 
+/// Arc tessellation for the arena floor and walls. Curved shapes get this many
+/// segments around a full revolution; straight-sided shapes ignore it.
+///
+/// 64 keeps a ~120yd bowl's wall visibly smooth: the bowl outline it produces has
+/// ~134 edges (two 63-point arcs plus the two gate mouths) at ~3yd chords, so a
+/// wall follows the curve closely. Wall meshes and materials are deduplicated by
+/// length in `spawn_arena_environment`, which is what keeps that edge count from
+/// turning into 134 distinct assets.
+pub(crate) const WALL_ARC_SEGMENTS: usize = 64;
+
 /// Creates a flat floor mesh for an arbitrary arena outline (world-space XZ
 /// vertices in counter-clockwise order, from `ArenaBounds::outline`).
 ///
@@ -200,11 +210,6 @@ pub(crate) fn create_surface_texture(base: [f32; 3], blotch_amp: f32, grain_amp:
 /// the origin to an alcove corner runs down the corridor rather than crossing a
 /// wall. A fan would be wrong for a shape with an off-axis recess, so if one is
 /// ever added this needs a real triangulator.
-/// Arc tessellation for the arena floor and walls. Curved shapes get this many
-/// segments around a full revolution; straight-sided shapes ignore it. 64 keeps
-/// a ~120yd bowl's wall visibly smooth (~6yd chords) at ~70 wall entities.
-pub(crate) const WALL_ARC_SEGMENTS: usize = 64;
-
 pub(crate) fn create_arena_floor_mesh(outline: &[Vec2], uv_scale: f32) -> Mesh {
     let mut positions: Vec<[f32; 3]> = outline.iter().map(|p| [p.x, 0.0, p.y]).collect();
     let center_idx = positions.len() as u32;
@@ -436,9 +441,14 @@ pub(crate) fn spawn_arena_environment(
     // corner edge differs from the old `PI/4` by exactly 180 degrees, which is the
     // same solid (a cuboid is symmetric under a half turn about its own axis).
     //
-    // Materials are shared per rounded length so a tessellated curve — whose
-    // segments are all the same length — allocates one material, not sixty.
+    // Meshes AND materials are shared per rounded length: a tessellated curve's
+    // arc segments are all the same length, so Nagrand's ~130-edge outline
+    // allocates a handful of assets instead of 130 identical cuboids and 130
+    // identical materials. That matters twice — every match setup, and every map
+    // switch in the Configure Match preview, which rebuilds this scene.
     let mut wall_materials: std::collections::BTreeMap<u32, Handle<StandardMaterial>> =
+        std::collections::BTreeMap::new();
+    let mut wall_meshes: std::collections::BTreeMap<u32, Handle<Mesh>> =
         std::collections::BTreeMap::new();
     let wall_tile = 6.0;
 
@@ -457,8 +467,9 @@ pub(crate) fn spawn_arena_environment(
         // hairline gaps at the joints where the boxes meet at an angle.
         let seg_length = length + wall_thickness * 0.5;
 
-        // Key on tenths of a world unit: identical-length segments share one
-        // material, and the uv_transform stays correct for each distinct length.
+        // Key on tenths of a world unit: identical-length segments share one mesh
+        // and one material, and the uv_transform stays correct for each distinct
+        // length.
         let key = (seg_length * 10.0).round() as u32;
         let material = wall_materials
             .entry(key)
@@ -475,11 +486,15 @@ pub(crate) fn spawn_arena_environment(
                 })
             })
             .clone();
+        let mesh = wall_meshes
+            .entry(key)
+            .or_insert_with(|| meshes.add(Cuboid::new(seg_length, wall_height, wall_thickness)))
+            .clone();
 
         entities.push(
             commands
                 .spawn((
-                    Mesh3d(meshes.add(Cuboid::new(seg_length, wall_height, wall_thickness))),
+                    Mesh3d(mesh),
                     MeshMaterial3d(material),
                     Transform::from_xyz(mid.x, wall_height / 2.0, mid.y)
                         .with_rotation(Quat::from_rotation_y(yaw)),

@@ -14,11 +14,16 @@
 //! - **Visual outline** — where the floor mesh and wall meshes go, obtained by
 //!   offsetting the gameplay bounds outward by [`WALL_OFFSET`].
 //!
-//! The visual outline is *derived*, not declared, so the two can never drift.
-//! For [`ArenaBounds::Octagon`] the derivation reproduces the old
-//! `ARENA_FLOOR_*` constants exactly (36.5 + 1.5 = 38, 21.5 + 1.5 = 23, and
-//! 48.88 + 1.5·√2 = 51 = 38 − 10 + 23), which is what keeps BasicArena
-//! byte-identical.
+//! The visual outline is *derived*, not declared, so the two cannot drift — the
+//! retired `ARENA_FLOOR_*` constants are gone rather than kept alongside. For
+//! [`ArenaBounds::Octagon`] the derivation reproduces them exactly (36.5 + 1.5 =
+//! 38, 21.5 + 1.5 = 23, and 48.88 + 1.5·√2 = 51 = 38 − 10 + 23), which is what
+//! keeps BasicArena byte-identical, and a test pins that.
+//!
+//! Anything positioned against the arena's shape must go through this type. The
+//! failure mode is silent: a consumer left on the old hard-coded octagon (the
+//! Shaman totem ground decal was one) does not error on Nagrand, it just draws or
+//! measures the wrong arena.
 //!
 //! ## Adding a shape
 //!
@@ -39,7 +44,12 @@ pub const WALL_OFFSET: f32 = 1.5;
 /// Fraction of the way to the boundary at which the scorer's corner/edge penalty
 /// begins ramping. Preserves the old `CORNER_PENALTY_ONSET = ARENA_CORNER_SUM *
 /// 0.7`, so ~70% of the wall keeps the arena's center open.
-const EDGE_PENALTY_ONSET_FRACTION: f32 = 0.7;
+///
+/// `pub` because `movement_scoring::CORNER_PENALTY_ONSET` — the octagon-only
+/// absolute threshold the movement probes assert against — is derived from it. The
+/// two must not restate 0.7 independently, or retuning the onset moves the scorer
+/// without moving the probes that police it.
+pub const EDGE_PENALTY_ONSET_FRACTION: f32 = 0.7;
 
 /// The walkable region of one arena, in XZ world units (yards).
 ///
@@ -151,16 +161,37 @@ impl ArenaBounds {
                     pos.x = pos.x.clamp(-(semi_x + alcove_depth), semi_x + alcove_depth);
                     return pos;
                 }
-                // Otherwise pull radially onto the ellipse. This is the radial
-                // projection, not the true nearest point (which needs iteration);
-                // adequate here for the same reason the octagon's 45°-normal
-                // projection is, and cheap + deterministic.
+                // Outside the corridor band in z. Two boundaries can be the
+                // nearest one here, and picking the wrong one TELEPORTS the mover:
+                //
+                // - The ellipse, for a point out past the bowl's shoulder.
+                // - The corridor's SIDE wall, for a point inside a starting room
+                //   (`|x|` past the bowl wall) that has just stepped over
+                //   `z = ±alcove_half_width`. Such a point is a fraction of a yard
+                //   from that side wall but ~10yd from the ellipse, so radially
+                //   projecting it would fling the mover back through the wall into
+                //   the bowl in a single frame.
+                //
+                // So compute both projections and take the nearer. The radial one
+                // is still a radial projection, not the true nearest point on the
+                // ellipse (which needs iteration) — adequate for the same reason
+                // the octagon's 45°-normal projection is, and cheap + deterministic.
                 let r = ellipse_radius(pos.x, pos.z, semi_x, semi_z);
-                if r > 1.0 {
-                    pos.x /= r;
-                    pos.z /= r;
+                let onto_bowl = if r > 1.0 {
+                    Vec3::new(pos.x / r, pos.y, pos.z / r)
+                } else {
+                    pos
+                };
+                let onto_corridor = Vec3::new(
+                    pos.x.clamp(-(semi_x + alcove_depth), semi_x + alcove_depth),
+                    pos.y,
+                    pos.z.clamp(-alcove_half_width, alcove_half_width),
+                );
+                if pos.distance(onto_corridor) < pos.distance(onto_bowl) {
+                    onto_corridor
+                } else {
+                    onto_bowl
                 }
-                pos
             }
         }
     }
@@ -324,6 +355,21 @@ impl ArenaBounds {
     }
 }
 
+/// Half-extents of an [`ArenaBounds::outline`] polygon's bounding box — the
+/// extents to fit when scaling or framing a drawing of the whole arena, walls
+/// included.
+///
+/// Shared by every consumer that has to size the arena (the Configure Match
+/// preview pane and its schematic, the annotated layout view) so they cannot
+/// disagree about how big it is; floored at 1 so a degenerate outline cannot make
+/// a caller divide by zero.
+pub fn outline_half_extents(outline: &[Vec2]) -> Vec2 {
+    outline
+        .iter()
+        .fold(Vec2::ZERO, |acc, p| acc.max(p.abs()))
+        .max(Vec2::splat(1.0))
+}
+
 /// Normalized ellipse radius: `1.0` exactly on the boundary, `< 1` inside.
 fn ellipse_radius(x: f32, z: f32, semi_x: f32, semi_z: f32) -> f32 {
     let sx = semi_x.max(1e-6);
@@ -468,6 +514,46 @@ mod tests {
             let x = i as f32;
             assert!(b.contains(Vec3::new(x, 1.0, 0.0)), "gap at x={x}");
         }
+    }
+
+    /// Stepping over a starting room's SIDE wall must clamp onto that wall, not
+    /// radially onto the ellipse — the latter is ~10yd away and would teleport the
+    /// mover back through the wall into the bowl in a single frame.
+    ///
+    /// A movement step is at most ~0.12yd (7yd/s at 60Hz), so the clamp must never
+    /// move a position further than a step's worth when it only just left bounds.
+    #[test]
+    fn bowl_clamp_never_teleports_out_of_a_starting_room() {
+        let b = ArenaBounds::Bowl {
+            semi_x: 59.72,
+            semi_z: 59.72,
+            alcove_depth: 10.0,
+            alcove_half_width: 8.0,
+        };
+        // Walk down the room's side wall, nudging just outside it each time.
+        for x in [61.0_f32, 64.0, 66.0, 69.0, 69.7] {
+            for (px, pz) in [(x, 8.06_f32), (x, -8.06), (-x, 8.06), (-x, -8.06)] {
+                let p = Vec3::new(px, 1.0, pz);
+                assert!(!b.contains(p), "{p:?} should be just outside the corridor");
+                let c = b.clamp(p);
+                assert!(b.contains(c), "clamp left {p:?} outside at {c:?}");
+                assert!(
+                    p.distance(c) < 0.5,
+                    "clamp teleported {p:?} to {c:?} ({:.2}yd) instead of onto the \
+                     corridor's side wall",
+                    p.distance(c)
+                );
+            }
+        }
+        // ...while a point out past the bowl's shoulder still projects radially
+        // onto the ellipse rather than being dragged into the corridor.
+        let shoulder = Vec3::new(62.0, 1.0, 20.0);
+        let c = b.clamp(shoulder);
+        assert!(b.contains(c), "shoulder clamp left {shoulder:?} outside at {c:?}");
+        assert!(
+            c.z.abs() > 8.0,
+            "shoulder point should clamp onto the bowl, not the corridor: {c:?}"
+        );
     }
 
     /// `edge_closeness` must mean the same thing on both shapes: <= 0 in the open

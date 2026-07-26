@@ -9,10 +9,9 @@ use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::PrimitiveTopology;
 use bevy_egui::{egui, EguiContexts};
 use crate::states::play_match::abilities::SpellSchool;
+use crate::states::play_match::arena_bounds::ArenaBounds;
 use crate::states::play_match::components::*;
-use crate::states::play_match::constants::{
-    ARENA_FLOOR_CORNER_CUT, ARENA_FLOOR_HALF_X, ARENA_FLOOR_HALF_Z,
-};
+use crate::states::play_match::map_config::ActiveMapGeometry;
 use crate::states::match_config::CharacterClass;
 
 // ==============================================================================
@@ -1096,7 +1095,7 @@ fn dispel_ribbon_colors(class: CharacterClass) -> (Color, LinearRgba) {
 }
 
 /// Build the twisting-ribbon mesh: a flat strip of quads whose centerline follows
-/// a helix coiling upward. Modeled on `create_octagon_mesh` (the codebase's raw-vertex
+/// a helix coiling upward. Modeled on `create_arena_floor_mesh` (the codebase's raw-vertex
 /// mesh precedent). `radius` must be > 0 so the band coils laterally rather than
 /// twisting in place. Returns a `TriangleList` with POSITION / NORMAL / UV_0 and
 /// U32 indices; render it double-sided (`cull_mode: None`) since the band is thin.
@@ -2845,47 +2844,39 @@ pub fn update_walk_animation(
 // ==============================================================================
 
 /// Build a flat ground disc of `radius` centered at `center` (world XZ), clipped
-/// to the arena floor octagon so it never spills past the walls. Vertices are in
-/// LOCAL space (offsets from `center`) lying in the XZ plane at y=0, so the mesh
-/// can be parented to an entity sitting at `center`. The octagon is the same one
-/// `create_octagon_mesh` builds the floor from (shared arena constants), and it
-/// is convex and contains every in-bounds totem, so a per-direction ray clip
-/// yields exactly circle ∩ octagon. Reusable by any ground decal that must stay
-/// inside the arena.
-fn arena_clipped_disc_mesh(center: Vec2, radius: f32) -> Mesh {
-    // Arena floor octagon as half-planes `n · p <= d` (un-normalized normals;
-    // the ray parameter cancels |n|). Four axis walls + four corner diagonals.
-    let hx = ARENA_FLOOR_HALF_X;
-    let hz = ARENA_FLOOR_HALF_Z;
-    let cs = ARENA_FLOOR_HALF_X - ARENA_FLOOR_CORNER_CUT + ARENA_FLOOR_HALF_Z;
-    let planes: [(Vec2, f32); 8] = [
-        (Vec2::new(1.0, 0.0), hx),
-        (Vec2::new(-1.0, 0.0), hx),
-        (Vec2::new(0.0, 1.0), hz),
-        (Vec2::new(0.0, -1.0), hz),
-        (Vec2::new(1.0, 1.0), cs),
-        (Vec2::new(-1.0, 1.0), cs),
-        (Vec2::new(1.0, -1.0), cs),
-        (Vec2::new(-1.0, -1.0), cs),
-    ];
-
+/// to `bounds` so it never spills past the arena walls. Vertices are in LOCAL
+/// space (offsets from `center`) lying in the XZ plane at y=0, so the mesh can be
+/// parented to an entity sitting at `center`. Reusable by any ground decal that
+/// must stay inside the arena.
+///
+/// Clipping is a per-direction march against [`ArenaBounds::contains`], which is
+/// shape-agnostic: this used to be eight hard-coded octagon half-planes, which
+/// silently collapsed the disc to zero radius on Nagrand's bowl (any totem outside
+/// the retired 76×46 rectangle failed every plane test at once). The disc now
+/// stops at the walkable edge rather than exactly at the wall — a `WALL_OFFSET`
+/// (1.5yd) inset, and the only bound that holds for every shape.
+fn arena_clipped_disc_mesh(bounds: &ArenaBounds, center: Vec2, radius: f32) -> Mesh {
     const SEGMENTS: usize = 96;
+    /// Radial march step. Fine enough that the clip reads as a clean edge on a
+    /// decal this faint.
+    const STEP: f32 = 0.2;
+
     let mut positions: Vec<[f32; 3]> = Vec::with_capacity(SEGMENTS + 1);
     let mut indices: Vec<u32> = Vec::with_capacity(SEGMENTS * 3);
     positions.push([0.0, 0.0, 0.0]); // fan center (index 0)
     for i in 0..SEGMENTS {
         let a = (i as f32) / (SEGMENTS as f32) * std::f32::consts::TAU;
         let dir = Vec2::new(a.cos(), a.sin());
-        // Distance from center to the nearest octagon edge along `dir`, capped
-        // at the disc radius.
-        let mut t = radius;
-        for (n, d) in planes.iter() {
-            let nd = n.dot(dir);
-            if nd > 1e-6 {
-                t = t.min((d - n.dot(center)) / nd);
+        // March outward until the point leaves the arena, capped at `radius`.
+        let mut t = 0.0_f32;
+        while t + STEP <= radius {
+            let probe = center + dir * (t + STEP);
+            if !bounds.contains(Vec3::new(probe.x, 1.0, probe.y)) {
+                break;
             }
+            t += STEP;
         }
-        let p = dir * t.max(0.0);
+        let p = dir * t;
         positions.push([p.x, 0.0, p.y]); // dir.y maps to world/local Z
     }
     for i in 0..SEGMENTS {
@@ -2914,8 +2905,15 @@ pub fn spawn_totem_visuals(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    // Per-map arena shape, for clipping the buff-radius decal to the real walls.
+    // `Option` so a scene without the resource simply skips the map-aware clip.
+    map_geometry: Option<Res<ActiveMapGeometry>>,
     new_totems: Query<(Entity, &Totem, &Transform), (Added<Totem>, Without<Children>)>,
 ) {
+    let bounds = map_geometry
+        .as_ref()
+        .map(|g| g.bounds)
+        .unwrap_or_default();
     for (totem_entity, totem, transform) in new_totems.iter() {
         let color = totem.element.color();
         let s = color.to_srgba();
@@ -2940,10 +2938,11 @@ pub fn spawn_totem_visuals(
             ..default()
         });
 
-        // Very subtle ground disc marking the buff radius, clipped to the arena
-        // floor octagon so it never spills past the walls. `Add` blend per the
-        // project's ground-indicator convention to avoid z-fighting flicker.
+        // Very subtle ground disc marking the buff radius, clipped to the active
+        // map's walkable region so it never spills past the walls. `Add` blend per
+        // the project's ground-indicator convention to avoid z-fighting flicker.
         let disc_mesh = meshes.add(arena_clipped_disc_mesh(
+            &bounds,
             transform.translation.xz(),
             totem.radius,
         ));

@@ -897,17 +897,19 @@ fn run_match_impl(
         match TraceWriter::create(tc.output_path.clone()) {
             Ok(writer) => {
                 let world = app.world_mut();
+                // Read the profile the plugin already parsed rather than parsing
+                // the config string a second time — one parse, one error site, and
+                // the trace stamp cannot disagree with the profile the match ran.
+                let profile = world
+                    .get_resource::<HeadlessMatchState>()
+                    .map(|s| s.ai_profile)
+                    .unwrap_or_default();
                 if let Some(mut trace) = world.get_resource_mut::<DecisionTrace>() {
                     trace.install_writer(writer);
                     trace.seed = config.random_seed.unwrap_or(0);
                     // Stamp the AI profile too: without it, two traces from the
                     // same seed under different profiles are indistinguishable.
-                    trace.ai_profile = match config.ai_profile.as_deref() {
-                        Some(p) => crate::states::play_match::ai_profile::AiProfile::parse(p)
-                            .expect("Invalid ai_profile in headless config")
-                            .name(),
-                        None => crate::states::play_match::ai_profile::AiProfile::default().name(),
-                    };
+                    trace.ai_profile = profile.name();
                 }
             }
             Err(e) => {

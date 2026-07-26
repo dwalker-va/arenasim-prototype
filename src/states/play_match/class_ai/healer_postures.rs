@@ -14,7 +14,8 @@
 use bevy::prelude::*;
 
 use crate::states::play_match::combat_core::{
-    compass_directions_16, mask_and_los_bitmask, score_directions, AnchorConstraint, ScorerInputs,
+    candidate_mask, compass_directions_16, mask_and_los_bitmask, score_directions, AnchorConstraint,
+    ScorerInputs,
 };
 use crate::states::play_match::components::{HealerPosture, MovementDirective, MovementGoal, Posture};
 use crate::states::play_match::decision_trace::{
@@ -346,11 +347,20 @@ const COVER_STANDOFF: f32 = 1.5;
 /// on obstacle-free maps in the vacuous sense that it is always FALSE there — no
 /// obstacles means nothing is ever occluded — so the caller's `cover_pull > 0`
 /// gate is what keeps this inert, not this function.
+///
+/// MASKED candidates do not count. A step INTO a pillar is occluded from
+/// everything, but the scorer removes it (`MASK_LOS`), so counting it would report
+/// a gradient that `score_directions` cannot actually climb — and it would do so
+/// exactly where cover-seek is most needed: a healer pinned on the threat's side
+/// of a pillar, one step from cover it cannot walk through.
 fn has_local_cover(inputs: &ScorerInputs) -> bool {
     if inputs.obstacles.is_empty() {
         return false;
     }
     compass_directions_16().into_iter().any(|dir| {
+        if candidate_mask(dir, inputs) != 0 {
+            return false;
+        }
         let next = inputs.my_pos + Vec3::new(dir.x, 0.0, dir.y) * inputs.lookahead;
         let eye = Vec3::new(next.x, EYE_HEIGHT, next.z);
         inputs.threats.iter().any(|t| {
@@ -413,9 +423,11 @@ pub(super) fn cover_seek_target(
 
 /// Whether cover-seek should override the PRESSURED tick, and where to walk.
 ///
+/// PRESSURED-only by construction: the sole caller is the PRESSURED tick. Denial
+/// is a pressured behaviour — a FREE healer has formation duties and an ESCAPE/DIP
+/// healer has a committed window — so nothing else may call this.
+///
 /// Gates, in order of what they protect:
-/// - PRESSURED only. Denial is a pressured behaviour; a FREE healer has formation
-///   duties and an ESCAPE/DIP healer has a committed window.
 /// - `cover_pull` must be active *after* suppression, so the urgency and press
 ///   rules (a teammate dying, or the team pressing an advantage) still switch
 ///   denial off — cover-seek must not smuggle hiding back in when the healer
@@ -425,7 +437,6 @@ pub(super) fn cover_seek_target(
 /// - No local cover, or the scorer already has a gradient and should own the tick.
 pub(super) fn cover_seek_override(
     entity: Entity,
-    next: Posture,
     ctx: &CombatContext,
     inputs: &ScorerInputs,
     eff_weights: &MovementWeights,
@@ -434,7 +445,6 @@ pub(super) fn cover_seek_override(
     // and is opt-in. Landing it unconditionally drifted 6 fixed-seed probes on
     // every obstacle map — see `ai_profile.rs`.
     if !ctx.ai_profile.is_team_plan()
-        || next != Posture::Pressured
         || eff_weights.cover_pull <= 0.0
         || ctx.is_ccd(entity)
         || has_local_cover(inputs)
@@ -863,9 +873,7 @@ pub(super) fn healer_pressured_tick_shared(
     // the healer never approaches cover at all. When denial is active but no local
     // step is occluded, walk directly at the nearest hiding spot instead of
     // scoring. Placed AFTER `deny_weights` so urgency/press suppression still wins.
-    if let Some(spot) =
-        cover_seek_override(entity, Posture::Pressured, ctx, &inputs, &eff_weights)
-    {
+    if let Some(spot) = cover_seek_override(entity, ctx, &inputs, &eff_weights) {
         cover_seek_tick(
             commands, entity, spot, state, directive, shared, now, decision_trace, ctx,
             transitioned, prev,

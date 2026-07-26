@@ -182,6 +182,14 @@ impl HeadlessMatchConfig {
         // Validate map name
         Self::parse_map(&self.map)?;
 
+        // Validate the AI profile here, not at plugin build: `HeadlessPlugin`
+        // `.expect()`s it, so without this a typo'd `ai_profile` panics with a
+        // backtrace instead of getting the clean error every other string field in
+        // this config gets.
+        if let Some(profile) = self.ai_profile.as_deref() {
+            crate::states::play_match::ai_profile::AiProfile::parse(profile)?;
+        }
+
         // Validate kill targets
         if let Some(target) = self.team1_kill_target {
             if target >= self.team2.len() {

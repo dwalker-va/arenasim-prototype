@@ -58,6 +58,15 @@ fn arena_layout_basic() {
     render(ArenaMap::BasicArena, "arena_layout_basic");
 }
 
+/// TwinPillars gets a baseline too: it is a shipped, selectable map, and the one
+/// the line-of-sight probe suite measures, so a `maps.ron` edit that moves its
+/// pillars should be visible in the tuning loop and not only in an assertion.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn arena_layout_twin_pillars() {
+    render(ArenaMap::TwinPillars, "arena_layout_twin_pillars");
+}
+
 /// Pins the Nagrand spec numerically so the layout cannot silently drift, and so
 /// the spec is checked in the default `cargo test` run (no GPU required).
 ///
@@ -133,10 +142,16 @@ fn nagrand_dimensions_are_as_specified() {
 
 /// The other maps must NOT have been dragged onto Nagrand's bounds — their
 /// balance baselines and movement probes depend on the original octagon.
+/// TwinPillars is the load-bearing one: the whole line-of-sight probe suite and
+/// the 2026-07-23 balance doc measure exactly that geometry.
 #[test]
 fn other_maps_keep_the_historical_octagon() {
     let geometry = shipped_geometry();
-    for map in [ArenaMap::BasicArena, ArenaMap::TestVerticality] {
+    for map in [
+        ArenaMap::BasicArena,
+        ArenaMap::TwinPillars,
+        ArenaMap::TestVerticality,
+    ] {
         assert_eq!(
             geometry.active_for(map).bounds,
             ArenaBounds::default(),
