@@ -214,6 +214,32 @@ fn prism_clip_interval(
 }
 
 impl ObstacleVolume {
+    /// The volume's XZ footprint reduced to a bounding disc: `(center, radius)`
+    /// where the radius encloses the whole footprint.
+    ///
+    /// A deliberately coarse summary, for reasoning about an obstacle as "a blob
+    /// at a place" — e.g. picking a standing spot in its shadow. Callers must
+    /// verify the result against the exact predicates ([`has_line_of_sight`],
+    /// [`position_blocked`]) rather than trusting the disc, since it over-covers
+    /// every non-circular shape.
+    pub fn footprint_disc(&self) -> (Vec2, f32) {
+        match *self {
+            ObstacleVolume::Cylinder {
+                center_xz, radius, ..
+            } => (center_xz, radius),
+            ObstacleVolume::Prism {
+                center_xz,
+                circumradius,
+                ..
+            } => (center_xz, circumradius),
+            ObstacleVolume::Aabb { min, max } => {
+                let center = Vec2::new((min.x + max.x) * 0.5, (min.z + max.z) * 0.5);
+                let half = Vec2::new((max.x - min.x) * 0.5, (max.z - min.z) * 0.5);
+                (center, half.length())
+            }
+        }
+    }
+
     /// Whether the mover's `y` (a ground unit at `y ≈ 1.0`) falls within this
     /// volume's `y` span. Movement collision only applies when this is true.
     fn y_span_contains(&self, y: f32) -> bool {

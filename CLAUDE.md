@@ -24,6 +24,13 @@ cargo run --release -- --headless /tmp/test.json
 
 **Config options:**
 - `team1`, `team2`: Arrays of class names (Warrior, Mage, Rogue, Priest, Warlock, Paladin, Hunter)
+- `ai_profile`: "Legacy" (default) or "TeamPlan" — which AI implementation to run.
+  `Legacy` is the reactive per-unit AI every balance baseline and movement probe is
+  calibrated against; `TeamPlan` is the opt-in team-level positioning layer (see
+  `design-docs/team-level-positioning-ai.md`). Because matches are deterministic,
+  running the same seed under both profiles is a PAIRED comparison in which the AI
+  is the only variable. Also available as `--ai-profile` for `--matrix`, which
+  records it in the CSV header and the output filename.
 - `map`: "BasicArena", "TwinPillars", "PillaredArena", or "TestVerticality"
   ("PillaredArena" is the Nagrand Arena replica — a ~120yd circular bowl with four
   octagonal pillars and 10yd starting rooms; "TwinPillars" is the original

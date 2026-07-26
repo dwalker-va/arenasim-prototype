@@ -21,7 +21,9 @@ use crate::states::play_match::decision_trace::{
     ActorView, DecisionTrace, MovementEventBuilder, MovementGoalKind, MovementTrigger,
     Posture as TracePosture, TargetView,
 };
-use crate::states::play_match::map_geometry::{has_line_of_sight, EYE_HEIGHT};
+use crate::states::play_match::map_geometry::{
+    has_line_of_sight, position_blocked, EYE_HEIGHT, MOVER_RADIUS,
+};
 use crate::states::play_match::movement_config::{MovementWeights, SharedMovementConfig};
 
 use super::{pressing_when_ahead, CombatContext, CombatantInfo};
@@ -311,6 +313,219 @@ pub(super) fn medic_chase_target<'c>(
         .collect();
     let target = pick_medic_target(&candidates, shared.urgency_hp_threshold)?;
     ctx.combatants.get(&target)
+}
+
+// ---------------------------------------------------------------------------
+// Cover-seek navigation (distant cover)
+//
+// `cover_pull` is a LOCAL gradient: it rewards a candidate step that is already
+// occluded, evaluated one `SCORER_LOOKAHEAD` (2yd) ahead. That works when cover
+// is within a step or two, which it always was in a 73x46 arena with pillars at
+// x=+/-9. In a ~140yd arena the nearest pillar is tens of yards away, every
+// candidate direction scores 0, and the term is flat — so a pressured healer
+// never moves toward cover at all (measured: 0.00s occlusion per match, and only
+// 2 cover_pull firings against 14-19 historically).
+//
+// Cover-seek supplies the missing navigation: when denial is active but NO local
+// step is occluded, walk directly at the nearest standing spot that would break
+// the threat's sight. Same shape as `medic_chase` — a `MovementGoal::Point` that
+// overrides the scorer — and, like it, keyed on a condition that never holds on
+// obstacle-free maps, so BasicArena stays byte-identical.
+// ---------------------------------------------------------------------------
+
+/// Extra clearance beyond an obstacle's own footprint when picking a spot in its
+/// shadow, so the healer stands *behind* cover rather than flush against it (and
+/// so the point is not rejected as blocked by its own collision skin).
+const COVER_STANDOFF: f32 = 1.5;
+
+/// Whether any compass candidate step breaks sight to a threat — i.e. whether
+/// `cover_pull` has a local gradient to climb this tick.
+///
+/// When true, the scorer handles it and cover-seek must stay out of the way;
+/// when false the term is flat and only navigation can find cover. Always true
+/// on obstacle-free maps in the vacuous sense that it is always FALSE there — no
+/// obstacles means nothing is ever occluded — so the caller's `cover_pull > 0`
+/// gate is what keeps this inert, not this function.
+fn has_local_cover(inputs: &ScorerInputs) -> bool {
+    if inputs.obstacles.is_empty() {
+        return false;
+    }
+    compass_directions_16().into_iter().any(|dir| {
+        let next = inputs.my_pos + Vec3::new(dir.x, 0.0, dir.y) * inputs.lookahead;
+        let eye = Vec3::new(next.x, EYE_HEIGHT, next.z);
+        inputs.threats.iter().any(|t| {
+            !has_line_of_sight(
+                &inputs.obstacles,
+                eye,
+                Vec3::new(t.x, EYE_HEIGHT, t.z),
+            )
+        })
+    })
+}
+
+/// The nearest standing position that breaks sight to `threat`, or `None` if no
+/// obstacle offers one.
+///
+/// For each obstacle, the candidate is the point in its shadow: straight out from
+/// the obstacle centre along the direction away from the threat, clear of the
+/// footprint by [`COVER_STANDOFF`]. Candidates are then verified against the
+/// exact predicates — inside the arena, not inside an obstacle, and genuinely
+/// occluded — because `footprint_disc` over-covers non-circular shapes and the
+/// shadow point of a thin obstacle can miss.
+///
+/// Obstacles are walked in slice order and ties broken by distance-then-order, so
+/// the choice is deterministic.
+pub(super) fn cover_seek_target(
+    my_pos: Vec3,
+    threat: Vec3,
+    ctx: &CombatContext,
+) -> Option<Vec3> {
+    let threat_eye = Vec3::new(threat.x, EYE_HEIGHT, threat.z);
+    let mut best: Option<(f32, Vec3)> = None;
+
+    for volume in ctx.obstacles {
+        let (center, radius) = volume.footprint_disc();
+        // Direction from the threat past the obstacle — its shadow axis.
+        let away = (center - Vec2::new(threat.x, threat.z)).normalize_or_zero();
+        if away == Vec2::ZERO {
+            continue; // threat standing on the obstacle centre; no usable shadow
+        }
+        let spot_xz = center + away * (radius + MOVER_RADIUS + COVER_STANDOFF);
+        let spot = Vec3::new(spot_xz.x, my_pos.y, spot_xz.y);
+
+        // Exact checks — the disc is only a hint.
+        if !ctx.bounds.contains(spot) || position_blocked(ctx.obstacles, spot) {
+            continue;
+        }
+        let spot_eye = Vec3::new(spot.x, EYE_HEIGHT, spot.z);
+        if has_line_of_sight(ctx.obstacles, spot_eye, threat_eye) {
+            continue; // this shadow does not actually hide the healer
+        }
+
+        let d = my_pos.distance(spot);
+        if best.is_none_or(|(bd, _)| d < bd) {
+            best = Some((d, spot));
+        }
+    }
+
+    best.map(|(_, spot)| spot)
+}
+
+/// Whether cover-seek should override the PRESSURED tick, and where to walk.
+///
+/// Gates, in order of what they protect:
+/// - PRESSURED only. Denial is a pressured behaviour; a FREE healer has formation
+///   duties and an ESCAPE/DIP healer has a committed window.
+/// - `cover_pull` must be active *after* suppression, so the urgency and press
+///   rules (a teammate dying, or the team pressing an advantage) still switch
+///   denial off — cover-seek must not smuggle hiding back in when the healer
+///   should be healing. This is why it takes the EFFECTIVE weights.
+/// - Not hard-CC'd (`is_ccd` includes Root): a stationary healer's directive
+///   would be stale on release.
+/// - No local cover, or the scorer already has a gradient and should own the tick.
+pub(super) fn cover_seek_override(
+    entity: Entity,
+    next: Posture,
+    ctx: &CombatContext,
+    inputs: &ScorerInputs,
+    eff_weights: &MovementWeights,
+) -> Option<Vec3> {
+    // Gated on the AI profile: this is the first team-level-flavoured behaviour
+    // and is opt-in. Landing it unconditionally drifted 6 fixed-seed probes on
+    // every obstacle map — see `ai_profile.rs`.
+    if !ctx.ai_profile.is_team_plan()
+        || next != Posture::Pressured
+        || eff_weights.cover_pull <= 0.0
+        || ctx.is_ccd(entity)
+        || has_local_cover(inputs)
+    {
+        return None;
+    }
+    // Hide from the nearest threat: it is the one applying pressure, and cover
+    // that breaks its sight most often breaks its allies' too.
+    let nearest = inputs.threats.iter().copied().fold(None, |acc, t| {
+        let d = inputs.my_pos.distance(t);
+        match acc {
+            Some((bd, _)) if bd <= d => acc,
+            _ => Some((d, t)),
+        }
+    })?;
+    cover_seek_target(inputs.my_pos, nearest.1, ctx)
+}
+
+/// Issue/refresh the cover-seek directive toward `spot` and emit the movement
+/// event with a `Point` goal.
+///
+/// `transitioned`/`prev` are threaded through because this tick REPLACES the
+/// normal PRESSURED path, including its trace emission. A posture transition must
+/// still be recorded as a transition (`PressuredEnter`, or `EscapeWindowClosed`
+/// out of ESCAPE) — the `PressuredEnter`/`PressuredExit` pairing is what
+/// `pressured_windows` and the jq recipes key on, and silently swallowing it makes
+/// every PRESSURED window vanish from the trace. Only non-transition re-commits
+/// are tagged `SeekLos`, matching `medic_chase_tick` and the DPS occlusion chase.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn cover_seek_tick(
+    commands: &mut Commands,
+    entity: Entity,
+    spot: Vec3,
+    state: &mut HealerPosture,
+    directive: Option<&MovementDirective>,
+    shared: &SharedMovementConfig,
+    now: f32,
+    decision_trace: &mut DecisionTrace,
+    ctx: &CombatContext,
+    transitioned: bool,
+    prev: Posture,
+) {
+    // Re-commit when the window lapses or the destination moved materially (the
+    // threat circled, putting the shadow somewhere else).
+    let spot_xz = Vec2::new(spot.x, spot.z);
+    let moved = state
+        .last_point
+        .map_or(true, |p| p.distance(spot_xz) > COVER_STANDOFF);
+    let recommit =
+        moved || directive.map_or(true, |d| now >= d.committed_until || now >= d.expires);
+    // A transition must always be traced, even when the walk itself is still
+    // committed and needs no new directive.
+    if !recommit && !transitioned {
+        return;
+    }
+
+    if recommit {
+        commands.entity(entity).try_insert(MovementDirective {
+            goal: MovementGoal::Point(spot),
+            expires: now + shared.directive_ttl,
+            committed_until: now + shared.commit_window,
+        });
+        state.last_point = Some(spot_xz);
+        // A point walk is not a scored direction — clear it so the normal
+        // PRESSURED tick re-scores cleanly once local cover exists.
+        state.last_direction = None;
+    }
+
+    if let Some(mut builder) = start_movement_event(decision_trace, ctx) {
+        if transitioned {
+            // Mirrors the normal PRESSURED path's trigger choice exactly.
+            let trigger = if prev == Posture::Escape {
+                MovementTrigger::EscapeWindowClosed
+            } else {
+                MovementTrigger::PressuredEnter
+            };
+            builder.transition(
+                prev.into(),
+                TracePosture::Pressured,
+                trigger,
+                MovementGoalKind::Point,
+            );
+        } else {
+            builder.direction_change(
+                TracePosture::Pressured,
+                MovementTrigger::SeekLos,
+                MovementGoalKind::Point,
+            );
+        }
+        builder.finish();
+    }
 }
 
 /// Whether the medic chase should override the normal movement tick this frame:
@@ -642,6 +857,21 @@ pub(super) fn healer_pressured_tick_shared(
     // unless a teammate needs saving — then urgency suppression zeroes it so the
     // healer is never pulled into cover while an ally is dying (R11).
     let eff_weights = deny_weights(entity, my_pos, ctx, shared, weights);
+
+    // Cover-seek: `cover_pull` is only a 2yd-lookahead gradient, so on a large
+    // map where the nearest pillar is tens of yards away it is flat everywhere and
+    // the healer never approaches cover at all. When denial is active but no local
+    // step is occluded, walk directly at the nearest hiding spot instead of
+    // scoring. Placed AFTER `deny_weights` so urgency/press suppression still wins.
+    if let Some(spot) =
+        cover_seek_override(entity, Posture::Pressured, ctx, &inputs, &eff_weights)
+    {
+        cover_seek_tick(
+            commands, entity, spot, state, directive, shared, now, decision_trace, ctx,
+            transitioned, prev,
+        );
+        return;
+    }
 
     let chosen = score_directions(&compass_directions_16(), &inputs, &eff_weights);
     if chosen == Vec2::ZERO {

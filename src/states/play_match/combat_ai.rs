@@ -32,6 +32,9 @@ pub struct AbilityDispatchExtras<'w, 's> {
     /// system-param limit. Fed to `CombatSnapshot::build` for the cast-start
     /// LoS guard.
     map_geometry: Res<'w, super::map_config::ActiveMapGeometry>,
+    /// Which AI implementation this match runs under. `Option` so a scene that
+    /// never inserted it falls back to `Legacy` rather than panicking.
+    ai_profile: Option<Res<'w, super::ai_profile::AiProfile>>,
 }
 
 pub fn acquire_targets(
@@ -560,6 +563,7 @@ pub fn decide_abilities(
         &pet_query,
         &extras.map_geometry.volumes,
         extras.map_geometry.bounds,
+        extras.ai_profile.map(|p| *p).unwrap_or_default(),
     );
 
     // Queue for instant ability attacks (Ambush, Sinister Strike, Mortal Strike)

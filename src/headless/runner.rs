@@ -174,6 +174,9 @@ pub struct HeadlessMatchState {
     pub match_complete: bool,
     /// Random seed for deterministic simulation (if provided)
     pub random_seed: Option<u64>,
+    /// Which AI implementation this match runs under. Parsed once at plugin
+    /// build so a bad string fails fast rather than at match setup.
+    pub ai_profile: crate::states::play_match::ai_profile::AiProfile,
     /// If true, the per-match `.txt` log file is NOT written. Set by the
     /// matrix runner where 4,900+ logs would just clutter `match_logs/`.
     pub suppress_log: bool,
@@ -203,6 +206,11 @@ impl Plugin for HeadlessPlugin {
                 output_path: self.config.output_path.clone(),
                 match_complete: false,
                 random_seed: self.config.random_seed,
+                ai_profile: match self.config.ai_profile.as_deref() {
+                    Some(p) => crate::states::play_match::ai_profile::AiProfile::parse(p)
+                        .expect("Invalid ai_profile in headless config"),
+                    None => Default::default(),
+                },
                 suppress_log: self.suppress_log,
                 result: None,
             })
@@ -252,6 +260,11 @@ fn headless_setup_match(
     // Derive the obstacle geometry for the selected map (line-of-sight).
     let active_map_geometry = map_geometry.active_for(config.map);
     commands.insert_resource(active_map_geometry.clone());
+    // AI profile — inserted in BOTH modes (dual-registration rule). Defaults to
+    // Legacy, so experimental behaviour is never on by accident.
+    let ai_profile = headless_state.ai_profile;
+    info!("AI profile: {:?}", ai_profile);
+    commands.insert_resource(ai_profile);
 
     // Initialize GameRng with seed if provided (deterministic mode)
     let game_rng = match headless_state.random_seed {
@@ -887,6 +900,14 @@ fn run_match_impl(
                 if let Some(mut trace) = world.get_resource_mut::<DecisionTrace>() {
                     trace.install_writer(writer);
                     trace.seed = config.random_seed.unwrap_or(0);
+                    // Stamp the AI profile too: without it, two traces from the
+                    // same seed under different profiles are indistinguishable.
+                    trace.ai_profile = match config.ai_profile.as_deref() {
+                        Some(p) => crate::states::play_match::ai_profile::AiProfile::parse(p)
+                            .expect("Invalid ai_profile in headless config")
+                            .name(),
+                        None => crate::states::play_match::ai_profile::AiProfile::default().name(),
+                    };
                 }
             }
             Err(e) => {

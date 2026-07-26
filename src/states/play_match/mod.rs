@@ -41,6 +41,7 @@ pub mod rendering;
 pub mod auras;
 pub mod effects;
 pub mod match_flow;
+pub mod ai_profile;
 pub mod arena_bounds;
 pub mod map_geometry;
 pub mod map_config;
@@ -653,6 +654,9 @@ pub fn setup_play_match(
     commands.insert_resource(active_map_geometry.clone());
     // AI profile — inserted in BOTH modes (dual-registration rule). Defaults to
     // Legacy, so experimental behaviour is never on by accident.
+    // Graphical mode has no profile selector yet, so it runs Legacy. When the
+    // TeamPlan work is playable this should read from GameSettings.
+    commands.insert_resource(ai_profile::AiProfile::default());
 
     // Initialize Shadow Sight state (for stealth stalemate breaking)
     commands.insert_resource(ShadowSightState::default());

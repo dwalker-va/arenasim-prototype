@@ -74,6 +74,13 @@ pub struct DecisionEvent {
     pub frame: u64,
     pub sim_time: f32,
     pub seed: u64,
+    /// Which AI implementation produced this decision ("Legacy" / "TeamPlan").
+    ///
+    /// Carried per-event, like `seed`, so a single JSONL line grepped out of
+    /// context is still interpretable — without it, two traces from the same seed
+    /// under different profiles are indistinguishable, and any conclusion drawn
+    /// from a mixed corpus is unattributable.
+    pub ai_profile: &'static str,
     pub kind: EventKind,
     pub actor: ActorView,
     #[serde(skip_serializing_if = "Option::is_none")]

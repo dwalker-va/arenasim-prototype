@@ -81,6 +81,15 @@ pub struct Args {
     #[arg(long, value_name = "MAP", default_value = "BasicArena")]
     pub matrix_map: String,
 
+    /// AI implementation for matrix mode: "Legacy" (default — what every recorded
+    /// baseline is calibrated against) or "TeamPlan". Because matches are
+    /// deterministic, running the same `--seed-base` under both profiles gives a
+    /// PAIRED comparison in which the AI is the only variable — far more sensitive
+    /// than comparing two independent sweeps. The profile is recorded in the CSV
+    /// header and in the output filename so runs cannot be confused.
+    #[arg(long, value_name = "PROFILE", default_value = "Legacy")]
+    pub ai_profile: String,
+
     /// In matrix mode, also write each individual match's `.txt` log file.
     /// Off by default to avoid 49 × N files in match_logs/.
     #[arg(long)]

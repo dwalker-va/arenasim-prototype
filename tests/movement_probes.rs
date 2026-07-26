@@ -2584,6 +2584,7 @@ mod paladin_unit {
         let mut combatants = BTreeMap::new();
         combatants.insert(self_entity, info(self_entity, 1, CharacterClass::Paladin, Vec3::ZERO));
         CombatSnapshot {
+        ai_profile: Default::default(),
             bounds: Default::default(),
             combatants,
             active_auras: BTreeMap::new(),
@@ -2843,6 +2844,7 @@ mod bucket_a_unit {
         }
         (
             CombatSnapshot {
+        ai_profile: Default::default(),
             bounds: Default::default(),
                 combatants,
                 active_auras,
@@ -4413,6 +4415,7 @@ mod u9_seek_reset {
         let obstacles = Vec::new();
 
         let ctx = CombatContext {
+        ai_profile: Default::default(),
             bounds: Default::default(),
             combatants: &combatants,
             active_auras: &active_auras,

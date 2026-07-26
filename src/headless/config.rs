@@ -41,6 +41,11 @@ pub struct HeadlessMatchConfig {
     /// If provided, the match will use a seeded RNG for reproducible results
     #[serde(default)]
     pub random_seed: Option<u64>,
+    /// Which AI implementation to run this match under: "Legacy" (default, what
+    /// every balance baseline is calibrated against) or "TeamPlan". Omit for
+    /// Legacy. See `src/states/play_match/ai_profile.rs`.
+    #[serde(default)]
+    pub ai_profile: Option<String>,
     /// Optional grouping label echoed verbatim into batch-runner output. Lets a
     /// strategy-var sweep keep variants distinct (e.g. "Hunter+Spider vs Mage"
     /// vs "Hunter+Boar vs Mage") when two configs share the same class lists.
@@ -125,6 +130,7 @@ impl Default for HeadlessMatchConfig {
             output_path: None,
             max_duration_secs: default_max_duration(),
             random_seed: None,
+            ai_profile: None,
             team1_rogue_openers: Vec::new(),
             team2_rogue_openers: Vec::new(),
             team1_rogue_poisons: Vec::new(),
