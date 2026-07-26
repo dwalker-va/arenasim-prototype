@@ -4,6 +4,70 @@ Development history of ArenaSim, preserved for context and learning.
 
 ---
 
+## Session 17 (July 25-26, 2026 - Nagrand Arena + AI Profile scaffold)
+
+Rebuilt `PillaredArena` as a Nagrand Arena replica, and discovered along the way
+that the map is fine but the AI cannot use it. Commits `2d38ea1` (map geometry),
+`304ba8d` (AI profile).
+
+**Shipped**
+
+- `ObstacleVolume::Prism` — octagonal pillars, parameterized (not a vertex list)
+  so the enum stays `Copy`. Pillar `rotation_deg` is gameplay-relevant: a
+  half-step turn pulls axial reach from circumradius to apothem.
+- `ArenaBounds` — arena shape is per-map data now, not three globals. The visual
+  outline is *derived* from gameplay bounds, reproducing the retired
+  `ARENA_FLOOR_*` values exactly.
+- `TwinPillars` — the original two-cylinder map, preserved verbatim. The LoS probe
+  suite and the 2026-07-23 balance doc describe THIS map, not Nagrand.
+- `AiProfile::{Legacy, TeamPlan}` — swappable AI, profile stamped on trace events,
+  `--ai-profile` dimension on `--matrix`. Legacy is default; absent resource reads
+  as Legacy.
+- `tests/arena_layout_snapshot.rs` — annotated top-down map tuning loop.
+
+**The central finding, and how it was got wrong twice**
+
+Nagrand measures **0.00s occlusion per match**. First diagnosis: pillars are too
+far from where combat happens. That is true but backwards as a *cause* — combat
+converges on the arena centre because nothing gives either team a reason to be
+elsewhere.
+
+Two false starts worth not repeating:
+
+1. A Monte-Carlo over *uniformly sampled* sightlines said pillar SIZE was the
+   lever and spacing barely mattered. Wrong: it ignores that combat clusters.
+2. Reasoning from that, spacing was then blamed. Also wrong — `(±40, ±20)` and
+   `(±25, ±14)` both measure exactly 0.00s.
+
+Only reading real positions out of a decision trace found it: combat settles at
+median `|x|` 22.1 and **never comes within 15yd of a pillar centre**. Lesson:
+measure the actual distribution, not a synthetic one.
+
+Root cause is architectural. `cover_pull` is a **2yd-lookahead local gradient** —
+it rewards a step that is already occluded. Fine when cover is a step away (old
+map, pillars at `±9`); identically zero when cover is 20yd away. Adding
+`cover_seek` navigation was necessary but not sufficient: the probe passes with
+pillars at `(±10, ±6)` and fails at `(±18, ±10)`, so cover only works where
+combat already is.
+
+**Known imperfect state of Nagrand (deliberate)**
+
+- Correct collision, sightlines, spawns, rendering — but **no functioning cover**.
+- **No probes of its own** (all LoS probes moved to `TwinPillars`).
+- **No balance baseline**, deliberately deferred until the geometry question settles.
+- Melee-vs-melee opens with a ~130yd walk (139yd arena). Independent of cover;
+  may argue for revisiting the bowl radius on its own merits.
+
+**Next session**
+
+Implement `design-docs/team-level-positioning-ai.md` (status AGREED, 8-step
+migration plan). Step 2 is a provable no-op; **step 3 is the cheap experiment that
+decides whether Nagrand's 40/80 spacing is viable** — give a melee/healer comp a
+pillar-camp opener and see whether combat relocates off centre. Do that before
+anything with irreversible balance consequences.
+
+---
+
 ## Session 16 (January 18, 2026 - Polymorph)
 
 **New Mage Ability: Polymorph**
