@@ -642,7 +642,7 @@ pub fn setup_play_match(
             *team1_class_counts.entry(*character).or_insert(0) += 1;
 
             // Register combatant with combat log for timeline display
-            combat_log.register_combatant(combatant_id(1, *character));
+            combat_log.register_combatant(combatant_id(1, i as u8, *character));
 
             // Get rogue opener preference for this slot
             let rogue_opener = config.team1_rogue_openers.get(i).copied().unwrap_or_default();
@@ -684,7 +684,7 @@ pub fn setup_play_match(
             // Log equipment loadout
             combat_log.log(
                 CombatLogEventType::MatchEvent,
-                format!("[EQUIPMENT] {}: {}", combatant_id(1, *character), format_loadout(&loadout, &item_defs)),
+                format!("[EQUIPMENT] {}: {}", combatant_id(1, i as u8, *character), format_loadout(&loadout, &item_defs)),
             );
 
             // Spawn Felhunter pet for Warlocks
@@ -733,7 +733,7 @@ pub fn setup_play_match(
             *team2_class_counts.entry(*character).or_insert(0) += 1;
 
             // Register combatant with combat log for timeline display
-            combat_log.register_combatant(combatant_id(2, *character));
+            combat_log.register_combatant(combatant_id(2, i as u8, *character));
 
             // Get rogue opener preference for this slot
             let rogue_opener = config.team2_rogue_openers.get(i).copied().unwrap_or_default();
@@ -775,7 +775,7 @@ pub fn setup_play_match(
             // Log equipment loadout
             combat_log.log(
                 CombatLogEventType::MatchEvent,
-                format!("[EQUIPMENT] {}: {}", combatant_id(2, *character), format_loadout(&loadout, &item_defs)),
+                format!("[EQUIPMENT] {}: {}", combatant_id(2, i as u8, *character), format_loadout(&loadout, &item_defs)),
             );
 
             // Spawn Felhunter pet for Warlocks
@@ -1012,7 +1012,7 @@ fn spawn_pet(
     ));
 
     // Register pet with combat log
-    combat_log.register_combatant(format!("Team {} {}", owner_combatant.team, pet_type.name()));
+    combat_log.register_combatant(pet_combatant_id(owner_combatant.team, owner_combatant.slot, pet_type));
 }
 
 /// Handle camera input for mode switching, zoom, rotation, and drag

@@ -630,14 +630,14 @@ mod tests {
 
     #[test]
     fn test_combatant_id_format() {
-        let id = combatant_id(1, match_config::CharacterClass::Warrior);
-        assert_eq!(id, "Team 1 Warrior");
+        let id = combatant_id(1, 0, match_config::CharacterClass::Warrior);
+        assert_eq!(id, "Team 1 Warrior #1");
     }
 
     #[test]
     fn test_combatant_id_team2() {
-        let id = combatant_id(2, match_config::CharacterClass::Mage);
-        assert_eq!(id, "Team 2 Mage");
+        let id = combatant_id(2, 1, match_config::CharacterClass::Mage);
+        assert_eq!(id, "Team 2 Mage #2");
     }
 
     // =========================================================================

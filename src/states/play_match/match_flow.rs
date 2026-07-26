@@ -11,6 +11,7 @@ use crate::combat::log::{CombatLog, CombatLogEventType, MatchMetadata, Combatant
 use crate::states::GameState;
 use super::match_config::MatchConfig;
 use super::components::*;
+use super::utils::{combatant_id, pet_combatant_id};
 
 /// Update the pre-combat countdown timer.
 /// 
@@ -254,8 +255,8 @@ pub fn check_match_end(
             *pet_damage_by_owner.entry(pet.owner).or_insert(0.0) += pet_combatant.damage_dealt;
             if let Ok((_, owner, _)) = combatants.get(pet.owner) {
                 let pet_name = pet.pet_type.name();
-                let pet_id = format!("Team {} {}", pet_combatant.team, pet_name);
-                let owner_id = format!("Team {} {}", owner.team, owner.class.name());
+                let pet_id = pet_combatant_id(pet_combatant.team, owner.slot, pet.pet_type);
+                let owner_id = combatant_id(owner.team, owner.slot, owner.class);
                 pet_damage_links.insert(pet_id, (owner_id, pet_name.to_string()));
             }
         }
@@ -266,6 +267,7 @@ pub fn check_match_end(
 
             let stats = CombatantStats {
                 class: combatant.class,
+                slot: combatant.slot,
                 damage_dealt,
                 damage_taken: combatant.damage_taken,
                 healing_done: combatant.healing_done,

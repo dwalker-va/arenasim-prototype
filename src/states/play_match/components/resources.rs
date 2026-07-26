@@ -263,6 +263,10 @@ pub struct MatchResults {
 #[derive(Clone)]
 pub struct CombatantStats {
     pub class: match_config::CharacterClass,
+    /// Team slot (0-based). Used to rebuild this combatant's unique combat-log
+    /// id (`combatant_id(team, slot, class)`) on the Results screen so same-class
+    /// teammates query their own — not each other's — log aggregations.
+    pub slot: u8,
     pub damage_dealt: f32,
     pub damage_taken: f32,
     pub healing_done: f32,

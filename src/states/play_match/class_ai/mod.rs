@@ -89,6 +89,7 @@ pub struct QueuedInstantAttack {
     pub target: Entity,
     pub damage: f32,
     pub attacker_team: u8,
+    pub attacker_slot: u8,
     pub attacker_class: CharacterClass,
     pub ability: AbilityType,
     pub is_crit: bool,
@@ -101,12 +102,31 @@ pub struct QueuedAoeDamage {
     pub target: Entity,
     pub damage: f32,
     pub caster_team: u8,
+    pub caster_slot: u8,
     pub caster_class: CharacterClass,
     pub target_pos: Vec3,
     pub is_crit: bool,
 }
 
 impl CombatantInfo {
+    /// This combatant's combat-log id, pet-aware. A pet resolves to its own
+    /// display id keyed to its owner's slot (`"Team 1 Spider #2"`), NOT the raw
+    /// `combatant_id` (which for a pet would use the owner's class and the
+    /// un-adjusted `PET_SLOT_BASE + owner_slot`, yielding an id like
+    /// `"Team 1 Hunter #12"` that matches nothing registered). Use this
+    /// everywhere a target id is built from a snapshot, so pet targets attribute
+    /// correctly and never leak an impossible slot number into log text.
+    pub fn log_id(&self) -> crate::combat::log::CombatantId {
+        match self.pet_type {
+            Some(pt) => super::utils::pet_combatant_id(
+                self.team,
+                super::utils::owner_relative_slot(self.slot),
+                pt,
+            ),
+            None => super::utils::combatant_id(self.team, self.slot, self.class),
+        }
+    }
+
     /// Health as a percentage (0.0 to 1.0)
     pub fn health_pct(&self) -> f32 {
         if self.max_health > 0.0 {
@@ -797,8 +817,8 @@ pub fn try_dispel_ally(
     combatant.global_cooldown = GCD;
 
     // Log
-    let target_tuple = ctx.combatants.get(&dispel_target).map(|info| (info.team, info.class));
-    log_ability_use(combat_log, combatant.team, combatant.class, log_name, target_tuple, "casts");
+    let target_tuple = ctx.combatants.get(&dispel_target).map(|info| info.log_id());
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, log_name, target_tuple, "casts");
 
     // Spawn pending dispel
     commands.spawn(DispelPending {
@@ -944,8 +964,8 @@ pub fn try_purge_enemy(
         combatant.ability_cooldowns.insert(ability, def.cooldown);
     }
 
-    let target_tuple = ctx.combatants.get(&target_entity).map(|info| (info.team, info.class));
-    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, target_tuple, "casts");
+    let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, target_tuple, "casts");
 
     // Pin the filter to the chosen (highest-priority) buff type so process_dispels
     // targets that valuable buff rather than any purgeable aura. If the enemy

@@ -285,13 +285,16 @@ fn render_team_panel(
             });
             ui.add_space(4.0);
 
-            // Combatant rows.
+            // Combatant rows. Every row carries the "#slot" suffix, matching the
+            // combat-log ids unconditionally — so a reader cross-referencing the
+            // saved report to this screen always finds the same label, and two
+            // same-class teammates are never ambiguous.
             for stats in combatants {
                 combatant_block(ui, stats, team, combat_log, class_icons, max_damage, dimf, pet_links);
             }
 
             // Σ TOTAL row.
-            total_row(ui, combatants, combat_log, team, dimf);
+            total_row(ui, combatants, combat_log, team, dimf, pet_links);
         });
 }
 
@@ -306,13 +309,14 @@ fn combatant_block(
     dimf: f32,
     pet_links: &std::collections::HashMap<String, (String, String)>,
 ) {
-    let cid = combatant_id(team, stats);
+    let cid = stats_log_id(team, stats);
     let class_color = dim(class_color32(stats.class), dimf);
-    let kills = combat_log.killing_blows(&cid);
+    let kills = combat_log.killing_blows_including_pets(&cid, pet_links);
+    let row_label = format!("{} #{}", stats.class.name(), stats.slot + 1);
 
     // Stat row (name left, stats right-aligned to the panel edge).
     ui.horizontal(|ui| {
-        name_cell(ui, class_icons.textures.get(&stats.class).copied(), stats.class.name(), class_color);
+        name_cell(ui, class_icons.textures.get(&stats.class).copied(), &row_label, class_color);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = STAT_GAP;
             num_cell(ui, W_K, kills.to_string(), dim(C_KILL, dimf), false);
@@ -368,13 +372,14 @@ fn total_row(
     combat_log: &CombatLog,
     team: u8,
     dimf: f32,
+    pet_links: &std::collections::HashMap<String, (String, String)>,
 ) {
     let dmg: f32 = combatants.iter().map(|s| s.damage_dealt).sum();
     let heal: f32 = combatants.iter().map(|s| s.healing_done).sum();
     let tkn: f32 = combatants.iter().map(|s| s.damage_taken).sum();
     let kills: u32 = combatants
         .iter()
-        .map(|s| combat_log.killing_blows(&combatant_id(team, s)))
+        .map(|s| combat_log.killing_blows_including_pets(&stats_log_id(team, s), pet_links))
         .sum();
 
     let (rect, _) =
@@ -562,8 +567,13 @@ fn tag(ui: &mut egui::Ui, text: &str, bg: egui::Color32, fg: egui::Color32) {
 
 // --- Pure helpers ---
 
-fn combatant_id(team: u8, stats: &CombatantStats) -> String {
-    format!("Team {} {}", team, stats.class.name())
+/// This combatant's combat-log id, from its team + slot + class. Delegates to
+/// the canonical builder so it stays byte-for-byte identical to the ids the
+/// combat log is written under (a divergent format here would silently break
+/// the kill-count / ability-breakdown lookups). Named distinctly so it does not
+/// shadow the imported `play_match::combatant_id`.
+fn stats_log_id(team: u8, stats: &CombatantStats) -> String {
+    super::play_match::combatant_id(team, stats.slot, stats.class)
 }
 
 /// `8400.0 -> "8.4k"`, values under 1000 stay exact.

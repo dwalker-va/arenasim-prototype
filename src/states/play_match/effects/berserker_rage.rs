@@ -90,7 +90,7 @@ pub fn process_berserker_rage(
                 0
             };
 
-            let caster_id = combatant_id(pending.caster_team, pending.caster_class);
+            let caster_id = combatant_id(pending.caster_team, pending.caster_slot, pending.caster_class);
 
             // Log activation
             combat_log.log(

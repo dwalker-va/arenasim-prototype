@@ -14,7 +14,7 @@ use bevy_egui::egui;
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use super::match_config;
 use super::components::*;
-use super::utils::{combatant_id, get_next_fct_offset};
+use super::utils::{combatant_id, combat_log_id_for, get_next_fct_offset};
 
 /// Update all active auras - tick down durations and remove expired ones.
 ///
@@ -243,6 +243,12 @@ pub fn apply_pending_auras(
             continue;
         }
 
+        // The target's pet-aware combat-log id, resolved once for the buff / CC /
+        // IMMUNE log lines below. Placed after the dead-target bail-out so an aura
+        // landing on a corpse doesn't allocate. (Depends only on
+        // team/slot/class/pet, none of which the aura mutations touch.)
+        let target_id = combat_log_id_for(&target_combatant, pet_query.get(pending.target).ok());
+
         // Check for CC immunity: Charging combatants are immune to crowd control
         let is_cc_aura = matches!(
             pending.aura.effect_type,
@@ -284,16 +290,14 @@ pub fn apply_pending_auras(
             combat_log.log(
                 CombatLogEventType::MatchEvent,
                 format!(
-                    "Team {} {}'s {} is immune (charging)",
-                    target_combatant.team,
-                    target_combatant.class.name(),
+                    "{}'s {} is immune (charging)",
+                    target_id,
                     cc_name
                 )
             );
             info!(
-                "Team {} {} is immune to {} (charging)",
-                target_combatant.team,
-                target_combatant.class.name(),
+                "{} is immune to {} (charging)",
+                target_id,
                 cc_name
             );
 
@@ -372,10 +376,9 @@ pub fn apply_pending_auras(
             combat_log.log(
                 CombatLogEventType::CrowdControl,
                 format!(
-                    "{} IMMUNE on Team {} {} (Berserker Rage)",
+                    "{} IMMUNE on {} (Berserker Rage)",
                     pending.aura.ability_name,
-                    target_combatant.team,
-                    target_combatant.class.name(),
+                    target_id,
                 ),
             );
 
@@ -409,17 +412,10 @@ pub fn apply_pending_auras(
                         PlayMatchEntity,
                     ));
 
-                    let display_name = if let Ok(pet) = pet_query.get(pending.target) {
-                        pet.pet_type.name().to_string()
-                    } else {
-                        target_combatant.class.name().to_string()
-                    };
-
                     let message = format!(
-                        "{} IMMUNE on Team {} {} (DR immune)",
+                        "{} IMMUNE on {} (DR immune)",
                         pending.aura.ability_name,
-                        target_combatant.team,
-                        display_name,
+                        target_id,
                     );
                     combat_log.log(CombatLogEventType::CrowdControl, message);
 
@@ -505,16 +501,9 @@ pub fn apply_pending_auras(
             target_combatant.max_health += hp_bonus;
             target_combatant.current_health += hp_bonus; // Give them the extra HP
 
-            let display_name = if let Ok(pet) = pet_query.get(pending.target) {
-                pet.pet_type.name().to_string()
-            } else {
-                target_combatant.class.name().to_string()
-            };
-
             info!(
-                "Team {} {} receives Power Word: Fortitude (+{:.0} max HP, now {:.0}/{:.0})",
-                target_combatant.team,
-                display_name,
+                "{} receives Power Word: Fortitude (+{:.0} max HP, now {:.0}/{:.0})",
+                target_id,
                 hp_bonus,
                 target_combatant.current_health,
                 target_combatant.max_health
@@ -524,9 +513,8 @@ pub fn apply_pending_auras(
             combat_log.log(
                 CombatLogEventType::Buff,
                 format!(
-                    "Team {} {} gains Power Word: Fortitude (+{:.0} max HP)",
-                    target_combatant.team,
-                    display_name,
+                    "{} gains Power Word: Fortitude (+{:.0} max HP)",
+                    target_id,
                     hp_bonus
                 )
             );
@@ -539,9 +527,8 @@ pub fn apply_pending_auras(
             target_combatant.current_mana += mana_bonus; // Give them the extra mana
 
             info!(
-                "Team {} {} receives Arcane Intellect (+{:.0} max mana, now {:.0}/{:.0})",
-                target_combatant.team,
-                target_combatant.class.name(),
+                "{} receives Arcane Intellect (+{:.0} max mana, now {:.0}/{:.0})",
+                target_id,
                 mana_bonus,
                 target_combatant.current_mana,
                 target_combatant.max_mana
@@ -551,9 +538,8 @@ pub fn apply_pending_auras(
             combat_log.log(
                 CombatLogEventType::Buff,
                 format!(
-                    "Team {} {} gains Arcane Intellect (+{:.0} max mana)",
-                    target_combatant.team,
-                    target_combatant.class.name(),
+                    "{} gains Arcane Intellect (+{:.0} max mana)",
+                    target_id,
                     mana_bonus
                 )
             );
@@ -564,18 +550,16 @@ pub fn apply_pending_auras(
             let ap_bonus = pending.aura.magnitude;
 
             info!(
-                "Team {} {} receives Battle Shout (+{:.0} attack power)",
-                target_combatant.team,
-                target_combatant.class.name(),
+                "{} receives Battle Shout (+{:.0} attack power)",
+                target_id,
                 ap_bonus,
             );
 
             combat_log.log(
                 CombatLogEventType::Buff,
                 format!(
-                    "Team {} {} gains Battle Shout (+{:.0} attack power)",
-                    target_combatant.team,
-                    target_combatant.class.name(),
+                    "{} gains Battle Shout (+{:.0} attack power)",
+                    target_id,
                     ap_bonus
                 )
             );
@@ -588,9 +572,8 @@ pub fn apply_pending_auras(
             combat_log.log(
                 CombatLogEventType::Buff,
                 format!(
-                    "Team {} {} suffers {} (-{:.0} attack power)",
-                    target_combatant.team,
-                    target_combatant.class.name(),
+                    "{} suffers {} (-{:.0} attack power)",
+                    target_id,
                     pending.aura.ability_name,
                     ap_reduction
                 )
@@ -602,9 +585,8 @@ pub fn apply_pending_auras(
             combat_log.log(
                 CombatLogEventType::Buff,
                 format!(
-                    "Team {} {} gains {} (+{:.0}% crit chance)",
-                    target_combatant.team,
-                    target_combatant.class.name(),
+                    "{} gains {} (+{:.0}% crit chance)",
+                    target_id,
                     pending.aura.ability_name,
                     pending.aura.magnitude * 100.0
                 )
@@ -616,9 +598,8 @@ pub fn apply_pending_auras(
             combat_log.log(
                 CombatLogEventType::Buff,
                 format!(
-                    "Team {} {} gains {} (+{:.0} mana/s)",
-                    target_combatant.team,
-                    target_combatant.class.name(),
+                    "{} gains {} (+{:.0} mana/s)",
+                    target_id,
                     pending.aura.ability_name,
                     pending.aura.magnitude
                 )
@@ -630,9 +611,8 @@ pub fn apply_pending_auras(
             combat_log.log(
                 CombatLogEventType::Buff,
                 format!(
-                    "Team {} {} gains {}",
-                    target_combatant.team,
-                    target_combatant.class.name(),
+                    "{} gains {}",
+                    target_id,
                     pending.aura.ability_name,
                 )
             );
@@ -646,9 +626,8 @@ pub fn apply_pending_auras(
             combat_log.log(
                 CombatLogEventType::Buff,
                 format!(
-                    "Team {} {} gains {}",
-                    target_combatant.team,
-                    target_combatant.class.name(),
+                    "{} gains {}",
+                    target_id,
                     pending.aura.ability_name,
                 )
             );
@@ -660,9 +639,8 @@ pub fn apply_pending_auras(
             combat_log.log(
                 CombatLogEventType::Buff,
                 format!(
-                    "Team {} {} gains {} ({}% shorter interrupt lockouts)",
-                    target_combatant.team,
-                    target_combatant.class.name(),
+                    "{} gains {} ({}% shorter interrupt lockouts)",
+                    target_id,
                     pending.aura.ability_name,
                     reduction_pct
                 )
@@ -675,9 +653,8 @@ pub fn apply_pending_auras(
             combat_log.log(
                 CombatLogEventType::Buff,
                 format!(
-                    "Team {} {} gains {} ({}% damage reduction)",
-                    target_combatant.team,
-                    target_combatant.class.name(),
+                    "{} gains {} ({}% damage reduction)",
+                    target_id,
                     pending.aura.ability_name,
                     reduction_percent
                 )
@@ -699,18 +676,11 @@ pub fn apply_pending_auras(
 
         // Log DR info for CC auras
         if let Some(category) = dr_category {
-            let display_name = if let Ok(pet) = pet_query.get(pending.target) {
-                pet.pet_type.name().to_string()
-            } else {
-                target_combatant.class.name().to_string()
-            };
-
             let dr_pct = (dr_multiplier * 100.0) as i32;
             let message = format!(
-                "{} on Team {} {} ({:.1}s, DR: {}%)",
+                "{} on {} ({:.1}s, DR: {}%)",
                 aura_to_add.ability_name,
-                target_combatant.team,
-                display_name,
+                target_id,
                 aura_to_add.duration,
                 dr_pct,
             );
@@ -757,6 +727,7 @@ pub fn process_aura_breaks(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
     mut combatants: Query<(Entity, &Combatant, &mut ActiveAuras, Option<&DamageTakenThisFrame>)>,
+    pet_query: Query<&Pet>,
 ) {
     for (entity, combatant, mut active_auras, damage_taken) in combatants.iter_mut() {
         let Some(damage_taken) = damage_taken else {
@@ -810,9 +781,8 @@ pub fn process_aura_breaks(
                     };
 
                     let message = format!(
-                        "Team {} {}'s {} broke from damage ({:.0}/{:.0})",
-                        combatant.team,
-                        combatant.class.name(),
+                        "{}'s {} broke from damage ({:.0}/{:.0})",
+                        combat_log_id_for(combatant, pet_query.get(entity).ok()),
                         aura_name,
                         aura.accumulated_damage,
                         aura.break_on_damage_threshold
@@ -850,6 +820,7 @@ pub fn process_dot_ticks(
     mut combat_log: ResMut<CombatLog>,
     mut combatants_with_auras: Query<(Entity, &mut Combatant, &Transform, &mut ActiveAuras)>,
     combatants_without_auras: Query<(Entity, &Combatant), Without<ActiveAuras>>,
+    pet_query: Query<&Pet>,
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
@@ -861,15 +832,15 @@ pub fn process_dot_ticks(
     
     // Build a map of entity -> (team, class) for quick lookups
     // Include BOTH combatants with auras AND combatants without auras (like the Warrior caster)
-    let mut combatant_info: std::collections::HashMap<Entity, (u8, match_config::CharacterClass)> = 
+    let mut combatant_info: std::collections::HashMap<Entity, (u8, u8, match_config::CharacterClass)> = 
         combatants_with_auras
             .iter()
-            .map(|(entity, combatant, _, _)| (entity, (combatant.team, combatant.class)))
+            .map(|(entity, combatant, _, _)| (entity, (combatant.team, combatant.slot, combatant.class)))
             .collect();
     
     // Add combatants without auras to the map
     for (entity, combatant) in combatants_without_auras.iter() {
-        combatant_info.insert(entity, (combatant.team, combatant.class));
+        combatant_info.insert(entity, (combatant.team, combatant.slot, combatant.class));
     }
     
     // Build a map of entity -> position
@@ -880,7 +851,7 @@ pub fn process_dot_ticks(
     
     // Track DoT damage to apply (to avoid borrow issues)
     // Format: (target_entity, caster_entity, damage, target_pos, caster_team, caster_class, ability_name, spell_school)
-    let mut dot_damage_to_apply: Vec<(Entity, Entity, f32, Vec3, u8, match_config::CharacterClass, String, super::abilities::SpellSchool)> = Vec::new();
+    let mut dot_damage_to_apply: Vec<(Entity, Entity, f32, Vec3, u8, u8, match_config::CharacterClass, String, super::abilities::SpellSchool)> = Vec::new();
     
     // First pass: tick down DoT timers and queue damage
     for (entity, combatant, _transform, mut active_auras) in combatants_with_auras.iter_mut() {
@@ -911,13 +882,14 @@ pub fn process_dot_ticks(
 
                 // Get caster info (if still exists)
                 if let Some(caster_entity) = aura.caster {
-                    if let Some(&(caster_team, caster_class)) = combatant_info.get(&caster_entity) {
+                    if let Some(&(caster_team, caster_slot, caster_class)) = combatant_info.get(&caster_entity) {
                         dot_damage_to_apply.push((
                             entity,
                             caster_entity,
                             damage,
                             target_pos,
                             caster_team,
+                            caster_slot,
                             caster_class,
                             aura.ability_name.clone(),
                             aura.spell_school.unwrap_or(super::abilities::SpellSchool::None),
@@ -937,7 +909,7 @@ pub fn process_dot_ticks(
     let mut caster_damage_updates: Vec<(Entity, f32)> = Vec::new();
     
     // Second pass: apply queued DoT damage to targets
-    for (target_entity, caster_entity, damage, target_pos, caster_team, caster_class, ability_name, spell_school) in dot_damage_to_apply {
+    for (target_entity, caster_entity, damage, target_pos, caster_team, caster_slot, caster_class, ability_name, spell_school) in dot_damage_to_apply {
         // Get target combatant
         let Ok((_, mut target, _, mut target_auras)) = combatants_with_auras.get_mut(target_entity) else {
             continue;
@@ -947,8 +919,11 @@ pub fn process_dot_ticks(
             continue;
         }
 
-        let target_team = target.team;
-        let target_class = target.class;
+        // Pet-aware ids for structured fields + message text. The DoT caster is
+        // always a primary (a pet can't apply a DoT), so its id comes from the
+        // queued (team, slot, class); the target may be a pet.
+        let caster_id = combatant_id(caster_team, caster_slot, caster_class);
+        let target_id = combat_log_id_for(&target, pet_query.get(target_entity).ok());
 
         // Apply damage with absorb shield consideration
         let (actual_damage, absorbed) = super::combat_core::apply_damage_with_absorb(
@@ -1019,29 +994,18 @@ pub fn process_dot_ticks(
         }
         let message = if absorbed > 0.0 {
             format!(
-                "Team {} {}'s {} ticks for {:.0} damage on Team {} {} ({:.0} absorbed)",
-                caster_team,
-                caster_class.name(),
-                ability_name,
-                actual_damage,
-                target_team,
-                target_class.name(),
-                absorbed
+                "{}'s {} ticks for {:.0} damage on {} ({:.0} absorbed)",
+                caster_id, ability_name, actual_damage, target_id, absorbed
             )
         } else {
             format!(
-                "Team {} {}'s {} ticks for {:.0} damage on Team {} {}",
-                caster_team,
-                caster_class.name(),
-                ability_name,
-                actual_damage,
-                target_team,
-                target_class.name()
+                "{}'s {} ticks for {:.0} damage on {}",
+                caster_id, ability_name, actual_damage, target_id
             )
         };
         combat_log.log_damage(
-            combatant_id(caster_team, caster_class),
-            combatant_id(target_team, target_class),
+            caster_id.clone(),
+            target_id.clone(),
             ability_name.clone(),
             actual_damage,
             is_killing_blow,
@@ -1055,14 +1019,10 @@ pub fn process_dot_ticks(
             commands.entity(target_entity).remove::<CastingState>();
             commands.entity(target_entity).remove::<ChannelingState>();
 
-            let death_message = format!(
-                "Team {} {} has been eliminated",
-                target_team,
-                target_class.name()
-            );
+            let death_message = format!("{} has been eliminated", target_id);
             combat_log.log_death(
-                combatant_id(target_team, target_class),
-                Some(combatant_id(caster_team, caster_class)),
+                target_id.clone(),
+                Some(caster_id.clone()),
                 death_message,
             );
         }
@@ -1097,6 +1057,7 @@ pub fn process_hot_ticks(
     dampening: Res<ArenaDampening>,
     mut combatants_with_auras: Query<(Entity, &mut Combatant, &Transform, &mut ActiveAuras)>,
     combatants_without_auras: Query<(Entity, &Combatant), Without<ActiveAuras>>,
+    pet_query: Query<&Pet>,
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
@@ -1109,13 +1070,13 @@ pub fn process_hot_ticks(
     // Build a map of entity -> (team, class) for caster attribution lookups.
     // Include BOTH combatants with auras AND combatants without auras (a caster
     // may have shed all of its own auras while its totem buff lives on an ally).
-    let mut combatant_info: std::collections::HashMap<Entity, (u8, match_config::CharacterClass)> =
+    let mut combatant_info: std::collections::HashMap<Entity, (u8, u8, match_config::CharacterClass)> =
         combatants_with_auras
             .iter()
-            .map(|(entity, combatant, _, _)| (entity, (combatant.team, combatant.class)))
+            .map(|(entity, combatant, _, _)| (entity, (combatant.team, combatant.slot, combatant.class)))
             .collect();
     for (entity, combatant) in combatants_without_auras.iter() {
-        combatant_info.insert(entity, (combatant.team, combatant.class));
+        combatant_info.insert(entity, (combatant.team, combatant.slot, combatant.class));
     }
 
     // Build a map of entity -> position
@@ -1126,7 +1087,7 @@ pub fn process_hot_ticks(
 
     // Track HoT healing to apply (to avoid borrow issues)
     // Format: (target_entity, caster_entity, healing, target_pos, caster_team, caster_class, ability_name)
-    let mut hot_healing_to_apply: Vec<(Entity, Entity, f32, Vec3, u8, match_config::CharacterClass, String)> = Vec::new();
+    let mut hot_healing_to_apply: Vec<(Entity, Entity, f32, Vec3, u8, u8, match_config::CharacterClass, String)> = Vec::new();
 
     // First pass: tick down HoT timers and queue healing
     for (entity, combatant, _transform, mut active_auras) in combatants_with_auras.iter_mut() {
@@ -1155,13 +1116,14 @@ pub fn process_hot_ticks(
 
                 // Get caster info (if still exists) for attribution
                 if let Some(caster_entity) = aura.caster {
-                    if let Some(&(caster_team, caster_class)) = combatant_info.get(&caster_entity) {
+                    if let Some(&(caster_team, caster_slot, caster_class)) = combatant_info.get(&caster_entity) {
                         hot_healing_to_apply.push((
                             entity,
                             caster_entity,
                             healing,
                             target_pos,
                             caster_team,
+                            caster_slot,
                             caster_class,
                             aura.ability_name.clone(),
                         ));
@@ -1180,7 +1142,7 @@ pub fn process_hot_ticks(
     let mut caster_healing_updates: Vec<(Entity, f32)> = Vec::new();
 
     // Second pass: apply queued HoT healing to bearers
-    for (target_entity, caster_entity, healing, target_pos, caster_team, caster_class, ability_name) in hot_healing_to_apply {
+    for (target_entity, caster_entity, healing, target_pos, caster_team, caster_slot, caster_class, ability_name) in hot_healing_to_apply {
         // Get target combatant (the bearer of the HoT)
         let Ok((_, mut target, _, _)) = combatants_with_auras.get_mut(target_entity) else {
             continue;
@@ -1190,8 +1152,9 @@ pub fn process_hot_ticks(
             continue;
         }
 
-        let target_team = target.team;
-        let target_class = target.class;
+        // Pet-aware: a HoT bearer CAN be a pet — Healing Stream Totem pulses its
+        // HoT onto every ally in radius, pets included.
+        let target_id = combat_log_id_for(&target, pet_query.get(target_entity).ok());
 
         // Arena dampening: time-ramped reduction of all healing (HoT ticks and
         // Healing Stream Totem pulses included — free sustain must dampen too)
@@ -1222,19 +1185,15 @@ pub fn process_hot_ticks(
             PlayMatchEntity,
         ));
 
-        // Log to combat log with structured data
+        // Log to combat log with structured data.
+        let caster_id = combatant_id(caster_team, caster_slot, caster_class);
         let message = format!(
-            "Team {} {}'s {} heals Team {} {} for {:.0}",
-            caster_team,
-            caster_class.name(),
-            ability_name,
-            target_team,
-            target_class.name(),
-            actual_healing
+            "{}'s {} heals {} for {:.0}",
+            caster_id, ability_name, target_id, actual_healing
         );
         combat_log.log_healing(
-            combatant_id(caster_team, caster_class),
-            combatant_id(target_team, target_class),
+            caster_id.clone(),
+            target_id,
             ability_name.clone(),
             actual_healing,
             false, // is_crit - HoT ticks never crit

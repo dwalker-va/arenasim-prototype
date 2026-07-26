@@ -12,7 +12,7 @@ use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
 use crate::states::play_match::combat_core::{apply_damage_with_absorb, roll_crit};
 use crate::states::play_match::constants::{CRIT_DAMAGE_MULTIPLIER, CRIT_HEALING_MULTIPLIER};
-use crate::states::play_match::utils::{combatant_id, get_next_fct_offset};
+use crate::states::play_match::utils::{combatant_id, combat_log_id_for, get_next_fct_offset};
 
 /// Process pending Holy Shock heals.
 ///
@@ -26,6 +26,7 @@ pub fn process_holy_shock_heals(
     dampening: Res<ArenaDampening>,
     pending_heals: Query<(Entity, &HolyShockHealPending)>,
     mut combatants: Query<(&mut Combatant, &Transform, Option<&ActiveAuras>)>,
+    pet_query: Query<&Pet>,
     mut fct_states: Query<&mut FloatingTextState>,
 ) {
     let ability_def = abilities.get_unchecked(&AbilityType::HolyShock);
@@ -67,8 +68,7 @@ pub fn process_holy_shock_heals(
             target.current_health = (target.current_health + heal_amount).min(target.max_health);
             let actual_heal = target.current_health - old_health;
 
-            let target_team = target.team;
-            let target_class = target.class;
+            let target_id = combat_log_id_for(&target, pet_query.get(pending.target).ok());
 
             // Spawn floating combat text (green for healing)
             let text_position = target_transform.translation + Vec3::new(0.0, super::super::FCT_HEIGHT, 0.0);
@@ -90,19 +90,15 @@ pub fn process_holy_shock_heals(
             ));
 
             // Log the heal with caster attribution
-            let caster_id = combatant_id(pending.caster_team, pending.caster_class);
+            let caster_id = combatant_id(pending.caster_team, pending.caster_slot, pending.caster_class);
             let verb = if is_crit { "CRITICALLY heals" } else { "heals" };
             let message = format!(
-                "{}'s Holy Shock {} Team {} {} for {:.0}",
-                caster_id,
-                verb,
-                target_team,
-                target_class.name(),
-                actual_heal
+                "{}'s Holy Shock {} {} for {:.0}",
+                caster_id, verb, target_id, actual_heal
             );
             combat_log.log_healing(
                 caster_id.clone(),
-                combatant_id(target_team, target_class),
+                target_id,
                 "Holy Shock".to_string(),
                 actual_heal,
                 is_crit,
@@ -126,6 +122,7 @@ pub fn process_holy_shock_damage(
     abilities: Res<AbilityDefinitions>,
     pending_damage: Query<(Entity, &HolyShockDamagePending)>,
     mut combatants: Query<(&mut Combatant, &Transform, Option<&mut ActiveAuras>)>,
+    pet_query: Query<&Pet>,
     mut fct_states: Query<&mut FloatingTextState>,
 ) {
     let ability_def = abilities.get_unchecked(&AbilityType::HolyShock);
@@ -158,8 +155,9 @@ pub fn process_holy_shock_damage(
                 crate::states::play_match::abilities::SpellSchool::Holy,
             );
 
-            let target_team = target.team;
-            let target_class = target.class;
+            // Pet-aware: try_holy_shock_damage's target filter does not exclude
+            // pets, so a Felhunter can be here.
+            let target_id = combat_log_id_for(&target, pet_query.get(pending.target).ok());
 
             // Track damage for aura breaking
             commands.entity(pending.target).insert(DamageTakenThisFrame {
@@ -212,7 +210,7 @@ pub fn process_holy_shock_damage(
             }
 
             // Log damage with caster attribution
-            let caster_id = combatant_id(pending.caster_team, pending.caster_class);
+            let caster_id = combatant_id(pending.caster_team, pending.caster_slot, pending.caster_class);
             let is_killing_blow = !target.is_alive();
             let is_first_death = is_killing_blow && !target.is_dead;
             if is_first_death {
@@ -221,27 +219,18 @@ pub fn process_holy_shock_damage(
             let verb = if is_crit { "CRITS" } else { "hits" };
             let message = if absorbed > 0.0 {
                 format!(
-                    "{}'s Holy Shock {} Team {} {} for {:.0} damage ({:.0} absorbed)",
-                    caster_id,
-                    verb,
-                    target_team,
-                    target_class.name(),
-                    actual_damage,
-                    absorbed
+                    "{}'s Holy Shock {} {} for {:.0} damage ({:.0} absorbed)",
+                    caster_id, verb, target_id, actual_damage, absorbed
                 )
             } else {
                 format!(
-                    "{}'s Holy Shock {} Team {} {} for {:.0} damage",
-                    caster_id,
-                    verb,
-                    target_team,
-                    target_class.name(),
-                    actual_damage
+                    "{}'s Holy Shock {} {} for {:.0} damage",
+                    caster_id, verb, target_id, actual_damage
                 )
             };
             combat_log.log_damage(
                 caster_id.clone(),
-                combatant_id(target_team, target_class),
+                target_id.clone(),
                 "Holy Shock".to_string(),
                 actual_damage,
                 is_killing_blow,
@@ -256,13 +245,11 @@ pub fn process_holy_shock_damage(
                 commands.entity(pending.target).remove::<ChannelingState>();
 
                 let death_message = format!(
-                    "Team {} {} has been eliminated by {}'s Holy Shock",
-                    target_team,
-                    target_class.name(),
-                    caster_id
+                    "{} has been eliminated by {}'s Holy Shock",
+                    target_id, caster_id
                 );
                 combat_log.log_death(
-                    combatant_id(target_team, target_class),
+                    target_id,
                     Some(caster_id),
                     death_message,
                 );

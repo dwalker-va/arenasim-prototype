@@ -13,7 +13,7 @@ use super::match_config;
 use super::components::*;
 use super::abilities::AbilityType;
 use super::ability_config::AbilityDefinitions;
-use super::utils::{combatant_id, get_next_fct_offset, log_ability_use};
+use super::utils::{combatant_id, combat_log_id_for, get_next_fct_offset, log_ability_use};
 use super::class_ai;
 
 // Re-export spawn_speech_bubble for backward compatibility (used by other modules)
@@ -96,7 +96,7 @@ pub fn acquire_targets(
     // single process, Bevy reuses despawned entity IDs from the free list — slot 0
     // can end up with a higher entity index than slot 1. Sorting by entity.index()
     // would then put slot 1 first, so kill_target=Some(0) would resolve to the
-    // wrong combatant. Pets have slot >= PET_SLOT_BASE (100+), so they sort after
+    // wrong combatant. Pets have slot >= PET_SLOT_BASE (10+), so they sort after
     // primaries naturally. Look up slot per entity from the live combatants query.
     let slot_lookup: std::collections::HashMap<Entity, u8> = combatants
         .iter()
@@ -1060,6 +1060,7 @@ pub fn decide_abilities(
             target: target_entity,
             damage,
             attacker_team,
+            attacker_slot,
             attacker_class,
             ability,
             is_crit,
@@ -1091,8 +1092,9 @@ pub fn decide_abilities(
                     ability_spell_school,
                 );
                 actual_damage = dmg;
-                let target_team = target.team;
-                let target_class = target.class;
+                // Pet-aware ids for structured fields + message/trace text.
+                let target_id = combat_log_id_for(&target, pet_query.get(target_entity).ok());
+                let attacker_id = combatant_id(attacker_team, attacker_slot, attacker_class);
 
                 // Warriors generate Rage from taking damage (only on actual health damage)
                 if actual_damage > 0.0 && target.resource_type == ResourceType::Rage {
@@ -1106,13 +1108,8 @@ pub fn decide_abilities(
                 });
 
                 info!(
-                    "Team {} {}'s {} hits Team {} {} for {:.0} damage!",
-                    attacker_team,
-                    attacker_class.name(),
-                    ability_name,
-                    target_team,
-                    target_class.name(),
-                    actual_damage
+                    "{}'s {} hits {} for {:.0} damage!",
+                    attacker_id, ability_name, target_id, actual_damage
                 );
 
                 // Spawn floating combat text (yellow for abilities)
@@ -1164,31 +1161,18 @@ pub fn decide_abilities(
                 let verb = if is_crit { "CRITS" } else { "hits" };
                 let message = if absorbed > 0.0 {
                     format!(
-                        "Team {} {}'s {} {} Team {} {} for {:.0} damage ({:.0} absorbed)",
-                        attacker_team,
-                        attacker_class.name(),
-                        ability_name,
-                        verb,
-                        target_team,
-                        target_class.name(),
-                        actual_damage,
-                        absorbed
+                        "{}'s {} {} {} for {:.0} damage ({:.0} absorbed)",
+                        attacker_id, ability_name, verb, target_id, actual_damage, absorbed
                     )
                 } else {
                     format!(
-                        "Team {} {}'s {} {} Team {} {} for {:.0} damage",
-                        attacker_team,
-                        attacker_class.name(),
-                        ability_name,
-                        verb,
-                        target_team,
-                        target_class.name(),
-                        actual_damage
+                        "{}'s {} {} {} for {:.0} damage",
+                        attacker_id, ability_name, verb, target_id, actual_damage
                     )
                 };
                 combat_log.log_damage(
-                    combatant_id(attacker_team, attacker_class),
-                    combatant_id(target_team, target_class),
+                    attacker_id.clone(),
+                    target_id.clone(),
                     ability_name.to_string(),
                     actual_damage,
                     is_killing_blow,
@@ -1202,14 +1186,10 @@ pub fn decide_abilities(
                     commands.entity(target_entity).remove::<CastingState>();
                     commands.entity(target_entity).remove::<ChannelingState>();
 
-                    let death_message = format!(
-                        "Team {} {} has been eliminated",
-                        target_team,
-                        target_class.name()
-                    );
+                    let death_message = format!("{} has been eliminated", target_id);
                     combat_log.log_death(
-                        combatant_id(target_team, target_class),
-                        Some(combatant_id(attacker_team, attacker_class)),
+                        target_id.clone(),
+                        Some(attacker_id.clone()),
                         death_message,
                     );
                 }
@@ -1229,6 +1209,7 @@ pub fn decide_abilities(
             target: target_entity,
             damage,
             caster_team,
+            caster_slot,
             caster_class,
             target_pos: _target_pos,
             is_crit,
@@ -1251,8 +1232,8 @@ pub fn decide_abilities(
                     super::abilities::SpellSchool::Frost,
                 );
                 actual_damage = dmg;
-                let target_team = target.team;
-                let target_class = target.class;
+                // Pet-aware target id (structured fields + message text).
+                let target_id = combat_log_id_for(&target, pet_query.get(target_entity).ok());
 
                 // Warriors generate Rage from taking damage (only on actual health damage)
                 if actual_damage > 0.0 && target.resource_type == ResourceType::Rage {
@@ -1311,32 +1292,22 @@ pub fn decide_abilities(
                 if is_first_death {
                     target.is_dead = true;
                 }
+                let caster_id = combatant_id(caster_team, caster_slot, caster_class);
                 let verb = if is_crit { "CRITS" } else { "hits" };
                 let message = if absorbed > 0.0 {
                     format!(
-                        "Team {} {}'s Frost Nova {} Team {} {} for {:.0} damage ({:.0} absorbed)",
-                        caster_team,
-                        caster_class.name(),
-                        verb,
-                        target_team,
-                        target_class.name(),
-                        actual_damage,
-                        absorbed
+                        "{}'s Frost Nova {} {} for {:.0} damage ({:.0} absorbed)",
+                        caster_id, verb, target_id, actual_damage, absorbed
                     )
                 } else {
                     format!(
-                        "Team {} {}'s Frost Nova {} Team {} {} for {:.0} damage",
-                        caster_team,
-                        caster_class.name(),
-                        verb,
-                        target_team,
-                        target_class.name(),
-                        actual_damage
+                        "{}'s Frost Nova {} {} for {:.0} damage",
+                        caster_id, verb, target_id, actual_damage
                     )
                 };
                 combat_log.log_damage(
-                    combatant_id(caster_team, caster_class),
-                    combatant_id(target_team, target_class),
+                    caster_id.clone(),
+                    target_id.clone(),
                     "Frost Nova".to_string(),
                     actual_damage,
                     is_killing_blow,
@@ -1350,14 +1321,10 @@ pub fn decide_abilities(
                     commands.entity(target_entity).remove::<CastingState>();
                     commands.entity(target_entity).remove::<ChannelingState>();
 
-                    let death_message = format!(
-                        "Team {} {} has been eliminated",
-                        target_team,
-                        target_class.name()
-                    );
+                    let death_message = format!("{} has been eliminated", target_id);
                     combat_log.log_death(
-                        combatant_id(target_team, target_class),
-                        Some(combatant_id(caster_team, caster_class)),
+                        target_id.clone(),
+                        Some(caster_id.clone()),
                         death_message,
                     );
                 }
@@ -1552,7 +1519,7 @@ pub fn check_interrupts(
         // Interrupts do NOT trigger GCD in WoW!
 
         // Log ability cast for timeline
-        log_ability_use(&mut combat_log, combatant.team, combatant.class, &ability_def.name, None, "uses");
+        log_ability_use(&mut combat_log, combatant.team, combatant.slot, combatant.class, &ability_def.name, None, "uses");
 
         // Queue the interrupt for processing
         // Note: The actual interrupt result (with school lockout info) is logged in process_interrupts

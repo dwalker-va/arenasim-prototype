@@ -13,7 +13,7 @@ use bevy::prelude::*;
 
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use crate::states::play_match::components::*;
-use crate::states::play_match::utils::combatant_id;
+use crate::states::play_match::utils::{combatant_id, combat_log_id_for};
 
 /// Process pending Mana Burns.
 ///
@@ -26,6 +26,7 @@ pub fn process_mana_burn(
     mut combat_log: ResMut<CombatLog>,
     pending_burns: Query<(Entity, &ManaBurnPending)>,
     mut combatants: Query<&mut Combatant>,
+    pet_query: Query<&Pet>,
 ) {
     for (pending_entity, pending) in pending_burns.iter() {
         if let Ok(mut target) = combatants.get_mut(pending.target) {
@@ -33,11 +34,12 @@ pub fn process_mana_burn(
                 let burned = target.current_mana.min(pending.amount);
                 target.current_mana -= burned;
 
+                let target_id = combat_log_id_for(&target, pet_query.get(pending.target).ok());
                 let msg = format!(
                     "[MANA BURN] {}'s Mana Burn destroys {:.0} mana on {} ({:.0}/{:.0} remaining)",
-                    combatant_id(pending.caster_team, pending.caster_class),
+                    combatant_id(pending.caster_team, pending.caster_slot, pending.caster_class),
                     burned,
-                    combatant_id(target.team, target.class),
+                    target_id,
                     target.current_mana,
                     target.max_mana,
                 );
@@ -67,6 +69,7 @@ mod tests {
                 target,
                 amount,
                 caster_team: 1,
+                caster_slot: 0,
                 caster_class: CharacterClass::Priest,
             })
             .id()

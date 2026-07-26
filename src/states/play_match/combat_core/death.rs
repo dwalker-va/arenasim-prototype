@@ -3,6 +3,7 @@
 use bevy::prelude::*;
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use super::super::components::*;
+use super::super::utils::pet_combatant_id;
 
 /// Trigger death animation when a combatant dies.
 /// Detects dead combatants without a DeathAnimation component and adds one.
@@ -127,7 +128,7 @@ pub fn despawn_pets_of_dead_owners(
                 pet_combatant.current_health = 0.0;
                 combat_log.log(
                     CombatLogEventType::Death,
-                    format!("Team {} {} despawns (owner died)", pet_combatant.team, pet.pet_type.name()),
+                    format!("{} despawns (owner died)", pet_combatant_id(pet_combatant.team, pet_combatant.owner_relative_slot(), pet.pet_type)),
                 );
             }
         }

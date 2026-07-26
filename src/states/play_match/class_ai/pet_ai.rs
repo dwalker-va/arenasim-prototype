@@ -16,6 +16,7 @@ use crate::states::play_match::decision_trace::{
 use crate::states::play_match::utils::spawn_speech_bubble;
 use crate::states::match_config::CharacterClass;
 use super::CombatContext;
+use super::super::utils::pet_combatant_id;
 
 /// Render a PetType variant into a stable string for pet_decision events.
 fn pet_type_str(pt: PetType) -> &'static str {
@@ -514,12 +515,12 @@ fn execute_spell_lock(
 
     combatant.ability_cooldowns.insert(ability, def.cooldown);
 
-    let caster_id = format!("Team {} Felhunter", combatant.team);
+    let caster_id = pet_combatant_id(combatant.team, combatant.owner_relative_slot(), PetType::Felhunter);
     combat_log.log_ability_cast(
-        caster_id,
+        caster_id.clone(),
         ability_name.to_string(),
         None,
-        format!("Team {} Felhunter uses {}", combatant.team, ability_name),
+        format!("{} uses {}", caster_id, ability_name),
     );
 
     spawn_speech_bubble(commands, entity, ability_name);
@@ -588,12 +589,12 @@ fn try_devour_magic(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = super::super::constants::GCD;
 
-    let caster_id = format!("Team {} Felhunter", combatant.team);
+    let caster_id = pet_combatant_id(combatant.team, combatant.owner_relative_slot(), PetType::Felhunter);
     combat_log.log_ability_cast(
-        caster_id,
+        caster_id.clone(),
         def.name.to_string(),
         None,
-        format!("Team {} Felhunter uses {}", combatant.team, def.name),
+        format!("{} uses {}", caster_id, def.name),
     );
 
     spawn_speech_bubble(commands, entity, &def.name);
@@ -637,7 +638,9 @@ fn execute_spider_web(
             ability,
             speed: projectile_speed,
             caster_team: combatant.team,
+            caster_slot: combatant.owner_relative_slot(),
             caster_class: combatant.class,
+            caster_pet_type: Some(PetType::Spider),
         },
         Transform::from_translation(my_pos + Vec3::new(0.0, 0.5, 0.0)),
         PlayMatchEntity,
@@ -646,12 +649,12 @@ fn execute_spider_web(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = super::super::constants::GCD;
 
-    let caster_id = format!("Team {} Spider", combatant.team);
+    let caster_id = pet_combatant_id(combatant.team, combatant.owner_relative_slot(), PetType::Spider);
     combat_log.log_ability_cast(
-        caster_id,
+        caster_id.clone(),
         def.name.to_string(),
         None,
-        format!("Team {} Spider uses {}", combatant.team, def.name),
+        format!("{} uses {}", caster_id, def.name),
     );
 
     spawn_speech_bubble(commands, entity, &def.name);
@@ -677,12 +680,12 @@ fn execute_boar_charge(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = super::super::constants::GCD;
 
-    let caster_id = format!("Team {} Boar", combatant.team);
+    let caster_id = pet_combatant_id(combatant.team, combatant.owner_relative_slot(), PetType::Boar);
     combat_log.log_ability_cast(
-        caster_id,
+        caster_id.clone(),
         def.name.to_string(),
         None,
-        format!("Team {} Boar uses {}", combatant.team, def.name),
+        format!("{} uses {}", caster_id, def.name),
     );
 
     spawn_speech_bubble(commands, entity, &def.name);
@@ -723,12 +726,12 @@ fn execute_masters_call(
     combatant.ability_cooldowns.insert(ability, def.cooldown);
     combatant.global_cooldown = super::super::constants::GCD;
 
-    let caster_id = format!("Team {} Bird", combatant.team);
+    let caster_id = pet_combatant_id(combatant.team, combatant.owner_relative_slot(), PetType::Bird);
     combat_log.log_ability_cast(
-        caster_id,
+        caster_id.clone(),
         def.name.to_string(),
         None,
-        format!("Team {} Bird uses {}", combatant.team, def.name),
+        format!("{} uses {}", caster_id, def.name),
     );
 
     spawn_speech_bubble(commands, entity, &def.name);

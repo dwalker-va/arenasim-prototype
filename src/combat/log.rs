@@ -15,8 +15,11 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
-/// Unique identifier for a combatant in the combat log
-/// Format: "Team {team} {class}" e.g. "Team 1 Warrior"
+/// Unique identifier for a combatant in the combat log.
+/// Format: "Team {team} {class} #{slot+1}" e.g. "Team 1 Warrior #1"
+/// (pets use their type name and the owner's slot, e.g. "Team 1 Spider #2").
+/// Built by `states::play_match::utils::combat_log_id` and its wrappers; the
+/// 1-based slot suffix keeps same-class teammates distinct.
 pub type CombatantId = String;
 
 /// A single entry in the combat log
@@ -276,6 +279,27 @@ impl CombatLog {
         });
     }
 
+    /// Flag the most recent `source -> target` damage entry as a killing blow.
+    ///
+    /// Channel ticks (Drain Life) log their damage in one pass and only learn
+    /// the target died in a later application pass, so the tick's `Damage` event
+    /// is written with `is_killing_blow: false`. Since `killing_blows` counts the
+    /// `Damage` flag (not `Death` events), that kill would go uncredited. This
+    /// back-patches the flag on the just-logged tick — the same shape as
+    /// [`Self::mark_cast_interrupted`]. Idempotent; a no-op if no match exists.
+    pub fn mark_last_damage_killing_blow(&mut self, source_id: &str, target_id: &str) {
+        for entry in self.entries.iter_mut().rev() {
+            if let Some(StructuredEventData::Damage { source, target, is_killing_blow, .. }) =
+                &mut entry.structured_data
+            {
+                if source == source_id && target == target_id {
+                    *is_killing_blow = true;
+                    return;
+                }
+            }
+        }
+    }
+
     /// Mark the most recent ability cast by a combatant as interrupted
     pub fn mark_cast_interrupted(&mut self, caster_id: &str, ability_name: &str) {
         // Find the most recent matching ability cast and mark it interrupted
@@ -342,30 +366,24 @@ impl CombatLog {
     // Aggregation Methods for Results Scene
     // =========================================================================
 
-    /// Get total damage dealt by a combatant, broken down by ability
-    /// Returns HashMap<AbilityName, TotalDamage>
+    /// Get total damage dealt by a combatant, broken down by ability.
+    /// Returns HashMap<AbilityName, TotalDamage>. Thin wrapper over
+    /// [`Self::damage_by_ability_including_pets`] with no pet links, so the two
+    /// can never drift out of sync (a split like that was the original results
+    /// bug).
     pub fn damage_by_ability(&self, combatant_id: &str) -> HashMap<String, f32> {
-        let mut result: HashMap<String, f32> = HashMap::new();
-
-        for entry in &self.entries {
-            if let Some(StructuredEventData::Damage { source, ability, amount, .. }) = &entry.structured_data {
-                if source == combatant_id {
-                    *result.entry(ability.clone()).or_insert(0.0) += amount;
-                }
-            }
-        }
-
-        result
+        self.damage_by_ability_including_pets(combatant_id, &HashMap::new())
     }
 
     /// Like [`Self::damage_by_ability`], but also folds in damage dealt by the
     /// combatant's pets. `pet_links` maps a pet's source id (e.g.
-    /// `"Team 1 Spider"`) to `(owner_id, pet_display_name)`; any log entry whose
-    /// source maps to `owner_id` is credited to the owner under the label
+    /// `"Team 1 Spider #2"`) to `(owner_id, pet_display_name)` (e.g.
+    /// `("Team 1 Hunter #2", "Spider")`); any log entry whose source maps to
+    /// `owner_id` is credited to the owner under the label
     /// `"<pet_display_name>: <ability>"` (e.g. `"Spider: Auto Attack"`), keeping
     /// it distinct from the owner's own abilities. Entries sourced directly by
-    /// `owner_id` are counted unchanged. With an empty `pet_links` this is
-    /// identical to `damage_by_ability`.
+    /// `owner_id` are counted unchanged. With an empty `pet_links` this is a
+    /// plain per-ability damage tally.
     pub fn damage_by_ability_including_pets(
         &self,
         owner_id: &str,
@@ -429,13 +447,36 @@ impl CombatLog {
         total
     }
 
-    /// Get number of killing blows by a combatant
+    /// Get number of killing blows by a combatant. Thin wrapper over
+    /// [`Self::killing_blows_including_pets`] with no pet links, so the plain
+    /// and pet-aware counts can never drift apart.
     pub fn killing_blows(&self, combatant_id: &str) -> u32 {
+        self.killing_blows_including_pets(combatant_id, &HashMap::new())
+    }
+
+    /// Like [`Self::killing_blows`], but also credits killing blows dealt by the
+    /// combatant's pets to the owner. `pet_links` maps a pet's source id (e.g.
+    /// `"Team 1 Spider #2"`) to `(owner_id, pet_display_name)` (e.g.
+    /// `("Team 1 Hunter #2", "Spider")`) — the same map the Results screen uses
+    /// for the damage breakdown. A killing blow whose source maps to `owner_id`
+    /// counts toward the owner. With an empty `pet_links` this is a plain
+    /// killing-blow tally. Mirrors [`Self::damage_by_ability_including_pets`] so
+    /// the K column accounts for pet kills the way the DMG column folds in pet
+    /// damage.
+    pub fn killing_blows_including_pets(
+        &self,
+        owner_id: &str,
+        pet_links: &HashMap<String, (String, String)>,
+    ) -> u32 {
         let mut count = 0;
 
         for entry in &self.entries {
             if let Some(StructuredEventData::Damage { source, is_killing_blow: true, .. }) = &entry.structured_data {
-                if source == combatant_id {
+                let credited = source == owner_id
+                    || pet_links
+                        .get(source)
+                        .is_some_and(|(mapped_owner, _)| mapped_owner == owner_id);
+                if credited {
                     count += 1;
                 }
             }
@@ -735,10 +776,22 @@ mod pet_attribution_tests {
     fn dmg(log: &mut CombatLog, source: &str, ability: &str, amount: f32) {
         log.log_damage(
             source.to_string(),
-            "Team 2 Warrior".to_string(),
+            "Team 2 Warrior #1".to_string(),
             ability.to_string(),
             amount,
             false,
+            false,
+            String::new(),
+        );
+    }
+
+    fn killing_blow(log: &mut CombatLog, source: &str, ability: &str) {
+        log.log_damage(
+            source.to_string(),
+            "Team 2 Warrior #1".to_string(),
+            ability.to_string(),
+            50.0,
+            true,
             false,
             String::new(),
         );
@@ -786,5 +839,72 @@ mod pet_attribution_tests {
         assert_eq!(with_pets, plain);
         // Pet damage is absent without a link entry.
         assert!(with_pets.get("Spider: Auto Attack").is_none());
+    }
+
+    #[test]
+    fn credits_pet_killing_blows_to_the_owner() {
+        let mut log = CombatLog::default();
+        killing_blow(&mut log, "Team 1 Hunter", "Aimed Shot"); // owner's own kill
+        killing_blow(&mut log, "Team 1 Spider", "Auto Attack"); // pet's kill -> owner
+        dmg(&mut log, "Team 1 Spider", "Auto Attack", 30.0); // non-lethal pet hit, ignored
+        killing_blow(&mut log, "Team 2 Mage", "Frostbolt"); // enemy kill, must not leak
+
+        let mut links = HashMap::new();
+        links.insert(
+            "Team 1 Spider".to_string(),
+            ("Team 1 Hunter".to_string(), "Spider".to_string()),
+        );
+
+        // Owner is credited with its own kill + the pet's kill.
+        assert_eq!(log.killing_blows_including_pets("Team 1 Hunter", &links), 2);
+        // The plain method still only sees the owner's own kill.
+        assert_eq!(log.killing_blows("Team 1 Hunter"), 1);
+        // Enemy kills never leak into the owner's count.
+        assert_eq!(log.killing_blows_including_pets("Team 2 Mage", &links), 1);
+    }
+
+    #[test]
+    fn mark_last_damage_killing_blow_credits_the_channel_finish() {
+        // Mirrors Drain Life: the tick's Damage lands with is_killing_blow=false,
+        // then the application pass learns the target died and back-patches it.
+        //
+        // The ids here are hand-written (suffixed to be representative). This
+        // test can only exercise the back-patch *mechanism* — flagging the most
+        // recent source→target Damage entry — because `log.rs` sits below
+        // `states::play_match::utils::{combatant_id, log_id_from_parts}` in the
+        // module graph and cannot call the real id constructors. The production
+        // guarantee that the tick's source id and the death-block back-patch id
+        // are byte-identical is enforced at their construction sites
+        // (`combat_core/casting.rs`, both pet-aware), exercised by the headless
+        // integration path.
+        let mut log = CombatLog::default();
+        dmg(&mut log, "Team 1 Warlock #1", "Drain Life (tick)", 30.0);
+        dmg(&mut log, "Team 1 Warlock #1", "Drain Life (tick)", 30.0); // the lethal one
+        assert_eq!(log.killing_blows("Team 1 Warlock #1"), 0);
+
+        // Back-patch the most recent Warlock -> Warrior damage entry.
+        log.mark_last_damage_killing_blow("Team 1 Warlock #1", "Team 2 Warrior #1");
+        assert_eq!(log.killing_blows("Team 1 Warlock #1"), 1);
+        // Only the most-recent matching entry is flagged.
+        let flagged = log.entries.iter().filter(|e| matches!(
+            &e.structured_data,
+            Some(StructuredEventData::Damage { is_killing_blow: true, .. })
+        )).count();
+        assert_eq!(flagged, 1);
+    }
+
+    #[test]
+    fn empty_links_kills_match_plain_killing_blows() {
+        let mut log = CombatLog::default();
+        killing_blow(&mut log, "Team 1 Hunter", "Aimed Shot");
+        killing_blow(&mut log, "Team 1 Spider", "Auto Attack");
+
+        let empty = HashMap::new();
+        // Without links the pet's kill is not credited — identical to the plain method.
+        assert_eq!(
+            log.killing_blows_including_pets("Team 1 Hunter", &empty),
+            log.killing_blows("Team 1 Hunter"),
+        );
+        assert_eq!(log.killing_blows_including_pets("Team 1 Hunter", &empty), 1);
     }
 }

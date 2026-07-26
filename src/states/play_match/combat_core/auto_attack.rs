@@ -8,7 +8,7 @@ use super::super::components::*;
 use super::super::abilities::{AbilityType, SpellSchool};
 use super::super::ability_config::AbilityDefinitions;
 use super::super::constants::CRIT_DAMAGE_MULTIPLIER;
-use super::super::utils::get_next_fct_offset;
+use super::super::utils::{get_next_fct_offset, combat_log_id};
 use super::super::{MELEE_RANGE, WAND_RANGE, HUNTER_DEAD_ZONE, AUTO_SHOT_RANGE, FCT_HEIGHT};
 use super::super::map_config::ActiveMapGeometry;
 use super::super::map_geometry::has_line_of_sight;
@@ -59,16 +59,19 @@ pub fn combat_auto_attack(
         .collect();
 
     // Build a snapshot of combatant info for logging and alive checks
-    // Tuple: (team, class, display_name, is_melee, is_alive)
-    let combatant_info: std::collections::HashMap<Entity, (u8, match_config::CharacterClass, String, bool, bool)> = combatants
+    // Tuple: (team, class, display_name, is_melee, is_alive, slot_label)
+    // `slot_label` is the OWNER-relative 0-based slot used to build the unique
+    // combat-log id: a combatant's own slot, or a pet's owner slot
+    // (pet.slot - PET_SLOT_BASE) so a pet lines up with its owner's number.
+    let combatant_info: std::collections::HashMap<Entity, (u8, match_config::CharacterClass, String, bool, bool, u8)> = combatants
         .iter()
         .map(|(entity, _, combatant, _, _, _)| {
-            let (display_name, is_melee) = if let Ok(pet) = auto_attack_pet_query.get(entity) {
-                (pet.pet_type.name().to_string(), pet.pet_type.is_melee())
+            let (display_name, is_melee, slot_label) = if let Ok(pet) = auto_attack_pet_query.get(entity) {
+                (pet.pet_type.name().to_string(), pet.pet_type.is_melee(), combatant.owner_relative_slot())
             } else {
-                (combatant.class.name().to_string(), combatant.class.is_melee())
+                (combatant.class.name().to_string(), combatant.class.is_melee(), combatant.slot)
             };
-            (entity, (combatant.team, combatant.class, display_name, is_melee, combatant.is_alive()))
+            (entity, (combatant.team, combatant.class, display_name, is_melee, combatant.is_alive(), slot_label))
         })
         .collect();
 
@@ -216,7 +219,7 @@ pub fn combat_auto_attack(
 
                     // Use pet-aware is_melee from snapshot (pets inherit owner's class
                     // but may have different melee/ranged behavior)
-                    let &(_, attacker_class, _, attacker_is_melee, _) = &combatant_info[&attacker_entity];
+                    let &(_, attacker_class, _, attacker_is_melee, _, _) = &combatant_info[&attacker_entity];
                     let attack_range = if attacker_is_melee {
                         MELEE_RANGE
                     } else if attacker_class == match_config::CharacterClass::Hunter {
@@ -358,7 +361,7 @@ pub fn combat_auto_attack(
                 {
                     // Look up the caster's team
                     if let Some(caster_entity) = aura.caster {
-                        if let Some(&(caster_team, _, _, _, _)) = combatant_info.get(&caster_entity) {
+                        if let Some(&(caster_team, _, _, _, _, _)) = combatant_info.get(&caster_entity) {
                             // Only track if the CC is from the opposing team of the target
                             // (i.e., the CC caster is an enemy of the CC'd target)
                             if caster_team != combatant.team {
@@ -385,7 +388,7 @@ pub fn combat_auto_attack(
         // Bug fix: Don't auto-attack targets with breakable CC from a friendly caster.
         // This prevents, e.g., a Warlock pet from breaking its team's Polymorph.
         if let Some(&cc_caster_team) = friendly_cc_team.get(&target_entity) {
-            if let Some(&(attacker_team, _, _, _, _)) = combatant_info.get(&attacker_entity) {
+            if let Some(&(attacker_team, _, _, _, _, _)) = combatant_info.get(&attacker_entity) {
                 if attacker_team == cc_caster_team {
                     continue;
                 }
@@ -409,7 +412,7 @@ pub fn combat_auto_attack(
                 }
 
                 // Check for Frost Armor proc: if target has FrostArmorBuff and attacker is melee
-                if let Some(&(_, _, _, attacker_is_melee, _)) = combatant_info.get(&attacker_entity) {
+                if let Some(&(_, _, _, attacker_is_melee, _, _)) = combatant_info.get(&attacker_entity) {
                     if attacker_is_melee {
                         if let Some(ref target_auras_ref) = target_auras {
                             if target_auras_ref.auras.iter().any(|a| a.effect_type == AuraType::FrostArmorBuff) {
@@ -432,7 +435,7 @@ pub fn combat_auto_attack(
                             target_auras.as_deref_mut(),
                         );
                         if fresh {
-                            if let Some((_, _, tname, _, _)) = combatant_info.get(&target_entity) {
+                            if let Some((_, _, tname, _, _, _)) = combatant_info.get(&target_entity) {
                                 combat_log.log(
                                     CombatLogEventType::CrowdControl,
                                     format!("Crippling Poison applied to {} ({:.0}% slow)", tname, 70.0),
@@ -453,7 +456,7 @@ pub fn combat_auto_attack(
                 damage_dealt_updates.push((attacker_entity, actual_damage + absorbed));
 
                 // Log the attack with structured data
-                if let (Some((attacker_team, attacker_class, attacker_name, attacker_is_melee, _)), Some((target_team, _target_class, target_name, _, _))) =
+                if let (Some((attacker_team, attacker_class, attacker_name, attacker_is_melee, _, attacker_slot)), Some((target_team, _target_class, target_name, _, _, target_slot))) =
                     (combatant_info.get(&attacker_entity), combatant_info.get(&target_entity)) {
                     let attack_name = if has_bonus {
                         "Heroic Strike" // Enhanced auto-attack
@@ -464,34 +467,21 @@ pub fn combat_auto_attack(
                     } else {
                         "Wand Shot"
                     };
+                    let attacker_id = combat_log_id(*attacker_team, *attacker_slot, attacker_name);
+                    let target_id = combat_log_id(*target_team, *target_slot, target_name);
+
                     let verb = if is_crit { "CRITS" } else { "hits" };
                     let message = if absorbed > 0.0 {
                         format!(
-                            "Team {} {}'s {} {} Team {} {} for {:.0} damage ({:.0} absorbed)",
-                            attacker_team,
-                            attacker_name,
-                            attack_name,
-                            verb,
-                            target_team,
-                            target_name,
-                            actual_damage,
-                            absorbed
+                            "{}'s {} {} {} for {:.0} damage ({:.0} absorbed)",
+                            attacker_id, attack_name, verb, target_id, actual_damage, absorbed
                         )
                     } else {
                         format!(
-                            "Team {} {}'s {} {} Team {} {} for {:.0} damage",
-                            attacker_team,
-                            attacker_name,
-                            attack_name,
-                            verb,
-                            target_team,
-                            target_name,
-                            actual_damage
+                            "{}'s {} {} {} for {:.0} damage",
+                            attacker_id, attack_name, verb, target_id, actual_damage
                         )
                     };
-
-                    let attacker_id = format!("Team {} {}", attacker_team, attacker_name);
-                    let target_id = format!("Team {} {}", target_team, target_name);
 
                     let is_killing_blow = !target.is_alive();
                     combat_log.log_damage(
@@ -523,11 +513,7 @@ pub fn combat_auto_attack(
                         commands.entity(target_entity).remove::<CastingState>();
                         commands.entity(target_entity).remove::<ChannelingState>();
 
-                        let death_message = format!(
-                            "Team {} {} has been eliminated",
-                            target_team,
-                            target_name
-                        );
+                        let death_message = format!("{} has been eliminated", target_id);
                         combat_log.log_death(
                             target_id,
                             Some(attacker_id),

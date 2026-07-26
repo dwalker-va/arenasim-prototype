@@ -312,14 +312,14 @@ fn try_psychic_scream(
     // real threat are still feared — this only blocks a pet-only cast.
     let has_real_threat = targets
         .iter()
-        .any(|(e, _, _)| ctx.combatants.get(e).map_or(false, |i| !i.is_pet));
+        .any(|e| ctx.combatants.get(e).map_or(false, |i| !i.is_pet));
     if !has_real_threat {
         builder.reject(scream, RejectionReason::NoValidTarget);
         return false;
     }
 
     fire_psychic_scream(
-        commands, combat_log, scream_def, entity, combatant, same_frame_cc_queue, &targets, builder,
+        commands, combat_log, scream_def, entity, combatant, same_frame_cc_queue, &targets, ctx, builder,
     );
     true
 }
@@ -332,13 +332,17 @@ fn scream_targets(
     entity: Entity,
     my_pos: Vec3,
     radius: f32,
-) -> Vec<(Entity, u8, CharacterClass)> {
+) -> Vec<Entity> {
+    // Returns just entities (Copy) — this is a per-tick *predicate* helper whose
+    // result is usually discarded, so it must not allocate. The pet-aware id is
+    // resolved lazily in `fire_psychic_scream`, which only runs on the committed
+    // cast.
     ctx.visible_enemies_within(entity, my_pos, radius)
         .into_iter()
         .filter(|info| {
             !ctx.entity_is_immune(info.entity) && !ctx.is_dr_immune(info.entity, DRCategory::Fears)
         })
-        .map(|info| (info.entity, info.team, info.class))
+        .map(|info| info.entity)
         .collect()
 }
 
@@ -353,7 +357,8 @@ fn fire_psychic_scream(
     entity: Entity,
     combatant: &mut Combatant,
     same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
-    targets: &[(Entity, u8, CharacterClass)],
+    targets: &[Entity],
+    ctx: &CombatContext,
     builder: &mut DecisionEventBuilder<'_>,
 ) {
     builder.choose(AbilityType::PsychicScream, None, true);
@@ -376,26 +381,30 @@ fn fire_psychic_scream(
         .insert(AbilityType::PsychicScream, scream_def.cooldown);
     combatant.global_cooldown = GCD;
 
-    log_ability_use(combat_log, combatant.team, combatant.class, "Psychic Scream", None, "casts");
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Psychic Scream", None, "casts");
 
     let fear_duration = scream_def.applies_aura.as_ref().map(|a| a.duration).unwrap_or(0.0);
-    for (target_entity, target_team, target_class) in targets {
+    let caster_id = combatant_id(combatant.team, combatant.slot, combatant.class);
+    for target_entity in targets {
+        // Resolve the pet-aware id here (committed cast only, not per predicate
+        // tick). The entity came from `scream_targets` → `visible_enemies_within`,
+        // so it is always present in `ctx.combatants`; skip defensively rather
+        // than fear-and-log an empty target id if that invariant ever changes.
+        let Some(target_id) = ctx.combatants.get(target_entity).map(|i| i.log_id()) else {
+            continue;
+        };
         if let Some(aura_pending) = AuraPending::from_ability(*target_entity, entity, scream_def) {
             same_frame_cc_queue.push((*target_entity, aura_pending.aura.clone()));
             commands.spawn(aura_pending);
         }
 
         let message = format!(
-            "Team {} {}'s Psychic Scream fears Team {} {} ({:.1}s)",
-            combatant.team,
-            combatant.class.name(),
-            target_team,
-            target_class.name(),
-            fear_duration
+            "{}'s Psychic Scream fears {} ({:.1}s)",
+            caster_id, target_id, fear_duration
         );
         combat_log.log_crowd_control(
-            combatant_id(combatant.team, combatant.class),
-            combatant_id(*target_team, *target_class),
+            caster_id.clone(),
+            target_id,
             "Fear".to_string(),
             fear_duration,
             message,
@@ -447,7 +456,7 @@ fn try_dip_psychic_scream(
     }
 
     fire_psychic_scream(
-        commands, combat_log, scream_def, entity, combatant, same_frame_cc_queue, &targets, builder,
+        commands, combat_log, scream_def, entity, combatant, same_frame_cc_queue, &targets, ctx, builder,
     );
     true
 }
@@ -513,8 +522,8 @@ fn try_fortitude(
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
 
-    let target_tuple = ctx.combatants.get(&buff_target).map(|info| (info.team, info.class));
-    log_ability_use(combat_log, combatant.team, combatant.class, "Power Word: Fortitude", target_tuple, "casts");
+    let target_tuple = ctx.combatants.get(&buff_target).map(|info| info.log_id());
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Power Word: Fortitude", target_tuple, "casts");
 
     if let Some(aura_pending) = AuraPending::from_ability(buff_target, entity, def) {
         commands.spawn(aura_pending);
@@ -618,8 +627,8 @@ fn try_power_word_shield(
     combatant.current_mana -= pw_shield_def.mana_cost;
     combatant.global_cooldown = GCD;
 
-    let target_tuple = ctx.combatants.get(&shield_entity).map(|info| (info.team, info.class));
-    log_ability_use(combat_log, combatant.team, combatant.class, "Power Word: Shield", target_tuple, "casts");
+    let target_tuple = ctx.combatants.get(&shield_entity).map(|info| info.log_id());
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, "Power Word: Shield", target_tuple, "casts");
 
     // Absorb scales with the Priest's effective spell power (base + gear +
     // aura bonuses) via magnitude_coefficient — same stat the heals use.
@@ -756,8 +765,8 @@ fn try_flash_heal(
 
     let target_tuple = ctx.combatants
         .get(&heal_target)
-        .map(|info| (info.team, info.class));
-    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, target_tuple, "begins casting");
+        .map(|info| info.log_id());
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, target_tuple, "begins casting");
 
     info!(
         "Team {} {} starts casting {} on ally",
@@ -841,8 +850,8 @@ fn try_mind_blast(
 
     let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| (info.team, info.class));
-    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, target_tuple, "begins casting");
+        .map(|info| info.log_id());
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, target_tuple, "begins casting");
 
     info!(
         "Team {} {} starts casting {} on enemy",
@@ -1097,8 +1106,8 @@ fn try_mana_burn(
 
     let target_tuple = ctx.combatants
         .get(&target_entity)
-        .map(|info| (info.team, info.class));
-    log_ability_use(combat_log, combatant.team, combatant.class, &def.name, target_tuple, "begins casting");
+        .map(|info| info.log_id());
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, &def.name, target_tuple, "begins casting");
 
     info!(
         "Team {} {} starts casting {} on enemy healer",

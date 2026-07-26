@@ -8,6 +8,7 @@ use bevy::prelude::*;
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use super::components::*;
 use super::PlayMatchEntity;
+use super::utils::combat_log_id_for;
 
 /// Time after gates open before Shadow Sight orbs spawn (seconds)
 pub const SHADOW_SIGHT_SPAWN_TIME: f32 = 90.0;
@@ -135,6 +136,7 @@ pub fn check_orb_pickups(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
     combatants: Query<(Entity, &Combatant, &Transform)>,
+    pet_query: Query<&Pet>,
     orbs: Query<(Entity, &ShadowSightOrb, &Transform), Without<ShadowSightOrbConsuming>>,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
@@ -190,9 +192,8 @@ pub fn check_orb_pickups(
                 combat_log.log(
                     CombatLogEventType::Buff,
                     format!(
-                        "Team {} {} picks up Shadow Sight!",
-                        combatant.team,
-                        combatant.class.name()
+                        "{} picks up Shadow Sight!",
+                        combat_log_id_for(combatant, pet_query.get(combatant_entity).ok())
                     ),
                 );
 

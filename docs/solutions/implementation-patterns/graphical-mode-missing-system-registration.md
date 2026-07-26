@@ -20,7 +20,7 @@ This caused abilities to work perfectly in headless simulations but silently fai
 
 ## Symptoms
 
-- AI logs ability cast (e.g., "[CAST] Team 1 Paladin casts Divine Shield") but no corresponding [BUFF] or [DMG] entries appear
+- AI logs ability cast (e.g., "[CAST] Team 1 Paladin #1 casts Divine Shield") but no corresponding [BUFF] or [DMG] entries appear
 - Abilities work in headless mode (`cargo run --release -- --headless`) but fail in graphical mode (`cargo run --release`)
 - No errors or panics — the system simply never runs because it's not registered
 - Ability goes on cooldown as expected (casting system runs) but effect never applies (effect system missing)
@@ -177,8 +177,8 @@ cargo run --release
 ```
 
 Look for both cast logs AND effect logs:
-- `[CAST] Team 1 Paladin casts Divine Shield` ✓
-- `[BUFF] Team 1 Paladin gains Divine Shield (absorbs 500 damage)` ✓
+- `[CAST] Team 1 Paladin #1 casts Divine Shield` ✓
+- `[BUFF] Team 1 Paladin #1 gains Divine Shield (absorbs 500 damage)` ✓
 
 ## Secondary Bug: Break-on-Damage Convention
 

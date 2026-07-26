@@ -11,6 +11,7 @@ use crate::combat::log::{CombatLog, CombatLogEventType};
 use super::components::*;
 use super::constants::*;
 use super::abilities::SpellSchool;
+use super::utils::combat_log_id_for;
 
 /// Single system handling the full trap lifecycle:
 /// 1. Decrement arm_timer, consider armed when timer hits 0
@@ -22,6 +23,7 @@ pub fn trap_system(
     mut combat_log: ResMut<CombatLog>,
     mut traps: Query<(Entity, &mut Trap, &Transform)>,
     mut combatants: Query<(Entity, &mut Combatant, &Transform), Without<Trap>>,
+    pet_query: Query<&Pet>,
     celebration: Option<Res<VictoryCelebration>>,
 ) {
     // Don't trigger traps during victory celebration
@@ -65,7 +67,7 @@ pub fn trap_system(
                 triggered_by = Some((
                     target_entity,
                     target_combatant.team,
-                    format!("Team {} {}", target_combatant.team, target_combatant.class.name()),
+                    combat_log_id_for(&target_combatant, pet_query.get(target_entity).ok()),
                 ));
                 break; // First enemy in range triggers it
             }
@@ -74,7 +76,12 @@ pub fn trap_system(
         // Phase 3: Apply effect if triggered
         if let Some((target_entity, _target_team, target_name)) = triggered_by {
             trap.triggered = true;
-            let owner_name = format!("Team {}", trap.owner_team);
+            // The trap owner's own id (a Hunter, but resolve pet-aware for
+            // uniformity) so a Hunter+Hunter mirror shows which one's trap fired.
+            let owner_name = combatants
+                .get(trap.owner)
+                .map(|(_, c, _)| combat_log_id_for(c, pet_query.get(trap.owner).ok()))
+                .unwrap_or_else(|_| format!("Team {}", trap.owner_team));
 
             // Traps break stealth on trigger
             if let Ok((_, mut target_combatant, _)) = combatants.get_mut(target_entity) {
