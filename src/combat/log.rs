@@ -776,7 +776,7 @@ mod pet_attribution_tests {
     fn dmg(log: &mut CombatLog, source: &str, ability: &str, amount: f32) {
         log.log_damage(
             source.to_string(),
-            "Team 2 Warrior".to_string(),
+            "Team 2 Warrior #1".to_string(),
             ability.to_string(),
             amount,
             false,
@@ -788,7 +788,7 @@ mod pet_attribution_tests {
     fn killing_blow(log: &mut CombatLog, source: &str, ability: &str) {
         log.log_damage(
             source.to_string(),
-            "Team 2 Warrior".to_string(),
+            "Team 2 Warrior #1".to_string(),
             ability.to_string(),
             50.0,
             true,
@@ -867,13 +867,23 @@ mod pet_attribution_tests {
     fn mark_last_damage_killing_blow_credits_the_channel_finish() {
         // Mirrors Drain Life: the tick's Damage lands with is_killing_blow=false,
         // then the application pass learns the target died and back-patches it.
+        //
+        // The ids here are hand-written (suffixed to be representative). This
+        // test can only exercise the back-patch *mechanism* — flagging the most
+        // recent source→target Damage entry — because `log.rs` sits below
+        // `states::play_match::utils::{combatant_id, log_id_from_parts}` in the
+        // module graph and cannot call the real id constructors. The production
+        // guarantee that the tick's source id and the death-block back-patch id
+        // are byte-identical is enforced at their construction sites
+        // (`combat_core/casting.rs`, both pet-aware), exercised by the headless
+        // integration path.
         let mut log = CombatLog::default();
         dmg(&mut log, "Team 1 Warlock #1", "Drain Life (tick)", 30.0);
         dmg(&mut log, "Team 1 Warlock #1", "Drain Life (tick)", 30.0); // the lethal one
         assert_eq!(log.killing_blows("Team 1 Warlock #1"), 0);
 
         // Back-patch the most recent Warlock -> Warrior damage entry.
-        log.mark_last_damage_killing_blow("Team 1 Warlock #1", "Team 2 Warrior");
+        log.mark_last_damage_killing_blow("Team 1 Warlock #1", "Team 2 Warrior #1");
         assert_eq!(log.killing_blows("Team 1 Warlock #1"), 1);
         // Only the most-recent matching entry is flagged.
         let flagged = log.entries.iter().filter(|e| matches!(

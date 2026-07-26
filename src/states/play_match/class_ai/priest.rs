@@ -386,13 +386,18 @@ fn fire_psychic_scream(
     let fear_duration = scream_def.applies_aura.as_ref().map(|a| a.duration).unwrap_or(0.0);
     let caster_id = combatant_id(combatant.team, combatant.slot, combatant.class);
     for target_entity in targets {
+        // Resolve the pet-aware id here (committed cast only, not per predicate
+        // tick). The entity came from `scream_targets` → `visible_enemies_within`,
+        // so it is always present in `ctx.combatants`; skip defensively rather
+        // than fear-and-log an empty target id if that invariant ever changes.
+        let Some(target_id) = ctx.combatants.get(target_entity).map(|i| i.log_id()) else {
+            continue;
+        };
         if let Some(aura_pending) = AuraPending::from_ability(*target_entity, entity, scream_def) {
             same_frame_cc_queue.push((*target_entity, aura_pending.aura.clone()));
             commands.spawn(aura_pending);
         }
 
-        // Resolve the pet-aware id here (committed cast only, not per predicate tick).
-        let target_id = ctx.combatants.get(target_entity).map(|i| i.log_id()).unwrap_or_default();
         let message = format!(
             "{}'s Psychic Scream fears {} ({:.1}s)",
             caster_id, target_id, fear_duration

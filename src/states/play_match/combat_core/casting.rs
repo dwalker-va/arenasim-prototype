@@ -923,7 +923,11 @@ pub fn process_channeling(
 
             // Log the tick
             if let Some(&(_, t_team, t_slot, t_class, t_pet)) = health_info.get(&channeling.target) {
-                let caster_id = combatant_id(caster.team, caster.slot, caster.class);
+                // Pet-aware for consistency with the rest of the sweep (a channel
+                // caster is always a Warlock today, but reachability isn't a
+                // load-bearing assumption). Must match the death-block back-patch
+                // id built the same way below.
+                let caster_id = combat_log_id_for(&caster, pet_query.get(caster_entity).ok());
                 let target_id = super::super::utils::log_id_from_parts(t_team, t_slot, t_class, t_pet);
                 let damage_message = format!(
                     "{}'s {} ticks on {} for {:.0} damage",
@@ -1050,7 +1054,14 @@ pub fn process_channeling(
                     commands.entity(target_entity).remove::<ChannelingState>();
 
                     let target_id = combat_log_id_for(&target, pet_query.get(target_entity).ok());
-                    let caster_id = combatant_id(caster_team, caster_slot, caster_class);
+                    // Pet-aware, matching the tick-site source id above so the
+                    // back-patch actually finds the entry to flag.
+                    let caster_id = super::super::utils::log_id_from_parts(
+                        caster_team,
+                        caster_slot,
+                        caster_class,
+                        pet_query.get(caster_entity).ok().map(|p| p.pet_type),
+                    );
                     // Credit the kill: this tick's Damage event was logged with
                     // is_killing_blow=false in the pass above (death is only known
                     // here), so back-patch it — else the Warlock's K column
