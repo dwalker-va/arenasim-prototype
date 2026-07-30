@@ -66,14 +66,13 @@ pub fn process_divine_shield(
                 // (removing the aura is sufficient), and MaxHealth/MaxMana are always friendly buffs
                 // that won't be purged.
                 let before = active_auras.auras.len();
-                active_auras.auras.retain(|a| !matches!(a.effect_type,
-                    AuraType::MovementSpeedSlow | AuraType::Root | AuraType::Stun |
-                    AuraType::DamageOverTime | AuraType::SpellSchoolLockout |
-                    AuraType::HealingReduction | AuraType::Fear | AuraType::Polymorph |
-                    AuraType::DamageReduction | AuraType::CastTimeIncrease |
-                    AuraType::AttackPowerReduction | AuraType::AttackSpeedSlow |
-                    AuraType::Silence
-                ));
+                // Classification lives on `Aura::is_hostile_effect`, which is
+                // an EXHAUSTIVE match. This was an inline allowlist here, and it
+                // silently missed `Incapacitate` when that variant was added —
+                // Freezing Trap survived the bubble while the log still claimed
+                // debuffs were removed. Keep the decision at the type, where the
+                // compiler enforces that new aura types get classified.
+                active_auras.auras.retain(|a| !a.is_hostile_effect());
                 let removed = before - active_auras.auras.len();
                 active_auras.auras.push(immunity_aura);
                 removed

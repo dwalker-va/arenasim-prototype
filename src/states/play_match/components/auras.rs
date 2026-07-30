@@ -255,6 +255,68 @@ impl Aura {
     /// `DamageImmunity` (Divine Shield is unpurgeable by design), `ShadowSight`
     /// and `WeaponPoison` (mechanical markers, not real buffs), and every
     /// debuff/CC aura type.
+    /// Returns true if this aura is a HOSTILE effect — one that a full immunity
+    /// (Divine Shield) both BLOCKS on application and CLEARS from its holder.
+    ///
+    /// Single source of truth for that classification. It previously existed as
+    /// three separate hand-maintained lists (the Divine Shield purge, the
+    /// apply-time immunity gate in `auras.rs`, and `is_ccd`), which had already
+    /// drifted apart: the purge list omitted `Incapacitate`, and the apply gate
+    /// omitted `Silence`, `AttackPowerReduction` and `AttackSpeedSlow`.
+    ///
+    /// **Exhaustive on purpose — do not add a `_ =>` arm.** This started life as
+    /// an inline allowlist in `process_divine_shield`, and when `Incapacitate`
+    /// was added to `AuraType` later nobody updated it, so Freezing Trap survived
+    /// the bubble: a trapped Paladin popped Divine Shield, the log cheerfully
+    /// reported "removes 3 debuffs", and the Paladin then stood still for the
+    /// remaining 8 seconds while its partner died. A wildcard arm would silently
+    /// reintroduce exactly that class of bug; the compiler refusing to build until
+    /// a new variant is classified is the whole point.
+    ///
+    /// `WeakenedSoul` is deliberately NOT cleared despite being a debuff — it is
+    /// the Power Word: Shield cooldown marker, and stripping it would let a Priest
+    /// re-shield instantly. Mechanical markers are not CC.
+    pub fn is_hostile_effect(&self) -> bool {
+        match self.effect_type {
+            // Hostile: crowd control, damage-over-time, and stat/casting debuffs.
+            AuraType::MovementSpeedSlow
+            | AuraType::Root
+            | AuraType::Stun
+            | AuraType::Fear
+            | AuraType::Polymorph
+            | AuraType::Incapacitate
+            | AuraType::Silence
+            | AuraType::SpellSchoolLockout
+            | AuraType::DamageOverTime
+            | AuraType::HealingReduction
+            | AuraType::DamageReduction
+            | AuraType::CastTimeIncrease
+            | AuraType::AttackPowerReduction
+            | AuraType::AttackSpeedSlow => true,
+
+            // Beneficial — never stripped from their holder.
+            AuraType::Absorb
+            | AuraType::MaxHealthIncrease
+            | AuraType::MaxManaIncrease
+            | AuraType::AttackPowerIncrease
+            | AuraType::SpellPowerIncrease
+            | AuraType::HealingOverTime
+            | AuraType::WindfuryBuff
+            | AuraType::DamageTakenReduction
+            | AuraType::DamageImmunity
+            | AuraType::CritChanceIncrease
+            | AuraType::ManaRegenIncrease
+            | AuraType::LockoutDurationReduction
+            | AuraType::FrostArmorBuff
+            | AuraType::SpellResistanceBuff
+            | AuraType::FearImmunity => false,
+
+            // Mechanical markers, not effects: clearing these would grant a
+            // cooldown reset (WeakenedSoul) or corrupt tracking state.
+            AuraType::WeakenedSoul | AuraType::ShadowSight | AuraType::WeaponPoison => false,
+        }
+    }
+
     pub fn can_be_purged(&self) -> bool {
         matches!(
             self.effect_type,
@@ -592,6 +654,74 @@ mod tests {
                 aura(ty).can_be_purged(),
                 "{:?} is a beneficial buff and must be purgeable",
                 ty
+            );
+        }
+    }
+
+    /// Regression: Divine Shield must clear EVERY crowd-control type, including
+    /// `Incapacitate`. Freezing Trap applies `Incapacitate`, and the old inline
+    /// allowlist in `process_divine_shield` omitted it, so a trapped Paladin
+    /// bubbled, was told "removes 3 debuffs", and then stood still for 8 seconds
+    /// while its partner died.
+    #[test]
+    fn immunity_clears_every_crowd_control_type() {
+        for ty in [
+            AuraType::Stun,
+            AuraType::Root,
+            AuraType::Fear,
+            AuraType::Polymorph,
+            AuraType::Incapacitate,
+            AuraType::Silence,
+            AuraType::SpellSchoolLockout,
+        ] {
+            assert!(
+                aura(ty).is_hostile_effect(),
+                "{ty:?} is crowd control and MUST be cleared by Divine Shield"
+            );
+        }
+    }
+
+    /// Immunity must not strip the holder's own buffs — including the
+    /// `DamageImmunity` aura that represents the shield itself.
+    #[test]
+    fn immunity_never_clears_buffs_or_markers() {
+        for ty in [
+            AuraType::DamageImmunity,
+            AuraType::Absorb,
+            AuraType::AttackPowerIncrease,
+            AuraType::SpellPowerIncrease,
+            AuraType::HealingOverTime,
+            AuraType::FrostArmorBuff,
+            AuraType::FearImmunity,
+            // Mechanical markers: clearing WeakenedSoul would hand the Priest a
+            // free Power Word: Shield reset.
+            AuraType::WeakenedSoul,
+            AuraType::ShadowSight,
+            AuraType::WeaponPoison,
+        ] {
+            assert!(
+                !aura(ty).is_hostile_effect(),
+                "{ty:?} must NOT be cleared by Divine Shield"
+            );
+        }
+    }
+
+    /// Every CC type `is_ccd` recognises must be clearable by immunity, or a
+    /// Paladin can bubble and remain unable to act — which is the failure the
+    /// Freezing Trap bug produced. Pins the two lists together.
+    #[test]
+    fn every_cc_recognised_by_is_ccd_is_hostile_effect() {
+        for ty in [
+            AuraType::Stun,
+            AuraType::Fear,
+            AuraType::Root,
+            AuraType::Polymorph,
+            AuraType::Incapacitate,
+        ] {
+            assert!(
+                aura(ty).is_hostile_effect(),
+                "{ty:?} counts as CC for is_ccd but survives immunity — a bubbled \
+                 Paladin would stay locked out"
             );
         }
     }

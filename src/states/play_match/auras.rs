@@ -306,12 +306,12 @@ pub fn apply_pending_auras(
         }
 
         // Check for DamageImmunity (Divine Shield): blocks ALL hostile aura applications
-        let is_hostile_aura = matches!(
-            pending.aura.effect_type,
-            AuraType::Fear | AuraType::Stun | AuraType::Root | AuraType::Polymorph | AuraType::Incapacitate
-            | AuraType::MovementSpeedSlow | AuraType::DamageOverTime | AuraType::SpellSchoolLockout
-            | AuraType::HealingReduction | AuraType::DamageReduction | AuraType::CastTimeIncrease
-        );
+        // Same exhaustive classifier the Divine Shield purge uses, so "blocked on
+        // application" and "cleared from the holder" can never disagree. This was a
+        // separate hand-maintained list that had already drifted — it omitted
+        // Silence, AttackPowerReduction and AttackSpeedSlow, so a bubbled target
+        // could still receive them.
+        let is_hostile_aura = pending.aura.is_hostile_effect();
         let has_immunity = if let Some(ref auras) = active_auras {
             auras.auras.iter().any(|a| a.effect_type == AuraType::DamageImmunity)
         } else {
