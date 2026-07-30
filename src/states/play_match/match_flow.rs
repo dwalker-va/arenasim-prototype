@@ -203,6 +203,7 @@ pub fn check_match_end(
     config: Res<MatchConfig>,
     combat_log: Res<CombatLog>,
     celebration: Option<Res<VictoryCelebration>>,
+    game_rng: Option<Res<GameRng>>,
     projectiles: Query<Entity, With<Projectile>>,
     spell_effects: Query<Entity, With<SpellImpactEffect>>,
     traps: Query<Entity, With<Trap>>,
@@ -340,14 +341,15 @@ pub fn check_match_end(
             commands.entity(ice_entity).despawn();
         }
 
-        // Save combat log to file for debugging.
-        // Graphical mode currently runs unseeded (no CLI flag exposes a seed
-        // here); headless mode writes its own MatchMetadata in runner.rs with
-        // the actual seed.
+        // Save combat log to file for debugging. The seed is read back off the
+        // live `GameRng` rather than hardcoded to None: graphical matches choose a
+        // random seed but now RECORD it, so a bug seen in the client can be
+        // replayed exactly by passing this value as `random_seed` in a headless
+        // config. Headless writes its own MatchMetadata in runner.rs.
         let match_metadata = MatchMetadata {
             arena_name: config.map.name().to_string(),
             winner,
-            random_seed: None,
+            random_seed: game_rng.as_ref().and_then(|r| r.seed),
             team1: team1_metadata,
             team2: team2_metadata,
         };

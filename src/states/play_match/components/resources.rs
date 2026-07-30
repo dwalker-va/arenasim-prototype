@@ -29,11 +29,31 @@ impl GameRng {
         }
     }
 
-    /// Create a new GameRng seeded from OS entropy (non-deterministic)
+    /// Pick a fresh random seed from OS entropy.
+    ///
+    /// Callers that need the seed *before* building the RNG (so it can be recorded
+    /// in match metadata and traces) use this and then [`GameRng::from_seed`].
+    pub fn choose_seed() -> u64 {
+        StdRng::from_os_rng().random::<u64>()
+    }
+
+    /// Create a new GameRng with a randomly-chosen but **recorded** seed.
+    ///
+    /// Draws one `u64` from OS entropy and seeds from that, rather than consuming
+    /// OS entropy as the stream directly. Still non-deterministic run to run — but
+    /// the seed is now KNOWN, so it lands in the match log and any match can be
+    /// replayed exactly by passing it back as `random_seed`.
+    ///
+    /// This exists because it previously did the opposite: `seed: None` meant an
+    /// observed bug in the graphical client was unreproducible in principle, not
+    /// merely unlogged. A Divine Shield CC bug reported from a client match could
+    /// not be reproduced across 33 hand-picked seeds; with the seed recorded it
+    /// would have been a one-line replay.
     pub fn from_os_rng() -> Self {
+        let seed = StdRng::from_os_rng().random::<u64>();
         Self {
-            rng: StdRng::from_os_rng(),
-            seed: None,
+            rng: StdRng::seed_from_u64(seed),
+            seed: Some(seed),
         }
     }
 

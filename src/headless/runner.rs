@@ -205,7 +205,16 @@ impl Plugin for HeadlessPlugin {
                 elapsed_time: 0.0,
                 output_path: self.config.output_path.clone(),
                 match_complete: false,
-                random_seed: self.config.random_seed,
+                // Resolve the seed ONCE here rather than leaving it None for an
+                // unseeded run. Every downstream consumer (match metadata, the
+                // MatchResult, the decision trace) reads this field, so recording
+                // it up front makes any run replayable without touching them —
+                // an unseeded match used to be unreproducible in principle.
+                random_seed: Some(
+                    self.config
+                        .random_seed
+                        .unwrap_or_else(crate::states::play_match::GameRng::choose_seed),
+                ),
                 ai_profile: match self.config.ai_profile.as_deref() {
                     Some(p) => crate::states::play_match::ai_profile::AiProfile::parse(p)
                         .expect("Invalid ai_profile in headless config"),
