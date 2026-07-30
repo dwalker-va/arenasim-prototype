@@ -25,6 +25,8 @@ use crate::states::play_match::components::{
     ActiveAuras, Aura, CastingState, ChannelingState, ChargingState, Combatant, DisengagingState,
     DRTracker, Pet,
 };
+use crate::states::play_match::ai_profile::AiProfile;
+use crate::states::play_match::arena_bounds::ArenaBounds;
 use crate::states::play_match::map_geometry::ObstacleVolume;
 
 /// Per-frame snapshot of every combatant's stats, auras, and DR state.
@@ -50,6 +52,11 @@ pub struct CombatSnapshot {
     /// the cast-start LoS guard can test caster→target sight. Empty on maps
     /// with no cover, making the guard a no-op there.
     pub obstacles: Vec<ObstacleVolume>,
+    /// The active map's walkable region, captured alongside `obstacles` so every
+    /// `CombatContext` derived from this snapshot sees the selected map's shape.
+    pub bounds: ArenaBounds,
+    /// Which AI implementation this match runs under.
+    pub ai_profile: AiProfile,
 }
 
 impl CombatSnapshot {
@@ -83,6 +90,8 @@ impl CombatSnapshot {
         dr_tracker_query: &Query<(Entity, &DRTracker)>,
         pet_query: &Query<&Pet>,
         obstacles: &[ObstacleVolume],
+        bounds: ArenaBounds,
+        ai_profile: AiProfile,
     ) -> Self {
         let mut combatants: BTreeMap<Entity, CombatantInfo> = BTreeMap::new();
         let mut active_auras: BTreeMap<Entity, Vec<Aura>> = BTreeMap::new();
@@ -178,7 +187,7 @@ impl CombatSnapshot {
             .map(|(entity, tracker)| (entity, tracker.clone()))
             .collect();
 
-        Self { combatants, active_auras, dr_trackers, ability_cooldowns, obstacles: obstacles.to_vec() }
+        Self { combatants, active_auras, dr_trackers, ability_cooldowns, obstacles: obstacles.to_vec(), bounds, ai_profile }
     }
 
     /// Borrow a `CombatContext` view of this snapshot for the given combatant.
@@ -186,6 +195,8 @@ impl CombatSnapshot {
     /// Cheap — just hands out three `&` references and copies one `Entity`.
     pub fn context_for(&self, self_entity: Entity) -> CombatContext<'_> {
         CombatContext {
+            bounds: self.bounds,
+            ai_profile: self.ai_profile,
             combatants: &self.combatants,
             active_auras: &self.active_auras,
             dr_trackers: &self.dr_trackers,

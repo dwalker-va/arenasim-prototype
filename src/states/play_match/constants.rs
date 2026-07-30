@@ -89,32 +89,31 @@ pub const DOT_TICK_INTERVAL: f32 = 3.0;
 // Arena
 // ============================================================================
 
-/// Arena half-size on X axis (inside the visual walls).
+// Arena SHAPE is per-map data — see `arena_bounds::ArenaBounds`, carried on
+// `ActiveMapGeometry::bounds`. The constants below describe only the HISTORICAL
+// octagon (`ArenaBounds::default()`), which BasicArena, TwinPillars, and
+// TestVerticality still use; they exist so octagon-specific probes can assert
+// against the numbers directly. Gameplay code must read the active map's bounds
+// instead, or it silently uses the wrong shape on Nagrand.
+//
+// There is deliberately no `ARENA_FLOOR_*` counterpart: the visual floor/wall
+// outline is DERIVED from the gameplay bounds by `ArenaBounds::outline` (offset
+// outward by `arena_bounds::WALL_OFFSET`), so a second hand-maintained set of
+// numbers could only drift. `arena_bounds::tests::
+// default_octagon_outline_matches_historical_floor` pins that the derivation
+// still reproduces the retired 38 / 23 / corner-cut-10 values exactly.
+
+/// Historical-octagon half-size on X axis (inside the visual walls).
 /// The arena is 76x46 with wall centers at ±38/±23 and wall thickness 1.0.
 /// We subtract 1.5 to account for wall thickness (0.5) + combatant buffer (1.0).
 pub const ARENA_HALF_X: f32 = 36.5;
 
-/// Arena half-size on Z axis (inside the visual walls).
+/// Historical-octagon half-size on Z axis (inside the visual walls).
 pub const ARENA_HALF_Z: f32 = 21.5;
 
-/// Maximum |x| + |z| permitted at octagonal arena corners (diagonal wall boundary with wall+buffer offset).
+/// Maximum |x| + |z| permitted at the historical octagon's corners (diagonal wall
+/// boundary with wall+buffer offset).
 pub const ARENA_CORNER_SUM: f32 = 48.88;
-
-// --- Visual arena floor octagon -------------------------------------------
-// Single source of truth for the floor mesh (`create_octagon_mesh`) AND any
-// ground decal that must stay inside the walls (e.g. the totem radius disc).
-// Half-extents to the wall centerlines; the four corners are cut by
-// `ARENA_FLOOR_CORNER_CUT`, giving an octagon. Distinct from the gameplay
-// bounds above, which are inset by a wall+combatant buffer.
-
-/// Visual floor half-size on X (arena_length / 2 = 76 / 2).
-pub const ARENA_FLOOR_HALF_X: f32 = 38.0;
-
-/// Visual floor half-size on Z (arena_width / 2 = 46 / 2).
-pub const ARENA_FLOOR_HALF_Z: f32 = 23.0;
-
-/// Length cut off each corner along both axes to form the octagon.
-pub const ARENA_FLOOR_CORNER_CUT: f32 = 10.0;
 
 // ============================================================================
 // Visual/UI

@@ -24,32 +24,25 @@ pub use death::*;
 
 use bevy::prelude::*;
 use super::components::*;
-use super::{ARENA_HALF_X, ARENA_HALF_Z, ARENA_CORNER_SUM};
+use super::arena_bounds::ArenaBounds;
 
 // Re-export combatant_id for backward compatibility (used by other modules)
 pub use super::utils::combatant_id;
 
-/// Returns true if the XZ position is inside the octagonal arena bounds.
-pub fn is_in_arena_bounds(pos: Vec3) -> bool {
-    if pos.x < -ARENA_HALF_X || pos.x > ARENA_HALF_X { return false; }
-    if pos.z < -ARENA_HALF_Z || pos.z > ARENA_HALF_Z { return false; }
-    // Diagonal corner check: each 45° wall constrains |x|+|z|
-    pos.x.abs() + pos.z.abs() <= ARENA_CORNER_SUM
+/// Returns true if the XZ position is inside the active map's walkable region.
+///
+/// Bounds are per-map data ([`ArenaBounds`], from the map's `MapDef`) rather than
+/// global constants, because the Nagrand replica is a ~120yd circular bowl with
+/// gate alcoves while the other maps stay on the original 76×46 octagon. Callers
+/// get it from `ActiveMapGeometry::bounds` (or `CombatContext::bounds` /
+/// `ScorerInputs::bounds`, which carry a copy).
+pub fn is_in_arena_bounds(bounds: &ArenaBounds, pos: Vec3) -> bool {
+    bounds.contains(pos)
 }
 
-/// Clamp a position to stay inside the octagonal arena.
-pub fn clamp_to_arena(mut pos: Vec3) -> Vec3 {
-    // Rectangular edges
-    pos.x = pos.x.clamp(-ARENA_HALF_X, ARENA_HALF_X);
-    pos.z = pos.z.clamp(-ARENA_HALF_Z, ARENA_HALF_Z);
-    // Diagonal corners: project inward along the 45° normal
-    let corner_excess = pos.x.abs() + pos.z.abs() - ARENA_CORNER_SUM;
-    if corner_excess > 0.0 {
-        let half = corner_excess / 2.0;
-        pos.x -= half * pos.x.signum();
-        pos.z -= half * pos.z.signum();
-    }
-    pos
+/// Clamp a position to stay inside the active map's walkable region.
+pub fn clamp_to_arena(bounds: &ArenaBounds, pos: Vec3) -> Vec3 {
+    bounds.clamp(pos)
 }
 
 /// Get the total cast time increase from CastTimeIncrease auras on a combatant.
@@ -659,70 +652,79 @@ mod tests {
 
     // =========================================================================
     // Arena Boundary Tests
+    //
+    // Bounds are per-map data now; these pin the default (historical) octagon,
+    // which is what BasicArena and TestVerticality still use. The shape's own
+    // math is unit-tested in `arena_bounds`; these cover the combat_core wrappers.
     // =========================================================================
+
+    /// The historical arena shape, which `ArenaBounds::default()` reproduces.
+    fn oct() -> ArenaBounds {
+        ArenaBounds::default()
+    }
 
     #[test]
     fn test_is_in_arena_bounds_center() {
-        assert!(is_in_arena_bounds(Vec3::new(0.0, 0.0, 0.0)));
+        assert!(is_in_arena_bounds(&oct(), Vec3::new(0.0, 0.0, 0.0)));
     }
 
     #[test]
     fn test_is_in_arena_bounds_outside_x() {
-        assert!(!is_in_arena_bounds(Vec3::new(40.0, 0.0, 0.0)));
+        assert!(!is_in_arena_bounds(&oct(), Vec3::new(40.0, 0.0, 0.0)));
     }
 
     #[test]
     fn test_is_in_arena_bounds_outside_z() {
-        assert!(!is_in_arena_bounds(Vec3::new(0.0, 0.0, 25.0)));
+        assert!(!is_in_arena_bounds(&oct(), Vec3::new(0.0, 0.0, 25.0)));
     }
 
     #[test]
     fn test_is_in_arena_bounds_outside_diagonal_corner() {
         // Inside rectangle but outside diagonal: |30| + |20| = 50 > 48.88
-        assert!(!is_in_arena_bounds(Vec3::new(30.0, 0.0, 20.0)));
+        assert!(!is_in_arena_bounds(&oct(), Vec3::new(30.0, 0.0, 20.0)));
     }
 
     #[test]
     fn test_is_in_arena_bounds_inside_diagonal_corner() {
         // |25| + |15| = 40 < 48.88
-        assert!(is_in_arena_bounds(Vec3::new(25.0, 0.0, 15.0)));
+        assert!(is_in_arena_bounds(&oct(), Vec3::new(25.0, 0.0, 15.0)));
     }
 
     #[test]
     fn test_clamp_to_arena_inside_unchanged() {
         let pos = Vec3::new(10.0, 5.0, 8.0);
-        let clamped = clamp_to_arena(pos);
+        let clamped = clamp_to_arena(&oct(), pos);
         assert_eq!(clamped, pos);
     }
 
     #[test]
     fn test_clamp_to_arena_outside_x() {
-        let clamped = clamp_to_arena(Vec3::new(50.0, 1.0, 0.0));
-        assert_eq!(clamped.x, ARENA_HALF_X);
+        let clamped = clamp_to_arena(&oct(), Vec3::new(50.0, 1.0, 0.0));
+        assert_eq!(clamped.x, 36.5);
         assert_eq!(clamped.z, 0.0);
     }
 
     #[test]
     fn test_clamp_to_arena_diagonal_corner() {
         // (35, 20) is inside rectangle but |35|+|20|=55 > 48.88
-        let clamped = clamp_to_arena(Vec3::new(35.0, 1.0, 20.0));
+        let clamped = clamp_to_arena(&oct(), Vec3::new(35.0, 1.0, 20.0));
         let sum = clamped.x.abs() + clamped.z.abs();
-        assert!((sum - ARENA_CORNER_SUM).abs() < 0.01, "Corner sum should equal ARENA_CORNER_SUM, got {}", sum);
+        assert!((sum - 48.88).abs() < 0.01, "Corner sum should equal 48.88, got {}", sum);
         assert!(clamped.x > 0.0, "Should stay in same quadrant");
         assert!(clamped.z > 0.0, "Should stay in same quadrant");
     }
 
     #[test]
     fn test_clamp_to_arena_preserves_y() {
-        let clamped = clamp_to_arena(Vec3::new(50.0, 3.5, 30.0));
+        let clamped = clamp_to_arena(&oct(), Vec3::new(50.0, 3.5, 30.0));
         assert_eq!(clamped.y, 3.5, "Y should be unchanged");
     }
 
     #[test]
     fn test_clamp_to_arena_idempotent() {
         let pos = Vec3::new(35.0, 1.0, 20.0);
-        let once = clamp_to_arena(pos);
-        let twice = clamp_to_arena(once);
+        let once = clamp_to_arena(&oct(), pos);
+        let twice = clamp_to_arena(&oct(), once);
         assert_eq!(once, twice, "Clamping twice should give the same result");
     }
 

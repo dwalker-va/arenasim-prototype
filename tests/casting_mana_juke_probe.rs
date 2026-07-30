@@ -41,7 +41,7 @@ fn seed1_config() -> HeadlessMatchConfig {
     HeadlessMatchConfig {
         team1: vec!["Mage".into(), "Priest".into()],
         team2: vec!["Warrior".into(), "Shaman".into()],
-        map: "PillaredArena".into(),
+        map: "TwinPillars".into(),
         random_seed: Some(1),
         max_duration_secs: 300.0,
         ..Default::default()

@@ -144,6 +144,8 @@ fn run_charge_decision(obstacles: Vec<ObstacleVolume>) -> DecisionTrace {
     let ability_cooldowns = BTreeMap::new();
 
     let ctx = CombatContext {
+        ai_profile: Default::default(),
+        bounds: Default::default(),
         combatants: &combatants,
         active_auras: &active_auras,
         dr_trackers: &dr_trackers,

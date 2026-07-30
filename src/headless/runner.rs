@@ -174,6 +174,9 @@ pub struct HeadlessMatchState {
     pub match_complete: bool,
     /// Random seed for deterministic simulation (if provided)
     pub random_seed: Option<u64>,
+    /// Which AI implementation this match runs under. Parsed once at plugin
+    /// build so a bad string fails fast rather than at match setup.
+    pub ai_profile: crate::states::play_match::ai_profile::AiProfile,
     /// If true, the per-match `.txt` log file is NOT written. Set by the
     /// matrix runner where 4,900+ logs would just clutter `match_logs/`.
     pub suppress_log: bool,
@@ -202,7 +205,21 @@ impl Plugin for HeadlessPlugin {
                 elapsed_time: 0.0,
                 output_path: self.config.output_path.clone(),
                 match_complete: false,
-                random_seed: self.config.random_seed,
+                // Resolve the seed ONCE here rather than leaving it None for an
+                // unseeded run. Every downstream consumer (match metadata, the
+                // MatchResult, the decision trace) reads this field, so recording
+                // it up front makes any run replayable without touching them —
+                // an unseeded match used to be unreproducible in principle.
+                random_seed: Some(
+                    self.config
+                        .random_seed
+                        .unwrap_or_else(crate::states::play_match::GameRng::choose_seed),
+                ),
+                ai_profile: match self.config.ai_profile.as_deref() {
+                    Some(p) => crate::states::play_match::ai_profile::AiProfile::parse(p)
+                        .expect("Invalid ai_profile in headless config"),
+                    None => Default::default(),
+                },
                 suppress_log: self.suppress_log,
                 result: None,
             })
@@ -250,7 +267,13 @@ fn headless_setup_match(
     commands.insert_resource(ShadowSightState::default());
 
     // Derive the obstacle geometry for the selected map (line-of-sight).
-    commands.insert_resource(map_geometry.active_for(config.map));
+    let active_map_geometry = map_geometry.active_for(config.map);
+    commands.insert_resource(active_map_geometry.clone());
+    // AI profile — inserted in BOTH modes (dual-registration rule). Defaults to
+    // Legacy, so experimental behaviour is never on by accident.
+    let ai_profile = headless_state.ai_profile;
+    info!("AI profile: {:?}", ai_profile);
+    commands.insert_resource(ai_profile);
 
     // Initialize GameRng with seed if provided (deterministic mode)
     let game_rng = match headless_state.random_seed {
@@ -265,8 +288,13 @@ fn headless_setup_match(
     };
     commands.insert_resource(game_rng);
 
-    // Spawn combatants for Team 1
-    let team1_spawn_x = -35.0;
+    // Spawn combatants for Team 1.
+    //
+    // Per-map, from the active map's bounds — MUST match the graphical path in
+    // `setup_play_match` (this repo's dual-mode registration failure class). Teams
+    // start outboard of the cover so closing to engage carries them past it.
+    let spawn_x = active_map_geometry.bounds.team_spawn_x();
+    let team1_spawn_x = -spawn_x;
     for (i, character_opt) in config.team1.iter().enumerate() {
         if let Some(character) = character_opt {
             combat_log.register_combatant(combatant_id(1, i as u8, *character));
@@ -347,7 +375,7 @@ fn headless_setup_match(
     }
 
     // Spawn combatants for Team 2
-    let team2_spawn_x = 35.0;
+    let team2_spawn_x = spawn_x;
     for (i, character_opt) in config.team2.iter().enumerate() {
         if let Some(character) = character_opt {
             combat_log.register_combatant(combatant_id(2, i as u8, *character));
@@ -878,9 +906,19 @@ fn run_match_impl(
         match TraceWriter::create(tc.output_path.clone()) {
             Ok(writer) => {
                 let world = app.world_mut();
+                // Read the profile the plugin already parsed rather than parsing
+                // the config string a second time — one parse, one error site, and
+                // the trace stamp cannot disagree with the profile the match ran.
+                let profile = world
+                    .get_resource::<HeadlessMatchState>()
+                    .map(|s| s.ai_profile)
+                    .unwrap_or_default();
                 if let Some(mut trace) = world.get_resource_mut::<DecisionTrace>() {
                     trace.install_writer(writer);
                     trace.seed = config.random_seed.unwrap_or(0);
+                    // Stamp the AI profile too: without it, two traces from the
+                    // same seed under different profiles are indistinguishable.
+                    trace.ai_profile = profile.name();
                 }
             }
             Err(e) => {

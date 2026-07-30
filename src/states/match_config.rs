@@ -364,6 +364,12 @@ pub enum ArenaMap {
     #[default]
     BasicArena,
     PillaredArena,
+    /// The original two-cylinder cover map (pillars at (±9, 0) in the 76x46
+    /// octagon). Kept as its own map after `PillaredArena` became the Nagrand
+    /// replica, because its pillars sit where combat actually happens and the
+    /// line-of-sight probe suite is calibrated against it. Nagrand is additive
+    /// rather than a replacement.
+    TwinPillars,
     /// Line-of-sight test asset (raised platform, stepped ramp, pillar).
     /// Deliberately EXCLUDED from [`ArenaMap::all()`] so it never appears in
     /// the map-select UI (`configure_match_ui.rs`) — it is reachable only via
@@ -378,14 +384,15 @@ impl ArenaMap {
     /// test asset and must not surface in the map-select UI, which iterates
     /// this list.
     pub fn all() -> &'static [ArenaMap] {
-        &[ArenaMap::BasicArena, ArenaMap::PillaredArena]
+        &[ArenaMap::BasicArena, ArenaMap::TwinPillars, ArenaMap::PillaredArena]
     }
 
     /// Get the display name
     pub fn name(&self) -> &'static str {
         match self {
             ArenaMap::BasicArena => "Basic Arena",
-            ArenaMap::PillaredArena => "Pillared Arena",
+            ArenaMap::PillaredArena => "Nagrand Arena",
+            ArenaMap::TwinPillars => "Twin Pillars",
             ArenaMap::TestVerticality => "Test Verticality",
         }
     }
@@ -394,7 +401,8 @@ impl ArenaMap {
     pub fn description(&self) -> &'static str {
         match self {
             ArenaMap::BasicArena => "Simple rectangular arena",
-            ArenaMap::PillaredArena => "Arena with pillars for cover",
+            ArenaMap::PillaredArena => "Ring of Trials: circular bowl, four octagonal pillars",
+            ArenaMap::TwinPillars => "Two central pillars for close-quarters cover",
             ArenaMap::TestVerticality => "LoS test asset: platform, ramp, pillar",
         }
     }

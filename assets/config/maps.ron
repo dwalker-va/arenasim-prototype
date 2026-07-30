@@ -8,18 +8,82 @@
 // Volume forms (mirror map_geometry::ObstacleVolume):
 //   Cylinder(center: (x, z), radius, base_y, height)   // vertical finite cylinder
 //   Aabb(min: (x, y, z), max: (x, y, z))               // closed axis-aligned box
+//   Prism(center: (x, z), circumradius, sides, rotation_deg, base_y, height)
+//                                                      // regular N-gon, extruded
 //
-// All volumes must lie within arena gameplay bounds (±36.5 x, ±21.5 z);
-// cover anchors (XZ) must not sit inside any volume. Enforced by validate().
+// Bounds forms (mirror arena_bounds::ArenaBounds) — OPTIONAL per map; omitting
+// `bounds` keeps the historical 76x46 cut-corner octagon:
+//   Octagon(half_x, half_z, corner_sum)                // rectangle, corners cut
+//   Bowl(semi_x, semi_z, alcove_depth, alcove_half_width)
+//                                                      // ellipse + gate alcoves
+//
+// Every volume must lie within ITS OWN map's bounds (bounds are per-map, so a
+// pillar legal on Nagrand is rejected on the smaller octagon maps); cover anchors
+// (XZ) must not sit inside any volume. Both enforced by validate().
+//
+// The visual floor/wall outline is DERIVED from `bounds` by offsetting outward
+// 1.5 (wall half-thickness + combatant buffer) — do not declare it separately.
 (
     // BasicArena: open field, no obstacles.
     basic_arena: (
         volumes: [],
     ),
 
-    // PillaredArena: two full-height cover cylinders, mirrored about
-    // x=0 (the team-side swap is symmetric, so both are declared explicitly).
+    // PillaredArena: a replica of Nagrand Arena (TBC "Ring of Trials").
+    //
+    // Four octagonal pillars in a symmetric rectangle: the pair on each side of
+    // the arena is 40yd apart (2 x 20 in z), and the two pairs are 80yd apart
+    // (2 x 40 in x). The bowl wall sits ~15yd beyond a pillar at its nearest
+    // (radial) point: |(40, 20)| = 44.72, + 15 => radius 59.72. Each gate has a
+    // 10yd-deep starting room, putting the far wall of each room at x = +/-69.72.
+    //
+    // TUNING: edit the numbers here and re-render the annotated top-down layout
+    // (`cargo test --release --test arena_layout_snapshot -- --ignored`) to check
+    // them against a reference screenshot. No rebuild of game logic needed.
+    //
+    // `rotation_deg: 22.5` is a half-step turn on an octagon, putting a flat FACE
+    // (not a vertex) along each axis. This is gameplay-relevant, not cosmetic: it
+    // pulls the pillar's axial reach in from the circumradius (6.0) to the
+    // apothem (5.54), which changes which grazing sightlines the pillar blocks.
+    //
+    // `circumradius: 6.0` (12yd across) is set by COVER DENSITY, not by looks.
+    // Measured over random combat-range (<30yd) sightlines, the fraction blocked
+    // by any pillar is:
+    //     r=2.5 -> 4.3%    r=4.0 -> 7.5%    r=6.0 -> 11.9%
+    // The old 2-cylinder PillaredArena sat at 12.7%, so r=6.0 preserves roughly
+    // today's amount of line-of-sight play. r=2.5 in a bowl this large gives only
+    // a third of it, which reads as "the pillars are decorative" — and the
+    // occlusion probes in tests/movement_probes.rs fail with 0.00s occlusion.
+    //
+    // Pillar SPACING is nearly irrelevant to cover (4.3%-5.2% measured across
+    // everything from 24yd to 80yd apart), so 40 x 80 is chosen purely for visual
+    // fidelity to Nagrand. If cover needs retuning, change circumradius.
     pillared_arena: (
+        bounds: Bowl(
+            semi_x: 59.72,
+            semi_z: 59.72,
+            alcove_depth: 10.0,
+            alcove_half_width: 8.0,
+        ),
+        // Declaration order is load-bearing (slice-order tie-breaks in steering
+        // and nearest-blocker selection): -x pair first, then +x.
+        volumes: [
+            Prism(center: (-40.0, -20.0), circumradius: 6.0, sides: 8, rotation_deg: 22.5, base_y: 0.0, height: 5.0),
+            Prism(center: (-40.0,  20.0), circumradius: 6.0, sides: 8, rotation_deg: 22.5, base_y: 0.0, height: 5.0),
+            Prism(center: ( 40.0, -20.0), circumradius: 6.0, sides: 8, rotation_deg: 22.5, base_y: 0.0, height: 5.0),
+            Prism(center: ( 40.0,  20.0), circumradius: 6.0, sides: 8, rotation_deg: 22.5, base_y: 0.0, height: 5.0),
+        ],
+    ),
+
+    // TwinPillars: the ORIGINAL two-cylinder cover map, preserved verbatim.
+    //
+    // Two full-height pillars mirrored about x=0 in the historical 76x46 octagon
+    // (bounds omitted => the default Octagon). Kept as its own map when
+    // PillaredArena became the Nagrand replica: its pillars sit at (+/-9, 0),
+    // which is where combat actually converges, so cover genuinely functions here.
+    // The line-of-sight probe suite and design-docs/balance/2026-07-23-line-of-sight-balance.md
+    // are calibrated against exactly this geometry — do not retune it.
+    twin_pillars: (
         volumes: [
             Cylinder(center: (9.0, 0.0), radius: 2.5, base_y: 0.0, height: 5.0),
             Cylinder(center: (-9.0, 0.0), radius: 2.5, base_y: 0.0, height: 5.0),

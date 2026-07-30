@@ -3,6 +3,7 @@
 use bevy::prelude::*;
 use super::super::components::*;
 use super::clamp_to_arena;
+use super::super::arena_bounds::ArenaBounds;
 use super::super::match_config::CharacterClass;
 use super::super::{MELEE_RANGE, WAND_RANGE, DISENGAGE_SPEED};
 use super::super::map_config::ActiveMapGeometry;
@@ -19,8 +20,13 @@ pub const DIRECTIVE_POINT_EPSILON: f32 = 0.25;
 /// a volume and tangent-slides a blocked step; with no obstacles (BasicArena)
 /// it returns `to` unchanged, so this reduces to the prior `clamp_to_arena(to)`
 /// and the whole feature is a provable no-op on obstacle-free maps.
-fn resolve_and_clamp(volumes: &[ObstacleVolume], from: Vec3, to: Vec3) -> Vec3 {
-    clamp_to_arena(resolve_movement(volumes, from, to))
+fn resolve_and_clamp(
+    bounds: &ArenaBounds,
+    volumes: &[ObstacleVolume],
+    from: Vec3,
+    to: Vec3,
+) -> Vec3 {
+    clamp_to_arena(bounds, resolve_movement(volumes, from, to))
 }
 
 pub fn move_to_target(
@@ -120,7 +126,7 @@ pub fn move_to_target(
                 // Move in fear direction (slide off obstacles, then clamp to arena)
                 let from = transform.translation;
                 let proposed = from + direction * move_distance;
-                transform.translation = resolve_and_clamp(&map_geometry.volumes, from, proposed);
+                transform.translation = resolve_and_clamp(&map_geometry.bounds, &map_geometry.volumes, from, proposed);
 
                 // Rotate to face direction of travel
                 let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
@@ -141,7 +147,7 @@ pub fn move_to_target(
                 // Move in polymorph direction (slide off obstacles, then clamp to arena)
                 let from = transform.translation;
                 let proposed = from + direction * move_distance;
-                transform.translation = resolve_and_clamp(&map_geometry.volumes, from, proposed);
+                transform.translation = resolve_and_clamp(&map_geometry.bounds, &map_geometry.volumes, from, proposed);
 
                 // Rotate to face direction of travel
                 let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
@@ -192,7 +198,7 @@ pub fn move_to_target(
                 // check in warrior AI rejects Charge across an obstacle up front.
                 let from = transform.translation;
                 let proposed = from + direction * move_distance;
-                transform.translation = resolve_and_clamp(&map_geometry.volumes, from, proposed);
+                transform.translation = resolve_and_clamp(&map_geometry.bounds, &map_geometry.volumes, from, proposed);
 
                 // Rotate to face target
                 let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
@@ -210,7 +216,7 @@ pub fn move_to_target(
                 let new_pos = from + disengage.direction * move_amount;
 
                 // Slide off obstacles, then clamp to arena bounds
-                transform.translation = resolve_and_clamp(&map_geometry.volumes, from, new_pos);
+                transform.translation = resolve_and_clamp(&map_geometry.bounds, &map_geometry.volumes, from, new_pos);
 
                 // Decrement distance remaining
                 let remaining = disengage.distance_remaining - move_amount;
@@ -301,7 +307,7 @@ pub fn move_to_target(
                 // Slide off obstacles, then clamp to arena bounds
                 let from = transform.translation;
                 let proposed = from + direction * move_distance;
-                transform.translation = resolve_and_clamp(&map_geometry.volumes, from, proposed);
+                transform.translation = resolve_and_clamp(&map_geometry.bounds, &map_geometry.volumes, from, proposed);
 
                 // Rotate to face direction of travel
                 let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
@@ -343,7 +349,7 @@ pub fn move_to_target(
                             // Slide off obstacles, then clamp to arena bounds
                             let from = transform.translation;
                             let proposed = from + direction * move_distance;
-                            transform.translation = resolve_and_clamp(&map_geometry.volumes, from, proposed);
+                            transform.translation = resolve_and_clamp(&map_geometry.bounds, &map_geometry.volumes, from, proposed);
                             let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
                             transform.rotation = target_rotation;
                         }
@@ -393,7 +399,7 @@ pub fn move_to_target(
                     let move_distance = movement_speed * dt;
                     let from = transform.translation;
                     let proposed = from + direction * move_distance;
-                    transform.translation = resolve_and_clamp(&map_geometry.volumes, from, proposed);
+                    transform.translation = resolve_and_clamp(&map_geometry.bounds, &map_geometry.volumes, from, proposed);
 
                     // Rotate to face destination
                     let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));
@@ -462,7 +468,7 @@ pub fn move_to_target(
                 let move_distance = movement_speed * dt;
                 let from = transform.translation;
                 let proposed = from + direction * move_distance;
-                transform.translation = resolve_and_clamp(&map_geometry.volumes, from, proposed);
+                transform.translation = resolve_and_clamp(&map_geometry.bounds, &map_geometry.volumes, from, proposed);
 
                 // Rotate to face target
                 let target_rotation = Quat::from_rotation_y(direction.x.atan2(direction.z));

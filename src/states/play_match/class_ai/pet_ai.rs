@@ -199,6 +199,9 @@ pub fn pet_ai_system(
             dr_trackers: &dr_trackers,
             ability_cooldowns: &ability_cooldowns,
             obstacles: &map_geometry.volumes,
+            bounds: map_geometry.bounds,
+            // Pets have no team-level behaviours; Legacy is always correct here.
+            ai_profile: Default::default(),
             self_entity: entity,
         };
 

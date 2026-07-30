@@ -24,7 +24,20 @@ cargo run --release -- --headless /tmp/test.json
 
 **Config options:**
 - `team1`, `team2`: Arrays of class names (Warrior, Mage, Rogue, Priest, Warlock, Paladin, Hunter)
-- `map`: "BasicArena", "PillaredArena", or "TestVerticality" (a headless-only LoS test asset with a raised platform and ramp; `--matrix` rejects it and it never appears in the graphical map-select list)
+- `ai_profile`: "Legacy" (default) or "TeamPlan" — which AI implementation to run.
+  `Legacy` is the reactive per-unit AI every balance baseline and movement probe is
+  calibrated against; `TeamPlan` is the opt-in team-level positioning layer (see
+  `design-docs/team-level-positioning-ai.md`). Because matches are deterministic,
+  running the same seed under both profiles is a PAIRED comparison in which the AI
+  is the only variable. Also available as `--ai-profile` for `--matrix`, which
+  records it in the CSV header and the output filename.
+- `map`: "BasicArena", "TwinPillars", "PillaredArena", or "TestVerticality"
+  ("PillaredArena" is the Nagrand Arena replica — a ~120yd circular bowl with four
+  octagonal pillars and 10yd starting rooms; "TwinPillars" is the original
+  two-cylinder cover map, which the line-of-sight probe suite is calibrated
+  against; "TestVerticality" is a headless-only LoS test asset with a raised
+  platform and ramp — `--matrix` rejects it and it never appears in the graphical
+  map-select list)
 - `team1_kill_target`, `team2_kill_target`: Priority target index (0-based)
 - `max_duration_secs`: Timeout (default 300)
 
@@ -122,10 +135,15 @@ assets/
 
 For deeper context, see these focused references:
 
-- **[Session Notes](design-docs/session-notes.md)** - Full development history (16 sessions)
+- **[Session Notes](design-docs/session-notes.md)** - Full development history (17 sessions)
 - **[WoW Mechanics](design-docs/wow-mechanics.md)** - Implemented game mechanics (CC, resources, combat)
 - **[Bevy Patterns](design-docs/bevy-patterns.md)** - Rust/Bevy learnings and common pitfalls
 - **[Roadmap](design-docs/roadmap.md)** - Long-term TODOs and milestones
+- **[Team-Level Positioning AI](design-docs/team-level-positioning-ai.md)** - AGREED
+  design for the `TeamPlan` layer (team stance, obligations, positioning solve).
+  Read before touching pillar/cover behaviour: the existing `cover_pull` /
+  `cover_seek` / `medic_chase` mechanisms are individually reactive and cannot
+  express team pillar play, which is why Nagrand currently measures zero occlusion.
 - **[Stat Scaling](design-docs/stat-scaling-system.md)** - Damage/healing formulas and coefficients
 - **[Game Design](design-docs/game-design-doc.md)** - High-level game vision
 - **[Documented Solutions](docs/solutions/)** - Documented solutions to past problems (bugs, implementation patterns, workflows) organized by category, with YAML frontmatter (`module`, `tags`, `category`). Relevant when implementing or debugging in documented areas.
@@ -590,6 +608,31 @@ returns a `MatchResult` bit-identical to an unobserved run at the same seed —
 so probing never perturbs the sim. Probes pin behavior at fixed seeds; see the
 `priest_postures` / `escape_windows` / `paladin_postures` modules for the
 established idiom.
+
+### Tune a map's dimensions (annotated top-down snapshot)
+
+Map geometry is RON data (`assets/config/maps.ron`), so tuning it needs no
+rebuild of game logic — only a re-render. `tests/arena_layout_snapshot.rs` draws
+the **loaded** geometry from above with every dimension **measured off it** (pillar
+spacings from actual volume centres, wall clearance by marching outward until the
+point leaves the bounds), so a RON edit that misses its intent shows up in the
+labels rather than being restated back at you.
+
+```bash
+# Render every map; writes tests/snapshots/arena_layout_<map>.new.png on any diff
+cargo test --release --test arena_layout_snapshot -- --ignored
+# ...read that PNG, edit assets/config/maps.ron, repeat (sub-second loop)
+
+# Bless the baselines once the layout is right:
+UPDATE_SNAPSHOTS=1 cargo test --release --test arena_layout_snapshot -- --ignored
+```
+
+`nagrand_dimensions_are_as_specified` in the same file pins the intended numbers
+as plain assertions (no GPU), so a geometry regression fails the default
+`cargo test` even without rendering.
+
+Same offscreen-egui pattern as the Results/Configure screens — see the egui
+snapshot loop above.
 
 ### Look up spell data for implementation
 ```

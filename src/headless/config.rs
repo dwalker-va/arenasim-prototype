@@ -41,6 +41,11 @@ pub struct HeadlessMatchConfig {
     /// If provided, the match will use a seeded RNG for reproducible results
     #[serde(default)]
     pub random_seed: Option<u64>,
+    /// Which AI implementation to run this match under: "Legacy" (default, what
+    /// every balance baseline is calibrated against) or "TeamPlan". Omit for
+    /// Legacy. See `src/states/play_match/ai_profile.rs`.
+    #[serde(default)]
+    pub ai_profile: Option<String>,
     /// Optional grouping label echoed verbatim into batch-runner output. Lets a
     /// strategy-var sweep keep variants distinct (e.g. "Hunter+Spider vs Mage"
     /// vs "Hunter+Boar vs Mage") when two configs share the same class lists.
@@ -125,6 +130,7 @@ impl Default for HeadlessMatchConfig {
             output_path: None,
             max_duration_secs: default_max_duration(),
             random_seed: None,
+            ai_profile: None,
             team1_rogue_openers: Vec::new(),
             team2_rogue_openers: Vec::new(),
             team1_rogue_poisons: Vec::new(),
@@ -175,6 +181,14 @@ impl HeadlessMatchConfig {
 
         // Validate map name
         Self::parse_map(&self.map)?;
+
+        // Validate the AI profile here, not at plugin build: `HeadlessPlugin`
+        // `.expect()`s it, so without this a typo'd `ai_profile` panics with a
+        // backtrace instead of getting the clean error every other string field in
+        // this config gets.
+        if let Some(profile) = self.ai_profile.as_deref() {
+            crate::states::play_match::ai_profile::AiProfile::parse(profile)?;
+        }
 
         // Validate kill targets
         if let Some(target) = self.team1_kill_target {
@@ -253,9 +267,10 @@ impl HeadlessMatchConfig {
         match name {
             "BasicArena" => Ok(ArenaMap::BasicArena),
             "PillaredArena" => Ok(ArenaMap::PillaredArena),
+            "TwinPillars" => Ok(ArenaMap::TwinPillars),
             "TestVerticality" => Ok(ArenaMap::TestVerticality),
             _ => Err(format!(
-                "Unknown map: '{}'. Valid maps: BasicArena, PillaredArena, TestVerticality",
+                "Unknown map: '{}'. Valid maps: BasicArena, PillaredArena, TwinPillars, TestVerticality",
                 name
             )),
         }

@@ -30,8 +30,9 @@ use std::collections::HashMap;
 use super::{GameState, match_config::{self, MatchConfig, ArenaMap}};
 use super::view_combatant_ui::ViewCombatantState;
 use super::play_match::map_config::MapGeometryConfig;
-use super::play_match::map_geometry::ObstacleVolume;
-use super::play_match::{spawn_arena_environment, ARENA_FLOOR_HALF_X, ARENA_FLOOR_HALF_Z, ARENA_FLOOR_CORNER_CUT};
+use super::play_match::arena_bounds::{outline_half_extents, ArenaBounds, WALL_OFFSET};
+use super::play_match::map_geometry::{prism_vertices_world, ObstacleVolume};
+use super::play_match::{spawn_arena_environment, WALL_ARC_SEGMENTS};
 
 /// Resource storing loaded class icon textures for egui rendering.
 /// Maps CharacterClass to egui TextureId for efficient icon display.
@@ -992,11 +993,26 @@ fn render_map_panel(
         ui.add_space(12.0);
 
         // Map preview — real top-down geometry for the selected map.
-        // Arena floor aspect ratio (x:z) keeps the schematic true to scale.
-        let world_w = ARENA_FLOOR_HALF_X * 2.0;
-        let world_h = ARENA_FLOOR_HALF_Z * 2.0;
+        //
+        // Aspect depends on WHICH preview is shown, and getting it wrong distorts
+        // the arena:
+        // - The live 3D texture has the render target's FIXED aspect, so the rect
+        //   must match it exactly (the camera letterboxes the map inside that
+        //   frame instead).
+        // - The vector fallback draws the map's own outline, so it can use the
+        //   map's aspect and fill the pane — this is what keeps Nagrand's
+        //   near-square bowl out of the old 76x46 letterbox. Measured off
+        //   `outline()`, the same extents `draw_map_preview` fits to, so the
+        //   schematic fills its frame exactly.
+        let preview_aspect = if preview_texture.is_some() {
+            PREVIEW_TEX_ASPECT
+        } else {
+            let bounds = map_geometry.active_for(config.map).bounds;
+            let half = outline_half_extents(&bounds.outline(WALL_ARC_SEGMENTS));
+            half.x / half.y
+        };
         let preview_width = (max_width * 0.92).min(230.0);
-        let preview_height = preview_width * (world_h / world_w);
+        let preview_height = preview_width / preview_aspect;
 
         let (rect, _response) = ui.allocate_exact_size(
             egui::vec2(preview_width, preview_height),
@@ -1087,7 +1103,7 @@ fn render_map_panel(
 /// Draw a top-down schematic of `map` into `rect`, using the map's real
 /// obstacle geometry (cylinders → circles, boxes → rectangles) scaled to fit.
 ///
-/// World coordinates: x ∈ [-`ARENA_FLOOR_HALF_X`, +], z ∈ [-`ARENA_FLOOR_HALF_Z`, +].
+/// World coordinates come from the map's own `ArenaBounds::outline`.
 /// World x maps to the schematic's horizontal axis and world z to its vertical
 /// axis, preserving aspect. Pure painter work so it renders identically in the
 /// egui harness and the real client.
@@ -1097,38 +1113,34 @@ fn draw_map_preview(
     map: match_config::ArenaMap,
     map_geometry: &MapGeometryConfig,
 ) {
-    let world_w = ARENA_FLOOR_HALF_X * 2.0;
-    let world_h = ARENA_FLOOR_HALF_Z * 2.0;
-    let scale = (rect.width() / world_w).min(rect.height() / world_h);
+    let active = map_geometry.active_for(map);
+
+    // Fit the selected map's OWN outline — maps no longer share one shape, so a
+    // fixed 76x46 frame would crop Nagrand and mis-scale its pillars.
+    let outline = active.bounds.outline(WALL_ARC_SEGMENTS);
+    let half = outline_half_extents(&outline);
+    let scale = (rect.width() / (half.x * 2.0)).min(rect.height() / (half.y * 2.0));
     let center = rect.center();
 
     // World (x, z) -> screen point.
     let to_screen = |x: f32, z: f32| egui::pos2(center.x + x * scale, center.y + z * scale);
 
-    // Arena floor: the cut-corner octagon (matches the 3D floor mesh).
-    let hx = ARENA_FLOOR_HALF_X;
-    let hz = ARENA_FLOOR_HALF_Z;
-    let cut = ARENA_FLOOR_CORNER_CUT;
-    let floor: Vec<egui::Pos2> = vec![
-        to_screen(-hx + cut, -hz),
-        to_screen(hx - cut, -hz),
-        to_screen(hx, -hz + cut),
-        to_screen(hx, hz - cut),
-        to_screen(hx - cut, hz),
-        to_screen(-hx + cut, hz),
-        to_screen(-hx, hz - cut),
-        to_screen(-hx, -hz + cut),
-    ];
-    painter.add(egui::Shape::convex_polygon(
+    // Arena floor: the same outline the 3D floor mesh is built from.
+    //
+    // Filled as a closed path rather than `convex_polygon` because the
+    // bowl-with-alcoves outline is CONCAVE, and egui's tessellator emits spurious
+    // triangles across a concavity when told the path is convex.
+    let floor: Vec<egui::Pos2> = outline.iter().map(|p| to_screen(p.x, p.y)).collect();
+    let mut floor_path = egui::epaint::PathShape::closed_line(
         floor,
-        egui::Color32::from_rgb(34, 36, 48),
         egui::Stroke::new(1.5, egui::Color32::from_rgb(90, 96, 120)),
-    ));
+    );
+    floor_path.fill = egui::Color32::from_rgb(34, 36, 48);
+    painter.add(floor_path);
 
     // Obstacles for the selected map.
     let obstacle_fill = egui::Color32::from_rgb(96, 102, 128);
     let obstacle_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(150, 156, 180));
-    let active = map_geometry.active_for(map);
     for volume in &active.volumes {
         match volume {
             ObstacleVolume::Cylinder { center_xz, radius, .. } => {
@@ -1145,6 +1157,23 @@ fn draw_map_preview(
                     to_screen(max.x, max.z),
                 );
                 painter.rect(r, 2.0, obstacle_fill, obstacle_stroke, egui::StrokeKind::Inside);
+            }
+            ObstacleVolume::Prism {
+                center_xz,
+                circumradius,
+                sides,
+                rotation,
+                ..
+            } => {
+                // Same outline helper the collision math and the 3D mesh use, so
+                // the schematic shows the real footprint, not a circle standing in
+                // for one.
+                let pts: Vec<egui::Pos2> =
+                    prism_vertices_world(*center_xz, *circumradius, *sides, *rotation)
+                        .into_iter()
+                        .map(|v| to_screen(v.x, v.y))
+                        .collect();
+                painter.add(egui::Shape::convex_polygon(pts, obstacle_fill, obstacle_stroke));
             }
         }
     }
@@ -1165,10 +1194,15 @@ fn draw_map_preview(
 /// Isolated render layer for the preview scene (camera + light + meshes),
 /// so it is invisible to every window-facing camera and vice versa.
 const PREVIEW_LAYER: usize = 3;
-/// Offscreen render-target size. Aspect matches the arena floor (x:z) so the
-/// arena fills the frame without letterboxing.
+/// Offscreen render-target size. Its aspect is FIXED (it was picked for the
+/// historical 76 × 46 octagon), so `render_map_panel` must give the texture a rect
+/// of the same aspect or the image is stretched, and `preview_camera_transform`
+/// must frame each map inside this aspect rather than the map's own.
 const PREVIEW_TEX_W: u32 = 640;
 const PREVIEW_TEX_H: u32 = 388;
+
+/// Aspect (width / height) of the offscreen preview render target.
+const PREVIEW_TEX_ASPECT: f32 = PREVIEW_TEX_W as f32 / PREVIEW_TEX_H as f32;
 
 /// Marks every entity in the offscreen preview scene (camera, light, meshes)
 /// for teardown on state exit.
@@ -1180,6 +1214,12 @@ pub struct PreviewSceneEntity;
 #[derive(Component)]
 pub struct PreviewEnvEntity;
 
+/// Marks the offscreen preview camera so it can be REFRAMED when the selected map
+/// changes. It persists across map switches, so without this it would keep the
+/// framing of whichever map was selected first.
+#[derive(Component)]
+pub struct PreviewCamera;
+
 /// Handle + egui texture id for the live arena preview render target, plus the
 /// map currently rendered into it (so the UI only shows the texture once it
 /// matches the selection, and the env is rebuilt when the selection changes).
@@ -1190,9 +1230,23 @@ pub struct MapPreview {
     rendered_map: ArenaMap,
 }
 
-/// Fixed 3/4 top-down camera framing the whole arena (76 × 46 world units).
-fn preview_camera_transform() -> Transform {
-    Transform::from_xyz(0.0, 52.0, 40.0).looking_at(Vec3::ZERO, Vec3::Y)
+/// 3/4 top-down camera framing the whole of `bounds`, walls included.
+///
+/// The framing was hand-tuned for the historical 76 × 46 octagon; arena shape is
+/// per-map now, so the distance SCALES with the map's extents. Left fixed, the old
+/// `(0, 52, 40)` showed roughly the middle 54yd of whatever was loaded — which
+/// cropped everything outside Nagrand's centre, pillars included.
+fn preview_camera_transform(bounds: &ArenaBounds) -> Transform {
+    /// Half-extents of the arena the framing below was tuned against, walls
+    /// included (`ArenaBounds::default().outline()` reaches 38 × 23).
+    const REFERENCE_HALF: Vec2 = Vec2::new(38.0, 23.0);
+    let half = bounds.half_extents() + Vec2::splat(WALL_OFFSET);
+    // Scale by whichever axis is the binding constraint, so the arena fits the
+    // render target's fixed aspect on both.
+    let scale = (half.x / REFERENCE_HALF.x)
+        .max(half.y / REFERENCE_HALF.y)
+        .max(1.0);
+    Transform::from_xyz(0.0, 52.0 * scale, 40.0 * scale).looking_at(Vec3::ZERO, Vec3::Y)
 }
 
 /// Spawn the arena environment for `map` onto the preview render layer, tagged
@@ -1206,7 +1260,7 @@ fn spawn_preview_environment(
     map_geometry: &MapGeometryConfig,
 ) {
     let active = map_geometry.active_for(map);
-    for entity in spawn_arena_environment(commands, meshes, materials, images, &active.volumes) {
+    for entity in spawn_arena_environment(commands, meshes, materials, images, &active.bounds, &active.volumes) {
         commands
             .entity(entity)
             .insert((RenderLayers::layer(PREVIEW_LAYER), PreviewEnvEntity, PreviewSceneEntity));
@@ -1256,8 +1310,9 @@ pub fn setup_map_preview(
         },
         Tonemapping::TonyMcMapface,
         Bloom::NATURAL,
-        preview_camera_transform(),
+        preview_camera_transform(&map_geometry.active_for(config.map).bounds),
         RenderLayers::layer(PREVIEW_LAYER),
+        PreviewCamera,
         PreviewSceneEntity,
     ));
 
@@ -1308,10 +1363,18 @@ pub fn update_map_preview(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
     env_entities: Query<Entity, With<PreviewEnvEntity>>,
+    mut camera: Query<&mut Transform, With<PreviewCamera>>,
 ) {
     let Some(mut preview) = map_preview else { return };
     if preview.rendered_map == config.map {
         return;
+    }
+
+    // Reframe: maps no longer share one shape, so the camera distance has to
+    // follow the newly selected map's extents.
+    let bounds = map_geometry.active_for(config.map).bounds;
+    for mut transform in &mut camera {
+        *transform = preview_camera_transform(&bounds);
     }
 
     for entity in &env_entities {

@@ -41,6 +41,8 @@ pub mod rendering;
 pub mod auras;
 pub mod effects;
 pub mod match_flow;
+pub mod ai_profile;
+pub mod arena_bounds;
 pub mod map_geometry;
 pub mod map_config;
 pub mod traps;
@@ -183,60 +185,155 @@ pub(crate) fn create_surface_texture(base: [f32; 3], blotch_amp: f32, grain_amp:
     image
 }
 
-/// Creates an octagonal floor mesh matching the arena wall layout.
+/// Arc tessellation for the arena floor and walls. Curved shapes get this many
+/// segments around a full revolution; straight-sided shapes ignore it.
+///
+/// 64 keeps a ~120yd bowl's wall visibly smooth: the bowl outline it produces has
+/// ~134 edges (two 63-point arcs plus the two gate mouths) at ~3yd chords, so a
+/// wall follows the curve closely. Wall meshes and materials are deduplicated by
+/// length in `spawn_arena_environment`, which is what keeps that edge count from
+/// turning into 134 distinct assets.
+pub(crate) const WALL_ARC_SEGMENTS: usize = 64;
+
+/// Creates a flat floor mesh for an arbitrary arena outline (world-space XZ
+/// vertices in counter-clockwise order, from `ArenaBounds::outline`).
+///
 /// `uv_scale` maps world units to texture space (UV = world_pos * uv_scale),
 /// giving square, uniformly-tiled texels regardless of the floor's aspect
 /// ratio. Smaller values = the texture repeats more often.
-pub(crate) fn create_octagon_mesh(length: f32, width: f32, corner_cut: f32, uv_scale: f32) -> Mesh {
-    let half_length = length / 2.0;
-    let half_width = width / 2.0;
-    
-    // Define the 8 vertices of the octagon (going counter-clockwise from top-right)
-    // Y is up in 3D space, but for a floor plane we want XZ coordinates
-    let vertices = vec![
-        // Starting from north-east, going counter-clockwise
-        [half_length - corner_cut, 0.0, half_width],           // 0: NE corner (right side of north edge)
-        [-half_length + corner_cut, 0.0, half_width],          // 1: NW corner (left side of north edge)
-        [-half_length, 0.0, half_width - corner_cut],          // 2: NW corner (top of west edge)
-        [-half_length, 0.0, -half_width + corner_cut],         // 3: SW corner (bottom of west edge)
-        [-half_length + corner_cut, 0.0, -half_width],         // 4: SW corner (left side of south edge)
-        [half_length - corner_cut, 0.0, -half_width],          // 5: SE corner (right side of south edge)
-        [half_length, 0.0, -half_width + corner_cut],          // 6: SE corner (bottom of east edge)
-        [half_length, 0.0, half_width - corner_cut],           // 7: NE corner (top of east edge)
-    ];
-    
-    // Create triangles by fanning from center point
-    // Add center vertex
-    let center = [0.0, 0.0, 0.0];
-    let mut all_vertices = vertices.clone();
-    all_vertices.push(center); // Index 8 is the center
-    
-    // Create triangle indices (center to each edge, going counter-clockwise)
-    let indices = vec![
-        8, 0, 1,  // North edge
-        8, 1, 2,  // NW corner
-        8, 2, 3,  // West edge
-        8, 3, 4,  // SW corner
-        8, 4, 5,  // South edge
-        8, 5, 6,  // SE corner
-        8, 6, 7,  // East edge
-        8, 7, 0,  // NE corner
-    ];
-    
-    // Create normals (all pointing up for a flat floor)
-    let normals = vec![[0.0, 1.0, 0.0]; all_vertices.len()];
-    
-    // Create UVs by world-space tiling so texels stay square and uniform
-    // regardless of the floor's aspect ratio (Repeat sampler handles wrap).
-    let uvs: Vec<[f32; 2]> = all_vertices.iter().map(|v| {
-        [v[0] * uv_scale, v[2] * uv_scale]
-    }).collect();
-    
+///
+/// Triangulated as a fan from the origin. That is valid for every arena shape
+/// because they are all **star-shaped about the origin** — the segment from the
+/// centre to any boundary point stays inside the arena. This holds for the
+/// cut-corner octagon (convex) and, less obviously, for the bowl-with-alcoves:
+/// a gate corridor is centred on z=0 and narrower than the bowl, so the ray from
+/// the origin to an alcove corner runs down the corridor rather than crossing a
+/// wall. A fan would be wrong for a shape with an off-axis recess, so if one is
+/// ever added this needs a real triangulator.
+pub(crate) fn create_arena_floor_mesh(outline: &[Vec2], uv_scale: f32) -> Mesh {
+    let mut positions: Vec<[f32; 3]> = outline.iter().map(|p| [p.x, 0.0, p.y]).collect();
+    let center_idx = positions.len() as u32;
+    positions.push([0.0, 0.0, 0.0]);
+
+    let n = outline.len() as u32;
+    let mut indices: Vec<u32> = Vec::with_capacity(outline.len() * 3);
+    for i in 0..n {
+        // Wound to face +Y (up), matching the shading normal. A centroid fan over
+        // a counter-clockwise XZ outline winds downward if taken naively; the
+        // floor material sets `cull_mode: None` so this was not visible, but the
+        // mesh should be correct regardless of material.
+        indices.extend_from_slice(&[center_idx, (i + 1) % n, i]);
+    }
+
+    let normals = vec![[0.0, 1.0, 0.0]; positions.len()];
+    // World-space tiling so texels stay square and uniform regardless of the
+    // floor's aspect ratio (Repeat sampler handles wrap).
+    let uvs: Vec<[f32; 2]> = positions
+        .iter()
+        .map(|v| [v[0] * uv_scale, v[2] * uv_scale])
+        .collect();
+
     Mesh::new(
         bevy::render::render_resource::PrimitiveTopology::TriangleList,
         bevy::render::render_asset::RenderAssetUsages::default(),
     )
-    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, all_vertices)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+    .with_inserted_indices(bevy::render::mesh::Indices::U32(indices))
+}
+
+/// Build the mesh for a vertical prism over the XZ polygon `verts` (world-space,
+/// edge order), spanning `y ∈ [base_y, base_y + height]`: one quad per side plus
+/// a flat top cap.
+///
+/// `verts` comes from `map_geometry::prism_vertices_world`, the same helper the
+/// collision and line-of-sight predicates use, so the rendered pillar is exactly
+/// the volume the sim blocks — no second formula to keep in sync.
+///
+/// Side UVs run `u ∈ [0,1]` around the perimeter (proportional to edge length, so
+/// the texture doesn't stretch on uneven polygons) and `v ∈ [0,1]` up the height,
+/// matching the convention `spawn_arena_environment` expects: it scales them into
+/// square texels via the material's `uv_transform`.
+pub(crate) fn create_prism_mesh(verts: &[Vec2], base_y: f32, height: f32) -> Mesh {
+    let n = verts.len();
+    let top = base_y + height;
+
+    // Cumulative perimeter fraction at each vertex, for non-stretching side UVs.
+    let mut cumulative = Vec::with_capacity(n + 1);
+    cumulative.push(0.0_f32);
+    for i in 0..n {
+        let seg = verts[i].distance(verts[(i + 1) % n]);
+        cumulative.push(cumulative[i] + seg);
+    }
+    let perimeter = cumulative[n].max(1e-6);
+
+    let mut positions: Vec<[f32; 3]> = Vec::with_capacity(n * 4 + n + 1);
+    let mut normals: Vec<[f32; 3]> = Vec::with_capacity(n * 4 + n + 1);
+    let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(n * 4 + n + 1);
+    let mut indices: Vec<u32> = Vec::with_capacity(n * 6 + n * 3);
+
+    // Side quads. Each gets its own 4 vertices so the outward face normal is flat
+    // (shared vertices would smooth the octagon into a cylinder).
+    for i in 0..n {
+        let a = verts[i];
+        let b = verts[(i + 1) % n];
+        let edge = b - a;
+        // Outward normal of edge a→b for counter-clockwise XZ winding.
+        let normal = Vec2::new(edge.y, -edge.x).normalize_or(Vec2::X);
+        let nrm = [normal.x, 0.0, normal.y];
+        let (u0, u1) = (cumulative[i] / perimeter, cumulative[i + 1] / perimeter);
+
+        let base = positions.len() as u32;
+        positions.push([a.x, base_y, a.y]);
+        positions.push([b.x, base_y, b.y]);
+        positions.push([b.x, top, b.y]);
+        positions.push([a.x, top, a.y]);
+        for _ in 0..4 {
+            normals.push(nrm);
+        }
+        uvs.push([u0, 0.0]);
+        uvs.push([u1, 0.0]);
+        uvs.push([u1, 1.0]);
+        uvs.push([u0, 1.0]);
+        // Reverse winding (0,2,1 / 0,3,2 rather than 0,1,2 / 0,2,3): the outline
+        // runs counter-clockwise in the XZ plane, and with Bevy's default
+        // FrontFace::Ccw the naive order produces INWARD-facing front faces, so
+        // every outward face gets backface-culled and the pillar renders as just
+        // its far interior wall. The winding must agree with the shading normal
+        // above, which is the outward edge normal.
+        indices.extend_from_slice(&[base, base + 2, base + 1, base, base + 3, base + 2]);
+    }
+
+    // Top cap: triangle fan from the centroid. Planar UVs scaled by the outline's
+    // extent so the cap grain roughly matches the sides.
+    let centroid = verts.iter().copied().fold(Vec2::ZERO, |acc, v| acc + v) / n as f32;
+    let extent = verts
+        .iter()
+        .map(|v| v.distance(centroid))
+        .fold(1e-6_f32, f32::max);
+    let center_idx = positions.len() as u32;
+    positions.push([centroid.x, top, centroid.y]);
+    normals.push([0.0, 1.0, 0.0]);
+    uvs.push([0.5, 0.5]);
+    for (i, v) in verts.iter().enumerate() {
+        positions.push([v.x, top, v.y]);
+        normals.push([0.0, 1.0, 0.0]);
+        let rel = (*v - centroid) / (2.0 * extent);
+        uvs.push([rel.x + 0.5, rel.y + 0.5]);
+        let cur = center_idx + 1 + i as u32;
+        let next = center_idx + 1 + ((i as u32 + 1) % n as u32);
+        // Reversed for the same reason as the side quads — a centroid fan over a
+        // counter-clockwise XZ outline winds DOWNWARD, against the +Y shading
+        // normal, so an un-flipped cap is invisible from above.
+        indices.extend_from_slice(&[center_idx, next, cur]);
+    }
+
+    Mesh::new(
+        bevy::render::render_resource::PrimitiveTopology::TriangleList,
+        bevy::render::render_asset::RenderAssetUsages::default(),
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
     .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
     .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
     .with_inserted_indices(bevy::render::mesh::Indices::U32(indices))
@@ -292,20 +389,20 @@ pub(crate) fn spawn_arena_environment(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
     images: &mut Assets<Image>,
+    bounds: &arena_bounds::ArenaBounds,
     obstacles: &[map_geometry::ObstacleVolume],
 ) -> Vec<Entity> {
-    let mut entities = Vec::with_capacity(9);
+    let mut entities = Vec::with_capacity(16);
 
-    // Arena floor - octagonal shape matching the wall boundary.
-    // Warm sandy/dirt battleground.
-    let arena_length = ARENA_FLOOR_HALF_X * 2.0;
-    let arena_width = ARENA_FLOOR_HALF_Z * 2.0;
-    let corner_cut = ARENA_FLOOR_CORNER_CUT;
+    // Floor and walls are both built from ONE outline, so a curved wall can never
+    // drift off the floor edge. The outline is derived from the map's gameplay
+    // bounds (offset outward by the wall+buffer inset), which is why the octagon
+    // maps still land on exactly the old 38 x 23 / corner-cut-10 shape.
+    let outline = bounds.outline(WALL_ARC_SEGMENTS);
 
-    // Create custom octagonal mesh. UV scale tiles the procedural dirt texture
-    // ~every 12 world units (square texels), giving the floor grain/variation
-    // without an external asset.
-    let octagon_mesh = create_octagon_mesh(arena_length, arena_width, corner_cut, 1.0 / 12.0);
+    // UV scale tiles the procedural dirt texture ~every 12 world units (square
+    // texels), giving the floor grain/variation without an external asset.
+    let octagon_mesh = create_arena_floor_mesh(&outline, 1.0 / 12.0);
     // Sandy dirt: blotches + grain, no courses.
     let floor_texture = images.add(create_surface_texture([0.79, 0.66, 0.46], 0.12, 0.06, 0));
 
@@ -334,133 +431,78 @@ pub(crate) fn spawn_arena_environment(
     // with faint horizontal courses so it reads as stacked masonry.
     let wall_texture = images.add(create_surface_texture([0.54, 0.45, 0.33], 0.10, 0.05, 6));
 
-    // Arena dimensions: elongated octagon
-    let corner_cut = 10.0; // How much to cut off each corner
-    let half_length = arena_length / 2.0; // 38.0
-    let half_width = arena_width / 2.0;   // 23.0
-
-    // Calculate wall dimensions
-    let long_wall_length = arena_length - corner_cut * 2.0; // North/South walls
-    let short_wall_length = arena_width - corner_cut * 2.0; // East/West walls
-    let corner_wall_length = corner_cut * 1.414; // Diagonal length (45° angle)
-
-    // One stone material per wall size. uv_transform scales the shared texture
-    // to each wall's length × height so texels stay square (~6 world units per
-    // tile) instead of smearing across the long faces. The Repeat sampler wraps
-    // the resulting >1 UVs.
+    // One wall segment per outline edge, so any arena shape (straight-sided
+    // octagon or tessellated curve) gets walls that exactly follow its floor.
+    //
+    // A Bevy `Cuboid` is centred at its origin with its length along local +X, so
+    // each segment sits at the edge midpoint, rotated about Y to align +X with the
+    // edge direction. `atan2(-dz, dx)` is that angle. For the octagon this
+    // reproduces the previous eight hand-placed walls: the resulting box for a
+    // corner edge differs from the old `PI/4` by exactly 180 degrees, which is the
+    // same solid (a cuboid is symmetric under a half turn about its own axis).
+    //
+    // Meshes AND materials are shared per rounded length: a tessellated curve's
+    // arc segments are all the same length, so Nagrand's ~130-edge outline
+    // allocates a handful of assets instead of 130 identical cuboids and 130
+    // identical materials. That matters twice — every match setup, and every map
+    // switch in the Configure Match preview, which rebuilds this scene.
+    let mut wall_materials: std::collections::BTreeMap<u32, Handle<StandardMaterial>> =
+        std::collections::BTreeMap::new();
+    let mut wall_meshes: std::collections::BTreeMap<u32, Handle<Mesh>> =
+        std::collections::BTreeMap::new();
     let wall_tile = 6.0;
-    let stone_material = |length: f32, materials: &mut Assets<StandardMaterial>| {
-        materials.add(StandardMaterial {
-            base_color: Color::WHITE, // tone baked into the texture
-            base_color_texture: Some(wall_texture.clone()),
-            perceptual_roughness: 0.9,
-            uv_transform: Affine2::from_scale(Vec2::new(
-                length / wall_tile,
-                wall_height / wall_tile,
-            )),
-            ..default()
-        })
-    };
-    let long_wall_material = stone_material(long_wall_length, materials);
-    let short_wall_material = stone_material(short_wall_length, materials);
-    let corner_wall_material = stone_material(corner_wall_length, materials);
 
-    // North wall (positive Z) - main long side
-    entities.push(
-        commands
-            .spawn((
-                Mesh3d(meshes.add(Cuboid::new(long_wall_length, wall_height, wall_thickness))),
-                MeshMaterial3d(long_wall_material.clone()),
-                Transform::from_xyz(0.0, wall_height / 2.0, half_width),
-            ))
-            .id(),
-    );
+    for i in 0..outline.len() {
+        let a = outline[i];
+        let b = outline[(i + 1) % outline.len()];
+        let edge = b - a;
+        let length = edge.length();
+        if length <= 1e-3 {
+            continue; // degenerate edge (coincident outline points)
+        }
+        let mid = (a + b) * 0.5;
+        let yaw = (-edge.y).atan2(edge.x);
 
-    // South wall (negative Z) - main long side
-    entities.push(
-        commands
-            .spawn((
-                Mesh3d(meshes.add(Cuboid::new(long_wall_length, wall_height, wall_thickness))),
-                MeshMaterial3d(long_wall_material.clone()),
-                Transform::from_xyz(0.0, wall_height / 2.0, -half_width),
-            ))
-            .id(),
-    );
+        // Overlap adjacent segments slightly so a tessellated curve shows no
+        // hairline gaps at the joints where the boxes meet at an angle.
+        let seg_length = length + wall_thickness * 0.5;
 
-    // East wall (positive X) - short side
-    entities.push(
-        commands
-            .spawn((
-                Mesh3d(meshes.add(Cuboid::new(wall_thickness, wall_height, short_wall_length))),
-                MeshMaterial3d(short_wall_material.clone()),
-                Transform::from_xyz(half_length, wall_height / 2.0, 0.0),
-            ))
-            .id(),
-    );
+        // Key on tenths of a world unit: identical-length segments share one mesh
+        // and one material, and the uv_transform stays correct for each distinct
+        // length.
+        let key = (seg_length * 10.0).round() as u32;
+        let material = wall_materials
+            .entry(key)
+            .or_insert_with(|| {
+                materials.add(StandardMaterial {
+                    base_color: Color::WHITE, // tone baked into the texture
+                    base_color_texture: Some(wall_texture.clone()),
+                    perceptual_roughness: 0.9,
+                    uv_transform: Affine2::from_scale(Vec2::new(
+                        seg_length / wall_tile,
+                        wall_height / wall_tile,
+                    )),
+                    ..default()
+                })
+            })
+            .clone();
+        let mesh = wall_meshes
+            .entry(key)
+            .or_insert_with(|| meshes.add(Cuboid::new(seg_length, wall_height, wall_thickness)))
+            .clone();
 
-    // West wall (negative X) - short side
-    entities.push(
-        commands
-            .spawn((
-                Mesh3d(meshes.add(Cuboid::new(wall_thickness, wall_height, short_wall_length))),
-                MeshMaterial3d(short_wall_material.clone()),
-                Transform::from_xyz(-half_length, wall_height / 2.0, 0.0),
-            ))
-            .id(),
-    );
+        entities.push(
+            commands
+                .spawn((
+                    Mesh3d(mesh),
+                    MeshMaterial3d(material),
+                    Transform::from_xyz(mid.x, wall_height / 2.0, mid.y)
+                        .with_rotation(Quat::from_rotation_y(yaw)),
+                ))
+                .id(),
+        );
+    }
 
-    // Angled corner pieces to connect the walls (45-degree angles).
-    // Each corner wall connects the end of one straight wall to the end of another.
-    let corner_offset_x = half_length - corner_cut / 2.0;
-    let corner_offset_z = half_width - corner_cut / 2.0;
-
-    // Northeast corner (connects North wall to East wall)
-    entities.push(
-        commands
-            .spawn((
-                Mesh3d(meshes.add(Cuboid::new(corner_wall_length, wall_height, wall_thickness))),
-                MeshMaterial3d(corner_wall_material.clone()),
-                Transform::from_xyz(corner_offset_x, wall_height / 2.0, corner_offset_z)
-                    .with_rotation(Quat::from_rotation_y(std::f32::consts::PI / 4.0)),
-            ))
-            .id(),
-    );
-
-    // Southeast corner (connects South wall to East wall)
-    entities.push(
-        commands
-            .spawn((
-                Mesh3d(meshes.add(Cuboid::new(corner_wall_length, wall_height, wall_thickness))),
-                MeshMaterial3d(corner_wall_material.clone()),
-                Transform::from_xyz(corner_offset_x, wall_height / 2.0, -corner_offset_z)
-                    .with_rotation(Quat::from_rotation_y(-std::f32::consts::PI / 4.0)),
-            ))
-            .id(),
-    );
-
-    // Northwest corner (connects North wall to West wall)
-    entities.push(
-        commands
-            .spawn((
-                Mesh3d(meshes.add(Cuboid::new(corner_wall_length, wall_height, wall_thickness))),
-                MeshMaterial3d(corner_wall_material.clone()),
-                Transform::from_xyz(-corner_offset_x, wall_height / 2.0, corner_offset_z)
-                    .with_rotation(Quat::from_rotation_y(-std::f32::consts::PI / 4.0)),
-            ))
-            .id(),
-    );
-
-    // Southwest corner (connects South wall to West wall)
-    entities.push(
-        commands
-            .spawn((
-                Mesh3d(meshes.add(Cuboid::new(corner_wall_length, wall_height, wall_thickness))),
-                MeshMaterial3d(corner_wall_material.clone()),
-                Transform::from_xyz(-corner_offset_x, wall_height / 2.0, -corner_offset_z)
-                    .with_rotation(Quat::from_rotation_y(std::f32::consts::PI / 4.0)),
-            ))
-            .id(),
-    );
 
     // Cosmetic obstacle meshes for the active map's line-of-sight volumes
     // (pillars, platforms). Solid stone architecture — reuses the wall texture
@@ -488,6 +530,28 @@ pub(crate) fn spawn_arena_environment(
                     Cuboid::new(size.x, size.y, size.z).into(),
                     (min + max) / 2.0,
                     Vec2::new(size.x, size.y),
+                )
+            }
+            map_geometry::ObstacleVolume::Prism {
+                center_xz,
+                circumradius,
+                sides,
+                rotation,
+                base_y,
+                height,
+            } => {
+                // Built at world coordinates (not centered on the origin like the
+                // Bevy primitives), so the transform is identity — this keeps the
+                // mesh vertices literally equal to the collision outline.
+                let verts =
+                    map_geometry::prism_vertices_world(center_xz, circumradius, sides, rotation);
+                let perimeter: f32 = (0..verts.len())
+                    .map(|i| verts[i].distance(verts[(i + 1) % verts.len()]))
+                    .sum();
+                (
+                    create_prism_mesh(&verts, base_y, height),
+                    Vec3::ZERO,
+                    Vec2::new(perimeter, height),
                 )
             }
         };
@@ -603,6 +667,11 @@ pub fn setup_play_match(
     // meshes spawned by `spawn_arena_environment` below, so they cannot drift.
     let active_map_geometry = map_geometry.active_for(config.map);
     commands.insert_resource(active_map_geometry.clone());
+    // AI profile — inserted in BOTH modes (dual-registration rule). Defaults to
+    // Legacy, so experimental behaviour is never on by accident.
+    // Graphical mode has no profile selector yet, so it runs Legacy. When the
+    // TeamPlan work is playable this should read from GameSettings.
+    commands.insert_resource(ai_profile::AiProfile::default());
 
     // Initialize Shadow Sight state (for stealth stalemate breaking)
     commands.insert_resource(ShadowSightState::default());
@@ -623,6 +692,7 @@ pub fn setup_play_match(
         &mut meshes,
         &mut materials,
         &mut images,
+        &active_map_geometry.bounds,
         &active_map_geometry.volumes,
     ) {
         commands.entity(entity).insert(PlayMatchEntity);
@@ -633,9 +703,14 @@ pub fn setup_play_match(
     let mut team1_class_counts: HashMap<match_config::CharacterClass, usize> = HashMap::new();
     let mut team2_class_counts: HashMap<match_config::CharacterClass, usize> = HashMap::new();
 
-    // Spawn Team 1 combatants (left side of arena, in starting pen)
-    // Teams start further back (-35/+35) and will move forward when gates open
-    let team1_spawn_x = -35.0;
+    // Spawn Team 1 combatants (left side of arena, in the starting room).
+    //
+    // Per-map, from the active map's bounds: teams must start OUTBOARD of the
+    // cover so closing to engage carries them past it. On the octagon maps this
+    // resolves to the historical ±35; on Nagrand it puts them inside the gate
+    // alcoves, ~65yd out, so the walk in crosses the pillar line.
+    let spawn_x = active_map_geometry.bounds.team_spawn_x();
+    let team1_spawn_x = -spawn_x;
     for (i, character_opt) in config.team1.iter().enumerate() {
         if let Some(character) = character_opt {
             let count = *team1_class_counts.get(character).unwrap_or(&0);
@@ -725,8 +800,8 @@ pub fn setup_play_match(
         }
     }
 
-    // Spawn Team 2 combatants (right side of arena, in starting pen)
-    let team2_spawn_x = 35.0;
+    // Spawn Team 2 combatants (right side of arena, in the starting room).
+    let team2_spawn_x = spawn_x;
     for (i, character_opt) in config.team2.iter().enumerate() {
         if let Some(character) = character_opt {
             let count = *team2_class_counts.get(character).unwrap_or(&0);
@@ -817,22 +892,31 @@ pub fn setup_play_match(
     }
     
     // Spawn starting gate bars for both teams
-    spawn_gate_bars(&mut commands, &mut meshes, &mut materials, team1_spawn_x, team2_spawn_x);
+    let (gate_x, gate_half_width) = active_map_geometry.bounds.gate_plane();
+    spawn_gate_bars(&mut commands, &mut meshes, &mut materials, gate_x, gate_half_width);
 }
 
 /// Spawn visual gate bars that lower when countdown ends
+/// Spawn the cosmetic gate bars that seal each team in during the countdown.
+///
+/// `gate_x` is the `|x|` of the gate plane and `gate_half_width` its half-extent
+/// in z, both from `ArenaBounds::gate_plane()` so the bars span the actual mouth
+/// of the starting area on whatever map is loaded. Bars are evenly distributed
+/// across the mouth rather than at a fixed spacing, so a wide gate is filled and
+/// a narrow one is not overshot.
 fn spawn_gate_bars(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
-    team1_x: f32,
-    team2_x: f32,
+    gate_x: f32,
+    gate_half_width: f32,
 ) {
     let gate_height = 6.0;
     let bar_width = 0.5;
     let bar_depth = 0.5;
     let num_bars = 7; // Number of vertical bars per gate
-    let spacing = 2.5; // Space between bars
+    // Distribute across the mouth: `num_bars - 1` gaps spanning the full width.
+    let spacing = (gate_half_width * 2.0) / (num_bars as f32 - 1.0);
     
     // Dark metal material for the bars
     let bar_material = materials.add(StandardMaterial {
@@ -842,13 +926,13 @@ fn spawn_gate_bars(
         ..default()
     });
     
-    // Team 1 gate (left side)
+    // Team 1 gate (-x side)
     for i in 0..num_bars {
-        let z_offset = (i as f32 - (num_bars as f32 / 2.0)) * spacing;
+        let z_offset = (i as f32 - (num_bars as f32 - 1.0) / 2.0) * spacing;
         commands.spawn((
             Mesh3d(meshes.add(Cuboid::new(bar_width, gate_height, bar_depth))),
             MeshMaterial3d(bar_material.clone()),
-            Transform::from_xyz(team1_x + 3.0, gate_height / 2.0, z_offset),
+            Transform::from_xyz(-gate_x, gate_height / 2.0, z_offset),
             GateBar {
                 team: 1,
                 initial_height: gate_height,
@@ -857,13 +941,13 @@ fn spawn_gate_bars(
         ));
     }
     
-    // Team 2 gate (right side)
+    // Team 2 gate (+x side)
     for i in 0..num_bars {
-        let z_offset = (i as f32 - (num_bars as f32 / 2.0)) * spacing;
+        let z_offset = (i as f32 - (num_bars as f32 - 1.0) / 2.0) * spacing;
         commands.spawn((
             Mesh3d(meshes.add(Cuboid::new(bar_width, gate_height, bar_depth))),
             MeshMaterial3d(bar_material.clone()),
-            Transform::from_xyz(team2_x - 3.0, gate_height / 2.0, z_offset),
+            Transform::from_xyz(gate_x, gate_height / 2.0, z_offset),
             GateBar {
                 team: 2,
                 initial_height: gate_height,
@@ -1074,3 +1158,135 @@ pub fn update_play_match(
 // Combat Systems (see submodules: combat_ai, combat_core, auras, projectiles)
 // ============================================================================
 
+
+// ============================================================================
+// Mesh construction tests
+// ============================================================================
+
+#[cfg(test)]
+mod mesh_tests {
+    use super::*;
+    use bevy::render::mesh::{Indices, VertexAttributeValues};
+
+    /// Pull (positions, normals, indices) out of a mesh for winding checks.
+    fn mesh_parts(mesh: &Mesh) -> (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<u32>) {
+        let VertexAttributeValues::Float32x3(pos) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION).expect("positions")
+        else {
+            panic!("positions must be Float32x3");
+        };
+        let VertexAttributeValues::Float32x3(nrm) =
+            mesh.attribute(Mesh::ATTRIBUTE_NORMAL).expect("normals")
+        else {
+            panic!("normals must be Float32x3");
+        };
+        let Some(Indices::U32(idx)) = mesh.indices() else {
+            panic!("indices must be U32");
+        };
+        (pos.clone(), nrm.clone(), idx.clone())
+    }
+
+    /// Every triangle's geometric winding must agree with its vertex shading
+    /// normals: `(v1-v0) x (v2-v0)` must point the same way as the normals.
+    ///
+    /// This is the check that catches inverted winding. Bevy culls back faces by
+    /// default (`FrontFace::Ccw`), so a mesh whose winding disagrees with its
+    /// normals renders as only its FAR interior surface — which is exactly how the
+    /// Nagrand pillars first appeared ("half built and not filled in"). Shading
+    /// normals alone look right in that state, so nothing else flags it.
+    fn assert_winding_matches_normals(mesh: &Mesh, label: &str) {
+        let (pos, nrm, idx) = mesh_parts(mesh);
+        assert!(!idx.is_empty(), "{label}: mesh has no triangles");
+        assert_eq!(idx.len() % 3, 0, "{label}: index count is not a multiple of 3");
+
+        for tri in idx.chunks(3) {
+            let v: Vec<Vec3> = tri
+                .iter()
+                .map(|&i| Vec3::from_array(pos[i as usize]))
+                .collect();
+            let geo = (v[1] - v[0]).cross(v[2] - v[0]);
+            // Degenerate triangles carry no orientation; skip them.
+            if geo.length_squared() < 1e-9 {
+                continue;
+            }
+            let geo = geo.normalize();
+            for &i in tri {
+                let shading = Vec3::from_array(nrm[i as usize]);
+                assert!(
+                    geo.dot(shading) > 0.0,
+                    "{label}: triangle {tri:?} winds against its shading normal \
+                     (geometric {geo:?} vs shading {shading:?}) — it will be \
+                     backface-culled and render invisible"
+                );
+            }
+        }
+    }
+
+    /// A pillar's side faces must point AWAY from its centre, or the solid renders
+    /// inside-out.
+    #[test]
+    fn prism_mesh_faces_outward() {
+        let center = Vec2::new(-40.0, 20.0);
+        let verts = map_geometry::prism_vertices_world(center, 6.0, 8, 22.5_f32.to_radians());
+        let mesh = create_prism_mesh(&verts, 0.0, 5.0);
+        assert_winding_matches_normals(&mesh, "octagonal pillar");
+
+        // Spot-check outwardness directly: each side quad's shading normal must
+        // have a positive component away from the pillar's centre.
+        let (pos, nrm, _) = mesh_parts(&mesh);
+        let mut side_faces = 0;
+        for (p, n) in pos.iter().zip(nrm.iter()) {
+            let n = Vec3::from_array(*n);
+            if n.y.abs() > 0.5 {
+                continue; // top cap
+            }
+            let radial = Vec2::new(p[0] - center.x, p[2] - center.y);
+            if radial.length_squared() < 1e-6 {
+                continue;
+            }
+            assert!(
+                Vec2::new(n.x, n.z).dot(radial.normalize()) > 0.0,
+                "pillar side normal {n:?} points inward at {p:?}"
+            );
+            side_faces += 1;
+        }
+        assert!(side_faces > 0, "expected side-face vertices to check");
+    }
+
+    /// The arena floor must face up, for both arena shapes.
+    #[test]
+    fn arena_floor_mesh_faces_up() {
+        let bowl = arena_bounds::ArenaBounds::Bowl {
+            semi_x: 59.72,
+            semi_z: 59.72,
+            alcove_depth: 10.0,
+            alcove_half_width: 8.0,
+        };
+        for (label, bounds) in [
+            ("octagon floor", arena_bounds::ArenaBounds::default()),
+            ("bowl floor", bowl),
+        ] {
+            let outline = bounds.outline(WALL_ARC_SEGMENTS);
+            let mesh = create_arena_floor_mesh(&outline, 1.0 / 12.0);
+            assert_winding_matches_normals(&mesh, label);
+        }
+    }
+
+    /// Guards the fan-triangulation vertex/index arithmetic: a fan over `n`
+    /// outline points is `n + 1` vertices and `n` triangles.
+    #[test]
+    fn arena_floor_mesh_has_expected_topology() {
+        let outline = arena_bounds::ArenaBounds::default().outline(WALL_ARC_SEGMENTS);
+        let mesh = create_arena_floor_mesh(&outline, 1.0 / 12.0);
+        let (pos, nrm, idx) = mesh_parts(&mesh);
+        assert_eq!(pos.len(), outline.len() + 1, "fan is outline + centre vertex");
+        assert_eq!(nrm.len(), pos.len(), "one normal per vertex");
+        assert_eq!(idx.len(), outline.len() * 3, "one triangle per outline edge");
+        for p in &pos {
+            assert!(
+                p.iter().all(|c| c.is_finite()),
+                "floor vertex {p:?} is not finite"
+            );
+        }
+    }
+}

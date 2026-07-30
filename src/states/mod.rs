@@ -7,6 +7,7 @@ use bevy_egui::{egui, EguiContexts};
 
 pub mod match_config;
 pub mod main_menu;
+pub mod arena_layout_debug;
 pub mod configure_match_ui;
 pub mod play_match;
 pub mod results_ui;

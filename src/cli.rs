@@ -5,6 +5,10 @@
 use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
 
+/// Default `--ai-profile`. Shared with `main` so the "flag ignored outside
+/// --matrix" warning cannot drift from the clap default.
+pub const DEFAULT_AI_PROFILE: &str = "Legacy";
+
 /// AI decision trace output mode.
 ///
 /// `off` — no trace emitted.
@@ -80,6 +84,17 @@ pub struct Args {
     /// rejected here. CSV columns are unchanged regardless of map.
     #[arg(long, value_name = "MAP", default_value = "BasicArena")]
     pub matrix_map: String,
+
+    /// AI implementation for matrix mode ONLY — `--headless` / `--batch` read
+    /// `ai_profile` from their JSON config instead, and `main` warns if this flag
+    /// is set without `--matrix`. "Legacy" (default — what every recorded baseline
+    /// is calibrated against) or "TeamPlan". Because matches are deterministic,
+    /// running the same `--seed-base` under both profiles gives a PAIRED comparison
+    /// in which the AI is the only variable — far more sensitive than comparing two
+    /// independent sweeps. The profile is recorded in the CSV header and in the
+    /// output filename so runs cannot be confused.
+    #[arg(long, value_name = "PROFILE", default_value = DEFAULT_AI_PROFILE)]
+    pub ai_profile: String,
 
     /// In matrix mode, also write each individual match's `.txt` log file.
     /// Off by default to avoid 49 × N files in match_logs/.

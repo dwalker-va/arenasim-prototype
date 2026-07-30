@@ -104,6 +104,8 @@ impl TestWorld {
 
     fn ctx(&self) -> CombatContext<'_> {
         CombatContext {
+        ai_profile: Default::default(),
+        bounds: Default::default(),
             combatants: &self.combatants,
             active_auras: &self.active_auras,
             dr_trackers: &self.dr_trackers,
@@ -454,6 +456,8 @@ fn classify_returns_friendly_breakable_cc_when_opt_in_and_friendly_cc_present() 
     active_auras_map.insert(world.target, target_active.auras.clone());
 
     let ctx = CombatContext {
+        ai_profile: Default::default(),
+        bounds: Default::default(),
         combatants: &world.combatants,
         active_auras: &active_auras_map,
         dr_trackers: &world.dr_trackers,

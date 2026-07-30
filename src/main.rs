@@ -20,6 +20,17 @@ use arenasim::ui::UiPlugin;
 fn main() {
     let args = cli::parse_args();
 
+    // `--ai-profile` is consumed only by `--matrix`; every other mode takes the
+    // profile from its own JSON config (`ai_profile`). Say so rather than silently
+    // running Legacy after the user asked for something else.
+    if args.matrix.is_none() && args.ai_profile != cli::DEFAULT_AI_PROFILE {
+        eprintln!(
+            "warning: --ai-profile {} ignored — it applies to --matrix only. \
+             Set \"ai_profile\" in the match config instead.",
+            args.ai_profile
+        );
+    }
+
     if let Some(batch_path) = args.batch {
         // Parallel in-process batch runner for sweeps (2v2/3v3/strategy vars).
         let out = args.out.unwrap_or_else(|| {
@@ -37,7 +48,7 @@ fn main() {
         // 7×7 matchup matrix mode — defaults to trace `on` so every cell's
         // trace is on disk when an anomaly surfaces; explicit `off` opts out.
         let trace_mode = args.trace_mode.unwrap_or(cli::TraceMode::On);
-        if let Err(e) = headless::run_matrix(n, args.seed_base, args.save_logs, trace_mode, args.matrix_map) {
+        if let Err(e) = headless::run_matrix(n, args.seed_base, args.save_logs, trace_mode, args.matrix_map, args.ai_profile) {
             eprintln!("Matrix run failed: {}", e);
             std::process::exit(1);
         }

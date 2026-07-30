@@ -80,14 +80,172 @@ pub enum ObstacleVolume {
     },
     /// A closed axis-aligned bounding box spanning `[min, max]` on every axis.
     Aabb { min: Vec3, max: Vec3 },
+    /// A vertical prism over a **regular** `sides`-gon: the polygon inscribed in
+    /// a circle of `circumradius` centered at `center_xz`, with vertex 0 at
+    /// `rotation` radians, spanning `y ∈ [base_y, base_y + height]`.
+    ///
+    /// Parameterized (center/circumradius/sides/rotation) rather than as a vertex
+    /// list so [`ObstacleVolume`] stays `Copy` and allocation-free — the
+    /// determinism guarantee above depends on volumes being plain values walked
+    /// in slice order.
+    ///
+    /// Treated as the intersection of `sides` half-planes whose outward normals
+    /// sit at the edge midpoint angles, each at distance
+    /// [`prism_apothem`] from the center. Every predicate below reuses that
+    /// half-plane form, which makes the prism math a direct generalization of the
+    /// [`ObstacleVolume::Aabb`] slab method (a box is four half-planes) — so the
+    /// touching/graze edge policies match the box branch exactly.
+    Prism {
+        center_xz: Vec2,
+        circumradius: f32,
+        sides: u32,
+        rotation: f32,
+        base_y: f32,
+        height: f32,
+    },
+}
+
+/// Distance from a regular polygon's center to its edges (the inradius), given
+/// the circumradius and side count. `sides < 3` degenerates to `0.0`.
+pub fn prism_apothem(circumradius: f32, sides: u32) -> f32 {
+    if sides < 3 {
+        return 0.0;
+    }
+    circumradius * (std::f32::consts::PI / sides as f32).cos()
+}
+
+/// Outward unit normal of edge `i` of a regular `sides`-gon at `rotation`.
+///
+/// Vertex `i` sits at angle `rotation + i * TAU / sides`, so edge `i` (spanning
+/// vertices `i` and `i+1`) faces the midpoint angle, offset by half a step.
+fn prism_edge_normal(i: u32, sides: u32, rotation: f32) -> Vec2 {
+    let ang = rotation + (i as f32 + 0.5) * std::f32::consts::TAU / sides as f32;
+    Vec2::new(ang.cos(), ang.sin())
+}
+
+/// Vertex `i` of a regular `sides`-gon of `circumradius` at `rotation`.
+fn prism_vertex(i: u32, sides: u32, rotation: f32, circumradius: f32) -> Vec2 {
+    let ang = rotation + i as f32 * std::f32::consts::TAU / sides as f32;
+    Vec2::new(ang.cos(), ang.sin()) * circumradius
+}
+
+/// World-space XZ vertices of a regular prism's cross-section, in edge order.
+///
+/// The single source of truth for a prism's outline: the collision predicates
+/// above, the 3D pillar mesh, and the top-down schematic all derive from this, so
+/// what the sim blocks and what the player sees agree by construction rather than
+/// by two hand-kept-in-sync formulas. Allocates, so it belongs to setup/render
+/// paths — the per-frame predicates use the half-plane form instead.
+pub fn prism_vertices_world(
+    center: Vec2,
+    circumradius: f32,
+    sides: u32,
+    rotation: f32,
+) -> Vec<Vec2> {
+    (0..sides.max(3))
+        .map(|i| center + prism_vertex(i, sides.max(3), rotation, circumradius))
+        .collect()
+}
+
+/// Whether `rel` (a point relative to the prism center) satisfies every edge
+/// half-plane at the given `limit` distance. `strict` selects `<` over `<=`,
+/// which is how the inclusive line-of-sight policy (touching = inside) and the
+/// strict movement policy (touching = allowed) share one routine.
+fn prism_half_planes_contain(
+    rel: Vec2,
+    limit: f32,
+    sides: u32,
+    rotation: f32,
+    strict: bool,
+) -> bool {
+    if sides < 3 {
+        return false;
+    }
+    (0..sides).all(|i| {
+        let d = rel.dot(prism_edge_normal(i, sides, rotation));
+        if strict {
+            d < limit
+        } else {
+            d <= limit
+        }
+    })
+}
+
+/// Clip the parameter interval `[lo, hi]` of the segment `from + t * d` against
+/// a regular prism's edge half-planes, each at `limit` from the center.
+///
+/// Returns `false` if the segment lies wholly outside some half-plane (a
+/// separating edge), in which case `lo`/`hi` are left in an unspecified state.
+/// `flush_clear` picks the parallel-segment edge policy: `false` treats a
+/// segment flush on the boundary as inside (line-of-sight, touching = blocked),
+/// `true` treats it as outside (movement, touching = allowed) — mirroring the
+/// `Aabb` branches of [`segment_intersects`] and [`footprint_sweep_entry`].
+fn prism_clip_interval(
+    rel_from: Vec2,
+    d: Vec2,
+    limit: f32,
+    sides: u32,
+    rotation: f32,
+    lo: &mut f32,
+    hi: &mut f32,
+    flush_clear: bool,
+) -> bool {
+    if sides < 3 {
+        return false;
+    }
+    for i in 0..sides {
+        let n = prism_edge_normal(i, sides, rotation);
+        let dn = d.dot(n);
+        // Remaining slack to this edge from the segment start.
+        let c = limit - rel_from.dot(n);
+        if dn.abs() <= 1e-12 {
+            // Parallel to this edge: the whole segment is on one side of it.
+            let outside = if flush_clear { c <= 0.0 } else { c < 0.0 };
+            if outside {
+                return false;
+            }
+        } else if dn > 0.0 {
+            *hi = hi.min(c / dn);
+        } else {
+            *lo = lo.max(c / dn);
+        }
+    }
+    true
 }
 
 impl ObstacleVolume {
+    /// The volume's XZ footprint reduced to a bounding disc: `(center, radius)`
+    /// where the radius encloses the whole footprint.
+    ///
+    /// A deliberately coarse summary, for reasoning about an obstacle as "a blob
+    /// at a place" — e.g. picking a standing spot in its shadow. Callers must
+    /// verify the result against the exact predicates ([`has_line_of_sight`],
+    /// [`position_blocked`]) rather than trusting the disc, since it over-covers
+    /// every non-circular shape.
+    pub fn footprint_disc(&self) -> (Vec2, f32) {
+        match *self {
+            ObstacleVolume::Cylinder {
+                center_xz, radius, ..
+            } => (center_xz, radius),
+            ObstacleVolume::Prism {
+                center_xz,
+                circumradius,
+                ..
+            } => (center_xz, circumradius),
+            ObstacleVolume::Aabb { min, max } => {
+                let center = Vec2::new((min.x + max.x) * 0.5, (min.z + max.z) * 0.5);
+                let half = Vec2::new((max.x - min.x) * 0.5, (max.z - min.z) * 0.5);
+                (center, half.length())
+            }
+        }
+    }
+
     /// Whether the mover's `y` (a ground unit at `y ≈ 1.0`) falls within this
     /// volume's `y` span. Movement collision only applies when this is true.
     fn y_span_contains(&self, y: f32) -> bool {
         match *self {
-            ObstacleVolume::Cylinder { base_y, height, .. } => {
+            ObstacleVolume::Cylinder { base_y, height, .. }
+            | ObstacleVolume::Prism { base_y, height, .. } => {
                 y >= base_y - TOUCH_EPS && y <= base_y + height + TOUCH_EPS
             }
             ObstacleVolume::Aabb { min, max } => y >= min.y - TOUCH_EPS && y <= max.y + TOUCH_EPS,
@@ -119,6 +277,24 @@ pub fn contains_point(volume: &ObstacleVolume, p: Vec3) -> bool {
                 && p.y <= max.y + TOUCH_EPS
                 && p.z >= min.z - TOUCH_EPS
                 && p.z <= max.z + TOUCH_EPS
+        }
+        ObstacleVolume::Prism {
+            center_xz,
+            circumradius,
+            sides,
+            rotation,
+            base_y,
+            height,
+        } => {
+            p.y >= base_y - TOUCH_EPS
+                && p.y <= base_y + height + TOUCH_EPS
+                && prism_half_planes_contain(
+                    Vec2::new(p.x - center_xz.x, p.z - center_xz.y),
+                    prism_apothem(circumradius, sides) + TOUCH_EPS,
+                    sides,
+                    rotation,
+                    false,
+                )
         }
     }
 }
@@ -215,6 +391,45 @@ pub fn segment_intersects(volume: &ObstacleVolume, a: Vec3, b: Vec3) -> bool {
             }
             lo <= hi
         }
+        ObstacleVolume::Prism {
+            center_xz,
+            circumradius,
+            sides,
+            rotation,
+            base_y,
+            height,
+        } => {
+            // XZ half-plane clip (edges inflated by TOUCH_EPS so a true tangent
+            // lands inside the interval: touching = blocked), intersected with
+            // the finite y span — the same two-stage structure as the cylinder.
+            let mut lo = 0.0_f32;
+            let mut hi = 1.0_f32;
+            if !prism_clip_interval(
+                Vec2::new(a.x - center_xz.x, a.z - center_xz.y),
+                Vec2::new(d.x, d.z),
+                prism_apothem(circumradius, sides) + TOUCH_EPS,
+                sides,
+                rotation,
+                &mut lo,
+                &mut hi,
+                false,
+            ) {
+                return false;
+            }
+
+            let top = base_y + height;
+            if d.y.abs() <= 1e-12 {
+                if a.y < base_y - TOUCH_EPS || a.y > top + TOUCH_EPS {
+                    return false;
+                }
+            } else {
+                let t0 = (base_y - TOUCH_EPS - a.y) / d.y;
+                let t1 = (top + TOUCH_EPS - a.y) / d.y;
+                lo = lo.max(t0.min(t1));
+                hi = hi.min(t0.max(t1));
+            }
+            lo <= hi
+        }
     }
 }
 
@@ -295,6 +510,23 @@ fn penetrates_footprint(volume: &ObstacleVolume, p_xz: Vec2, mover_y: f32) -> bo
                 && p_xz.y > min.z - MOVER_RADIUS + TOUCH_EPS
                 && p_xz.y < max.z + MOVER_RADIUS - TOUCH_EPS
         }
+        // Half-planes pushed out by MOVER_RADIUS. Like the box branch, this
+        // squares off the true rounded Minkowski corners, so it over-blocks by
+        // at most a sliver at each vertex — the same conservative approximation,
+        // and `resolve_movement` stays the no-clip backstop either way.
+        ObstacleVolume::Prism {
+            center_xz,
+            circumradius,
+            sides,
+            rotation,
+            ..
+        } => prism_half_planes_contain(
+            p_xz - center_xz,
+            prism_apothem(circumradius, sides) + MOVER_RADIUS - TOUCH_EPS,
+            sides,
+            rotation,
+            true,
+        ),
     }
 }
 
@@ -365,6 +597,44 @@ fn slide_against(volume: &ObstacleVolume, pos_xz: Vec2, desired_xz: Vec2) -> Vec
                     max_z + PUSH_OUT_EPS
                 };
                 Vec2::new(desired_xz.x, face)
+            }
+        }
+        ObstacleVolume::Prism {
+            center_xz,
+            circumradius,
+            sides,
+            rotation,
+            ..
+        } => {
+            let limit = prism_apothem(circumradius, sides) + MOVER_RADIUS;
+            // Choose the exit face the same way the box branch chooses its axis:
+            // prefer an edge the mover is *already outside of* (the side it came
+            // from), and among the candidates take the least-penetrated edge —
+            // the nearest way out. Fixed edge order gives a deterministic
+            // tie-break.
+            let mut best: Option<(f32, Vec2)> = None;
+            let mut best_from_outside: Option<(f32, Vec2)> = None;
+            for i in 0..sides {
+                let n = prism_edge_normal(i, sides, rotation);
+                // Signed distance past the inflated edge; negative = penetrating.
+                let s_desired = (desired_xz - center_xz).dot(n) - limit;
+                let s_pos = (pos_xz - center_xz).dot(n) - limit;
+                if best.is_none_or(|(b, _)| s_desired > b) {
+                    best = Some((s_desired, n));
+                }
+                if s_pos >= 0.0 && best_from_outside.is_none_or(|(b, _)| s_desired > b) {
+                    best_from_outside = Some((s_desired, n));
+                }
+            }
+
+            // `slide_against` is only reached for a penetrating `desired`, so
+            // every `s` here is negative and the correction pushes outward.
+            // Removing exactly the normal overshoot keeps the full tangential
+            // component, which is what makes the slide preserve lateral progress.
+            match best_from_outside.or(best) {
+                Some((s, n)) => desired_xz + n * (PUSH_OUT_EPS - s),
+                // Degenerate prism (`sides < 3`, rejected by config validation).
+                None => pos_xz,
             }
         }
     }
@@ -450,6 +720,34 @@ fn footprint_sweep_entry(volume: &ObstacleVolume, from: Vec2, to: Vec2, mover_y:
                 None
             }
         }
+        ObstacleVolume::Prism {
+            center_xz,
+            circumradius,
+            sides,
+            rotation,
+            ..
+        } => {
+            let mut lo = 0.0_f32;
+            let mut hi = 1.0_f32;
+            if !prism_clip_interval(
+                from - center_xz,
+                to - from,
+                prism_apothem(circumradius, sides) + MOVER_RADIUS,
+                sides,
+                rotation,
+                &mut lo,
+                &mut hi,
+                true,
+            ) {
+                return None;
+            }
+            // Strict overlap: a single-point graze (lo == hi) is touching = clear.
+            if lo < hi {
+                Some(lo.max(0.0))
+            } else {
+                None
+            }
+        }
     }
 }
 
@@ -511,6 +809,13 @@ pub fn steer_toward_goal(
             center_xz, radius, ..
         } => steer_around_cylinder(center_xz, radius, from, goal),
         ObstacleVolume::Aabb { min, max } => steer_around_box(min, max, from, goal, mover_y),
+        ObstacleVolume::Prism {
+            center_xz,
+            circumradius,
+            sides,
+            rotation,
+            ..
+        } => steer_around_prism(center_xz, circumradius, sides, rotation, from, goal),
     })
 }
 
@@ -585,6 +890,90 @@ fn steer_around_box(min: Vec3, max: Vec3, from: Vec2, goal: Vec2, mover_y: f32) 
         }
     }
     best
+}
+
+/// Unit direction toward a regular prism's better-progress **tangent vertex** —
+/// the polygon analog of [`steer_around_cylinder`], which it deliberately mirrors
+/// (two candidate tangents, pick by goal alignment, [`STEER_TIE_EPS`] default).
+///
+/// The tangents are the two *angular extremes* of the inflated polygon as seen
+/// from `from`. Because the polygon is convex, the ray through an angular extreme
+/// is a supporting line: every other vertex lies to one side of it, so the ray
+/// touches the footprint only at that vertex and is therefore a clear heading.
+///
+/// Angular extremes must be found by signed **angle** (`atan2`), not by the
+/// cheaper signed sine: once the mover is close enough that the polygon subtends
+/// more than a right angle, `sin` folds back and would pick an interior vertex.
+///
+/// Selecting "any unblocked vertex most aligned with the goal" — the approach
+/// [`steer_around_box`] can afford — is wrong here: a polygon can have a vertex
+/// pointing straight back at the mover, and that vertex is both unblocked and
+/// perfectly goal-aligned, so it would steer directly into the obstacle. An
+/// axis-aligned box never presents a corner along an approach axis, which is why
+/// the box branch gets away with it.
+fn steer_around_prism(
+    center: Vec2,
+    circumradius: f32,
+    sides: u32,
+    rotation: f32,
+    from: Vec2,
+    goal: Vec2,
+) -> Vec2 {
+    let goal_dir = (goal - from).normalize_or_zero();
+    let skin = prism_apothem(circumradius, sides) + MOVER_RADIUS;
+    let d = center - from;
+    let dist = d.length();
+
+    // Already within the collision skin (a hugging chase): no external tangents
+    // exist, so peel off perpendicular to the center direction on whichever side
+    // heads more toward the goal — identical to the cylinder's inside-skin case.
+    // Tested exactly (half-planes), not by the inner-bound radius, because the
+    // skin distance varies with angle between `skin` and the inflated
+    // circumradius.
+    if prism_half_planes_contain(from - center, skin, sides, rotation, false) {
+        let dn = if dist > 1e-6 { d / dist } else { goal_dir };
+        let dn = dn.normalize_or(Vec2::X);
+        let perp = Vec2::new(-dn.y, dn.x);
+        let s = if goal_dir.dot(perp) >= 0.0 { 1.0 } else { -1.0 };
+        return perp * s;
+    }
+
+    // Circumradius of the polygon whose edges sit at `apothem + MOVER_RADIUS`.
+    let inflated_circumradius = if sides < 3 {
+        circumradius + MOVER_RADIUS
+    } else {
+        skin / (std::f32::consts::PI / sides as f32).cos()
+    };
+    let c_dir = if dist > 1e-6 {
+        d / dist
+    } else {
+        return goal_dir;
+    };
+
+    let mut left: Option<(f32, Vec2)> = None; // greatest signed angle
+    let mut right: Option<(f32, Vec2)> = None; // least signed angle
+    for i in 0..sides {
+        let v = center + prism_vertex(i, sides, rotation, inflated_circumradius);
+        let dir = (v - from).normalize_or_zero();
+        let angle = c_dir.perp_dot(dir).atan2(c_dir.dot(dir));
+        if left.is_none_or(|(a, _)| angle > a) {
+            left = Some((angle, dir));
+        }
+        if right.is_none_or(|(a, _)| angle < a) {
+            right = Some((angle, dir));
+        }
+    }
+
+    let t_left = left.map_or(goal_dir, |(_, dir)| dir);
+    let t_right = right.map_or(goal_dir, |(_, dir)| dir);
+    let dot_l = t_left.dot(goal_dir);
+    let dot_r = t_right.dot(goal_dir);
+    if (dot_l - dot_r).abs() < STEER_TIE_EPS || dot_l >= dot_r {
+        // Goal ~directly behind the prism: deterministic default (left tangent).
+        t_left
+    } else {
+        t_right
+    }
 }
 
 #[cfg(test)]
@@ -982,5 +1371,298 @@ mod tests {
         let from = Vec2::new(-20.0, 0.0);
         let goal = Vec2::new(20.0, 0.0); // XZ crosses the platform, but at ground y
         assert_eq!(steer_toward_goal(&[platform], from, goal, 1.0), None);
+    }
+
+    // ========================================================================
+    // Regular-prism volumes (the Nagrand octagonal pillars)
+    //
+    // The through-line of these tests is that a prism is NOT its circumcircle:
+    // between the apothem and the circumradius, whether a point is inside
+    // depends on the angle. A prism silently implemented as a cylinder would
+    // pass a naive "blocks through the center" test but fail these.
+    // ========================================================================
+
+    /// An octagonal pillar of `circumradius` centered at `(cx, cz)`, unrotated,
+    /// spanning the standard pillar height.
+    fn octagon(cx: f32, cz: f32, circumradius: f32) -> ObstacleVolume {
+        ObstacleVolume::Prism {
+            center_xz: Vec2::new(cx, cz),
+            circumradius,
+            sides: 8,
+            rotation: 0.0,
+            base_y: 0.0,
+            height: 5.0,
+        }
+    }
+
+    #[test]
+    fn prism_apothem_matches_regular_polygon_geometry() {
+        // Octagon: R·cos(π/8).
+        assert!((prism_apothem(1.0, 8) - 0.923_879_5).abs() < 1e-6);
+        // Square: R/√2.
+        assert!((prism_apothem(1.0, 4) - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-6);
+        // Scales linearly with the circumradius.
+        assert!((prism_apothem(2.5, 8) - 2.5 * 0.923_879_5).abs() < 1e-5);
+        // Degenerate side counts collapse to zero rather than producing NaN.
+        assert_eq!(prism_apothem(2.5, 2), 0.0);
+    }
+
+    /// The defining property: at a radius between the apothem and the
+    /// circumradius, a vertex direction is inside and an edge-normal direction is
+    /// outside. A circle of either radius cannot reproduce both.
+    #[test]
+    fn prism_contains_point_has_flat_edges_not_a_circle() {
+        let r = 2.5_f32;
+        let pillar = octagon(0.0, 0.0, r);
+        let apothem = prism_apothem(r, 8); // ≈ 2.310
+
+        // Vertex 0 is at angle 0 (+x), so just inside/outside along +x brackets
+        // the circumradius.
+        assert!(contains_point(&pillar, Vec3::new(r - 0.01, 1.0, 0.0)));
+        assert!(!contains_point(&pillar, Vec3::new(r + 0.01, 1.0, 0.0)));
+
+        // Edge 0's outward normal is at half a step (22.5°). Along that
+        // direction the boundary is the apothem, which is *nearer* than the
+        // circumradius — this is the flat-edge bite.
+        let n = Vec2::from_angle(std::f32::consts::TAU / 16.0);
+        let just_in = n * (apothem - 0.01);
+        let just_out = n * (apothem + 0.01);
+        assert!(contains_point(&pillar, Vec3::new(just_in.x, 1.0, just_in.y)));
+        assert!(!contains_point(&pillar, Vec3::new(just_out.x, 1.0, just_out.y)));
+
+        // The discriminating case: radius 2.4 sits between apothem and R, so it
+        // is inside toward a vertex and outside toward an edge.
+        let mid = 2.4_f32;
+        assert!(
+            contains_point(&pillar, Vec3::new(mid, 1.0, 0.0)),
+            "r=2.4 toward a vertex must be inside"
+        );
+        let edge_pt = n * mid;
+        assert!(
+            !contains_point(&pillar, Vec3::new(edge_pt.x, 1.0, edge_pt.y)),
+            "r=2.4 toward an edge must be outside (apothem is {apothem})"
+        );
+        assert!(mid > apothem && mid < r, "the test radius must straddle");
+    }
+
+    /// Rotation actually turns the polygon: rotating an octagon by half a step
+    /// swaps which directions are vertices and which are edge normals.
+    #[test]
+    fn prism_rotation_turns_the_footprint() {
+        let r = 2.5_f32;
+        let half_step = std::f32::consts::TAU / 16.0;
+        let rotated = ObstacleVolume::Prism {
+            center_xz: Vec2::ZERO,
+            circumradius: r,
+            sides: 8,
+            rotation: half_step,
+            base_y: 0.0,
+            height: 5.0,
+        };
+        // +x was a vertex direction unrotated; after a half-step turn it is an
+        // edge normal, so a point that was inside is now outside.
+        let mid = 2.4_f32;
+        assert!(contains_point(&octagon(0.0, 0.0, r), Vec3::new(mid, 1.0, 0.0)));
+        assert!(!contains_point(&rotated, Vec3::new(mid, 1.0, 0.0)));
+    }
+
+    #[test]
+    fn prism_blocks_and_clears_line_of_sight() {
+        let pillar = octagon(0.0, 0.0, 2.5);
+        // Straight through the middle.
+        assert!(!has_line_of_sight(
+            &[pillar],
+            Vec3::new(-20.0, EYE_HEIGHT, 0.0),
+            Vec3::new(20.0, EYE_HEIGHT, 0.0),
+        ));
+        // Passing wide of the circumcircle.
+        assert!(has_line_of_sight(
+            &[pillar],
+            Vec3::new(-20.0, EYE_HEIGHT, 6.0),
+            Vec3::new(20.0, EYE_HEIGHT, 6.0),
+        ));
+
+        // Unrotated, an octagon has a vertex at 90°, so its +z extent IS the
+        // circumradius and a graze at z=2.4 legitimately clips it.
+        assert!(!has_line_of_sight(
+            &[pillar],
+            Vec3::new(-20.0, EYE_HEIGHT, 2.4),
+            Vec3::new(20.0, EYE_HEIGHT, 2.4),
+        ));
+
+        // Turn the octagon a half step so +z becomes an edge normal: now the +z
+        // extent is the apothem (≈2.31) and the same graze is clear. This is the
+        // sightline a cylinder of equal circumradius would wrongly block, and it
+        // is why pillar `rotation_deg` is a gameplay-relevant knob and not just
+        // cosmetic.
+        let turned = ObstacleVolume::Prism {
+            center_xz: Vec2::ZERO,
+            circumradius: 2.5,
+            sides: 8,
+            rotation: std::f32::consts::PI / 8.0,
+            base_y: 0.0,
+            height: 5.0,
+        };
+        assert!(prism_apothem(2.5, 8) < 2.4, "test premise: apothem is inside 2.4");
+        assert!(has_line_of_sight(
+            &[turned],
+            Vec3::new(-20.0, EYE_HEIGHT, 2.4),
+            Vec3::new(20.0, EYE_HEIGHT, 2.4),
+        ));
+        // ...and still blocks a graze inside the apothem.
+        assert!(!has_line_of_sight(
+            &[turned],
+            Vec3::new(-20.0, EYE_HEIGHT, 2.2),
+            Vec3::new(20.0, EYE_HEIGHT, 2.2),
+        ));
+    }
+
+    /// The y-span is finite, so a raised prism never occludes a ground sightline.
+    #[test]
+    fn prism_y_span_is_finite() {
+        let elevated = ObstacleVolume::Prism {
+            center_xz: Vec2::ZERO,
+            circumradius: 2.5,
+            sides: 8,
+            rotation: 0.0,
+            base_y: 6.0,
+            height: 4.0,
+        };
+        assert!(has_line_of_sight(
+            &[elevated],
+            Vec3::new(-20.0, EYE_HEIGHT, 0.0),
+            Vec3::new(20.0, EYE_HEIGHT, 0.0),
+        ));
+        assert!(!has_line_of_sight(
+            &[elevated],
+            Vec3::new(-20.0, 8.0, 0.0),
+            Vec3::new(20.0, 8.0, 0.0),
+        ));
+    }
+
+    #[test]
+    fn prism_footprint_honors_mover_radius() {
+        let pillar = octagon(0.0, 0.0, 2.5);
+        let apothem = prism_apothem(2.5, 8);
+        // Approaching along an edge normal, the movement skin is apothem + r.
+        let n = Vec2::from_angle(std::f32::consts::TAU / 16.0);
+        let inside = n * (apothem + MOVER_RADIUS - 0.05);
+        let outside = n * (apothem + MOVER_RADIUS + 0.05);
+        assert!(position_blocked(&[pillar], Vec3::new(inside.x, 1.0, inside.y)));
+        assert!(!position_blocked(&[pillar], Vec3::new(outside.x, 1.0, outside.y)));
+    }
+
+    /// Walking straight into a prism resolves to a non-penetrating position that
+    /// keeps lateral progress — the same contract the cylinder/box branches hold.
+    #[test]
+    fn resolve_movement_slides_along_prism_without_clipping() {
+        let pillar = octagon(0.0, 0.0, 2.5);
+        let pos = Vec3::new(-4.0, 1.0, 0.3);
+        let desired = Vec3::new(-2.0, 1.0, 0.3); // into the footprint
+        assert!(position_blocked(&[pillar], desired), "test setup: step is blocked");
+
+        let resolved = resolve_movement(&[pillar], pos, desired);
+        assert!(
+            !position_blocked(&[pillar], resolved),
+            "resolved position {resolved:?} still penetrates the pillar"
+        );
+        assert_eq!(resolved.y, desired.y, "slides are XZ-only");
+        // The blocked normal component is removed but the tangential slide keeps
+        // the mover moving rather than freezing it in place.
+        assert!(
+            resolved.distance(pos) > 1e-3,
+            "expected a tangential slide, got {resolved:?} from {pos:?}"
+        );
+    }
+
+    /// Prism analog of `steer_converges_and_never_clips`: a mover stepping along
+    /// the steering direction rounds an octagonal pillar and reaches a clear line
+    /// to the goal, never entering the footprint. Catches oscillation, which is
+    /// the failure mode a vertex-selection tie-break can introduce.
+    #[test]
+    fn steer_converges_around_prism_without_clipping() {
+        let pillar = octagon(0.0, 0.0, 2.5);
+        let goal = Vec2::new(20.0, 0.0);
+        let mut pos = Vec2::new(-20.0, 0.0);
+        let step = 0.5;
+        let mut steps = 0;
+        loop {
+            assert!(
+                !position_blocked(&[pillar], Vec3::new(pos.x, 1.0, pos.y)),
+                "mover clipped the pillar at {pos:?}"
+            );
+            match steer_toward_goal(&[pillar], pos, goal, 1.0) {
+                None => break, // clear straight line to the goal
+                Some(dir) => {
+                    assert!(
+                        (dir.length() - 1.0).abs() < 1e-4,
+                        "steering must return a unit direction, got {dir:?}"
+                    );
+                    pos += dir * step;
+                    steps += 1;
+                    assert!(steps < 500, "steering did not converge (oscillation?)");
+                }
+            }
+        }
+        assert!(steps > 0, "the path should have been blocked initially");
+        assert!(steps < 200, "convergence took {steps} steps — unexpectedly long");
+    }
+
+    /// Steering is a deterministic function of geometry: same inputs, same
+    /// direction, every time (no hashing or float-order dependence).
+    #[test]
+    fn steer_around_prism_is_deterministic() {
+        let pillar = octagon(0.0, 0.0, 2.5);
+        let from = Vec2::new(-12.0, 0.0);
+        let goal = Vec2::new(12.0, 0.0);
+        let first = steer_toward_goal(&[pillar], from, goal, 1.0).expect("blocked");
+        for _ in 0..16 {
+            assert_eq!(steer_toward_goal(&[pillar], from, goal, 1.0), Some(first));
+        }
+    }
+
+    /// A prism whose y-span is above the mover does not deflect a ground path,
+    /// mirroring the platform case for boxes.
+    #[test]
+    fn steer_prism_above_mover_does_not_deflect() {
+        let elevated = ObstacleVolume::Prism {
+            center_xz: Vec2::ZERO,
+            circumradius: 3.0,
+            sides: 8,
+            rotation: 0.0,
+            base_y: 5.0,
+            height: 2.0,
+        };
+        assert_eq!(
+            steer_toward_goal(&[elevated], Vec2::new(-20.0, 0.0), Vec2::new(20.0, 0.0), 1.0),
+            None
+        );
+    }
+
+    /// `prism_vertices_world` is the shared outline the 3D mesh and the top-down
+    /// schematic both draw; its vertices must sit on the circumcircle, be
+    /// `sides` in count, and lie on the volume's closed boundary.
+    #[test]
+    fn prism_vertices_world_lie_on_the_volume_boundary() {
+        let center = Vec2::new(-40.0, 20.0);
+        let r = 2.5_f32;
+        let verts = prism_vertices_world(center, r, 8, 0.0);
+        assert_eq!(verts.len(), 8);
+        let pillar = ObstacleVolume::Prism {
+            center_xz: center,
+            circumradius: r,
+            sides: 8,
+            rotation: 0.0,
+            base_y: 0.0,
+            height: 5.0,
+        };
+        for v in verts {
+            assert!(
+                (v.distance(center) - r).abs() < 1e-4,
+                "vertex {v:?} is not on the circumcircle"
+            );
+            // Inclusive boundary policy: a vertex counts as inside.
+            assert!(contains_point(&pillar, Vec3::new(v.x, 1.0, v.y)));
+        }
     }
 }

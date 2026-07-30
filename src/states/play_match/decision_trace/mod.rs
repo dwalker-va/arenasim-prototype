@@ -44,6 +44,8 @@ pub struct DecisionTrace {
     pub current_frame: u64,
     pub current_sim_time: f32,
     pub seed: u64,
+    /// Stamped onto every event. Set at match setup from the `AiProfile` resource.
+    pub ai_profile: &'static str,
     pub pending_events: Vec<DecisionEvent>,
     pub writer: Option<TraceWriter>,
 }

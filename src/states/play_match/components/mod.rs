@@ -71,10 +71,34 @@ mod tests {
         assert_eq!(rng.seed, Some(seed));
     }
 
+    /// An entropy-seeded RNG must RECORD the seed it chose, and replaying that
+    /// seed must reproduce its stream exactly.
+    ///
+    /// This deliberately inverts the old contract (`from_os_rng` had
+    /// `seed: None`). That contract made an unseeded match unreproducible in
+    /// principle rather than merely unlogged: a Divine Shield CC bug observed in
+    /// the graphical client could not be recreated, and 33 hand-picked seeds
+    /// failed to hit the same window. Recording the seed costs nothing — the run
+    /// is still non-deterministic — and makes every match replayable.
     #[test]
-    fn test_entropy_rng_has_no_seed() {
-        let rng = GameRng::from_os_rng();
-        assert!(rng.seed.is_none());
+    fn test_entropy_rng_records_a_replayable_seed() {
+        let mut rng = GameRng::from_os_rng();
+        let seed = rng.seed.expect("an entropy RNG must record the seed it chose");
+
+        // Replaying the recorded seed reproduces the same stream — otherwise the
+        // seed in a match log would be decoration rather than a repro handle.
+        let drawn: Vec<f32> = (0..8).map(|_| rng.random_f32()).collect();
+        let mut replay = GameRng::from_seed(seed);
+        let replayed: Vec<f32> = (0..8).map(|_| replay.random_f32()).collect();
+        assert_eq!(drawn, replayed, "recorded seed {seed} did not reproduce the stream");
+    }
+
+    /// Two entropy RNGs must not collide, or "random seed" would be a constant.
+    #[test]
+    fn test_entropy_rngs_choose_distinct_seeds() {
+        let a = GameRng::from_os_rng().seed.expect("seed recorded");
+        let b = GameRng::from_os_rng().seed.expect("seed recorded");
+        assert_ne!(a, b, "entropy seeds should differ between constructions");
     }
 
     // =========================================================================

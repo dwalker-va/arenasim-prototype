@@ -19,6 +19,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use crate::states::match_config::{ArenaMap, CharacterClass};
 
 use super::config::HeadlessMatchConfig;
+use crate::states::play_match::ai_profile::AiProfile;
 use super::runner::{run_headless_match_with, TraceConfig};
 use crate::cli::TraceMode;
 
@@ -72,10 +73,15 @@ pub fn run_matrix(
     save_logs: bool,
     trace_mode: TraceMode,
     matrix_map: String,
+    ai_profile: String,
 ) -> Result<(), String> {
     if n == 0 {
         return Err("--matrix N requires N >= 1".to_string());
     }
+
+    // Validate the AI profile up front so a typo fails before thousands of
+    // matches run, not after.
+    let profile = AiProfile::parse(&ai_profile)?;
 
     // Validate the map with the same parser the single-match path uses, then
     // reject TestVerticality explicitly: it parses (the single-match path
@@ -101,8 +107,8 @@ pub fn run_matrix(
         .map(|d| d.as_secs())
         .unwrap_or(0);
 
-    println!("Running matrix: {}×{} matchups × {} runs = {} matches (map={}, seed_base={}, trace={:?})",
-        classes.len(), classes.len(), n, total_matches, matrix_map, seed_base, trace_mode);
+    println!("Running matrix: {}×{} matchups × {} runs = {} matches (map={}, ai={}, seed_base={}, trace={:?})",
+        classes.len(), classes.len(), n, total_matches, matrix_map, profile.name(), seed_base, trace_mode);
 
     // Per-run subdir scopes trace output to this invocation, eliminating
     // collisions with concurrent matrix runs that share match_logs/traces/.
@@ -124,7 +130,7 @@ pub fn run_matrix(
             for run in 0..n {
                 let seed = seed_base.wrapping_add(global_idx);
                 global_idx += 1;
-                let config = build_config(c1, c2, seed, &matrix_map);
+                let config = build_config(c1, c2, seed, &matrix_map, profile);
 
                 let trace_config = traces_dir.as_ref().map(|dir| TraceConfig {
                     output_path: format!(
@@ -183,13 +189,19 @@ pub fn run_matrix(
 
     fs::create_dir_all("match_logs").map_err(|e| format!("create match_logs/: {}", e))?;
 
-    let csv_path = format!("match_logs/matrix_{}.csv", timestamp);
-    write_csv(&csv_path, classes, &stats, n, seed_base)
+    // Profile in the filename (Legacy omitted so historical paths are unchanged)
+    // so a paired A/B writes two files instead of silently overwriting one.
+    let profile_tag = match profile {
+        AiProfile::Legacy => String::new(),
+        other => format!("_{}", other.name()),
+    };
+    let csv_path = format!("match_logs/matrix_{}{}.csv", timestamp, profile_tag);
+    write_csv(&csv_path, classes, &stats, n, seed_base, profile)
         .map_err(|e| format!("write {}: {}", csv_path, e))?;
     println!("Wrote {}", csv_path);
 
-    let md_path = format!("match_logs/matrix_{}.md", timestamp);
-    write_markdown(&md_path, classes, &stats, n, seed_base, elapsed)
+    let md_path = format!("match_logs/matrix_{}{}.md", timestamp, profile_tag);
+    write_markdown(&md_path, classes, &stats, n, seed_base, profile, elapsed)
         .map_err(|e| format!("write {}: {}", md_path, e))?;
     println!("Wrote {}", md_path);
 
@@ -204,8 +216,11 @@ fn build_config(
     team2: CharacterClass,
     seed: u64,
     map: &str,
+    profile: AiProfile,
 ) -> HeadlessMatchConfig {
     HeadlessMatchConfig {
+        // Recorded per match so a re-run from this config reproduces the sweep.
+        ai_profile: Some(profile.name().to_string()),
         team1: vec![team1.name().to_string()],
         team2: vec![team2.name().to_string()],
         map: map.to_string(),
@@ -242,9 +257,10 @@ fn write_csv(
     stats: &HashMap<(CharacterClass, CharacterClass), CellStats>,
     n: u32,
     seed_base: u64,
+    profile: AiProfile,
 ) -> std::io::Result<()> {
     let mut f = fs::File::create(path)?;
-    writeln!(f, "# Matrix run: n={} seed_base={}", n, seed_base)?;
+    writeln!(f, "# Matrix run: n={} seed_base={} ai_profile={}", n, seed_base, profile.name())?;
     writeln!(f, "team1,team2,runs,team1_wins,team2_wins,draws,team1_winrate,draw_rate,avg_duration_secs")?;
     for &c1 in classes {
         for &c2 in classes {
@@ -265,6 +281,7 @@ fn write_markdown(
     stats: &HashMap<(CharacterClass, CharacterClass), CellStats>,
     n: u32,
     seed_base: u64,
+    profile: AiProfile,
     elapsed_secs: f32,
 ) -> std::io::Result<()> {
     let mut f = fs::File::create(path)?;
@@ -272,6 +289,7 @@ fn write_markdown(
     writeln!(f, "# Matrix Run")?;
     writeln!(f)?;
     writeln!(f, "- **Runs per cell:** {}", n)?;
+    writeln!(f, "- **AI profile:** {}", profile.name())?;
     writeln!(f, "- **Seed base:** {} (cell `(c1, c2)` run `i` uses seed `seed_base + (cell_idx × N + i)`)", seed_base)?;
     writeln!(f, "- **Total matches:** {}", classes.len().pow(2) as u32 * n)?;
     writeln!(f, "- **Wall time:** {:.1}s", elapsed_secs)?;

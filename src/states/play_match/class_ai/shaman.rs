@@ -946,5 +946,5 @@ fn compute_formation_point(
         }
     }
 
-    Some(clamp_to_arena(point))
+    Some(clamp_to_arena(&ctx.bounds, point))
 }
