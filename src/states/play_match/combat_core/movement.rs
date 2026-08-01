@@ -287,12 +287,14 @@ pub fn move_to_target(
                     .map(|(_, pos)| Vec2::new(pos.x, pos.z))
             }).flatten();
 
-            hold_position(
-                &map_geometry.volumes,
-                anchor,
-                Vec2::new(nearest_pos.x, nearest_pos.z),
-                keep_sighted,
-            )
+            // Every living enemy, so the spot maximises how many of them lose
+            // sight — hiding from only the nearest left the other caster free.
+            let threats: Vec<Vec2> = positions
+                .iter()
+                .filter(|(_, (_, team))| *team != combatant.team)
+                .map(|(_, (pos, _))| Vec2::new(pos.x, pos.z))
+                .collect();
+            hold_position(&map_geometry.volumes, anchor, &threats, keep_sighted)
             .map(|spot| (spot, nearest_pos))
         });
 
