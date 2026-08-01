@@ -8,7 +8,8 @@ use super::super::match_config::CharacterClass;
 use super::super::{MELEE_RANGE, WAND_RANGE, DISENGAGE_SPEED};
 use super::super::map_config::ActiveMapGeometry;
 use super::super::team_plan::{
-    hold_position, should_hold, Stance, TeamPlans, CAMP_ARRIVAL_EPSILON, CAMP_ENGAGE_RADIUS,
+    hold_position, should_break_cover, should_hold, Stance, TeamPlans, CAMP_ARRIVAL_EPSILON,
+    CAMP_ENGAGE_RADIUS,
 };
 use super::super::map_geometry::{resolve_movement, steer_toward_goal, ObstacleVolume};
 
@@ -68,6 +69,18 @@ pub fn move_to_target(
     let positions: std::collections::BTreeMap<Entity, (Vec3, u8)> = combatants
         .iter()
         .map(|(entity, transform, combatant, _, _, _, _, _, _)| (entity, (transform.translation, combatant.team)))
+        .collect();
+
+    // Position + team + HP fraction, for the camp's line-of-sight cycle. Separate
+    // from `positions` so that map's shape (and every other consumer of it) is
+    // untouched.
+    let ally_health: std::collections::BTreeMap<Entity, (Vec3, u8, f32)> = combatants
+        .iter()
+        .filter(|(_, _, c, _, _, _, _, _, _)| c.is_alive())
+        .map(|(entity, transform, c, _, _, _, _, _, _)| {
+            let frac = if c.max_health > 0.0 { c.current_health / c.max_health } else { 0.0 };
+            (entity, (transform.translation, c.team, frac))
+        })
         .collect();
 
     // Move each combatant towards their target if needed
@@ -274,17 +287,24 @@ pub fn move_to_target(
             if !should_hold(Some(nearest_d), CAMP_ENGAGE_RADIUS) {
                 return None;
             }
-            // A healer must keep its partner in sight while holding cover, or the
-            // camp traps it behind the pillar unable to heal — observed directly:
-            // the Priest reached cover and sat there while the Warrior died.
-            // Nearest living non-pet ally stands in for "the partner" at 2v2.
+            // LINE-OF-SIGHT CYCLE. A healer alternates between a POKE spot (sees
+            // the ally, can heal) and a DUCK spot (maximally occluded). Holding a
+            // sight-line permanently is what left the Priest exposed to the enemy
+            // Warlock 70% of the match and mana-burned to nothing.
+            //
+            // The cycle needs no state machine: casting units are planted and
+            // `continue` above this branch, so all that is required per tick is
+            // "does anyone need healing?" — if yes, break cover for the cast; if
+            // no, hide.
             let keep_sighted = combatant.class.is_healer().then(|| {
-                positions
+                // Most-injured living ally, and how hurt it is.
+                let worst = ally_health
                     .iter()
-                    .filter(|(e, (_, team))| *team == combatant.team && **e != entity)
-                    .map(|(_, (pos, _))| (my_pos.distance(*pos), *pos))
-                    .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
-                    .map(|(_, pos)| Vec2::new(pos.x, pos.z))
+                    .filter(|(e, (_, team, _))| *team == combatant.team && **e != entity)
+                    .map(|(_, (pos, _, hp))| (*hp, *pos))
+                    .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+                let (hp, pos) = worst?;
+                should_break_cover(Some(hp)).then_some(Vec2::new(pos.x, pos.z))
             }).flatten();
 
             // Every living enemy, so the spot maximises how many of them lose

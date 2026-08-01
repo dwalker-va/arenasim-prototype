@@ -313,6 +313,37 @@ pub fn hold_position(
         .map(|(_, spot)| spot)
 }
 
+
+/// Ally HP fraction at or below which a camped healer breaks cover to get line of
+/// sight for a heal.
+///
+/// Deliberately higher than `urgency_hp_threshold` (0.5, the "someone is dying"
+/// mark): a healer that only pokes out at half health has already lost the race,
+/// because it must then chain-cast while exposed. Topping up earlier means
+/// shorter exposures.
+pub const CAMP_POKE_HP: f32 = 0.85;
+
+/// Whether a camped healer should break cover for line of sight this tick.
+///
+/// This is the LINE-OF-SIGHT CYCLE, and it is why a camp cannot be a fixed point.
+/// Sight to an ally and occlusion from that ally's attackers are near-opposite
+/// demands — the partner fights in roughly the same direction as the enemies
+/// shooting at it, so one position cannot satisfy both. Measured: pushing enemy
+/// exposure from 70% down to 52% dragged ally sight from 92% to 70%.
+///
+/// Real play resolves this in TIME rather than space: poke out to heal, duck back
+/// while the heal lands and the enemy casts. Casting units are already planted
+/// (they `continue` above the camp branch), so the cycle needs no state machine —
+/// only the question "do I need sight right now?", asked per tick.
+pub fn should_break_cover(worst_ally_hp_fraction: Option<f32>) -> bool {
+    match worst_ally_hp_fraction {
+        // Nobody to heal: stay hidden. This is the DUCK half, and it is the half
+        // that was missing — the healer used to hold a sight-line permanently.
+        None => false,
+        Some(hp) => hp <= CAMP_POKE_HP,
+    }
+}
+
 /// Whether a camping unit should still be holding, given the nearest enemy.
 ///
 /// A camp that never releases is a unit refusing to fight — the team would hold
@@ -708,6 +739,36 @@ mod tests {
     fn hold_position_tolerates_a_stale_anchor() {
         assert_eq!(hold_position(&nagrand(), Anchor::Obstacle(99), &[Vec2::ZERO], None), None);
         assert_eq!(hold_position(&[], Anchor::Obstacle(0), &[Vec2::ZERO], None), None);
+    }
+
+
+    /// The DUCK half — the one that was missing. With nobody hurt, a camped healer
+    /// must NOT hold a sight-line; holding one permanently is what left the Priest
+    /// exposed to the enemy Warlock 70% of the match.
+    #[test]
+    fn healthy_team_means_stay_hidden() {
+        assert!(!should_break_cover(None), "no ally to heal: stay in cover");
+        assert!(!should_break_cover(Some(1.0)), "full HP: stay in cover");
+        assert!(!should_break_cover(Some(0.95)), "a scratch is not worth exposure");
+    }
+
+    /// The POKE half — break cover while there is still a race to win.
+    #[test]
+    fn injured_ally_means_break_cover() {
+        assert!(should_break_cover(Some(CAMP_POKE_HP)), "at the threshold, poke");
+        assert!(should_break_cover(Some(0.5)), "badly hurt: definitely poke");
+        assert!(should_break_cover(Some(0.05)), "nearly dead: poke");
+    }
+
+    /// The poke threshold must sit ABOVE the "someone is dying" mark. A healer that
+    /// only emerges at half health has to chain-cast while exposed, which is the
+    /// losing shape — topping up earlier keeps each exposure short.
+    #[test]
+    fn poke_threshold_is_above_the_urgency_mark() {
+        assert!(
+            CAMP_POKE_HP > 0.5,
+            "CAMP_POKE_HP {CAMP_POKE_HP} must exceed urgency_hp_threshold (0.5)"
+        );
     }
 
     /// A camp that never releases is a unit refusing to fight — the match would
