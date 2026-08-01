@@ -29,6 +29,7 @@ use bevy::prelude::*;
 
 // === Phase 1: Resources and Auras ===
 pub use super::match_flow::update_countdown;
+pub use super::team_plan::update_team_plans;
 pub use super::match_flow::update_dampening;
 pub use super::combat_core::regenerate_resources;
 pub use super::shadow_sight::track_shadow_sight_timer;
@@ -163,6 +164,15 @@ where
             process_holy_shock_heals,
             process_holy_shock_damage,
             process_mana_burn,
+            // Team-level strategy. Recomputes on roster change; NOTHING reads the
+            // result yet, so it is a no-op in both profiles. Under the default
+            // `AiProfile::Legacy` it does not even select a plan, which is what
+            // keeps the recorded behaviour baselines valid. Registered here so the
+            // cadence and dual-mode wiring are exercised before any behaviour
+            // depends on it.
+            // Must never draw from GameRng: it shares this schedule with the AI,
+            // so a draw would shift every downstream roll.
+            update_team_plans,
         )
             .chain()
             .in_set(CombatSystemPhase::ResourcesAndAuras)

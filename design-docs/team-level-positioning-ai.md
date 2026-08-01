@@ -463,15 +463,42 @@ directive are indistinguishable downstream, so a unit that should be *waiting*
 looks identical to one that has nothing to do and gets re-tasked by the next
 posture evaluation.
 
+## The geometry is a constant, not a parameter
+
+**Nagrand's dimensions are the specification. The AI is the thing under
+development.** The 40yd/80yd pillar spacing, the ~120yd bowl and the 10yd starting
+rooms come from the reference arena; they are not knobs to be tuned for the
+convenience of whatever the AI can currently handle.
+
+This is a correction to an earlier framing in this document, which treated
+spacing as adjustable and asked whether it was "viable". That question is
+malformed. The layout is a given, and every measurement below asks *what the AI
+needs in order to play it*, never *what the map should become*.
+
+Three consequences that follow directly, and that an earlier draft got backwards:
+
+- **A negative result indicts the AI, not the map.** If a pillar-camp opener fails
+  to produce cover play, the conclusion is that the planner is not yet good
+  enough — not that the pillars should move inward.
+- **Coverage is an AI target.** "Only one pillar sees use" and "double-ranged
+  mirrors never approach cover" are gaps in the comp→plan table, which is the
+  entire lever once geometry is fixed. They are not evidence for reshaping the
+  arena.
+- **The long opener is a property to model, not a defect to tune away.** A 139yd
+  arena means melee-vs-melee spends ~18s closing (observed in a live client run).
+  Real teams use that approach to set up; the AI walking it in a straight line is
+  the thing that is wrong, not the distance.
+
+The one legitimate reason these numbers could still move is **improving the
+fidelity estimate** — they were derived from a reference screenshot, not measured
+from the game, so better source data may refine them. That is categorically
+different from adjusting them because the AI finds them inconvenient.
+
 ## What this does NOT solve
 
-- **Arena scale.** A 139yd arena means melee-vs-melee opens with a ~130yd walk
-  (observed in a live client run: gates open, then ~18s of approach). Team plans
-  relocate the fight; they do not shorten the opener. Worth revisiting the bowl
-  radius independently.
-- **Faithfulness vs function.** If team plans make 40/80 spacing work, the
-  spec geometry is vindicated. If they do not, the choice between visual fidelity
-  and functioning cover is still live.
+- **Matchups with no camper.** The comp→plan table only camps for melee/healer.
+  Double-ranged mirrors have no reason to approach a pillar and will still fight
+  in the open. Closing that is further AI work, not a geometry question.
 
 ## Migration plan
 
@@ -482,9 +509,10 @@ posture evaluation.
    byte-identical BasicArena and PillaredArena results. This is the guard rail
    for everything after.
 3. Enable the melee/healer pillar-camp opener on obstacle maps only. Measure
-   whether combat relocates off centre and whether `cover_pull` starts firing
-   with 40/80 spacing intact. **This is the experiment that decides whether the
-   map is fine.**
+   whether combat relocates off centre and whether occlusion appears, with the
+   spec geometry intact. **This measures whether the AI can yet use the map** —
+   the map is not on trial. "cover_pull fired" is too weak a criterion; use
+   occlusion-seconds per match, and track how many distinct pillars see use.
 4. Port positioning to the focal-rooted team solve, retiring `cover_pull` /
    `cover_seek` / `medic_chase` as separate mechanisms. The solve must support both
    convergent (`StackAnchor`) and divergent (pincer) team shapes from the start,

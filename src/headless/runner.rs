@@ -274,6 +274,8 @@ fn headless_setup_match(
     let ai_profile = headless_state.ai_profile;
     info!("AI profile: {:?}", ai_profile);
     commands.insert_resource(ai_profile);
+    // Team plans — inserted in BOTH modes (dual-registration rule).
+    commands.insert_resource(crate::states::play_match::team_plan::TeamPlans::default());
 
     // Initialize GameRng with seed if provided (deterministic mode)
     let game_rng = match headless_state.random_seed {
