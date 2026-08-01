@@ -45,7 +45,7 @@ use super::components::{Combatant, MatchCountdown};
 use super::ai_profile::AiProfile;
 use super::constants::PET_SLOT_BASE;
 use super::map_config::ActiveMapGeometry;
-use super::map_geometry::ObstacleVolume;
+use super::map_geometry::{ObstacleVolume, MOVER_RADIUS};
 use crate::states::match_config::CharacterClass;
 
 /// Where a team wants the fight to happen.
@@ -212,6 +212,69 @@ pub fn choose_anchor(volumes: &[ObstacleVolume], spawn_x: f32) -> Option<Anchor>
         }
     }
     best.map(|(_, i)| Anchor::Obstacle(i))
+}
+
+
+/// Standoff beyond the anchor's own footprint when holding it, so a camper stands
+/// *beside* cover rather than inside its collision skin.
+pub const CAMP_STANDOFF: f32 = 2.0;
+
+/// How close an enemy must come before a camp releases into normal combat.
+///
+/// Set above `danger_radius` (12) so the release fires slightly BEFORE a healer
+/// would flip to PRESSURED — a camp that outlived the posture change would have
+/// the unit holding ground while its own AI thinks it is under threat.
+pub const CAMP_ENGAGE_RADIUS: f32 = 15.0;
+
+/// Distance within which a camper is considered arrived and stops adjusting.
+/// Prevents jitter around the exact hold point.
+pub const CAMP_ARRIVAL_EPSILON: f32 = 0.5;
+
+/// Where a unit should stand to hold `anchor` against an enemy approaching from
+/// `threat_from`.
+///
+/// The spot is on the far side of the obstacle from the approach, so the cover
+/// sits between the camper and the incoming team — the whole point of taking a
+/// pillar before contact. Returns `None` if the anchor index is stale or the
+/// approach direction is degenerate.
+///
+/// Pure, so the geometry is testable without a match. The caller must still check
+/// the result is in bounds and unblocked; this only picks the direction.
+pub fn hold_position(
+    volumes: &[ObstacleVolume],
+    anchor: Anchor,
+    threat_from: Vec2,
+) -> Option<Vec2> {
+    let Anchor::Obstacle(i) = anchor else {
+        // A Point anchor IS the hold position — nothing to stand behind.
+        if let Anchor::Point(p) = anchor {
+            return Some(p);
+        }
+        return None;
+    };
+    // A stale index is possible if the map changed under a live plan; treat it as
+    // "no anchor" rather than panicking mid-match.
+    let (center, radius) = volumes.get(i)?.footprint_disc();
+
+    let away = (center - threat_from).normalize_or_zero();
+    if away == Vec2::ZERO {
+        return None; // threat standing on the anchor; no meaningful far side
+    }
+    Some(center + away * (radius + MOVER_RADIUS + CAMP_STANDOFF))
+}
+
+/// Whether a camping unit should still be holding, given the nearest enemy.
+///
+/// A camp that never releases is a unit refusing to fight — the team would hold
+/// position until the match hit its duration cap. Once the enemy has committed
+/// (come within `engage_radius`), the camp has done its job: it made them cross
+/// the arena, and normal combat takes over from there.
+pub fn should_hold(nearest_enemy_distance: Option<f32>, engage_radius: f32) -> bool {
+    match nearest_enemy_distance {
+        // Nobody near: keep holding, this is the pre-contact camp.
+        None => true,
+        Some(d) => d > engage_radius,
+    }
 }
 
 /// Recompute both teams' plans when the roster changes.
@@ -504,6 +567,73 @@ mod tests {
             pillar(40.0, -20.0),
             pillar(40.0, 20.0),
         ]
+    }
+
+
+    /// The hold spot must put the pillar BETWEEN the camper and the approach —
+    /// that is the entire point of taking cover before contact.
+    #[test]
+    fn hold_position_is_on_the_far_side_from_the_threat() {
+        let v = nagrand();
+        let anchor = Anchor::Obstacle(0); // pillar at (-40, -20)
+        // Enemy approaching from the arena centre.
+        let spot = hold_position(&v, anchor, Vec2::ZERO).expect("a far side exists");
+        let (center, _) = v[0].footprint_disc();
+
+        // The pillar centre must lie between the threat and the hold spot.
+        let to_spot = (spot - Vec2::ZERO).normalize();
+        let to_center = (center - Vec2::ZERO).normalize();
+        assert!(
+            to_spot.dot(to_center) > 0.99,
+            "hold spot {spot:?} should be directly beyond the pillar from the threat"
+        );
+        assert!(
+            spot.distance(center) > center.distance(Vec2::ZERO) * 0.0 + 6.0,
+            "hold spot must be clear of the pillar footprint"
+        );
+    }
+
+    /// Standing on the pillar is not holding it — the spot must clear the
+    /// footprint plus the mover's own radius.
+    #[test]
+    fn hold_position_clears_the_footprint() {
+        let v = nagrand();
+        let (center, radius) = v[0].footprint_disc();
+        let spot = hold_position(&v, Anchor::Obstacle(0), Vec2::ZERO).unwrap();
+        assert!(
+            spot.distance(center) >= radius + MOVER_RADIUS,
+            "hold spot is inside the collision skin"
+        );
+    }
+
+    /// The approach direction decides the side, so a threat from the opposite
+    /// quarter must flip the hold spot.
+    #[test]
+    fn hold_position_follows_the_approach() {
+        let v = nagrand();
+        let from_centre = hold_position(&v, Anchor::Obstacle(0), Vec2::ZERO).unwrap();
+        let from_behind = hold_position(&v, Anchor::Obstacle(0), Vec2::new(-80.0, -40.0)).unwrap();
+        assert!(
+            from_centre.distance(from_behind) > 6.0,
+            "opposite approaches should yield opposite sides of the pillar"
+        );
+    }
+
+    /// A stale anchor index must not panic a live match.
+    #[test]
+    fn hold_position_tolerates_a_stale_anchor() {
+        assert_eq!(hold_position(&nagrand(), Anchor::Obstacle(99), Vec2::ZERO), None);
+        assert_eq!(hold_position(&[], Anchor::Obstacle(0), Vec2::ZERO), None);
+    }
+
+    /// A camp that never releases is a unit refusing to fight — the match would
+    /// run to its duration cap. Holding ends when the enemy commits.
+    #[test]
+    fn camp_releases_once_the_enemy_commits() {
+        assert!(should_hold(None, 15.0), "pre-contact: keep holding");
+        assert!(should_hold(Some(40.0), 15.0), "still far: keep holding");
+        assert!(!should_hold(Some(14.0), 15.0), "committed: release and fight");
+        assert!(!should_hold(Some(0.0), 15.0), "in melee: definitely release");
     }
 
     #[test]

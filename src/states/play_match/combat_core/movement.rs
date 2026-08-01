@@ -7,6 +7,9 @@ use super::super::arena_bounds::ArenaBounds;
 use super::super::match_config::CharacterClass;
 use super::super::{MELEE_RANGE, WAND_RANGE, DISENGAGE_SPEED};
 use super::super::map_config::ActiveMapGeometry;
+use super::super::team_plan::{
+    hold_position, should_hold, Stance, TeamPlans, CAMP_ARRIVAL_EPSILON, CAMP_ENGAGE_RADIUS,
+};
 use super::super::map_geometry::{resolve_movement, steer_toward_goal, ObstacleVolume};
 
 
@@ -41,6 +44,9 @@ pub fn move_to_target(
     // auto-attack fires. Read-only; owned/updated by `evaluate_dps_posture`.
     kite_query: Query<&KitePosture>,
     map_geometry: Res<ActiveMapGeometry>,
+    // Team-level plan. `Option` so a scene that never inserted it simply behaves
+    // as it always has, rather than panicking.
+    team_plans: Option<Res<TeamPlans>>,
 ) {
     // Don't allow movement until gates open
     if !countdown.gates_opened {
@@ -433,6 +439,73 @@ pub fn move_to_target(
         } else {
             combatant.class.preferred_range()
         };
+
+        // Pillar camp: hold cover and make the enemy cross the arena, instead of
+        // walking at them. This is the "hold ground" primitive — every other
+        // posture approaches, orbits or flees, and none waits somewhere
+        // advantageous.
+        //
+        // Only while the plan says Hold AND the enemy has not committed. A camp
+        // that never releases is a unit refusing to fight, which would run every
+        // match to its duration cap; `should_hold` ends it once they close.
+        // Inert under Legacy (the planner leaves `anchor: None`), so recorded
+        // baselines are unaffected.
+        let camp_spot = team_plans.as_ref().and_then(|plans| {
+            let plan = plans.for_team(combatant.team);
+            if plan.stance != Stance::Hold {
+                return None;
+            }
+            let anchor = plan.anchor?;
+            // Distance to the nearest LIVING enemy, for the release check.
+            let nearest_enemy = positions
+                .iter()
+                .filter(|(_, (_, team))| *team != combatant.team)
+                .map(|(_, (pos, _))| my_pos.distance(*pos))
+                .fold(f32::INFINITY, f32::min);
+            let nearest = nearest_enemy.is_finite().then_some(nearest_enemy);
+            if !should_hold(nearest, CAMP_ENGAGE_RADIUS) {
+                return None;
+            }
+            // Stand on the far side of the anchor from where they are coming.
+            let threat_from = Vec2::new(target_pos.x, target_pos.z);
+            hold_position(&map_geometry.volumes, anchor, threat_from)
+        });
+
+        if let Some(spot) = camp_spot {
+            let dest = Vec3::new(spot.x, my_pos.y, spot.y);
+            let to_spot = dest - my_pos;
+            let planar = Vec2::new(to_spot.x, to_spot.z).length();
+            // Walk to the spot, then stand still — holding, not orbiting.
+            if planar > CAMP_ARRIVAL_EPSILON {
+                let dir = steer_toward_goal(
+                    &map_geometry.volumes,
+                    Vec2::new(my_pos.x, my_pos.z),
+                    spot,
+                    my_pos.y,
+                )
+                .unwrap_or_else(|| Vec2::new(to_spot.x, to_spot.z).normalize_or_zero());
+                // Same speed derivation as the pursuit branch below: base speed
+                // times any MovementSpeedSlow multipliers. A camper walking at
+                // unslowed speed would ignore Frost Trap and Concussive Shot.
+                let mut movement_speed = combatant.base_movement_speed;
+                if let Some(auras) = auras {
+                    for aura in &auras.auras {
+                        if aura.effect_type == AuraType::MovementSpeedSlow {
+                            movement_speed *= aura.magnitude;
+                        }
+                    }
+                }
+                let step = Vec3::new(dir.x, 0.0, dir.y) * movement_speed * dt;
+                transform.translation =
+                    resolve_and_clamp(&map_geometry.bounds, &map_geometry.volumes, my_pos, my_pos + step);
+            }
+            // Face the enemy while holding, so the camp reads as deliberate.
+            let facing = target_pos - transform.translation;
+            if facing.length_squared() > 1e-6 {
+                transform.rotation = Quat::from_rotation_y(facing.x.atan2(facing.z));
+            }
+            continue;
+        }
 
         // If out of range, move towards target
         if distance > stop_distance {
