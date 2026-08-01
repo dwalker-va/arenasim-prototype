@@ -601,6 +601,10 @@ pub fn setup_play_match(
     item_defs: Res<ItemDefinitions>,
     default_loadouts: Res<DefaultLoadouts>,
     map_geometry: Res<MapGeometryConfig>,
+    // A `--replay` launch pre-inserts these so a recorded seed reproduces
+    // exactly. Present => honour them; absent => fresh defaults as normal.
+    existing_rng: Option<Res<GameRng>>,
+    existing_profile: Option<Res<ai_profile::AiProfile>>,
 ) {
     info!("Setting up Play Match scene with config: {:?}", *config);
 
@@ -672,14 +676,24 @@ pub fn setup_play_match(
     // Legacy, so experimental behaviour is never on by accident.
     // Graphical mode has no profile selector yet, so it runs Legacy. When the
     // TeamPlan work is playable this should read from GameSettings.
-    commands.insert_resource(ai_profile::AiProfile::default());
+    // Do not clobber a profile a replay launch already chose.
+    let profile = existing_profile.map(|p| *p).unwrap_or_default();
+    info!("AI profile: {:?}", profile);
+    commands.insert_resource(profile);
     commands.insert_resource(team_plan::TeamPlans::default());
 
     // Initialize Shadow Sight state (for stealth stalemate breaking)
     commands.insert_resource(ShadowSightState::default());
 
     // Initialize random number generator (non-deterministic for graphical mode)
-    commands.insert_resource(GameRng::default());
+    // Same for the RNG: a replay pre-seeds it, so overwriting here would make
+    // the recorded seed meaningless — the whole point is bit-exact reproduction.
+    let rng = match existing_rng {
+        Some(r) if r.seed.is_some() => GameRng::from_seed(r.seed.unwrap()),
+        _ => GameRng::default(),
+    };
+    info!("Match seed: {:?}", rng.seed);
+    commands.insert_resource(rng);
 
     // Initialize display settings from game settings
     commands.insert_resource(DisplaySettings {

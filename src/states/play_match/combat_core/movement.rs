@@ -241,6 +241,87 @@ pub fn move_to_target(
             }
         }
 
+        // PILLAR CAMP (team strategy): hold cover and make the enemy cross the
+        // arena. Sits ABOVE the posture directive deliberately — the strategy
+        // layer subordinates execution, it does not race it.
+        //
+        // This block used to live down in the pursuit path, below the directive
+        // branch's `continue`. Melee reach that path so their camp worked; healers
+        // almost always carry a posture directive, so their camp only fired in the
+        // GAPS between directives. The result was a Priest oscillating 17-26yd
+        // from its pillar for a whole match — never arriving, never healing,
+        // because two layers were issuing contradictory orders with no arbitration.
+        //
+        // Still below CC and the scripted Charge/Disengage bursts: a camp must not
+        // override being stunned, and a committed dash outranks a positioning
+        // intent.
+        //
+        // Threat reference is the NEAREST enemy, not the kill target: you take
+        // cover from whoever is coming at you, which for a healer is rarely the
+        // unit it is trying to damage.
+        let camp_spot = team_plans.as_ref().and_then(|plans| {
+            let plan = plans.for_team(combatant.team);
+            if plan.stance != Stance::Hold {
+                return None;
+            }
+            let anchor = plan.anchor?;
+            let nearest = positions
+                .iter()
+                .filter(|(_, (_, team))| *team != combatant.team)
+                .map(|(_, (pos, _))| (my_pos.distance(*pos), *pos))
+                .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+            let (nearest_d, nearest_pos) = nearest?;
+            if !should_hold(Some(nearest_d), CAMP_ENGAGE_RADIUS) {
+                return None;
+            }
+            hold_position(
+                &map_geometry.volumes,
+                anchor,
+                Vec2::new(nearest_pos.x, nearest_pos.z),
+            )
+            .map(|spot| (spot, nearest_pos))
+        });
+
+        if let Some((spot, face_pos)) = camp_spot {
+            let dest = Vec3::new(spot.x, my_pos.y, spot.y);
+            let to_spot = dest - my_pos;
+            if Vec2::new(to_spot.x, to_spot.z).length() > CAMP_ARRIVAL_EPSILON {
+                let dir = steer_toward_goal(
+                    &map_geometry.volumes,
+                    Vec2::new(my_pos.x, my_pos.z),
+                    spot,
+                    my_pos.y,
+                )
+                .unwrap_or_else(|| Vec2::new(to_spot.x, to_spot.z).normalize_or_zero());
+                // Same speed derivation as every other branch: base speed times
+                // MovementSpeedSlow, or a camper would ignore Frost Trap.
+                let mut movement_speed = combatant.base_movement_speed;
+                if let Some(auras) = auras {
+                    for aura in &auras.auras {
+                        if aura.effect_type == AuraType::MovementSpeedSlow {
+                            movement_speed *= aura.magnitude;
+                        }
+                    }
+                }
+                let step = Vec3::new(dir.x, 0.0, dir.y) * movement_speed * dt;
+                transform.translation = resolve_and_clamp(
+                    &map_geometry.bounds,
+                    &map_geometry.volumes,
+                    my_pos,
+                    my_pos + step,
+                );
+            }
+            // Face the approach while holding, so the camp reads as deliberate.
+            let facing = face_pos - transform.translation;
+            if facing.length_squared() > 1e-6 {
+                transform.rotation = Quat::from_rotation_y(facing.x.atan2(facing.z));
+            }
+            // A camp overrides the posture directive; drop it so the unit does not
+            // resume a stale walk the instant the camp releases.
+            commands.entity(entity).remove::<MovementDirective>();
+            continue;
+        }
+
         // MOVEMENT DIRECTIVE: execute an unexpired directive issued by class
         // AI (healer postures + the Mage/Hunter ENGAGE/KITE machine). Ladder
         // position is deliberate: casting/channeling/root/stun continue ABOVE
@@ -439,73 +520,6 @@ pub fn move_to_target(
         } else {
             combatant.class.preferred_range()
         };
-
-        // Pillar camp: hold cover and make the enemy cross the arena, instead of
-        // walking at them. This is the "hold ground" primitive — every other
-        // posture approaches, orbits or flees, and none waits somewhere
-        // advantageous.
-        //
-        // Only while the plan says Hold AND the enemy has not committed. A camp
-        // that never releases is a unit refusing to fight, which would run every
-        // match to its duration cap; `should_hold` ends it once they close.
-        // Inert under Legacy (the planner leaves `anchor: None`), so recorded
-        // baselines are unaffected.
-        let camp_spot = team_plans.as_ref().and_then(|plans| {
-            let plan = plans.for_team(combatant.team);
-            if plan.stance != Stance::Hold {
-                return None;
-            }
-            let anchor = plan.anchor?;
-            // Distance to the nearest LIVING enemy, for the release check.
-            let nearest_enemy = positions
-                .iter()
-                .filter(|(_, (_, team))| *team != combatant.team)
-                .map(|(_, (pos, _))| my_pos.distance(*pos))
-                .fold(f32::INFINITY, f32::min);
-            let nearest = nearest_enemy.is_finite().then_some(nearest_enemy);
-            if !should_hold(nearest, CAMP_ENGAGE_RADIUS) {
-                return None;
-            }
-            // Stand on the far side of the anchor from where they are coming.
-            let threat_from = Vec2::new(target_pos.x, target_pos.z);
-            hold_position(&map_geometry.volumes, anchor, threat_from)
-        });
-
-        if let Some(spot) = camp_spot {
-            let dest = Vec3::new(spot.x, my_pos.y, spot.y);
-            let to_spot = dest - my_pos;
-            let planar = Vec2::new(to_spot.x, to_spot.z).length();
-            // Walk to the spot, then stand still — holding, not orbiting.
-            if planar > CAMP_ARRIVAL_EPSILON {
-                let dir = steer_toward_goal(
-                    &map_geometry.volumes,
-                    Vec2::new(my_pos.x, my_pos.z),
-                    spot,
-                    my_pos.y,
-                )
-                .unwrap_or_else(|| Vec2::new(to_spot.x, to_spot.z).normalize_or_zero());
-                // Same speed derivation as the pursuit branch below: base speed
-                // times any MovementSpeedSlow multipliers. A camper walking at
-                // unslowed speed would ignore Frost Trap and Concussive Shot.
-                let mut movement_speed = combatant.base_movement_speed;
-                if let Some(auras) = auras {
-                    for aura in &auras.auras {
-                        if aura.effect_type == AuraType::MovementSpeedSlow {
-                            movement_speed *= aura.magnitude;
-                        }
-                    }
-                }
-                let step = Vec3::new(dir.x, 0.0, dir.y) * movement_speed * dt;
-                transform.translation =
-                    resolve_and_clamp(&map_geometry.bounds, &map_geometry.volumes, my_pos, my_pos + step);
-            }
-            // Face the enemy while holding, so the camp reads as deliberate.
-            let facing = target_pos - transform.translation;
-            if facing.length_squared() > 1e-6 {
-                transform.rotation = Quat::from_rotation_y(facing.x.atan2(facing.z));
-            }
-            continue;
-        }
 
         // If out of range, move towards target
         if distance > stop_distance {
