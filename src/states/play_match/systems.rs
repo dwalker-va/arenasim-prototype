@@ -164,10 +164,12 @@ where
             process_holy_shock_heals,
             process_holy_shock_damage,
             process_mana_burn,
-            // Team-level strategy. Inert in step 2 of the TeamPlan migration —
-            // it recomputes on roster change and always produces `anchor: None`,
-            // and nothing reads the result. Registered here so the cadence and
-            // dual-mode wiring are exercised before any behaviour depends on it.
+            // Team-level strategy. Recomputes on roster change; NOTHING reads the
+            // result yet, so it is a no-op in both profiles. Under the default
+            // `AiProfile::Legacy` it does not even select a plan, which is what
+            // keeps the recorded behaviour baselines valid. Registered here so the
+            // cadence and dual-mode wiring are exercised before any behaviour
+            // depends on it.
             // Must never draw from GameRng: it shares this schedule with the AI,
             // so a draw would shift every downstream roll.
             update_team_plans,

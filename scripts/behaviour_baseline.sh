@@ -60,8 +60,13 @@ json.dump({
     "random_seed": int(seed), "ai_profile": prof,
 }, open(out, "w"))
 PY
-      cargo run --release --quiet -- --headless "$TMP/cfg.json" >/dev/null 2>&1
-      log=$(ls -t match_logs/match_*.txt | head -1)
+      # stderr is kept: with `set -e` a build or match failure would otherwise
+      # abort the whole sweep with no diagnostic at all.
+      cargo run --release --quiet -- --headless "$TMP/cfg.json" >/dev/null
+      # `sed -n 1p`, not `head -1`: head exits after the first line, and under
+      # `set -o pipefail` the resulting SIGPIPE on `ls` fails the assignment once
+      # match_logs/ grows past a pipe buffer. sed drains the stream.
+      log=$(ls -t match_logs/match_*.txt | sed -n 1p)
       # Whole value, not $2 — "Winner: Team 1" would otherwise record as "Team".
       winner=$(grep -m1 '^Winner:'   "$log" | sed 's/^Winner: *//' | tr ' ' '_')
       dur=$(grep    -m1 '^Duration:' "$log" | awk '{print $2}')

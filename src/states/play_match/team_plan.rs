@@ -1,12 +1,17 @@
 //! Team-level strategy layer — the `TeamPlan` from
 //! `design-docs/team-level-positioning-ai.md`.
 //!
-//! **Step 2 of the migration: this is deliberately inert.** The types, the
-//! resource, and the recompute cadence all exist and run, but every plan carries
-//! `anchor: None` and nothing consumes a plan yet. That is the point — landing the
-//! scaffolding as a *provable* no-op means the next step changes behaviour on
-//! purpose rather than by accident, and any drift it causes is attributable to it
-//! alone.
+//! **The layer is inert under `AiProfile::Legacy`, which is the default and what
+//! every recorded baseline runs.** The types, the resource, and the recompute
+//! cadence all exist and run, but under `Legacy` every plan is
+//! `TeamPlan::default()` (`anchor: None`), and nothing consumes a plan yet in
+//! EITHER profile. That is the point — landing the scaffolding as a *provable*
+//! no-op means the next step changes behaviour on purpose rather than by
+//! accident, and any drift it causes is attributable to it alone.
+//!
+//! Under `AiProfile::TeamPlan` the planner does select a real anchor and stance
+//! (see [`update_team_plans`]); that output is still read by nothing, so it is
+//! observable only in tests.
 //!
 //! Verify the no-op with the recorded baseline, not the test suite:
 //!
@@ -38,6 +43,7 @@ use std::collections::BTreeMap;
 
 use super::components::{Combatant, MatchCountdown};
 use super::ai_profile::AiProfile;
+use super::constants::PET_SLOT_BASE;
 use super::map_config::ActiveMapGeometry;
 use super::map_geometry::ObstacleVolume;
 use crate::states::match_config::CharacterClass;
@@ -178,6 +184,18 @@ pub fn classify_comp(classes: &[CharacterClass]) -> CompProfile {
 /// to you. Ties break on the lowest index so the choice is deterministic — the
 /// four Nagrand pillars are symmetric, so ties are the normal case, not an edge.
 ///
+/// `spawn_x` must be the team's ACTUAL spawn abscissa (`ArenaBounds::team_spawn_x`,
+/// signed by side) — not a `±1.0` side sentinel. With a sentinel the ranking
+/// inverts: `|center.x - ±1|` is smallest for the pillar nearest the arena
+/// CENTRE, i.e. the one furthest from the gate. That is invisible on Nagrand only
+/// because its two same-side pillars share an `x` and therefore tie.
+///
+/// Side membership uses a strict product test rather than `signum`, because
+/// `(0.0f32).signum() == 1.0` and `(-0.0f32).signum() == -1.0` — an obstacle
+/// sitting exactly on the centre line would otherwise be silently handed to one
+/// team based on the sign of a zero. A centre-line obstacle belongs to neither
+/// side and is skipped by both.
+///
 /// Returns `None` when the map has no obstacles, which is what keeps this inert
 /// on BasicArena without a separate map check.
 pub fn choose_anchor(volumes: &[ObstacleVolume], spawn_x: f32) -> Option<Anchor> {
@@ -185,7 +203,7 @@ pub fn choose_anchor(volumes: &[ObstacleVolume], spawn_x: f32) -> Option<Anchor>
     for (i, v) in volumes.iter().enumerate() {
         let (center, _) = v.footprint_disc();
         // Same side of the arena as our gate, and nearest to it.
-        if center.x.signum() != spawn_x.signum() {
+        if center.x * spawn_x <= 0.0 {
             continue;
         }
         let d = (center.x - spawn_x).abs();
@@ -198,9 +216,11 @@ pub fn choose_anchor(volumes: &[ObstacleVolume], spawn_x: f32) -> Option<Anchor>
 
 /// Recompute both teams' plans when the roster changes.
 ///
-/// **Step 2: produces `anchor: None` for every comp, and nothing reads the
-/// result.** The cadence and the wiring are real so that step 3 only has to add
-/// the decision, but the output is inert by construction.
+/// **Under `AiProfile::Legacy` (the default) this produces `TeamPlan::default()`
+/// for every comp, and nothing reads the result in either profile.** The cadence
+/// and the wiring are real so that step 3 only has to add the consumer. Under
+/// `AiProfile::TeamPlan` a camping comp on a map with cover gets a real
+/// `Anchor::Obstacle` and `Stance::Hold`.
 ///
 /// Cadence is roster-driven rather than per-frame: gates opening and any
 /// combatant dying are the events that invalidate a plan. Pets are excluded — a
@@ -241,6 +261,13 @@ pub fn update_team_plans(
         .as_ref()
         .map(|g| g.volumes.as_slice())
         .unwrap_or(&[]);
+    // `choose_anchor` ranks by distance to the GATE, so it needs the real spawn
+    // abscissa, not a side sentinel — see its doc comment. Without geometry there
+    // are no volumes either, so the fallback magnitude is never actually used.
+    let spawn_mag = geometry
+        .as_ref()
+        .map(|g| g.bounds.team_spawn_x())
+        .unwrap_or(1.0);
 
     for team in [1u8, 2u8] {
         if !team_plan_active {
@@ -258,14 +285,14 @@ pub fn update_team_plans(
         // Team 1 spawns at -x, team 2 at +x. Camping the cover nearest our own
         // gate is what makes the enemy walk to us; camping theirs would mean
         // crossing the arena first.
-        let spawn_side = if team == 1 { -1.0 } else { 1.0 };
+        let spawn_x = if team == 1 { -spawn_mag } else { spawn_mag };
 
         // A camp is only meaningful for a comp that must close to deal damage,
         // and only where there is cover to hold. `choose_anchor` returns None on
         // an obstacle-free map, so BasicArena needs no separate guard.
         let anchor = comp
             .wants_to_camp()
-            .then(|| choose_anchor(volumes, spawn_side))
+            .then(|| choose_anchor(volumes, spawn_x))
             .flatten();
 
         let plan = plans.for_team_mut(team);
@@ -273,19 +300,17 @@ pub fn update_team_plans(
         // Hold ground and make them come; without an anchor there is nothing to
         // hold, so fall back to today's behaviour.
         plan.stance = if anchor.is_some() { Stance::Hold } else { Stance::Press };
+        // Cleared, not carried: the commonest replan trigger is a death, and the
+        // dead unit is exactly the one most likely to be the stale `kill_target`.
+        // Leaving it would hand step 3's consumer a despawned `Entity`.
+        plan.kill_target = None;
         plan.intents.clear();
     }
 }
 
-/// Slots at or above this are pets. Mirrors the convention in `acquire_targets`.
-const PET_SLOT_BASE: u8 = 100;
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-
-    use crate::states::match_config::CharacterClass;
 
     /// Drive `update_team_plans` over a real `World`, so the cadence is tested as
     /// wired rather than as intended.
@@ -302,6 +327,35 @@ mod tests {
                 c.current_health = 0.0;
             }
             app.world_mut().spawn(c);
+        }
+        app.add_systems(Update, update_team_plans);
+        app.update();
+        app.world().resource::<TeamPlans>().clone()
+    }
+
+    /// As `run_planner`, but with an `AiProfile` and Nagrand's geometry present,
+    /// so the plan-SELECTION branch runs rather than being skipped for want of
+    /// resources.
+    fn run_planner_with_profile(
+        profile: AiProfile,
+        roster: &[(u8, u8, CharacterClass)],
+    ) -> TeamPlans {
+        let mut app = App::new();
+        app.insert_resource(MatchCountdown { time_remaining: 0.0, gates_opened: true });
+        app.insert_resource(TeamPlans::default());
+        app.insert_resource(profile);
+        app.insert_resource(ActiveMapGeometry {
+            bounds: super::super::arena_bounds::ArenaBounds::Bowl {
+                semi_x: 59.72,
+                semi_z: 59.72,
+                alcove_depth: 10.0,
+                alcove_half_width: 8.0,
+            },
+            volumes: nagrand(),
+            cover_anchors: Vec::new(),
+        });
+        for &(team, slot, class) in roster {
+            app.world_mut().spawn(Combatant::new(team, slot, class));
         }
         app.add_systems(Update, update_team_plans);
         app.update();
@@ -326,10 +380,49 @@ mod tests {
         let plans = run_planner(true, &[(1, 0, true), (1, 1, true), (2, 0, true)]);
         assert_eq!(plans.revisions, 1, "planner should have recomputed exactly once");
         assert_eq!(plans.roster, vec![(1, 0), (1, 1), (2, 0)]);
-        // ...and step 2's output is still inert.
+        // ...and with no `AiProfile` resource the output stays inert.
         for team in [1u8, 2u8] {
             assert_eq!(plans.for_team(team).anchor, None);
         }
+    }
+
+    /// `Legacy` is the default and what every recorded baseline runs — it must
+    /// keep producing the inert plan even on a map with cover and a camping comp,
+    /// or the baselines stop meaning anything.
+    #[test]
+    fn legacy_profile_stays_inert_on_a_map_with_cover() {
+        let plans = run_planner_with_profile(
+            AiProfile::Legacy,
+            &[(1, 0, CharacterClass::Warrior), (1, 1, CharacterClass::Priest), (2, 0, CharacterClass::Mage)],
+        );
+        for team in [1u8, 2u8] {
+            assert_eq!(plans.for_team(team).anchor, None, "Legacy must not select an anchor");
+            assert_eq!(plans.for_team(team).stance, Stance::Press);
+        }
+    }
+
+    /// The plan-selection branch itself, driven through a real `World` — without
+    /// this the entire `TeamPlan`-profile path is covered only by the pure
+    /// helpers, and the wiring between them is untested.
+    #[test]
+    fn team_plan_profile_selects_a_same_side_anchor_for_a_camping_comp() {
+        let plans = run_planner_with_profile(
+            AiProfile::TeamPlan,
+            &[(1, 0, CharacterClass::Warrior), (1, 1, CharacterClass::Priest), (2, 0, CharacterClass::Mage)],
+        );
+
+        // Team 1 is melee + healer on a map with cover: it camps, on a -x pillar.
+        let p1 = plans.for_team(1);
+        let Some(Anchor::Obstacle(i)) = p1.anchor else {
+            panic!("melee + healer on a map with cover should anchor, got {:?}", p1.anchor)
+        };
+        assert!(matches!(i, 0 | 1), "team 1 must anchor on a -x pillar, got {i}");
+        assert_eq!(p1.stance, Stance::Hold);
+
+        // Team 2 is a lone Mage: nothing to camp with, so today's behaviour.
+        let p2 = plans.for_team(2);
+        assert_eq!(p2.anchor, None, "a pure-ranged comp gains nothing from camping");
+        assert_eq!(p2.stance, Stance::Press);
     }
 
     /// Dead combatants leave the roster, so a death triggers a replan — that is
@@ -344,8 +437,27 @@ mod tests {
     /// trying to do, and letting it churn the plan would make the cadence noise.
     #[test]
     fn pets_do_not_enter_the_roster() {
-        let plans = run_planner(true, &[(1, 0, true), (1, PET_SLOT_BASE, true), (2, 0, true)]);
-        assert_eq!(plans.roster, vec![(1, 0), (2, 0)], "pet slot should be excluded");
+        // Real pets get `PET_SLOT_BASE + owner_slot`, so exercise actual pet
+        // slots, not just the boundary. An earlier version of this test spawned a
+        // LOCAL `PET_SLOT_BASE` that disagreed with the project constant by 10x,
+        // so it asserted the filter against its own wrong value and could never
+        // fail while real pets sailed straight into the roster.
+        let plans = run_planner(
+            true,
+            &[
+                (1, 0, true),
+                (1, 1, true),
+                (1, PET_SLOT_BASE, true),     // team 1 slot-0's pet
+                (1, PET_SLOT_BASE + 1, true), // team 1 slot-1's pet
+                (2, 0, true),
+                (2, PET_SLOT_BASE, true),
+            ],
+        );
+        assert_eq!(
+            plans.roster,
+            vec![(1, 0), (1, 1), (2, 0)],
+            "pets must not enter the roster — a pet dying does not change what a team wants"
+        );
     }
 
     /// A stable roster must not recompute — the plan is an intent that persists,
@@ -368,8 +480,10 @@ mod tests {
         );
     }
 
-
-    use crate::states::play_match::map_geometry::ObstacleVolume;
+    /// Nagrand's real spawn abscissa (`Bowl { semi_x: 59.72, alcove_depth: 10.0 }`
+    /// -> 59.72 + 5.0). `choose_anchor` ranks by distance to the GATE, so probing
+    /// it with a `±1.0` side sentinel would exercise the inverted ordering.
+    const NAGRAND_SPAWN_X: f32 = 64.72;
 
     fn pillar(x: f32, z: f32) -> ObstacleVolume {
         ObstacleVolume::Prism {
@@ -423,11 +537,11 @@ mod tests {
     fn anchor_is_on_the_teams_own_side() {
         let v = nagrand();
         // Team 1 spawns at -x.
-        let a1 = choose_anchor(&v, -1.0).expect("a -x pillar exists");
+        let a1 = choose_anchor(&v, -NAGRAND_SPAWN_X).expect("a -x pillar exists");
         let Anchor::Obstacle(i1) = a1 else { panic!("expected an obstacle anchor") };
         assert!(matches!(i1, 0 | 1), "team 1 must anchor on a -x pillar, got {i1}");
 
-        let a2 = choose_anchor(&v, 1.0).expect("a +x pillar exists");
+        let a2 = choose_anchor(&v, NAGRAND_SPAWN_X).expect("a +x pillar exists");
         let Anchor::Obstacle(i2) = a2 else { panic!("expected an obstacle anchor") };
         assert!(matches!(i2, 2 | 3), "team 2 must anchor on a +x pillar, got {i2}");
     }
@@ -437,18 +551,41 @@ mod tests {
     #[test]
     fn anchor_choice_is_deterministic_under_ties() {
         let v = nagrand();
-        let first = choose_anchor(&v, -1.0);
+        let first = choose_anchor(&v, -NAGRAND_SPAWN_X);
         for _ in 0..16 {
-            assert_eq!(choose_anchor(&v, -1.0), first);
+            assert_eq!(choose_anchor(&v, -NAGRAND_SPAWN_X), first);
         }
+    }
+
+    /// The ranking is distance to the GATE, not to the arena centre. Pinning this
+    /// on an ASYMMETRIC same-side pair is the only way to catch it: Nagrand's two
+    /// -x pillars tie, so a fully inverted comparison passes there.
+    #[test]
+    fn anchor_is_the_pillar_nearest_our_gate() {
+        // Index 0 is deep in our half (near the gate); index 1 sits near centre.
+        let v = vec![pillar(-40.0, 0.0), pillar(-10.0, 0.0)];
+        assert_eq!(
+            choose_anchor(&v, -NAGRAND_SPAWN_X),
+            Some(Anchor::Obstacle(0)),
+            "must pick the pillar nearest our own gate, not the one nearest centre"
+        );
+    }
+
+    /// A pillar exactly on the centre line belongs to NEITHER side. `signum` would
+    /// hand it to a team based on the sign of a zero (`(0.0f32).signum() == 1.0`).
+    #[test]
+    fn centre_line_obstacles_belong_to_neither_side() {
+        let v = vec![pillar(0.0, 0.0), pillar(-0.0, 5.0)];
+        assert_eq!(choose_anchor(&v, -NAGRAND_SPAWN_X), None);
+        assert_eq!(choose_anchor(&v, NAGRAND_SPAWN_X), None);
     }
 
     /// No obstacles means no anchor — which is what keeps this inert on
     /// BasicArena without a separate map check.
     #[test]
     fn no_obstacles_yields_no_anchor() {
-        assert_eq!(choose_anchor(&[], -1.0), None);
-        assert_eq!(choose_anchor(&[], 1.0), None);
+        assert_eq!(choose_anchor(&[], -NAGRAND_SPAWN_X), None);
+        assert_eq!(choose_anchor(&[], NAGRAND_SPAWN_X), None);
     }
 
     #[test]
@@ -456,7 +593,7 @@ mod tests {
         let plans = TeamPlans::default();
         for team in [1u8, 2u8] {
             let p = plans.for_team(team);
-            assert_eq!(p.anchor, None, "step 2 must produce no anchor");
+            assert_eq!(p.anchor, None, "the default plan must carry no anchor");
             assert_eq!(p.stance, Stance::Press);
             assert_eq!(p.kill_target, None);
             assert!(p.intents.is_empty());
