@@ -274,10 +274,24 @@ pub fn move_to_target(
             if !should_hold(Some(nearest_d), CAMP_ENGAGE_RADIUS) {
                 return None;
             }
+            // A healer must keep its partner in sight while holding cover, or the
+            // camp traps it behind the pillar unable to heal — observed directly:
+            // the Priest reached cover and sat there while the Warrior died.
+            // Nearest living non-pet ally stands in for "the partner" at 2v2.
+            let keep_sighted = combatant.class.is_healer().then(|| {
+                positions
+                    .iter()
+                    .filter(|(e, (_, team))| *team == combatant.team && **e != entity)
+                    .map(|(_, (pos, _))| (my_pos.distance(*pos), *pos))
+                    .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
+                    .map(|(_, pos)| Vec2::new(pos.x, pos.z))
+            }).flatten();
+
             hold_position(
                 &map_geometry.volumes,
                 anchor,
                 Vec2::new(nearest_pos.x, nearest_pos.z),
+                keep_sighted,
             )
             .map(|spot| (spot, nearest_pos))
         });

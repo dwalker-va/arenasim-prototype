@@ -45,7 +45,7 @@ use super::components::{Combatant, MatchCountdown};
 use super::ai_profile::AiProfile;
 use super::constants::PET_SLOT_BASE;
 use super::map_config::ActiveMapGeometry;
-use super::map_geometry::{ObstacleVolume, MOVER_RADIUS};
+use super::map_geometry::{has_line_of_sight, ObstacleVolume, EYE_HEIGHT, MOVER_RADIUS};
 use crate::states::match_config::CharacterClass;
 
 /// Where a team wants the fight to happen.
@@ -244,6 +244,9 @@ pub fn hold_position(
     volumes: &[ObstacleVolume],
     anchor: Anchor,
     threat_from: Vec2,
+    // The ally this unit must keep in sight — a healer's partner. `None` for
+    // units with no such obligation (melee), which take the pure shadow point.
+    keep_sighted: Option<Vec2>,
 ) -> Option<Vec2> {
     let Anchor::Obstacle(i) = anchor else {
         // A Point anchor IS the hold position — nothing to stand behind.
@@ -260,7 +263,59 @@ pub fn hold_position(
     if away == Vec2::ZERO {
         return None; // threat standing on the anchor; no meaningful far side
     }
-    Some(center + away * (radius + MOVER_RADIUS + CAMP_STANDOFF))
+    let ring = radius + MOVER_RADIUS + CAMP_STANDOFF;
+    let shadow = center + away * ring;
+
+    // Melee and anyone with no sight obligation: the pure shadow point.
+    let Some(ally) = keep_sighted else {
+        return Some(shadow);
+    };
+
+    // DUAL CONSTRAINT (the healer-pinning case from the design doc): occluded
+    // from the threat AND still able to see the ally. A spot that only satisfies
+    // the first is a healer hiding perfectly and unable to heal — which is
+    // exactly what a pure shadow point produced: the Priest reached cover and
+    // then sat there while its partner died.
+    //
+    // Walk outward from the shadow bearing in alternating steps and take the
+    // first spot meeting both. Alternating keeps the choice symmetric and
+    // deterministic; stepping outward means we give up as little occlusion as
+    // possible to regain sight.
+    let eye = |p: Vec2| Vec3::new(p.x, EYE_HEIGHT, p.y);
+    let ally_eye = eye(ally);
+    let threat_eye = eye(threat_from);
+    let base = away.to_angle();
+    const STEPS: i32 = 12;
+    for i in 0..=STEPS {
+        for sign in [1.0_f32, -1.0] {
+            if i == 0 && sign < 0.0 {
+                continue; // don't test the shadow bearing twice
+            }
+            let ang = base + sign * (i as f32) * (std::f32::consts::PI / STEPS as f32);
+            let cand = center + Vec2::from_angle(ang) * ring;
+            let cand_eye = eye(cand);
+            let sees_ally = has_line_of_sight(volumes, cand_eye, ally_eye);
+            let hidden = !has_line_of_sight(volumes, cand_eye, threat_eye);
+            if sees_ally && hidden {
+                return Some(cand);
+            }
+        }
+    }
+
+    // No spot satisfies both — the geometry does not allow it from this anchor.
+    // Prefer SEEING THE ALLY over hiding: a healer that cannot heal is worse than
+    // one that can be shot at. This is the fallback that keeps the camp from
+    // trapping a healer behind cover.
+    for i in 0..=STEPS {
+        for sign in [1.0_f32, -1.0] {
+            let ang = base + sign * (i as f32) * (std::f32::consts::PI / STEPS as f32);
+            let cand = center + Vec2::from_angle(ang) * ring;
+            if has_line_of_sight(volumes, eye(cand), ally_eye) {
+                return Some(cand);
+            }
+        }
+    }
+    Some(shadow)
 }
 
 /// Whether a camping unit should still be holding, given the nearest enemy.
@@ -577,7 +632,7 @@ mod tests {
         let v = nagrand();
         let anchor = Anchor::Obstacle(0); // pillar at (-40, -20)
         // Enemy approaching from the arena centre.
-        let spot = hold_position(&v, anchor, Vec2::ZERO).expect("a far side exists");
+        let spot = hold_position(&v, anchor, Vec2::ZERO, None).expect("a far side exists");
         let (center, _) = v[0].footprint_disc();
 
         // The pillar centre must lie between the threat and the hold spot.
@@ -593,13 +648,47 @@ mod tests {
         );
     }
 
+
+    /// The healer-pinning case from the design doc: a spot that hides from the
+    /// threat but ALSO keeps the partner in sight. A pure shadow point satisfies
+    /// only the first, which is how the Priest ended up behind its pillar unable
+    /// to heal while its partner died.
+    #[test]
+    fn hold_position_keeps_the_ally_in_sight() {
+        let v = nagrand();
+        let (center, _) = v[0].footprint_disc();
+        let threat = Vec2::ZERO;
+        // Ally on the same side as the threat — the hard case, where the pure
+        // shadow point would put the pillar between healer and ally.
+        let ally = center + (threat - center).normalize() * 20.0;
+
+        let spot = hold_position(&v, Anchor::Obstacle(0), threat, Some(ally))
+            .expect("a hold spot exists");
+        let eye = |p: Vec2| Vec3::new(p.x, EYE_HEIGHT, p.y);
+        assert!(
+            has_line_of_sight(&v, eye(spot), eye(ally)),
+            "a healer must be able to see the ally it is holding cover for; spot {spot:?}"
+        );
+    }
+
+    /// With no sight obligation (melee), the pure shadow point is still used —
+    /// the dual constraint must not change behaviour for units that do not have it.
+    #[test]
+    fn hold_position_without_an_ally_is_the_plain_shadow_point() {
+        let v = nagrand();
+        let (center, radius) = v[0].footprint_disc();
+        let spot = hold_position(&v, Anchor::Obstacle(0), Vec2::ZERO, None).unwrap();
+        let expected = center + (center - Vec2::ZERO).normalize() * (radius + MOVER_RADIUS + CAMP_STANDOFF);
+        assert!(spot.distance(expected) < 1e-3, "melee should take the plain shadow point");
+    }
+
     /// Standing on the pillar is not holding it — the spot must clear the
     /// footprint plus the mover's own radius.
     #[test]
     fn hold_position_clears_the_footprint() {
         let v = nagrand();
         let (center, radius) = v[0].footprint_disc();
-        let spot = hold_position(&v, Anchor::Obstacle(0), Vec2::ZERO).unwrap();
+        let spot = hold_position(&v, Anchor::Obstacle(0), Vec2::ZERO, None).unwrap();
         assert!(
             spot.distance(center) >= radius + MOVER_RADIUS,
             "hold spot is inside the collision skin"
@@ -611,8 +700,8 @@ mod tests {
     #[test]
     fn hold_position_follows_the_approach() {
         let v = nagrand();
-        let from_centre = hold_position(&v, Anchor::Obstacle(0), Vec2::ZERO).unwrap();
-        let from_behind = hold_position(&v, Anchor::Obstacle(0), Vec2::new(-80.0, -40.0)).unwrap();
+        let from_centre = hold_position(&v, Anchor::Obstacle(0), Vec2::ZERO, None).unwrap();
+        let from_behind = hold_position(&v, Anchor::Obstacle(0), Vec2::new(-80.0, -40.0), None).unwrap();
         assert!(
             from_centre.distance(from_behind) > 6.0,
             "opposite approaches should yield opposite sides of the pillar"
@@ -622,8 +711,8 @@ mod tests {
     /// A stale anchor index must not panic a live match.
     #[test]
     fn hold_position_tolerates_a_stale_anchor() {
-        assert_eq!(hold_position(&nagrand(), Anchor::Obstacle(99), Vec2::ZERO), None);
-        assert_eq!(hold_position(&[], Anchor::Obstacle(0), Vec2::ZERO), None);
+        assert_eq!(hold_position(&nagrand(), Anchor::Obstacle(99), Vec2::ZERO, None), None);
+        assert_eq!(hold_position(&[], Anchor::Obstacle(0), Vec2::ZERO, None), None);
     }
 
     /// A camp that never releases is a unit refusing to fight — the match would
