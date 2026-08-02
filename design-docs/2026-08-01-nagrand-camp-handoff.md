@@ -103,7 +103,8 @@ reads positions and health straight off the observer, so the pet-aliasing bug of
 §4.2 cannot recur — entities are keyed by `Entity` and `is_pet` is a field.
 
 **Everything below this section is the original handoff, unedited.** §3.1 is
-superseded by the above and §3.4 is now fixed in place; §3.3, §4 and §5 still stand.
+superseded by the above, and §3.3 and §3.4 are now fixed in place (§3.3's
+original diagnosis was refuted). §4 and §5 still stand.
 
 ---
 
@@ -216,7 +217,60 @@ An earlier plan was to flip melee+healer from `Hold` to `Press`. **That is
 probably the wrong fix** — the stance is not what is broken, the pillar-rounding
 is. Revisit only after 3.1 is measured.
 
-### 3.3 Graphical/headless divergence — diagnosed, not fixed
+### 3.3 Graphical/headless divergence — **CAUSE FOUND 2026-08-02, AND IT IS NOT THIS**
+
+**The archetype / RNG-draw-order hypothesis below is WRONG.** It was never tested,
+and the evidence refutes it: an RNG-order change would alter damage VALUES, but
+every damage value, crit, and event ordering matched between the two modes. Only
+timestamps moved — the signature of a POSITIONAL perturbation, not a reordered
+draw sequence.
+
+Two measurement traps had to be cleared first:
+
+1. **The two duration figures are different clocks.** `MatchResult.match_time`
+   counts only after the gates open; the match log's `Duration` is
+   `combat_log.match_time`, which runs from match start and so includes the 10s
+   countdown. They differ by exactly the countdown (82.24 vs 72.25 on seed 11).
+   Comparing one against the other inflates any apparent divergence by 10s, and
+   §3.3's original "93.44s vs 79.37s" is not a trustworthy figure.
+2. Both modes tick at exactly 1/60 with a 1:1 tick-to-`match_time` relationship
+   (verified with a temporary counter: 4800 ticks -> 80.0026s in both). So the
+   divergence was never dropped or extra ticks.
+
+**Actual cause: the two pet-spawn paths disagreed.** `headless/runner.rs` mirrors
+the offset by team — `(-2.0, 0.75, 1.5)` for team 1, `(+2.0, 0.75, 1.5)` for team
+2 — so the pet spawns BEHIND its owner on either side. The graphical `spawn_pet`
+used a flat `(-2.0, 0.3, 1.5)` for both, putting team 2's pet two yards toward the
+ENEMY. Four yards of difference on frame one; the Felhunter reached the enemy
+sooner and pulled every subsequent event ~0.7s earlier, growing to 3.8s by the
+end. Found by diffing gate-open positions: every unit matched to three decimals
+except the pet (`66.628` headless vs `62.628` client).
+
+Fixed by mirroring the graphical offset and matching headless's `y`. Result on
+seed 11 — the client and headless logs now agree on the **same 82.24s duration,
+the same winner, and all 284 events with identical damage values**. Headless is
+untouched, so no baseline moves.
+
+**Residual, still open:** two wand-shot pairs fire 2 ticks early in the client
+(74.93 vs 74.97, 77.97 vs 78.00). Cause is `update_walk_animation`, a
+graphical-only system that writes `transform.translation.y = ground_y +
+sin(phase) * 0.10` on every unit every frame — while gameplay range checks use
+`Vec3::distance`, which includes `y`. A ±0.10 bob flips a range-boundary check by
+a tick or two. Two ways to close it, and they trade against each other:
+- Make gameplay distances 2D (x/z). This is what the code already claims
+  ("gameplay distances are on x/z") and `map_geometry` already does, but it
+  **moves the headless baseline**.
+- Move the bob onto a child entity holding the mesh. No baseline movement, but a
+  real refactor of the render hierarchy.
+
+**Known cosmetic cost of the fix as landed:** the graphical pet `y` moved 0.3 ->
+0.75 to match headless, so the pet mesh now sits higher than it was tuned to.
+Making distances 2D would let each mode pick its own `y` and resolve this too.
+
+<details>
+<summary>Original (refuted) diagnosis, kept for the record</summary>
+
+#### Graphical/headless divergence — diagnosed, not fixed
 
 Seed 11 runs **93.44s headless** and **79.37s in the client** (Warrior dies
 50.12s vs 47.83s). Same seed, same profile, same map. A genuinely different
@@ -249,6 +303,8 @@ Three ways to close it:
 
 Recommended: (1). The probe work depends on headless and the client agreeing
 when you want to *watch* a seed you measured — which is exactly what failed.
+
+</details>
 
 ### 3.4 Separate schedule bugs found along the way — **FIXED**
 
@@ -378,8 +434,9 @@ re-measuring against the probes once 3.1 lands.
 
 1. **Side commitment when rounding a pillar** (§3.1) — the primary fix; probes
    are in place to verify it.
-2. **Graphical/headless divergence** (§3.3) — undermines the tool that found
-   this bug in the first place.
+2. ~~**Graphical/headless divergence** (§3.3)~~ — cause found and fixed
+   2026-08-02 (pet spawn offset). A 2-tick residual from the walk-bob remains;
+   see §3.3 for the two ways to close it.
 3. ~~**Schedule bugs** (§3.4)~~ — FIXED 2026-08-01, see §3.4.
 4. **Re-derive `seen_by_wl` / `near8`** with the corrected extractor (§4.2).
 5. **Was the Fear dodgeable?** (§2) — 1.05s of free movement during the school

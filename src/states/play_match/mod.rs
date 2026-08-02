@@ -1069,7 +1069,25 @@ fn spawn_pet(
 ) {
     let pet_slot = PET_SLOT_BASE + owner_combatant.slot;
     let pet_combatant = Combatant::new_pet(owner_combatant.team, pet_slot, pet_type, owner_combatant);
-    let pet_position = owner_position + Vec3::new(-2.0, 0.3, 1.5);
+    // MUST match the headless spawn offsets in `headless/runner.rs` exactly, or a
+    // seed stops reproducing between the two modes.
+    //
+    // The x offset MIRRORS BY TEAM so the pet spawns BEHIND its owner: team 1
+    // starts at -x, team 2 at +x. This used to be a flat `-2.0` for both, which
+    // put team 2's pet two yards toward the ENEMY instead of two yards back — a
+    // four-yard positional difference from headless on the very first frame. The
+    // Felhunter then reached the enemy sooner and shifted every subsequent event
+    // ~0.7s earlier, growing to 3.8s by the end of the match. That is the bulk of
+    // the graphical/headless seed divergence in `design-docs/2026-08-01-nagrand-
+    // camp-handoff.md` §3.3 — it is a POSITIONAL difference, not the archetype /
+    // RNG-draw-order effect that document hypothesised. (An RNG-order change
+    // would alter damage VALUES; every value matched, only timings moved.)
+    //
+    // The y must match too: gameplay range checks use `Vec3::distance`, so height
+    // is not free. 0.75 is headless's value, and headless is what every recorded
+    // baseline runs.
+    let pet_position = owner_position
+        + Vec3::new(if owner_combatant.team == 1 { -2.0 } else { 2.0 }, 0.75, 1.5);
 
     let pet_color = pet_type.color();
     // Stocky capsule for quadruped (tilted horizontal by apply_pet_mesh_tilt system)
