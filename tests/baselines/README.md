@@ -19,7 +19,7 @@ every bound passes all of them. These files close that gap.
 
 ```bash
 # Verify nothing changed
-scripts/behaviour_baseline.sh | diff tests/baselines/legacy_behaviour_2026-07-31.txt -
+scripts/behaviour_baseline.sh | diff tests/baselines/legacy_behaviour_2026-08-01_fixed_timestep.txt -
 
 # Capture a TeamPlan-profile baseline for a paired A/B
 AI_PROFILE=TeamPlan scripts/behaviour_baseline.sh > /tmp/teamplan.txt
@@ -40,13 +40,41 @@ existing one — the old baseline is the record of what behaviour used to be.
 
 ## Files
 
+Newest first. **Diff against the newest.** Older files are kept as the record of
+what behaviour used to be — that is the point of dating them rather than
+overwriting, and it is what makes a claim like "only timestamps moved" checkable
+by someone who was not there.
+
 | File | Captured | Notes |
 |---|---|---|
-| `legacy_behaviour_2026-07-31.txt` | 2026-07-31, `main` @ `4e71746` | `Legacy` profile. 3 maps × 3 comps × 3 seeds. Verified reproducible: two independent runs agreed on all 27 cells. Taken *before* any `TeamPlan` work, on a `main` that already includes PR #89's combat-log-id changes. |
+| `legacy_behaviour_2026-08-01_fixed_timestep.txt` | 2026-08-01 | **Current.** After moving the simulation to `FixedUpdate`. Verified reproducible: two independent runs agreed on all 27 cells. |
+| `legacy_behaviour_2026-07-31.txt` | 2026-07-31, `main` @ `4e71746` | Pre-fixed-timestep. Also verified reproducible when captured. |
+
+### What changed between them, and what did not
+
+Moving combat systems from `Update` to `FixedUpdate` shifted every logged
+timestamp by one tick (1/60 ≈ 0.02s), so all 27 log hashes changed.
+
+**Winner and duration are identical in all 27 cells.** Event order is unchanged.
+The evidence says the simulation is unaffected and only the printed time column
+moved.
+
+That is strong evidence, not proof. The residual one-tick offset is
+**characterised but not explained** — the obvious cause (the match clock left in
+`Update` while the sim moved to `FixedUpdate`) was fixed and the offset survived
+it, so something else in the schedule carries it. If a future investigation shows
+the shift was not benign, the 07-31 file is the record needed to tell.
+
+### Why a new file rather than an overwrite
+
+Overwriting would have destroyed the only record of pre-change behaviour, leaving
+no way to check the "timestamps only" claim. Re-blessing to make a diff disappear
+is exactly the instinct this directory exists to resist; dating the new capture
+lets a real fix land without discarding the evidence that it was safe.
 
 ### Caveat on `TwinPillars ranged_v_melee seed 4`
 
 That cell runs 164s against siblings at 105s and 75s — close enough to the 300s
-cap that a small perturbation could push it to a draw. If a future diff fires on
-only that row, suspect a timing-sensitive cell before suspecting a real
-regression, and check whether the other 26 held.
+cap to be draw-sensitive. If a future diff fires on only that row, suspect a
+timing-sensitive cell before suspecting a real regression, and check whether the
+other 26 held.
