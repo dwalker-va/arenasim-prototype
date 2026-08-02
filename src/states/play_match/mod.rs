@@ -1169,6 +1169,17 @@ pub fn cleanup_play_match(
     commands.remove_resource::<ActiveMapGeometry>();
     commands.remove_resource::<ShadowSightState>();
     commands.remove_resource::<DisplaySettings>();
+    // MUST be removed, not left for the next match: `setup_play_match` treats a
+    // surviving `GameRng` (and `AiProfile`) as "a replay pre-seeded this match"
+    // and honours it. `GameRng::default()` now RECORDS its seed, so leaving the
+    // resource behind made every match after the first in a client session
+    // silently re-run the first match's seed instead of picking a fresh one —
+    // and a `--replay` under TeamPlan leaked that profile into the next normal
+    // match. A real replay inserts both BEFORE the state is entered, so it is
+    // unaffected by this exit-time cleanup.
+    commands.remove_resource::<GameRng>();
+    commands.remove_resource::<ai_profile::AiProfile>();
+    commands.remove_resource::<team_plan::TeamPlans>();
     // Remove optional resources (may not exist if match didn't finish)
     commands.remove_resource::<VictoryCelebration>();
 }

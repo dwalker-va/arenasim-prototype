@@ -332,6 +332,21 @@ fn in_arena_bounds(bounds: &ArenaBounds, x: f32, z: f32) -> bool {
     bounds.contains(Vec3::new(x, 1.0, z))
 }
 
+/// Whether an axis-aligned XZ rectangle lies wholly inside the arena.
+///
+/// Tests ALL FOUR corners. Checking only `(min_x, min_z)` and `(max_x, max_z)`
+/// — which is what the volume checks used to do — misses the two corners on the
+/// other diagonal, and those are the far ones for any volume sitting in the
+/// `(-, +)` or `(+, -)` quadrant. On the circular bowl a pillar at
+/// `(-40, +40)` with `circumradius` 6 validated clean while actually reaching
+/// 62.6yd from centre, i.e. ~3yd through a 59.72yd wall.
+fn rect_in_arena_bounds(bounds: &ArenaBounds, min_x: f32, min_z: f32, max_x: f32, max_z: f32) -> bool {
+    in_arena_bounds(bounds, min_x, min_z)
+        && in_arena_bounds(bounds, max_x, min_z)
+        && in_arena_bounds(bounds, min_x, max_z)
+        && in_arena_bounds(bounds, max_x, max_z)
+}
+
 /// Validate a map's [`ArenaBounds`], pushing every violation.
 ///
 /// `bounds` became RON-authored data with the Nagrand rework, so it needs the same
@@ -423,8 +438,13 @@ fn validate_map(map: &str, def: &MapDef, issues: &mut Vec<String>) {
                     ));
                 }
                 if radius.is_finite()
-                    && (!in_arena_bounds(bounds, center.0 - radius, center.1 - radius)
-                        || !in_arena_bounds(bounds, center.0 + radius, center.1 + radius))
+                    && !rect_in_arena_bounds(
+                        bounds,
+                        center.0 - radius,
+                        center.1 - radius,
+                        center.0 + radius,
+                        center.1 + radius,
+                    )
                 {
                     issues.push(format!(
                         "{map}.volumes[{i}] cylinder center {center:?} ± radius {radius} extends \
@@ -449,7 +469,7 @@ fn validate_map(map: &str, def: &MapDef, issues: &mut Vec<String>) {
                         "{map}.volumes[{i}] box min {min:?} / max {max:?} must be finite"
                     ));
                 }
-                if finite && (!in_arena_bounds(bounds, min.0, min.2) || !in_arena_bounds(bounds, max.0, max.2)) {
+                if finite && !rect_in_arena_bounds(bounds, min.0, min.2, max.0, max.2) {
                     issues.push(format!(
                         "{map}.volumes[{i}] box [{min:?}, {max:?}] extends \
                          outside {map} bounds {bounds:?}"
@@ -492,8 +512,13 @@ fn validate_map(map: &str, def: &MapDef, issues: &mut Vec<String>) {
                 }
                 // Bounded by the circumcircle, so the cylinder check applies.
                 if circumradius.is_finite()
-                    && (!in_arena_bounds(bounds, center.0 - circumradius, center.1 - circumradius)
-                        || !in_arena_bounds(bounds, center.0 + circumradius, center.1 + circumradius))
+                    && !rect_in_arena_bounds(
+                        bounds,
+                        center.0 - circumradius,
+                        center.1 - circumradius,
+                        center.0 + circumradius,
+                        center.1 + circumradius,
+                    )
                 {
                     issues.push(format!(
                         "{map}.volumes[{i}] prism center {center:?} ± circumradius {circumradius} \

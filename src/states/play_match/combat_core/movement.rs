@@ -71,15 +71,22 @@ pub fn move_to_target(
         .map(|(entity, transform, combatant, _, _, _, _, _, _)| (entity, (transform.translation, combatant.team)))
         .collect();
 
-    // Position + team + HP fraction, for the camp's line-of-sight cycle. Separate
-    // from `positions` so that map's shape (and every other consumer of it) is
-    // untouched.
-    let ally_health: std::collections::BTreeMap<Entity, (Vec3, u8, f32)> = combatants
+    // Position + team + HP fraction + pet flag, for the camp's line-of-sight
+    // cycle and its threat scan. Separate from `positions` so that map's shape
+    // (and every other consumer of it) is untouched.
+    //
+    // LIVING units only. `positions` deliberately carries corpses too (its other
+    // consumers are keyed lookups that never scan it), and the camp is the one
+    // place that DOES scan: without this filter a dead enemy still counted as a
+    // threat to hide from, and could even be the "nearest enemy" the camp uses
+    // to decide whether to release.
+    let living: std::collections::BTreeMap<Entity, (Vec3, u8, f32, bool)> = combatants
         .iter()
         .filter(|(_, _, c, _, _, _, _, _, _)| c.is_alive())
         .map(|(entity, transform, c, _, _, _, _, _, _)| {
             let frac = if c.max_health > 0.0 { c.current_health / c.max_health } else { 0.0 };
-            (entity, (transform.translation, c.team, frac))
+            let is_pet = pet_query.get(entity).is_ok();
+            (entity, (transform.translation, c.team, frac, is_pet))
         })
         .collect();
 
@@ -277,11 +284,18 @@ pub fn move_to_target(
             if plan.stance != Stance::Hold {
                 return None;
             }
+            // A pet is not a member of the team's plan — it owes its owner a
+            // flank, not the pillar. Without this a Felhunter/Boar on a camping
+            // comp abandoned its owner and walked to the hold spot, because pets
+            // share their owner's `team` and so matched the stance check.
+            if pet_query.get(entity).is_ok() {
+                return None;
+            }
             let anchor = plan.anchor?;
-            let nearest = positions
+            let nearest = living
                 .iter()
-                .filter(|(_, (_, team))| *team != combatant.team)
-                .map(|(_, (pos, _))| (my_pos.distance(*pos), *pos))
+                .filter(|(_, (_, team, _, _))| *team != combatant.team)
+                .map(|(_, (pos, _, _, _))| (my_pos.distance(*pos), *pos))
                 .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
             let (nearest_d, nearest_pos) = nearest?;
             if !should_hold(Some(nearest_d), CAMP_ENGAGE_RADIUS) {
@@ -297,11 +311,20 @@ pub fn move_to_target(
             // "does anyone need healing?" — if yes, break cover for the cast; if
             // no, hide.
             let keep_sighted = combatant.class.is_healer().then(|| {
-                // Most-injured living ally, and how hurt it is.
-                let worst = ally_health
+                // Most-injured living HEALABLE ally, and how hurt it is. Pets are
+                // excluded because no healer in this codebase ever targets one
+                // (every heal/shield/medic-chase predicate filters `is_pet`), so
+                // including them made the healer break cover to hold sight of a
+                // Felhunter or Hunter pet it could not heal — and, because pets
+                // are squishy and engage first, that pet was usually the
+                // lowest-HP unit on the team, hiding the teammate that did need
+                // the line.
+                let worst = living
                     .iter()
-                    .filter(|(e, (_, team, _))| *team == combatant.team && **e != entity)
-                    .map(|(_, (pos, _, hp))| (*hp, *pos))
+                    .filter(|(e, (_, team, _, is_pet))| {
+                        *team == combatant.team && **e != entity && !*is_pet
+                    })
+                    .map(|(_, (pos, _, hp, _))| (*hp, *pos))
                     .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
                 let (hp, pos) = worst?;
                 should_break_cover(Some(hp)).then_some(Vec2::new(pos.x, pos.z))
@@ -309,10 +332,10 @@ pub fn move_to_target(
 
             // Every living enemy, so the spot maximises how many of them lose
             // sight — hiding from only the nearest left the other caster free.
-            let threats: Vec<Vec2> = positions
+            let threats: Vec<Vec2> = living
                 .iter()
-                .filter(|(_, (_, team))| *team != combatant.team)
-                .map(|(_, (pos, _))| Vec2::new(pos.x, pos.z))
+                .filter(|(_, (_, team, _, _))| *team != combatant.team)
+                .map(|(_, (pos, _, _, _))| Vec2::new(pos.x, pos.z))
                 .collect();
             hold_position(&map_geometry.volumes, anchor, &threats, keep_sighted)
             .map(|spot| (spot, nearest_pos))

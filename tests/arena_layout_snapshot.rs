@@ -31,10 +31,17 @@ use arenasim::states::play_match::arena_bounds::ArenaBounds;
 use arenasim::states::play_match::map_config::{load_map_geometry_config, MapGeometryConfig};
 use arenasim::states::play_match::map_geometry::ObstacleVolume;
 
-/// Load the shipped `assets/config/maps.ron`, falling back to the built-in
-/// defaults if the file is absent (they are kept equivalent by design).
+/// Load the shipped `assets/config/maps.ron`.
+///
+/// Deliberately `expect`, NOT `unwrap_or_default()`: these tests exist to pin the
+/// shipped asset, and the built-in defaults satisfy every assertion below. With a
+/// fallback, the exact edits this file is meant to catch — a typo'd field, a
+/// pillar pushed outside the bounds, a degenerate `corner_sum` — make the loader
+/// return `Err`, the tests silently assert against `MapGeometryConfig::default()`
+/// and pass green, while the real client panics at startup on that same file.
 fn shipped_geometry() -> MapGeometryConfig {
-    load_map_geometry_config().unwrap_or_default()
+    load_map_geometry_config()
+        .expect("assets/config/maps.ron must load and validate — these tests pin the SHIPPED asset")
 }
 
 fn render(map: ArenaMap, name: &str) {

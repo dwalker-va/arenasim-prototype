@@ -47,7 +47,8 @@ by someone who was not there.
 
 | File | Captured | Notes |
 |---|---|---|
-| `legacy_behaviour_2026-08-01_fixed_timestep.txt` | 2026-08-01 | **Current.** After moving the simulation to `FixedUpdate`. Verified reproducible: two independent runs agreed on all 27 cells. |
+| `legacy_behaviour_2026-08-02_backlash_ids.txt` | 2026-08-02 | **Current.** After the `[BACKLASH]` log-id fix. Verified reproducible: two independent runs agreed on all 27 cells. |
+| `legacy_behaviour_2026-08-01_fixed_timestep.txt` | 2026-08-01 | After moving the simulation to `FixedUpdate`. Verified reproducible when captured. |
 | `legacy_behaviour_2026-07-31.txt` | 2026-07-31, `main` @ `4e71746` | Pre-fixed-timestep. Also verified reproducible when captured. |
 
 ### What changed between them, and what did not
@@ -55,15 +56,51 @@ by someone who was not there.
 Moving combat systems from `Update` to `FixedUpdate` shifted every logged
 timestamp by one tick (1/60 ≈ 0.02s), so all 27 log hashes changed.
 
-**Winner and duration are identical in all 27 cells.** Event order is unchanged.
-The evidence says the simulation is unaffected and only the printed time column
-moved.
+**23 of 27 cells kept their winner AND duration. Four did not, and one of those
+flipped the winner:**
 
-That is strong evidence, not proof. The residual one-tick offset is
-**characterised but not explained** — the obvious cause (the match clock left in
-`Update` while the sim moved to `FixedUpdate`) was fixed and the offset survived
-it, so something else in the schedule carries it. If a future investigation shows
-the shift was not benign, the 07-31 file is the record needed to tell.
+| Cell | 07-31 | 08-01 |
+|---|---|---|
+| `TwinPillars pet_comp 1` | Team_2, 85.47s | **Team_1, 71.18s** |
+| `TwinPillars pet_comp 4` | Team_2, 79.54s | Team_2, 80.02s |
+| `TwinPillars pet_comp 7` | Team_2, 83.92s | Team_2, 69.98s |
+| `PillaredArena pet_comp 4` | Team_1, 48.22s | Team_1, 48.23s |
+
+Bisected: the divergence appears exactly at `3a16a46` (the `Update` →
+`FixedUpdate` move) and is NOT the match-clock lag — it survives `a9861e3`, which
+put `headless_track_time` back in phase with the sim. So the schedule move is not
+a pure re-timing of headless: it changes the simulation, and a one-tick offset in
+a deterministic sim is enough to cascade into a different winner.
+
+**This is a real Legacy behaviour change, not a printing artifact.** It is
+confined to the `pet_comp` rows (`Hunter,Shaman` vs `Rogue,Priest`) on the two
+obstacle maps, which is a specific enough signature to chase. Do NOT cite these
+baselines as evidence that the `TeamPlan` work is a no-op without first accounting
+for it; the 07-31 file is the record needed to tell the two apart.
+
+To reproduce the flipped cell:
+
+```bash
+echo '{"team1":["Hunter","Shaman"],"team2":["Rogue","Priest"],"map":"TwinPillars",
+       "max_duration_secs":300,"random_seed":1,"ai_profile":"Legacy"}' > /tmp/c.json
+cargo run --release -- --headless /tmp/c.json
+```
+
+### Recorded: the `[BACKLASH]` id fix changed some digests (text only)
+
+`effects/backlash.rs` was the last combat-log line still written in the retired
+`Team {team} {class}` shape, and it named a dispelling PET as its owner. Fixing it
+to the `#slot` ids changes the TEXT of any log containing a `[BACKLASH]` line, so
+those cells' `log_sha256` move. Verified behaviour-neutral: all nine
+`healer_v_healer` cells (the only comp here with a Warlock) keep their exact
+winner and duration; only the 5 cells that actually emit a `[BACKLASH]` line
+change hash.
+
+Re-blessed as `legacy_behaviour_2026-08-02_backlash_ids.txt`. Confirmed on
+capture: the five cells whose hash moved (`BasicArena healer_v_healer 4/7`,
+`TwinPillars healer_v_healer 4/7`, `PillaredArena healer_v_healer 4`) keep their
+exact winner AND duration, and the other 22 are byte-identical. Do not read those
+five hash diffs as a behaviour change.
 
 ### Why a new file rather than an overwrite
 

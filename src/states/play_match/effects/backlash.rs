@@ -68,6 +68,10 @@ pub fn process_backlash(
     mut combat_log: ResMut<CombatLog>,
     pending: Query<(Entity, &BacklashPending)>,
     mut combatants: Query<(&mut Combatant, Option<&mut ActiveAuras>)>,
+    // The dispeller is routinely a PET — `pet_ai::try_devour_magic` strips an
+    // enemy Warlock's UA off its owner — and a pet's `Combatant.class` is its
+    // OWNER's class, so the log line must resolve its id pet-aware.
+    pet_query: Query<&Pet>,
 ) {
     for (pending_entity, event) in pending.iter() {
         // Despawn the event regardless of outcome.
@@ -86,7 +90,7 @@ pub fn process_backlash(
         }
 
         // ----- Step 1: Apply backlash damage -----
-        let (actual_damage, absorbed, dispeller_team, dispeller_class_name, still_alive) = {
+        let (actual_damage, absorbed, dispeller_id, still_alive) = {
             let (actual_damage, absorbed) = apply_damage_with_absorb(
                 event.damage,
                 &mut dispeller,
@@ -96,8 +100,10 @@ pub fn process_backlash(
             (
                 actual_damage,
                 absorbed,
-                dispeller.team,
-                dispeller.class.name(),
+                crate::states::play_match::utils::combat_log_id_for(
+                    &dispeller,
+                    pet_query.get(event.dispeller).ok(),
+                ),
                 dispeller.is_alive(),
             )
         };
@@ -114,14 +120,14 @@ pub fn process_backlash(
         combat_log.log(
             CombatLogEventType::Damage,
             format!(
-                "[BACKLASH] Team {} {} takes {:.0} Shadow damage and is Silenced by Unstable Affliction",
-                dispeller_team, dispeller_class_name, actual_damage
+                "[BACKLASH] {} takes {:.0} Shadow damage and is Silenced by Unstable Affliction",
+                dispeller_id, actual_damage
             ),
         );
 
         info!(
-            "[BACKLASH] Team {} {} takes {:.0} Shadow damage from Unstable Affliction",
-            dispeller_team, dispeller_class_name, actual_damage
+            "[BACKLASH] {} takes {:.0} Shadow damage from Unstable Affliction",
+            dispeller_id, actual_damage
         );
 
         // Spawn the BacklashBurst visual at the dispeller (graphical mode only —
