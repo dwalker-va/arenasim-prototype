@@ -1,13 +1,107 @@
 # Nagrand pillar-camp: findings and handoff
 
 **Date:** 2026-08-01
-**Branch:** `feat/team-plan-camp` (7 commits ahead of `main`, unpushed)
-**Status:** TeamPlan step 3 (pillar-camp opener) — mechanism works, outcome
-regresses, root cause identified and measured. Fix not started.
+**Branch:** `feat/team-plan-camp` (8 commits ahead of `main`, unpushed)
+**Status:** TeamPlan step 3 (pillar-camp opener) — **regression fixed.** The camp
+now buys 28.3 occlusion-seconds per match against `Legacy`'s 0.0, at win parity
+(9/12 both). A smaller residual remains and is step 4's to fix.
 
 This is a handoff document. It records what is *established*, what was
 *retracted*, and what to do next, so the next session does not re-derive any of
 it or repeat the measurement mistakes.
+
+---
+
+## 0. Resolution (added after §1–§8 were written)
+
+**§3.1 named the wrong fix.** "The healer cannot commit to a side when rounding
+its pillar" is the symptom. The cause is one line of scope:
+
+> **The camp was an opener that never ended.** Its release predicate
+> (`should_hold`) asked *"is an enemy within 15yd of ME"*. For a healer facing a
+> ranged comp that is never true — the enemy stops at 30–40yd to cast — so the
+> camp never released. The Priest stayed welded to a ring 8.5yd around its pillar
+> for the entire match with its posture AI suppressed (the camp branch removes
+> `MovementDirective`), chasing a hold spot that moved as the fight moved.
+
+Measured on seeds 7/11/12 before the fix: the teams met 18.9s after the gates,
+and the healer was **still camping for 71–79% of every frame after that**. When
+it was actively trying to poke for a heal it could not see its Warrior on
+**60–94%** of those frames — while standing a mean 3.6–5.8yd behind its own
+orders.
+
+Three hypotheses were killed by measurement on the way, and are recorded so they
+are not re-run: the healer was never out of heal range (0% of frames beyond
+40yd, mean separation 12.8yd); the commanded hold spot was *stable* (it jumped
+>4yd on 1–4 frames of a whole match, so the ring tie-break is not thrashing);
+and whenever a poke was requested the commanded spot did have line of sight to
+the ally (0 failures) — the healer simply never got there.
+
+### The fix
+
+`teams_in_contact` (`team_plan.rs`): contact is a **team** event — any enemy
+within `CAMP_ENGAGE_RADIUS` of any living member. `update_team_plans` checks it
+every frame, above the roster gate, and latches it per team. On the transition
+the stance drops `Hold` → `Press`, which the movement consumer already reads.
+
+The latch has to outlive a replan. A death is the commonest replan trigger and
+it lands mid-fight; without the latch the recomputed plan hands the comp
+`Stance::Hold` again and marches its healer back to the pillar at the worst
+possible moment. That case is pinned by
+`a_replan_after_contact_does_not_re_arm_the_camp`.
+
+This is the scope the design doc already specifies: step 3 is the opener ("the
+team takes the pillar *before contact*"), and in-fight positioning around cover
+is step 4's focal-rooted team solve.
+
+### Result — 12 paired seeds, `Warrior+Priest` vs `Warlock+Priest`
+
+|  | Legacy | TeamPlan before | TeamPlan after |
+|---|---|---|---|
+| team-1 wins | 9/12 | 5/12 | **9/12** |
+| Warlock denied sight of Priest | 0.0s | — | **28.3s** |
+| heal delivered to Warrior | 481 | 190 | 295 |
+| heal line occluded | 0% | 55% | 25% |
+| mean duration | 58.1s | 86.2s | 76.5s |
+
+**`Legacy` measures 0.0 occlusion-seconds.** That is the number step 3 exists to
+move, and it is the first time this AI has used the Nagrand geometry at all.
+
+### What remains (step 4, not step 3)
+
+Post-release the healer starts the fight standing next to a pillar, and
+`cover_pull` then pins it there — 11.8yd from the camp pillar on average against
+`Legacy`'s 32.6yd. It still loses the heal line on 39% of post-contact frames
+and heals 295 against `Legacy`'s 481. Both pathology probes therefore still
+assert a live pathology, at reduced magnitude; their doc comments carry the
+revised attribution. This is the reactive layer's limit, and step 4 retires
+`cover_pull` for the team solve.
+
+Two smaller things worth knowing, neither fixed:
+
+- **The camp stacks the team on one coordinate.** Separation between Warrior and
+  Priest at contact is *exactly* 0.0yd: with `keep_sighted: None` both units feed
+  `hold_position` identical inputs and get the identical point. A melee/healer
+  opener presumably wants the melee screening, not co-located.
+- **A geometric probe cannot decide whether the camp released.** Position alone
+  does not separate "camp active" from "`cover_pull` picking a similar spot"
+  (on-ring occupancy was 31% early vs 22% late — no separation). One was drafted
+  and deleted rather than fitted to a threshold. The release seam is decided in
+  `team_plan.rs`'s unit tests, where it is unambiguous.
+
+### Reproduce
+
+```bash
+cargo test --release --test camp_sweep -- --ignored --nocapture       # the table above
+cargo test --release --test movement_probes pillar_self_block -- --nocapture
+```
+
+`tests/camp_sweep.rs` replaces the scratch sweep script §6 records as lost. It
+reads positions and health straight off the observer, so the pet-aliasing bug of
+§4.2 cannot recur — entities are keyed by `Entity` and `is_pet` is a field.
+
+**Everything below this section is the original handoff, unedited.** §3.1 is
+superseded by the above; §3.3, §3.4, §4 and §5 all still stand.
 
 ---
 

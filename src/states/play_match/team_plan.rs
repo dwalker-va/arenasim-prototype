@@ -126,6 +126,9 @@ pub struct TeamPlans {
     /// seconds; a per-frame plan would just be the movement scorer with extra
     /// steps.
     roster: Vec<(u8, u8)>,
+    /// Set once, per team, when the teams first meet — and never cleared.
+    /// See [`teams_in_contact`] for why the latch has to outlive a replan.
+    contact: [bool; 2],
     /// Number of recomputes this match. Exposed for tests and tracing — a plan
     /// layer that silently never recomputes looks identical to a working one.
     pub revisions: u32,
@@ -139,8 +142,17 @@ impl TeamPlans {
         &self.plans[usize::from(team.saturating_sub(1)).min(1)]
     }
 
+    /// Whether `team` has met the enemy yet. Once true, always true.
+    pub fn has_contact(&self, team: u8) -> bool {
+        self.contact[Self::index(team)]
+    }
+
+    fn index(team: u8) -> usize {
+        usize::from(team.saturating_sub(1)).min(1)
+    }
+
     fn for_team_mut(&mut self, team: u8) -> &mut TeamPlan {
-        &mut self.plans[usize::from(team.saturating_sub(1)).min(1)]
+        &mut self.plans[Self::index(team)]
     }
 }
 
@@ -350,12 +362,43 @@ pub fn should_break_cover(worst_ally_hp_fraction: Option<f32>) -> bool {
 /// position until the match hit its duration cap. Once the enemy has committed
 /// (come within `engage_radius`), the camp has done its job: it made them cross
 /// the arena, and normal combat takes over from there.
+///
+/// This is the PER-UNIT half of the release, and on its own it is not enough:
+/// see [`teams_in_contact`], which is what actually ends the camp.
 pub fn should_hold(nearest_enemy_distance: Option<f32>, engage_radius: f32) -> bool {
     match nearest_enemy_distance {
         // Nobody near: keep holding, this is the pre-contact camp.
         None => true,
         Some(d) => d > engage_radius,
     }
+}
+
+/// Have the two teams met? True once ANY enemy is within `engage_radius` of ANY
+/// living member of the camping team.
+///
+/// **This is what ends a camp, and asking it per-unit instead was the bug.**
+/// `should_hold` releases a unit when an enemy walks into *its own* bubble. A
+/// healer facing a ranged comp never has that happen: the enemy stops at 30-40yd
+/// to cast, so the healer's personal bubble stays empty for the entire match and
+/// its camp never released. Measured on `Warrior+Priest` vs `Warlock+Priest` over
+/// seeds 7/11/12: the teams met 18.9s after the gates, and the healer was still
+/// camping for 71-79% of every frame after that — welded to a ring 8.5yd around
+/// its pillar while the fight moved 20-30yd away, with its posture AI suppressed
+/// (the camp branch removes `MovementDirective`). It could not see the ally it
+/// was there to heal on 60-94% of the frames where it was actively trying to, and
+/// every TeamPlan loss in the 12-seed sweep delivered exactly zero healing.
+///
+/// A camp is an OPENER — `design-docs/team-level-positioning-ai.md` step 3, "the
+/// team takes the pillar *before contact*". In-fight positioning around cover is
+/// step 4's focal-rooted team solve, and until that lands the tuned posture layer
+/// (heal range, `cover_pull`, `medic_chase`) is strictly better at it than a
+/// fixed ring around a fixed pillar.
+///
+/// Pets count as enemies — a Felhunter in your face is contact — but only living
+/// units on either side are considered.
+pub fn teams_in_contact(own: &[Vec2], enemies: &[Vec2], engage_radius: f32) -> bool {
+    own.iter()
+        .any(|a| enemies.iter().any(|e| a.distance(*e) <= engage_radius))
 }
 
 /// Recompute both teams' plans when the roster changes.
@@ -371,7 +414,7 @@ pub fn should_hold(nearest_enemy_distance: Option<f32>, engage_radius: f32) -> b
 /// pet dying does not change what a team is trying to do.
 pub fn update_team_plans(
     countdown: Res<MatchCountdown>,
-    combatants: Query<&Combatant>,
+    combatants: Query<(&Combatant, &Transform)>,
     geometry: Option<Res<ActiveMapGeometry>>,
     profile: Option<Res<AiProfile>>,
     mut plans: ResMut<TeamPlans>,
@@ -380,10 +423,43 @@ pub fn update_team_plans(
         return;
     }
 
+    // CONTACT — checked every frame, ABOVE the roster gate, because the event
+    // that ends a camp is the teams meeting, not the roster changing. Latching it
+    // here (rather than releasing per-unit down in the movement system) is what
+    // makes the release survive a replan: any death recomputes the plan, and a
+    // recomputed plan would otherwise hand a camping comp `Stance::Hold` again and
+    // send its healer back to the pillar with the fight 30yd away.
+    //
+    // Positions are read live rather than from the roster fingerprint, so this
+    // costs one O(n*m) pass over at most six units per frame.
+    let living: Vec<(u8, Vec2)> = combatants
+        .iter()
+        .filter(|(c, _)| c.is_alive())
+        .map(|(c, t)| (c.team, Vec2::new(t.translation.x, t.translation.z)))
+        .collect();
+    for team in [1u8, 2u8] {
+        // Guard before touching `plans` mutably: an unconditional write would mark
+        // the resource changed every frame and defeat change detection.
+        if plans.has_contact(team) {
+            continue;
+        }
+        let own: Vec<Vec2> = living.iter().filter(|(t, _)| *t == team).map(|(_, p)| *p).collect();
+        let foes: Vec<Vec2> = living.iter().filter(|(t, _)| *t != team).map(|(_, p)| *p).collect();
+        if teams_in_contact(&own, &foes, CAMP_ENGAGE_RADIUS) {
+            plans.contact[TeamPlans::index(team)] = true;
+            // The camp is over. Fall back to today's behaviour — the posture layer
+            // owns in-fight positioning until step 4's team solve lands.
+            if plans.for_team(team).stance == Stance::Hold {
+                plans.for_team_mut(team).stance = Stance::Press;
+            }
+        }
+    }
+
     // (team, slot) rather than Entity: stable across the match, and meaningful in
     // a debugger. Sorted so the fingerprint does not depend on query order.
     let mut roster: Vec<(u8, u8)> = combatants
         .iter()
+        .map(|(c, _)| c)
         .filter(|c| c.is_alive() && c.slot < PET_SLOT_BASE)
         .map(|c| (c.team, c.slot))
         .collect();
@@ -421,6 +497,7 @@ pub fn update_team_plans(
 
         let classes: Vec<CharacterClass> = combatants
             .iter()
+            .map(|(c, _)| c)
             .filter(|c| c.team == team && c.is_alive() && c.slot < PET_SLOT_BASE)
             .map(|c| c.class)
             .collect();
@@ -434,8 +511,11 @@ pub fn update_team_plans(
         // A camp is only meaningful for a comp that must close to deal damage,
         // and only where there is cover to hold. `choose_anchor` returns None on
         // an obstacle-free map, so BasicArena needs no separate guard.
-        let anchor = comp
-            .wants_to_camp()
+        //
+        // ...and only BEFORE contact. Without the latch, the commonest replan
+        // trigger (a death) lands mid-fight and would re-arm the camp, marching a
+        // healer back to its pillar at the worst possible moment.
+        let anchor = (comp.wants_to_camp() && !plans.has_contact(team))
             .then(|| choose_anchor(volumes, spawn_x))
             .flatten();
 
@@ -456,6 +536,14 @@ pub fn update_team_plans(
 mod tests {
     use super::*;
 
+    /// A spawn-side position for `team`, far enough apart that the two sides are
+    /// NOT in contact. The planner reads live positions to latch contact, so a
+    /// helper that stacked everyone on the origin would report instant contact
+    /// and no test could ever observe a camp.
+    fn spawn_pos(team: u8) -> Transform {
+        Transform::from_xyz(if team == 1 { -60.0 } else { 60.0 }, 0.0, 0.0)
+    }
+
     /// Drive `update_team_plans` over a real `World`, so the cadence is tested as
     /// wired rather than as intended.
     fn run_planner(gates_open: bool, roster: &[(u8, u8, bool)]) -> TeamPlans {
@@ -470,7 +558,7 @@ mod tests {
             if !alive {
                 c.current_health = 0.0;
             }
-            app.world_mut().spawn(c);
+            app.world_mut().spawn((c, spawn_pos(team)));
         }
         app.add_systems(Update, update_team_plans);
         app.update();
@@ -499,7 +587,7 @@ mod tests {
             cover_anchors: Vec::new(),
         });
         for &(team, slot, class) in roster {
-            app.world_mut().spawn(Combatant::new(team, slot, class));
+            app.world_mut().spawn((Combatant::new(team, slot, class), spawn_pos(team)));
         }
         app.add_systems(Update, update_team_plans);
         app.update();
@@ -611,8 +699,8 @@ mod tests {
         let mut app = App::new();
         app.insert_resource(MatchCountdown { time_remaining: 0.0, gates_opened: true });
         app.insert_resource(TeamPlans::default());
-        app.world_mut().spawn(Combatant::new(1, 0, CharacterClass::Warrior));
-        app.world_mut().spawn(Combatant::new(2, 0, CharacterClass::Warrior));
+        app.world_mut().spawn((Combatant::new(1, 0, CharacterClass::Warrior), spawn_pos(1)));
+        app.world_mut().spawn((Combatant::new(2, 0, CharacterClass::Warrior), spawn_pos(2)));
         app.add_systems(Update, update_team_plans);
         for _ in 0..5 {
             app.update();
@@ -769,6 +857,141 @@ mod tests {
             CAMP_POKE_HP > 0.5,
             "CAMP_POKE_HP {CAMP_POKE_HP} must exceed urgency_hp_threshold (0.5)"
         );
+    }
+
+    /// Contact is a TEAM event. The per-unit test (`should_hold`) is not enough:
+    /// a healer facing a ranged comp never has an enemy in its own bubble, so its
+    /// camp never released and it stayed welded to the pillar all match.
+    #[test]
+    fn contact_is_a_team_event_not_a_personal_one() {
+        // Healer at the pillar, partner out fighting, enemy engaging the partner.
+        let healer = Vec2::new(-40.0, -20.0);
+        let partner = Vec2::new(-10.0, 0.0);
+        let enemy = Vec2::new(-2.0, 0.0);
+
+        // The healer's own bubble is empty — 40yd of clear air.
+        assert!(
+            should_hold(Some(healer.distance(enemy)), CAMP_ENGAGE_RADIUS),
+            "the per-unit test sees nothing, which is exactly the bug"
+        );
+        // ...but the teams have plainly met.
+        assert!(teams_in_contact(&[healer, partner], &[enemy], CAMP_ENGAGE_RADIUS));
+    }
+
+    /// Two teams still crossing the arena are not in contact — the opener must
+    /// survive the approach or it buys nothing.
+    #[test]
+    fn no_contact_while_the_teams_are_still_closing() {
+        assert!(!teams_in_contact(
+            &[Vec2::new(-60.0, 0.0), Vec2::new(-40.0, -20.0)],
+            &[Vec2::new(60.0, 0.0), Vec2::new(55.0, 10.0)],
+            CAMP_ENGAGE_RADIUS
+        ));
+    }
+
+    /// Degenerate rosters must not report contact — an empty side has met nobody.
+    #[test]
+    fn contact_needs_units_on_both_sides() {
+        assert!(!teams_in_contact(&[], &[Vec2::ZERO], CAMP_ENGAGE_RADIUS));
+        assert!(!teams_in_contact(&[Vec2::ZERO], &[], CAMP_ENGAGE_RADIUS));
+    }
+
+    /// Drive the planner over a `World` where the teams ARE touching, so the
+    /// contact latch and the stance downgrade are tested as wired.
+    fn run_planner_in_contact() -> TeamPlans {
+        let mut app = App::new();
+        app.insert_resource(MatchCountdown { time_remaining: 0.0, gates_opened: true });
+        app.insert_resource(TeamPlans::default());
+        app.insert_resource(AiProfile::TeamPlan);
+        app.insert_resource(ActiveMapGeometry {
+            bounds: super::super::arena_bounds::ArenaBounds::Bowl {
+                semi_x: 59.72,
+                semi_z: 59.72,
+                alcove_depth: 10.0,
+                alcove_half_width: 8.0,
+            },
+            volumes: nagrand(),
+            cover_anchors: Vec::new(),
+        });
+        // A camping comp (Warrior + Priest) standing right on top of a lone Mage.
+        app.world_mut()
+            .spawn((Combatant::new(1, 0, CharacterClass::Warrior), Transform::from_xyz(0.0, 0.0, 0.0)));
+        app.world_mut()
+            .spawn((Combatant::new(1, 1, CharacterClass::Priest), Transform::from_xyz(-2.0, 0.0, 0.0)));
+        app.world_mut()
+            .spawn((Combatant::new(2, 0, CharacterClass::Mage), Transform::from_xyz(3.0, 0.0, 0.0)));
+        app.add_systems(Update, update_team_plans);
+        app.update();
+        app.world().resource::<TeamPlans>().clone()
+    }
+
+    /// A camping comp that is ALREADY in contact must never take the camp — the
+    /// opener's window has passed.
+    #[test]
+    fn a_comp_already_in_contact_does_not_camp() {
+        let plans = run_planner_in_contact();
+        assert!(plans.has_contact(1), "touching units must register contact");
+        assert_eq!(plans.for_team(1).anchor, None, "no camp once the teams have met");
+        assert_eq!(plans.for_team(1).stance, Stance::Press);
+    }
+
+    /// THE REGRESSION THIS LATCH EXISTS FOR. A death is the commonest replan
+    /// trigger and it lands mid-fight; without the latch outliving the replan, the
+    /// recomputed plan hands the comp `Stance::Hold` again and marches its healer
+    /// back to the pillar with the fight 30yd away.
+    #[test]
+    fn a_replan_after_contact_does_not_re_arm_the_camp() {
+        let mut app = App::new();
+        app.insert_resource(MatchCountdown { time_remaining: 0.0, gates_opened: true });
+        app.insert_resource(TeamPlans::default());
+        app.insert_resource(AiProfile::TeamPlan);
+        app.insert_resource(ActiveMapGeometry {
+            bounds: super::super::arena_bounds::ArenaBounds::Bowl {
+                semi_x: 59.72,
+                semi_z: 59.72,
+                alcove_depth: 10.0,
+                alcove_half_width: 8.0,
+            },
+            volumes: nagrand(),
+            cover_anchors: Vec::new(),
+        });
+        // Frame 1: apart. Team 1 is a camping comp, so it takes the pillar.
+        let w = app
+            .world_mut()
+            .spawn((Combatant::new(1, 0, CharacterClass::Warrior), spawn_pos(1)))
+            .id();
+        app.world_mut()
+            .spawn((Combatant::new(1, 1, CharacterClass::Priest), spawn_pos(1)));
+        let m = app
+            .world_mut()
+            .spawn((Combatant::new(2, 0, CharacterClass::Mage), spawn_pos(2)))
+            .id();
+        app.world_mut()
+            .spawn((Combatant::new(2, 1, CharacterClass::Warlock), spawn_pos(2)));
+        app.add_systems(Update, update_team_plans);
+        app.update();
+        assert!(
+            app.world().resource::<TeamPlans>().for_team(1).anchor.is_some(),
+            "pre-contact, a melee+healer comp should camp"
+        );
+
+        // Frame 2: the teams meet.
+        app.world_mut().entity_mut(m).insert(Transform::from_xyz(-58.0, 0.0, 0.0));
+        app.update();
+        assert!(app.world().resource::<TeamPlans>().has_contact(1));
+        assert_eq!(app.world().resource::<TeamPlans>().for_team(1).stance, Stance::Press);
+
+        // Frame 3: the Warrior dies — a replan, mid-fight, with the roster changed.
+        app.world_mut().entity_mut(w).get_mut::<Combatant>().unwrap().current_health = 0.0;
+        app.update();
+        let plans = app.world().resource::<TeamPlans>();
+        assert!(plans.revisions >= 2, "the death should have triggered a replan");
+        assert_eq!(
+            plans.for_team(1).anchor,
+            None,
+            "a mid-fight replan must NOT re-arm the camp"
+        );
+        assert_eq!(plans.for_team(1).stance, Stance::Press);
     }
 
     /// A camp that never releases is a unit refusing to fight — the match would

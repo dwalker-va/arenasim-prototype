@@ -6337,12 +6337,32 @@ mod warrior_pillar_pathing {
 // they assert what the AI does today so that a fix flips them loudly, rather
 // than asserting the behaviour we want and sitting red.
 //
-// The finding they capture: a `TeamPlan` healer camping a Nagrand pillar puts
-// that same pillar between itself and the ally it is supposed to heal, and
-// oscillates across the blocking axis instead of committing to a side. In the
-// 12-seed paired sweep, every `TeamPlan` loss had EXACTLY ZERO healing
-// delivered to the Warrior while every win had 306-616 — so "the healer denies
-// itself the heal" is the leading explanation for the loss column.
+// The finding they capture: a `TeamPlan` healer near a Nagrand pillar puts that
+// same pillar between itself and the ally it is supposed to heal, and oscillates
+// across the blocking axis instead of committing to a side. `Legacy` measures
+// 0% on the same metric, so this is not baseline healer behaviour.
+//
+// CAUSE, REVISED 2026-08-01 (the probes are unchanged; only the attribution is).
+// The original reading was that the healer cannot decide which way to round its
+// pillar. That is the symptom. The cause was that the camp NEVER ENDED: its
+// release asked "is an enemy within 15yd of me", which for a healer facing a
+// ranged comp is never true, so the healer stayed welded to a ring 8.5yd around
+// its pillar for the whole match with its posture AI suppressed — 71-79% of
+// post-contact frames still camping, measured on these three seeds. Ending the
+// camp at team contact (`teams_in_contact`) cut the blocked share from
+// 40.0/51.5/55.1% to 36.7/35.5/22.5% and the longest blackout from 20.4s to
+// 14.3s, and took the 12-seed paired win column from 5/12 back to 9/12 — level
+// with `Legacy`, with 28.3 occlusion-seconds per match bought against its 0.0.
+//
+// WHAT REMAINS, and why these probes still assert a pathology: post-release the
+// healer starts the fight standing next to a pillar, and `cover_pull` then pins
+// it there (11.8yd from the camp pillar on average, against `Legacy`'s 32.6yd).
+// It still loses the heal line 39% of post-contact frames and heals its Warrior
+// 295 per match against `Legacy`'s 481. That is a REACTIVE-LAYER limitation, not
+// a camp bug — `design-docs/team-level-positioning-ai.md` step 4 retires
+// `cover_pull` for the focal-rooted team solve, which is where it gets fixed.
+// Re-run `cargo test --release --test camp_sweep -- --ignored --nocapture` for
+// the current numbers.
 //
 // Why the trace could not measure this: trace events fire on decisions, and a
 // unit under sustained CC makes none. On seed 11 the Warrior stopped emitting
@@ -6502,11 +6522,14 @@ mod pillar_self_block {
         }
     }
 
-    /// PATHOLOGY PROBE. When a TeamPlan healer loses line of sight to the ally
-    /// it is meant to heal, the obstacle is its OWN camp pillar essentially
+    /// PATHOLOGY PROBE (residual — see the module note for the revised cause).
+    /// When a TeamPlan healer loses line of sight to the ally it is meant to
+    /// heal, the obstacle is the pillar it is standing next to essentially
     /// always — not a distant pillar, not geometry it could not have avoided.
-    /// A fix that makes the healer pick a poke side which preserves the heal
-    /// line will drive `self_blocked` toward zero and flip this probe.
+    /// Ending the camp at contact cut the blocked SHARE (40.0/51.5/55.1% ->
+    /// 36.7/35.5/22.5%) but not the attribution, which stays pinned at 100%:
+    /// step 4's team solve is what drives `self_blocked` toward zero and flips
+    /// this probe.
     #[test]
     fn priest_blocks_its_own_line_to_the_warrior() {
         for seed in [11u64, 7, 12] {
@@ -6542,10 +6565,14 @@ mod pillar_self_block {
         }
     }
 
-    /// PATHOLOGY PROBE. The healer does not commit to a side when rounding its
-    /// pillar — it oscillates across the axis that runs through the blocking
-    /// pillar to its ally, which is what drops the heal line. A fix that adds
-    /// side commitment will cut this rate sharply and flip this probe.
+    /// PATHOLOGY PROBE (residual — see the module note for the revised cause).
+    /// The healer does not commit to a side when rounding the pillar it is
+    /// standing next to — it oscillates across the axis that runs through that
+    /// pillar to its ally, which is what drops the heal line. Ending the camp at
+    /// contact barely moved this (1.21/1.07/0.79 per second), which is itself
+    /// the evidence that the thrash lives in the reactive `cover_pull` layer
+    /// rather than in the camp: the camp is gone for most of these frames and
+    /// the oscillation is not.
     #[test]
     fn priest_thrashes_across_the_pillar_axis() {
         for seed in [11u64, 7, 12] {
