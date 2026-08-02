@@ -251,7 +251,29 @@ seed 11 — the client and headless logs now agree on the **same 82.24s duration
 the same winner, and all 284 events with identical damage values**. Headless is
 untouched, so no baseline moves.
 
-**Residual, still open:** two wand-shot pairs fire 2 ticks early in the client
+**Residual — CLOSED, same day.** The `VisualBody` child entity now carries every
+combatant's and pet's mesh, and the walk bob, death sink, victory bounce and pet
+tilt all write that child's LOCAL transform. The sim entity's `Transform` is the
+unit's logical position, written only by simulation systems. Seed 11 now produces
+**byte-identical event logs** between the client and headless — all 284 events,
+every timestamp, every damage value — with the sole difference being the
+intentional "(headless mode)" label on line 1.
+
+2D distances were considered and REJECTED: `docs/plans/2026-07-18-001-feat-line-
+of-sight-mechanics-plan.md` commits to "sight math is 3D from day one" and names
+Blade's Edge / Dalaran Sewers as the ambition. On a vertical map, 2D range checks
+would put a unit in the pit "in melee range" of one on the bridge above. Keeping
+distances 3D and moving the visuals off the sim entity is the option compatible
+with that roadmap.
+
+It also fixed the cosmetic cost noted below for free: the pet's sim entity sits at
+headless's 0.75 while its mesh renders at its tuned 0.3, verified at runtime
+(5 `VisualBody` entities, world y `[0.300, 1.000, 1.000, 1.000, 1.000]`).
+
+<details>
+<summary>The residual as originally found</summary>
+
+Two wand-shot pairs fired 2 ticks early in the client
 (74.93 vs 74.97, 77.97 vs 78.00). Cause is `update_walk_animation`, a
 graphical-only system that writes `transform.translation.y = ground_y +
 sin(phase) * 0.10` on every unit every frame — while gameplay range checks use
@@ -265,7 +287,8 @@ a tick or two. Two ways to close it, and they trade against each other:
 
 **Known cosmetic cost of the fix as landed:** the graphical pet `y` moved 0.3 ->
 0.75 to match headless, so the pet mesh now sits higher than it was tuned to.
-Making distances 2D would let each mode pick its own `y` and resolve this too.
+
+</details>
 
 <details>
 <summary>Original (refuted) diagnosis, kept for the record</summary>
@@ -434,9 +457,8 @@ re-measuring against the probes once 3.1 lands.
 
 1. **Side commitment when rounding a pillar** (§3.1) — the primary fix; probes
    are in place to verify it.
-2. ~~**Graphical/headless divergence** (§3.3)~~ — cause found and fixed
-   2026-08-02 (pet spawn offset). A 2-tick residual from the walk-bob remains;
-   see §3.3 for the two ways to close it.
+2. ~~**Graphical/headless divergence** (§3.3)~~ — FIXED 2026-08-02. A seed now
+   reproduces byte-identically between the client and headless.
 3. ~~**Schedule bugs** (§3.4)~~ — FIXED 2026-08-01, see §3.4.
 4. **Re-derive `seen_by_wl` / `near8`** with the corrected extractor (§4.2).
 5. **Was the Fear dodgeable?** (§2) — 1.05s of free movement during the school

@@ -64,37 +64,45 @@ pub fn regenerate_resources(
 /// to clearly indicate their stealth status. When they break stealth (e.g., by using Ambush),
 /// they return to full opacity and original color.
 pub fn update_stealth_visuals(
-    combatants: Query<(&Combatant, &MeshMaterial3d<StandardMaterial>), Changed<Combatant>>,
+    // The material moved to the `VisualBody` child, so join through the
+    // hierarchy rather than reading it off the combatant.
+    combatants: Query<(&Combatant, &Children), Changed<Combatant>>,
+    bodies: Query<&MeshMaterial3d<StandardMaterial>, With<VisualBody>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    for (combatant, material_handle) in combatants.iter() {
-        if let Some(material) = materials.get_mut(&material_handle.0) {
-            let current_color = material.base_color.to_srgba();
-            let current_alpha = current_color.alpha;
+    for (combatant, children) in combatants.iter() {
+        for child in children.iter() {
+            let Ok(material_handle) = bodies.get(child) else {
+                continue;
+            };
+            if let Some(material) = materials.get_mut(&material_handle.0) {
+                let current_color = material.base_color.to_srgba();
+                let current_alpha = current_color.alpha;
 
-            if combatant.stealthed {
-                // Only apply stealth effect if not already stealthed (alpha is 1.0)
-                if current_alpha >= 0.9 {
-                    // Semi-transparent with darker tint for stealth
-                    let color = Color::srgba(
-                        current_color.red * 0.6,
-                        current_color.green * 0.6,
-                        current_color.blue * 0.6,
-                        0.4, // 40% opacity
-                    );
-                    material.base_color = color;
-                }
-            } else {
-                // Only restore if currently stealthed (alpha is low)
-                if current_alpha < 0.9 {
-                    // Restore original color by reversing the darkening (divide by 0.6)
-                    let color = Color::srgba(
-                        (current_color.red / 0.6).min(1.0),
-                        (current_color.green / 0.6).min(1.0),
-                        (current_color.blue / 0.6).min(1.0),
-                        1.0, // Full opacity
-                    );
-                    material.base_color = color;
+                if combatant.stealthed {
+                    // Only apply stealth effect if not already stealthed (alpha is 1.0)
+                    if current_alpha >= 0.9 {
+                        // Semi-transparent with darker tint for stealth
+                        let color = Color::srgba(
+                            current_color.red * 0.6,
+                            current_color.green * 0.6,
+                            current_color.blue * 0.6,
+                            0.4, // 40% opacity
+                        );
+                        material.base_color = color;
+                    }
+                } else {
+                    // Only restore if currently stealthed (alpha is low)
+                    if current_alpha < 0.9 {
+                        // Restore original color by reversing the darkening (divide by 0.6)
+                        let color = Color::srgba(
+                            (current_color.red / 0.6).min(1.0),
+                            (current_color.green / 0.6).min(1.0),
+                            (current_color.blue / 0.6).min(1.0),
+                            1.0, // Full opacity
+                        );
+                        material.base_color = color;
+                    }
                 }
             }
         }

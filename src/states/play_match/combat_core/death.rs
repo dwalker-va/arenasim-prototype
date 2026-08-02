@@ -66,14 +66,19 @@ pub fn trigger_death_animation(
 }
 
 /// Animate dead combatants falling over.
-/// Updates the DeathAnimation component each frame to rotate and lower the capsule.
+///
+/// Purely visual: it drives the corpse's [`VisualBody`] child, never the sim
+/// entity's own `Transform`. Gameplay range checks read the parent's translation
+/// (including `y`), so animating the parent would feed a graphical effect back
+/// into the simulation — see `VisualBody`.
 pub fn animate_death(
     time: Res<Time>,
-    mut combatants: Query<(&mut Transform, &mut DeathAnimation)>,
+    mut combatants: Query<(&mut DeathAnimation, &Children)>,
+    mut bodies: Query<(&mut Transform, &VisualBody)>,
 ) {
     let dt = time.delta_secs();
 
-    for (mut transform, mut death_anim) in combatants.iter_mut() {
+    for (mut death_anim, children) in combatants.iter_mut() {
         if death_anim.is_complete() {
             continue;
         }
@@ -89,13 +94,19 @@ pub fn animate_death(
         // The rotation axis is perpendicular to both Y (up) and fall direction
         let rotation_axis = Vec3::Y.cross(death_anim.fall_direction).normalize_or_zero();
 
-        if rotation_axis != Vec3::ZERO {
-            let rotation_angle = t * std::f32::consts::FRAC_PI_2; // 90 degrees
-            transform.rotation = Quat::from_axis_angle(rotation_axis, rotation_angle);
+        for child in children.iter() {
+            let Ok((mut body_transform, body)) = bodies.get_mut(child) else {
+                continue;
+            };
+            if rotation_axis != Vec3::ZERO {
+                let rotation_angle = t * std::f32::consts::FRAC_PI_2; // 90 degrees
+                body_transform.rotation = Quat::from_axis_angle(rotation_axis, rotation_angle);
+            }
+            // Sink as the capsule falls: 0.5 units below its resting height,
+            // which reproduces the old absolute 1.0 -> 0.5 for a combatant
+            // standing at y = 1.0 without hardcoding that standing height.
+            body_transform.translation.y = body.rest_y - t * 0.5;
         }
-
-        // Lower Y as capsule falls (1.0 standing -> 0.5 lying flat)
-        transform.translation.y = 1.0 - (t * 0.5);
     }
 }
 
