@@ -1,7 +1,9 @@
 # Nagrand pillar-camp: findings and handoff
 
 **Date:** 2026-08-01
-**Branch:** `feat/team-plan-camp` (8 commits ahead of `main`, unpushed)
+**Branch:** `feat/team-plan-camp` (10 commits ahead of `origin/main`, 0 behind,
+not pushed — the original "7 commits ahead of `main`" counted against a stale
+local `main`)
 **Status:** TeamPlan step 3 (pillar-camp opener) — **regression fixed.** The camp
 now buys 28.3 occlusion-seconds per match against `Legacy`'s 0.0, at win parity
 (9/12 both). A smaller residual remains and is step 4's to fix.
@@ -101,7 +103,7 @@ reads positions and health straight off the observer, so the pet-aliasing bug of
 §4.2 cannot recur — entities are keyed by `Entity` and `is_pet` is a field.
 
 **Everything below this section is the original handoff, unedited.** §3.1 is
-superseded by the above; §3.3, §3.4, §4 and §5 all still stand.
+superseded by the above and §3.4 is now fixed in place; §3.3, §4 and §5 still stand.
 
 ---
 
@@ -248,17 +250,39 @@ Three ways to close it:
 Recommended: (1). The probe work depends on headless and the client agreeing
 when you want to *watch* a seed you measured — which is exactly what failed.
 
-### 3.4 Separate schedule bugs found along the way (fix regardless)
+### 3.4 Separate schedule bugs found along the way — **FIXED**
 
 Not the divergence cause, but real, and the same class as the match-clock bug
-fixed in `3a16a46`:
-- `check_match_end` runs in `Update` in graphical mode, while headless runs
-  `headless_check_match_end` in `FixedUpdate` (`src/states/mod.rs` ~line 165).
-- `spawn_projectile_visuals` is registered in `Update` but declares
-  `.in_set(CombatSystemPhase::CombatAndMovement)` — a set that now lives in
-  `FixedUpdate`, so the constraint is silently void (`src/states/mod.rs` ~line 155).
-- The graphical `Update` block at ~line 135 declares
-  `.before(CombatSystemPhase::ResourcesAndAuras)`, also now cross-schedule.
+fixed in `3a16a46`. All three confirmed still live and fixed on 2026-08-01.
+
+The governing fact, now documented in `src/states/mod.rs`: Bevy's `Main` order is
+`First -> PreUpdate -> StateTransition -> RunFixedMainLoop -> Update -> PostUpdate
+-> Last`, so **`FixedUpdate` runs BEFORE `Update`** within a frame, zero or more
+times. An ordering constraint in `Update` naming a `CombatSystemPhase` creates no
+edge (the set has no members there) and Bevy does not complain.
+
+- `check_match_end` ran in `Update` while headless runs `headless_check_match_end`
+  in `FixedUpdate` → **moved to `FixedUpdate`**, `.after(CombatResolution)`. Match
+  end is a sim decision and now runs on the sim clock instead of once per rendered
+  frame. Headless never registers it, so no baseline moved.
+- `spawn_projectile_visuals` declared `.in_set(CombatAndMovement)`,
+  `.after(process_channeling)` and `.before(move_projectiles)` from `Update` — all
+  three void, and the last two *inverted*, since those systems run in `FixedUpdate`
+  before `Update`. A projectile that spawned and hit inside one rendered frame was
+  therefore never drawn. **Moved to `FixedUpdate`** with the constraints intact; it
+  draws no RNG, so the sim draw order cannot shift.
+- The `Update` input/camera block declared `.before(ResourcesAndAuras)` — void and
+  inverted (those systems run *after* the frame's sim ticks). **Dropped**, with the
+  reasoning recorded inline; the intra-block `.chain()` is kept because it is real.
+
+The remaining `.after(CombatSystemPhase::*)` constraints on `Update` visual groups
+are left in place as documentation of intent — they are structurally satisfied by
+the schedule order but NOT enforced, which the new comment says explicitly so the
+pattern is not copied onto a system that needs real ordering.
+
+Verified in the client (headless does not register any of these): a full
+`--replay` match ran to `Match ended! Team 2 wins!` with the log saved, victory
+celebration and death animations firing, and no panic or ambiguity warning.
 
 ---
 
@@ -356,7 +380,7 @@ re-measuring against the probes once 3.1 lands.
    are in place to verify it.
 2. **Graphical/headless divergence** (§3.3) — undermines the tool that found
    this bug in the first place.
-3. **Schedule bugs** (§3.4) — small, independent, fix regardless.
+3. ~~**Schedule bugs** (§3.4)~~ — FIXED 2026-08-01, see §3.4.
 4. **Re-derive `seen_by_wl` / `near8`** with the corrected extractor (§4.2).
 5. **Was the Fear dodgeable?** (§2) — 1.05s of free movement during the school
    lockout; feasible but unconfirmed. Leads to a general "use lockout windows to
