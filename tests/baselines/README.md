@@ -72,11 +72,33 @@ put `headless_track_time` back in phase with the sim. So the schedule move is no
 a pure re-timing of headless: it changes the simulation, and a one-tick offset in
 a deterministic sim is enough to cascade into a different winner.
 
-**This is a real Legacy behaviour change, not a printing artifact.** It is
-confined to the `pet_comp` rows (`Hunter,Shaman` vs `Rogue,Priest`) on the two
-obstacle maps, which is a specific enough signature to chase. Do NOT cite these
-baselines as evidence that the `TeamPlan` work is a no-op without first accounting
-for it; the 07-31 file is the record needed to tell the two apart.
+**This is a real Legacy behaviour change, not a printing artifact — but it is
+NOT a bug, and there is nothing here to chase.** Localised 2026-08-02 by diffing
+the flipped cell's log against `fbe4250` with timestamps stripped:
+
+- The first 94 log events are content-identical. It is not a cascade from some
+  early mistake.
+- Event 95 is a within-tick REORDER: `[CAST] Purge` and a Healing Stream Totem
+  tick swap places, because the sim was re-phased by one tick and they landed on
+  the same tick instead of consecutive ones.
+- Event ~113 is the first consequence: the Spider's auto-attack reads
+  `7 damage` before and `0 damage (7 absorbed)` after, i.e. the Purge stripped
+  the enemy's Power Word: Shield a tick later and the absorb was still up.
+
+Changing the stepping model from "one sim step per `app.update()`" to a fixed
+accumulator re-phases the whole simulation by a tick. Every effect still happens;
+some land on a different tick. In a deterministic sim that is enough to flip a
+knife-edge interaction and cascade to a different winner. **The 07-31 outcomes are
+superseded, not contradicted** — neither run is more correct.
+
+The concentration in `pet_comp` is a Shaman artifact, not a pet or obstacle one:
+that is the only comp here containing a Shaman, so it is the only one where
+`Purge` races an enemy `Power Word: Shield` — a genuinely one-tick race. The other
+two comps have no dispel and re-phased harmlessly.
+
+Do NOT cite these baselines as evidence that the `TeamPlan` work is a no-op
+without first accounting for this; the 07-31 file is the record needed to tell the
+two apart.
 
 To reproduce the flipped cell:
 
