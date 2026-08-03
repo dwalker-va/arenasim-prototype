@@ -327,6 +327,18 @@ pub fn violations(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) -> u1
                 if candidate.distance(ally) > world.heal_range {
                     v |= C_LEASH;
                 }
+                // SIGHT OF THE ALLY. The design doc's bullet for this intent
+                // lists only occlusion and heal range, but its own prose is
+                // explicit that the point of the solve is to make
+                // "LoS to my ally, no LoS to their caster" ONE position query
+                // rather than two behaviours arbitrated by an HP threshold.
+                // Without this the intent is satisfiable by a spot the healer
+                // cannot heal from, which is precisely the step-3 residual this
+                // step exists to fix: the camped Priest sat in cover, blind to
+                // its Warrior, on 39% of post-contact frames.
+                if !world.sees(candidate, ally) {
+                    v |= C_SIGHT;
+                }
             }
         }
         RoleIntent::ScreenPartner => {
@@ -416,18 +428,40 @@ fn team_bearing(ctx: &SolveContext) -> Option<Vec2> {
     (n > 0).then(|| sum.normalize_or_zero()).filter(|b| *b != Vec2::ZERO)
 }
 
-/// Candidate positions for a unit: stand still, or step one `SOLVE_LOOKAHEAD`
-/// along each compass bearing.
+/// Radii at which candidate positions are sampled, in yards.
+///
+/// **Multiple radii, not one step, and this is load-bearing.** The constraints
+/// that matter most — line of sight, and occlusion from casters — are BINARY and
+/// change only when the unit crosses a pillar's shadow boundary. Sampling a
+/// single [`SOLVE_LOOKAHEAD`] ring means that on a map whose nearest cover is
+/// tens of yards away, all 16 candidates score identically, the nearest-satisfying
+/// tie-break picks standing still, and the unit never approaches cover at all.
+///
+/// That is not a hypothetical: the first wiring of this solve measured a healer
+/// moving 47-91yd across an entire match (a statue; the tuned scorer moves ~3yd/s)
+/// while violating a constraint on 63% of frames and asking to move on 7%. It is
+/// the same "cover is a local gradient" limit that forced `cover_seek_override`
+/// to exist alongside `cover_pull` — and the solve is supposed to REPLACE that
+/// pair, so it has to see far enough to do their job.
+///
+/// The design doc frames this correctly and the first draft did not: a unit
+/// "scores candidate POSITIONS", not candidate steps.
+pub const SOLVE_RADII: [f32; 4] = [SOLVE_LOOKAHEAD, 6.0, 14.0, 26.0];
+
+/// Candidate positions for a unit: stand still, or a point on each
+/// [`SOLVE_RADII`] ring along each compass bearing.
 ///
 /// Standing still is index 0 deliberately — it is the cheapest correct answer
 /// whenever the unit already satisfies its intent, and having it win ties is
 /// what stops the solve from jittering.
 pub fn candidates_for(from: Vec2) -> Vec<Vec2> {
-    let mut out = Vec::with_capacity(SOLVE_DIRECTIONS + 1);
+    let mut out = Vec::with_capacity(SOLVE_DIRECTIONS * SOLVE_RADII.len() + 1);
     out.push(from);
-    for i in 0..SOLVE_DIRECTIONS {
-        let a = (i as f32) * std::f32::consts::TAU / SOLVE_DIRECTIONS as f32;
-        out.push(from + Vec2::from_angle(a) * SOLVE_LOOKAHEAD);
+    for radius in SOLVE_RADII {
+        for i in 0..SOLVE_DIRECTIONS {
+            let a = (i as f32) * std::f32::consts::TAU / SOLVE_DIRECTIONS as f32;
+            out.push(from + Vec2::from_angle(a) * radius);
+        }
     }
     out
 }
@@ -453,7 +487,13 @@ fn infeasibility(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) -> f32
     // Scales, in the order the design doc treats them: giving up sight or cover
     // defeats the intent, the leash and standoff degrade it, cohesion is a
     // preference.
-    const W_SIGHT: f32 = 100.0;
+    // Sight OUTRANKS cover, and deliberately: these two are near-opposite
+    // demands for a healer (its partner fights in roughly the same direction as
+    // the enemies shooting at it), so when no position satisfies both, the
+    // solve must choose. A healer that cannot heal is worse than one that can be
+    // shot at — the same call the step-3 camp made when it filtered candidates
+    // on ally sight and only scored occlusion among the survivors.
+    const W_SIGHT: f32 = 400.0;
     const W_OCCLUDED: f32 = 100.0;
     const W_LEASH: f32 = 10.0;
     const W_STANDOFF: f32 = 10.0;
@@ -575,6 +615,55 @@ pub fn solve_team(
         placed.insert(entity, spot);
     }
     placed
+}
+
+/// Build a [`SolveWorld`] from the AI's per-frame view.
+///
+/// Living units only, in the `BTreeMap` order `CombatContext` already
+/// guarantees, so the solve's inputs are deterministic without a sort. Stealthed
+/// enemies are EXCLUDED: the solve must not position around information the team
+/// does not have, and every other threat consumer in this codebase filters them
+/// the same way.
+pub fn world_from_context(ctx: &super::class_ai::CombatContext, heal_range: f32, threat_radius: f32) -> SolveWorld {
+    let my_team = ctx.self_info().map(|c| c.team);
+    let units = ctx
+        .combatants
+        .values()
+        .filter(|c| c.is_alive)
+        .filter(|c| Some(c.team) == my_team || !c.stealthed)
+        .map(|c| SolveUnit {
+            entity: c.entity,
+            team: c.team,
+            slot: c.slot,
+            pos: Vec2::new(c.position.x, c.position.z),
+            is_healer: c.class.is_healer(),
+            is_melee: c.class.is_melee(),
+            is_pet: c.slot >= super::constants::PET_SLOT_BASE,
+        })
+        .collect();
+    SolveWorld {
+        units,
+        obstacles: ctx.obstacles.to_vec(),
+        bounds: Some(ctx.bounds),
+        heal_range,
+        threat_radius,
+        kill_target: None,
+    }
+}
+
+/// Solve one unit's position, or `None` when it is already where it wants to be.
+///
+/// Returns a POSITION, not a bearing, because the chosen spot can be tens of
+/// yards away (see [`SOLVE_RADII`]) and getting there may mean rounding a pillar.
+/// `MovementGoal::Point` already navigates — it runs `steer_toward_goal`, which
+/// aims at an obstacle's tangent instead of oozing along its face — whereas a
+/// bare direction would walk the unit into the pillar between it and the cover it
+/// picked.
+pub fn solve_position(intent: RoleIntent, entity: Entity, world: &SolveWorld) -> Option<Vec2> {
+    let unit = *world.unit(entity)?;
+    let ctx = SolveContext { world, unit, focus: None, placed: &BTreeMap::new() };
+    let spot = solve_unit(intent, &ctx);
+    (spot.distance(unit.pos) > 1e-3).then_some(spot)
 }
 
 #[cfg(test)]
@@ -794,6 +883,56 @@ mod tests {
             violations(RoleIntent::OccupyCover, Vec2::new(-10.0, 30.0), &ctx) & C_OCCLUDED,
             0,
             "a melee enemy must not make an open spot count as 'exposed'"
+        );
+    }
+
+    /// The dual constraint, and the whole reason step 4 exists: cover is not
+    /// cover if the healer cannot see the ally it is covering for.
+    #[test]
+    fn occupy_cover_also_demands_sight_of_the_ally() {
+        let mut w = world(vec![
+            healer(1, 1, 0, -10.0, 0.0),
+            melee(2, 1, 1, 10.0, 0.0), // ally on the far side of the pillar
+            unit(3, 2, 0, 0.0, 30.0),  // enemy caster off to one side
+        ]);
+        w.obstacles = vec![pillar_at(0.0, 0.0)];
+        let ctx = SolveContext {
+            world: &w,
+            unit: w.units[0],
+            focus: None,
+            placed: &BTreeMap::new(),
+        };
+        // Standing where the pillar blocks the line to the ally fails, even
+        // though it is beautifully hidden from the enemy.
+        assert_ne!(
+            violations(RoleIntent::OccupyCover, Vec2::new(-10.0, 0.0), &ctx) & C_SIGHT,
+            0,
+            "a spot the healer cannot heal from must not satisfy OccupyCover"
+        );
+    }
+
+    /// When the two halves cannot both hold, sight of the ally must win — a
+    /// healer that cannot heal is worse than one that can be shot at.
+    #[test]
+    fn sight_of_the_ally_outranks_cover_when_both_are_impossible() {
+        let mut w = world(vec![
+            healer(1, 1, 0, -10.0, 0.0),
+            melee(2, 1, 1, 10.0, 0.0),
+            unit(3, 2, 0, 12.0, 0.0), // caster right beside the ally
+        ]);
+        w.obstacles = vec![pillar_at(0.0, 0.0)];
+        let ctx = SolveContext {
+            world: &w,
+            unit: w.units[0],
+            focus: None,
+            placed: &BTreeMap::new(),
+        };
+        let hidden_but_blind = Vec2::new(-10.0, 0.0);
+        let seen_but_sighted = Vec2::new(0.0, 20.0);
+        assert!(
+            infeasibility(RoleIntent::OccupyCover, seen_but_sighted, &ctx)
+                < infeasibility(RoleIntent::OccupyCover, hidden_but_blind, &ctx),
+            "the position that can actually heal must score better"
         );
     }
 

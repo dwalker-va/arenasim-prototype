@@ -868,6 +868,51 @@ pub(super) fn healer_pressured_tick_shared(
     // healer is never pulled into cover while an ally is dying (R11).
     let eff_weights = deny_weights(entity, my_pos, ctx, shared, weights);
 
+    // STEP 4: under `TeamPlan`, the healer's position comes from the team solve
+    // instead of the additive scorer. `OccupyCover` is one query for what
+    // `cover_pull`, `cover_seek` and `medic_chase` express as three mutually
+    // exclusive mechanisms — "hidden from their casters, in range of my ally,
+    // and able to SEE my ally" — so all three are skipped here rather than
+    // arbitrated against it.
+    //
+    // Gated on the profile, so `Legacy` (which every recorded baseline and every
+    // calibrated probe runs) is untouched and any drift is attributable to this
+    // line alone. The ESCAPE and DIP windows are deliberately NOT rerouted: they
+    // are committed scripts with their own abort conditions, not positioning.
+    if ctx.ai_profile.is_team_plan() {
+        let world = crate::states::play_match::team_solve::world_from_context(
+            ctx,
+            shared.heal_range,
+            threat_radius,
+        );
+        if let Some(spot) = crate::states::play_match::team_solve::solve_position(
+            crate::states::play_match::team_plan::RoleIntent::OccupyCover,
+            entity,
+            &world,
+        ) {
+            // A `Point` goal, not a bearing: the chosen spot can be tens of yards
+            // off and behind a pillar, and `Point` is the branch that
+            // tangent-steers around one.
+            commands.entity(entity).try_insert(MovementDirective {
+                goal: MovementGoal::Point(Vec3::new(spot.x, my_pos.y, spot.y)),
+                expires: now + shared.directive_ttl,
+                committed_until: now + shared.commit_window,
+            });
+            state.last_direction =
+                Some((spot - Vec2::new(my_pos.x, my_pos.z)).normalize_or_zero());
+        } else {
+            // Already satisfying the intent: hold, rather than falling through
+            // to the scorer, which would move the healer off a good position for
+            // an interest term the solve has deliberately retired.
+            commands.entity(entity).try_insert(MovementDirective {
+                goal: MovementGoal::Point(my_pos),
+                expires: now + shared.directive_ttl,
+                committed_until: now + shared.commit_window,
+            });
+        }
+        return;
+    }
+
     // Cover-seek: `cover_pull` is only a 2yd-lookahead gradient, so on a large
     // map where the nearest pillar is tens of yards away it is flat everywhere and
     // the healer never approaches cover at all. When denial is active but no local
