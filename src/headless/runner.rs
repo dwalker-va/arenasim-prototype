@@ -233,8 +233,13 @@ impl Plugin for HeadlessPlugin {
 
         // Add headless-specific systems after combat resolution.
         app.add_systems(Startup, headless_setup_match)
+            // FixedUpdate, matching the combat systems. The match clock must
+            // advance in lockstep with the simulation: left in `Update` while the
+            // sim moved to `FixedUpdate`, the two ran a tick out of phase (every
+            // logged timestamp shifted by 1/60) and the `.after()` constraint
+            // silently spanned two schedules, where it means nothing.
             .add_systems(
-                Update,
+                FixedUpdate,
                 (headless_track_time, headless_check_match_end)
                     .chain()
                     .after(systems::CombatSystemPhase::CombatResolution),

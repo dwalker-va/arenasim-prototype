@@ -7,6 +7,10 @@ use super::super::arena_bounds::ArenaBounds;
 use super::super::match_config::CharacterClass;
 use super::super::{MELEE_RANGE, WAND_RANGE, DISENGAGE_SPEED};
 use super::super::map_config::ActiveMapGeometry;
+use super::super::team_plan::{
+    hold_position, should_break_cover, should_hold, Stance, TeamPlans, CAMP_ARRIVAL_EPSILON,
+    CAMP_ENGAGE_RADIUS,
+};
 use super::super::map_geometry::{resolve_movement, steer_toward_goal, ObstacleVolume};
 
 
@@ -41,6 +45,9 @@ pub fn move_to_target(
     // auto-attack fires. Read-only; owned/updated by `evaluate_dps_posture`.
     kite_query: Query<&KitePosture>,
     map_geometry: Res<ActiveMapGeometry>,
+    // Team-level plan. `Option` so a scene that never inserted it simply behaves
+    // as it always has, rather than panicking.
+    team_plans: Option<Res<TeamPlans>>,
 ) {
     // Don't allow movement until gates open
     if !countdown.gates_opened {
@@ -62,6 +69,25 @@ pub fn move_to_target(
     let positions: std::collections::BTreeMap<Entity, (Vec3, u8)> = combatants
         .iter()
         .map(|(entity, transform, combatant, _, _, _, _, _, _)| (entity, (transform.translation, combatant.team)))
+        .collect();
+
+    // Position + team + HP fraction + pet flag, for the camp's line-of-sight
+    // cycle and its threat scan. Separate from `positions` so that map's shape
+    // (and every other consumer of it) is untouched.
+    //
+    // LIVING units only. `positions` deliberately carries corpses too (its other
+    // consumers are keyed lookups that never scan it), and the camp is the one
+    // place that DOES scan: without this filter a dead enemy still counted as a
+    // threat to hide from, and could even be the "nearest enemy" the camp uses
+    // to decide whether to release.
+    let living: std::collections::BTreeMap<Entity, (Vec3, u8, f32, bool)> = combatants
+        .iter()
+        .filter(|(_, _, c, _, _, _, _, _, _)| c.is_alive())
+        .map(|(entity, transform, c, _, _, _, _, _, _)| {
+            let frac = if c.max_health > 0.0 { c.current_health / c.max_health } else { 0.0 };
+            let is_pet = pet_query.get(entity).is_ok();
+            (entity, (transform.translation, c.team, frac, is_pet))
+        })
         .collect();
 
     // Move each combatant towards their target if needed
@@ -233,6 +259,126 @@ pub fn move_to_target(
             } else {
                 commands.entity(entity).remove::<DisengagingState>();
             }
+        }
+
+        // PILLAR CAMP (team strategy): hold cover and make the enemy cross the
+        // arena. Sits ABOVE the posture directive deliberately — the strategy
+        // layer subordinates execution, it does not race it.
+        //
+        // This block used to live down in the pursuit path, below the directive
+        // branch's `continue`. Melee reach that path so their camp worked; healers
+        // almost always carry a posture directive, so their camp only fired in the
+        // GAPS between directives. The result was a Priest oscillating 17-26yd
+        // from its pillar for a whole match — never arriving, never healing,
+        // because two layers were issuing contradictory orders with no arbitration.
+        //
+        // Still below CC and the scripted Charge/Disengage bursts: a camp must not
+        // override being stunned, and a committed dash outranks a positioning
+        // intent.
+        //
+        // Threat reference is the NEAREST enemy, not the kill target: you take
+        // cover from whoever is coming at you, which for a healer is rarely the
+        // unit it is trying to damage.
+        let camp_spot = team_plans.as_ref().and_then(|plans| {
+            let plan = plans.for_team(combatant.team);
+            if plan.stance != Stance::Hold {
+                return None;
+            }
+            // A pet is not a member of the team's plan — it owes its owner a
+            // flank, not the pillar. Without this a Felhunter/Boar on a camping
+            // comp abandoned its owner and walked to the hold spot, because pets
+            // share their owner's `team` and so matched the stance check.
+            if pet_query.get(entity).is_ok() {
+                return None;
+            }
+            let anchor = plan.anchor?;
+            let nearest = living
+                .iter()
+                .filter(|(_, (_, team, _, _))| *team != combatant.team)
+                .map(|(_, (pos, _, _, _))| (my_pos.distance(*pos), *pos))
+                .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+            let (nearest_d, nearest_pos) = nearest?;
+            if !should_hold(Some(nearest_d), CAMP_ENGAGE_RADIUS) {
+                return None;
+            }
+            // LINE-OF-SIGHT CYCLE. A healer alternates between a POKE spot (sees
+            // the ally, can heal) and a DUCK spot (maximally occluded). Holding a
+            // sight-line permanently is what left the Priest exposed to the enemy
+            // Warlock 70% of the match and mana-burned to nothing.
+            //
+            // The cycle needs no state machine: casting units are planted and
+            // `continue` above this branch, so all that is required per tick is
+            // "does anyone need healing?" — if yes, break cover for the cast; if
+            // no, hide.
+            let keep_sighted = combatant.class.is_healer().then(|| {
+                // Most-injured living HEALABLE ally, and how hurt it is. Pets are
+                // excluded because no healer in this codebase ever targets one
+                // (every heal/shield/medic-chase predicate filters `is_pet`), so
+                // including them made the healer break cover to hold sight of a
+                // Felhunter or Hunter pet it could not heal — and, because pets
+                // are squishy and engage first, that pet was usually the
+                // lowest-HP unit on the team, hiding the teammate that did need
+                // the line.
+                let worst = living
+                    .iter()
+                    .filter(|(e, (_, team, _, is_pet))| {
+                        *team == combatant.team && **e != entity && !*is_pet
+                    })
+                    .map(|(_, (pos, _, hp, _))| (*hp, *pos))
+                    .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+                let (hp, pos) = worst?;
+                should_break_cover(Some(hp)).then_some(Vec2::new(pos.x, pos.z))
+            }).flatten();
+
+            // Every living enemy, so the spot maximises how many of them lose
+            // sight — hiding from only the nearest left the other caster free.
+            let threats: Vec<Vec2> = living
+                .iter()
+                .filter(|(_, (_, team, _, _))| *team != combatant.team)
+                .map(|(_, (pos, _, _, _))| Vec2::new(pos.x, pos.z))
+                .collect();
+            hold_position(&map_geometry.volumes, anchor, &threats, keep_sighted)
+            .map(|spot| (spot, nearest_pos))
+        });
+
+        if let Some((spot, face_pos)) = camp_spot {
+            let dest = Vec3::new(spot.x, my_pos.y, spot.y);
+            let to_spot = dest - my_pos;
+            if Vec2::new(to_spot.x, to_spot.z).length() > CAMP_ARRIVAL_EPSILON {
+                let dir = steer_toward_goal(
+                    &map_geometry.volumes,
+                    Vec2::new(my_pos.x, my_pos.z),
+                    spot,
+                    my_pos.y,
+                )
+                .unwrap_or_else(|| Vec2::new(to_spot.x, to_spot.z).normalize_or_zero());
+                // Same speed derivation as every other branch: base speed times
+                // MovementSpeedSlow, or a camper would ignore Frost Trap.
+                let mut movement_speed = combatant.base_movement_speed;
+                if let Some(auras) = auras {
+                    for aura in &auras.auras {
+                        if aura.effect_type == AuraType::MovementSpeedSlow {
+                            movement_speed *= aura.magnitude;
+                        }
+                    }
+                }
+                let step = Vec3::new(dir.x, 0.0, dir.y) * movement_speed * dt;
+                transform.translation = resolve_and_clamp(
+                    &map_geometry.bounds,
+                    &map_geometry.volumes,
+                    my_pos,
+                    my_pos + step,
+                );
+            }
+            // Face the approach while holding, so the camp reads as deliberate.
+            let facing = face_pos - transform.translation;
+            if facing.length_squared() > 1e-6 {
+                transform.rotation = Quat::from_rotation_y(facing.x.atan2(facing.z));
+            }
+            // A camp overrides the posture directive; drop it so the unit does not
+            // resume a stale walk the instant the camp releases.
+            commands.entity(entity).remove::<MovementDirective>();
+            continue;
         }
 
         // MOVEMENT DIRECTIVE: execute an unexpired directive issued by class

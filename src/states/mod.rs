@@ -130,8 +130,29 @@ impl Plugin for StatesPlugin {
         configure_combat_system_ordering(app);
         add_core_combat_systems(app, in_state(GameState::PlayMatch));
 
-        // Graphical-only systems: camera, input, gate animation, projectile visuals
-        // These run before core combat in Phase 1 (ResourcesAndAuras)
+        // SCHEDULES: the sim runs in `FixedUpdate`, visuals in `Update`.
+        //
+        // Bevy's `Main` order is First -> PreUpdate -> StateTransition ->
+        // RunFixedMainLoop -> Update -> PostUpdate -> Last, so `FixedUpdate`
+        // runs BEFORE `Update` within a frame, zero or more times. Two
+        // consequences, both of which this file previously got wrong:
+        //
+        // 1. An ordering constraint in `Update` that names a `CombatSystemPhase`
+        //    is CROSS-SCHEDULE and therefore silently VOID — the set has no
+        //    members in `Update`, so no edge is created and Bevy does not
+        //    complain. The `.after(CombatSystemPhase::*)` constraints further
+        //    down are left in place as documentation of intent, and they happen
+        //    to be satisfied structurally (the sim already ran this frame), but
+        //    they are NOT enforced. Do not rely on one.
+        // 2. `.before(CombatSystemPhase::*)` in `Update` is void AND inverted —
+        //    it asks for something the schedule order makes impossible. The
+        //    camera/input block below used to carry
+        //    `.before(ResourcesAndAuras)`; it has been dropped rather than left
+        //    to imply an ordering that never held.
+        //
+        // The rule: anything that affects the SIMULATION belongs in
+        // `FixedUpdate` with a real phase constraint. `Update` is for systems
+        // that should run once per rendered frame.
         app.add_systems(
                 Update,
                 (
@@ -148,17 +169,33 @@ impl Plugin for StatesPlugin {
                     play_match::update_play_match,
                 )
                     .chain()
-                    .before(CombatSystemPhase::ResourcesAndAuras)
                     .run_if(in_state(GameState::PlayMatch)),
             )
-            // Graphical-only: projectile visuals must run after process_casting spawns projectiles
-            // but before move_projectiles. We chain it after process_channeling in Phase 2.
+            // Graphical-only, but it must run IN the sim schedule: it attaches
+            // meshes to projectiles the same tick `process_casting` spawns them,
+            // before `move_projectiles` moves them and `process_projectile_hits`
+            // can despawn them. Registered in `Update` it was ordered against a
+            // set with no members there, so a projectile that spawned and hit
+            // inside one rendered frame was never drawn at all. Draws no RNG, so
+            // moving it into `FixedUpdate` cannot shift the sim's draw order.
             .add_systems(
-                Update,
+                FixedUpdate,
                 play_match::spawn_projectile_visuals
                     .in_set(CombatSystemPhase::CombatAndMovement)
                     .after(play_match::process_channeling)
                     .before(play_match::move_projectiles)
+                    .run_if(in_state(GameState::PlayMatch)),
+            )
+            // Match end is a SIM decision, so it belongs on the sim clock. In
+            // `Update` it was evaluated once per rendered frame — coarser than a
+            // tick, and at a cadence that varied with frame rate — while headless
+            // has always run its equivalent (`headless_check_match_end`) in
+            // `FixedUpdate`. Same class of bug as the match-clock fix in 3a16a46.
+            // Headless never registers this system, so no baseline moves.
+            .add_systems(
+                FixedUpdate,
+                play_match::check_match_end
+                    .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_state(GameState::PlayMatch)),
             )
             // Combat resolution, death, and visual effects (after core combat)
@@ -166,7 +203,6 @@ impl Plugin for StatesPlugin {
                 Update,
                 (
                     play_match::update_stealth_visuals,
-                    play_match::check_match_end,
                     play_match::trigger_death_animation,
                     play_match::animate_death,
                     play_match::update_victory_celebration,

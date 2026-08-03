@@ -523,26 +523,31 @@ pub fn follow_shield_bubbles(
 pub fn update_polymorph_visuals(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut combatants: Query<(
-        Entity,
-        &ActiveAuras,
-        &OriginalMesh,
-        &mut Mesh3d,
-        Option<&PolymorphedVisual>,
-    ), With<Combatant>>,
+    // The aura state lives on the sim entity; the mesh lives on its `VisualBody`
+    // child, so this joins across the hierarchy.
+    combatants: Query<(Entity, &ActiveAuras, Option<&PolymorphedVisual>, &Children), With<Combatant>>,
+    mut bodies: Query<(&mut Mesh3d, &OriginalMesh), With<VisualBody>>,
 ) {
-    for (entity, auras, original_mesh, mut mesh3d, polymorphed_marker) in combatants.iter_mut() {
+    for (entity, auras, polymorphed_marker, children) in combatants.iter() {
         let is_polymorphed = auras.auras.iter().any(|a| a.effect_type == AuraType::Polymorph);
 
         if is_polymorphed && polymorphed_marker.is_none() {
             // Combatant just got polymorphed - swap to cuboid (sheep/pig box shape)
             // Using a squat cuboid to represent the transformed creature
             let poly_mesh = meshes.add(Cuboid::new(0.8, 0.6, 1.0));
-            *mesh3d = Mesh3d(poly_mesh);
+            for child in children.iter() {
+                if let Ok((mut mesh3d, _)) = bodies.get_mut(child) {
+                    *mesh3d = Mesh3d(poly_mesh.clone());
+                }
+            }
             commands.entity(entity).insert(PolymorphedVisual);
         } else if !is_polymorphed && polymorphed_marker.is_some() {
             // Polymorph ended - restore original capsule mesh
-            *mesh3d = Mesh3d(original_mesh.0.clone());
+            for child in children.iter() {
+                if let Ok((mut mesh3d, original_mesh)) = bodies.get_mut(child) {
+                    *mesh3d = Mesh3d(original_mesh.0.clone());
+                }
+            }
             commands.entity(entity).remove::<PolymorphedVisual>();
         }
     }
@@ -1903,14 +1908,22 @@ pub fn cleanup_expired_death_coil_bursts(
 /// baked into the current rotation or the movement system just set a fresh
 /// Y-only rotation this frame.
 pub fn apply_pet_mesh_tilt(
-    mut pets: Query<&mut Transform, With<Pet>>,
+    pets: Query<&Children, With<Pet>>,
+    mut bodies: Query<&mut Transform, With<VisualBody>>,
 ) {
     let tilt = Quat::from_rotation_x(std::f32::consts::FRAC_PI_2);
-    for mut transform in pets.iter_mut() {
-        // Euler YXZ decomposition correctly separates the Y-facing angle
-        // from the X-tilt, whether the rotation is Y-only or Y*X_tilt.
-        let (y_angle, _, _) = transform.rotation.to_euler(EulerRot::YXZ);
-        transform.rotation = Quat::from_rotation_y(y_angle) * tilt;
+    for children in pets.iter() {
+        for child in children.iter() {
+            let Ok(mut body_transform) = bodies.get_mut(child) else {
+                continue;
+            };
+            // The parent already carries the Y-facing the sim wrote, and the
+            // child's rotation composes on top of it, so the tilt is now a plain
+            // local rotation instead of a decompose-and-reapply. Assigning it
+            // unconditionally preserves the old behaviour of overriding a dying
+            // pet's fall rotation on the next frame.
+            body_transform.rotation = tilt;
+        }
     }
 }
 
@@ -2803,39 +2816,54 @@ const WALK_MAX_PHASE_STEP: f32 = std::f32::consts::PI;
 /// Drive the walking bob on combatant and pet capsules.
 ///
 /// Reads each unit's post-movement XZ, advances phase by the horizontal
-/// distance traveled this frame, and writes `translation.y = ground_y +
-/// sin(phase) * amplitude`. Idle units (and any unit whose `Combatant::is_alive()`
-/// returns true but whose XZ delta is below `WALK_IDLE_EPSILON`) snap to
-/// `ground_y` so they stand perfectly still.
+/// distance traveled this frame, and writes the bob to that unit's
+/// [`VisualBody`] child as `local.y = rest_y + sin(phase) * amplitude`. Idle
+/// units (and any unit whose `Combatant::is_alive()` returns true but whose XZ
+/// delta is below `WALK_IDLE_EPSILON`) snap to `rest_y` so they stand still.
+///
+/// **The bob must never touch the parent's `Transform`.** Gameplay range checks
+/// use `Vec3::distance`, so a ±0.10 bob on the sim entity perturbed real range
+/// checks — that is why a seed stopped reproducing between the client and
+/// headless. See [`VisualBody`].
 ///
 /// `Without<DeathAnimation>` and `Without<Celebrating>` cede the Y axis to
 /// `animate_death` (corpse sink) and `update_victory_celebration` (winner
-/// bounce). Both systems write `translation.y` and run in the same post-
-/// `CombatResolution` window, so excluding their drivers is the cleanest way
-/// to avoid the last-writer-wins race.
+/// bounce). All three now write the same child's local Y and run in the same
+/// post-`CombatResolution` window, so excluding their drivers is still the
+/// cleanest way to avoid the last-writer-wins race.
 ///
 /// Graphical-mode only — registered in `StatesPlugin::build()`, never in
 /// `add_core_combat_systems`. Visual-only; touches no gameplay state.
 pub fn update_walk_animation(
-    mut query: Query<
-        (&mut Transform, &mut WalkAnim, &Combatant),
-        (Without<DeathAnimation>, Without<Celebrating>),
+    mut movers: Query<
+        (&Transform, &mut WalkAnim, &Combatant, &Children),
+        (Without<DeathAnimation>, Without<Celebrating>, Without<VisualBody>),
     >,
+    mut bodies: Query<(&mut Transform, &VisualBody)>,
 ) {
-    for (mut transform, mut walk, combatant) in query.iter_mut() {
+    for (transform, mut walk, combatant, children) in movers.iter_mut() {
+        // Read the sim entity's XZ, but write only the child's local Y.
         let current_xz = transform.translation.xz();
         let distance = (current_xz - walk.previous_xz).length();
+        walk.previous_xz = current_xz;
 
-        if !combatant.is_alive() || distance < WALK_IDLE_EPSILON {
-            transform.translation.y = walk.ground_y;
-            walk.previous_xz = current_xz;
-            continue;
+        let idle = !combatant.is_alive() || distance < WALK_IDLE_EPSILON;
+        if !idle {
+            let step =
+                (distance / WALK_STEP_LENGTH * std::f32::consts::TAU).min(WALK_MAX_PHASE_STEP);
+            walk.phase = (walk.phase + step).rem_euclid(std::f32::consts::TAU);
         }
 
-        let step = (distance / WALK_STEP_LENGTH * std::f32::consts::TAU).min(WALK_MAX_PHASE_STEP);
-        walk.phase = (walk.phase + step).rem_euclid(std::f32::consts::TAU);
-        transform.translation.y = walk.ground_y + walk.phase.sin() * WALK_BOB_AMPLITUDE;
-        walk.previous_xz = current_xz;
+        for child in children.iter() {
+            let Ok((mut body_transform, body)) = bodies.get_mut(child) else {
+                continue;
+            };
+            body_transform.translation.y = if idle {
+                body.rest_y
+            } else {
+                body.rest_y + walk.phase.sin() * WALK_BOB_AMPLITUDE
+            };
+        }
     }
 }
 

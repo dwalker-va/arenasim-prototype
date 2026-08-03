@@ -96,6 +96,16 @@ pub struct Args {
     #[arg(long, value_name = "PROFILE", default_value = DEFAULT_AI_PROFILE)]
     pub ai_profile: String,
 
+    /// Watch a headless config play out in the graphical client, seed and all.
+    ///
+    /// Takes the same JSON `--headless` accepts. Comps, map, AI profile and
+    /// `random_seed` are all honoured, and the client boots straight into the
+    /// match rather than the menu — so a bug found in a sweep can be WATCHED
+    /// rather than inferred from a log. Without a `random_seed` in the file the
+    /// match is fresh, and its chosen seed is still recorded in the report.
+    #[arg(long, value_name = "CONFIG")]
+    pub replay: Option<std::path::PathBuf>,
+
     /// In matrix mode, also write each individual match's `.txt` log file.
     /// Off by default to avoid 49 × N files in match_logs/.
     #[arg(long)]

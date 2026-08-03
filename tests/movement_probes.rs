@@ -6328,3 +6328,310 @@ mod warrior_pillar_pathing {
         assert!(total_samples > 0, "no samples collected");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Pillar self-blocking probes (Nagrand / TeamPlan)
+// ---------------------------------------------------------------------------
+//
+// These probes pin a PATHOLOGY, in the idiom of the U2 inverted-statue probe:
+// they assert what the AI does today so that a fix flips them loudly, rather
+// than asserting the behaviour we want and sitting red.
+//
+// The finding they capture: a `TeamPlan` healer near a Nagrand pillar puts that
+// same pillar between itself and the ally it is supposed to heal, and oscillates
+// across the blocking axis instead of committing to a side. `Legacy` measures
+// 0% on the same metric, so this is not baseline healer behaviour.
+//
+// CAUSE, REVISED 2026-08-01 (the probes are unchanged; only the attribution is).
+// The original reading was that the healer cannot decide which way to round its
+// pillar. That is the symptom. The cause was that the camp NEVER ENDED: its
+// release asked "is an enemy within 15yd of me", which for a healer facing a
+// ranged comp is never true, so the healer stayed welded to a ring 8.5yd around
+// its pillar for the whole match with its posture AI suppressed — 71-79% of
+// post-contact frames still camping, measured on these three seeds. Ending the
+// camp at team contact (`teams_in_contact`) cut the blocked share from
+// 40.0/51.5/55.1% to 36.7/35.5/22.5% and the longest blackout from 20.4s to
+// 14.3s, and took the 12-seed paired win column from 5/12 back to 9/12 — level
+// with `Legacy`, with 28.3 occlusion-seconds per match bought against its 0.0.
+//
+// WHAT REMAINS, and why these probes still assert a pathology: post-release the
+// healer starts the fight standing next to a pillar, and `cover_pull` then pins
+// it there (11.8yd from the camp pillar on average, against `Legacy`'s 32.6yd).
+// It still loses the heal line 39% of post-contact frames and heals its Warrior
+// 295 per match against `Legacy`'s 481. That is a REACTIVE-LAYER limitation, not
+// a camp bug — `design-docs/team-level-positioning-ai.md` step 4 retires
+// `cover_pull` for the focal-rooted team solve, which is where it gets fixed.
+// Re-run `cargo test --release --test camp_sweep -- --ignored --nocapture` for
+// the current numbers.
+//
+// Why the trace could not measure this: trace events fire on decisions, and a
+// unit under sustained CC makes none. On seed 11 the Warrior stopped emitting
+// at 39.0s but did not die until 50.12s, leaving the decisive window blind.
+// The observer harness samples every frame regardless of decisions, so it sees
+// through CC.
+//
+// GEOMETRY APPROXIMATION: the pillars are octagonal prisms (circumradius 6.0,
+// apothem ~5.54). These helpers use the CIRCUMSCRIBED CIRCLE, which slightly
+// over-counts blocking near the octagon's flats. Both headline assertions are
+// robust to that choice: `self_blocked / all_blocked` is a ratio whose
+// numerator and denominator use the same test, and the side-reversal rate does
+// not depend on the radius at all. Only the raw blocked-fraction would move.
+mod pillar_self_block {
+    use super::*;
+
+    /// Nagrand pillar centres on the x/z plane (`assets/config/maps.ron`).
+    const PILLARS: [(f32, f32); 4] = [(-40.0, -20.0), (-40.0, 20.0), (40.0, -20.0), (40.0, 20.0)];
+    /// Circumradius of the octagonal prisms. See the module note.
+    const PILLAR_R: f32 = 6.0;
+
+    /// Index and distance of the pillar nearest `p`.
+    fn nearest_pillar(p: (f32, f32)) -> (usize, f32) {
+        let mut best = (0usize, f32::MAX);
+        for (i, c) in PILLARS.iter().enumerate() {
+            let d = ((p.0 - c.0).powi(2) + (p.1 - c.1).powi(2)).sqrt();
+            if d < best.1 {
+                best = (i, d);
+            }
+        }
+        best
+    }
+
+    /// Does segment `a..b` pass within `PILLAR_R` of pillar `c`?
+    fn segment_hits(a: (f32, f32), b: (f32, f32), c: (f32, f32)) -> bool {
+        let (dx, dz) = (b.0 - a.0, b.1 - a.1);
+        let (fx, fz) = (a.0 - c.0, a.1 - c.1);
+        let aa = dx * dx + dz * dz;
+        if aa < 1e-9 {
+            return fx * fx + fz * fz <= PILLAR_R * PILLAR_R;
+        }
+        let t = (-(fx * dx + fz * dz) / aa).clamp(0.0, 1.0);
+        let (px, pz) = (fx + t * dx, fz + t * dz);
+        px * px + pz * pz <= PILLAR_R * PILLAR_R
+    }
+
+    /// Which pillar (if any) blocks `a..b`. First hit wins; pillars are far
+    /// enough apart that a single segment rarely clips two.
+    fn blocking_pillar(a: (f32, f32), b: (f32, f32)) -> Option<usize> {
+        PILLARS.iter().position(|c| segment_hits(a, b, *c))
+    }
+
+    /// Which side of the (pillar -> target) axis `observer` stands on: the sign
+    /// of the 2D cross product. `0.0` means collinear (on the axis itself).
+    fn side_of(pillar: (f32, f32), target: (f32, f32), observer: (f32, f32)) -> f32 {
+        let (ax, az) = (target.0 - pillar.0, target.1 - pillar.1);
+        let (bx, bz) = (observer.0 - pillar.0, observer.1 - pillar.1);
+        let cross = ax * bz - az * bx;
+        if cross.abs() <= 1e-6 {
+            0.0
+        } else {
+            cross.signum()
+        }
+    }
+
+    fn xz(v: Vec3) -> (f32, f32) {
+        (v.x, v.z)
+    }
+
+    struct SelfBlockStats {
+        paired_samples: usize,
+        blocked: usize,
+        self_blocked: usize,
+        reversals: usize,
+        span_secs: f32,
+        longest_self_block: f32,
+    }
+
+    /// Per-frame Priest-vs-Warrior blocking stats for one TeamPlan match.
+    fn measure(seed: u64) -> SelfBlockStats {
+        let mut cfg = create_config(vec!["Warrior", "Priest"], vec!["Warlock", "Priest"], Some(seed));
+        cfg.map = "PillaredArena".to_string();
+        cfg.ai_profile = Some("TeamPlan".to_string());
+        cfg.max_duration_secs = 300.0;
+
+        let (_result, timeline) = run_observed_collecting(cfg);
+        let priest = timeline.find(1, CharacterClass::Priest, false);
+        let warrior = timeline.find(1, CharacterClass::Warrior, false);
+        let gate = timeline.gates_open_time.expect("gates never opened");
+
+        // Both timelines are alive-only and share the same frame clock, so an
+        // exact sim_time join pairs them and drops frames after either death.
+        let pri: BTreeMap<u32, Vec3> = timeline
+            .samples_from(priest, gate)
+            .into_iter()
+            .map(|(t, p)| (t.to_bits(), p))
+            .collect();
+
+        let mut paired = 0usize;
+        let (mut blocked, mut self_blocked, mut reversals) = (0usize, 0usize, 0usize);
+        let mut prev_side: Option<f32> = None;
+        let (mut first_t, mut last_t) = (f32::MAX, f32::MIN);
+        let (mut longest, mut run_start): (f32, Option<f32>) = (0.0, None);
+
+        for (t, wpos) in timeline.samples_from(warrior, gate) {
+            let Some(ppos) = pri.get(&t.to_bits()) else {
+                continue;
+            };
+            let (p, w) = (xz(*ppos), xz(wpos));
+            paired += 1;
+            first_t = first_t.min(t);
+            last_t = last_t.max(t);
+
+            let (near_idx, _) = nearest_pillar(p);
+            let is_self_block = match blocking_pillar(p, w) {
+                Some(idx) => {
+                    blocked += 1;
+                    if idx == near_idx {
+                        self_blocked += 1;
+                        true
+                    } else {
+                        false
+                    }
+                }
+                None => false,
+            };
+
+            // Longest contiguous self-blocked stretch.
+            match (is_self_block, run_start) {
+                (true, None) => run_start = Some(t),
+                (false, Some(s)) => {
+                    longest = longest.max(t - s);
+                    run_start = None;
+                }
+                _ => {}
+            }
+
+            let side = side_of(PILLARS[near_idx], w, p);
+            if side != 0.0 {
+                if prev_side.is_some_and(|s| s != side) {
+                    reversals += 1;
+                }
+                prev_side = Some(side);
+            }
+        }
+        if let Some(s) = run_start {
+            longest = longest.max(last_t - s);
+        }
+
+        SelfBlockStats {
+            paired_samples: paired,
+            blocked,
+            self_blocked,
+            reversals,
+            span_secs: if paired > 0 { last_t - first_t } else { 0.0 },
+            longest_self_block: longest,
+        }
+    }
+
+    /// PATHOLOGY PROBE (residual — see the module note for the revised cause).
+    /// When a TeamPlan healer loses line of sight to the ally it is meant to
+    /// heal, the obstacle is the pillar it is standing next to essentially
+    /// always — not a distant pillar, not geometry it could not have avoided.
+    /// Ending the camp at contact cut the blocked SHARE (40.0/51.5/55.1% ->
+    /// 36.7/35.5/22.5%) but not the attribution, which stays pinned at 100%:
+    /// step 4's team solve is what drives `self_blocked` toward zero and flips
+    /// this probe.
+    #[test]
+    fn priest_blocks_its_own_line_to_the_warrior() {
+        for seed in [11u64, 7, 12] {
+            let s = measure(seed);
+            assert!(
+                s.paired_samples > 500,
+                "seed {}: only {} paired samples — probe went vacuous",
+                seed,
+                s.paired_samples
+            );
+            assert_min_occurrences("frames with the heal line blocked", s.blocked, 1);
+
+            let self_share = s.self_blocked as f32 / s.blocked as f32;
+            println!(
+                "seed {:2}: {} paired over {:.1}s | blocked {} ({:.1}%) | self {} ({:.0}% of blocked) | longest self-block {:.2}s",
+                seed,
+                s.paired_samples,
+                s.span_secs,
+                s.blocked,
+                100.0 * s.blocked as f32 / s.paired_samples as f32,
+                s.self_blocked,
+                100.0 * self_share,
+                s.longest_self_block,
+            );
+            assert!(
+                self_share >= 0.9,
+                "seed {}: expected the healer's own camp pillar to cause ~all blocking, got {:.0}% ({}/{})",
+                seed,
+                100.0 * self_share,
+                s.self_blocked,
+                s.blocked
+            );
+        }
+    }
+
+    /// PATHOLOGY PROBE (residual — see the module note for the revised cause).
+    /// The healer does not commit to a side when rounding the pillar it is
+    /// standing next to — it oscillates across the axis that runs through that
+    /// pillar to its ally, which is what drops the heal line. Ending the camp at
+    /// contact barely moved this (1.21/1.07/0.79 per second), which is itself
+    /// the evidence that the thrash lives in the reactive `cover_pull` layer
+    /// rather than in the camp: the camp is gone for most of these frames and
+    /// the oscillation is not.
+    #[test]
+    fn priest_thrashes_across_the_pillar_axis() {
+        for seed in [11u64, 7, 12] {
+            let s = measure(seed);
+            assert!(s.span_secs > 5.0, "seed {}: span too short to rate", seed);
+            let rate = s.reversals as f32 / s.span_secs;
+            println!(
+                "seed {:2}: {} side reversals over {:.1}s = {:.2}/s",
+                seed, s.reversals, s.span_secs, rate
+            );
+            assert!(
+                rate >= 0.25,
+                "seed {}: expected the healer to thrash across the pillar axis, got {:.2}/s",
+                seed,
+                rate
+            );
+        }
+    }
+
+    // --- pure-geometry unit tests (no simulation) ---
+
+    #[test]
+    fn segment_hits_detects_a_blocked_line() {
+        // Straight through pillar 0's centre.
+        assert!(segment_hits((-50.0, -20.0), (-30.0, -20.0), PILLARS[0]));
+        // Parallel line well clear of it.
+        assert!(!segment_hits((-50.0, 0.0), (-30.0, 0.0), PILLARS[0]));
+        // Grazing just outside the circumradius.
+        assert!(!segment_hits(
+            (-50.0, -20.0 - PILLAR_R - 0.1),
+            (-30.0, -20.0 - PILLAR_R - 0.1),
+            PILLARS[0]
+        ));
+    }
+
+    #[test]
+    fn segment_hits_respects_endpoints_not_the_infinite_line() {
+        // The infinite line through these points would hit pillar 0, but the
+        // segment stops short of it — a mover behind its ally is not blocked.
+        assert!(!segment_hits((-70.0, -20.0), (-60.0, -20.0), PILLARS[0]));
+    }
+
+    #[test]
+    fn nearest_pillar_picks_the_closest() {
+        assert_eq!(nearest_pillar((-39.0, -19.0)).0, 0);
+        assert_eq!(nearest_pillar((41.0, 21.0)).0, 3);
+        let (_, d) = nearest_pillar((-40.0, -14.0));
+        assert!((d - 6.0).abs() < 1e-4, "expected 6.0, got {}", d);
+    }
+
+    #[test]
+    fn side_of_is_signed_and_flips_across_the_axis() {
+        let pillar = (0.0, 0.0);
+        let target = (10.0, 0.0);
+        let a = side_of(pillar, target, (0.0, 5.0));
+        let b = side_of(pillar, target, (0.0, -5.0));
+        assert_ne!(a, 0.0);
+        assert_eq!(a, -b, "opposite sides must have opposite sign");
+        // Collinear observer sits on the axis itself.
+        assert_eq!(side_of(pillar, target, (5.0, 0.0)), 0.0);
+    }
+}

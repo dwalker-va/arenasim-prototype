@@ -11,7 +11,7 @@
 use bevy::prelude::*;
 use bevy::color::LinearRgba;
 
-use super::components::{ArenaCamera, Combatant, CameraController, PlayMatchEntity, SelectionRing, WalkAnim};
+use super::components::{ArenaCamera, Combatant, CameraController, PlayMatchEntity, SelectionRing};
 
 // =============================================================================
 // Tunables
@@ -176,19 +176,19 @@ pub fn follow_selection_ring(
     mut commands: Commands,
     time: Res<Time>,
     mut selection: ResMut<Selection>,
-    combatants: Query<(&Transform, &Combatant, Option<&WalkAnim>), Without<SelectionRing>>,
+    combatants: Query<(&Transform, &Combatant), Without<SelectionRing>>,
     mut rings: Query<(Entity, &SelectionRing, &mut Transform), Without<Combatant>>,
 ) {
     for (ring_entity, ring, mut ring_transform) in rings.iter_mut() {
         match combatants.get(ring.target) {
-            Ok((target_transform, combatant, walk)) if combatant.is_alive() => {
-                // Ground-lock the ring: read logical Y from WalkAnim::ground_y when
-                // present so the ring stays planted while the unit's mesh bobs.
-                // Falls back to translation.y for entities without WalkAnim.
-                let logical_y = walk.map(|w| w.ground_y).unwrap_or(target_transform.translation.y);
+            Ok((target_transform, combatant)) if combatant.is_alive() => {
+                // The ring stays planted while the mesh bobs for free now: the
+                // bob lives on the `VisualBody` child, so the combatant's own
+                // translation IS the logical ground position. This used to have
+                // to read `WalkAnim::ground_y` to dodge the bob.
                 ring_transform.translation = Vec3::new(
                     target_transform.translation.x,
-                    logical_y + RING_GROUND_OFFSET_Y,
+                    target_transform.translation.y + RING_GROUND_OFFSET_Y,
                     target_transform.translation.z,
                 );
                 // Bevy's Torus mesh is already flat in the XZ plane (major

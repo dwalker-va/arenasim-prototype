@@ -104,8 +104,23 @@ pub enum CombatSystemPhase {
 ///
 /// Call this once during app setup before adding combat systems.
 pub fn configure_combat_system_ordering(app: &mut App) {
+    // The simulation runs on a FIXED timestep, not per rendered frame.
+    //
+    // Combat systems consume `Time::delta_secs()` for movement, cooldowns and
+    // casting, so running them in `Update` made the whole simulation frame-rate
+    // dependent: the same seed produced a 165.65s match headless and 68.78s in
+    // the graphical client, because headless pins ManualDuration(1/60) while the
+    // client ran on whatever the GPU delivered. That silently voided the seed as a
+    // reproduction handle and meant match outcomes varied with the player's
+    // hardware.
+    //
+    // 1/60 matches the rate headless already forced, so headless behaviour is
+    // unchanged (the recorded baseline is the proof); the client now steps the sim
+    // at the same rate and catches up across frames instead of scaling with them.
+    // Visual systems stay in `Update` — they should run per frame.
+    app.insert_resource(Time::<Fixed>::from_hz(60.0));
     app.configure_sets(
-        Update,
+        FixedUpdate,
         (
             CombatSystemPhase::ResourcesAndAuras,
             CombatSystemPhase::CombatAndMovement,
@@ -142,7 +157,7 @@ where
 
     // Phase 1: Resources and Auras
     app.add_systems(
-        Update,
+        FixedUpdate,
         (
             update_countdown,
             update_dampening, // Ramp heal/absorb dampening BEFORE any healing applies this frame
@@ -181,7 +196,7 @@ where
 
     // Flush deferred commands between phases
     app.add_systems(
-        Update,
+        FixedUpdate,
         ApplyDeferred
             .after(CombatSystemPhase::ResourcesAndAuras)
             .before(CombatSystemPhase::CombatAndMovement)
@@ -190,7 +205,7 @@ where
 
     // Phase 2: Combat and Movement
     app.add_systems(
-        Update,
+        FixedUpdate,
         (
             process_aura_breaks,
             acquire_targets,
@@ -227,7 +242,7 @@ where
 
     // Phase 3: Combat Resolution
     app.add_systems(
-        Update,
+        FixedUpdate,
         (
             combat_auto_attack,
             flush_decision_trace_system,

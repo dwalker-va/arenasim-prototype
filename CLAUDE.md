@@ -143,7 +143,11 @@ For deeper context, see these focused references:
   design for the `TeamPlan` layer (team stance, obligations, positioning solve).
   Read before touching pillar/cover behaviour: the existing `cover_pull` /
   `cover_seek` / `medic_chase` mechanisms are individually reactive and cannot
-  express team pillar play, which is why Nagrand currently measures zero occlusion.
+  express team pillar play. Steps 1-3 have shipped: `Legacy` still measures 0.0
+  occlusion-seconds on Nagrand, `TeamPlan` now measures 28.3, at win parity.
+  Step 4 (the focal-rooted team solve) is next and owns the residual — see
+  **[the camp handoff](design-docs/2026-08-01-nagrand-camp-handoff.md)** §0 for
+  what is fixed, what is not, and the three hypotheses already ruled out.
 - **[Stat Scaling](design-docs/stat-scaling-system.md)** - Damage/healing formulas and coefficients
 - **[Game Design](design-docs/game-design-doc.md)** - High-level game vision
 - **[Documented Solutions](docs/solutions/)** - Documented solutions to past problems (bugs, implementation patterns, workflows) organized by category, with YAML frontmatter (`module`, `tags`, `category`). Relevant when implementing or debugging in documented areas.

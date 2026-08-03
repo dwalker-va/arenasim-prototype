@@ -601,6 +601,10 @@ pub fn setup_play_match(
     item_defs: Res<ItemDefinitions>,
     default_loadouts: Res<DefaultLoadouts>,
     map_geometry: Res<MapGeometryConfig>,
+    // A `--replay` launch pre-inserts these so a recorded seed reproduces
+    // exactly. Present => honour them; absent => fresh defaults as normal.
+    existing_rng: Option<Res<GameRng>>,
+    existing_profile: Option<Res<ai_profile::AiProfile>>,
 ) {
     info!("Setting up Play Match scene with config: {:?}", *config);
 
@@ -672,14 +676,24 @@ pub fn setup_play_match(
     // Legacy, so experimental behaviour is never on by accident.
     // Graphical mode has no profile selector yet, so it runs Legacy. When the
     // TeamPlan work is playable this should read from GameSettings.
-    commands.insert_resource(ai_profile::AiProfile::default());
+    // Do not clobber a profile a replay launch already chose.
+    let profile = existing_profile.map(|p| *p).unwrap_or_default();
+    info!("AI profile: {:?}", profile);
+    commands.insert_resource(profile);
     commands.insert_resource(team_plan::TeamPlans::default());
 
     // Initialize Shadow Sight state (for stealth stalemate breaking)
     commands.insert_resource(ShadowSightState::default());
 
     // Initialize random number generator (non-deterministic for graphical mode)
-    commands.insert_resource(GameRng::default());
+    // Same for the RNG: a replay pre-seeds it, so overwriting here would make
+    // the recorded seed meaningless — the whole point is bit-exact reproduction.
+    let rng = match existing_rng {
+        Some(r) if r.seed.is_some() => GameRng::from_seed(r.seed.unwrap()),
+        _ => GameRng::default(),
+    };
+    info!("Match seed: {:?}", rng.seed);
+    commands.insert_resource(rng);
 
     // Initialize display settings from game settings
     commands.insert_resource(DisplaySettings {
@@ -1018,23 +1032,31 @@ fn spawn_combatant(
     let combatant_clone = combatant.clone();
     let weapon_poison_buff = combatant.weapon_poison_self_buff();
 
+    // The mesh hangs off a CHILD entity so graphical animation never writes this
+    // entity's Transform — see `VisualBody`. The child sits at local y 0, so the
+    // capsule renders exactly where the sim puts the combatant.
     let entity = commands.spawn((
-        Mesh3d(mesh_handle.clone()),
-        MeshMaterial3d(material),
         Transform::from_translation(position),
+        Visibility::default(),
         combatant,
         DRTracker::default(),
         FloatingTextState {
             next_pattern_index: 0,
         },
-        OriginalMesh(mesh_handle),
         PlayMatchEntity,
         WalkAnim {
-            ground_y: position.y,
             phase: walk_phase_seed(position.xz()),
             previous_xz: position.xz(),
         },
-    )).id();
+    ))
+    .with_child((
+        Mesh3d(mesh_handle.clone()),
+        MeshMaterial3d(material),
+        OriginalMesh(mesh_handle),
+        VisualBody { rest_y: 0.0 },
+        Transform::default(),
+    ))
+    .id();
     if let Some(buff) = weapon_poison_buff {
         commands.entity(entity).insert(ActiveAuras { auras: vec![buff] });
     }
@@ -1055,7 +1077,25 @@ fn spawn_pet(
 ) {
     let pet_slot = PET_SLOT_BASE + owner_combatant.slot;
     let pet_combatant = Combatant::new_pet(owner_combatant.team, pet_slot, pet_type, owner_combatant);
-    let pet_position = owner_position + Vec3::new(-2.0, 0.3, 1.5);
+    // MUST match the headless spawn offsets in `headless/runner.rs` exactly, or a
+    // seed stops reproducing between the two modes.
+    //
+    // The x offset MIRRORS BY TEAM so the pet spawns BEHIND its owner: team 1
+    // starts at -x, team 2 at +x. This used to be a flat `-2.0` for both, which
+    // put team 2's pet two yards toward the ENEMY instead of two yards back — a
+    // four-yard positional difference from headless on the very first frame. The
+    // Felhunter then reached the enemy sooner and shifted every subsequent event
+    // ~0.7s earlier, growing to 3.8s by the end of the match. That is the bulk of
+    // the graphical/headless seed divergence in `design-docs/2026-08-01-nagrand-
+    // camp-handoff.md` §3.3 — it is a POSITIONAL difference, not the archetype /
+    // RNG-draw-order effect that document hypothesised. (An RNG-order change
+    // would alter damage VALUES; every value matched, only timings moved.)
+    //
+    // The y must match too: gameplay range checks use `Vec3::distance`, so height
+    // is not free. 0.75 is headless's value, and headless is what every recorded
+    // baseline runs.
+    let pet_position = owner_position
+        + Vec3::new(if owner_combatant.team == 1 { -2.0 } else { 2.0 }, 0.75, 1.5);
 
     let pet_color = pet_type.color();
     // Stocky capsule for quadruped (tilted horizontal by apply_pet_mesh_tilt system)
@@ -1075,10 +1115,14 @@ fn spawn_pet(
         Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2) // Face left (-X)
     };
 
+    // The sim entity sits at headless's y (0.75) so a seed reproduces; the
+    // capsule is tuned to render at 0.3, so the `VisualBody` child carries the
+    // difference as a local offset. Splitting the two is what lets the gameplay
+    // height and the rendered height disagree without either being wrong.
+    const PET_MESH_Y: f32 = 0.3;
     commands.spawn((
-        Mesh3d(mesh_handle.clone()),
-        MeshMaterial3d(material),
         Transform::from_translation(pet_position).with_rotation(initial_facing),
+        Visibility::default(),
         pet_combatant,
         DRTracker::default(),
         Pet {
@@ -1088,13 +1132,18 @@ fn spawn_pet(
         FloatingTextState {
             next_pattern_index: 0,
         },
-        OriginalMesh(mesh_handle),
         PlayMatchEntity,
         WalkAnim {
-            ground_y: pet_position.y,
             phase: walk_phase_seed(pet_position.xz()),
             previous_xz: pet_position.xz(),
         },
+    ))
+    .with_child((
+        Mesh3d(mesh_handle.clone()),
+        MeshMaterial3d(material),
+        OriginalMesh(mesh_handle),
+        VisualBody { rest_y: PET_MESH_Y - pet_position.y },
+        Transform::from_xyz(0.0, PET_MESH_Y - pet_position.y, 0.0),
     ));
 
     // Register pet with combat log
@@ -1120,6 +1169,17 @@ pub fn cleanup_play_match(
     commands.remove_resource::<ActiveMapGeometry>();
     commands.remove_resource::<ShadowSightState>();
     commands.remove_resource::<DisplaySettings>();
+    // MUST be removed, not left for the next match: `setup_play_match` treats a
+    // surviving `GameRng` (and `AiProfile`) as "a replay pre-seeded this match"
+    // and honours it. `GameRng::default()` now RECORDS its seed, so leaving the
+    // resource behind made every match after the first in a client session
+    // silently re-run the first match's seed instead of picking a fresh one —
+    // and a `--replay` under TeamPlan leaked that profile into the next normal
+    // match. A real replay inserts both BEFORE the state is entered, so it is
+    // unaffected by this exit-time cleanup.
+    commands.remove_resource::<GameRng>();
+    commands.remove_resource::<ai_profile::AiProfile>();
+    commands.remove_resource::<team_plan::TeamPlans>();
     // Remove optional resources (may not exist if match didn't finish)
     commands.remove_resource::<VictoryCelebration>();
 }

@@ -297,14 +297,40 @@ pub struct BacklashBurst {
 }
 
 /// Drives a subtle vertical bob on combatant/pet capsules while they are moving.
-/// `ground_y` is captured at spawn; the bob is applied as an offset above it.
 /// `phase` advances by horizontal distance traveled, so slowed units bob slowly
 /// and stationary units do not bob at all.
+///
+/// Lives on the SIM entity (it needs that entity's post-movement XZ), but the bob
+/// it drives is written to the [`VisualBody`] child — see that type for why.
 #[derive(Component)]
 pub struct WalkAnim {
-    pub ground_y: f32,
     pub phase: f32,
     pub previous_xz: Vec2,
+}
+
+/// The rendered body of a combatant or pet: a CHILD entity carrying `Mesh3d`,
+/// `MeshMaterial3d` and [`OriginalMesh`], with a local `Transform` relative to
+/// its parent.
+///
+/// **This exists to keep graphical animation out of the simulation's state.**
+/// Gameplay range checks use `Vec3::distance`, which includes `y`. The walk bob,
+/// the death sink and the victory bounce all used to write `translation.y`
+/// directly on the combatant entity, so a ±0.10 visual bob perturbed real range
+/// checks and a seed stopped reproducing between the client and headless (see
+/// `design-docs/2026-08-01-nagrand-camp-handoff.md` §3.3). Those animations now
+/// write this child's LOCAL transform, which nothing in the simulation reads.
+///
+/// The parent's `Transform` is therefore the unit's logical position, written
+/// only by simulation systems. Keep it that way: a graphical system that needs
+/// to move a unit visually should move its `VisualBody`, never its parent.
+///
+/// `rest_y` is the child's neutral local height — the offset that makes the mesh
+/// sit correctly on the ground given wherever the sim puts the parent. It is not
+/// always 0: pets spawn at the `y` headless uses (0.75) so the two modes agree,
+/// while the pet capsule is tuned to render lower.
+#[derive(Component)]
+pub struct VisualBody {
+    pub rest_y: f32,
 }
 
 /// Marker component for the player's selection ring — a translucent torus

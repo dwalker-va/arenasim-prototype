@@ -57,6 +57,9 @@ fn main() {
         // `--trace-mode on` (or `verbose`).
         let trace_mode = args.trace_mode.unwrap_or(cli::TraceMode::Off);
         run_headless_mode(config_path, args.output, args.max_duration, trace_mode);
+    } else if let Some(replay_path) = args.replay {
+        // Graphical replay of a headless config — same file, watchable.
+        run_replay_mode(replay_path);
     } else {
         // Normal graphical mode
         run_graphical_mode();
@@ -118,6 +121,11 @@ fn run_headless_mode(
 }
 
 fn run_graphical_mode() {
+    build_graphical_app(None).run();
+}
+
+/// Build the client app. `replay` pre-seeds the match and boots straight into it.
+fn build_graphical_app(replay: Option<headless::HeadlessMatchConfig>) -> App {
     // Load settings first to apply them to window configuration
     let settings = GameSettings::load();
     let (width, height) = settings.resolution.dimensions();
@@ -128,7 +136,8 @@ fn run_graphical_mode() {
         PresentMode::AutoNoVsync
     };
 
-    App::new()
+    let mut app = App::new();
+    app
         // Bevy default plugins with settings-based window configuration
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
@@ -154,11 +163,47 @@ fn run_graphical_mode() {
             CombatPlugin,
             UiPlugin,
         ))
-        // Start in the main menu state
-        .init_state::<GameState>()
         // Setup custom font
-        .add_systems(Startup, setup_custom_font)
-        .run();
+        .add_systems(Startup, setup_custom_font);
+
+    match replay {
+        // A replay boots directly into PlayMatch with the recorded seed, profile
+        // and comps already inserted — `setup_play_match` honours all three
+        // rather than overwriting them.
+        Some(cfg) => {
+            let match_config = cfg
+                .to_match_config()
+                .unwrap_or_else(|e| { eprintln!("Invalid replay config: {e}"); std::process::exit(1) });
+            let profile = cfg
+                .ai_profile
+                .as_deref()
+                .map(|p| arenasim::states::play_match::ai_profile::AiProfile::parse(p)
+                    .unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(1) }))
+                .unwrap_or_default();
+            let rng = match cfg.random_seed {
+                Some(seed) => arenasim::states::play_match::GameRng::from_seed(seed),
+                None => arenasim::states::play_match::GameRng::default(),
+            };
+            println!(
+                "Replaying: {:?} vs {:?} on {} | profile {:?} | seed {:?}",
+                cfg.team1, cfg.team2, cfg.map, profile, rng.seed,
+            );
+            app.insert_resource(match_config)
+                .insert_resource(profile)
+                .insert_resource(rng)
+                .insert_state(GameState::PlayMatch);
+        }
+        None => {
+            app.init_state::<GameState>();
+        }
+    }
+    app
+}
+
+fn run_replay_mode(path: std::path::PathBuf) {
+    let cfg = headless::HeadlessMatchConfig::load_from_file(&path)
+        .unwrap_or_else(|e| { eprintln!("Error loading replay config: {e}"); std::process::exit(1) });
+    build_graphical_app(Some(cfg)).run();
 }
 
 fn setup_custom_font(

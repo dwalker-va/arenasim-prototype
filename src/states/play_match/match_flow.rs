@@ -395,7 +395,10 @@ pub fn update_victory_celebration(
     celebration: Option<ResMut<VictoryCelebration>>,
     mut commands: Commands,
     mut next_state: ResMut<NextState<GameState>>,
-    mut celebrating_combatants: Query<(&mut Transform, &Celebrating)>,
+    // Drives the winners' `VisualBody` children, not the sim entities — see
+    // `VisualBody`: gameplay range checks read the parent's translation.
+    celebrating_combatants: Query<(&Celebrating, &Children)>,
+    mut bodies: Query<(&mut Transform, &VisualBody)>,
 ) {
     // Only run if celebration is active
     let Some(mut celebration) = celebration else {
@@ -406,13 +409,19 @@ pub fn update_victory_celebration(
     
     // Animate celebrating combatants (bounce up and down)
     let celebration_time = 5.0 - celebration.time_remaining; // Elapsed time
-    for (mut transform, celebrating) in celebrating_combatants.iter_mut() {
+    for (celebrating, children) in celebrating_combatants.iter() {
         // Sine wave for smooth bounce (frequency = 2 Hz for lively bounce)
         let bounce_time = celebration_time + celebrating.bounce_offset;
         let bounce_height = (bounce_time * std::f32::consts::TAU * 2.0).sin().max(0.0) * 0.8;
-        
-        // Set Y position (base height = 1.0 + bounce)
-        transform.translation.y = 1.0 + bounce_height;
+
+        for child in children.iter() {
+            if let Ok((mut body_transform, body)) = bodies.get_mut(child) {
+                // Bounce above the body's resting height rather than an absolute
+                // 1.0, so pets (whose mesh rests below their sim y) bounce from
+                // where they actually stand.
+                body_transform.translation.y = body.rest_y + bounce_height;
+            }
+        }
     }
     
     // Check if celebration finished
