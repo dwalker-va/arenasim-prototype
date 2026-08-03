@@ -43,6 +43,7 @@ pub mod effects;
 pub mod match_flow;
 pub mod ai_profile;
 pub mod team_plan;
+pub mod team_solve;
 pub mod arena_bounds;
 pub mod map_geometry;
 pub mod map_config;
