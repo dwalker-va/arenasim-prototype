@@ -884,11 +884,15 @@ pub(super) fn healer_pressured_tick_shared(
             ctx,
             shared.heal_range,
             threat_radius,
+            None,
         );
         if let Some(spot) = crate::states::play_match::team_solve::solve_position(
             crate::states::play_match::team_plan::RoleIntent::OccupyCover,
             entity,
             &world,
+            // `OccupyCover` is defined against the healer's own ally and the
+            // enemy casters, not against a focal unit.
+            None,
         ) {
             // A `Point` goal, not a bearing: the chosen spot can be tens of yards
             // off and behind a pillar, and `Point` is the branch that

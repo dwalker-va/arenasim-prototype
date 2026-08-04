@@ -80,6 +80,11 @@ fn run(profile: &str, seed: u64) -> Cell {
 
 /// Head-to-head: each team on its own implementation, same seed.
 fn run_pair(t1: &str, t2: &str, seed: u64) -> Cell {
+    run_comp(t1, t2, seed, &["Warrior", "Priest"], &["Warlock", "Priest"])
+}
+
+/// As `run_pair`, with the comps named explicitly.
+fn run_comp(t1: &str, t2: &str, seed: u64, team1: &[&str], team2: &[&str]) -> Cell {
     let volumes = nagrand();
     let eye = |p: Vec2| Vec3::new(p.x, EYE_HEIGHT, p.y);
 
@@ -98,8 +103,8 @@ fn run_pair(t1: &str, t2: &str, seed: u64) -> Cell {
 
     let result = run_headless_match_observed(
         HeadlessMatchConfig {
-            team1: vec!["Warrior".into(), "Priest".into()],
-            team2: vec!["Warlock".into(), "Priest".into()],
+            team1: team1.iter().map(|s| s.to_string()).collect(),
+            team2: team2.iter().map(|s| s.to_string()).collect(),
             map: "PillaredArena".to_string(),
             team1_ai_profile: Some(t1.to_string()),
             team2_ai_profile: Some(t2.to_string()),
@@ -419,4 +424,37 @@ fn paired_legacy_vs_team_plan() {
          (n={} — below ~12 discordant this is not conclusive on its own)",
         only_legacy + only_team_plan
     );
+}
+
+/// STEP 4c: the kiter comps. The pillar-camp sweep above contains no unit on the
+/// ENGAGE/KITE machine at all — the Warlock was deliberately taken off it — so it
+/// cannot see the DPS half of the solve. Mage and Hunter are the two classes that
+/// are on it.
+///
+/// Reports each side's GAIN against its own Legacy-vs-Legacy baseline, for the
+/// same reason the pillar sweep does: the comps are not evenly matched, so raw
+/// head-to-head counts are not comparable to each other.
+#[test]
+#[ignore]
+fn head_to_head_kiter_comps() {
+    let seeds: Vec<u64> = (1..=12).collect();
+    let comps: [(&str, &[&str], &[&str]); 2] = [
+        ("Mage+Priest vs Warrior+Priest", &["Mage", "Priest"], &["Warrior", "Priest"]),
+        ("Hunter+Priest vs Rogue+Priest", &["Hunter", "Priest"], &["Rogue", "Priest"]),
+    ];
+    for (label, t1, t2) in comps {
+        let base = seeds.iter().filter(|&&s| run_comp("Legacy", "Legacy", s, t1, t2).won).count();
+        let with_tp = seeds.iter().filter(|&&s| run_comp("TeamPlan", "Legacy", s, t1, t2).won).count();
+        let vs_tp = seeds.iter().filter(|&&s| run_comp("Legacy", "TeamPlan", s, t1, t2).won).count();
+        let n = seeds.len();
+        let pct = |k: usize| 100.0 * k as f32 / n as f32;
+        println!(
+            "\n{label}\n  Legacy vs Legacy        team 1 {}/{} ({:.0}%)\n\
+               team 1 on TeamPlan      team 1 {}/{} ({:.0}%)  -> {:+.0}pt for the kiter side\n\
+               team 2 on TeamPlan      team 1 {}/{} ({:.0}%)  -> {:+.0}pt for the other side",
+            base, n, pct(base),
+            with_tp, n, pct(with_tp), pct(with_tp) - pct(base),
+            vs_tp, n, pct(vs_tp), pct(n - vs_tp) - pct(n - base),
+        );
+    }
 }

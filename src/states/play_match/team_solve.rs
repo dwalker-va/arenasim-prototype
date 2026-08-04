@@ -61,6 +61,9 @@ pub struct SolveUnit {
     pub is_healer: bool,
     pub is_melee: bool,
     pub is_pet: bool,
+    /// The unit's own preferred engagement range — `CharacterClass::preferred_range`.
+    /// `HoldRange` uses it as the ring's OUTER edge.
+    pub ability_range: f32,
     /// Can this unit land a heal RIGHT NOW — i.e. is it neither silenced nor
     /// locked out of its healing school? See [`violations`]'s `OccupyCover` arm
     /// for why positioning depends on it.
@@ -415,6 +418,14 @@ pub fn violations(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) -> u1
                 if !world.sees(candidate, focus) {
                     v |= C_SIGHT;
                 }
+                // AND an outer leash. The doc's bullet gives this intent a floor
+                // ("outside enemy threat range") but no ceiling, which is not a
+                // ring — it is a half-space, and it is satisfied best by walking
+                // to the far wall and never casting again. The floor and the
+                // ceiling together ARE the tuned `range_band` this replaces.
+                if candidate.distance(focus) > ctx.unit.ability_range {
+                    v |= C_LEASH;
+                }
             }
         }
         RoleIntent::StackAnchor => {
@@ -616,15 +627,15 @@ fn infeasibility(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) -> f32
     // that matters comes from: it points along the shortest path back into range.
     if v & C_LEASH != 0 {
         let leash_ref = match intent {
-            RoleIntent::PressTarget => ctx.focus,
+            RoleIntent::PressTarget | RoleIntent::HoldRange => ctx.focus,
             RoleIntent::StackAnchor => ctx.healer_pos(),
             _ => ctx.anchor_ally_pos(),
         };
         if let Some(r) = leash_ref {
-            let limit = if intent == RoleIntent::PressTarget {
-                world.heal_range.min(ABILITY_REACH)
-            } else {
-                world.heal_range
+            let limit = match intent {
+                RoleIntent::PressTarget => world.heal_range.min(ABILITY_REACH),
+                RoleIntent::HoldRange => ctx.unit.ability_range,
+                _ => world.heal_range,
             };
             cost += W_LEASH * (candidate.distance(r) - limit).max(0.0);
         }
@@ -669,6 +680,10 @@ pub fn solve_unit(intent: RoleIntent, ctx: &SolveContext) -> Vec2 {
         // Lexicographic: satisfy the intent first, and only then prefer not
         // moving. Standing still is candidate 0 and ties at equal cost, which is
         // what keeps a satisfied unit planted.
+        //
+        // A distance-MAXIMISING secondary was tried for `HoldRange`, to mimic the
+        // Hunter's `flee` term, and measured worse: no change for the Hunter comp
+        // and -8pt for the Mage. Reverted.
         let key = (infeasibility(intent, candidate, ctx), candidate.distance(ctx.unit.pos));
         if best.is_none_or(|(bc, bd, _)| (key.0, key.1) < (bc, bd)) {
             best = Some((key.0, key.1, candidate));
@@ -751,7 +766,12 @@ fn can_cast_heal(ctx: &super::class_ai::CombatContext, info: &super::class_ai::C
 /// enemies are EXCLUDED: the solve must not position around information the team
 /// does not have, and every other threat consumer in this codebase filters them
 /// the same way.
-pub fn world_from_context(ctx: &super::class_ai::CombatContext, heal_range: f32, threat_radius: f32) -> SolveWorld {
+pub fn world_from_context(
+    ctx: &super::class_ai::CombatContext,
+    heal_range: f32,
+    threat_radius: f32,
+    kill_target: Option<Entity>,
+) -> SolveWorld {
     let my_team = ctx.self_info().map(|c| c.team);
     let units = ctx
         .combatants
@@ -766,6 +786,7 @@ pub fn world_from_context(ctx: &super::class_ai::CombatContext, heal_range: f32,
             is_healer: c.class.is_healer(),
             is_melee: c.class.is_melee(),
             is_pet: c.slot >= super::constants::PET_SLOT_BASE,
+            ability_range: c.class.preferred_range(),
             can_cast_heal: can_cast_heal(ctx, c),
         })
         .collect();
@@ -775,7 +796,7 @@ pub fn world_from_context(ctx: &super::class_ai::CombatContext, heal_range: f32,
         bounds: Some(ctx.bounds),
         heal_range,
         threat_radius,
-        kill_target: None,
+        kill_target,
     }
 }
 
@@ -787,9 +808,14 @@ pub fn world_from_context(ctx: &super::class_ai::CombatContext, heal_range: f32,
 /// aims at an obstacle's tangent instead of oozing along its face — whereas a
 /// bare direction would walk the unit into the pillar between it and the cover it
 /// picked.
-pub fn solve_position(intent: RoleIntent, entity: Entity, world: &SolveWorld) -> Option<Vec2> {
+pub fn solve_position(
+    intent: RoleIntent,
+    entity: Entity,
+    world: &SolveWorld,
+    focus: Option<Vec2>,
+) -> Option<Vec2> {
     let unit = *world.unit(entity)?;
-    let ctx = SolveContext { world, unit, focus: None, placed: &BTreeMap::new() };
+    let ctx = SolveContext { world, unit, focus, placed: &BTreeMap::new() };
     let spot = solve_unit(intent, &ctx);
     (spot.distance(unit.pos) > 1e-3).then_some(spot)
 }
@@ -812,6 +838,7 @@ mod tests {
             is_healer: false,
             is_melee: false,
             is_pet: false,
+            ability_range: 30.0,
             // Test healers can heal unless a case says otherwise.
             can_cast_heal: true,
         }
