@@ -57,6 +57,12 @@ struct Cell {
     /// because denying the approach is what an opener is for.
     pre_occlusion_secs: f32,
     post_occlusion_secs: f32,
+    /// Mean distance from the Priest to the nearest enemy CASTER. `OccupyCover`
+    /// constrains occlusion but not distance, so this is where a healer that is
+    /// "in cover" can still be well inside Fear range.
+    mean_caster_dist: f32,
+    /// Sim-seconds the Priest spent under hard CC (fear/stun/incap/poly).
+    priest_cc_secs: f32,
     /// Mean distance of the Priest from its camp pillar centre, post-contact.
     /// A released camp lets the healer follow the fight; an unreleased one pins
     /// it to the hold ring (circumradius 6 + mover 0.5 + standoff 2 = 8.5yd).
@@ -76,6 +82,8 @@ fn run(profile: &str, seed: u64) -> Cell {
     let mut sep_at_contact = f32::NAN;
     let (mut pre_occ, mut post_occ) = (0usize, 0usize);
     let mut ring_sum = 0.0f32;
+    let (mut caster_dist_sum, mut caster_dist_n) = (0.0f32, 0usize);
+    let mut cc_frames = 0usize;
 
     let result = run_headless_match_observed(
         HeadlessMatchConfig {
@@ -131,6 +139,34 @@ fn run(profile: &str, seed: u64) -> Cell {
             prev_hp = Some(hp);
 
             let Some(p3) = priest else { return };
+            {
+                let pp = Vec2::new(p3.x, p3.z);
+                // `Option`, not a f32::MAX sentinel: MAX is finite, so a frame
+                // with no living enemy caster silently contributed 3.4e38.
+                let mut nearest: Option<f32> = None;
+                for obs in f.combatants.values() {
+                    if obs.team == 1 || !obs.alive || obs.class.is_melee() {
+                        continue;
+                    }
+                    let d = pp.distance(Vec2::new(obs.position.x, obs.position.z));
+                    nearest = Some(nearest.map_or(d, |n: f32| n.min(d)));
+                }
+                if let Some(d) = nearest {
+                    caster_dist_sum += d;
+                    caster_dist_n += 1;
+                }
+                for obs in f.combatants.values() {
+                    if obs.team != 1 || obs.is_pet || obs.class != CharacterClass::Priest {
+                        continue;
+                    }
+                    use arenasim::states::play_match::components::AuraType::*;
+                    if obs.aura_types.iter().any(|a| {
+                        matches!(a, Fear | Stun | Incapacitate | Polymorph | Root)
+                    }) {
+                        cc_frames += 1;
+                    }
+                }
+            }
             let (p, w) = (Vec2::new(p3.x, p3.z), Vec2::new(w3.x, w3.z));
 
             // Same definition the planner latches on: any enemy within
@@ -178,6 +214,8 @@ fn run(profile: &str, seed: u64) -> Cell {
         pre_occlusion_secs: pre_occ as f32 / 60.0,
         post_occlusion_secs: post_occ as f32 / 60.0,
         post_ring_dist: ring_sum / post.max(1) as f32,
+        mean_caster_dist: caster_dist_sum / caster_dist_n.max(1) as f32,
+        priest_cc_secs: cc_frames as f32 / 60.0,
     }
 }
 
@@ -205,6 +243,8 @@ fn paired_legacy_vs_team_plan() {
     let (mut lpo, mut tpo) = (0.0f32, 0.0f32);
     let (mut lqo, mut tqo) = (0.0f32, 0.0f32);
     let (mut lrd, mut trd) = (0.0f32, 0.0f32);
+    let (mut lcd, mut tcd) = (0.0f32, 0.0f32);
+    let (mut lcc, mut tcc) = (0.0f32, 0.0f32);
     let (mut lt, mut tt) = (0.0f32, 0.0f32);
     // McNemar discordant pairs.
     let (mut only_legacy, mut only_team_plan) = (0usize, 0usize);
@@ -245,6 +285,10 @@ fn paired_legacy_vs_team_plan() {
         tqo += t.post_occlusion_secs;
         lrd += l.post_ring_dist;
         trd += t.post_ring_dist;
+        lcd += l.mean_caster_dist;
+        tcd += t.mean_caster_dist;
+        lcc += l.priest_cc_secs;
+        tcc += t.priest_cc_secs;
         lt += l.duration;
         tt += t.duration;
         match (l.won, t.won) {
@@ -273,6 +317,8 @@ fn paired_legacy_vs_team_plan() {
          {:<28} {:>11.1}s {:>11.1}s\n\
          {:<28} {:>11.1}s {:>11.1}s\n\
          {:<28} {:>11.1}y {:>11.1}y\n\
+         {:<28} {:>11.1}y {:>11.1}y\n\
+         {:<28} {:>11.1}s {:>11.1}s\n\
          {:<28} {:>12} {:>12}\n\
          {:<28} {:>12} {:>12}",
         "", "Legacy", "TeamPlan",
@@ -286,6 +332,8 @@ fn paired_legacy_vs_team_plan() {
         "Warlock denied Priest, pre", lpo / n, tpo / n,
         "Warlock denied Priest, post", lqo / n, tqo / n,
         "Priest dist from camp pillar", lrd / n, trd / n,
+        "Priest dist to nearest caster", lcd / n, tcd / n,
+        "Priest time hard-CC'd", lcc / n, tcc / n,
         "Warrior died", format!("{ld}/{}", seeds.len()), format!("{td}/{}", seeds.len()),
         "losses with ZERO heal", zero_heal_losses.0, zero_heal_losses.1,
     );

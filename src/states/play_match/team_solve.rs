@@ -37,7 +37,7 @@ use bevy::prelude::*;
 use std::collections::BTreeMap;
 
 use super::arena_bounds::ArenaBounds;
-use super::map_geometry::{has_line_of_sight, ObstacleVolume, EYE_HEIGHT};
+use super::map_geometry::{has_line_of_sight, ObstacleVolume, EYE_HEIGHT, MOVER_RADIUS};
 use super::team_plan::{Anchor, RoleIntent, Stance};
 
 /// Where a candidate position is probed from, as an offset ring around the
@@ -183,8 +183,23 @@ pub fn focus_position(focus: Focus, world: &SolveWorld) -> Option<Vec2> {
 /// (`HoldRange`).
 pub fn assign_intents(stance: Stance, team: u8, world: &SolveWorld) -> BTreeMap<Entity, RoleIntent> {
     let mut intents = BTreeMap::new();
+    // Does this team still have anyone worth healing? A healer with no living
+    // non-pet partner is not a healer any more, and `OccupyCover` degenerates
+    // badly for it: with no anchor ally the sight and leash constraints go
+    // vacuous, leaving only "stay hidden from casters" — so the last unit
+    // standing holds cover for a corpse, forever, instead of fighting or
+    // kiting. Watching a 2v1 is what surfaced this.
+    let has_partner = |me: Entity| {
+        world
+            .units
+            .iter()
+            .any(|u| u.team == team && !u.is_pet && u.entity != me && !u.is_healer)
+    };
     for unit in world.units.iter().filter(|u| u.team == team && !u.is_pet) {
         let intent = match stance {
+            // A healer with nobody left to heal fights at range instead: stay
+            // out of reach, keep sight of the target so it can still cast.
+            _ if unit.is_healer && !has_partner(unit.entity) => RoleIntent::HoldRange,
             // The healer's job never changes with stance: be able to heal, and
             // not be shootable while doing it. What changes is who else does what.
             _ if unit.is_healer => RoleIntent::OccupyCover,
@@ -428,40 +443,93 @@ fn team_bearing(ctx: &SolveContext) -> Option<Vec2> {
     (n > 0).then(|| sum.normalize_or_zero()).filter(|b| *b != Vec2::ZERO)
 }
 
-/// Radii at which candidate positions are sampled, in yards.
-///
-/// **Multiple radii, not one step, and this is load-bearing.** The constraints
-/// that matter most — line of sight, and occlusion from casters — are BINARY and
-/// change only when the unit crosses a pillar's shadow boundary. Sampling a
-/// single [`SOLVE_LOOKAHEAD`] ring means that on a map whose nearest cover is
-/// tens of yards away, all 16 candidates score identically, the nearest-satisfying
-/// tie-break picks standing still, and the unit never approaches cover at all.
-///
-/// That is not a hypothetical: the first wiring of this solve measured a healer
-/// moving 47-91yd across an entire match (a statue; the tuned scorer moves ~3yd/s)
-/// while violating a constraint on 63% of frames and asking to move on 7%. It is
-/// the same "cover is a local gradient" limit that forced `cover_seek_override`
-/// to exist alongside `cover_pull` — and the solve is supposed to REPLACE that
-/// pair, so it has to see far enough to do their job.
-///
-/// The design doc frames this correctly and the first draft did not: a unit
-/// "scores candidate POSITIONS", not candidate steps.
-pub const SOLVE_RADII: [f32; 4] = [SOLVE_LOOKAHEAD, 6.0, 14.0, 26.0];
+/// Clearance beyond an obstacle's own footprint when standing in its shadow, so
+/// a unit sits BEHIND cover rather than flush against its collision skin.
+pub const COVER_STANDOFF: f32 = 1.5;
 
-/// Candidate positions for a unit: stand still, or a point on each
-/// [`SOLVE_RADII`] ring along each compass bearing.
+/// Bearings either side of a shadow's centre line, in radians, giving positions
+/// at the shadow's EDGE — still mostly covered, but able to see past it. This is
+/// the "poke out to heal" spot expressed as geometry rather than as a timer.
+pub const PEEK_OFFSETS: [f32; 2] = [-0.45, 0.45];
+
+/// Distances BEYOND the obstacle's skin to sample along a shadow's centre line,
+/// in yards. Cover at depth is the same cover, but out of CC range.
+pub const SHADOW_DEPTHS: [f32; 4] = [0.0, 8.0, 18.0, 28.0];
+
+/// How far along the line toward the ally to sample, in yards.
+const ALLY_APPROACH_STEPS: [f32; 3] = [4.0, 10.0, 20.0];
+
+/// Candidate positions for a unit, DERIVED FROM THE MATCH GEOMETRY.
 ///
-/// Standing still is index 0 deliberately — it is the cheapest correct answer
-/// whenever the unit already satisfies its intent, and having it win ties is
-/// what stops the solve from jittering.
-pub fn candidates_for(from: Vec2) -> Vec<Vec2> {
-    let mut out = Vec::with_capacity(SOLVE_DIRECTIONS * SOLVE_RADII.len() + 1);
-    out.push(from);
-    for radius in SOLVE_RADII {
-        for i in 0..SOLVE_DIRECTIONS {
-            let a = (i as f32) * std::f32::consts::TAU / SOLVE_DIRECTIONS as f32;
-            out.push(from + Vec2::from_angle(a) * radius);
+/// **Not a lattice around the mover, and that distinction is what makes the
+/// movement look deliberate.** An earlier version sampled fixed rings at fixed
+/// bearings relative to the unit. Those candidates are only stable in the unit's
+/// OWN frame: as it moves, the whole lattice moves with it, so the winning
+/// candidate hops from one lattice cell to the next and the unit visibly snaps
+/// between arbitrary points, never settling. Watching a 2v1 is what made it
+/// obvious — the healer "swapped between fixed positions" instead of holding one.
+///
+/// These candidates are anchored to things that exist in the world:
+///
+/// - the unit's current position (stand still),
+/// - for every (obstacle, enemy caster) pair, the point that puts that obstacle
+///   between the unit and that caster — plus the two [`PEEK_OFFSETS`] shoulders
+///   of the same shadow,
+/// - points along the line toward the ally that must be seen and reached,
+/// - a small local ring, so there is always a fine-grained gradient to follow
+///   even when none of the above helps.
+///
+/// A pillar's shadow point moves slowly and continuously as the caster moves, so
+/// the unit walks to it and STAYS there — and when the fight shifts, the target
+/// slides rather than teleporting to the next lattice cell.
+pub fn candidates_for(ctx: &SolveContext) -> Vec<Vec2> {
+    let world = ctx.world;
+    let mut out = vec![ctx.unit.pos];
+
+    // Cover geometry: for each (obstacle, caster) pair, sample ALONG the shadow
+    // rather than only at the pillar's skin.
+    //
+    // A shadow is a REGION, not a point. Sampling only the ring hugs the pillar,
+    // which is the worst place to stand when the caster is using that same
+    // pillar — measured at 32.3yd mean distance to the nearest caster and 7.2s
+    // of hard CC, both worse than sampling a plain lattice. Standing 25yd back
+    // along the same bearing is equally hidden and far out of Fear range.
+    //
+    // The peek shoulders stay at the ring: peeking only works near the edge,
+    // where a small step recovers the sightline.
+    for obstacle in &world.obstacles {
+        let (center, radius) = obstacle.footprint_disc();
+        let ring = radius + MOVER_RADIUS + COVER_STANDOFF;
+        for caster in world.enemy_casters_of(ctx.unit.team) {
+            let away = (center - caster.pos).normalize_or_zero();
+            if away == Vec2::ZERO {
+                continue;
+            }
+            let bearing = away.to_angle();
+            for depth in SHADOW_DEPTHS {
+                out.push(center + away * (ring + depth));
+            }
+            for offset in PEEK_OFFSETS {
+                out.push(center + Vec2::from_angle(bearing + offset) * ring);
+            }
         }
+    }
+
+    // Toward the ally we have to be able to see and reach.
+    if let Some(ally) = ctx.anchor_ally_pos() {
+        let toward = (ally - ctx.unit.pos).normalize_or_zero();
+        if toward != Vec2::ZERO {
+            for step in ALLY_APPROACH_STEPS {
+                out.push(ctx.unit.pos + toward * step);
+            }
+        }
+    }
+
+    // Local ring: the fine adjustment, and the fallback gradient when no
+    // geometric candidate is an improvement.
+    for i in 0..SOLVE_DIRECTIONS {
+        let a = (i as f32) * std::f32::consts::TAU / SOLVE_DIRECTIONS as f32;
+        out.push(ctx.unit.pos + Vec2::from_angle(a) * SOLVE_LOOKAHEAD);
     }
     out
 }
@@ -571,7 +639,7 @@ pub fn solve_unit(intent: RoleIntent, ctx: &SolveContext) -> Vec2 {
     };
 
     let mut best: Option<(f32, f32, Vec2)> = None;
-    for candidate in candidates_for(ctx.unit.pos) {
+    for candidate in candidates_for(ctx) {
         if !in_bounds(&candidate) {
             continue;
         }
