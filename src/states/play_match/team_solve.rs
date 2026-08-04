@@ -370,6 +370,22 @@ pub fn violations(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) -> u1
                     v |= C_SIGHT;
                 }
             }
+            // NARROWING THIS TO "something is mid-cast at me" WAS TRIED AND LOST
+            // BADLY: 11/12 -> 8/12 wins, heal 348 -> 258, match length 60s ->
+            // 91s. The idea was to stop the duck wasting GCDs, since Mind Blast
+            // is Shadow and therefore free during a Holy lockout. It is not
+            // ability priority that stops it — Mind Blast already falls through
+            // below Flash Heal with no health guard — it is POSITION: over one
+            // measured match its rejections were 954 OutOfRange and 510
+            // LosBlocked against 4 OnCooldown, i.e. ducking is exactly what puts
+            // it out of reach.
+            //
+            // So the two are in real tension and the duck wins on the numbers.
+            // (The predicate was also weak — `CombatantInfo::target` is the kill
+            // target, not the cast's target, so "casting at me" rarely fired.
+            // Fixing that needs the casting target exposed on the snapshot;
+            // worth redoing only if the tension is revisited.)
+            //
             // ...and while it CANNOT cast, buy distance instead. These two are
             // mutually exclusive by construction, so they never compete for
             // weight — which is why an unconditional standoff constraint failed
