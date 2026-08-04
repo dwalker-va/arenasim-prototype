@@ -25,7 +25,7 @@ use crate::states::play_match::components::{
     ActiveAuras, Aura, CastingState, ChannelingState, ChargingState, Combatant, DisengagingState,
     DRTracker, Pet,
 };
-use crate::states::play_match::ai_profile::AiProfile;
+use crate::states::play_match::ai_profile::{AiProfile, AiProfiles};
 use crate::states::play_match::arena_bounds::ArenaBounds;
 use crate::states::play_match::map_geometry::ObstacleVolume;
 
@@ -56,7 +56,9 @@ pub struct CombatSnapshot {
     /// `CombatContext` derived from this snapshot sees the selected map's shape.
     pub bounds: ArenaBounds,
     /// Which AI implementation this match runs under.
-    pub ai_profile: AiProfile,
+    /// Per-TEAM, so a head-to-head match can run one implementation against
+    /// the other. `context_for` resolves it to the acting unit's own team.
+    pub ai_profile: AiProfiles,
 }
 
 impl CombatSnapshot {
@@ -91,7 +93,7 @@ impl CombatSnapshot {
         pet_query: &Query<&Pet>,
         obstacles: &[ObstacleVolume],
         bounds: ArenaBounds,
-        ai_profile: AiProfile,
+        ai_profile: AiProfiles,
     ) -> Self {
         let mut combatants: BTreeMap<Entity, CombatantInfo> = BTreeMap::new();
         let mut active_auras: BTreeMap<Entity, Vec<Aura>> = BTreeMap::new();
@@ -196,7 +198,13 @@ impl CombatSnapshot {
     pub fn context_for(&self, self_entity: Entity) -> CombatContext<'_> {
         CombatContext {
             bounds: self.bounds,
-            ai_profile: self.ai_profile,
+            // The acting unit's OWN profile — this is what makes every
+            // downstream `ctx.ai_profile.is_team_plan()` gate per-team.
+            ai_profile: self
+                .combatants
+                .get(&self_entity)
+                .map(|c| self.ai_profile.for_team(c.team))
+                .unwrap_or_default(),
             combatants: &self.combatants,
             active_auras: &self.active_auras,
             dr_trackers: &self.dr_trackers,

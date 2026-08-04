@@ -46,6 +46,13 @@ pub struct HeadlessMatchConfig {
     /// Legacy. See `src/states/play_match/ai_profile.rs`.
     #[serde(default)]
     pub ai_profile: Option<String>,
+    /// Per-team overrides for `ai_profile`. Setting these differently pits the
+    /// two AI implementations directly against each other on one seed, which a
+    /// match-wide profile cannot do — see `AiProfiles`.
+    #[serde(default)]
+    pub team1_ai_profile: Option<String>,
+    #[serde(default)]
+    pub team2_ai_profile: Option<String>,
     /// Optional grouping label echoed verbatim into batch-runner output. Lets a
     /// strategy-var sweep keep variants distinct (e.g. "Hunter+Spider vs Mage"
     /// vs "Hunter+Boar vs Mage") when two configs share the same class lists.
@@ -131,6 +138,8 @@ impl Default for HeadlessMatchConfig {
             max_duration_secs: default_max_duration(),
             random_seed: None,
             ai_profile: None,
+            team1_ai_profile: None,
+            team2_ai_profile: None,
             team1_rogue_openers: Vec::new(),
             team2_rogue_openers: Vec::new(),
             team1_rogue_poisons: Vec::new(),

@@ -174,12 +174,17 @@ fn build_graphical_app(replay: Option<headless::HeadlessMatchConfig>) -> App {
             let match_config = cfg
                 .to_match_config()
                 .unwrap_or_else(|e| { eprintln!("Invalid replay config: {e}"); std::process::exit(1) });
-            let profile = cfg
-                .ai_profile
-                .as_deref()
-                .map(|p| arenasim::states::play_match::ai_profile::AiProfile::parse(p)
-                    .unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(1) }))
-                .unwrap_or_default();
+            let parse_profile = |p: &str| {
+                arenasim::states::play_match::ai_profile::AiProfile::parse(p)
+                    .unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(1) })
+            };
+            // A bare `ai_profile` means both teams; the per-team fields override
+            // it so a replay can watch one implementation against the other.
+            let base = cfg.ai_profile.as_deref().map(parse_profile).unwrap_or_default();
+            let profile = arenasim::states::play_match::ai_profile::AiProfiles {
+                team1: cfg.team1_ai_profile.as_deref().map(parse_profile).unwrap_or(base),
+                team2: cfg.team2_ai_profile.as_deref().map(parse_profile).unwrap_or(base),
+            };
             let rng = match cfg.random_seed {
                 Some(seed) => arenasim::states::play_match::GameRng::from_seed(seed),
                 None => arenasim::states::play_match::GameRng::default(),

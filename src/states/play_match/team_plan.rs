@@ -42,7 +42,7 @@ use bevy::prelude::*;
 use std::collections::BTreeMap;
 
 use super::components::{Combatant, MatchCountdown};
-use super::ai_profile::AiProfile;
+use super::ai_profile::{AiProfile, AiProfiles};
 use super::constants::PET_SLOT_BASE;
 use super::map_config::ActiveMapGeometry;
 use super::map_geometry::{has_line_of_sight, ObstacleVolume, EYE_HEIGHT, MOVER_RADIUS};
@@ -416,7 +416,7 @@ pub fn update_team_plans(
     countdown: Res<MatchCountdown>,
     combatants: Query<(&Combatant, &Transform)>,
     geometry: Option<Res<ActiveMapGeometry>>,
-    profile: Option<Res<AiProfile>>,
+    profile: Option<Res<AiProfiles>>,
     mut plans: ResMut<TeamPlans>,
 ) {
     if !countdown.gates_opened {
@@ -476,7 +476,8 @@ pub fn update_team_plans(
 
     // Legacy keeps the inert plan, so every recorded baseline stays reproducible.
     // Only the TeamPlan profile selects a real plan.
-    let team_plan_active = profile.map(|p| p.is_team_plan()).unwrap_or(false);
+    // Per team: a head-to-head match has one side planning and the other not.
+    let profiles = profile.map(|p| *p).unwrap_or_default();
     let volumes: &[ObstacleVolume] = geometry
         .as_ref()
         .map(|g| g.volumes.as_slice())
@@ -490,7 +491,7 @@ pub fn update_team_plans(
         .unwrap_or(1.0);
 
     for team in [1u8, 2u8] {
-        if !team_plan_active {
+        if !profiles.for_team(team).is_team_plan() {
             *plans.for_team_mut(team) = TeamPlan::default();
             continue;
         }
@@ -575,7 +576,7 @@ mod tests {
         let mut app = App::new();
         app.insert_resource(MatchCountdown { time_remaining: 0.0, gates_opened: true });
         app.insert_resource(TeamPlans::default());
-        app.insert_resource(profile);
+        app.insert_resource(AiProfiles::uniform(profile));
         app.insert_resource(ActiveMapGeometry {
             bounds: super::super::arena_bounds::ArenaBounds::Bowl {
                 semi_x: 59.72,
@@ -902,7 +903,7 @@ mod tests {
         let mut app = App::new();
         app.insert_resource(MatchCountdown { time_remaining: 0.0, gates_opened: true });
         app.insert_resource(TeamPlans::default());
-        app.insert_resource(AiProfile::TeamPlan);
+        app.insert_resource(AiProfiles::uniform(AiProfile::TeamPlan));
         app.insert_resource(ActiveMapGeometry {
             bounds: super::super::arena_bounds::ArenaBounds::Bowl {
                 semi_x: 59.72,
@@ -944,7 +945,7 @@ mod tests {
         let mut app = App::new();
         app.insert_resource(MatchCountdown { time_remaining: 0.0, gates_opened: true });
         app.insert_resource(TeamPlans::default());
-        app.insert_resource(AiProfile::TeamPlan);
+        app.insert_resource(AiProfiles::uniform(AiProfile::TeamPlan));
         app.insert_resource(ActiveMapGeometry {
             bounds: super::super::arena_bounds::ArenaBounds::Bowl {
                 semi_x: 59.72,

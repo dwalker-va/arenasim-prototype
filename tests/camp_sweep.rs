@@ -63,6 +63,11 @@ struct Cell {
     mean_caster_dist: f32,
     /// Sim-seconds the Priest spent under hard CC (fear/stun/incap/poly).
     priest_cc_secs: f32,
+    /// Mean distance between the TWO Priests. Both teams run the same profile,
+    /// so under TeamPlan both healers solve the same constraint set and can
+    /// converge on the same cover — which is free value for an AoE like
+    /// Psychic Scream.
+    mean_healer_sep: f32,
     /// Mean distance of the Priest from its camp pillar centre, post-contact.
     /// A released camp lets the healer follow the fight; an unreleased one pins
     /// it to the hold ring (circumradius 6 + mover 0.5 + standoff 2 = 8.5yd).
@@ -70,6 +75,11 @@ struct Cell {
 }
 
 fn run(profile: &str, seed: u64) -> Cell {
+    run_pair(profile, profile, seed)
+}
+
+/// Head-to-head: each team on its own implementation, same seed.
+fn run_pair(t1: &str, t2: &str, seed: u64) -> Cell {
     let volumes = nagrand();
     let eye = |p: Vec2| Vec3::new(p.x, EYE_HEIGHT, p.y);
 
@@ -84,13 +94,15 @@ fn run(profile: &str, seed: u64) -> Cell {
     let mut ring_sum = 0.0f32;
     let (mut caster_dist_sum, mut caster_dist_n) = (0.0f32, 0usize);
     let mut cc_frames = 0usize;
+    let (mut sep_sum, mut sep_n) = (0.0f32, 0usize);
 
     let result = run_headless_match_observed(
         HeadlessMatchConfig {
             team1: vec!["Warrior".into(), "Priest".into()],
             team2: vec!["Warlock".into(), "Priest".into()],
             map: "PillaredArena".to_string(),
-            ai_profile: Some(profile.to_string()),
+            team1_ai_profile: Some(t1.to_string()),
+            team2_ai_profile: Some(t2.to_string()),
             max_duration_secs: 300.0,
             random_seed: Some(seed),
             ..Default::default()
@@ -155,6 +167,18 @@ fn run(profile: &str, seed: u64) -> Cell {
                     caster_dist_sum += d;
                     caster_dist_n += 1;
                 }
+                {
+                    let mut enemy_priest: Option<Vec2> = None;
+                    for obs in f.combatants.values() {
+                        if obs.team == 2 && !obs.is_pet && obs.class == CharacterClass::Priest && obs.alive {
+                            enemy_priest = Some(Vec2::new(obs.position.x, obs.position.z));
+                        }
+                    }
+                    if let Some(ep) = enemy_priest {
+                        sep_sum += pp.distance(ep);
+                        sep_n += 1;
+                    }
+                }
                 for obs in f.combatants.values() {
                     if obs.team != 1 || obs.is_pet || obs.class != CharacterClass::Priest {
                         continue;
@@ -216,7 +240,55 @@ fn run(profile: &str, seed: u64) -> Cell {
         post_ring_dist: ring_sum / post.max(1) as f32,
         mean_caster_dist: caster_dist_sum / caster_dist_n.max(1) as f32,
         priest_cc_secs: cc_frames as f32 / 60.0,
+        mean_healer_sep: sep_sum / sep_n.max(1) as f32,
     }
+}
+
+/// THE HEAD-TO-HEAD. `run`'s uniform comparison asks "does this matchup play out
+/// differently when BOTH teams change implementation" — a real question, but not
+/// "is the new AI better". Only differing profiles answer that, and only a
+/// per-team profile makes it expressible.
+///
+/// Run BOTH assignments: team 1 on TeamPlan against team 2 on Legacy, and the
+/// mirror. The comps are asymmetric (`Warrior+Priest` vs `Warlock+Priest`), so a
+/// single assignment would confound the AI with the comp.
+#[test]
+#[ignore]
+fn head_to_head_team_plan_vs_legacy() {
+    let seeds: Vec<u64> = (1..=12).collect();
+    let (mut tp_as_t1, mut tp_as_t2) = (0usize, 0usize);
+    println!("\nHead-to-head, same seed, one implementation per side");
+    println!("{:>4}  {:>22}  {:>22}", "seed", "T1=TeamPlan T2=Legacy", "T1=Legacy T2=TeamPlan");
+    for &seed in &seeds {
+        // Team 1 wins => TeamPlan won this one.
+        let a = run_pair("TeamPlan", "Legacy", seed);
+        // Team 1 wins => LEGACY won this one, so TeamPlan won when team 1 lost.
+        let b = run_pair("Legacy", "TeamPlan", seed);
+        tp_as_t1 += a.won as usize;
+        tp_as_t2 += (!b.won) as usize;
+        println!(
+            "{:>4}  {:>22}  {:>22}",
+            seed,
+            if a.won { "TeamPlan" } else { "Legacy" },
+            if b.won { "Legacy" } else { "TeamPlan" },
+        );
+    }
+    // The two comps are NOT equally strong, so raw head-to-head counts cannot be
+    // compared to each other. Measure each side's GAIN against the uniform
+    // Legacy-vs-Legacy baseline instead — that is comp-independent.
+    let base_t1 = seeds.iter().filter(|&&s| run("Legacy", s).won).count();
+    let n = seeds.len();
+    let pct = |k: usize| 100.0 * k as f32 / n as f32;
+    println!(
+        "\nLegacy vs Legacy: team 1 wins {}/{} ({:.0}%) — the comps are not even, \n\
+         so compare each side's GAIN, not the raw counts.\n\
+         \n\
+         team 1 on TeamPlan: {}/{} ({:.0}%)  -> {:+.0}pt for team 1\n\
+         team 2 on TeamPlan: {}/{} ({:.0}%)  -> {:+.0}pt for team 2",
+        base_t1, n, pct(base_t1),
+        tp_as_t1, n, pct(tp_as_t1), pct(tp_as_t1) - pct(base_t1),
+        tp_as_t2, n, pct(tp_as_t2), pct(tp_as_t2) - pct(n - base_t1),
+    );
 }
 
 #[test]
@@ -245,6 +317,7 @@ fn paired_legacy_vs_team_plan() {
     let (mut lrd, mut trd) = (0.0f32, 0.0f32);
     let (mut lcd, mut tcd) = (0.0f32, 0.0f32);
     let (mut lcc, mut tcc) = (0.0f32, 0.0f32);
+    let (mut lhs, mut ths) = (0.0f32, 0.0f32);
     let (mut lt, mut tt) = (0.0f32, 0.0f32);
     // McNemar discordant pairs.
     let (mut only_legacy, mut only_team_plan) = (0usize, 0usize);
@@ -289,6 +362,8 @@ fn paired_legacy_vs_team_plan() {
         tcd += t.mean_caster_dist;
         lcc += l.priest_cc_secs;
         tcc += t.priest_cc_secs;
+        lhs += l.mean_healer_sep;
+        ths += t.mean_healer_sep;
         lt += l.duration;
         tt += t.duration;
         match (l.won, t.won) {
@@ -319,6 +394,7 @@ fn paired_legacy_vs_team_plan() {
          {:<28} {:>11.1}y {:>11.1}y\n\
          {:<28} {:>11.1}y {:>11.1}y\n\
          {:<28} {:>11.1}s {:>11.1}s\n\
+         {:<28} {:>11.1}y {:>11.1}y\n\
          {:<28} {:>12} {:>12}\n\
          {:<28} {:>12} {:>12}",
         "", "Legacy", "TeamPlan",
@@ -334,6 +410,7 @@ fn paired_legacy_vs_team_plan() {
         "Priest dist from camp pillar", lrd / n, trd / n,
         "Priest dist to nearest caster", lcd / n, tcd / n,
         "Priest time hard-CC'd", lcc / n, tcc / n,
+        "distance BETWEEN the healers", lhs / n, ths / n,
         "Warrior died", format!("{ld}/{}", seeds.len()), format!("{td}/{}", seeds.len()),
         "losses with ZERO heal", zero_heal_losses.0, zero_heal_losses.1,
     );

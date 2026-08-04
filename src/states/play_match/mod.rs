@@ -622,7 +622,7 @@ pub fn setup_play_match(
     // A `--replay` launch pre-inserts these so a recorded seed reproduces
     // exactly. Present => honour them; absent => fresh defaults as normal.
     existing_rng: Option<Res<GameRng>>,
-    existing_profile: Option<Res<ai_profile::AiProfile>>,
+    existing_profile: Option<Res<ai_profile::AiProfiles>>,
 ) {
     info!("Setting up Play Match scene with config: {:?}", *config);
 
@@ -1207,7 +1207,7 @@ pub fn cleanup_play_match(
     // match. A real replay inserts both BEFORE the state is entered, so it is
     // unaffected by this exit-time cleanup.
     commands.remove_resource::<GameRng>();
-    commands.remove_resource::<ai_profile::AiProfile>();
+    commands.remove_resource::<ai_profile::AiProfiles>();
     commands.remove_resource::<team_plan::TeamPlans>();
     // Remove optional resources (may not exist if match didn't finish)
     commands.remove_resource::<VictoryCelebration>();

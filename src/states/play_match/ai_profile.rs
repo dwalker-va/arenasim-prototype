@@ -131,3 +131,81 @@ mod tests {
         assert!(!team_gate(None), "absent resource must NOT satisfy TeamPlan");
     }
 }
+
+/// The AI profile each TEAM runs under.
+///
+/// **Per-team, because a match-wide profile cannot answer "is the new AI
+/// better".** With one profile for the whole match, an A/B compares
+/// *both-teams-Legacy* against *both-teams-TeamPlan* — two internally consistent
+/// worlds. A win-rate shift then means one comp benefits more from the change
+/// than the other, which is a real signal but NOT the question usually being
+/// asked. Setting the two teams differently pits the implementations directly
+/// against each other on the same seed.
+///
+/// It also stops both healers solving identical constraints and converging on
+/// the same cover, which was visible in a replay as two Priests standing close
+/// enough together to be free value for an AoE fear.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AiProfiles {
+    pub team1: AiProfile,
+    pub team2: AiProfile,
+}
+
+impl AiProfiles {
+    /// Both teams on the same implementation — the historical behaviour, and
+    /// what a bare `ai_profile` in a match config still means.
+    pub fn uniform(profile: AiProfile) -> Self {
+        Self { team1: profile, team2: profile }
+    }
+
+    /// The profile `team` runs under. Out-of-range team ids resolve to team 1
+    /// rather than panicking, matching `TeamPlans::for_team`.
+    pub fn for_team(&self, team: u8) -> AiProfile {
+        if team == 2 { self.team2 } else { self.team1 }
+    }
+
+    /// True when the two teams differ — i.e. this match is a head-to-head of the
+    /// two implementations rather than a uniform world.
+    pub fn is_head_to_head(&self) -> bool {
+        self.team1 != self.team2
+    }
+}
+
+#[cfg(test)]
+mod profiles_tests {
+    use super::*;
+
+    #[test]
+    fn uniform_sets_both_teams() {
+        let p = AiProfiles::uniform(AiProfile::TeamPlan);
+        assert_eq!(p.for_team(1), AiProfile::TeamPlan);
+        assert_eq!(p.for_team(2), AiProfile::TeamPlan);
+        assert!(!p.is_head_to_head());
+    }
+
+    #[test]
+    fn teams_resolve_independently() {
+        let p = AiProfiles { team1: AiProfile::TeamPlan, team2: AiProfile::Legacy };
+        assert_eq!(p.for_team(1), AiProfile::TeamPlan);
+        assert_eq!(p.for_team(2), AiProfile::Legacy);
+        assert!(p.is_head_to_head());
+    }
+
+    /// A bad team id must not panic mid-match.
+    #[test]
+    fn out_of_range_team_ids_clamp() {
+        let p = AiProfiles { team1: AiProfile::TeamPlan, team2: AiProfile::Legacy };
+        for team in [0u8, 3, 255] {
+            assert_eq!(p.for_team(team), AiProfile::TeamPlan);
+        }
+    }
+
+    /// The default must stay Legacy on both sides — every recorded baseline
+    /// depends on it.
+    #[test]
+    fn default_is_legacy_on_both_sides() {
+        let p = AiProfiles::default();
+        assert_eq!(p.for_team(1), AiProfile::Legacy);
+        assert_eq!(p.for_team(2), AiProfile::Legacy);
+    }
+}
