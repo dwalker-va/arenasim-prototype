@@ -333,6 +333,80 @@ pub struct VisualBody {
     pub rest_y: f32,
 }
 
+/// Which weapon model a [`WeaponSocket`] holds. Decides the glTF asset, the
+/// mount pose, and the swing arc. Class-keyed for v1 (see the attack-animations
+/// plan KTD6); an equipment-keyed lookup can replace the mapping later without
+/// touching the animation layer.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum WeaponKind {
+    TwoHandAxe,
+    Dagger,
+    Bow,
+    Mace,
+    Shield,
+}
+
+/// Which hand position a [`WeaponSocket`] occupies. Off-hand items (Rogue's
+/// second dagger, Paladin's shield) are held statically in v1 — only the main
+/// hand swings.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum WeaponHand {
+    Main,
+    Off,
+}
+
+/// A weapon held by a combatant: a child of the [`VisualBody`] carrying a glTF
+/// `SceneRoot`. Purely graphical — spawned only by the graphical
+/// `spawn_combatant` path, so headless never sees one.
+///
+/// The swing animation writes this entity's LOCAL `Transform` every frame
+/// (never the sim parent's — see [`VisualBody`]). `rest` is the mount pose the
+/// weapon returns to between swings; `release_t` is the seconds elapsed in the
+/// current release stroke (`None` when no release is playing), set by the
+/// swing-signal consumer when an auto-attack actually lands; `aim` is the
+/// world-space point the current/last swing was aimed at, captured at the hit
+/// frame so a dead or despawned target cannot orphan the stroke.
+#[derive(Component)]
+pub struct WeaponSocket {
+    pub kind: WeaponKind,
+    pub hand: WeaponHand,
+    /// The sim combatant holding this weapon (NOT the `VisualBody` parent).
+    pub owner: Entity,
+    pub rest: Transform,
+    pub release_t: Option<f32>,
+    pub aim: Vec3,
+}
+
+/// One landed auto-attack, spawned in core at the damage-APPLY site (mirrors
+/// [`FloatingCombatText`] / [`WindfuryTornado`]): a bare marker entity, inert in
+/// headless, consumed and despawned by the graphical swing systems in
+/// `rendering/effects.rs` (registered only in `states/mod.rs`). Spawned in the
+/// apply loop rather than the queue loop so an attack dropped by the
+/// friendly-CC guard or a same-frame death never telegraphs a phantom release.
+#[derive(Component)]
+pub struct AutoAttackSwing {
+    pub attacker: Entity,
+    pub target: Entity,
+    /// True for ranged autos (Hunter Auto Shot AND caster Wand Shots). The
+    /// consumer additionally gates the cosmetic arrow on the attacker holding a
+    /// Bow-kind main hand, so wand shots and socketless attackers no-op.
+    pub ranged: bool,
+}
+
+/// A purely cosmetic arrow for Hunter Auto Shot. Damage already landed
+/// (hit-scan) when this spawns; the arrow just flies the visual. Never touches
+/// the sim `Projectile` machinery — spawn/move/cleanup live in
+/// `rendering/effects.rs`, registered only in `states/mod.rs`.
+#[derive(Component)]
+pub struct CosmeticArrow {
+    /// World-space destination, captured at the hit frame.
+    pub to: Vec3,
+    /// Yards per second of cosmetic travel.
+    pub speed: f32,
+    /// Seconds remaining before a hard despawn (backstop if it never arrives).
+    pub ttl: f32,
+}
+
 /// Marker component for the player's selection ring — a translucent torus
 /// laid flat at the selected combatant's feet. One ring exists at most.
 #[derive(Component)]

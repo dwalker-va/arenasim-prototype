@@ -595,6 +595,7 @@ pub fn setup_play_match(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
+    asset_server: Res<AssetServer>,
     mut combat_log: ResMut<CombatLog>,
     config: Res<MatchConfig>,
     game_settings: Res<crate::settings::GameSettings>,
@@ -757,6 +758,7 @@ pub fn setup_play_match(
                 &mut commands,
                 &mut meshes,
                 &mut materials,
+                &asset_server,
                 1,
                 i as u8, // slot index
                 *character,
@@ -848,6 +850,7 @@ pub fn setup_play_match(
                 &mut commands,
                 &mut meshes,
                 &mut materials,
+                &asset_server,
                 2,
                 i as u8, // slot index
                 *character,
@@ -980,6 +983,62 @@ fn walk_phase_seed(xz: Vec2) -> f32 {
     (xz.x * 7.314 + xz.y * 11.927).rem_euclid(std::f32::consts::TAU)
 }
 
+/// Class-default weapon set for v1 (plan KTD6): hardcoded per class, positioned
+/// so the deferred equipment-keyed lookup can replace this one match without
+/// touching the animation layer. Classes not listed hold nothing (casters,
+/// Shaman) — their auto-attack swing signals no-op against zero sockets.
+fn class_weapon_loadout(class: match_config::CharacterClass) -> &'static [(WeaponKind, WeaponHand)] {
+    use match_config::CharacterClass as C;
+    match class {
+        C::Warrior => &[(WeaponKind::TwoHandAxe, WeaponHand::Main)],
+        C::Rogue => &[
+            (WeaponKind::Dagger, WeaponHand::Main),
+            (WeaponKind::Dagger, WeaponHand::Off),
+        ],
+        C::Hunter => &[(WeaponKind::Bow, WeaponHand::Main)],
+        C::Paladin => &[
+            (WeaponKind::Mace, WeaponHand::Main),
+            (WeaponKind::Shield, WeaponHand::Off),
+        ],
+        _ => &[],
+    }
+}
+
+/// Asset path for each weapon model (all CC0 — see assets/models/weapons/LICENSE.md).
+fn weapon_asset_path(kind: WeaponKind) -> &'static str {
+    match kind {
+        WeaponKind::TwoHandAxe => "models/weapons/axe_2handed.gltf",
+        WeaponKind::Dagger => "models/weapons/dagger.gltf",
+        WeaponKind::Bow => "models/weapons/bow_wooden.glb",
+        WeaponKind::Mace => "models/weapons/hammer_double.glb",
+        WeaponKind::Shield => "models/weapons/shield_round.gltf",
+    }
+}
+
+/// Mount pose for a weapon socket, local to the `VisualBody` (capsule radius
+/// 0.5, height 2.5, no facing — the swing system adds aim yaw around Y at
+/// swing time). Translation/rotation/scale tuned by eye against the graphical
+/// client; adjust freely, nothing else depends on these numbers.
+fn weapon_mount(kind: WeaponKind, hand: WeaponHand) -> Transform {
+    let side = if hand == WeaponHand::Off { -1.0 } else { 1.0 };
+    match kind {
+        WeaponKind::TwoHandAxe => Transform::from_xyz(0.6 * side, 0.1, 0.15)
+            .with_rotation(Quat::from_rotation_z(-0.15 * side))
+            .with_scale(Vec3::splat(0.9)),
+        WeaponKind::Dagger => Transform::from_xyz(0.55 * side, -0.05, 0.25)
+            .with_rotation(Quat::from_rotation_z(-0.1 * side))
+            .with_scale(Vec3::splat(0.8)),
+        WeaponKind::Bow => Transform::from_xyz(0.5 * side, 0.25, 0.2)
+            .with_scale(Vec3::splat(0.7)),
+        WeaponKind::Mace => Transform::from_xyz(0.55 * side, 0.05, 0.15)
+            .with_rotation(Quat::from_rotation_z(-0.12 * side))
+            .with_scale(Vec3::splat(0.5)),
+        WeaponKind::Shield => Transform::from_xyz(0.62 * side, 0.15, 0.0)
+            .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2 * side))
+            .with_scale(Vec3::splat(0.9)),
+    }
+}
+
 /// Helper function to spawn a single combatant entity.
 ///
 /// Creates a capsule mesh colored by class, with darker shades for duplicates.
@@ -988,6 +1047,7 @@ fn spawn_combatant(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
+    asset_server: &AssetServer,
     team: u8,
     slot: u8,
     class: match_config::CharacterClass,
@@ -1049,14 +1109,46 @@ fn spawn_combatant(
             previous_xz: position.xz(),
         },
     ))
-    .with_child((
-        Mesh3d(mesh_handle.clone()),
-        MeshMaterial3d(material),
-        OriginalMesh(mesh_handle),
-        VisualBody { rest_y: 0.0 },
-        Transform::default(),
-    ))
     .id();
+    // Spawned separately (not via `.with_child`) because the weapon sockets
+    // below need the VisualBody's OWN entity id as their parent — a chained
+    // `.with_child` only ever returns the top-level combatant id.
+    let body = commands
+        .spawn((
+            Mesh3d(mesh_handle.clone()),
+            MeshMaterial3d(material),
+            OriginalMesh(mesh_handle),
+            VisualBody { rest_y: 0.0 },
+            Transform::default(),
+        ))
+        .id();
+    commands.entity(entity).add_child(body);
+    // Class-default weapon set (plan KTD6): each held item is a WeaponSocket
+    // child of the VisualBody, so walk bob / death sink / victory bounce and
+    // match-exit despawn all carry the weapons for free. Graphical-only —
+    // headless has its own mesh-free spawn path and never runs this fn.
+    for &(kind, hand) in class_weapon_loadout(class) {
+        let rest = weapon_mount(kind, hand);
+        let socket = commands
+            .spawn((
+                SceneRoot(
+                    asset_server.load(
+                        bevy::gltf::GltfAssetLabel::Scene(0).from_asset(weapon_asset_path(kind)),
+                    ),
+                ),
+                WeaponSocket {
+                    kind,
+                    hand,
+                    owner: entity,
+                    rest,
+                    release_t: None,
+                    aim: Vec3::Z,
+                },
+                rest,
+            ))
+            .id();
+        commands.entity(body).add_child(socket);
+    }
     if let Some(buff) = weapon_poison_buff {
         commands.entity(entity).insert(ActiveAuras { auras: vec![buff] });
     }
