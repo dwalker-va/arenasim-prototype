@@ -101,6 +101,19 @@ use equipment::{ItemDefinitions, DefaultLoadouts, ItemSlot, ItemId, resolve_load
 // Helper Functions
 // ============================================================================
 
+/// Largest half-extent of the arena the in-match camera and sun were tuned
+/// against — the historical 76x46 octagon (`ArenaBounds::default()`).
+const REFERENCE_HALF_EXTENT: f32 = 36.5;
+
+/// How far to pull the camera back (and stretch the shadow cascade) for a map
+/// bigger than the one those numbers were tuned on.
+///
+/// Never below 1.0: a smaller map keeps the tuned framing rather than shoving the
+/// camera into the floor. Pure, so the framing is testable without a window.
+pub(crate) fn arena_view_scale(bounds: &arena_bounds::ArenaBounds) -> f32 {
+    (bounds.half_extents().max_element() / REFERENCE_HALF_EXTENT).max(1.0)
+}
+
 /// Integer hash (Murmur-style finalizer) for deterministic per-texel noise.
 fn hash_u32(mut x: u32) -> u32 {
     x ^= x >> 16;
@@ -359,7 +372,7 @@ pub(crate) fn class_mesh_color(class: match_config::CharacterClass) -> Color {
 /// Spawns the warm directional "sun" light with 2-cascade shadows grounded to
 /// the ~76-unit arena. Returns the entity so the caller can tag it with its
 /// own scene marker (PlayMatch vs main-menu backdrop).
-pub(crate) fn spawn_arena_sun(commands: &mut Commands) -> Entity {
+pub(crate) fn spawn_arena_sun(commands: &mut Commands, view_scale: f32) -> Entity {
     commands
         .spawn((
             DirectionalLight {
@@ -370,7 +383,11 @@ pub(crate) fn spawn_arena_sun(commands: &mut Commands) -> Entity {
             },
             CascadeShadowConfigBuilder {
                 num_cascades: 2,
-                maximum_distance: 120.0,
+                // Scaled with the map: 120 was sized for the ~76yd arena, so on
+                // the 120yd bowl the far half of the floor fell outside the
+                // shadow cascade and units there lost the contact shadow that
+                // anchors them to the ground.
+                maximum_distance: 120.0 * view_scale,
                 ..default()
             }
             .build(),
@@ -620,6 +637,17 @@ pub fn setup_play_match(
     commands.insert_resource(SpellIcons::default());
     commands.insert_resource(SpellIconHandles::default());
 
+    // Resolved BEFORE the camera so the camera can be framed to the map. The
+    // resource is inserted further down; this is just the lookup.
+    let active_map_geometry = map_geometry.active_for(config.map);
+    // How much bigger this map is than the arena the camera was tuned for.
+    // Nagrand is a ~120yd bowl whose spawn rooms sit at |x| = 64.7, so a camera
+    // fixed at the historical (0, 40, 50) framed an empty floor while both teams
+    // walked in off-screen for the whole 10s countdown. The preview camera in
+    // configure_match_ui was made map-aware when the bowl landed; this one was
+    // missed.
+    let view_scale = arena_view_scale(&active_map_geometry.bounds);
+
     // Spawn 3D camera with isometric-ish view.
     // HDR + tonemapping + bloom let the pre-scaled emissive effects (shields,
     // heal columns, traps, drain beams — all authored at 2-4x) actually glow
@@ -632,7 +660,8 @@ pub fn setup_play_match(
         },
         Tonemapping::TonyMcMapface,
         Bloom::NATURAL,
-        Transform::from_xyz(0.0, 40.0, 50.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_xyz(0.0, 40.0 * view_scale, 50.0 * view_scale)
+            .looking_at(Vec3::ZERO, Vec3::Y),
         ArenaCamera,
         PlayMatchEntity,
     ));
@@ -640,7 +669,7 @@ pub fn setup_play_match(
     // Add directional light (sun-like) - warm golden sunlight.
     // Shadows grounded to the ~76-unit arena via a 2-cascade config so units
     // cast contact shadows that anchor them to the floor.
-    let sun = spawn_arena_sun(&mut commands);
+    let sun = spawn_arena_sun(&mut commands, view_scale);
     commands.entity(sun).insert(PlayMatchEntity);
 
     // Add ambient light for overall scene brightness - warm atmospheric glow.
@@ -671,7 +700,6 @@ pub fn setup_play_match(
     // Derive the obstacle geometry for the selected map (line-of-sight). The
     // same volumes drive both the gameplay resource and the cosmetic obstacle
     // meshes spawned by `spawn_arena_environment` below, so they cannot drift.
-    let active_map_geometry = map_geometry.active_for(config.map);
     commands.insert_resource(active_map_geometry.clone());
     // AI profile — inserted in BOTH modes (dual-registration rule). Defaults to
     // Legacy, so experimental behaviour is never on by accident.
@@ -1351,5 +1379,46 @@ mod mesh_tests {
                 "floor vertex {p:?} is not finite"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod view_scale_tests {
+    use super::*;
+    use arena_bounds::ArenaBounds;
+
+    /// The tuned arena keeps its tuned framing.
+    #[test]
+    fn the_reference_arena_is_unscaled() {
+        assert_eq!(arena_view_scale(&ArenaBounds::default()), 1.0);
+    }
+
+    /// Nagrand's spawn rooms sit at |x| = 64.72. The camera must pull back far
+    /// enough to hold them, or both teams walk in off-screen — which is exactly
+    /// what the fixed (0, 40, 50) framing did.
+    #[test]
+    fn the_bowl_pulls_the_camera_back_past_its_spawns() {
+        let bowl = ArenaBounds::Bowl {
+            semi_x: 59.72,
+            semi_z: 59.72,
+            alcove_depth: 10.0,
+            alcove_half_width: 8.0,
+        };
+        let scale = arena_view_scale(&bowl);
+        assert!(scale > 1.5, "expected a real pull-back, got {scale}");
+        let framed_depth = 50.0 * scale;
+        assert!(
+            framed_depth > bowl.team_spawn_x(),
+            "camera at z={framed_depth:.1} cannot hold spawns at |x|={:.1}",
+            bowl.team_spawn_x()
+        );
+    }
+
+    /// A hypothetical small map must not drag the camera closer than the tuned
+    /// framing — clamping at 1.0 is deliberate.
+    #[test]
+    fn a_smaller_map_is_never_scaled_below_one() {
+        let tiny = ArenaBounds::Octagon { half_x: 10.0, half_z: 8.0, corner_sum: 14.0 };
+        assert_eq!(arena_view_scale(&tiny), 1.0);
     }
 }
