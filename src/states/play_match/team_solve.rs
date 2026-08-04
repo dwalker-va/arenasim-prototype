@@ -61,6 +61,10 @@ pub struct SolveUnit {
     pub is_healer: bool,
     pub is_melee: bool,
     pub is_pet: bool,
+    /// Can this unit land a heal RIGHT NOW — i.e. is it neither silenced nor
+    /// locked out of its healing school? See [`violations`]'s `OccupyCover` arm
+    /// for why positioning depends on it.
+    pub can_cast_heal: bool,
 }
 
 /// Everything the solve needs about the world, owned so it is trivially testable
@@ -342,18 +346,37 @@ pub fn violations(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) -> u1
                 if candidate.distance(ally) > world.heal_range {
                     v |= C_LEASH;
                 }
-                // SIGHT OF THE ALLY. The design doc's bullet for this intent
-                // lists only occlusion and heal range, but its own prose is
-                // explicit that the point of the solve is to make
-                // "LoS to my ally, no LoS to their caster" ONE position query
-                // rather than two behaviours arbitrated by an HP threshold.
-                // Without this the intent is satisfiable by a spot the healer
-                // cannot heal from, which is precisely the step-3 residual this
-                // step exists to fix: the camped Priest sat in cover, blind to
-                // its Warrior, on 39% of post-contact frames.
-                if !world.sees(candidate, ally) {
+                // SIGHT OF THE ALLY, but only while the healer can actually use
+                // it. The design doc's bullet lists occlusion and heal range;
+                // its prose is explicit that the point of the solve is to make
+                // "LoS to my ally, no LoS to their caster" ONE query rather than
+                // two behaviours arbitrated by a threshold. Without sight the
+                // intent is satisfiable from a spot the healer cannot heal from
+                // — the step-3 residual this step exists to fix.
+                //
+                // CONDITIONED ON CASTABILITY, and that is what resolves the
+                // cover-versus-line fight. A line of sight is worth exactly
+                // NOTHING during a school lockout, so holding one then buys no
+                // healing and costs real exposure: on seed 10 the Priest was
+                // counterspelled, held its line anyway, and was feared twice
+                // through the window its partner died in. Static weighting
+                // cannot express that — sight either outranks safety always
+                // (measured: 5.0s of cover, 9.1s of hard CC) or never. It is
+                // temporal, not a tradeoff.
+                if ctx.unit.can_cast_heal && !world.sees(candidate, ally) {
                     v |= C_SIGHT;
                 }
+            }
+            // ...and while it CANNOT cast, buy distance instead. These two are
+            // mutually exclusive by construction, so they never compete for
+            // weight — which is why an unconditional standoff constraint failed
+            // (it perturbed the choice without ever binding) and this does not.
+            if !ctx.unit.can_cast_heal
+                && world
+                    .enemy_casters_of(ctx.unit.team)
+                    .any(|e| candidate.distance(e.pos) < world.threat_radius)
+            {
+                v |= C_STANDOFF;
             }
         }
         RoleIntent::ScreenPartner => {
@@ -685,6 +708,42 @@ pub fn solve_team(
     placed
 }
 
+/// The spell school a class heals in. `None` for classes that do not heal — the
+/// answer is unused for them, since only `OccupyCover` reads castability.
+fn heal_school(class: crate::states::match_config::CharacterClass) -> Option<super::abilities::SpellSchool> {
+    use crate::states::match_config::CharacterClass as C;
+    use super::abilities::SpellSchool;
+    match class {
+        C::Priest | C::Paladin => Some(SpellSchool::Holy),
+        C::Shaman => Some(SpellSchool::Nature),
+        _ => None,
+    }
+}
+
+/// Whether `info` could land a heal this instant: not silenced, and not locked
+/// out of its healing school.
+///
+/// Deliberately about the HEAL specifically rather than "can act at all" — a
+/// Priest with Holy locked but Shadow free can still cast Mind Blast, and should
+/// still be positioning for safety rather than for a heal it cannot deliver.
+fn can_cast_heal(ctx: &super::class_ai::CombatContext, info: &super::class_ai::CombatantInfo) -> bool {
+    let Some(school) = heal_school(info.class) else {
+        return false;
+    };
+    let auras = ctx.active_auras.get(&info.entity);
+    let silenced = auras.is_some_and(|a| {
+        a.iter().any(|aura| aura.effect_type == super::components::AuraType::Silence)
+    });
+    if silenced {
+        return false;
+    }
+    // `is_spell_school_locked` takes `ActiveAuras`; the context stores the aura
+    // vec directly, so rebuild the thin wrapper rather than duplicate the
+    // magnitude-to-school decoding it owns.
+    let wrapped = auras.map(|a| super::components::ActiveAuras { auras: a.clone() });
+    !super::abilities::is_spell_school_locked(school, wrapped.as_ref())
+}
+
 /// Build a [`SolveWorld`] from the AI's per-frame view.
 ///
 /// Living units only, in the `BTreeMap` order `CombatContext` already
@@ -707,6 +766,7 @@ pub fn world_from_context(ctx: &super::class_ai::CombatContext, heal_range: f32,
             is_healer: c.class.is_healer(),
             is_melee: c.class.is_melee(),
             is_pet: c.slot >= super::constants::PET_SLOT_BASE,
+            can_cast_heal: can_cast_heal(ctx, c),
         })
         .collect();
     SolveWorld {
@@ -752,6 +812,8 @@ mod tests {
             is_healer: false,
             is_melee: false,
             is_pet: false,
+            // Test healers can heal unless a case says otherwise.
+            can_cast_heal: true,
         }
     }
 
@@ -976,6 +1038,90 @@ mod tests {
             violations(RoleIntent::OccupyCover, Vec2::new(-10.0, 0.0), &ctx) & C_SIGHT,
             0,
             "a spot the healer cannot heal from must not satisfy OccupyCover"
+        );
+    }
+
+    /// THE CASTABILITY HINGE. A spell-locked healer must stop paying for a
+    /// sightline it cannot use, and start paying for distance instead.
+    ///
+    /// This is the fix for the seed-10 loss: the Priest was counterspelled, held
+    /// its line anyway because sight is statically weighted above safety, and was
+    /// feared twice through the window its partner died in.
+    #[test]
+    fn a_spell_locked_healer_stops_paying_for_a_sightline() {
+        let mut w = world(vec![
+            healer(1, 1, 0, -10.0, 0.0),
+            melee(2, 1, 1, 10.0, 0.0),
+            unit(3, 2, 0, 12.0, 0.0),
+        ]);
+        w.obstacles = vec![pillar_at(0.0, 0.0)];
+        // Behind the pillar: hidden from the caster, blind to the ally.
+        let hidden_but_blind = Vec2::new(-10.0, 0.0);
+
+        let locked = SolveUnit { can_cast_heal: false, ..w.units[0] };
+        let ctx = SolveContext {
+            world: &w,
+            unit: locked,
+            focus: None,
+            placed: &BTreeMap::new(),
+        };
+        assert_eq!(
+            violations(RoleIntent::OccupyCover, hidden_but_blind, &ctx) & C_SIGHT,
+            0,
+            "a healer that cannot cast must not be charged for losing the line"
+        );
+
+        // ...and the same spot for a healer that CAN cast is a violation.
+        let ctx = SolveContext {
+            world: &w,
+            unit: w.units[0],
+            focus: None,
+            placed: &BTreeMap::new(),
+        };
+        assert_ne!(
+            violations(RoleIntent::OccupyCover, hidden_but_blind, &ctx) & C_SIGHT,
+            0,
+            "a healer that CAN cast still needs the line"
+        );
+    }
+
+    /// The other half: while locked out, distance from casters becomes a real
+    /// constraint. The two are mutually exclusive by construction, which is why
+    /// they never compete for weight — an unconditional standoff was measured
+    /// and reverted precisely because it perturbed the choice without binding.
+    #[test]
+    fn standoff_applies_only_while_the_healer_cannot_cast() {
+        let mut w = world(vec![
+            healer(1, 1, 0, 0.0, 0.0),
+            melee(2, 1, 1, 40.0, 0.0),
+            unit(3, 2, 0, 5.0, 0.0), // caster well inside threat_radius (12)
+        ]);
+        w.threat_radius = 12.0;
+        w.obstacles = vec![];
+
+        let castable = SolveContext {
+            world: &w,
+            unit: w.units[0],
+            focus: None,
+            placed: &BTreeMap::new(),
+        };
+        assert_eq!(
+            violations(RoleIntent::OccupyCover, Vec2::ZERO, &castable) & C_STANDOFF,
+            0,
+            "a healer mid-rotation is not charged for standing close"
+        );
+
+        let locked = SolveUnit { can_cast_heal: false, ..w.units[0] };
+        let ctx = SolveContext {
+            world: &w,
+            unit: locked,
+            focus: None,
+            placed: &BTreeMap::new(),
+        };
+        assert_ne!(
+            violations(RoleIntent::OccupyCover, Vec2::ZERO, &ctx) & C_STANDOFF,
+            0,
+            "a locked-out healer must be charged for staying in CC range"
         );
     }
 
