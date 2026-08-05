@@ -42,7 +42,7 @@ use bevy::prelude::*;
 use std::collections::BTreeMap;
 
 use super::components::{Combatant, MatchCountdown};
-use super::ai_profile::{AiProfile, AiProfiles};
+use super::ai_profile::AiProfiles;
 use super::constants::PET_SLOT_BASE;
 use super::map_config::ActiveMapGeometry;
 use super::map_geometry::{has_line_of_sight, ObstacleVolume, EYE_HEIGHT, MOVER_RADIUS};
@@ -536,6 +536,9 @@ pub fn update_team_plans(
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Only the tests still name a single-team profile; the planner itself reads
+    // the per-team `AiProfiles` resource.
+    use super::super::ai_profile::AiProfile;
 
     /// A spawn-side position for `team`, far enough apart that the two sides are
     /// NOT in contact. The planner reads live positions to latch contact, so a

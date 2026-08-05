@@ -192,10 +192,18 @@ impl HeadlessMatchConfig {
         Self::parse_map(&self.map)?;
 
         // Validate the AI profile here, not at plugin build: `HeadlessPlugin`
-        // `.expect()`s it, so without this a typo'd `ai_profile` panics with a
+        // `.expect()`s them, so without this a typo'd profile panics with a
         // backtrace instead of getting the clean error every other string field in
-        // this config gets.
-        if let Some(profile) = self.ai_profile.as_deref() {
+        // this config gets. ALL THREE fields, not just the match-wide one — the
+        // per-team overrides run through the same `.expect()`.
+        for profile in [
+            self.ai_profile.as_deref(),
+            self.team1_ai_profile.as_deref(),
+            self.team2_ai_profile.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
             crate::states::play_match::ai_profile::AiProfile::parse(profile)?;
         }
 

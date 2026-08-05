@@ -101,8 +101,19 @@ impl SolveWorld {
         self.units.iter().filter(move |u| u.team != team)
     }
 
-    /// Enemy units that can shoot from range, i.e. the ones cover is FOR.
-    /// Melee are excluded: no amount of occlusion stops a unit that closes.
+    /// Enemy units that can hurt this team from RANGE — the ones cover is for.
+    /// Units that close are excluded: no amount of occlusion stops them.
+    ///
+    /// Pets are classified by what they can actually DO, not by class. A pet
+    /// inherits its owner's class (`Combatant::new_pet` makes a Felhunter a
+    /// `Warlock` and every Hunter pet a `Hunter`), so a class-derived
+    /// `is_melee` reads EVERY pet as a ranged caster. That is wrong in general
+    /// and yet mostly right by accident here, which is why the obvious
+    /// correction — filtering all pets out — measured badly (wins 11/12 -> 9/12,
+    /// heal 349 -> 119): it removed the Felhunter, and a Felhunter really is a
+    /// ranged threat to a healer. Spell Lock and Devour Magic both reach 30yd,
+    /// and Spell Lock is precisely what stops the heals. See
+    /// [`SolveUnit::is_melee`]'s assignment in `world_from_context`.
     fn enemy_casters_of(&self, team: u8) -> impl Iterator<Item = &SolveUnit> {
         self.enemies_of(team).filter(|u| !u.is_melee)
     }
@@ -196,11 +207,18 @@ pub fn assign_intents(stance: Stance, team: u8, world: &SolveWorld) -> BTreeMap<
     // vacuous, leaving only "stay hidden from casters" — so the last unit
     // standing holds cover for a corpse, forever, instead of fighting or
     // kiting. Watching a 2v1 is what surfaced this.
+    //
+    // "Partner" is ANY living non-pet teammate, healer or not — it has to match
+    // `SolveContext::anchor_ally_pos`, which is what actually makes the sight
+    // and leash constraints non-vacuous, and that does not filter healers. An
+    // earlier version required a NON-healer partner, which sent both members of
+    // a double-healer comp to `HoldRange` even though each had a live ally to
+    // cover and heal.
     let has_partner = |me: Entity| {
         world
             .units
             .iter()
-            .any(|u| u.team == team && !u.is_pet && u.entity != me && !u.is_healer)
+            .any(|u| u.team == team && !u.is_pet && u.entity != me)
     };
     for unit in world.units.iter().filter(|u| u.team == team && !u.is_pet) {
         let intent = match stance {
@@ -739,6 +757,25 @@ pub fn solve_team(
     placed
 }
 
+/// Does this pet only threaten in melee, so cover does nothing against it?
+///
+/// Judged on reach, from `abilities.ron`:
+/// - Felhunter — Spell Lock and Devour Magic both 30yd. NOT melee: breaking its
+///   line is what stops it interrupting a heal.
+/// - Spider — Web 20yd, a ranged root. NOT melee.
+/// - Boar — Charge 25yd, but that is a GAP CLOSER; once it arrives cover is
+///   worthless, so treating it as a caster just drags a healer around for
+///   nothing. Melee.
+/// - Bird — Master's Call (40yd) targets an ALLY; it has no ranged offence.
+///   Melee.
+fn pet_is_melee(pet_type: super::components::PetType) -> bool {
+    use super::components::PetType as P;
+    match pet_type {
+        P::Felhunter | P::Spider => false,
+        P::Boar | P::Bird => true,
+    }
+}
+
 /// The spell school a class heals in. `None` for classes that do not heal — the
 /// answer is unused for them, since only `OccupyCover` reads castability.
 fn heal_school(class: crate::states::match_config::CharacterClass) -> Option<super::abilities::SpellSchool> {
@@ -800,7 +837,13 @@ pub fn world_from_context(
             slot: c.slot,
             pos: Vec2::new(c.position.x, c.position.z),
             is_healer: c.class.is_healer(),
-            is_melee: c.class.is_melee(),
+            // Pets: by ability reach, not by inherited class — see
+            // `enemy_casters_of`.
+            is_melee: if c.is_pet {
+                c.pet_type.is_none_or(pet_is_melee)
+            } else {
+                c.class.is_melee()
+            },
             is_pet: c.slot >= super::constants::PET_SLOT_BASE,
             ability_range: c.class.preferred_range(),
             can_cast_heal: can_cast_heal(ctx, c),
@@ -977,6 +1020,25 @@ mod tests {
         assert!(!i.contains_key(&e(9)), "a pet must not get a positional job");
     }
 
+    /// A healer's partner may itself be a healer. Both still have someone to
+    /// cover and heal, so neither degenerates into the lone-unit `HoldRange`.
+    #[test]
+    fn two_healers_still_cover_for_each_other() {
+        let w = world(vec![healer(1, 1, 0, -10.0, 0.0), healer(2, 1, 1, -12.0, 0.0)]);
+        let i = assign_intents(Stance::Hold, 1, &w);
+        assert_eq!(i[&e(1)], RoleIntent::OccupyCover);
+        assert_eq!(i[&e(2)], RoleIntent::OccupyCover);
+    }
+
+    /// ...but a healer genuinely alone fights instead of camping for a corpse.
+    #[test]
+    fn a_lone_healer_holds_range_instead_of_camping() {
+        let pet = SolveUnit { is_pet: true, ..unit(9, 1, 10, -11.0, 0.0) };
+        let w = world(vec![healer(1, 1, 0, -10.0, 0.0), pet, unit(2, 2, 0, 10.0, 0.0)]);
+        let i = assign_intents(Stance::Hold, 1, &w);
+        assert_eq!(i[&e(1)], RoleIntent::HoldRange, "a pet is not a partner");
+    }
+
     #[test]
     fn intents_are_per_team() {
         let w = world(vec![melee(1, 1, 0, -10.0, 0.0), melee(2, 2, 0, 10.0, 0.0)]);
@@ -1056,6 +1118,30 @@ mod tests {
             violations(RoleIntent::OccupyCover, Vec2::new(-10.0, 30.0), &ctx) & C_OCCLUDED,
             0,
             "a melee enemy must not make an open spot count as 'exposed'"
+        );
+    }
+
+    /// PINS THE KNOWN MISCLASSIFICATION, so a future pet-aware `is_melee` fails
+    /// here loudly instead of silently re-tuning the healer. A pet inherits its
+    /// OWNER's class, so a Felhunter reads as `Warlock` and every Hunter pet as
+    /// `Hunter` — neither is `is_melee`, so both count as casters to hide from
+    /// even though both close to melee. See `enemy_casters_of` for the sweep
+    /// numbers that say this is currently load-bearing.
+    #[test]
+    fn enemy_pets_still_count_as_casters_to_hide_from() {
+        let enemy_pet = SolveUnit { is_pet: true, ..unit(2, 2, 10, 10.0, 0.0) };
+        let mut w = world(vec![healer(1, 1, 0, -10.0, 0.0), enemy_pet]);
+        w.obstacles = vec![pillar_at(0.0, 0.0)];
+        let ctx = SolveContext {
+            world: &w,
+            unit: w.units[0],
+            focus: None,
+            placed: &BTreeMap::new(),
+        };
+        assert_ne!(
+            violations(RoleIntent::OccupyCover, Vec2::new(-10.0, 30.0), &ctx) & C_OCCLUDED,
+            0,
+            "documented wart: a chasing pet is treated as a caster to hide from"
         );
     }
 

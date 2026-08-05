@@ -38,6 +38,11 @@ fn nagrand() -> Vec<ObstacleVolume> {
 
 struct Cell {
     won: bool,
+    /// Team 2's win, kept SEPARATE from `!won` because a draw is neither. The
+    /// head-to-head sweeps score one implementation per side, so reading team
+    /// 2's wins as `!won` silently credits every timeout draw to whichever
+    /// implementation happened to be on team 2.
+    won_t2: bool,
     duration: f32,
     /// Healing the Warrior received, as the sum of its positive health deltas.
     /// Measured off the observer rather than parsed out of a match log.
@@ -61,12 +66,15 @@ struct Cell {
     /// constrains occlusion but not distance, so this is where a healer that is
     /// "in cover" can still be well inside Fear range.
     mean_caster_dist: f32,
-    /// Sim-seconds the Priest spent under hard CC (fear/stun/incap/poly).
+    /// Sim-seconds the Priest spent under CC (fear/stun/incap/poly/root). Root
+    /// is included deliberately — it does not stop a cast, but a rooted healer
+    /// cannot walk to the position the solve picked, which is what this sweep
+    /// measures.
     priest_cc_secs: f32,
-    /// Mean distance between the TWO Priests. Both teams run the same profile,
-    /// so under TeamPlan both healers solve the same constraint set and can
-    /// converge on the same cover — which is free value for an AoE like
-    /// Psychic Scream.
+    /// Mean distance between the TWO Priests. Under the UNIFORM comparison both
+    /// healers solve the same constraint set and can converge on the same cover
+    /// — free value for an AoE like Psychic Scream. In a head-to-head run only
+    /// one side is solving, so read this as a one-sided figure there.
     mean_healer_sep: f32,
     /// Mean distance of the Priest from its camp pillar centre, post-contact.
     /// A released camp lets the healer follow the fight; an unreleased one pins
@@ -232,6 +240,7 @@ fn run_comp(t1: &str, t2: &str, seed: u64, team1: &[&str], team2: &[&str]) -> Ce
 
     Cell {
         won: result.winner == Some(1),
+        won_t2: result.winner == Some(2),
         duration: result.match_time,
         heal_to_warrior: heal,
         warrior_died,
@@ -262,28 +271,46 @@ fn run_comp(t1: &str, t2: &str, seed: u64, team1: &[&str], team2: &[&str]) -> Ce
 fn head_to_head_team_plan_vs_legacy() {
     let seeds: Vec<u64> = (1..=12).collect();
     let (mut tp_as_t1, mut tp_as_t2) = (0usize, 0usize);
+    // Draws are counted, never silently credited to a side: `!won` is not a
+    // team-2 win, and at the 300s cap a Nagrand camp can genuinely draw.
+    let mut draws = 0usize;
     println!("\nHead-to-head, same seed, one implementation per side");
     println!("{:>4}  {:>22}  {:>22}", "seed", "T1=TeamPlan T2=Legacy", "T1=Legacy T2=TeamPlan");
+    let label = |team_plan_won: bool, drawn: bool| {
+        if drawn {
+            "draw"
+        } else if team_plan_won {
+            "TeamPlan"
+        } else {
+            "Legacy"
+        }
+    };
     for &seed in &seeds {
         // Team 1 wins => TeamPlan won this one.
         let a = run_pair("TeamPlan", "Legacy", seed);
-        // Team 1 wins => LEGACY won this one, so TeamPlan won when team 1 lost.
+        // Team 2 wins => TeamPlan won this one.
         let b = run_pair("Legacy", "TeamPlan", seed);
         tp_as_t1 += a.won as usize;
-        tp_as_t2 += (!b.won) as usize;
+        tp_as_t2 += b.won_t2 as usize;
+        draws += (!a.won && !a.won_t2) as usize + (!b.won && !b.won_t2) as usize;
         println!(
             "{:>4}  {:>22}  {:>22}",
             seed,
-            if a.won { "TeamPlan" } else { "Legacy" },
-            if b.won { "Legacy" } else { "TeamPlan" },
+            label(a.won, !a.won && !a.won_t2),
+            label(b.won_t2, !b.won && !b.won_t2),
         );
     }
     // The two comps are NOT equally strong, so raw head-to-head counts cannot be
     // compared to each other. Measure each side's GAIN against the uniform
     // Legacy-vs-Legacy baseline instead — that is comp-independent.
-    let base_t1 = seeds.iter().filter(|&&s| run("Legacy", s).won).count();
+    let baseline: Vec<Cell> = seeds.iter().map(|&s| run("Legacy", s)).collect();
+    let base_t1 = baseline.iter().filter(|c| c.won).count();
+    let base_t2 = baseline.iter().filter(|c| c.won_t2).count();
     let n = seeds.len();
     let pct = |k: usize| 100.0 * k as f32 / n as f32;
+    if draws > 0 {
+        println!("\n({draws} of {} head-to-head runs DREW — excluded from both win counts)", 2 * n);
+    }
     println!(
         "\nLegacy vs Legacy: team 1 wins {}/{} ({:.0}%) — the comps are not even, \n\
          so compare each side's GAIN, not the raw counts.\n\
@@ -292,7 +319,7 @@ fn head_to_head_team_plan_vs_legacy() {
          team 2 on TeamPlan: {}/{} ({:.0}%)  -> {:+.0}pt for team 2",
         base_t1, n, pct(base_t1),
         tp_as_t1, n, pct(tp_as_t1), pct(tp_as_t1) - pct(base_t1),
-        tp_as_t2, n, pct(tp_as_t2), pct(tp_as_t2) - pct(n - base_t1),
+        tp_as_t2, n, pct(tp_as_t2), pct(tp_as_t2) - pct(base_t2),
     );
 }
 
@@ -443,18 +470,25 @@ fn head_to_head_kiter_comps() {
         ("Hunter+Priest vs Rogue+Priest", &["Hunter", "Priest"], &["Rogue", "Priest"]),
     ];
     for (label, t1, t2) in comps {
-        let base = seeds.iter().filter(|&&s| run_comp("Legacy", "Legacy", s, t1, t2).won).count();
+        // Team 2's column is `won_t2`, NOT `!won` — a draw belongs to neither
+        // side, and crediting it to team 2 would fake a TeamPlan gain.
+        let baseline: Vec<Cell> = seeds.iter().map(|&s| run_comp("Legacy", "Legacy", s, t1, t2)).collect();
+        let base = baseline.iter().filter(|c| c.won).count();
+        let base_t2 = baseline.iter().filter(|c| c.won_t2).count();
         let with_tp = seeds.iter().filter(|&&s| run_comp("TeamPlan", "Legacy", s, t1, t2).won).count();
-        let vs_tp = seeds.iter().filter(|&&s| run_comp("Legacy", "TeamPlan", s, t1, t2).won).count();
+        let vs_tp = seeds
+            .iter()
+            .filter(|&&s| run_comp("Legacy", "TeamPlan", s, t1, t2).won_t2)
+            .count();
         let n = seeds.len();
         let pct = |k: usize| 100.0 * k as f32 / n as f32;
         println!(
-            "\n{label}\n  Legacy vs Legacy        team 1 {}/{} ({:.0}%)\n\
+            "\n{label}\n  Legacy vs Legacy        team 1 {}/{} ({:.0}%), team 2 {}/{} ({:.0}%)\n\
                team 1 on TeamPlan      team 1 {}/{} ({:.0}%)  -> {:+.0}pt for the kiter side\n\
-               team 2 on TeamPlan      team 1 {}/{} ({:.0}%)  -> {:+.0}pt for the other side",
-            base, n, pct(base),
+               team 2 on TeamPlan      team 2 {}/{} ({:.0}%)  -> {:+.0}pt for the other side",
+            base, n, pct(base), base_t2, n, pct(base_t2),
             with_tp, n, pct(with_tp), pct(with_tp) - pct(base),
-            vs_tp, n, pct(vs_tp), pct(n - vs_tp) - pct(n - base),
+            vs_tp, n, pct(vs_tp), pct(vs_tp) - pct(base_t2),
         );
     }
 }

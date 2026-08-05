@@ -84,11 +84,23 @@ impl AiProfile {
 /// ```ignore
 /// .add_systems(Update, team_plan_postures.run_if(ai_profile_is(AiProfile::TeamPlan)))
 /// ```
-pub fn ai_profile_is(want: AiProfile) -> impl Fn(Option<Res<AiProfile>>) -> bool {
+///
+/// Reads [`AiProfiles`] — the resource actually inserted by both the headless
+/// runner and `setup_play_match`. It must NOT read `AiProfile`: nothing inserts
+/// that any more, so an `Option<Res<AiProfile>>` gate would silently see `None`
+/// and never run a `TeamPlan` system.
+///
+/// True when EITHER team runs `want`, because a head-to-head match needs the
+/// system scheduled for the one side that wants it. A system gated this way
+/// therefore still has to filter per unit — `CombatContext::ai_profile` is
+/// already resolved to the acting unit's own team.
+pub fn ai_profile_is(want: AiProfile) -> impl Fn(Option<Res<AiProfiles>>) -> bool {
     // `Option<Res<_>>` so a scene that never inserted the resource simply
     // reports the default rather than panicking.
-    move |profile: Option<Res<AiProfile>>| {
-        profile.map_or(want == AiProfile::Legacy, |p| *p == want)
+    move |profile: Option<Res<AiProfiles>>| {
+        profile.map_or(want == AiProfile::Legacy, |p| {
+            p.team1 == want || p.team2 == want
+        })
     }
 }
 
@@ -130,6 +142,30 @@ mod tests {
         assert!(legacy_gate(None), "absent resource should satisfy Legacy");
         assert!(!team_gate(None), "absent resource must NOT satisfy TeamPlan");
     }
+
+    /// The gate must read the resource that is actually INSERTED (`AiProfiles`),
+    /// and must fire when EITHER side wants the profile — otherwise a
+    /// head-to-head match would schedule nothing for the TeamPlan side.
+    #[test]
+    fn the_gate_reads_the_inserted_resource_and_covers_both_sides() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let fires = |profiles: AiProfiles| {
+            let gate = ai_profile_is(AiProfile::TeamPlan);
+            let mut world = World::new();
+            world.insert_resource(profiles);
+            world
+                .run_system_once(move |p: Option<Res<AiProfiles>>| gate(p))
+                .expect("gate system runs")
+        };
+
+        assert!(fires(AiProfiles::uniform(AiProfile::TeamPlan)), "uniform TeamPlan");
+        assert!(
+            fires(AiProfiles { team1: AiProfile::Legacy, team2: AiProfile::TeamPlan }),
+            "one side on TeamPlan must still schedule the system"
+        );
+        assert!(!fires(AiProfiles::uniform(AiProfile::Legacy)), "neither side wants it");
+    }
 }
 
 /// The AI profile each TEAM runs under.
@@ -169,6 +205,23 @@ impl AiProfiles {
     pub fn is_head_to_head(&self) -> bool {
         self.team1 != self.team2
     }
+
+    /// Stamp for the decision trace. A uniform match keeps the bare profile name
+    /// (so every existing trace consumer and `AiProfile::parse` round-trip still
+    /// works); a head-to-head records `team1/team2` so it can never be misread as
+    /// uniform.
+    ///
+    /// `&'static str` from the four literal combinations rather than a leaked
+    /// `format!` — the batch runner stamps thousands of traces in one process.
+    pub fn trace_label(&self) -> &'static str {
+        use AiProfile::*;
+        match (self.team1, self.team2) {
+            (Legacy, Legacy) => "Legacy",
+            (TeamPlan, TeamPlan) => "TeamPlan",
+            (Legacy, TeamPlan) => "Legacy/TeamPlan",
+            (TeamPlan, Legacy) => "TeamPlan/Legacy",
+        }
+    }
 }
 
 #[cfg(test)]
@@ -198,6 +251,24 @@ mod profiles_tests {
         for team in [0u8, 3, 255] {
             assert_eq!(p.for_team(team), AiProfile::TeamPlan);
         }
+    }
+
+    /// A uniform stamp must stay parseable as a plain profile (existing traces
+    /// and configs depend on it); a head-to-head must name both sides.
+    #[test]
+    fn trace_labels_distinguish_uniform_from_head_to_head() {
+        for p in [AiProfile::Legacy, AiProfile::TeamPlan] {
+            let label = AiProfiles::uniform(p).trace_label();
+            assert_eq!(AiProfile::parse(label).unwrap(), p, "{label}");
+        }
+        assert_eq!(
+            AiProfiles { team1: AiProfile::TeamPlan, team2: AiProfile::Legacy }.trace_label(),
+            "TeamPlan/Legacy"
+        );
+        assert_eq!(
+            AiProfiles { team1: AiProfile::Legacy, team2: AiProfile::TeamPlan }.trace_label(),
+            "Legacy/TeamPlan"
+        );
     }
 
     /// The default must stay Legacy on both sides — every recorded baseline

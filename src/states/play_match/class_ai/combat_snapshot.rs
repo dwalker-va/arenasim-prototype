@@ -25,7 +25,7 @@ use crate::states::play_match::components::{
     ActiveAuras, Aura, CastingState, ChannelingState, ChargingState, Combatant, DisengagingState,
     DRTracker, Pet,
 };
-use crate::states::play_match::ai_profile::{AiProfile, AiProfiles};
+use crate::states::play_match::ai_profile::AiProfiles;
 use crate::states::play_match::arena_bounds::ArenaBounds;
 use crate::states::play_match::map_geometry::ObstacleVolume;
 

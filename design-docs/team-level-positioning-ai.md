@@ -27,6 +27,25 @@ over 12 paired seeds on Nagrand: occlusion bought per match went from `Legacy`'s
 whichever side runs it**. `Legacy` is byte-identical throughout; everything is
 gated on `AiProfiles`.
 
+**That +8pt is NOT universal, and the exception matters.** Measured head-to-head
+with the healer solve as the only variable:
+
+| Comp given the solve | Gain |
+|---|---|
+| `Warrior+Priest` (vs Warlock, and vs Mage) | +8pt |
+| `Warlock+Priest` | +8pt |
+| `Rogue+Priest` | +17pt |
+| `Mage+Priest` | +0pt — baseline is 12/12, so this comp measures nothing |
+| **`Hunter+Priest`** | **-17pt** |
+
+Every comp gains except `Hunter+Priest`, which loses badly. The leading
+hypothesis is that `OccupyCover` anchors on the nearest living ally and demands
+line of sight to it — cheap when that ally is a melee planted in a scrum, and
+expensive when it is a KITER moving fast and erratically, because the healer ends
+up chasing a sight-line that moves with the fight. That is the same failure shape
+step 3 measured for the camp (a healer permanently behind its own orders), and it
+is unverified. **Do not quote the +8pt figure without this caveat.**
+
 ## Why this exists
 
 The Nagrand Arena rework (four octagonal pillars at `(±40, ±20)` in a ~120yd

@@ -838,6 +838,73 @@ pub(super) fn healer_pressured_tick_shared(
         }
     }
 
+    // STEP 4: under `TeamPlan`, the healer's position comes from the team solve
+    // instead of the additive scorer. `OccupyCover` is one query for what
+    // `cover_pull`, `cover_seek` and `medic_chase` express as three mutually
+    // exclusive mechanisms — "hidden from their casters, in range of my ally,
+    // and able to SEE my ally" — so all three are skipped here rather than
+    // arbitrated against it.
+    //
+    // Placed BEFORE the scorer inputs are assembled: `ScorerInputs` clones the
+    // whole obstacle list every tick and `deny_weights` walks the team, and none
+    // of it is read on this path.
+    //
+    // Gated on the profile, so `Legacy` (which every recorded baseline and every
+    // calibrated probe runs) is untouched and any drift is attributable to this
+    // line alone. The ESCAPE and DIP windows are deliberately NOT rerouted: they
+    // are committed scripts with their own abort conditions, not positioning.
+    if ctx.ai_profile.is_team_plan() {
+        let world = crate::states::play_match::team_solve::world_from_context(
+            ctx,
+            shared.heal_range,
+            threat_radius,
+            None,
+        );
+        let spot = crate::states::play_match::team_solve::solve_position(
+            crate::states::play_match::team_plan::RoleIntent::OccupyCover,
+            entity,
+            &world,
+            // `OccupyCover` is defined against the healer's own ally and the
+            // enemy casters, not against a focal unit.
+            None,
+        );
+        // A `Point` goal, not a bearing: the chosen spot can be tens of yards
+        // off and behind a pillar, and `Point` is the branch that tangent-steers
+        // around one. `None` means the solve is already satisfied here — hold,
+        // rather than falling through to the scorer, which would move the healer
+        // off a good position for an interest term the solve has retired.
+        let goal = spot.map_or(my_pos, |s| Vec3::new(s.x, my_pos.y, s.y));
+        commands.entity(entity).try_insert(MovementDirective {
+            goal: MovementGoal::Point(goal),
+            expires: now + shared.directive_ttl,
+            committed_until: now + shared.commit_window,
+        });
+        state.last_direction =
+            spot.map(|s| (s - Vec2::new(my_pos.x, my_pos.z)).normalize_or_zero());
+
+        // Trace the transition on the same terms every other exit from this
+        // function does. Without it a `TeamPlan` match records no PRESSURED
+        // entries at all, and the documented `movement_decision` recipes go
+        // blind on exactly the profile being investigated.
+        if transitioned {
+            if let Some(mut builder) = start_movement_event(decision_trace, ctx) {
+                let trigger = if prev == Posture::Escape {
+                    MovementTrigger::EscapeWindowClosed
+                } else {
+                    MovementTrigger::PressuredEnter
+                };
+                builder.transition(
+                    prev.into(),
+                    TracePosture::Pressured,
+                    trigger,
+                    MovementGoalKind::Point,
+                );
+                builder.finish();
+            }
+        }
+        return;
+    }
+
     // Wand pull (Priest only) — but never toward an enemy that is itself in the
     // threat set: drifting toward your own attacker would cancel the repulsion
     // term at mid range and park the healer at a standoff distance instead of
@@ -885,55 +952,6 @@ pub(super) fn healer_pressured_tick_shared(
     // unless a teammate needs saving — then urgency suppression zeroes it so the
     // healer is never pulled into cover while an ally is dying (R11).
     let eff_weights = deny_weights(entity, my_pos, ctx, shared, weights);
-
-    // STEP 4: under `TeamPlan`, the healer's position comes from the team solve
-    // instead of the additive scorer. `OccupyCover` is one query for what
-    // `cover_pull`, `cover_seek` and `medic_chase` express as three mutually
-    // exclusive mechanisms — "hidden from their casters, in range of my ally,
-    // and able to SEE my ally" — so all three are skipped here rather than
-    // arbitrated against it.
-    //
-    // Gated on the profile, so `Legacy` (which every recorded baseline and every
-    // calibrated probe runs) is untouched and any drift is attributable to this
-    // line alone. The ESCAPE and DIP windows are deliberately NOT rerouted: they
-    // are committed scripts with their own abort conditions, not positioning.
-    if ctx.ai_profile.is_team_plan() {
-        let world = crate::states::play_match::team_solve::world_from_context(
-            ctx,
-            shared.heal_range,
-            threat_radius,
-            None,
-        );
-        if let Some(spot) = crate::states::play_match::team_solve::solve_position(
-            crate::states::play_match::team_plan::RoleIntent::OccupyCover,
-            entity,
-            &world,
-            // `OccupyCover` is defined against the healer's own ally and the
-            // enemy casters, not against a focal unit.
-            None,
-        ) {
-            // A `Point` goal, not a bearing: the chosen spot can be tens of yards
-            // off and behind a pillar, and `Point` is the branch that
-            // tangent-steers around one.
-            commands.entity(entity).try_insert(MovementDirective {
-                goal: MovementGoal::Point(Vec3::new(spot.x, my_pos.y, spot.y)),
-                expires: now + shared.directive_ttl,
-                committed_until: now + shared.commit_window,
-            });
-            state.last_direction =
-                Some((spot - Vec2::new(my_pos.x, my_pos.z)).normalize_or_zero());
-        } else {
-            // Already satisfying the intent: hold, rather than falling through
-            // to the scorer, which would move the healer off a good position for
-            // an interest term the solve has deliberately retired.
-            commands.entity(entity).try_insert(MovementDirective {
-                goal: MovementGoal::Point(my_pos),
-                expires: now + shared.directive_ttl,
-                committed_until: now + shared.commit_window,
-            });
-        }
-        return;
-    }
 
     // Cover-seek: `cover_pull` is only a 2yd-lookahead gradient, so on a large
     // map where the nearest pillar is tens of yards away it is flat everywhere and

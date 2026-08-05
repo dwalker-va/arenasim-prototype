@@ -935,15 +935,11 @@ fn run_match_impl(
                     // Stamp the AI profile too: without it, two traces from the
                     // same seed under different profiles are indistinguishable.
                     // Head-to-head runs record BOTH sides, so a trace can never
-                    // be misread as a uniform-profile match.
-                    trace.ai_profile = if profile.is_head_to_head() {
-                        Box::leak(
-                            format!("{}/{}", profile.team1.name(), profile.team2.name())
-                                .into_boxed_str(),
-                        )
-                    } else {
-                        profile.team1.name()
-                    };
+                    // be misread as a uniform-profile match. Spelled as literals
+                    // rather than a leaked `format!`: the batch runner traces
+                    // thousands of matches per process, and a per-match
+                    // `Box::leak` would never be reclaimed.
+                    trace.ai_profile = profile.trace_label();
                 }
             }
             Err(e) => {
