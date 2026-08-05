@@ -396,6 +396,11 @@ pub struct WeaponSocket {
     /// parent's tick-quantized facing snapped, which read as flashing while
     /// units moved.
     pub yaw_local: f32,
+    /// The owner's facing yaw last frame. Large one-frame facing jumps
+    /// (gate-open first move, a hard target switch) are absorbed into
+    /// `yaw_local` so the weapon holds its world bearing through the snap and
+    /// then eases to the new aim, instead of whipping around with the body.
+    pub prev_owner_yaw: f32,
     /// Smoothed windup parameter (0 to -1). The raw value is discontinuous
     /// while chasing: an overdue attack timer pins it at full windup the
     /// moment the target enters reach and drops it to rest the moment it

@@ -1120,19 +1120,16 @@ fn spawn_combatant(
     // The mesh hangs off a CHILD entity so graphical animation never writes this
     // entity's Transform — see `VisualBody`. The child sits at local y 0, so the
     // capsule renders exactly where the sim puts the combatant.
-    // Spawn already facing the arena center (where the enemy gates are), so
-    // the first movement tick's facing write is a small correction instead of
-    // a quarter-turn that visibly spins the held weapons at gate-open. The
-    // sim never READS rotation — movement only writes it — and headless has
-    // its own spawn path, so this is purely cosmetic.
-    let to_center = Vec3::new(-position.x, 0.0, -position.z);
-    let initial_facing = if to_center.length_squared() > 1e-6 {
-        Quat::from_rotation_y(to_center.x.atan2(to_center.z))
-    } else {
-        Quat::IDENTITY
-    };
+    // NOTE: the sim entity spawns with IDENTITY rotation, matching the
+    // headless spawn path exactly. Rotation is NOT cosmetic-only — the combat
+    // snapshot derives a velocity from it for units that haven't moved, and
+    // Freezing Trap leads consume that — so a graphical-only spawn facing
+    // would diverge seed reproduction between the two modes. The gate-open
+    // weapon spin is solved on the weapon side instead: sockets spawn aimed
+    // at arena center, and `animate_weapon_swings` absorbs large one-frame
+    // parent-facing snaps into the local yaw.
     let entity = commands.spawn((
-        Transform::from_translation(position).with_rotation(initial_facing),
+        Transform::from_translation(position),
         Visibility::default(),
         combatant,
         DRTracker::default(),
@@ -1164,6 +1161,13 @@ fn spawn_combatant(
     // child of the VisualBody, so walk bob / death sink / victory bounce and
     // match-exit despawn all carry the weapons for free. Graphical-only —
     // headless has its own mesh-free spawn path and never runs this fn.
+    // Weapons start aimed at arena center (toward the enemy gates), so they
+    // read correctly during the countdown without any sim rotation.
+    let center_yaw = if position.xz().length_squared() > 1e-6 {
+        (-position.x).atan2(-position.z)
+    } else {
+        0.0
+    };
     for &(kind, hand) in class_weapon_loadout(class) {
         let rest = weapon_mount(kind, hand);
         let socket = commands
@@ -1185,7 +1189,8 @@ fn spawn_combatant(
                     // The shield never swings; every other main hand starts as
                     // the next swinger. The consumer alternates dagger pairs.
                     winds_up_next: hand == WeaponHand::Main && kind != WeaponKind::Shield,
-                    yaw_local: 0.0,
+                    yaw_local: center_yaw,
+                    prev_owner_yaw: 0.0,
                     windup_s: 0.0,
                 },
                 rest,

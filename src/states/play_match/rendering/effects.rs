@@ -2853,6 +2853,11 @@ pub fn update_walk_animation(
         // other frame sees zero movement. Snapping to rest on those frames
         // strobed the bob (and every attached weapon) at frame rate.
         if distance >= WALK_IDLE_EPSILON {
+            // Coming out of a real stop, restart the cycle at its zero
+            // crossing so the first bobbing frame matches the rest height.
+            if walk.idle_time > 0.1 {
+                walk.phase = 0.0;
+            }
             walk.idle_time = 0.0;
         } else {
             walk.idle_time += time.delta_secs();
@@ -2864,15 +2869,21 @@ pub fn update_walk_animation(
             walk.phase = (walk.phase + step).rem_euclid(std::f32::consts::TAU);
         }
 
+        // Settling into idle EASES down to rest instead of snapping — the
+        // walk can stop at any bob height, and a one-frame drop reads as a
+        // pop (more so with weapons riding the body).
+        let settle_step = 0.6 * time.delta_secs();
         for child in children.iter() {
             let Ok((mut body_transform, body)) = bodies.get_mut(child) else {
                 continue;
             };
-            body_transform.translation.y = if idle {
-                body.rest_y
+            if idle {
+                let err = body.rest_y - body_transform.translation.y;
+                body_transform.translation.y += err.clamp(-settle_step, settle_step);
             } else {
-                body.rest_y + walk.phase.sin() * WALK_BOB_AMPLITUDE
-            };
+                body_transform.translation.y =
+                    body.rest_y + walk.phase.sin() * WALK_BOB_AMPLITUDE;
+            }
         }
     }
 }
@@ -3236,17 +3247,44 @@ pub fn consume_swing_signals(
 /// auras, positions) and never writes any of it.
 pub fn animate_weapon_swings(
     time: Res<Time>,
-    mut sockets: Query<(&mut WeaponSocket, &mut Transform)>,
-    owners: Query<(&Combatant, &Transform, Option<&ActiveAuras>), Without<WeaponSocket>>,
+    mut sockets: Query<(&mut WeaponSocket, &mut Transform, &mut Visibility)>,
+    owners: Query<
+        (
+            &Combatant,
+            &Transform,
+            Option<&ActiveAuras>,
+            Option<&CastingState>,
+            Option<&ChannelingState>,
+        ),
+        Without<WeaponSocket>,
+    >,
 ) {
     use crate::states::play_match::combat_core::effective_attack_interval;
-    use crate::states::play_match::{AUTO_SHOT_RANGE, MELEE_RANGE};
+    use crate::states::play_match::utils::is_incapacitated;
+    use crate::states::play_match::{AUTO_SHOT_RANGE, HUNTER_DEAD_ZONE, MELEE_RANGE};
 
     let dt = time.delta_secs();
-    for (mut socket, mut transform) in sockets.iter_mut() {
-        let Ok((combatant, owner_tf, auras)) = owners.get(socket.owner) else {
+    for (mut socket, mut transform, mut visibility) in sockets.iter_mut() {
+        let Ok((combatant, owner_tf, auras, casting, channeling)) = owners.get(socket.owner)
+        else {
             continue;
         };
+
+        // A stealthed Rogue's body fades to 40% alpha, and a polymorphed
+        // victim's body swaps to the sheep cuboid — an opaque weapon floating
+        // beside either gives the game away. Hide the sockets outright; the
+        // glTF subtree inherits.
+        let polymorphed = auras.is_some_and(|a| {
+            a.auras.iter().any(|au| au.effect_type == AuraType::Polymorph)
+        });
+        let wanted = if combatant.stealthed || polymorphed {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        };
+        if *visibility != wanted {
+            *visibility = wanted;
+        }
 
         // Advance / expire the release stroke. `windup_s` is frozen during
         // the stroke — it is the sweep's starting pose — and zeroed at expiry
@@ -3266,7 +3304,7 @@ pub fn animate_weapon_swings(
         let mut target_dist = f32::INFINITY;
         if combatant.is_alive() {
             if let Some(target) = combatant.target {
-                if let Ok((target_combatant, target_tf, _)) = owners.get(target) {
+                if let Ok((target_combatant, target_tf, _, _, _)) = owners.get(target) {
                     if target_combatant.is_alive() {
                         socket.aim = target_tf.translation;
                         target_dist = owner_tf.translation.distance(target_tf.translation);
@@ -3276,23 +3314,28 @@ pub fn animate_weapon_swings(
         }
 
         // Windup eligibility: cosmetic-grade approximation of "an attack is
-        // coming" — alive, unstealthed, main hand, and the target roughly in
-        // this weapon's reach. The RELEASE never depends on this (it keys off
-        // the sim's landed-hit marker), so a wrong guess here costs at most a
-        // windup that eases back down.
+        // coming" — the RELEASE never depends on this (it keys off the sim's
+        // landed-hit marker), so a wrong guess here costs at most a windup
+        // that eases back down. Mirrors the sim's own can't-swing gates: an
+        // incapacitated / casting / channeling attacker's timer is frozen,
+        // and a Hunter inside the dead zone can't loose the overdue shot —
+        // telegraphing in those states reads as a stuck animation.
         let mut windup_window = 0.0;
         let mut interval = 0.0;
         if socket.winds_up_next
             && socket.release_t.is_none()
             && combatant.is_alive()
             && !combatant.stealthed
+            && casting.is_none()
+            && channeling.is_none()
+            && !is_incapacitated(auras)
         {
-            let reach = if socket.kind == WeaponKind::Bow {
-                AUTO_SHOT_RANGE + 2.0
+            let (reach, min_reach) = if socket.kind == WeaponKind::Bow {
+                (AUTO_SHOT_RANGE + 2.0, HUNTER_DEAD_ZONE)
             } else {
-                MELEE_RANGE + 1.5
+                (MELEE_RANGE + 1.5, 0.0)
             };
-            if target_dist <= reach {
+            if target_dist <= reach && target_dist >= min_reach {
                 interval = effective_attack_interval(combatant, auras);
                 windup_window = (interval * SWING_WINDUP_FRACTION)
                     .clamp(SWING_WINDUP_MIN_SECS, SWING_WINDUP_MAX_SECS);
@@ -3320,18 +3363,34 @@ pub fn animate_weapon_swings(
         };
 
         // Aim yaw: the weapon is RIGID to the body (its transform is local to
-        // the hierarchy, so when `move_to_target` snaps the parent's facing
+        // the hierarchy, so when `move_to_target` turns the parent's facing
         // the weapon turns with it — that rigidity is what reads as a solidly
         // held object while units move). On top of that, a LOCAL yaw angle
         // eases toward the target bearing at a bounded rate: moving units
         // keep the weapon glued to their frame with a gentle drift toward the
         // victim; stationary units converge to exact target facing. A release
         // stroke corrects faster so the hit still lands visually on-target.
+        let owner_forward = owner_tf.rotation * Vec3::Z;
+        let owner_yaw = owner_forward.x.atan2(owner_forward.z);
+
+        // Absorb LARGE one-frame facing snaps (gate-open first move, a hard
+        // target switch) into the local yaw: the weapon holds its world
+        // bearing through the snap and eases to the new aim, instead of
+        // whipping a quarter-turn with the body. Ordinary per-tick turning
+        // stays rigid — only discrete jumps qualify.
+        let owner_snap = (owner_yaw - socket.prev_owner_yaw + std::f32::consts::PI)
+            .rem_euclid(std::f32::consts::TAU)
+            - std::f32::consts::PI;
+        socket.prev_owner_yaw = owner_yaw;
+        if owner_snap.abs() > 0.5 {
+            socket.yaw_local = (socket.yaw_local - owner_snap + std::f32::consts::PI)
+                .rem_euclid(std::f32::consts::TAU)
+                - std::f32::consts::PI;
+        }
+
         let aim_dir = socket.aim - owner_tf.translation;
         if aim_dir.xz().length_squared() > 1e-6 {
             let bearing = aim_dir.x.atan2(aim_dir.z);
-            let owner_forward = owner_tf.rotation * Vec3::Z;
-            let owner_yaw = owner_forward.x.atan2(owner_forward.z);
             // Wrap-aware shortest-path delta from current local angle.
             let target_local = bearing - owner_yaw;
             let mut err = target_local - socket.yaw_local;
