@@ -139,15 +139,20 @@ For deeper context, see these focused references:
 - **[WoW Mechanics](design-docs/wow-mechanics.md)** - Implemented game mechanics (CC, resources, combat)
 - **[Bevy Patterns](design-docs/bevy-patterns.md)** - Rust/Bevy learnings and common pitfalls
 - **[Roadmap](design-docs/roadmap.md)** - Long-term TODOs and milestones
-- **[Team-Level Positioning AI](design-docs/team-level-positioning-ai.md)** - AGREED
-  design for the `TeamPlan` layer (team stance, obligations, positioning solve).
-  Read before touching pillar/cover behaviour: the existing `cover_pull` /
-  `cover_seek` / `medic_chase` mechanisms are individually reactive and cannot
-  express team pillar play. Steps 1-3 have shipped: `Legacy` still measures 0.0
-  occlusion-seconds on Nagrand, `TeamPlan` now measures 28.3, at win parity.
-  Step 4 (the focal-rooted team solve) is next and owns the residual — see
-  **[the camp handoff](design-docs/2026-08-01-nagrand-camp-handoff.md)** §0 for
-  what is fixed, what is not, and the three hypotheses already ruled out.
+- **[Team-Level Positioning AI](design-docs/team-level-positioning-ai.md)** -
+  PARTLY IMPLEMENTED design for the `TeamPlan` layer (team stance, obligations,
+  positioning solve). Read before touching pillar/cover behaviour, and read the
+  2026-08-04 amendments before building any of it — the design's shape held up
+  but several specifics were wrong in ways only measurement exposed, and step 4's
+  retirement goal is not achievable as written. Steps 2, 3 and the healer half of
+  4 have shipped: Nagrand occlusion `Legacy` 0.0s -> `TeamPlan` 28.1s, and the
+  healer solve is worth ~+8pt to whichever side runs it. The DPS half was measured
+  at ~-17pt and reverted (constraint satisfaction cannot express a kiter's
+  distance-maximisation). `Legacy` is byte-identical throughout.
+  **Measurement rule:** `AiProfiles` is PER-TEAM; a uniform-profile A/B cannot
+  answer "is the new AI better", so set the sides differently and run both
+  assignments — see *How to measure a step* in that doc, and `tests/camp_sweep.rs`.
+  Background on the camp: **[the camp handoff](design-docs/2026-08-01-nagrand-camp-handoff.md)**.
 - **[Stat Scaling](design-docs/stat-scaling-system.md)** - Damage/healing formulas and coefficients
 - **[Game Design](design-docs/game-design-doc.md)** - High-level game vision
 - **[Documented Solutions](docs/solutions/)** - Documented solutions to past problems (bugs, implementation patterns, workflows) organized by category, with YAML frontmatter (`module`, `tags`, `category`). Relevant when implementing or debugging in documented areas.

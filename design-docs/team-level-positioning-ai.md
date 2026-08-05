@@ -1,11 +1,31 @@
 # Team-Level Positioning AI (`TeamPlan`)
 
-Status: **AGREED** — design settled in review; no code landed yet.
-Date: 2026-07-25, revised 2026-07-26 after review.
+Status: **PARTLY IMPLEMENTED** — steps 2, 3 and half of 4 have landed.
+Date: 2026-07-25, revised 2026-07-26 after review, amended 2026-08-04 from
+implementation.
 
 Open questions from the first draft are resolved and folded into the body below;
 see *Resolved during review* at the end for the list, and *Deferred* for the three
 items deliberately left open. Implementation order is in *Migration plan*.
+
+**Read the amendments before building anything.** The design's SHAPE has held up
+— a team-level plan, a focal-rooted solve, constraint sets per role — but several
+specifics were wrong or incomplete in ways only measurement exposed, and one goal
+turned out to be unachievable as stated. The amendments are marked inline:
+
+| Where | What changed |
+|---|---|
+| *Corrections from implementation* | Three constraint bullets were under-specified; assume the untested three are too. |
+| *The framing does not fit a kiter* | Constraint satisfaction is structurally wrong for a kiter, and step 4 needs a decision before it can close. |
+| Migration step 5 | Its premise about today's behaviour is wrong; it is focus fire, not a small delta. |
+| Migration step 6 | As ordered, it is guaranteed to be under-powered. Decide mid-match target switching first. |
+| *How to measure a step* | Uniform-profile A/B cannot answer "is this better". Every measurement before 2026-08-04 made that mistake. |
+
+What has actually landed, with numbers, on `Warrior+Priest` vs `Warlock+Priest`
+over 12 paired seeds on Nagrand: occlusion bought per match went from `Legacy`'s
+**0.0s to 28.1s**, and the healer solve is worth about **+8 percentage points to
+whichever side runs it**. `Legacy` is byte-identical throughout; everything is
+gated on `AiProfiles`.
 
 ## Why this exists
 
@@ -377,13 +397,67 @@ The three existing behaviours collapse into one solve. Instead of summing
 single-objective interest terms, a unit scores candidate positions against the
 constraints its `RoleIntent` implies:
 
-- `OccupyCover` — occluded from enemy casters; within `heal_range` of the anchor ally.
+- `OccupyCover` — occluded from enemy casters; within `heal_range` of the anchor
+  ally; **and able to SEE that ally** (see below).
 - `ScreenPartner` — has LoS to the partner; lacks LoS to the enemy kill target.
 - `PressTarget` — in ability range of the kill target; has LoS to it.
-- `HoldRange` — outside enemy threat range; retains LoS to the kill target.
+- `HoldRange` — outside enemy threat range; retains LoS to the kill target;
+  **and within our own ability range of it** (see below).
 - `StackAnchor` — same side of the anchor as the rest of the team; occluded from
   enemy casters; within `heal_range` of the healer. The only intent where
   teammates deliberately *converge* instead of distributing.
+
+#### Corrections from implementation (2026-08-04)
+
+**These bullets were under-specified, and each gap was invisible until it was
+measured.** Assume the three intents that still have no consumer
+(`ScreenPartner`, `PressTarget`, `StackAnchor`) carry the same debt.
+
+- **`OccupyCover` must require SIGHT of the ally.** The bullet listed only
+  occlusion and heal range, which is satisfiable from a spot the healer cannot
+  heal from — precisely the pathology step 4 exists to remove. The prose further
+  down this section already implies it ("LoS to my ally, no LoS to their caster is
+  one position query"); the bullet did not.
+- **`OccupyCover`'s sight requirement must be CONDITIONED ON CASTABILITY.** A
+  sightline is worth nothing during a school lockout, so holding one then buys no
+  healing and costs real exposure. Sight is required only while the healer can
+  actually land a heal; while it cannot, distance from casters is required
+  instead. The two are mutually exclusive by construction, so they never compete
+  for weight — which is why an unconditional standoff constraint measured worse on
+  every axis and this does not. This is temporal, not a tradeoff, and no static
+  weighting expresses it.
+- **`HoldRange` needs an OUTER leash.** "Outside enemy threat range" is a floor
+  with no ceiling — a half-space, not a ring — and is best satisfied by walking to
+  the far wall and never casting again. The floor and ceiling together are the
+  tuned `range_band` this intent replaces.
+
+#### The framing does not fit a kiter, and that is structural
+
+**Measured: `HoldRange` on the Mage/Hunter ENGAGE/KITE machine cost roughly 17
+percentage points and was reverted.** The reason is not tuning.
+
+A constraint set says "satisfy these conditions". That is genuinely a kiter's job
+only in part: the tuned scorer carries `flee` as distance **maximisation** rather
+than a threshold, precisely so a chased ranged DPS outruns an un-impaired chaser
+at ALL ranges. A ring constraint plus a nearest-satisfying tie-break stops fleeing
+the instant it is nominally satisfied, and the chaser closes again. A
+distance-maximising tie-break was tried as a fix and measured worse still.
+
+The scorer also carries kite entry/sustain hysteresis, the out-of-mana wand
+fallback, and the seek-chase leaky bucket — none of which is a position
+constraint.
+
+So step 4 has two possible honest endings, and one must be chosen:
+
+1. **Ranged DPS stays on the scorer permanently.** The solve becomes a
+   healer-and-melee mechanism. `los_seek` and `range_band` are then never retired.
+2. **Intents gain an optional continuous objective** alongside their constraints,
+   so "satisfy this, and among satisfying positions maximise that" is expressible.
+   This is a real extension to the solve, not a tweak.
+
+Until one is chosen, step 4's stated goal of retiring `cover_pull` /
+`cover_seek` / `medic_chase` is **not achievable**: `Legacy` still needs all
+three, and the kiter terms are staying regardless.
 
 #### The solve is a team problem, rooted at a focal unit
 
@@ -505,6 +579,13 @@ different from adjusting them because the AI finds them inconvenient.
 1. **Do not recalibrate the 16 failing PillaredArena probes yet.** They would be
    tuned against reactive-only behaviour and need redoing. Task 7 waits behind
    this work.
+
+   **Revisit this after step 5, not after step 8.** The debt has been parked since
+   the plan was written and keeps growing, and these probes are exactly the
+   calibration that would catch a regression in the area now being changed. Steps
+   3 and 4 both left `Legacy` byte-identical, so nothing has forced the issue yet
+   — but the first step that moves `Legacy` (the `cover_*` retirement, or step 7)
+   will, and doing it under time pressure is worse than doing it deliberately.
 2. Land `TeamPlan` with `anchor: None` for every comp — a pure no-op — and assert
    byte-identical BasicArena and PillaredArena results. This is the guard rail
    for everything after.
@@ -518,16 +599,51 @@ different from adjusting them because the AI finds them inconvenient.
    convergent (`StackAnchor`) and divergent (pincer) team shapes from the start,
    even though counter-formation *selection* is deferred — retrofitting divergence
    later would mean redoing the solve.
-5. Move kill-target selection onto the plan, held constant. Behaviourally close to
-   today's configured priority, so this is a small step deliberately taken before
-   anything depends on a *called* target.
+
+   **STATUS 2026-08-04: half done, and the other half is blocked on a decision.**
+   The healer is on the solve and it is worth ~+8 percentage points to whichever
+   side runs it. Ranged DPS was ported, measured at roughly -17 points, and
+   reverted — see "The framing does not fit a kiter" above, which is a structural
+   limit rather than a tuning problem. The retirement clause is therefore **not
+   currently achievable**: `Legacy` still needs all three mechanisms, and the
+   kiter's `los_seek` / `range_band` are staying regardless. Pick ending (1) or
+   (2) from that section before calling step 4 done.
+5. Move kill-target selection onto the plan, held constant.
+
+   **CORRECTION: this is NOT "behaviourally close to today's configured
+   priority".** That is true only when `teamN_kill_target` is set in the match
+   config, and it usually is not — every sweep and baseline runs without it. The
+   actual default in `acquire_targets` is that **each unit independently picks its
+   own nearest visible non-pet enemy**. Introducing a team-wide call is therefore
+   the introduction of FOCUS FIRE, which is normally a large effect, not a small
+   delta. Expect and measure it as such.
+
+   Two further notes for whoever builds it. "Held constant" must mean *constant
+   while the target lives* — `update_team_plans` deliberately clears the field on
+   replan, because a death is the commonest replan trigger and the dead unit is
+   the likeliest stale target. And to isolate the variable, pick the target with a
+   deliberately boring rule (the enemy our melee would have chosen anyway) so the
+   experiment measures COORDINATION; changing the priority at the same time
+   measures coordination and priority together and attributes neither.
 6. Add the crude lethality model (2s linear damage extrapolation) and the
    obligation layer on top of it. Peels become possible here — which is the
    prerequisite for `Withdraw(Recover)` being enterable at all.
+
+   **DECIDE MID-MATCH KILL-TARGET SWITCHING BEFORE STARTING THIS.** As ordered,
+   steps 5 and 6 guarantee an under-powered result: step 5 holds the target
+   constant, that cap makes "this enemy dies to one more cast" unactionable, and
+   the uncap sits unscheduled in Deferred. Building an obligation layer that is
+   known to be hobbled, with its fix in a wishlist, is a trap. Either pull
+   switching into this step or reduce this step's ambition to match.
 7. Add `Withdraw` with both reason codes, its dampening and mana-trajectory entry
    gates, and its exit conditions. Regenerate all balance baselines — this step
    changes behaviour on every map and is the point of no return for the existing
    CSVs.
+
+   **This is a project, not a step.** It carries a new stance with two entry
+   gates, depends on step 6's peels, and regenerates every recorded CSV. Give it
+   its own plan and its own baseline strategy rather than sequencing it as one
+   line item.
 8. Enemy-plan inference from observables, and counter-formations on top of it.
    Last because everything before it is playable without reading the opponent, and
    because its value depends on the enemy having plans worth reading.
@@ -535,6 +651,35 @@ different from adjusting them because the AI finds them inconvenient.
 The ordering principle: each step is measurable on its own, and the two steps with
 irreversible balance consequences (7, and to a lesser extent 4) come after the
 cheap experiment in step 3 has already told us whether the map geometry survives.
+
+### How to measure a step (added 2026-08-04)
+
+**A uniform-profile A/B cannot answer "is the new AI better", and every
+measurement taken before 2026-08-04 made that mistake.** Running the same seeds
+with both teams on `Legacy` and then both teams on `TeamPlan` compares two
+internally consistent worlds; a win-rate shift there means one comp benefits MORE
+from the change than the other. That is a real signal, but it is not the question
+usually being asked.
+
+`AiProfiles` is per-team for this reason. Set the sides differently and the two
+implementations play each other on one seed. Run BOTH assignments — comps are not
+evenly matched, so a single assignment confounds the AI with the comp — and report
+each side's GAIN against its own uniform baseline rather than raw head-to-head
+counts. `tests/camp_sweep.rs` does this; copy its shape.
+
+Two traps found the hard way:
+
+- **Check the baseline is not saturated.** `Mage+Priest vs Warrior+Priest` is
+  12/12 under Legacy, so it measures nothing and will report "+0pt" for any
+  change whatsoever.
+- **Pick a comp that actually contains the subsystem under test.** The pillar-camp
+  sweep contains no unit on the ENGAGE/KITE machine at all, so it was structurally
+  incapable of seeing the DPS half of the solve.
+
+And one method note: **watching a replay found three defects that no metric
+caught** — the original camp failure, the solve snapping between lattice points,
+and both teams sharing a profile. A seed now reproduces byte-identically between
+the client and headless, so what is watched is exactly what was scored. Use it.
 
 ## Deferred
 
