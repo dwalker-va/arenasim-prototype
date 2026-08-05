@@ -6366,8 +6366,8 @@ mod warrior_pillar_pathing {
 //   Warlock denied sight     0.0s    28.3s     30.8s
 //   Warrior died             3/12     4/12      2/12
 //
-// On these three seeds the blocked share fell 36.7/35.5/22.5% -> 12.6/27.3/14.5%
-// and the longest blackout 14.25s -> 7.62s. What is left is the irreducible part:
+// On these three seeds the blocked share fell 36.7/35.5/22.5% -> 13.8/18.1/12.3%
+// and the longest blackout 14.25s -> 6.12s. What is left is the irreducible part:
 // a healer standing near a pillar sometimes has that pillar between it and a
 // MOVING ally, and one solve tick cannot preempt where the ally runs next.
 // Closing it further needs the ally's predicted position, which is step 6's

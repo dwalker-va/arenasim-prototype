@@ -555,6 +555,24 @@ pub(super) fn medic_chase_override<'c>(
     if !matches!(next, Posture::Free | Posture::Pressured) || ctx.is_ccd(entity) {
         return None;
     }
+    // RETIRED under `TeamPlan`: the solve subsumes this.
+    //
+    // Medic-chase exists because `cover_pull` and `cover_seek` are mutually
+    // exclusive with seeing your ally, so a healer hiding from threats needed a
+    // separate override to walk back around cover and heal a dying teammate.
+    // `OccupyCover` asks for cover AND sight of the ally in ONE query, so the
+    // case medic-chase was invented for cannot arise: a position that loses the
+    // ally's line is already a constraint violation.
+    //
+    // Measured before removing it, rather than assumed — disabling it under
+    // TeamPlan left the 12-seed sweep materially unchanged (11/12 wins either
+    // way, heal 348 vs 349, Warrior deaths 1/12 either way; the only movement
+    // was occlusion 22% -> 20%, so it did still fire, just never decisively).
+    // Leaving it live would mean two positioning authorities under one profile,
+    // which is exactly the hand-arbitration step 4 exists to remove.
+    if ctx.ai_profile.is_team_plan() {
+        return None;
+    }
     medic_chase_target(entity, my_pos, ctx, shared)
 }
 
