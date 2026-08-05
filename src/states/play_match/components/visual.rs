@@ -306,6 +306,13 @@ pub struct BacklashBurst {
 pub struct WalkAnim {
     pub phase: f32,
     pub previous_xz: Vec2,
+    /// Seconds since the sim last moved this unit. The sim steps positions in
+    /// FixedUpdate, so at render rates above the tick rate every other frame
+    /// sees zero movement — treating those frames as "idle" snapped the bob
+    /// offset to rest and back every frame, strobing the body and anything
+    /// attached to it. Idle is declared only after this exceeds a real pause
+    /// (~0.1s), so the bob holds its height between ticks.
+    pub idle_time: f32,
 }
 
 /// The rendered body of a combatant or pet: a CHILD entity carrying `Mesh3d`,
@@ -346,9 +353,10 @@ pub enum WeaponKind {
     Shield,
 }
 
-/// Which hand position a [`WeaponSocket`] occupies. Off-hand items (Rogue's
-/// second dagger, Paladin's shield) are held statically in v1 — only the main
-/// hand swings.
+/// Which hand position a [`WeaponSocket`] occupies. The Paladin's shield is
+/// held statically; the Rogue's daggers alternate hands cosmetically — the
+/// sim has a single attack timer, so each landed auto swings whichever dagger
+/// is flagged `winds_up_next`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum WeaponHand {
     Main,
@@ -375,6 +383,25 @@ pub struct WeaponSocket {
     pub rest: Transform,
     pub release_t: Option<f32>,
     pub aim: Vec3,
+    /// True when THIS socket telegraphs and plays the owner's next swing.
+    /// Main hand at spawn; for dual daggers the signal consumer flips it
+    /// between hands after each landed auto so the pair alternates. Always
+    /// false for the shield.
+    pub winds_up_next: bool,
+    /// Smoothed aim correction, as a yaw angle LOCAL to the owner's facing
+    /// (radians). The weapon is rigid to the body — when the body turns, the
+    /// weapon turns with it instantly — and this angle eases toward the
+    /// target bearing at a bounded rate. Smoothing in world space instead
+    /// made the compensation sweep the weapon around the body every time the
+    /// parent's tick-quantized facing snapped, which read as flashing while
+    /// units moved.
+    pub yaw_local: f32,
+    /// Smoothed windup parameter (0 to -1). The raw value is discontinuous
+    /// while chasing: an overdue attack timer pins it at full windup the
+    /// moment the target enters reach and drops it to rest the moment it
+    /// leaves, which strobes the pose every few frames during pursuit.
+    /// Easing at a bounded rate turns that into a deliberate raise/lower.
+    pub windup_s: f32,
 }
 
 /// One landed auto-attack, spawned in core at the damage-APPLY site (mirrors

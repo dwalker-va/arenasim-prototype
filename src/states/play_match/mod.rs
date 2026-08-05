@@ -1016,25 +1016,50 @@ fn weapon_asset_path(kind: WeaponKind) -> &'static str {
 }
 
 /// Mount pose for a weapon socket, local to the `VisualBody` (capsule radius
-/// 0.5, height 2.5, no facing — the swing system adds aim yaw around Y at
-/// swing time). Translation/rotation/scale tuned by eye against the graphical
-/// client; adjust freely, nothing else depends on these numbers.
+/// 0.5, height 2.5, no facing — the swing system rotates the whole socket
+/// around Y to face the target, with local +Z as the aim axis). Melee weapons
+/// rest pitched forward so that yaw is actually VISIBLE — a vertical rod
+/// rotating around Y reads as static. Translation/rotation/scale tuned by eye
+/// against the graphical client; adjust freely, nothing else depends on these
+/// numbers.
 fn weapon_mount(kind: WeaponKind, hand: WeaponHand) -> Transform {
     let side = if hand == WeaponHand::Off { -1.0 } else { 1.0 };
+    // Every mount clears the capsule (radius 0.5) with margin: the body
+    // material is alpha-blended (stealth), and weapon geometry dipping inside
+    // it renders with mushy half-covered edges instead of a solid silhouette.
     match kind {
-        WeaponKind::TwoHandAxe => Transform::from_xyz(0.6 * side, 0.1, 0.15)
-            .with_rotation(Quat::from_rotation_z(-0.15 * side))
+        // Blade tips lean ~45° toward the target; the swing arc raises them
+        // back past vertical on windup and chops through on release. The
+        // innermost 90° roll turns the axe blade to lead the chop instead of
+        // riding flat.
+        WeaponKind::TwoHandAxe => Transform::from_xyz(0.78 * side, 0.1, 0.2)
+            .with_rotation(
+                Quat::from_rotation_x(0.75) * Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+            )
             .with_scale(Vec3::splat(0.9)),
-        WeaponKind::Dagger => Transform::from_xyz(0.55 * side, -0.05, 0.25)
-            .with_rotation(Quat::from_rotation_z(-0.1 * side))
+        // The innermost 90° roll about the blade's long axis stands the flat
+        // of the blade vertical — edge leading the stab, not slapping flat.
+        WeaponKind::Dagger => Transform::from_xyz(0.7 * side, -0.05, 0.3)
+            .with_rotation(
+                Quat::from_rotation_x(0.9) * Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+            )
             .with_scale(Vec3::splat(0.8)),
-        WeaponKind::Bow => Transform::from_xyz(0.5 * side, 0.25, 0.2)
-            .with_scale(Vec3::splat(0.7)),
-        WeaponKind::Mace => Transform::from_xyz(0.55 * side, 0.05, 0.15)
-            .with_rotation(Quat::from_rotation_z(-0.12 * side))
+        // Bows are held vertical, rotated so the limb/string PLANE contains
+        // the aim axis — limbs arc toward the target, string at the back.
+        WeaponKind::Bow => Transform::from_xyz(0.8 * side, 0.25, 0.25)
+            .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2))
+            .with_scale(Vec3::splat(1.0)),
+        // Same 90° roll for the hammer: striking face toward the target
+        // instead of the flat of the head riding sideways.
+        WeaponKind::Mace => Transform::from_xyz(0.72 * side, 0.05, 0.2)
+            .with_rotation(
+                Quat::from_rotation_x(0.75) * Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+            )
             .with_scale(Vec3::splat(0.5)),
-        WeaponKind::Shield => Transform::from_xyz(0.62 * side, 0.15, 0.0)
-            .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2 * side))
+        // Shield mesh is authored facing +Z — no base rotation, or it turns
+        // edge-on to the enemy. Just a slight outward cant on the off arm.
+        WeaponKind::Shield => Transform::from_xyz(0.78 * side, 0.15, 0.0)
+            .with_rotation(Quat::from_rotation_y(0.25 * side))
             .with_scale(Vec3::splat(0.9)),
     }
 }
@@ -1095,8 +1120,19 @@ fn spawn_combatant(
     // The mesh hangs off a CHILD entity so graphical animation never writes this
     // entity's Transform — see `VisualBody`. The child sits at local y 0, so the
     // capsule renders exactly where the sim puts the combatant.
+    // Spawn already facing the arena center (where the enemy gates are), so
+    // the first movement tick's facing write is a small correction instead of
+    // a quarter-turn that visibly spins the held weapons at gate-open. The
+    // sim never READS rotation — movement only writes it — and headless has
+    // its own spawn path, so this is purely cosmetic.
+    let to_center = Vec3::new(-position.x, 0.0, -position.z);
+    let initial_facing = if to_center.length_squared() > 1e-6 {
+        Quat::from_rotation_y(to_center.x.atan2(to_center.z))
+    } else {
+        Quat::IDENTITY
+    };
     let entity = commands.spawn((
-        Transform::from_translation(position),
+        Transform::from_translation(position).with_rotation(initial_facing),
         Visibility::default(),
         combatant,
         DRTracker::default(),
@@ -1107,6 +1143,7 @@ fn spawn_combatant(
         WalkAnim {
             phase: walk_phase_seed(position.xz()),
             previous_xz: position.xz(),
+            idle_time: 0.0,
         },
     ))
     .id();
@@ -1142,7 +1179,14 @@ fn spawn_combatant(
                     owner: entity,
                     rest,
                     release_t: None,
-                    aim: Vec3::Z,
+                    // Arena center: weapons face the enemy side of the map
+                    // until target acquisition takes over after gates open.
+                    aim: Vec3::ZERO,
+                    // The shield never swings; every other main hand starts as
+                    // the next swinger. The consumer alternates dagger pairs.
+                    winds_up_next: hand == WeaponHand::Main && kind != WeaponKind::Shield,
+                    yaw_local: 0.0,
+                    windup_s: 0.0,
                 },
                 rest,
             ))
@@ -1228,6 +1272,7 @@ fn spawn_pet(
         WalkAnim {
             phase: walk_phase_seed(pet_position.xz()),
             previous_xz: pet_position.xz(),
+            idle_time: 0.0,
         },
     ))
     .with_child((

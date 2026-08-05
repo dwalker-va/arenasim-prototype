@@ -55,7 +55,7 @@ Combat is currently legible only through floating combat text and the log. Bodie
 - R6. A swing animation plays only when an attack actually lands; a completed timer with no eligible target (out of range, no target) produces no phantom swing.
 - R7. When an attack lands without an anticipation window (attack was ready and the target just entered range), the animation degrades to release-plus-follow-through rather than desyncing or skipping.
 - R8. Windup pacing follows the live attack interval, including mid-fight attack-speed changes from `AttackSpeedSlow` auras.
-- R9. Rogue and Paladin swing with the main-hand weapon; the off-hand dagger and shield are held statically in v1 (no dual-wield alternation, no block animation).
+- R9. The Rogue's daggers alternate hands cosmetically — each landed auto swings the other dagger (the sim keeps its single attack timer); the Paladin's shield is held statically (no block animation).
 
 **Hunter auto-shot**
 
@@ -132,7 +132,7 @@ Deferred for later:
 
 ## Planning Contract
 
-**Product Contract preservation:** unchanged, except Outstanding Questions — its four deferred-to-planning items are resolved by KTD1, KTD4, and KTD5 below and the tuning notes in U2/U3, so the section is removed rather than left stale.
+**Product Contract preservation:** unchanged, with two exceptions. Outstanding Questions — its four deferred-to-planning items are resolved by KTD1, KTD4, and KTD5 below and the tuning notes in U2/U3, so the section is removed rather than left stale. R9 — originally "off-hand held statically"; revised during implementation review (user-directed) to alternate the Rogue's daggers cosmetically, since a static off-hand read as unanimated.
 
 ### Key Technical Decisions
 
