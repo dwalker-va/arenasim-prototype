@@ -235,7 +235,11 @@ impl Plugin for StatesPlugin {
                     .run_if(in_state(GameState::PlayMatch)),
             )
             // Casting orb (gathering-orb cast animation): spawn/animate/motes/
-            // cleanup — separate group to avoid tuple size limits.
+            // cleanup — separate group to avoid tuple size limits. `.chain()`
+            // enforces spawn->update->motes->cleanup ordering within the
+            // frame, so a just-spawned orb is positioned before motes stream
+            // toward it (otherwise motes could target the default-ZERO
+            // translation for a frame).
             .add_systems(
                 Update,
                 (
@@ -245,6 +249,7 @@ impl Plugin for StatesPlugin {
                     play_match::update_casting_orb_motes,
                     play_match::cleanup_casting_orbs,
                 )
+                    .chain()
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_state(GameState::PlayMatch)),
             )

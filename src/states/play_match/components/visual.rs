@@ -488,6 +488,9 @@ pub struct CastingOrb {
     /// Monotonic mote counter — drives the deterministic golden-angle spread
     /// of mote start offsets (no RNG: visual code never touches `game_rng`).
     pub mote_index: u32,
+    /// Total cast duration captured at spawn, so growth tracks the LIVE cast
+    /// time incl. CastTimeIncrease auras, not the base config value.
+    pub cast_total: f32,
 }
 
 /// One mote streaming into its parent orb's focus point. Travels a straight

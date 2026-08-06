@@ -3657,7 +3657,9 @@ fn casting_orb_anchor(caster_pos: Vec3, target_pos: Option<Vec3>) -> Vec3 {
 
 /// Spawn a casting orb when a combatant starts a hard cast or channel.
 /// No ability filter (R3): anything with cast/channel state gets the orb.
-/// Guards: one orb per caster (drain-life duplicate-check idiom), and a cast
+/// Guards: one live (non-ending) orb per caster (drain-life duplicate-check
+/// idiom, scoped to Growing/Holding so a back-to-back cast whose prior orb is
+/// still in its Sputter/Flash ending doesn't get swallowed), and a cast
 /// already flagged `interrupted` never spawns one — a same-frame interrupt's
 /// `CastEnding` marker was already consumed, so a late orb would linger.
 pub fn spawn_casting_orbs(
@@ -3668,21 +3670,31 @@ pub fn spawn_casting_orbs(
     new_casts: Query<(Entity, &CastingState), Added<CastingState>>,
     new_channels: Query<(Entity, &ChannelingState), Added<ChannelingState>>,
     existing_orbs: Query<&CastingOrb>,
+    casters: Query<&Transform, With<Combatant>>,
 ) {
     let starts = new_casts
         .iter()
-        .map(|(e, c)| (e, c.ability, c.interrupted, CastingOrbPhase::Growing))
-        .chain(
-            new_channels
-                .iter()
-                .map(|(e, c)| (e, c.ability, c.interrupted, CastingOrbPhase::Holding)),
-        );
+        .map(|(e, c)| {
+            (
+                e,
+                c.ability,
+                c.interrupted,
+                CastingOrbPhase::Growing,
+                Some(c.time_remaining),
+            )
+        })
+        .chain(new_channels.iter().map(|(e, c)| {
+            (e, c.ability, c.interrupted, CastingOrbPhase::Holding, None)
+        }));
 
-    for (caster_entity, ability, interrupted, phase) in starts {
+    for (caster_entity, ability, interrupted, phase, time_remaining) in starts {
         if interrupted {
             continue;
         }
-        if existing_orbs.iter().any(|orb| orb.caster == caster_entity) {
+        if existing_orbs.iter().any(|orb| {
+            orb.caster == caster_entity
+                && matches!(orb.phase, CastingOrbPhase::Growing | CastingOrbPhase::Holding)
+        }) {
             continue;
         }
 
@@ -3706,11 +3718,27 @@ pub fn spawn_casting_orbs(
             _ => 0.0,
         };
 
+        // cast_total tracks the LIVE cast time (incl. CastTimeIncrease auras
+        // such as Curse of Tongues), not the base config value — see the
+        // field doc comment. Unused in Holding, so 0.0 is fine there.
+        let cast_total = match time_remaining {
+            Some(remaining) => remaining.max(def.cast_time),
+            None => def.cast_time,
+        };
+
+        // Real initial translation (not the world origin) so a mote spawned
+        // before the first `update_casting_orbs` tick still streams toward
+        // the caster instead of Vec3::ZERO.
+        let initial_translation = casters
+            .get(caster_entity)
+            .map(|caster_transform| casting_orb_anchor(caster_transform.translation, None))
+            .unwrap_or(Vec3::ZERO);
+
         commands.spawn((
             Mesh3d(mesh),
             MeshMaterial3d(material),
-            // Scale ~0 until the first update positions and grows it.
-            Transform::from_scale(Vec3::splat(0.001)),
+            // Scale ~0 until the first update grows it; translation is real.
+            Transform::from_translation(initial_translation).with_scale(Vec3::splat(0.001)),
             CastingOrb {
                 caster: caster_entity,
                 intensity: initial_intensity,
@@ -3718,6 +3746,7 @@ pub fn spawn_casting_orbs(
                 ending_remaining: 0.0,
                 mote_spawn_timer: 0.0,
                 mote_index: 0,
+                cast_total,
             },
             PlayMatchEntity,
         ));
@@ -3750,9 +3779,14 @@ pub fn update_casting_orbs(
                 };
                 if !casting.interrupted {
                     let def = abilities.get_unchecked(&casting.ability);
-                    if def.cast_time > 0.0 {
+                    let total = if orb.cast_total > 0.0 {
+                        orb.cast_total
+                    } else {
+                        def.cast_time
+                    };
+                    if total > 0.0 {
                         orb.intensity =
-                            (1.0 - casting.time_remaining / def.cast_time).clamp(0.0, 1.0);
+                            (1.0 - casting.time_remaining / total).clamp(0.0, 1.0);
                     }
                 }
                 let target_pos = casting
@@ -3914,7 +3948,7 @@ pub fn consume_cast_ending_signals(
                     orb.ending_remaining = CASTING_ORB_SPUTTER_SECS;
                 }
             }
-            // At most one orb per caster (spawn dedup guard) — done.
+            // At most one NON-ENDING orb per caster (spawn dedup guard) — done.
             break;
         }
         commands.entity(signal_entity).despawn();
