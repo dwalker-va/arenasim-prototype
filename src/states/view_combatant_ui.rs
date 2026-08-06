@@ -1208,18 +1208,10 @@ fn render_abilities_panel(
     });
 }
 
-/// Get the color for a spell school
+/// Get the color for a spell school (shared authority: `SpellSchool::color_rgb8`)
 fn get_spell_school_color(school: SpellSchool) -> egui::Color32 {
-    match school {
-        SpellSchool::Physical => egui::Color32::from_rgb(199, 156, 110), // Brown/tan
-        SpellSchool::Frost => egui::Color32::from_rgb(100, 180, 255),    // Ice blue
-        SpellSchool::Fire => egui::Color32::from_rgb(255, 128, 64),      // Orange-red
-        SpellSchool::Shadow => egui::Color32::from_rgb(148, 130, 201),   // Purple
-        SpellSchool::Arcane => egui::Color32::from_rgb(255, 128, 255),   // Pink/magenta
-        SpellSchool::Holy => egui::Color32::from_rgb(255, 230, 150),     // Golden yellow
-        SpellSchool::Nature => egui::Color32::from_rgb(76, 196, 30),      // Green
-        SpellSchool::None => egui::Color32::from_rgb(220, 220, 220),     // Gray
-    }
+    let (r, g, b) = school.color_rgb8();
+    egui::Color32::from_rgb(r, g, b)
 }
 
 /// Render a WoW-style ability tooltip

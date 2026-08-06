@@ -266,6 +266,23 @@ impl AbilityConfig {
     pub fn is_channel(&self) -> bool {
         self.channel_duration.is_some()
     }
+
+    /// Resolve this ability's cast color as `(base_rgb, emissive_rgb)` in
+    /// 0..1 linear-ish component form: the exact `projectile_visuals` pair when
+    /// the ability defines one (the casting orb then matches the outgoing
+    /// projectile), otherwise the spell-school color from
+    /// [`SpellSchool::color_rgb8`] with emissive derived at 2.5x (the repo's
+    /// 2-4x visible-glow convention). A later per-spell override slots in
+    /// here without reworking callers.
+    pub fn cast_color(&self) -> ([f32; 3], [f32; 3]) {
+        if let Some(visuals) = &self.projectile_visuals {
+            return (visuals.color, visuals.emissive);
+        }
+        let (r, g, b) = self.spell_school.color_rgb8();
+        let base = [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0];
+        let emissive = [base[0] * 2.5, base[1] * 2.5, base[2] * 2.5];
+        (base, emissive)
+    }
 }
 
 /// Root structure for the abilities.ron file
@@ -480,6 +497,92 @@ impl Plugin for AbilityConfigPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn base_test_config() -> AbilityConfig {
+        AbilityConfig {
+            name: "Test".to_string(),
+            icon: String::new(),
+            description: String::new(),
+            cast_time: 0.0,
+            range: 40.0,
+            min_range: None,
+            mana_cost: 0.0,
+            cooldown: 0.0,
+            damage_base_min: 0.0,
+            damage_base_max: 0.0,
+            damage_coefficient: 0.0,
+            damage_scales_with: ScalingStat::SpellPower,
+            healing_base_min: 0.0,
+            healing_base_max: 0.0,
+            healing_coefficient: 0.0,
+            applies_aura: None,
+            application_chance: None,
+            projectile_speed: None,
+            projectile_visuals: None,
+            spell_school: SpellSchool::None,
+            is_interrupt: false,
+            lockout_duration: 0.0,
+            requires_stealth: false,
+            is_charge: false,
+            spawn_impact_effect: false,
+            channel_duration: None,
+            channel_tick_interval: 1.0,
+            channel_healing_per_tick: 0.0,
+            is_dispel: false,
+            mana_burn_amount: 0.0,
+            dispel_backlash: None,
+        }
+    }
+
+    #[test]
+    fn cast_color_prefers_projectile_visuals() {
+        // Frostbolt-shaped: projectile colors defined -> orb matches the bolt
+        // exactly, not the Frost school fallback.
+        let mut config = base_test_config();
+        config.spell_school = SpellSchool::Frost;
+        config.projectile_visuals = Some(ProjectileVisuals {
+            color: [0.4, 0.7, 1.0],
+            emissive: [0.6, 0.9, 1.5],
+        });
+        let (base, emissive) = config.cast_color();
+        assert_eq!(base, [0.4, 0.7, 1.0]);
+        assert_eq!(emissive, [0.6, 0.9, 1.5]);
+    }
+
+    #[test]
+    fn cast_color_falls_back_to_school() {
+        // Flash-Heal-shaped: no projectile visuals -> Holy school color with
+        // the 2.5x derived emissive.
+        let mut config = base_test_config();
+        config.spell_school = SpellSchool::Holy;
+        let (base, emissive) = config.cast_color();
+        let expected = [255.0 / 255.0, 230.0 / 255.0, 150.0 / 255.0];
+        assert_eq!(base, expected);
+        for i in 0..3 {
+            assert!((emissive[i] - expected[i] * 2.5).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn every_spell_school_resolves_a_color() {
+        // Exhaustiveness is compiler-enforced in color_rgb8; this pins that the
+        // fallback path produces a nonzero color for every school.
+        for school in [
+            SpellSchool::Physical,
+            SpellSchool::Frost,
+            SpellSchool::Holy,
+            SpellSchool::Shadow,
+            SpellSchool::Arcane,
+            SpellSchool::Fire,
+            SpellSchool::Nature,
+            SpellSchool::None,
+        ] {
+            let mut config = base_test_config();
+            config.spell_school = school;
+            let (base, _) = config.cast_color();
+            assert!(base.iter().any(|&c| c > 0.0), "{school:?} resolved to black");
+        }
+    }
 
     #[test]
     fn test_ability_config_is_damage() {
