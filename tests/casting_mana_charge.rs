@@ -22,7 +22,8 @@ use arenasim::combat::log::CombatLog;
 use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::combat_core::process_casting;
 use arenasim::states::play_match::components::{
-    ArenaDampening, CastingState, Combatant, GameRng, MatchCountdown,
+    ActiveAuras, ArenaDampening, Aura, AuraType, CastEnding, CastEndingKind, CastingState,
+    Combatant, GameRng, MatchCountdown,
 };
 use arenasim::states::play_match::map_config::ActiveMapGeometry;
 use arenasim::states::play_match::map_geometry::ObstacleVolume;
@@ -79,6 +80,19 @@ fn mana(app: &App, entity: Entity) -> f32 {
     app.world().get::<Combatant>(entity).unwrap().current_mana
 }
 
+/// All `CastEnding` marker kinds spawned for the given caster, in spawn order.
+/// `process_casting` spawns markers as bare entities (see `CastEnding` doc
+/// comment) so this queries the whole world rather than reading a component
+/// off the caster.
+fn cast_endings(app: &mut App, caster: Entity) -> Vec<CastEndingKind> {
+    app.world_mut()
+        .query::<&CastEnding>()
+        .iter(app.world())
+        .filter(|ending| ending.caster == caster)
+        .map(|ending| ending.kind)
+        .collect()
+}
+
 /// A full-height pillar on the origin (shipped PillaredArena radius), straddling
 /// a caster→target segment that runs along Z through the origin.
 fn blocking_pillar() -> ObstacleVolume {
@@ -118,6 +132,11 @@ fn projectile_fizzle_out_of_los_charges_no_mana() {
         before,
         "a Frostbolt that fizzles out of LoS at completion must cost no mana"
     );
+    assert_eq!(
+        cast_endings(&mut app, mage),
+        vec![CastEndingKind::Fizzled],
+        "an LoS fizzle at completion must spawn exactly one Fizzled CastEnding"
+    );
 }
 
 /// (2) Projectile cast that lands (clear LoS) → the projectile spawns and mana
@@ -139,6 +158,11 @@ fn projectile_land_charges_exact_mana_cost() {
         FROSTBOLT_COST,
         before,
         mana(&app, mage)
+    );
+    assert_eq!(
+        cast_endings(&mut app, mage),
+        vec![CastEndingKind::Landed],
+        "a landed projectile cast must spawn exactly one Landed CastEnding"
     );
 }
 
@@ -162,6 +186,11 @@ fn instant_effect_dead_target_charges_no_mana() {
         before,
         "a Flash Heal completing onto a dead target must cost no mana"
     );
+    assert_eq!(
+        cast_endings(&mut app, priest),
+        vec![CastEndingKind::Fizzled],
+        "a dead-target completion must spawn exactly one Fizzled CastEnding"
+    );
 }
 
 /// (4) Self-cast buff (Ice Barrier, instant-effect, target == caster) always
@@ -183,6 +212,11 @@ fn self_cast_buff_still_charges_mana() {
         ICE_BARRIER_COST,
         before,
         mana(&app, mage)
+    );
+    assert_eq!(
+        cast_endings(&mut app, mage),
+        vec![CastEndingKind::Landed],
+        "a landed instant-effect self-cast must spawn exactly one Landed CastEnding"
     );
 }
 
@@ -209,5 +243,47 @@ fn interrupted_cast_charges_no_mana() {
         mana(&app, mage),
         before,
         "an interrupted cast must cost no mana"
+    );
+    // No CastEnding marker assertion here: this scenario starts the
+    // `CastingState` already `interrupted: true`, which only exercises the
+    // "tick down the interrupted display" branch (casting.rs's `if
+    // casting.interrupted` block) — the marker is spawned at the point the
+    // interrupt is FIRST detected (the CC/Silence branches above it), not on
+    // every subsequent tick of an already-interrupted cast. See
+    // `stun_cancels_cast_charges_no_mana_and_spawns_interrupted_marker` below
+    // for that spawn site.
+}
+
+/// (6) Stun (an incapacitating aura) cancels an in-progress cast the moment
+/// `process_casting` observes it — this is the actual `Interrupted` marker
+/// spawn site for the CC-cancel branch (casting.rs's `is_incapacitated` gate),
+/// distinct from test (5) above which starts mid-way through an
+/// already-interrupted cast. No mana is charged, matching (5)'s guarantee.
+#[test]
+fn stun_cancels_cast_charges_no_mana_and_spawns_interrupted_marker() {
+    let mut app = harness_app(Vec::new());
+    let mage = spawn_combatant(&mut app, CharacterClass::Mage, Vec3::new(0.0, 1.0, -12.0));
+    let victim = spawn_combatant(&mut app, CharacterClass::Mage, Vec3::new(0.0, 1.0, 12.0));
+    let before = mana(&app, mage);
+    begin_completing_cast(&mut app, mage, AbilityType::Frostbolt, victim);
+    app.world_mut().entity_mut(mage).insert(ActiveAuras {
+        auras: vec![Aura {
+            effect_type: AuraType::Stun,
+            duration: 5.0,
+            ..Default::default()
+        }],
+    });
+
+    run(&mut app);
+
+    assert_eq!(
+        mana(&app, mage),
+        before,
+        "a cast cancelled by an incapacitating aura must cost no mana"
+    );
+    assert_eq!(
+        cast_endings(&mut app, mage),
+        vec![CastEndingKind::Interrupted],
+        "a CC-cancelled cast must spawn exactly one Interrupted CastEnding"
     );
 }

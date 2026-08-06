@@ -307,8 +307,12 @@ pub fn check_match_end(
                 commands.entity(entity).insert(Celebrating { bounce_offset });
             }
             
-            // Cancel any active casts to avoid frozen cast bars during celebration
+            // Cancel any active casts to avoid frozen cast bars during celebration.
+            // ChannelingState too: process_channeling early-returns during
+            // VictoryCelebration, so without this a Drain Life active at match end
+            // freezes its beam (and the casting orb) through the celebration.
             commands.entity(entity).remove::<CastingState>();
+            commands.entity(entity).remove::<ChannelingState>();
         }
         
         // Despawn all active projectiles to avoid frozen projectiles during celebration

@@ -30,6 +30,23 @@ pub enum SpellSchool {
 }
 
 impl SpellSchool {
+    /// Canonical per-school RGB (sRGB bytes) — the single color authority shared
+    /// by the View Combatant UI (as `egui::Color32`) and world-space casting
+    /// visuals (as `bevy::Color`). WoW-canonical hues; exhaustive so a new
+    /// school cannot ship without a color.
+    pub fn color_rgb8(self) -> (u8, u8, u8) {
+        match self {
+            SpellSchool::Physical => (199, 156, 110), // Brown/tan
+            SpellSchool::Frost => (100, 180, 255),    // Ice blue
+            SpellSchool::Fire => (255, 128, 64),      // Orange-red
+            SpellSchool::Shadow => (148, 130, 201),   // Purple
+            SpellSchool::Arcane => (255, 128, 255),   // Pink/magenta
+            SpellSchool::Holy => (255, 230, 150),     // Golden yellow
+            SpellSchool::Nature => (76, 196, 30),     // Green
+            SpellSchool::None => (220, 220, 220),     // Gray
+        }
+    }
+
     /// Encode this school as the `magnitude` of a `SpellSchoolLockout` aura.
     /// The lockout aura carries the locked school in its `magnitude` field (it
     /// has no dedicated school slot), so this and [`SpellSchool::from_lockout_magnitude`]

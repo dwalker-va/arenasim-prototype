@@ -425,6 +425,88 @@ pub struct AutoAttackSwing {
     pub ranged: bool,
 }
 
+/// How a hard cast or channel ended, for the casting-orb ending animation.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CastEndingKind {
+    /// The cast completed and its effect actually landed (mana was charged).
+    Landed,
+    /// The cast reached completion but fizzled — target dead, despawned, or
+    /// out of line of sight at the resolution gates (no mana charged).
+    Fizzled,
+    /// The cast or channel was cut short: ability interrupt (Pummel/Kick),
+    /// crowd control (stun/fear/polymorph), or Silence.
+    Interrupted,
+}
+
+/// One cast/channel ending, spawned in core at the resolution site (mirrors
+/// [`AutoAttackSwing`]): a bare marker entity, inert in headless, consumed and
+/// despawned by the graphical casting-orb systems in `rendering/effects.rs`
+/// (registered only in `states/mod.rs`). Spawned at the OUTCOME site rather
+/// than inferred from `CastingState` removal because pass 1 of
+/// `process_casting` removes the component before pass 2 decides landed vs
+/// fizzled — the two endings are indistinguishable from component state alone.
+/// Caster death and match end deliberately spawn NO marker (silent vanish —
+/// the death/celebration animation owns that moment).
+#[derive(Component)]
+pub struct CastEnding {
+    pub caster: Entity,
+    pub kind: CastEndingKind,
+}
+
+/// Lifecycle phase of a [`CastingOrb`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CastingOrbPhase {
+    /// Hard cast in progress — the orb grows with cast progress.
+    Growing,
+    /// Channel in progress — the orb holds at full intensity.
+    Holding,
+    /// Ending: shrink/dissipate after an interrupt or fizzle.
+    Sputter,
+    /// Ending: brief release pulse after a landed completion.
+    Flash,
+}
+
+/// The gathering-orb casting animation: one free-standing world-space entity
+/// per casting/channeling combatant (drain-life-beam follow pattern — NOT a
+/// `VisualBody` child), colored via [`AbilityConfig::cast_color`]. Growing and
+/// Holding read live cast state; the Sputter/Flash endings are driven by
+/// consumed [`CastEnding`] markers, and a state-gone-with-no-marker caster
+/// (death, match end, natural channel end) despawns the orb silently.
+///
+/// [`AbilityConfig::cast_color`]: crate::states::play_match::ability_config::AbilityConfig::cast_color
+#[derive(Component)]
+pub struct CastingOrb {
+    /// The combatant this orb hovers in front of.
+    pub caster: Entity,
+    /// 0..1 growth captured continuously; an ending animates from this value.
+    pub intensity: f32,
+    pub phase: CastingOrbPhase,
+    /// Seconds remaining in the current ending phase (Sputter/Flash only).
+    pub ending_remaining: f32,
+    /// Countdown to the next mote spawn.
+    pub mote_spawn_timer: f32,
+    /// Monotonic mote counter — drives the deterministic golden-angle spread
+    /// of mote start offsets (no RNG: visual code never touches `game_rng`).
+    pub mote_index: u32,
+    /// Total cast duration captured at spawn, so growth tracks the LIVE cast
+    /// time incl. CastTimeIncrease auras, not the base config value.
+    pub cast_total: f32,
+}
+
+/// One mote streaming into its parent orb's focus point. Travels a straight
+/// lerp from a deterministic start offset to the orb, then despawns (drain-
+/// particle idiom aimed at the orb instead of along a beam).
+#[derive(Component)]
+pub struct CastingOrbMote {
+    pub orb: Entity,
+    /// 0..1 travel progress toward the orb center.
+    pub progress: f32,
+    /// Progress units per second.
+    pub speed: f32,
+    /// World-space offset from the orb center where this mote started.
+    pub start_offset: Vec3,
+}
+
 /// The pre-stealth material of one weapon-mesh descendant, remembered so the
 /// stealth fade can restore it exactly on unstealth. glTF materials are
 /// SHARED assets across every spawned instance of the model, so the fade
