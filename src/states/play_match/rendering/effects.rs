@@ -3634,6 +3634,8 @@ const CASTING_ORB_FLASH_SECS: f32 = 0.25;
 const CASTING_ORB_MOTE_INTERVAL: f32 = 0.1;
 /// Radius of the ring motes stream in from.
 const CASTING_ORB_MOTE_RADIUS: f32 = 1.2;
+/// Mote travel speed in progress-units per second (~0.4s to reach the orb).
+const CASTING_ORB_MOTE_SPEED: f32 = 2.5;
 /// Golden angle (radians) — deterministic angular spread for mote offsets
 /// without touching any RNG.
 const GOLDEN_ANGLE: f32 = 2.399_963;
@@ -3841,7 +3843,7 @@ pub fn spawn_casting_orb_motes(
             CastingOrbMote {
                 orb: orb_entity,
                 progress: 0.0,
-                speed: 2.5,
+                speed: CASTING_ORB_MOTE_SPEED,
                 start_offset,
             },
             PlayMatchEntity,
@@ -3912,6 +3914,8 @@ pub fn consume_cast_ending_signals(
                     orb.ending_remaining = CASTING_ORB_SPUTTER_SECS;
                 }
             }
+            // At most one orb per caster (spawn dedup guard) — done.
+            break;
         }
         commands.entity(signal_entity).despawn();
     }

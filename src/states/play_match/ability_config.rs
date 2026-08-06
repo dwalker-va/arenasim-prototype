@@ -586,39 +586,12 @@ mod tests {
 
     #[test]
     fn test_ability_config_is_damage() {
-        let config = AbilityConfig {
-            name: "Test".to_string(),
-            icon: String::new(),
-            description: String::new(),
-            cast_time: 0.0,
-            range: 40.0,
-            min_range: None,
-            mana_cost: 0.0,
-            cooldown: 0.0,
-            damage_base_min: 10.0,
-            damage_base_max: 20.0,
-            damage_coefficient: 0.5,
-            damage_scales_with: ScalingStat::SpellPower,
-            healing_base_min: 0.0,
-            healing_base_max: 0.0,
-            healing_coefficient: 0.0,
-            applies_aura: None,
-            application_chance: None,
-            projectile_speed: None,
-            projectile_visuals: None,
-            spell_school: SpellSchool::Frost,
-            is_interrupt: false,
-            lockout_duration: 0.0,
-            requires_stealth: false,
-            is_charge: false,
-            spawn_impact_effect: false,
-            channel_duration: None,
-            channel_tick_interval: 1.0,
-            channel_healing_per_tick: 0.0,
-            is_dispel: false,
-            mana_burn_amount: 0.0,
-            dispel_backlash: None,
-        };
+        let mut config = base_test_config();
+        config.damage_base_min = 10.0;
+        config.damage_base_max = 20.0;
+        config.damage_coefficient = 0.5;
+        config.damage_scales_with = ScalingStat::SpellPower;
+        config.spell_school = SpellSchool::Frost;
 
         assert!(config.is_damage());
         assert!(!config.is_heal());
@@ -626,39 +599,15 @@ mod tests {
 
     #[test]
     fn test_ability_config_is_heal() {
-        let config = AbilityConfig {
-            name: "Test Heal".to_string(),
-            icon: String::new(),
-            description: String::new(),
-            cast_time: 1.5,
-            range: 40.0,
-            min_range: None,
-            mana_cost: 25.0,
-            cooldown: 0.0,
-            damage_base_min: 0.0,
-            damage_base_max: 0.0,
-            damage_coefficient: 0.0,
-            damage_scales_with: ScalingStat::None,
-            healing_base_min: 15.0,
-            healing_base_max: 20.0,
-            healing_coefficient: 0.75,
-            applies_aura: None,
-            application_chance: None,
-            projectile_speed: None,
-            projectile_visuals: None,
-            spell_school: SpellSchool::Holy,
-            is_interrupt: false,
-            lockout_duration: 0.0,
-            requires_stealth: false,
-            is_charge: false,
-            spawn_impact_effect: false,
-            channel_duration: None,
-            channel_tick_interval: 1.0,
-            channel_healing_per_tick: 0.0,
-            is_dispel: false,
-            mana_burn_amount: 0.0,
-            dispel_backlash: None,
-        };
+        let mut config = base_test_config();
+        config.name = "Test Heal".to_string();
+        config.cast_time = 1.5;
+        config.mana_cost = 25.0;
+        config.damage_scales_with = ScalingStat::None;
+        config.healing_base_min = 15.0;
+        config.healing_base_max = 20.0;
+        config.healing_coefficient = 0.75;
+        config.spell_school = SpellSchool::Holy;
 
         assert!(!config.is_damage());
         assert!(config.is_heal());
