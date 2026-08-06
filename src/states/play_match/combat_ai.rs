@@ -180,6 +180,18 @@ pub fn acquire_targets(
             } else {
                 None
             };
+            // STEP 5'S PLAN CALL WAS CONSUMED HERE, AND IS DELIBERATELY NOT.
+            // Four variants were measured at n=100 (gates-open and at-contact
+            // picks, nearest-to-melee and healer-first priorities), and EVERY
+            // static held call was catastrophic for at least one side of a
+            // matchup (-48 to -69pt), while helping its mirror (+25 to +65):
+            // each comp wants a different target called, and a call held
+            // constant cannot adapt the way per-unit re-acquisition does. The
+            // full table lives in the design doc's step-5 amendment. Mid-match
+            // switching is the PREREQUISITE for consuming the call — until it
+            // exists, `plan.kill_target` stays producer-only (the step-2
+            // provable-no-op shape).
+
 
             if let Some(priority_target) = kill_target {
                 // Use the kill target

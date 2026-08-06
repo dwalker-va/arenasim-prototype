@@ -672,8 +672,39 @@ different from adjusting them because the AI finds them inconvenient.
    (2) from that section before calling step 4 done.
 5. Move kill-target selection onto the plan, held constant.
 
-   **CORRECTION: this is NOT "behaviourally close to today's configured
-   priority".** That is true only when `teamN_kill_target` is set in the match
+   **MEASURED AND REFUTED AS SPECIFIED (2026-08-06).** Four variants were built
+   and measured head-to-head at n=100 per cell — pick at gates-open vs at first
+   contact, priority nearest-to-melee vs healer-first — and EVERY static held
+   call was catastrophic for at least one side of a matchup while helping its
+   mirror:
+
+   | Side with the call (solve-only baseline) | nearest@gates | nearest@contact | healer-first |
+   |---|---|---|---|
+   | `Warrior+Priest` (87%) | 91% | 87% | **18%** |
+   | `Warlock+Priest` (59%) | 67% | 67% | **0%** |
+   | `Hunter+Priest` (35%) | 35% | **100%** | 35% |
+   | `Rogue+Priest` (73%) | **24%** | **25%** | 98% |
+
+   Each side wants a DIFFERENT target called: the Rogue team wants the enemy
+   healer (98%); the Hunter team wants the burst melee, once visible at contact
+   (100%); the Warrior team must not chase the healer (18%); and the Warlock
+   team forced onto the healer collapses to 0/100 — its class AI already
+   handles the enemy healer separately (the shipped Fear+Spell Lock lockout
+   logic), so the call double-books the healer and destroys its damage
+   rotation. What per-unit acquisition does well is ADAPT — it converges on the
+   killable target as the fight reveals it — and a held call cannot express
+   that. **Mid-match switching is therefore a PREREQUISITE for the call, not a
+   deferred enhancement**; until it exists, `plan.kill_target` is filled by the
+   planner (healer-first at contact, tested) and consumed by NOTHING — the
+   step-2 provable-no-op shape. The revert was verified to restore the
+   committed pre-call numbers exactly (hunter_LT 73/100).
+
+   A comp-conditional call table would fit these four observations, but with
+   two matchups measured and the Warlock case showing class-AI double-handling,
+   it would be pure overfit. Do not build it without out-of-sample comps.
+
+   **CORRECTION (pre-dates the above): this is NOT "behaviourally close to
+   today's configured priority".** That is true only when `teamN_kill_target` is set in the match
    config, and it usually is not — every sweep and baseline runs without it. The
    actual default in `acquire_targets` is that **each unit independently picks its
    own nearest visible non-pet enemy**. Introducing a team-wide call is therefore
@@ -691,12 +722,12 @@ different from adjusting them because the AI finds them inconvenient.
    obligation layer on top of it. Peels become possible here — which is the
    prerequisite for `Withdraw(Recover)` being enterable at all.
 
-   **DECIDE MID-MATCH KILL-TARGET SWITCHING BEFORE STARTING THIS.** As ordered,
-   steps 5 and 6 guarantee an under-powered result: step 5 holds the target
-   constant, that cap makes "this enemy dies to one more cast" unactionable, and
-   the uncap sits unscheduled in Deferred. Building an obligation layer that is
-   known to be hobbled, with its fix in a wishlist, is a trap. Either pull
-   switching into this step or reduce this step's ambition to match.
+   **MID-MATCH SWITCHING IS NO LONGER OPTIONAL HERE.** Step 5's measurement
+   settled what the earlier warning hedged: a held call is not merely
+   under-powered, it is net-harmful for at least one side of every matchup
+   tested (-48 to -69pt). The obligation layer therefore CANNOT build on a held
+   call at all; switching (with a commitment/hysteresis rule so the team does
+   not thrash) must land first, and the call's consumer comes back only then.
 7. Add `Withdraw` with both reason codes, its dampening and mana-trajectory entry
    gates, and its exit conditions. Regenerate all balance baselines — this step
    changes behaviour on every map and is the point of no return for the existing
