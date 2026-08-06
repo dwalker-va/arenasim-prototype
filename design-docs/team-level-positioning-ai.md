@@ -36,15 +36,32 @@ with the healer solve as the only variable:
 | `Warlock+Priest` | +8pt |
 | `Rogue+Priest` | +17pt |
 | `Mage+Priest` | +0pt — baseline is 12/12, so this comp measures nothing |
-| **`Hunter+Priest`** | **-17pt** |
+| `Hunter+Priest` | -17pt -> **+0pt** after the kiter healer-leash fix, below |
 
-Every comp gains except `Hunter+Priest`, which loses badly. The leading
-hypothesis is that `OccupyCover` anchors on the nearest living ally and demands
-line of sight to it — cheap when that ally is a melee planted in a scrum, and
-expensive when it is a KITER moving fast and erratically, because the healer ends
-up chasing a sight-line that moves with the fight. That is the same failure shape
-step 3 measured for the camp (a healer permanently behind its own orders), and it
-is unverified. **Do not quote the +8pt figure without this caveat.**
+Every comp gains except `Hunter+Priest`, which lost badly until the cause was
+found. It was NOT the solve failing to cover a mobile ally, which was the
+first hypothesis. **A kiter had no awareness of its own healer at all**:
+`formation_pull` is 0 for both kiters and nothing in `dps_postures.rs` ever
+referenced `heal_range`, so `flee` (unbounded distance-maximisation) would take a
+Hunter clean out of its own Priest's range, leaving it unhealable AND — past its
+own shot range — unable to answer.
+
+Traced on `solve_hunter_s8`: the first divergence between the Legacy and TeamPlan
+runs is the enemy Rogue landing a Kidney Shot on the Priest at 27.62s, which in
+the TeamPlan run never happens because the Priest evaded it. The Rogue redirected
+onto the Hunter and got 33 connections instead of 7. **The solve did its job and
+the team lost because of it** — the healer stopped soaking pressure its Hunter
+could not survive.
+
+Fixed by a `healer_leash` scorer term: zero inside heal range, ramping outside,
+so it never opposes `flee` where fleeing is correct — the same shape
+`corner_penalty` uses to bound `flee` away from corners. That alone moved the
+comp from -17pt to +0pt.
+
+The general lesson is worth more than the fix: **a comp with broken internal
+spacing is knife-edge on healer positioning, so it will swing wildly under any
+change to it and read as a verdict on that change.** Check the comp's own
+fundamentals before concluding a positioning change is at fault.
 
 ## Why this exists
 

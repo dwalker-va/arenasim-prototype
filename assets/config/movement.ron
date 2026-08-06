@@ -132,6 +132,7 @@
             commitment_bonus: 1.5,
             los_seek: 2.0,         // Orbit to a sighted angle when occluded in cast range (matches range_band so LoS and distance trade evenly); obstacle maps only
             cover_pull: 0.0,       // bonus per threat a step is occluded from (kiters flee, they don't hide; obstacle maps only)
+            healer_leash: 4.0,     // pull back toward own healer once BEYOND heal range; zero inside, so it never opposes flee where fleeing is right
         ),
         range_band_min: 8.0,       // SAFE_KITING_DISTANCE — stay out of melee of the kill target
         range_band_max: 30.0,      // within AUTO_SHOT_RANGE — keep the kill target in cast range
@@ -159,6 +160,7 @@
             commitment_bonus: 1.5,
             los_seek: 1.0,          // Nudge toward a sighted angle when occluded in shot range — kept below flee (6.0) so escape still dominates; obstacle maps only
             cover_pull: 0.0,        // bonus per threat a step is occluded from (kiters flee, they don't hide; obstacle maps only)
+        healer_leash: 4.0,      // pull back toward own healer once BEYOND heal range; zero inside, so it never opposes flee where fleeing is right. Below flee (6.0) deliberately: escaping still wins, this only bends the escape back toward support.
         ),
         range_band_min: 8.0,       // HUNTER_DEAD_ZONE — can't shoot inside this
         range_band_max: 34.0,      // ~AUTO_SHOT_RANGE — only pull in near the shot-range edge

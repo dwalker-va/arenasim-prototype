@@ -39,6 +39,11 @@ use crate::states::play_match::movement_config::{DpsMovementConfig, MovementConf
 
 use super::CombatContext;
 
+/// Leash length for the kiter's `healer_leash` term, in yards — the healer's
+/// cast range from `movement.ron`'s `shared.heal_range`. Beyond this a kited DPS
+/// is simply unhealable, which is the condition the term exists to prevent.
+const HEALER_LEASH_RANGE: f32 = 40.0;
+
 /// One scorer-lookahead step distance (matches the healer scorer).
 const SCORER_LOOKAHEAD: f32 = 2.0;
 
@@ -438,6 +443,21 @@ fn build_kiter_inputs(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
+    // Own healer, for the leash. GATED ON THE PROFILE: `None` under `Legacy`
+    // makes the term structurally inert there rather than relying on a zero
+    // weight, so the recorded baselines cannot move.
+    let healer_point = if ctx.ai_profile.is_team_plan() {
+        ctx.combatants
+            .values()
+            .find(|i| {
+                i.team == self_team && i.is_alive && !i.is_pet && i.class.is_healer()
+                    && i.entity != entity
+            })
+            .map(|i| i.position)
+    } else {
+        None
+    };
+
     let kill_target_info = kill_target
         .and_then(|t| ctx.combatants.get(&t))
         .filter(|i| i.is_alive);
@@ -463,6 +483,10 @@ fn build_kiter_inputs(
         committed_direction,
         obstacles: ctx.obstacles.to_vec(),
         los_target,
+        healer_point,
+        // The healer's own cast range is the leash length: beyond it the kiter
+        // is simply unhealable.
+        healer_leash_range: HEALER_LEASH_RANGE,
     }
 }
 

@@ -698,6 +698,9 @@ pub(super) fn escape_tick(
         nearest_threat: None,
         committed_direction: None,
         obstacles: ctx.obstacles.to_vec(),
+        // A healer does not leash to itself.
+        healer_point: None,
+        healer_leash_range: 0.0,
         // No kill target tracked during an escape — repulsion, not LoS-seek,
         // drives the direction (and los_seek is 0.0 for healers regardless).
         los_target: None,
@@ -946,6 +949,9 @@ pub(super) fn healer_pressured_tick_shared(
         // guard; adding one would only inject a real (unwanted) trajectory delta.
         committed_direction: state.last_direction,
         obstacles: ctx.obstacles.to_vec(),
+        // A healer does not leash to itself.
+        healer_point: None,
+        healer_leash_range: 0.0,
         los_target,
     };
     // Deny posture: prefer a step that breaks attacker LoS (cover_pull),

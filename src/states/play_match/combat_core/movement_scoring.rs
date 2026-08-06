@@ -170,6 +170,12 @@ pub struct ScorerInputs {
     /// the `MASK_LOS` step check, the anchor LoS constraint, and the
     /// `los_seek` / `cover_pull` interest terms.
     pub obstacles: Vec<ObstacleVolume>,
+    /// Position of this unit's own HEALER, for the `healer_leash` term. `None`
+    /// disables it — no healer alive, a non-leashed scorer, or the profile gate.
+    pub healer_point: Option<Vec3>,
+    /// Distance beyond which the leash starts pulling (the healer's cast range).
+    /// Inside it the term contributes exactly nothing.
+    pub healer_leash_range: f32,
     /// Kill-target position for the `los_seek` term (keep sight of the target
     /// you shoot). `None` disables the term (no kill target, or a scorer that
     /// does not seek LoS).
@@ -244,6 +250,27 @@ pub fn score_direction(candidate: Vec2, inputs: &ScorerInputs, weights: &Movemen
     // hard mask) — it shapes the least-bad choice. Shape-specific (the octagon
     // measures |x|+|z| toward its diagonal corners; the bowl measures normalized
     // ellipse radius), but identically normalized so the weight transfers.
+    // HEALER LEASH: a kiter has no awareness of its own healer at all —
+    // `flee` is unbounded distance-maximisation and `range_band` bounds it
+    // relative to the TARGET, not the healer. So nothing stops a Hunter fleeing
+    // a Rogue straight out of its own Priest's range, at which point it is both
+    // unhealable and (past its shot range) unable to answer. Watching
+    // `solve_hunter_s8` is what surfaced it.
+    //
+    // Shaped as a LEASH rather than a pull: exactly zero inside
+    // `healer_leash_range`, then ramping with the overshoot. That is what keeps
+    // it from fighting `flee` in the region where fleeing is simply correct —
+    // the same shape as `corner_penalty`, which bounds `flee` away from corners
+    // without opposing it in open ground.
+    if let Some(healer) = inputs.healer_point {
+        let to_healer = xz(healer) - xz(next);
+        let overshoot = to_healer.length() - inputs.healer_leash_range;
+        if overshoot > 0.0 && to_healer.length() > f32::EPSILON {
+            let ramp = (overshoot / inputs.healer_leash_range.max(f32::EPSILON)).min(1.0);
+            score += weights.healer_leash * candidate.dot(to_healer.normalize()) * ramp;
+        }
+    }
+
     let corner_closeness = inputs.bounds.edge_closeness(next.x, next.z);
     if corner_closeness > 0.0 {
         score -= weights.corner_penalty * corner_closeness;
@@ -547,6 +574,61 @@ mod tests {
 
     /// (d) Commitment bonus: the previously committed direction wins over a
     /// marginally better alternative within the window, and loses outside it.
+    /// THE LEASH IS INERT INSIDE HEAL RANGE. This is the property that lets it
+    /// coexist with `flee`: in the region where fleeing is simply correct, the
+    /// term contributes exactly nothing, so it cannot blunt an escape.
+    #[test]
+    fn healer_leash_does_nothing_inside_heal_range() {
+        let weights = MovementWeights { healer_leash: 4.0, ..priest_weights() };
+        let dirs = compass_directions_16();
+        let mut inputs = ScorerInputs {
+            my_pos: Vec3::new(0.0, 1.0, 0.0),
+            lookahead: 2.0,
+            threats: vec![Vec3::new(5.0, 1.0, 0.0)],
+            wand_range: 30.0,
+            healer_leash_range: 40.0,
+            ..Default::default()
+        };
+        // Healer 10yd away — well inside the leash.
+        inputs.healer_point = Some(Vec3::new(10.0, 0.0, 0.0));
+        let with_healer = score_directions(&dirs, &inputs, &weights);
+        inputs.healer_point = None;
+        let without = score_directions(&dirs, &inputs, &weights);
+        assert_eq!(
+            with_healer, without,
+            "a healer inside leash range must not change the chosen direction at all"
+        );
+    }
+
+    /// ...and it DOES pull once beyond it, which is the whole point: a Hunter
+    /// fleeing a Rogue has no other term that knows its healer exists.
+    #[test]
+    fn healer_leash_pulls_back_once_beyond_heal_range() {
+        let weights = MovementWeights {
+            healer_leash: 40.0,
+            flee: 0.0,
+            threat_repulsion: 0.0,
+            formation_pull: 0.0,
+            corner_penalty: 0.0,
+            ..priest_weights()
+        };
+        let dirs = compass_directions_16();
+        let mut inputs = ScorerInputs {
+            my_pos: Vec3::new(0.0, 1.0, 0.0),
+            lookahead: 2.0,
+            wand_range: 30.0,
+            healer_leash_range: 40.0,
+            ..Default::default()
+        };
+        // Healer far behind us at -X: the leash should point that way.
+        inputs.healer_point = Some(Vec3::new(-80.0, 0.0, 0.0));
+        let chosen = score_directions(&dirs, &inputs, &weights);
+        assert!(
+            chosen.x < -0.5,
+            "expected a pull back toward the healer at -X, got {chosen:?}"
+        );
+    }
+
     #[test]
     fn commitment_bonus_wins_within_window_only() {
         // Isolate the interaction: only threat repulsion + commitment active.
@@ -561,6 +643,7 @@ mod tests {
             commitment_bonus: 0.5,
             los_seek: 0.0,
             cover_pull: 0.0,
+            healer_leash: 0.0,
         };
         let dirs = compass_directions_16();
         let ideal_away = dirs[8]; // ~(-1, 0): exactly away from a +X threat
@@ -852,6 +935,7 @@ mod tests {
             commitment_bonus: 0.0,
             los_seek: 0.0,
             cover_pull: 0.0,
+            healer_leash: 0.0,
         };
         let dirs = compass_directions_16();
         // Near the +X/+Z corner (|x|+|z| = 48, just inside ARENA_CORNER_SUM),
@@ -945,6 +1029,7 @@ mod tests {
             commitment_bonus: 0.0,
             los_seek: 0.0,
             cover_pull: 0.0,
+            healer_leash: 0.0,
         }
     }
 
