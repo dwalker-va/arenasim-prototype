@@ -28,25 +28,33 @@ win-rate effect is small and not resolved at the sample sizes used here (+3pt at
 n=36); see the correction below before quoting any percentage. `Legacy` is
 byte-identical throughout; everything is gated on `AiProfiles`.
 
-**CORRECTION 2026-08-06: the win-rate figures below were measured at n=12 and are
-UNDERPOWERED. Re-measured at n=36:**
+**DEFINITIVE MEASUREMENT 2026-08-06, n=100 per cell** (600 matches via the
+parallel batch runner; CSV committed at
+`design-docs/balance/2026-08-06-team-solve-headtohead-n100.csv`). Head-to-head,
+the named side gets the healer solve + kiter leash, the other side runs Legacy:
 
-| Comp | n=12 | n=36 |
-|---|---|---|
-| `Warrior+Priest` (the headline) | +8pt (9/12 -> 11/12) | **+3pt** (30/36 -> 31/36) |
-| `Hunter+Priest` | -17pt, then +0pt after the leash | **+11pt** (6/36 -> 10/36) |
+| Side given the solve | Baseline | With solve | Effect | z |
+|---|---|---|---|---|
+| `Warlock+Priest` (vs Warrior+Priest) | 23% | **59%** | **+36pt** | **5.2** |
+| `Hunter+Priest` (vs Rogue+Priest) | 21% | **35%** | **+14pt** | **2.2** |
+| `Warrior+Priest` (vs Warlock+Priest) | 77% | 87% | +10pt | 1.8 |
+| `Rogue+Priest` (vs Hunter+Priest) | 79% | 73% | -6pt | -1.0 |
 
-One extra win out of 36 is not a result, and the Hunter comp swung from -17 to +11
-purely on sample size. **Treat every win-rate number in this document as
-directional at best.** What survives the sample-size problem is the per-frame
-mechanism evidence — occlusion-seconds, blocked share, heal delivered, longest
-blackout — because those aggregate thousands of samples per match instead of one
-bit. The 0.0s -> 28.1s occlusion figure is robust; "+8pt" was not.
+Three of four sides gain, one decisively: the biggest winner is the side whose
+baseline was being crushed (`Warlock+Priest` at 23% — its Priest getting real
+cover play against a Warrior train is worth +36 points). The Hunter comp — once
+reported as -17pt at n=12 — is a significant GAIN with the leash in. The one
+negative (`Rogue+Priest`, -6pt) is within noise even at n=100.
 
-**That the effect is NOT uniform across comps still holds** — the Hunter comp
-behaved qualitatively differently and that led to a real bug — but the
-magnitudes below are noise. Measured head-to-head with the healer solve as the
-only variable:
+The n=12 and n=36 numbers previously recorded here (+8pt/-17pt/+3pt/+11pt)
+were all sample noise around these values and are superseded. The per-frame
+mechanism evidence (occlusion 0.0s -> 28.1s, blocked share, blackout length)
+stands unchanged, and is what correctly indicated the direction all along.
+
+**That the effect is NOT uniform across comps still holds** — and the n=12
+detour through the Hunter comp led to a real bug (the kiter healer leash). The
+history below is kept for the method lessons; its magnitudes are superseded by
+the table above:
 
 | Comp given the solve | Gain |
 |---|---|

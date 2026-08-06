@@ -149,10 +149,12 @@ For deeper context, see these focused references:
   result — per-frame, thousands of samples). The DPS half was reverted:
   constraint satisfaction cannot express a kiter's distance-maximisation.
   `Legacy` is byte-identical throughout.
-  **Sample-size warning:** win rate at n=12 was used throughout that work and is
-  UNDERPOWERED — re-measuring at n=36 moved the headline from +8pt to +3pt and one
-  comp from -17pt to +11pt. Prefer per-frame mechanism metrics; reserve win rate
-  for confirmation at ~100 matches per cell (`scripts/hunter_2v2_matrix.sh`).
+  **Definitive n=100 head-to-head** (2026-08-06, CSV in `design-docs/balance/`):
+  the healer solve + kiter leash is worth +36pt to Warlock+Priest (z=5.2), +14pt
+  to Hunter+Priest (z=2.2), +10pt to Warrior+Priest (z=1.8), -6pt (noise) to
+  Rogue+Priest. **Sample-size warning stands:** every earlier n=12 win-rate figure
+  was noise around these values. Prefer per-frame mechanism metrics; reserve win
+  rate for ~100 matches per cell (the parallel `--batch` runner does 600 in ~4min).
   **Measurement rule:** `AiProfiles` is PER-TEAM; a uniform-profile A/B cannot
   answer "is the new AI better", so set the sides differently and run both
   assignments — see *How to measure a step* in that doc, and `tests/camp_sweep.rs`.
