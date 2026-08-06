@@ -3703,13 +3703,16 @@ pub fn spawn_casting_orbs(
 
         let mesh = meshes.add(Sphere::new(1.0));
         let material = materials.add(StandardMaterial {
-            base_color: Color::srgba(r, g, b, 0.85),
+            base_color: Color::srgb(r, g, b),
             emissive: LinearRgba::rgb(er, eg, eb),
-            // Add, not Blend: the orb + mote stack is overlapping translucent
-            // geometry — exactly the Z-fighting flicker case the visual-effect
-            // pattern doc calls out (the Drain Life beam's Blend is the
-            // single-non-overlapping-mesh exception).
-            alpha_mode: AlphaMode::Add,
+            // Opaque, not Add/Blend: an additive orb only brightens what's
+            // behind it, so it read as ghostly and hard to distinguish in
+            // play. A solid emissive sphere occludes the background and stays
+            // unmistakable, and Opaque is depth-tested so the overlapping
+            // orb + mote stack has no blend-order flicker at all (the concern
+            // that ruled out Blend). Motes share this material and become
+            // crisp solid sparks.
+            alpha_mode: AlphaMode::Opaque,
             ..default()
         });
 
