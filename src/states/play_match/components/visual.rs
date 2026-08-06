@@ -453,6 +453,57 @@ pub struct CastEnding {
     pub kind: CastEndingKind,
 }
 
+/// Lifecycle phase of a [`CastingOrb`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CastingOrbPhase {
+    /// Hard cast in progress — the orb grows with cast progress.
+    Growing,
+    /// Channel in progress — the orb holds at full intensity.
+    Holding,
+    /// Ending: shrink/dissipate after an interrupt or fizzle.
+    Sputter,
+    /// Ending: brief release pulse after a landed completion.
+    Flash,
+}
+
+/// The gathering-orb casting animation: one free-standing world-space entity
+/// per casting/channeling combatant (drain-life-beam follow pattern — NOT a
+/// `VisualBody` child), colored via [`AbilityConfig::cast_color`]. Growing and
+/// Holding read live cast state; the Sputter/Flash endings are driven by
+/// consumed [`CastEnding`] markers, and a state-gone-with-no-marker caster
+/// (death, match end, natural channel end) despawns the orb silently.
+///
+/// [`AbilityConfig::cast_color`]: crate::states::play_match::ability_config::AbilityConfig::cast_color
+#[derive(Component)]
+pub struct CastingOrb {
+    /// The combatant this orb hovers in front of.
+    pub caster: Entity,
+    /// 0..1 growth captured continuously; an ending animates from this value.
+    pub intensity: f32,
+    pub phase: CastingOrbPhase,
+    /// Seconds remaining in the current ending phase (Sputter/Flash only).
+    pub ending_remaining: f32,
+    /// Countdown to the next mote spawn.
+    pub mote_spawn_timer: f32,
+    /// Monotonic mote counter — drives the deterministic golden-angle spread
+    /// of mote start offsets (no RNG: visual code never touches `game_rng`).
+    pub mote_index: u32,
+}
+
+/// One mote streaming into its parent orb's focus point. Travels a straight
+/// lerp from a deterministic start offset to the orb, then despawns (drain-
+/// particle idiom aimed at the orb instead of along a beam).
+#[derive(Component)]
+pub struct CastingOrbMote {
+    pub orb: Entity,
+    /// 0..1 travel progress toward the orb center.
+    pub progress: f32,
+    /// Progress units per second.
+    pub speed: f32,
+    /// World-space offset from the orb center where this mote started.
+    pub start_offset: Vec3,
+}
+
 /// The pre-stealth material of one weapon-mesh descendant, remembered so the
 /// stealth fade can restore it exactly on unstealth. glTF materials are
 /// SHARED assets across every spawned instance of the model, so the fade
