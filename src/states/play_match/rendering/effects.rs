@@ -2835,6 +2835,7 @@ const WALK_MAX_PHASE_STEP: f32 = std::f32::consts::PI;
 /// Graphical-mode only — registered in `StatesPlugin::build()`, never in
 /// `add_core_combat_systems`. Visual-only; touches no gameplay state.
 pub fn update_walk_animation(
+    time: Res<Time>,
     mut movers: Query<
         (&Transform, &mut WalkAnim, &Combatant, &Children),
         (Without<DeathAnimation>, Without<Celebrating>, Without<VisualBody>),
@@ -2847,22 +2848,42 @@ pub fn update_walk_animation(
         let distance = (current_xz - walk.previous_xz).length();
         walk.previous_xz = current_xz;
 
-        let idle = !combatant.is_alive() || distance < WALK_IDLE_EPSILON;
+        // Idle is TIME-based, not frame-based: the sim moves units only on
+        // FixedUpdate ticks, so at render rates above the tick rate every
+        // other frame sees zero movement. Snapping to rest on those frames
+        // strobed the bob (and every attached weapon) at frame rate.
+        if distance >= WALK_IDLE_EPSILON {
+            // Coming out of a real stop, restart the cycle at its zero
+            // crossing so the first bobbing frame matches the rest height.
+            if walk.idle_time > 0.1 {
+                walk.phase = 0.0;
+            }
+            walk.idle_time = 0.0;
+        } else {
+            walk.idle_time += time.delta_secs();
+        }
+        let idle = !combatant.is_alive() || walk.idle_time > 0.1;
         if !idle {
             let step =
                 (distance / WALK_STEP_LENGTH * std::f32::consts::TAU).min(WALK_MAX_PHASE_STEP);
             walk.phase = (walk.phase + step).rem_euclid(std::f32::consts::TAU);
         }
 
+        // Settling into idle EASES down to rest instead of snapping — the
+        // walk can stop at any bob height, and a one-frame drop reads as a
+        // pop (more so with weapons riding the body).
+        let settle_step = 0.6 * time.delta_secs();
         for child in children.iter() {
             let Ok((mut body_transform, body)) = bodies.get_mut(child) else {
                 continue;
             };
-            body_transform.translation.y = if idle {
-                body.rest_y
+            if idle {
+                let err = body.rest_y - body_transform.translation.y;
+                body_transform.translation.y += err.clamp(-settle_step, settle_step);
             } else {
-                body.rest_y + walk.phase.sin() * WALK_BOB_AMPLITUDE
-            };
+                body_transform.translation.y =
+                    body.rest_y + walk.phase.sin() * WALK_BOB_AMPLITUDE;
+            }
         }
     }
 }
@@ -3027,6 +3048,567 @@ pub fn update_totem_visuals(mut totems: Query<(&Totem, &mut Transform)>) {
         };
         if (transform.scale.x - scale).abs() > f32::EPSILON {
             transform.scale = Vec3::splat(scale);
+        }
+    }
+}
+
+// ==============================================================================
+// Auto-Attack Weapon Swings (graphical-only)
+// ==============================================================================
+//
+// The sim spawns one bare `AutoAttackSwing` marker per LANDED auto-attack
+// (combat_core/auto_attack.rs, apply loop). `consume_swing_signals` (FixedUpdate,
+// so a signal can never be missed when FixedUpdate ticks multiple times per
+// rendered frame) transfers each marker into `WeaponSocket` state and spawns the
+// cosmetic arrow for bow shots. `animate_weapon_swings` (Update, once per
+// rendered frame) writes the socket transforms: an anticipatory windup read
+// live from the attack timer, a release stroke synced to the landed hit, and
+// aim yaw toward the target. Registered ONLY in `StatesPlugin::build` — never
+// in `systems.rs` — so headless never runs any of this.
+
+/// Seconds of the release stroke (windup -> impact sweep).
+const SWING_RELEASE_SECS: f32 = 0.12;
+/// Seconds held at full extension so the impact registers before easing back.
+const SWING_IMPACT_HOLD_SECS: f32 = 0.05;
+/// Seconds of follow-through easing back to rest after the impact hold.
+const SWING_FOLLOW_SECS: f32 = 0.25;
+/// Fraction of the attack interval spent winding up, clamped to sane bounds
+/// so fast daggers still telegraph and slow 2H axes don't hover forever.
+const SWING_WINDUP_FRACTION: f32 = 0.30;
+const SWING_WINDUP_MIN_SECS: f32 = 0.15;
+const SWING_WINDUP_MAX_SECS: f32 = 0.60;
+/// Cosmetic arrow flight speed (yd/s) and hard despawn backstop.
+const COSMETIC_ARROW_SPEED: f32 = 45.0;
+const COSMETIC_ARROW_TTL: f32 = 1.5;
+
+/// Normalized swing parameter in `[-1, 1]`.
+///
+/// * `s < 0` — windup: eases 0 -> -1 over the anticipation window as
+///   `timer` approaches `interval`, holding at -1 while an overdue attack
+///   waits (out of range / no LoS).
+/// * `s > 0` — release: sweeps from `release_from` (the windup depth at the
+///   moment the hit landed, `<= 0`) THROUGH to full extension at 1 over
+///   `SWING_RELEASE_SECS` — the pull-back powers the strike instead of being
+///   discarded — holds at 1 for `SWING_IMPACT_HOLD_SECS` so the impact
+///   registers, then decays to 0 over `SWING_FOLLOW_SECS`.
+/// * `s == 0` — at rest.
+///
+/// Pure so the timing behavior is unit-testable without Bevy (see tests at the
+/// bottom of this file). A live `release_t` always wins over windup: the hit
+/// already landed, so the stroke plays regardless of what the timer says.
+fn swing_param(
+    timer: f32,
+    interval: f32,
+    windup_window: f32,
+    release_t: Option<f32>,
+    release_from: f32,
+) -> f32 {
+    if let Some(t) = release_t {
+        let from = release_from.clamp(-1.0, 0.0);
+        if t < SWING_RELEASE_SECS {
+            let p = (t / SWING_RELEASE_SECS).clamp(0.0, 1.0);
+            // Ease-in: the stroke accelerates into the hit.
+            let p = p * p;
+            return from + (1.0 - from) * p;
+        }
+        if t < SWING_RELEASE_SECS + SWING_IMPACT_HOLD_SECS {
+            return 1.0;
+        }
+        let f = (t - SWING_RELEASE_SECS - SWING_IMPACT_HOLD_SECS) / SWING_FOLLOW_SECS;
+        return (1.0 - f).clamp(0.0, 1.0);
+    }
+    if !(interval > 0.0) || !(windup_window > 0.0) {
+        return 0.0; // degenerate attack speed — hold at rest, never NaN
+    }
+    let windup_start = interval - windup_window;
+    if timer >= windup_start {
+        let w = ((timer - windup_start) / windup_window).clamp(0.0, 1.0);
+        // Ease-in so the raise reads as a deliberate telegraph, not a twitch.
+        return -(w * w);
+    }
+    0.0
+}
+
+/// Per-kind pose offset for a swing parameter: local rotation + translation
+/// applied on top of the socket's rest mount. Melee kinds arc around local X
+/// (raise back on windup, chop through on release); daggers add a forward jab;
+/// the bow draws back instead of arcing.
+fn swing_pose(kind: WeaponKind, s: f32) -> Transform {
+    let pitch = match kind {
+        WeaponKind::Bow => {
+            // Draw: slight tilt + pull toward the body. Release: tiny forward snap.
+            let pull = if s < 0.0 { -s } else { 0.0 };
+            let snap = if s > 0.0 { s } else { 0.0 };
+            return Transform::from_translation(Vec3::new(0.0, 0.0, -0.18 * pull + 0.08 * snap))
+                .with_rotation(Quat::from_rotation_z(0.15 * pull));
+        }
+        WeaponKind::Dagger => {
+            // A stab, not an arc: pull back along the aim axis on windup,
+            // lunge hard forward on release, with only a whisper of pitch.
+            let pull = if s < 0.0 { -s } else { 0.0 };
+            let thrust = if s > 0.0 { s } else { 0.0 };
+            return Transform::from_translation(Vec3::new(
+                0.0,
+                0.0,
+                -0.4 * pull + 0.85 * thrust,
+            ))
+            .with_rotation(Quat::from_rotation_x(0.2 * pull - 0.1 * thrust));
+        }
+        WeaponKind::Shield => 0.0, // static (plan R9)
+        // TwoHandAxe / Mace: big readable arc, raised back past vertical on
+        // windup and chopped forward-down through the target on release. In
+        // the socket frame, POSITIVE X-rotation pitches forward — windup is
+        // negative (s < 0 keeps the product negative), release positive. The
+        // mount's own 0.75 forward lean adds to these totals.
+        _ => {
+            if s < 0.0 {
+                0.9 * s
+            } else {
+                1.4 * s
+            }
+        }
+    };
+    Transform::from_rotation(Quat::from_rotation_x(pitch))
+}
+
+/// FixedUpdate (graphical-only): consume the sim's landed-attack markers.
+/// Main-hand sockets of the attacker begin their release stroke aimed at the
+/// hit target; a Bow main hand additionally looses a cosmetic arrow. Attackers
+/// with no sockets (pets, wand casters, un-animated classes) no-op — the
+/// marker is simply despawned.
+pub fn consume_swing_signals(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    signals: Query<(Entity, &AutoAttackSwing)>,
+    mut sockets: Query<&mut WeaponSocket>,
+    positions: Query<&Transform, With<Combatant>>,
+) {
+    for (signal_entity, signal) in signals.iter() {
+        let target_pos = positions.get(signal.target).map(|t| t.translation).ok();
+        // Dual-wield alternation: the sim has ONE attack timer, so each landed
+        // auto swings whichever dagger is flagged as next, then hands the flag
+        // to its twin. Single-weapon classes keep the flag on the main hand
+        // permanently.
+        let has_off_dagger = sockets.iter().any(|s| {
+            s.owner == signal.attacker && s.hand == WeaponHand::Off && s.kind == WeaponKind::Dagger
+        });
+        for mut socket in sockets.iter_mut() {
+            if socket.owner != signal.attacker {
+                continue;
+            }
+            if let Some(pos) = target_pos {
+                socket.aim = pos; // both hands track the victim
+            }
+            if !socket.winds_up_next {
+                if has_off_dagger && socket.kind == WeaponKind::Dagger {
+                    socket.winds_up_next = true; // this twin swings the NEXT auto
+                }
+                continue;
+            }
+            socket.release_t = Some(0.0);
+            if has_off_dagger && socket.kind == WeaponKind::Dagger {
+                socket.winds_up_next = false; // twin takes over
+            }
+            // Cosmetic arrow: bow-kind main hand only. This single gate keeps
+            // caster Wand Shots (ranged, no bow) and any future non-bow ranged
+            // weapon from loosing arrows.
+            if signal.ranged && socket.kind == WeaponKind::Bow {
+                if let (Ok(from_tf), Some(to)) = (positions.get(signal.attacker), target_pos) {
+                    let from = from_tf.translation + Vec3::Y * 1.1;
+                    let dir = (to - from).normalize_or_zero();
+                    commands.spawn((
+                        Mesh3d(meshes.add(Cuboid::new(0.06, 0.06, 0.55))),
+                        MeshMaterial3d(materials.add(StandardMaterial {
+                            base_color: Color::srgb(0.85, 0.78, 0.55),
+                            emissive: LinearRgba::new(0.25, 0.2, 0.1, 1.0),
+                            unlit: false,
+                            ..default()
+                        })),
+                        Transform::from_translation(from)
+                            .with_rotation(Quat::from_rotation_arc(Vec3::Z, dir)),
+                        CosmeticArrow {
+                            to: to + Vec3::Y * 1.0,
+                            speed: COSMETIC_ARROW_SPEED,
+                            ttl: COSMETIC_ARROW_TTL,
+                        },
+                        PlayMatchEntity,
+                    ));
+                }
+            }
+        }
+        commands.entity(signal_entity).despawn();
+    }
+}
+
+/// Update (graphical-only): write every weapon socket's local transform for
+/// this rendered frame — aim yaw toward the current target composed with the
+/// rest mount and the swing pose. Reads sim state (attack timer, attack speed,
+/// auras, positions) and never writes any of it.
+pub fn animate_weapon_swings(
+    time: Res<Time>,
+    mut sockets: Query<(&mut WeaponSocket, &mut Transform, &mut Visibility)>,
+    owners: Query<
+        (
+            &Combatant,
+            &Transform,
+            Option<&ActiveAuras>,
+            Option<&CastingState>,
+            Option<&ChannelingState>,
+        ),
+        Without<WeaponSocket>,
+    >,
+) {
+    use crate::states::play_match::combat_core::effective_attack_interval;
+    use crate::states::play_match::utils::is_incapacitated;
+    use crate::states::play_match::{AUTO_SHOT_RANGE, HUNTER_DEAD_ZONE, MELEE_RANGE};
+
+    let dt = time.delta_secs();
+    for (mut socket, mut transform, mut visibility) in sockets.iter_mut() {
+        let Ok((combatant, owner_tf, auras, casting, channeling)) = owners.get(socket.owner)
+        else {
+            continue;
+        };
+
+        // A polymorphed victim's body swaps to the sheep cuboid — a sheep
+        // gripping a full-size axe gives it away, so hide the sockets (the
+        // glTF subtree inherits). Stealth does NOT hide: the weapons fade
+        // with the body instead (`update_weapon_stealth_fade`).
+        let polymorphed = auras.is_some_and(|a| {
+            a.auras.iter().any(|au| au.effect_type == AuraType::Polymorph)
+        });
+        let wanted = if polymorphed {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        };
+        if *visibility != wanted {
+            *visibility = wanted;
+        }
+
+        // Advance / expire the release stroke. `windup_s` is frozen during
+        // the stroke — it is the sweep's starting pose — and zeroed at expiry
+        // so the next windup ramps fresh.
+        if let Some(t) = socket.release_t {
+            let t = t + dt;
+            if t >= SWING_RELEASE_SECS + SWING_IMPACT_HOLD_SECS + SWING_FOLLOW_SECS {
+                socket.release_t = None;
+                socket.windup_s = 0.0;
+            } else {
+                socket.release_t = Some(t);
+            }
+        }
+
+        // Track the live target's position whenever one exists — weapons face
+        // their target during the approach too, not just once in reach.
+        let mut target_dist = f32::INFINITY;
+        if combatant.is_alive() {
+            if let Some(target) = combatant.target {
+                if let Ok((target_combatant, target_tf, _, _, _)) = owners.get(target) {
+                    if target_combatant.is_alive() {
+                        socket.aim = target_tf.translation;
+                        target_dist = owner_tf.translation.distance(target_tf.translation);
+                    }
+                }
+            }
+        }
+
+        // Windup eligibility: cosmetic-grade approximation of "an attack is
+        // coming" — the RELEASE never depends on this (it keys off the sim's
+        // landed-hit marker), so a wrong guess here costs at most a windup
+        // that eases back down. Mirrors the sim's own can't-swing gates: an
+        // incapacitated / casting / channeling attacker's timer is frozen,
+        // and a Hunter inside the dead zone can't loose the overdue shot —
+        // telegraphing in those states reads as a stuck animation.
+        let mut windup_window = 0.0;
+        let mut interval = 0.0;
+        if socket.winds_up_next
+            && socket.release_t.is_none()
+            && combatant.is_alive()
+            && !combatant.stealthed
+            && casting.is_none()
+            && channeling.is_none()
+            && !is_incapacitated(auras)
+        {
+            let (reach, min_reach) = if socket.kind == WeaponKind::Bow {
+                (AUTO_SHOT_RANGE + 2.0, HUNTER_DEAD_ZONE)
+            } else {
+                (MELEE_RANGE + 1.5, 0.0)
+            };
+            if target_dist <= reach && target_dist >= min_reach {
+                interval = effective_attack_interval(combatant, auras);
+                windup_window = (interval * SWING_WINDUP_FRACTION)
+                    .clamp(SWING_WINDUP_MIN_SECS, SWING_WINDUP_MAX_SECS);
+            }
+        }
+
+        // Windup eases at a bounded rate; the raw parameter is discontinuous
+        // during pursuit (overdue timer + the reach boundary flickering as
+        // both units move), and rendering it raw strobes the pose. The
+        // release stroke stays raw — its sharpness IS the hit — and sweeps
+        // from the frozen windup depth through to full extension.
+        let s_raw = swing_param(
+            combatant.attack_timer,
+            interval,
+            windup_window,
+            socket.release_t,
+            socket.windup_s,
+        );
+        let s = if socket.release_t.is_some() {
+            s_raw
+        } else {
+            let max_step = 6.0 * dt;
+            socket.windup_s += (s_raw - socket.windup_s).clamp(-max_step, max_step);
+            socket.windup_s
+        };
+
+        // Aim yaw: the weapon is RIGID to the body (its transform is local to
+        // the hierarchy, so when `move_to_target` turns the parent's facing
+        // the weapon turns with it — that rigidity is what reads as a solidly
+        // held object while units move). On top of that, a LOCAL yaw angle
+        // eases toward the target bearing at a bounded rate: moving units
+        // keep the weapon glued to their frame with a gentle drift toward the
+        // victim; stationary units converge to exact target facing. A release
+        // stroke corrects faster so the hit still lands visually on-target.
+        let owner_forward = owner_tf.rotation * Vec3::Z;
+        let owner_yaw = owner_forward.x.atan2(owner_forward.z);
+
+        // Absorb LARGE one-frame facing snaps (gate-open first move, a hard
+        // target switch) into the local yaw: the weapon holds its world
+        // bearing through the snap and eases to the new aim, instead of
+        // whipping a quarter-turn with the body. Ordinary per-tick turning
+        // stays rigid — only discrete jumps qualify.
+        let owner_snap = (owner_yaw - socket.prev_owner_yaw + std::f32::consts::PI)
+            .rem_euclid(std::f32::consts::TAU)
+            - std::f32::consts::PI;
+        socket.prev_owner_yaw = owner_yaw;
+        if owner_snap.abs() > 0.5 {
+            socket.yaw_local = (socket.yaw_local - owner_snap + std::f32::consts::PI)
+                .rem_euclid(std::f32::consts::TAU)
+                - std::f32::consts::PI;
+        }
+
+        let aim_dir = socket.aim - owner_tf.translation;
+        if aim_dir.xz().length_squared() > 1e-6 {
+            let bearing = aim_dir.x.atan2(aim_dir.z);
+            // Wrap-aware shortest-path delta from current local angle.
+            let target_local = bearing - owner_yaw;
+            let mut err = target_local - socket.yaw_local;
+            err = (err + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
+                - std::f32::consts::PI;
+            let rate = if socket.release_t.is_some() { 20.0 } else { 6.0 };
+            let max_step = rate * dt;
+            socket.yaw_local += err.clamp(-max_step, max_step);
+            // Keep the stored angle wrapped so it never accumulates turns.
+            socket.yaw_local = (socket.yaw_local + std::f32::consts::PI)
+                .rem_euclid(std::f32::consts::TAU)
+                - std::f32::consts::PI;
+        }
+
+        // Pose composes in the SOCKET frame (left of `rest`), not the model
+        // frame: the swing arc must rotate around the socket's horizontal
+        // axis and the stab must translate straight along the aim axis,
+        // regardless of the roll each model carries inside its mount.
+        // Composed model-side, the axe's chop became a flat-faced sideways
+        // slap and the dagger's lunge became a sideways drag.
+        *transform = Transform::from_rotation(Quat::from_rotation_y(socket.yaw_local))
+            * swing_pose(socket.kind, s)
+            * socket.rest;
+    }
+}
+
+/// Update (graphical-only): fly cosmetic arrows to their captured destination
+/// and despawn on arrival (or on the TTL backstop — the damage already landed,
+/// the arrow is pure theater).
+pub fn update_cosmetic_arrows(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut arrows: Query<(Entity, &mut CosmeticArrow, &mut Transform)>,
+) {
+    let dt = time.delta_secs();
+    for (entity, mut arrow, mut transform) in arrows.iter_mut() {
+        arrow.ttl -= dt;
+        let to_target = arrow.to - transform.translation;
+        let step = arrow.speed * dt;
+        if arrow.ttl <= 0.0 || to_target.length() <= step {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        let dir = to_target.normalize_or_zero();
+        transform.translation += dir * step;
+        transform.rotation = Quat::from_rotation_arc(Vec3::Z, dir);
+    }
+}
+
+#[cfg(test)]
+mod swing_tests {
+    use super::*;
+
+    #[test]
+    fn rest_before_windup_window() {
+        assert_eq!(swing_param(0.5, 2.0, 0.5, None, 0.0), 0.0);
+    }
+
+    #[test]
+    fn windup_ramps_monotonically_to_full() {
+        let interval = 2.0;
+        let window = 0.5;
+        let mut last = 0.0;
+        for i in 0..=10 {
+            let timer = (interval - window) + window * (i as f32 / 10.0);
+            let s = swing_param(timer, interval, window, None, 0.0);
+            assert!(s <= last + 1e-6, "windup must be monotonically deepening");
+            assert!((-1.0..=0.0).contains(&s));
+            last = s;
+        }
+        assert!((last + 1.0).abs() < 1e-5, "full windup reaches -1");
+    }
+
+    #[test]
+    fn overdue_attack_holds_full_windup() {
+        // Timer past the interval (target out of range, attack pending):
+        // the weapon holds at full draw instead of snapping back.
+        let s = swing_param(3.7, 2.0, 0.5, None, 0.0);
+        assert!((s + 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn release_sweeps_through_from_windup_depth() {
+        // The stroke starts AT the frozen windup pose and powers through to
+        // full extension — the pull-back is spent, not discarded.
+        let start = swing_param(0.0, 2.0, 0.5, Some(0.0), -1.0);
+        assert!((start + 1.0).abs() < 1e-5, "stroke begins at the windup pose");
+        let peak = swing_param(0.0, 2.0, 0.5, Some(SWING_RELEASE_SECS), -1.0);
+        assert!((peak - 1.0).abs() < 1e-5, "stroke reaches full extension");
+        // Monotonically rising through the sweep.
+        let mut last = -1.0;
+        for i in 0..=10 {
+            let s = swing_param(0.0, 2.0, 0.5, Some(SWING_RELEASE_SECS * i as f32 / 10.0), -1.0);
+            assert!(s >= last - 1e-6, "sweep must rise monotonically");
+            last = s;
+        }
+    }
+
+    #[test]
+    fn impact_holds_then_returns_to_rest() {
+        // Held at full extension through the impact window...
+        let held = swing_param(
+            0.0,
+            2.0,
+            0.5,
+            Some(SWING_RELEASE_SECS + SWING_IMPACT_HOLD_SECS * 0.5),
+            0.0,
+        );
+        assert!((held - 1.0).abs() < 1e-5);
+        // ...then the follow-through decays back to 0.
+        let done = swing_param(
+            0.0,
+            2.0,
+            0.5,
+            Some(SWING_RELEASE_SECS + SWING_IMPACT_HOLD_SECS + SWING_FOLLOW_SECS),
+            0.0,
+        );
+        assert!(done.abs() < 1e-5);
+    }
+
+    #[test]
+    fn release_wins_over_windup_state() {
+        // A landed hit plays its stroke even if the timer says "mid-windup"
+        // (no-warning release, plan R7 / AE2): with no prior windup the
+        // stroke rises from rest regardless of the overdue timer.
+        let s = swing_param(1.9, 2.0, 0.5, Some(SWING_RELEASE_SECS * 0.5), 0.0);
+        assert!(s > 0.0);
+    }
+
+    #[test]
+    fn degenerate_interval_is_guarded() {
+        for bad in [0.0_f32, -1.0, f32::NAN] {
+            let s = swing_param(1.0, bad, 0.5, None, 0.0);
+            assert_eq!(s, 0.0, "degenerate interval must rest, not NaN");
+        }
+        // Interval change mid-windup stays in range (AE3 continuity).
+        let s1 = swing_param(1.8, 2.0, 0.5, None, 0.0);
+        let s2 = swing_param(1.8, 2.6, 0.6, None, 0.0); // slow applied mid-windup
+        assert!((-1.0..=0.0).contains(&s1));
+        assert!((-1.0..=0.0).contains(&s2));
+        // An out-of-range release_from is clamped, never amplified.
+        let s3 = swing_param(0.0, 2.0, 0.5, Some(0.0), -7.0);
+        assert!((-1.0..=1.0).contains(&s3));
+    }
+
+    #[test]
+    fn shield_pose_is_static() {
+        let t = swing_pose(WeaponKind::Shield, -1.0);
+        assert_eq!(t.translation, Vec3::ZERO);
+        assert_eq!(t.rotation, Quat::IDENTITY);
+    }
+
+    #[test]
+    fn dagger_pose_is_a_thrust_not_an_arc() {
+        // Windup pulls back along the aim axis; release thrusts forward —
+        // translation dominates and pitch stays a whisper.
+        let windup = swing_pose(WeaponKind::Dagger, -1.0);
+        assert!(windup.translation.z < -0.2, "windup pulls the dagger back");
+        let release = swing_pose(WeaponKind::Dagger, 1.0);
+        assert!(release.translation.z > 0.6, "release lunges the dagger forward");
+        let (_, angle) = release.rotation.to_axis_angle();
+        assert!(angle.abs() < 0.3, "a stab barely rotates");
+    }
+}
+
+/// Update (graphical-only): fade weapon materials with their owner's stealth,
+/// mirroring the body's 40%-alpha darkened tint (`update_stealth_visuals`).
+///
+/// glTF weapon materials are SHARED assets across every spawned instance of a
+/// model, so the fade swaps each weapon-mesh descendant onto a per-instance
+/// clone and remembers the original in [`OriginalWeaponMaterial`]; unstealth
+/// restores the shared original exactly. The scene subtree spawns async, so
+/// this keys off `Changed<Combatant>` (which fires every sim tick — timers
+/// mutate) and converges the first frame the meshes exist; the
+/// already-faded guard makes the steady state cheap.
+pub fn update_weapon_stealth_fade(
+    mut commands: Commands,
+    combatants: Query<(Entity, &Combatant), Changed<Combatant>>,
+    sockets: Query<(Entity, &WeaponSocket)>,
+    children: Query<&Children>,
+    mesh_mats: Query<&MeshMaterial3d<StandardMaterial>>,
+    originals: Query<&OriginalWeaponMaterial>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    for (owner_entity, combatant) in combatants.iter() {
+        for (socket_entity, socket) in sockets.iter() {
+            if socket.owner != owner_entity {
+                continue;
+            }
+            for desc in children.iter_descendants(socket_entity) {
+                if combatant.stealthed {
+                    if originals.get(desc).is_ok() {
+                        continue; // already faded
+                    }
+                    let Ok(mat_handle) = mesh_mats.get(desc) else {
+                        continue;
+                    };
+                    let Some(mat) = materials.get(&mat_handle.0) else {
+                        continue;
+                    };
+                    let mut faded = mat.clone();
+                    let c = faded.base_color.to_srgba();
+                    faded.base_color =
+                        Color::srgba(c.red * 0.6, c.green * 0.6, c.blue * 0.6, 0.4);
+                    faded.alpha_mode = bevy::prelude::AlphaMode::Blend;
+                    let original = mat_handle.0.clone();
+                    let faded_handle = materials.add(faded);
+                    commands.entity(desc).insert((
+                        MeshMaterial3d(faded_handle),
+                        OriginalWeaponMaterial(original),
+                    ));
+                } else if let Ok(original) = originals.get(desc) {
+                    commands
+                        .entity(desc)
+                        .insert(MeshMaterial3d(original.0.clone()))
+                        .remove::<OriginalWeaponMaterial>();
+                }
+            }
         }
     }
 }

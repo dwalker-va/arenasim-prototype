@@ -198,6 +198,30 @@ impl Plugin for StatesPlugin {
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_state(GameState::PlayMatch)),
             )
+            // Weapon-swing signal consumption is graphical-only but must run IN
+            // the sim schedule (same rationale as `spawn_projectile_visuals`
+            // above): `FixedUpdate` can tick several times per rendered frame,
+            // and a landed-attack marker consumed one tick late would desync
+            // the release stroke from its hit. Runs after CombatResolution so
+            // it sees the markers `combat_auto_attack` spawned this tick.
+            .add_systems(
+                FixedUpdate,
+                play_match::consume_swing_signals
+                    .after(CombatSystemPhase::CombatResolution)
+                    .run_if(in_state(GameState::PlayMatch)),
+            )
+            // Weapon swing animation + cosmetic arrows: per-rendered-frame
+            // cosmetic transforms, ordinary Update visual group.
+            .add_systems(
+                Update,
+                (
+                    play_match::animate_weapon_swings,
+                    play_match::update_cosmetic_arrows,
+                    play_match::update_weapon_stealth_fade,
+                )
+                    .after(CombatSystemPhase::CombatResolution)
+                    .run_if(in_state(GameState::PlayMatch)),
+            )
             // Combat resolution, death, and visual effects (after core combat)
             .add_systems(
                 Update,

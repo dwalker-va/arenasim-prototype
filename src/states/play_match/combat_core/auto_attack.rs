@@ -184,18 +184,7 @@ pub fn combat_auto_attack(
         combatant.attack_timer += dt;
 
         // Check if ready to attack and has a target
-        // Apply AttackSpeedSlow auras to increase the interval
-        let mut attack_interval = 1.0 / combatant.attack_speed;
-        if let Some(ref auras) = auras {
-            for aura in auras.auras.iter() {
-                if aura.effect_type == AuraType::AttackSpeedSlow {
-                    // magnitude = slow amount (e.g., 0.25 = 25% slower → 1.33x interval)
-                    // Clamp to 0.75 max to prevent division by near-zero or negative
-                    let clamped = aura.magnitude.min(0.75);
-                    attack_interval *= 1.0 / (1.0 - clamped);
-                }
-            }
-        }
+        let attack_interval = effective_attack_interval(&combatant, auras.as_deref());
         if combatant.attack_timer >= attack_interval {
             if let Some(target_entity) = combatant.target {
                 // Skip if target is dead (will be retargeted next frame)
@@ -455,6 +444,24 @@ pub fn combat_auto_attack(
                 // Collect attacker damage for later update (include absorbed damage - attacker dealt it)
                 damage_dealt_updates.push((attacker_entity, actual_damage + absorbed));
 
+                // One landed auto-attack = one swing signal for the graphical
+                // animation layer. Spawned here in the APPLY loop — not at the
+                // queue site like WindfuryTornado — so an attack dropped above
+                // by the friendly-CC guard or a same-frame death never
+                // telegraphs a phantom release stroke. Inert in headless: like
+                // FloatingCombatText, the consuming systems live in
+                // rendering/effects.rs and are registered only in states/mod.rs.
+                if let Some(&(_, _, _, attacker_is_melee, _, _)) = combatant_info.get(&attacker_entity) {
+                    commands.spawn((
+                        AutoAttackSwing {
+                            attacker: attacker_entity,
+                            target: target_entity,
+                            ranged: !attacker_is_melee,
+                        },
+                        PlayMatchEntity,
+                    ));
+                }
+
                 // Log the attack with structured data
                 if let (Some((attacker_team, attacker_class, attacker_name, attacker_is_melee, _, attacker_slot)), Some((target_team, _target_class, target_name, _, _, target_slot))) =
                     (combatant_info.get(&attacker_entity), combatant_info.get(&target_entity)) {
@@ -649,6 +656,28 @@ pub fn combat_auto_attack(
             amount: total_damage,
         });
     }
+}
+
+/// Effective auto-attack interval for a combatant: base `1.0 / attack_speed`,
+/// stretched by each `AttackSpeedSlow` aura (magnitude clamped at 0.75 to
+/// prevent division by near-zero).
+///
+/// Shared by the swing timer in `combat_auto_attack` above AND the graphical
+/// windup animation (`rendering/effects.rs`), so the anticipation window can
+/// never drift from the sim's real cadence. Pure — safe to call from graphical
+/// systems without touching sim state.
+pub fn effective_attack_interval(combatant: &Combatant, auras: Option<&ActiveAuras>) -> f32 {
+    let mut attack_interval = 1.0 / combatant.attack_speed;
+    if let Some(auras) = auras {
+        for aura in auras.auras.iter() {
+            if aura.effect_type == AuraType::AttackSpeedSlow {
+                // magnitude = slow amount (e.g., 0.25 = 25% slower → 1.33x interval)
+                let clamped = aura.magnitude.min(0.75);
+                attack_interval *= 1.0 / (1.0 - clamped);
+            }
+        }
+    }
+    attack_interval
 }
 
 /// Windfury Totem bonus-swing chance for this attacker. Returns `Some(magnitude)`

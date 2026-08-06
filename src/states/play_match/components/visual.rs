@@ -306,6 +306,13 @@ pub struct BacklashBurst {
 pub struct WalkAnim {
     pub phase: f32,
     pub previous_xz: Vec2,
+    /// Seconds since the sim last moved this unit. The sim steps positions in
+    /// FixedUpdate, so at render rates above the tick rate every other frame
+    /// sees zero movement — treating those frames as "idle" snapped the bob
+    /// offset to rest and back every frame, strobing the body and anything
+    /// attached to it. Idle is declared only after this exceeds a real pause
+    /// (~0.1s), so the bob holds its height between ticks.
+    pub idle_time: f32,
 }
 
 /// The rendered body of a combatant or pet: a CHILD entity carrying `Mesh3d`,
@@ -331,6 +338,113 @@ pub struct WalkAnim {
 #[derive(Component)]
 pub struct VisualBody {
     pub rest_y: f32,
+}
+
+/// Which weapon model a [`WeaponSocket`] holds. Decides the glTF asset, the
+/// mount pose, and the swing arc. Class-keyed for v1 (see the attack-animations
+/// plan KTD6); an equipment-keyed lookup can replace the mapping later without
+/// touching the animation layer.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum WeaponKind {
+    TwoHandAxe,
+    Dagger,
+    Bow,
+    Mace,
+    Shield,
+}
+
+/// Which hand position a [`WeaponSocket`] occupies. The Paladin's shield is
+/// held statically; the Rogue's daggers alternate hands cosmetically — the
+/// sim has a single attack timer, so each landed auto swings whichever dagger
+/// is flagged `winds_up_next`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum WeaponHand {
+    Main,
+    Off,
+}
+
+/// A weapon held by a combatant: a child of the [`VisualBody`] carrying a glTF
+/// `SceneRoot`. Purely graphical — spawned only by the graphical
+/// `spawn_combatant` path, so headless never sees one.
+///
+/// The swing animation writes this entity's LOCAL `Transform` every frame
+/// (never the sim parent's — see [`VisualBody`]). `rest` is the mount pose the
+/// weapon returns to between swings; `release_t` is the seconds elapsed in the
+/// current release stroke (`None` when no release is playing), set by the
+/// swing-signal consumer when an auto-attack actually lands; `aim` is the
+/// world-space point the current/last swing was aimed at, captured at the hit
+/// frame so a dead or despawned target cannot orphan the stroke.
+#[derive(Component)]
+pub struct WeaponSocket {
+    pub kind: WeaponKind,
+    pub hand: WeaponHand,
+    /// The sim combatant holding this weapon (NOT the `VisualBody` parent).
+    pub owner: Entity,
+    pub rest: Transform,
+    pub release_t: Option<f32>,
+    pub aim: Vec3,
+    /// True when THIS socket telegraphs and plays the owner's next swing.
+    /// Main hand at spawn; for dual daggers the signal consumer flips it
+    /// between hands after each landed auto so the pair alternates. Always
+    /// false for the shield.
+    pub winds_up_next: bool,
+    /// Smoothed aim correction, as a yaw angle LOCAL to the owner's facing
+    /// (radians). The weapon is rigid to the body — when the body turns, the
+    /// weapon turns with it instantly — and this angle eases toward the
+    /// target bearing at a bounded rate. Smoothing in world space instead
+    /// made the compensation sweep the weapon around the body every time the
+    /// parent's tick-quantized facing snapped, which read as flashing while
+    /// units moved.
+    pub yaw_local: f32,
+    /// The owner's facing yaw last frame. Large one-frame facing jumps
+    /// (gate-open first move, a hard target switch) are absorbed into
+    /// `yaw_local` so the weapon holds its world bearing through the snap and
+    /// then eases to the new aim, instead of whipping around with the body.
+    pub prev_owner_yaw: f32,
+    /// Smoothed windup parameter (0 to -1). The raw value is discontinuous
+    /// while chasing: an overdue attack timer pins it at full windup the
+    /// moment the target enters reach and drops it to rest the moment it
+    /// leaves, which strobes the pose every few frames during pursuit.
+    /// Easing at a bounded rate turns that into a deliberate raise/lower.
+    pub windup_s: f32,
+}
+
+/// One landed auto-attack, spawned in core at the damage-APPLY site (mirrors
+/// [`FloatingCombatText`] / [`WindfuryTornado`]): a bare marker entity, inert in
+/// headless, consumed and despawned by the graphical swing systems in
+/// `rendering/effects.rs` (registered only in `states/mod.rs`). Spawned in the
+/// apply loop rather than the queue loop so an attack dropped by the
+/// friendly-CC guard or a same-frame death never telegraphs a phantom release.
+#[derive(Component)]
+pub struct AutoAttackSwing {
+    pub attacker: Entity,
+    pub target: Entity,
+    /// True for ranged autos (Hunter Auto Shot AND caster Wand Shots). The
+    /// consumer additionally gates the cosmetic arrow on the attacker holding a
+    /// Bow-kind main hand, so wand shots and socketless attackers no-op.
+    pub ranged: bool,
+}
+
+/// The pre-stealth material of one weapon-mesh descendant, remembered so the
+/// stealth fade can restore it exactly on unstealth. glTF materials are
+/// SHARED assets across every spawned instance of the model, so the fade
+/// must swap in a per-instance clone rather than mutate in place — mutating
+/// would fade every copy of that weapon in the arena.
+#[derive(Component)]
+pub struct OriginalWeaponMaterial(pub Handle<StandardMaterial>);
+
+/// A purely cosmetic arrow for Hunter Auto Shot. Damage already landed
+/// (hit-scan) when this spawns; the arrow just flies the visual. Never touches
+/// the sim `Projectile` machinery — spawn/move/cleanup live in
+/// `rendering/effects.rs`, registered only in `states/mod.rs`.
+#[derive(Component)]
+pub struct CosmeticArrow {
+    /// World-space destination, captured at the hit frame.
+    pub to: Vec3,
+    /// Yards per second of cosmetic travel.
+    pub speed: f32,
+    /// Seconds remaining before a hard despawn (backstop if it never arrives).
+    pub ttl: f32,
 }
 
 /// Marker component for the player's selection ring — a translucent torus

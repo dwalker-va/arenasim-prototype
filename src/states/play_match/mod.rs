@@ -595,6 +595,7 @@ pub fn setup_play_match(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
+    asset_server: Res<AssetServer>,
     mut combat_log: ResMut<CombatLog>,
     config: Res<MatchConfig>,
     game_settings: Res<crate::settings::GameSettings>,
@@ -757,6 +758,7 @@ pub fn setup_play_match(
                 &mut commands,
                 &mut meshes,
                 &mut materials,
+                &asset_server,
                 1,
                 i as u8, // slot index
                 *character,
@@ -848,6 +850,7 @@ pub fn setup_play_match(
                 &mut commands,
                 &mut meshes,
                 &mut materials,
+                &asset_server,
                 2,
                 i as u8, // slot index
                 *character,
@@ -980,6 +983,87 @@ fn walk_phase_seed(xz: Vec2) -> f32 {
     (xz.x * 7.314 + xz.y * 11.927).rem_euclid(std::f32::consts::TAU)
 }
 
+/// Class-default weapon set for v1 (plan KTD6): hardcoded per class, positioned
+/// so the deferred equipment-keyed lookup can replace this one match without
+/// touching the animation layer. Classes not listed hold nothing (casters,
+/// Shaman) — their auto-attack swing signals no-op against zero sockets.
+fn class_weapon_loadout(class: match_config::CharacterClass) -> &'static [(WeaponKind, WeaponHand)] {
+    use match_config::CharacterClass as C;
+    match class {
+        C::Warrior => &[(WeaponKind::TwoHandAxe, WeaponHand::Main)],
+        C::Rogue => &[
+            (WeaponKind::Dagger, WeaponHand::Main),
+            (WeaponKind::Dagger, WeaponHand::Off),
+        ],
+        C::Hunter => &[(WeaponKind::Bow, WeaponHand::Main)],
+        C::Paladin => &[
+            (WeaponKind::Mace, WeaponHand::Main),
+            (WeaponKind::Shield, WeaponHand::Off),
+        ],
+        _ => &[],
+    }
+}
+
+/// Asset path for each weapon model (all CC0 — see assets/models/weapons/LICENSE.md).
+fn weapon_asset_path(kind: WeaponKind) -> &'static str {
+    match kind {
+        WeaponKind::TwoHandAxe => "models/weapons/axe_2handed.gltf",
+        WeaponKind::Dagger => "models/weapons/dagger.gltf",
+        WeaponKind::Bow => "models/weapons/bow_wooden.glb",
+        WeaponKind::Mace => "models/weapons/hammer_double.glb",
+        WeaponKind::Shield => "models/weapons/shield_round.gltf",
+    }
+}
+
+/// Mount pose for a weapon socket, local to the `VisualBody` (capsule radius
+/// 0.5, height 2.5, no facing — the swing system rotates the whole socket
+/// around Y to face the target, with local +Z as the aim axis). Melee weapons
+/// rest pitched forward so that yaw is actually VISIBLE — a vertical rod
+/// rotating around Y reads as static. Translation/rotation/scale tuned by eye
+/// against the graphical client; adjust freely, nothing else depends on these
+/// numbers.
+fn weapon_mount(kind: WeaponKind, hand: WeaponHand) -> Transform {
+    let side = if hand == WeaponHand::Off { -1.0 } else { 1.0 };
+    // Every mount clears the capsule (radius 0.5) with margin: the body
+    // material is alpha-blended (stealth), and weapon geometry dipping inside
+    // it renders with mushy half-covered edges instead of a solid silhouette.
+    match kind {
+        // Blade tips lean ~45° toward the target; the swing arc raises them
+        // back past vertical on windup and chops through on release. The
+        // innermost 90° roll turns the axe blade to lead the chop instead of
+        // riding flat.
+        WeaponKind::TwoHandAxe => Transform::from_xyz(0.78 * side, 0.1, 0.2)
+            .with_rotation(
+                Quat::from_rotation_x(0.75) * Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+            )
+            .with_scale(Vec3::splat(0.9)),
+        // The innermost 90° roll about the blade's long axis stands the flat
+        // of the blade vertical — edge leading the stab, not slapping flat.
+        WeaponKind::Dagger => Transform::from_xyz(0.7 * side, -0.05, 0.3)
+            .with_rotation(
+                Quat::from_rotation_x(0.9) * Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+            )
+            .with_scale(Vec3::splat(0.8)),
+        // Bows are held vertical, rotated so the limb/string PLANE contains
+        // the aim axis — limbs arc toward the target, string at the back.
+        WeaponKind::Bow => Transform::from_xyz(0.8 * side, 0.25, 0.25)
+            .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2))
+            .with_scale(Vec3::splat(1.0)),
+        // Same 90° roll for the hammer: striking face toward the target
+        // instead of the flat of the head riding sideways.
+        WeaponKind::Mace => Transform::from_xyz(0.72 * side, 0.05, 0.2)
+            .with_rotation(
+                Quat::from_rotation_x(0.75) * Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+            )
+            .with_scale(Vec3::splat(0.5)),
+        // Shield mesh is authored facing +Z — no base rotation, or it turns
+        // edge-on to the enemy. Just a slight outward cant on the off arm.
+        WeaponKind::Shield => Transform::from_xyz(0.78 * side, 0.15, 0.0)
+            .with_rotation(Quat::from_rotation_y(0.25 * side))
+            .with_scale(Vec3::splat(0.9)),
+    }
+}
+
 /// Helper function to spawn a single combatant entity.
 ///
 /// Creates a capsule mesh colored by class, with darker shades for duplicates.
@@ -988,6 +1072,7 @@ fn spawn_combatant(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
+    asset_server: &AssetServer,
     team: u8,
     slot: u8,
     class: match_config::CharacterClass,
@@ -1035,6 +1120,14 @@ fn spawn_combatant(
     // The mesh hangs off a CHILD entity so graphical animation never writes this
     // entity's Transform — see `VisualBody`. The child sits at local y 0, so the
     // capsule renders exactly where the sim puts the combatant.
+    // NOTE: the sim entity spawns with IDENTITY rotation, matching the
+    // headless spawn path exactly. Rotation is NOT cosmetic-only — the combat
+    // snapshot derives a velocity from it for units that haven't moved, and
+    // Freezing Trap leads consume that — so a graphical-only spawn facing
+    // would diverge seed reproduction between the two modes. The gate-open
+    // weapon spin is solved on the weapon side instead: sockets spawn aimed
+    // at arena center, and `animate_weapon_swings` absorbs large one-frame
+    // parent-facing snaps into the local yaw.
     let entity = commands.spawn((
         Transform::from_translation(position),
         Visibility::default(),
@@ -1047,16 +1140,64 @@ fn spawn_combatant(
         WalkAnim {
             phase: walk_phase_seed(position.xz()),
             previous_xz: position.xz(),
+            idle_time: 0.0,
         },
     ))
-    .with_child((
-        Mesh3d(mesh_handle.clone()),
-        MeshMaterial3d(material),
-        OriginalMesh(mesh_handle),
-        VisualBody { rest_y: 0.0 },
-        Transform::default(),
-    ))
     .id();
+    // Spawned separately (not via `.with_child`) because the weapon sockets
+    // below need the VisualBody's OWN entity id as their parent — a chained
+    // `.with_child` only ever returns the top-level combatant id.
+    let body = commands
+        .spawn((
+            Mesh3d(mesh_handle.clone()),
+            MeshMaterial3d(material),
+            OriginalMesh(mesh_handle),
+            VisualBody { rest_y: 0.0 },
+            Transform::default(),
+        ))
+        .id();
+    commands.entity(entity).add_child(body);
+    // Class-default weapon set (plan KTD6): each held item is a WeaponSocket
+    // child of the VisualBody, so walk bob / death sink / victory bounce and
+    // match-exit despawn all carry the weapons for free. Graphical-only —
+    // headless has its own mesh-free spawn path and never runs this fn.
+    // Weapons start aimed at arena center (toward the enemy gates), so they
+    // read correctly during the countdown without any sim rotation.
+    let center_yaw = if position.xz().length_squared() > 1e-6 {
+        (-position.x).atan2(-position.z)
+    } else {
+        0.0
+    };
+    for &(kind, hand) in class_weapon_loadout(class) {
+        let rest = weapon_mount(kind, hand);
+        let socket = commands
+            .spawn((
+                SceneRoot(
+                    asset_server.load(
+                        bevy::gltf::GltfAssetLabel::Scene(0).from_asset(weapon_asset_path(kind)),
+                    ),
+                ),
+                WeaponSocket {
+                    kind,
+                    hand,
+                    owner: entity,
+                    rest,
+                    release_t: None,
+                    // Arena center: weapons face the enemy side of the map
+                    // until target acquisition takes over after gates open.
+                    aim: Vec3::ZERO,
+                    // The shield never swings; every other main hand starts as
+                    // the next swinger. The consumer alternates dagger pairs.
+                    winds_up_next: hand == WeaponHand::Main && kind != WeaponKind::Shield,
+                    yaw_local: center_yaw,
+                    prev_owner_yaw: 0.0,
+                    windup_s: 0.0,
+                },
+                rest,
+            ))
+            .id();
+        commands.entity(body).add_child(socket);
+    }
     if let Some(buff) = weapon_poison_buff {
         commands.entity(entity).insert(ActiveAuras { auras: vec![buff] });
     }
@@ -1136,6 +1277,7 @@ fn spawn_pet(
         WalkAnim {
             phase: walk_phase_seed(pet_position.xz()),
             previous_xz: pet_position.xz(),
+            idle_time: 0.0,
         },
     ))
     .with_child((
