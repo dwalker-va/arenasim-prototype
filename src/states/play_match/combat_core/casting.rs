@@ -183,6 +183,7 @@ pub fn process_casting(
                 CombatLogEventType::CrowdControl,
                 format!("{}'s {} interrupted by crowd control", caster_id, ability_def.name),
             );
+            commands.spawn((CastEnding { caster: caster_entity, kind: CastEndingKind::Interrupted }, PlayMatchEntity));
             commands.entity(caster_entity).remove::<CastingState>();
             continue;
         }
@@ -200,6 +201,7 @@ pub fn process_casting(
                 CombatLogEventType::CrowdControl,
                 format!("{}'s {} interrupted by Silence", caster_id, ability_def.name),
             );
+            commands.spawn((CastEnding { caster: caster_entity, kind: CastEndingKind::Interrupted }, PlayMatchEntity));
             commands.entity(caster_entity).remove::<CastingState>();
             continue;
         }
@@ -335,6 +337,7 @@ pub fn process_casting(
             if let Ok((_, target_transform, ..)) = combatants.get(target_entity) {
                 if !has_line_of_sight(&map_geometry.volumes, caster_pos, target_transform.translation) {
                     log_los_fizzle(&mut combat_log, caster_team, caster_slot, caster_class, &def.name);
+                    commands.spawn((CastEnding { caster: caster_entity, kind: CastEndingKind::Fizzled }, PlayMatchEntity));
                     continue;
                 }
             }
@@ -343,6 +346,7 @@ pub fn process_casting(
             // projectile lands regardless of later LoS (R7), so mana is charged
             // at spawn, after the LoS-at-completion gate above.
             mana_charges.push((caster_entity, mana_cost));
+            commands.spawn((CastEnding { caster: caster_entity, kind: CastEndingKind::Landed }, PlayMatchEntity));
 
             // Spawn projectile with Transform (required for move_projectiles to work in headless mode)
             // Visual mesh/material is added by spawn_projectile_visuals in graphical mode
@@ -368,10 +372,15 @@ pub fn process_casting(
 
         // Get target combatant
         let Ok((_, target_transform, mut target, _, mut target_auras)) = combatants.get_mut(target_entity) else {
+            // Target no longer resolves → the cast fizzles (no mana charged).
+            commands.spawn((CastEnding { caster: caster_entity, kind: CastEndingKind::Fizzled }, PlayMatchEntity));
             continue;
         };
 
         if !target.is_alive() {
+            // Dead-target fizzle — the most common no-mana-charged exit in
+            // arena play. Signals the orb's sputter, like the LoS gates below.
+            commands.spawn((CastEnding { caster: caster_entity, kind: CastEndingKind::Fizzled }, PlayMatchEntity));
             continue;
         }
 
@@ -389,6 +398,7 @@ pub fn process_casting(
         // no-op-on-empty semantics as the cast-start gate.
         if !has_line_of_sight(&map_geometry.volumes, caster_pos, target_transform.translation) {
             log_los_fizzle(&mut combat_log, caster_team, caster_slot, caster_class, &def.name);
+            commands.spawn((CastEnding { caster: caster_entity, kind: CastEndingKind::Fizzled }, PlayMatchEntity));
             continue;
         }
 
@@ -398,6 +408,7 @@ pub fn process_casting(
         // cost mana exactly as before. Anything that fizzled above `continue`d
         // without reaching this line and costs nothing.
         mana_charges.push((caster_entity, mana_cost));
+        commands.spawn((CastEnding { caster: caster_entity, kind: CastEndingKind::Landed }, PlayMatchEntity));
 
         let target_pos = target_transform.translation;
         let text_position = target_transform.translation + Vec3::new(0.0, FCT_HEIGHT, 0.0);
@@ -878,6 +889,7 @@ pub fn process_channeling(
                 CombatLogEventType::CrowdControl,
                 format!("{}'s {} interrupted by crowd control", caster_id, ability_def.name),
             );
+            commands.spawn((CastEnding { caster: caster_entity, kind: CastEndingKind::Interrupted }, PlayMatchEntity));
             remove_channel.push(caster_entity);
             continue;
         }
@@ -894,6 +906,7 @@ pub fn process_channeling(
                 CombatLogEventType::CrowdControl,
                 format!("{}'s {} interrupted by Silence", caster_id, channel_def.name),
             );
+            commands.spawn((CastEnding { caster: caster_entity, kind: CastEndingKind::Interrupted }, PlayMatchEntity));
             remove_channel.push(caster_entity);
             continue;
         }

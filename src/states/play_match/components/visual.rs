@@ -425,6 +425,34 @@ pub struct AutoAttackSwing {
     pub ranged: bool,
 }
 
+/// How a hard cast or channel ended, for the casting-orb ending animation.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CastEndingKind {
+    /// The cast completed and its effect actually landed (mana was charged).
+    Landed,
+    /// The cast reached completion but fizzled — target dead, despawned, or
+    /// out of line of sight at the resolution gates (no mana charged).
+    Fizzled,
+    /// The cast or channel was cut short: ability interrupt (Pummel/Kick),
+    /// crowd control (stun/fear/polymorph), or Silence.
+    Interrupted,
+}
+
+/// One cast/channel ending, spawned in core at the resolution site (mirrors
+/// [`AutoAttackSwing`]): a bare marker entity, inert in headless, consumed and
+/// despawned by the graphical casting-orb systems in `rendering/effects.rs`
+/// (registered only in `states/mod.rs`). Spawned at the OUTCOME site rather
+/// than inferred from `CastingState` removal because pass 1 of
+/// `process_casting` removes the component before pass 2 decides landed vs
+/// fizzled — the two endings are indistinguishable from component state alone.
+/// Caster death and match end deliberately spawn NO marker (silent vanish —
+/// the death/celebration animation owns that moment).
+#[derive(Component)]
+pub struct CastEnding {
+    pub caster: Entity,
+    pub kind: CastEndingKind,
+}
+
 /// The pre-stealth material of one weapon-mesh descendant, remembered so the
 /// stealth fade can restore it exactly on unstealth. glTF materials are
 /// SHARED assets across every spawned instance of the model, so the fade

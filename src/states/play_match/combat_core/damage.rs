@@ -217,6 +217,7 @@ pub fn process_interrupts(
                 // Mark cast as interrupted
                 cast_state.interrupted = true;
                 cast_state.interrupted_display_time = 0.5; // Show "INTERRUPTED" for 0.5 seconds
+                commands.spawn((CastEnding { caster: interrupt.target, kind: CastEndingKind::Interrupted }, PlayMatchEntity));
 
                 // Mark the ability cast as interrupted in the combat log (for timeline visualization)
                 let interrupted_caster_id = combat_log_id_for(target_combatant, pet_query.get(interrupt.target).ok());
@@ -256,6 +257,7 @@ pub fn process_interrupts(
                     // Mark channel as interrupted
                     channel_state.interrupted = true;
                     channel_state.interrupted_display_time = 0.5; // Show "INTERRUPTED" for 0.5 seconds
+                    commands.spawn((CastEnding { caster: interrupt.target, kind: CastEndingKind::Interrupted }, PlayMatchEntity));
 
                     // Mark the ability as interrupted in the combat log (for timeline visualization)
                     let interrupted_caster_id = combat_log_id_for(target_combatant, pet_query.get(interrupt.target).ok());
