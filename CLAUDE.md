@@ -145,10 +145,14 @@ For deeper context, see these focused references:
   2026-08-04 amendments before building any of it — the design's shape held up
   but several specifics were wrong in ways only measurement exposed, and step 4's
   retirement goal is not achievable as written. Steps 2, 3 and the healer half of
-  4 have shipped: Nagrand occlusion `Legacy` 0.0s -> `TeamPlan` 28.1s, and the
-  healer solve is worth ~+8pt to whichever side runs it. The DPS half was measured
-  at ~-17pt and reverted (constraint satisfaction cannot express a kiter's
-  distance-maximisation). `Legacy` is byte-identical throughout.
+  4 have shipped: Nagrand occlusion `Legacy` 0.0s -> `TeamPlan` 28.1s (the robust
+  result — per-frame, thousands of samples). The DPS half was reverted:
+  constraint satisfaction cannot express a kiter's distance-maximisation.
+  `Legacy` is byte-identical throughout.
+  **Sample-size warning:** win rate at n=12 was used throughout that work and is
+  UNDERPOWERED — re-measuring at n=36 moved the headline from +8pt to +3pt and one
+  comp from -17pt to +11pt. Prefer per-frame mechanism metrics; reserve win rate
+  for confirmation at ~100 matches per cell (`scripts/hunter_2v2_matrix.sh`).
   **Measurement rule:** `AiProfiles` is PER-TEAM; a uniform-profile A/B cannot
   answer "is the new AI better", so set the sides differently and run both
   assignments — see *How to measure a step* in that doc, and `tests/camp_sweep.rs`.

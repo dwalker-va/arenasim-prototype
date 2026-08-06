@@ -4,6 +4,24 @@
 //! PAIRED comparison in which the AI is the only variable. `#[ignore]`d because
 //! it runs 24 full matches; it is a measurement tool, not a regression gate.
 //!
+//! # THE WIN COLUMN AT THIS SAMPLE SIZE IS NOISE
+//!
+//! Twelve seeds cannot resolve a few points of win rate on a binary outcome.
+//! Measured 2026-08-06: re-running the headline comp at n=36 moved it from +8pt
+//! to +3pt, and the Hunter comp from -17pt to +11pt — the flagship result and the
+//! flagship problem were both largely sample noise.
+//!
+//! Pairing does not rescue it. The pairing argument assumes the seed controls
+//! most of the variance; once the two AIs diverge the match is chaotic in the
+//! seed, so the same seed under two profiles behaves closer to two independent
+//! draws. Confirmed directly: `Legacy` and `TeamPlan+leash` both won 3/12 of the
+//! Hunter comp on COMPLETELY DISJOINT seed sets.
+//!
+//! **Read the per-frame columns, not the win column.** Occlusion-seconds, heal
+//! delivered, blocked share and CC time aggregate thousands of samples per match
+//! and are correspondingly sensitive. Use win rate only as a final confirmation,
+//! at the ~100-per-cell scale `scripts/hunter_2v2_matrix.sh` uses.
+//!
 //! ```bash
 //! cargo test --release --test camp_sweep -- --ignored --nocapture
 //! ```

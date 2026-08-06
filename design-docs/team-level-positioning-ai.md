@@ -22,13 +22,31 @@ turned out to be unachievable as stated. The amendments are marked inline:
 | *How to measure a step* | Uniform-profile A/B cannot answer "is this better". Every measurement before 2026-08-04 made that mistake. |
 
 What has actually landed, with numbers, on `Warrior+Priest` vs `Warlock+Priest`
-over 12 paired seeds on Nagrand: occlusion bought per match went from `Legacy`'s
-**0.0s to 28.1s**, and the healer solve is worth about **+8 percentage points to
-whichever side runs it**. `Legacy` is byte-identical throughout; everything is
-gated on `AiProfiles`.
+on Nagrand: occlusion bought per match went from `Legacy`'s **0.0s to 28.1s**,
+which is the robust result — a per-frame measure over thousands of samples. The
+win-rate effect is small and not resolved at the sample sizes used here (+3pt at
+n=36); see the correction below before quoting any percentage. `Legacy` is
+byte-identical throughout; everything is gated on `AiProfiles`.
 
-**That +8pt is NOT universal, and the exception matters.** Measured head-to-head
-with the healer solve as the only variable:
+**CORRECTION 2026-08-06: the win-rate figures below were measured at n=12 and are
+UNDERPOWERED. Re-measured at n=36:**
+
+| Comp | n=12 | n=36 |
+|---|---|---|
+| `Warrior+Priest` (the headline) | +8pt (9/12 -> 11/12) | **+3pt** (30/36 -> 31/36) |
+| `Hunter+Priest` | -17pt, then +0pt after the leash | **+11pt** (6/36 -> 10/36) |
+
+One extra win out of 36 is not a result, and the Hunter comp swung from -17 to +11
+purely on sample size. **Treat every win-rate number in this document as
+directional at best.** What survives the sample-size problem is the per-frame
+mechanism evidence — occlusion-seconds, blocked share, heal delivered, longest
+blackout — because those aggregate thousands of samples per match instead of one
+bit. The 0.0s -> 28.1s occlusion figure is robust; "+8pt" was not.
+
+**That the effect is NOT uniform across comps still holds** — the Hunter comp
+behaved qualitatively differently and that led to a real bug — but the
+magnitudes below are noise. Measured head-to-head with the healer solve as the
+only variable:
 
 | Comp given the solve | Gain |
 |---|---|
@@ -705,6 +723,19 @@ counts. `tests/camp_sweep.rs` does this; copy its shape.
 
 Two traps found the hard way:
 
+- **n=12 IS NOT ENOUGH FOR WIN RATE, and this cost the most.** Twelve paired
+  seeds was treated as sufficient throughout this work; it is not. Re-measuring
+  at n=36 moved the headline from +8pt to +3pt and the Hunter comp from -17pt to
+  +11pt — i.e. both the flagship result and the flagship problem were largely
+  sample noise. A binary outcome at a ~80% base rate needs HUNDREDS of matches to
+  resolve a few points, which is why `scripts/hunter_2v2_matrix.sh` defaults to
+  100 per cell. Pairing does not rescue it: once the AIs diverge the matches are
+  chaotic in the seed, so the same seed under two profiles is closer to two
+  independent draws than to a matched pair.
+  **Prefer per-frame mechanism metrics** — occlusion-seconds, blocked share, heal
+  delivered, time-to-death — which aggregate thousands of samples per match
+  rather than one bit, and reserve win rate for a final confirmation at real
+  scale.
 - **Check the baseline is not saturated.** `Mage+Priest vs Warrior+Priest` is
   12/12 under Legacy, so it measures nothing and will report "+0pt" for any
   change whatsoever.
