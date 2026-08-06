@@ -270,17 +270,30 @@ impl AbilityConfig {
     /// Resolve this ability's cast color as `(base_rgb, emissive_rgb)` in
     /// 0..1 linear-ish component form: the exact `projectile_visuals` pair when
     /// the ability defines one (the casting orb then matches the outgoing
-    /// projectile), otherwise the spell-school color from
-    /// [`SpellSchool::color_rgb8`] with emissive derived at 2.5x (the repo's
-    /// 2-4x visible-glow convention). A later per-spell override slots in
-    /// here without reworking callers.
+    /// projectile), otherwise a SATURATED form of the spell-school color from
+    /// [`SpellSchool::color_rgb8`]. A later per-spell override slots in here
+    /// without reworking callers.
+    ///
+    /// The school palette is tuned for UI text on a dark background — pastel,
+    /// high-luminance. Used raw as an additive emissive, those near-equal
+    /// channels clip toward WHITE once the orb and motes stack (Fear's pastel
+    /// Shadow purple read as white in play, Immolate's Fire likewise). So the
+    /// fallback normalizes to the dominant channel and squares the lesser
+    /// ones — the hue survives additive stacking — and emits at 2x (low end
+    /// of the repo's 2-4x glow convention, again to delay clipping).
     pub fn cast_color(&self) -> ([f32; 3], [f32; 3]) {
         if let Some(visuals) = &self.projectile_visuals {
             return (visuals.color, visuals.emissive);
         }
         let (r, g, b) = self.spell_school.color_rgb8();
-        let base = [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0];
-        let emissive = [base[0] * 2.5, base[1] * 2.5, base[2] * 2.5];
+        let raw = [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0];
+        let max = raw[0].max(raw[1]).max(raw[2]).max(f32::EPSILON);
+        let base = [
+            (raw[0] / max) * (raw[0] / max),
+            (raw[1] / max) * (raw[1] / max),
+            (raw[2] / max) * (raw[2] / max),
+        ];
+        let emissive = [base[0] * 2.0, base[1] * 2.0, base[2] * 2.0];
         (base, emissive)
     }
 }
@@ -550,17 +563,39 @@ mod tests {
     }
 
     #[test]
-    fn cast_color_falls_back_to_school() {
-        // Flash-Heal-shaped: no projectile visuals -> Holy school color with
-        // the 2.5x derived emissive.
-        let mut config = base_test_config();
-        config.spell_school = SpellSchool::Holy;
-        let (base, emissive) = config.cast_color();
-        let expected = [255.0 / 255.0, 230.0 / 255.0, 150.0 / 255.0];
-        assert_eq!(base, expected);
-        for i in 0..3 {
-            assert!((emissive[i] - expected[i] * 2.5).abs() < 1e-6);
+    fn cast_color_falls_back_to_saturated_school() {
+        // No projectile visuals -> saturated school color (normalize to the
+        // dominant channel, square the lesser ones) with 2x emissive. Pins the
+        // hue actually survives: the raw pastel palette read as white in play.
+        let saturate = |rgb8: (u8, u8, u8)| -> [f32; 3] {
+            let raw = [
+                rgb8.0 as f32 / 255.0,
+                rgb8.1 as f32 / 255.0,
+                rgb8.2 as f32 / 255.0,
+            ];
+            let max = raw[0].max(raw[1]).max(raw[2]);
+            [
+                (raw[0] / max) * (raw[0] / max),
+                (raw[1] / max) * (raw[1] / max),
+                (raw[2] / max) * (raw[2] / max),
+            ]
+        };
+        for school in [SpellSchool::Holy, SpellSchool::Fire, SpellSchool::Shadow] {
+            let mut config = base_test_config();
+            config.spell_school = school;
+            let (base, emissive) = config.cast_color();
+            let expected = saturate(school.color_rgb8());
+            for i in 0..3 {
+                assert!((base[i] - expected[i]).abs() < 1e-6, "{school:?} base");
+                assert!((emissive[i] - expected[i] * 2.0).abs() < 1e-6, "{school:?} emissive");
+            }
         }
+        // The two spells reported as washed-out must resolve red-dominant
+        // (Fire/Immolate) and blue-dominant (Shadow/Fear), not near-white.
+        let fire = saturate(SpellSchool::Fire.color_rgb8());
+        assert!(fire[0] > 2.0 * fire[1] && fire[0] > 2.0 * fire[2], "Fire must read red");
+        let shadow = saturate(SpellSchool::Shadow.color_rgb8());
+        assert!(shadow[2] > 1.5 * shadow[1], "Shadow must read purple, not white");
     }
 
     #[test]
