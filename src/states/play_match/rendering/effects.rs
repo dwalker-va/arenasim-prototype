@@ -3270,14 +3270,14 @@ pub fn animate_weapon_swings(
             continue;
         };
 
-        // A stealthed Rogue's body fades to 40% alpha, and a polymorphed
-        // victim's body swaps to the sheep cuboid — an opaque weapon floating
-        // beside either gives the game away. Hide the sockets outright; the
-        // glTF subtree inherits.
+        // A polymorphed victim's body swaps to the sheep cuboid — a sheep
+        // gripping a full-size axe gives it away, so hide the sockets (the
+        // glTF subtree inherits). Stealth does NOT hide: the weapons fade
+        // with the body instead (`update_weapon_stealth_fade`).
         let polymorphed = auras.is_some_and(|a| {
             a.auras.iter().any(|au| au.effect_type == AuraType::Polymorph)
         });
-        let wanted = if combatant.stealthed || polymorphed {
+        let wanted = if polymorphed {
             Visibility::Hidden
         } else {
             Visibility::Inherited
@@ -3553,5 +3553,62 @@ mod swing_tests {
         assert!(release.translation.z > 0.6, "release lunges the dagger forward");
         let (_, angle) = release.rotation.to_axis_angle();
         assert!(angle.abs() < 0.3, "a stab barely rotates");
+    }
+}
+
+/// Update (graphical-only): fade weapon materials with their owner's stealth,
+/// mirroring the body's 40%-alpha darkened tint (`update_stealth_visuals`).
+///
+/// glTF weapon materials are SHARED assets across every spawned instance of a
+/// model, so the fade swaps each weapon-mesh descendant onto a per-instance
+/// clone and remembers the original in [`OriginalWeaponMaterial`]; unstealth
+/// restores the shared original exactly. The scene subtree spawns async, so
+/// this keys off `Changed<Combatant>` (which fires every sim tick — timers
+/// mutate) and converges the first frame the meshes exist; the
+/// already-faded guard makes the steady state cheap.
+pub fn update_weapon_stealth_fade(
+    mut commands: Commands,
+    combatants: Query<(Entity, &Combatant), Changed<Combatant>>,
+    sockets: Query<(Entity, &WeaponSocket)>,
+    children: Query<&Children>,
+    mesh_mats: Query<&MeshMaterial3d<StandardMaterial>>,
+    originals: Query<&OriginalWeaponMaterial>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    for (owner_entity, combatant) in combatants.iter() {
+        for (socket_entity, socket) in sockets.iter() {
+            if socket.owner != owner_entity {
+                continue;
+            }
+            for desc in children.iter_descendants(socket_entity) {
+                if combatant.stealthed {
+                    if originals.get(desc).is_ok() {
+                        continue; // already faded
+                    }
+                    let Ok(mat_handle) = mesh_mats.get(desc) else {
+                        continue;
+                    };
+                    let Some(mat) = materials.get(&mat_handle.0) else {
+                        continue;
+                    };
+                    let mut faded = mat.clone();
+                    let c = faded.base_color.to_srgba();
+                    faded.base_color =
+                        Color::srgba(c.red * 0.6, c.green * 0.6, c.blue * 0.6, 0.4);
+                    faded.alpha_mode = bevy::prelude::AlphaMode::Blend;
+                    let original = mat_handle.0.clone();
+                    let faded_handle = materials.add(faded);
+                    commands.entity(desc).insert((
+                        MeshMaterial3d(faded_handle),
+                        OriginalWeaponMaterial(original),
+                    ));
+                } else if let Ok(original) = originals.get(desc) {
+                    commands
+                        .entity(desc)
+                        .insert(MeshMaterial3d(original.0.clone()))
+                        .remove::<OriginalWeaponMaterial>();
+                }
+            }
+        }
     }
 }

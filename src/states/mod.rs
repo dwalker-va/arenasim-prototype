@@ -217,6 +217,7 @@ impl Plugin for StatesPlugin {
                 (
                     play_match::animate_weapon_swings,
                     play_match::update_cosmetic_arrows,
+                    play_match::update_weapon_stealth_fade,
                 )
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_state(GameState::PlayMatch)),

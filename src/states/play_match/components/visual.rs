@@ -425,6 +425,14 @@ pub struct AutoAttackSwing {
     pub ranged: bool,
 }
 
+/// The pre-stealth material of one weapon-mesh descendant, remembered so the
+/// stealth fade can restore it exactly on unstealth. glTF materials are
+/// SHARED assets across every spawned instance of the model, so the fade
+/// must swap in a per-instance clone rather than mutate in place — mutating
+/// would fade every copy of that weapon in the arena.
+#[derive(Component)]
+pub struct OriginalWeaponMaterial(pub Handle<StandardMaterial>);
+
 /// A purely cosmetic arrow for Hunter Auto Shot. Damage already landed
 /// (hit-scan) when this spawns; the arrow just flies the visual. Never touches
 /// the sim `Projectile` machinery — spawn/move/cleanup live in
