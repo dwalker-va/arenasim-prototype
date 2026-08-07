@@ -7,7 +7,7 @@
 //! | Piece | Status |
 //! |---|---|
 //! | `OccupyCover` via [`solve_position`] | **LIVE** under `TeamPlan` (healer PRESSURED/FREE, `healer_postures.rs`). Measured at n=100 head-to-head: +36pt Warlock+Priest, +14pt Hunter+Priest, +10pt Warrior+Priest, -6pt (noise) Rogue+Priest. |
-//! | `HoldRange` | Wired to the Mage/Hunter kiter, **measured ~-17pt, reverted**. Constraint definition kept; see "the framing does not fit a kiter" in the design doc before retrying. |
+//! | `HoldRange` | Wired to the Mage/Hunter kiter, **measured ~-17pt, reverted — and the ending is now DECIDED: ranged DPS stays on the scorer permanently** (design doc, 2026-08-06). Constraint definition kept for the lone-healer fallback and future melee use; do not re-wire kiters absent step 8's reopening condition. |
 //! | `ScreenPartner`, `PressTarget`, `StackAnchor` | **NEVER RUN IN BATTLE.** Unit-tested against their written definitions only. All three consumed intents were under-specified in ways only measurement exposed (sight-of-ally, castability, the range ceiling) — assume these carry the same debt and budget a measurement pass before trusting them. |
 //! | [`solve_team`] / [`solve_order`] / [`focal_point`] / [`assign_intents`] / cohesion | **NO CALLERS.** The dependent team-level solve, kept because the design requires convergent AND divergent shapes from the start (retrofitting divergence would mean redoing the solve). It has never placed a unit in a real match. |
 //! | `plan.kill_target` (produced in `team_plan.rs`) | Producer-only: step 5 measured every static held call as net-harmful for some side and the consumer was reverted. Mid-match switching is the prerequisite for consuming it. |
