@@ -743,6 +743,7 @@ pub fn setup_play_match(
     commands.insert_resource(DisplaySettings {
         show_aura_icons: game_settings.show_aura_icons,
         show_combat_panel: game_settings.show_combat_panel,
+        show_call_display: game_settings.show_call_display,
     });
 
     // Spawn arena environment (octagonal floor + chamfered stadium walls)
