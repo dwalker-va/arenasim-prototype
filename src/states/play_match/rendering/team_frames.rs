@@ -150,7 +150,14 @@ const COLUMN_LABEL_H: f32 = 16.0;
 /// another color.
 const CALL_MARK: egui::Color32 = egui::Color32::from_rgb(236, 238, 248);
 /// Border shown while the pointer is over a clickable frame.
-const CALL_HOVER: egui::Color32 = egui::Color32::from_rgb(110, 114, 132);
+const CALL_HOVER: egui::Color32 = egui::Color32::from_rgb(150, 154, 172);
+/// Border shown on every clickable frame while the affordance is on.
+///
+/// This is what makes the toggle legible. Brighter than the inert border so
+/// turning calls on visibly arms the column, dimmer than [`CALL_HOVER`] so the
+/// pointer still reads, and far below [`CALL_MARK`] so the actual call stays
+/// the loudest thing on screen. Still hueless, per the note above.
+const CALL_CALLABLE: egui::Color32 = egui::Color32::from_rgb(96, 100, 118);
 const RETICLE_R: f32 = 5.0;
 /// How far the reticle's cross ticks reach past its ring.
 const RETICLE_TICK: f32 = 2.5;
@@ -345,15 +352,20 @@ fn draw_column(
 
     let mut clicked = None;
     for ((frame, rect), slot) in frames.iter().zip(&rects).zip(call_slots(frames)) {
-        // Only primary combatants are clickable; a pet sub-frame is inert.
-        let mut hovered = false;
+        // Only primary combatants are clickable; a pet sub-frame and a corpse
+        // both come back with no slot and stay inert.
+        let mut call_state = FrameCallState::Inert;
         if let (true, Some(slot)) = (affordance.interactive(), slot) {
             let response = ui.interact(
                 *rect,
                 egui::Id::new(("team_frame_call", team, slot)),
                 egui::Sense::click(),
             );
-            hovered = response.hovered();
+            call_state = if response.hovered() {
+                FrameCallState::Hovered
+            } else {
+                FrameCallState::Callable
+            };
             if response.clicked() {
                 clicked = Some(CallClick {
                     clicked_team: team,
@@ -361,27 +373,38 @@ fn draw_column(
                 });
             }
         }
-        // `called()` is `None` when hidden, so this covers visibility too.
-        let called = slot.is_some() && slot == affordance.called();
-        draw_frame(
-            painter,
-            *rect,
-            frame,
-            called,
-            hovered,
-            class_icons,
-            spell_icons,
-        );
+        // Being called outranks hover and callable. `called()` is `None` when
+        // the affordance is hidden, so this covers visibility too.
+        if slot.is_some() && slot == affordance.called() {
+            call_state = FrameCallState::Called;
+        }
+        draw_frame(painter, *rect, frame, call_state, class_icons, spell_icons);
     }
     clicked
+}
+
+/// How a frame participates in the call affordance, as one value rather than a
+/// pile of booleans.
+///
+/// The states are ordered by visual weight and are mutually exclusive, which is
+/// what an enum says and three bools do not.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FrameCallState {
+    /// Affordance off, or a frame that can never be called (a pet, a corpse).
+    Inert,
+    /// Callable right now, pointer elsewhere.
+    Callable,
+    /// Callable and under the pointer.
+    Hovered,
+    /// The opposing team's current call.
+    Called,
 }
 
 fn draw_frame(
     painter: &egui::Painter,
     rect: egui::Rect,
     frame: &CombatantFrame,
-    called: bool,
-    hovered: bool,
+    call_state: FrameCallState,
     class_icons: &ClassIcons,
     spell_icons: &SpellIcons,
 ) {
@@ -395,16 +418,18 @@ fn draw_frame(
     };
 
     // Frame background + class-colored accent stripe on the arena-facing edge.
-    // The border doubles as the call marker: brighter and thicker on the
-    // called combatant, faintly lifted on hover so the frames read as
-    // clickable while the affordance is on.
+    // The border doubles as the call marker and as the affordance's own tell.
+    //
+    // `Callable` carries a visible border on purpose. Without it, switching the
+    // affordance on changed nothing you could see until you happened to hover a
+    // frame — the toggle looked broken, because a control mode that renders no
+    // evidence of being on is indistinguishable from one that did not fire.
     painter.rect_filled(rect, 4.0, egui::Color32::from_rgba_unmultiplied(13, 13, 20, 235));
-    let border = if called {
-        egui::Stroke::new(2.0, CALL_MARK)
-    } else if hovered {
-        egui::Stroke::new(1.0, CALL_HOVER)
-    } else {
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(45, 45, 60))
+    let border = match call_state {
+        FrameCallState::Called => egui::Stroke::new(2.0, CALL_MARK),
+        FrameCallState::Hovered => egui::Stroke::new(1.0, CALL_HOVER),
+        FrameCallState::Callable => egui::Stroke::new(1.0, CALL_CALLABLE),
+        FrameCallState::Inert => egui::Stroke::new(1.0, egui::Color32::from_rgb(45, 45, 60)),
     };
     painter.rect_stroke(rect, 4.0, border, egui::StrokeKind::Outside);
     let stripe = egui::Rect::from_min_size(rect.min, egui::vec2(3.0, rect.height()));
@@ -465,7 +490,7 @@ fn draw_frame(
     // aside for it, since the call outlives the combatant it points at.
     let reticle_w = 2.0 * (RETICLE_R + RETICLE_TICK);
     let mut tag_right = inner_x + inner_w;
-    if called {
+    if call_state == FrameCallState::Called {
         draw_call_reticle(
             painter,
             egui::pos2(inner_x + inner_w - reticle_w / 2.0, y + HEADER_H / 2.0 - 1.0),
