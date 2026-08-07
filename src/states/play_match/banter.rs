@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 
 use super::banter_config::{BanterConfig, BanterContext, BanterExchange};
-use super::components::{Combatant, GameRng, MatchCountdown, Pet};
+use super::components::{Combatant, GameRng, MatchCountdown, Pet, SpeechBubble};
 use super::match_config::{CharacterClass, MatchConfig};
 use super::utils::spawn_speech_line;
 
@@ -726,6 +726,25 @@ impl BanterScheduler {
         }));
     }
 
+    /// Record every currently-live bubble as speaker occupancy.
+    ///
+    /// Takes the max against whatever is already recorded so a banter bubble's
+    /// own booking is never shortened by this, and so a speaker holding two
+    /// bubbles is busy until the later one clears.
+    ///
+    /// Split from [`take_due`](Self::take_due) rather than folded into it
+    /// because the queue mechanics stay pure and testable over plain values;
+    /// this is the one step that needs the World.
+    fn observe_live_bubbles(&mut self, bubbles: &Query<&SpeechBubble>) {
+        for bubble in bubbles.iter() {
+            let free_at = self.clock + bubble.lifetime;
+            self.speaking_until
+                .entry(bubble.owner)
+                .and_modify(|until| *until = until.max(free_at))
+                .or_insert(free_at);
+        }
+    }
+
     /// Remove and return every beat due at the current clock, in play order.
     ///
     /// `is_alive` is asked per beat at EMISSION time — a speaker bound five
@@ -856,6 +875,7 @@ pub fn play_banter_beats(
     mut watcher: ResMut<CallWatcher>,
     mut scheduler: ResMut<BanterScheduler>,
     combatants: Query<(Entity, &Combatant), Without<Pet>>,
+    bubbles: Query<&SpeechBubble>,
 ) {
     let Some(banter_config) = banter_config else {
         // `BanterConfigPlugin` registers in `src/main.rs` only (KTD5), so this
@@ -915,6 +935,17 @@ pub fn play_banter_beats(
             }
         }
     }
+
+    // Fold EVERY live bubble into the occupancy map before deciding what is
+    // due, not just the banter ones the scheduler emitted itself.
+    //
+    // Bubbles carry no per-owner offset, so two live on one speaker draw on top
+    // of each other. Post-gate that is reachable: ability bubbles render again
+    // once the gates open, so a mid-fight shout landing while its speaker is
+    // mid-"Mortal Strike!" would overlap it. The scheduler only knew about its
+    // own emissions, which made the one-bubble-per-speaker rule true within
+    // banter and false against the rest of the UI.
+    scheduler.observe_live_bubbles(&bubbles);
 
     // A despawned entity fails the `get` and reads as dead, which is the right
     // answer for a beat whose speaker is gone.
