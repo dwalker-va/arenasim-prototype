@@ -172,6 +172,11 @@ impl BanterExchange {
 pub struct BanterTiming {
     /// Seconds after the call change before beat 0 speaks.
     pub opening_start: f32,
+    /// Delay before a mid-fight `Switch` shout speaks. Near-immediate by
+    /// design — the shout's job is to make the operator's order legible as it
+    /// is given, so it does not wait out the countdown-oriented
+    /// `opening_start`.
+    pub switch_start: f32,
     /// Seconds between consecutive beats (`Opening` and `Switch`).
     pub beat_gap: f32,
     /// How long a bubble stays up. Bubbles carry no per-owner offset, so two
@@ -194,6 +199,12 @@ impl Default for BanterTiming {
     fn default() -> Self {
         Self {
             opening_start: 2.0,
+            // Near-immediate, but not 0.2: the deferral check below requires
+            // `line_lifetime - switch_start < beat_gap` for any context that
+            // could hold a multi-beat exchange, and 0.5 keeps the defaults
+            // internally consistent for ANY pool rather than only the shipped
+            // single-beat one.
+            switch_start: 0.5,
             beat_gap: 2.2,
             line_lifetime: 2.6,
             correction_beat_gap: 1.6,
@@ -212,10 +223,26 @@ impl BanterTiming {
         }
     }
 
+    /// Delay before a context's FIRST beat speaks.
+    ///
+    /// `Opening` and `Correction` wait out `opening_start` because they play
+    /// during the countdown, where combatants are still settling into the
+    /// starting room and an instant line would land before the scene reads. A
+    /// mid-fight `Switch` is the opposite case: it exists to make the
+    /// operator's order legible the moment it is given, and inheriting a
+    /// two-second delay would put the shout well after the team has already
+    /// visibly re-targeted.
+    fn start_delay_for(&self, context: BanterContext) -> f32 {
+        match context {
+            BanterContext::Switch => self.switch_start,
+            BanterContext::Opening | BanterContext::Correction => self.opening_start,
+        }
+    }
+
     /// Derived start time of beat `index` in `context`. Beat times are never
     /// authored — they fall out of the pacing block.
     pub fn beat_start(&self, context: BanterContext, index: usize) -> f32 {
-        self.opening_start + index as f32 * self.beat_gap_for(context)
+        self.start_delay_for(context) + index as f32 * self.beat_gap_for(context)
     }
 }
 
@@ -252,12 +279,55 @@ impl BanterConfig {
             ("timing.line_lifetime", t.line_lifetime),
             ("timing.correction_beat_gap", t.correction_beat_gap),
             ("timing.latest_beat", t.latest_beat),
+            ("timing.switch_start", t.switch_start),
         ];
         for (name, value) in positives {
             if !(value > 0.0) || !value.is_finite() {
                 issues.push(format!(
                     "{} must be a positive finite number, got {}",
                     name, value
+                ));
+            }
+        }
+
+        // The scheduler defers a beat whose speaker still has a live bubble to
+        // that bubble's expiry, but it does NOT push the beats queued behind
+        // it. The largest such push is `line_lifetime - start_delay`; if that
+        // exceeds the gap between beats, a deferred setup and its untouched
+        // punchline can land on the same frame and draw over each other.
+        //
+        // Checked only for contexts whose pool actually holds a multi-beat
+        // exchange, because a single-beat context has nothing queued behind to
+        // collide with — that is what lets `Switch` run its near-immediate
+        // `switch_start` against the shared `line_lifetime`. Authoring a
+        // two-beat `Switch` later turns the check on for it automatically.
+        //
+        // The shipped values satisfy this, which is exactly why it needs
+        // checking: the safety is arithmetic, not structural, so a plausible
+        // retune would reintroduce the collision silently.
+        for (context, start, gap) in [
+            (BanterContext::Opening, t.opening_start, t.beat_gap),
+            (
+                BanterContext::Correction,
+                t.opening_start,
+                t.correction_beat_gap,
+            ),
+            (BanterContext::Switch, t.switch_start, t.beat_gap),
+        ] {
+            let has_multi_beat = self
+                .exchanges
+                .iter()
+                .any(|e| e.context == context && e.beats.len() > 1);
+            if !has_multi_beat {
+                continue;
+            }
+            let max_push = t.line_lifetime - start;
+            if max_push >= gap {
+                issues.push(format!(
+                    "{:?}: timing.line_lifetime ({}) minus its start delay ({}) is {}, which is \
+                     not below its beat gap ({}) — a deferred beat could collide with the one \
+                     queued behind it",
+                    context, t.line_lifetime, start, max_push, gap
                 ));
             }
         }
@@ -710,14 +780,33 @@ mod tests {
         assert_eq!(exchange.specificity(), 2);
     }
 
-    /// Beat times are derived from the pacing block, and `Correction` paces
-    /// tighter than the other two contexts.
+    /// Beat times are derived from the pacing block: `Correction` paces
+    /// tighter between beats, and `Switch` starts almost immediately.
     #[test]
     fn beat_start_derives_from_context_gap() {
         let t = BanterTiming::default();
         assert_eq!(t.beat_start(BanterContext::Opening, 0), 2.0);
         assert_eq!(t.beat_start(BanterContext::Opening, 1), 4.2);
-        assert_eq!(t.beat_start(BanterContext::Switch, 1), 4.2);
+        assert_eq!(t.beat_start(BanterContext::Correction, 0), 2.0);
         assert_eq!(t.beat_start(BanterContext::Correction, 1), 3.6);
+    }
+
+    /// A mid-fight shout does NOT wait out the countdown-oriented
+    /// `opening_start`.
+    ///
+    /// The switch shout exists to make the operator's order legible the moment
+    /// it is given; inheriting the two-second opening delay put it well after
+    /// the team had already visibly re-targeted, which is the tell that the
+    /// bubble is decoration rather than feedback.
+    #[test]
+    fn switch_shout_starts_almost_immediately() {
+        let t = BanterTiming::default();
+        assert_eq!(t.beat_start(BanterContext::Switch, 0), t.switch_start);
+        assert!(
+            t.beat_start(BanterContext::Switch, 0) < t.beat_start(BanterContext::Opening, 0),
+            "a mid-fight shout must land sooner than a countdown opener: switch {} vs opening {}",
+            t.beat_start(BanterContext::Switch, 0),
+            t.beat_start(BanterContext::Opening, 0),
+        );
     }
 }

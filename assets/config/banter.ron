@@ -62,8 +62,16 @@
 // ---------------------------------------------------------------------------
 (
     timing: (
-        // Seconds after the call change before the first beat speaks.
+        // Seconds after the call change before the first beat speaks. Applies
+        // to Opening and Correction, both of which play during the countdown
+        // while combatants are still settling into the starting room.
         opening_start: 2.0,
+        // A mid-fight Switch shout does NOT wait that out — its job is to make
+        // the operator's order legible the moment it is given. Kept at 0.5
+        // rather than lower so that `line_lifetime - switch_start` stays below
+        // `beat_gap`, which is what stops a deferred beat colliding with the
+        // one behind it if a multi-beat Switch is ever authored.
+        switch_start: 0.5,
         // Seconds between consecutive beats (Opening and Switch).
         beat_gap: 2.2,
         // How long each bubble stays up. Two beats on the same role must be

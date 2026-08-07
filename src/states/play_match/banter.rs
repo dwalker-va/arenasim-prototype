@@ -798,12 +798,21 @@ impl BanterScheduler {
 fn team_rosters(combatants: &Query<(Entity, &Combatant), Without<Pet>>) -> [Vec<BanterCombatant>; 2] {
     let mut by_slot: [Vec<(u8, BanterCombatant)>; 2] = Default::default();
     for (entity, combatant) in combatants.iter() {
+        // The DEAD are excluded, not merely flagged, because this list is
+        // indexed by a call slot. `acquire_targets` builds `enemy_primary` by
+        // skipping the dead first and pets second, so that list compacts as
+        // combatants fall; a roster that kept the dead would name a different
+        // class in `{target}` than the AI is actually attacking. Speaker
+        // binding is unaffected — it only ever bound the living anyway.
+        if !combatant.is_alive() {
+            continue;
+        }
         by_slot[team_index(combatant.team)].push((
             combatant.slot,
             BanterCombatant {
                 entity,
                 class: combatant.class,
-                alive: combatant.is_alive(),
+                alive: true,
             },
         ));
     }
@@ -884,6 +893,16 @@ pub fn play_banter_beats(
 
             // KTD9: cancel first, unconditionally — see `cancel_team`.
             scheduler.cancel_team(change.team);
+
+            // A call cleared to nothing cancels the stale dialogue and stops
+            // there. There is no subject to speak about, and every line in the
+            // pool names one: resolving anyway would substitute the
+            // `UNRESOLVED_TARGET` fallback into text written around a class
+            // name and put "the them dies first" in a bubble.
+            if call.target.is_none() {
+                continue;
+            }
+
             if let Some(resolved) = resolve_exchange(
                 &banter_config,
                 &lineup,
@@ -2093,6 +2112,7 @@ mod tests {
     fn scheduler_config() -> BanterConfig {
         let timing = BanterTiming {
             opening_start: 1.0,
+            switch_start: 0.1,
             beat_gap: 1.0,
             line_lifetime: 0.5,
             correction_beat_gap: 1.0,

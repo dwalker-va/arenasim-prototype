@@ -225,6 +225,44 @@ fn clicking_an_enemy_frame_reports_its_column_and_slot() {
     );
 }
 
+/// A dead combatant is not callable, and — the part that actually matters —
+/// it consumes no slot index.
+///
+/// `acquire_targets` builds `enemy_primary` by skipping the dead before it
+/// skips pets, so that list COMPACTS as combatants fall and a call index is a
+/// position in what remains. If the frames numbered the dead, the two index
+/// spaces would drift apart the moment anyone died: a click on what the UI
+/// called slot 1 would write a call the simulation resolved against a shorter
+/// list, silently falling back to nearest-enemy while the marker rendered on
+/// somebody else. The bug is invisible until the first death, which is exactly
+/// when focus-fire matters most — hence the pin.
+#[test]
+fn the_dead_are_not_callable_and_do_not_consume_a_slot() {
+    // Team 2 is [Warlock (alive), Rogue (dead), Spider (pet)].
+    let mut probe = mock_data();
+    probe.show_calls = true;
+    assert!(!probe.team2[1].alive, "fixture expects a dead second frame");
+
+    // The dead frame itself answers to nothing.
+    let dead = column_frame_rects(&probe.team2, 2, screen_rect())[1].center();
+    assert!(
+        run_clicks(probe, Some(dead)).is_empty(),
+        "a dead combatant must not be callable"
+    );
+
+    // And it left the numbering alone: the living Warlock above it is still 0.
+    let mut data = mock_data();
+    data.show_calls = true;
+    let living = column_frame_rects(&data.team2, 2, screen_rect())[0].center();
+    assert_eq!(
+        run_clicks(data, Some(living)),
+        vec![CallClick {
+            clicked_team: 2,
+            slot: 0
+        }]
+    );
+}
+
 #[test]
 fn clicking_a_pet_sub_frame_is_a_no_op() {
     let mut data = mock_data();
@@ -242,9 +280,12 @@ fn clicking_a_pet_sub_frame_is_a_no_op() {
 #[test]
 fn a_pet_does_not_shift_the_slot_of_the_primary_below_it() {
     // The pet sits last in the mock, so re-order it above the Rogue and check
-    // the Rogue still answers to slot 1.
+    // the Rogue still answers to slot 1. The mock's Rogue is dead, and the
+    // dead are not callable, so revive it first — this test is about pets, and
+    // `the_dead_are_not_callable` below covers the other axis.
     let mut data = mock_data();
     data.show_calls = true;
+    data.team2[1].alive = true;
     let pet = data.team2.remove(2);
     data.team2.insert(1, pet);
     let target = column_frame_rects(&data.team2, 2, screen_rect())[2].center();

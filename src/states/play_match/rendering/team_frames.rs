@@ -175,16 +175,23 @@ fn frame_height(frame: &CombatantFrame) -> f32 {
 
 /// Call slot for each frame in a column, top to bottom.
 ///
-/// `None` for pets: a call addresses primary combatants only, and because a
-/// pet consumes no index it can never shift a teammate's slot. The result
-/// therefore lines up with the pet-filtered `enemy_primary` list that
-/// `acquire_targets` resolves `teamN_kill_target` against.
+/// `None` for pets AND for the dead, because both are absent from the list the
+/// simulation indexes. `acquire_targets` builds `enemy_primary` by skipping
+/// `!c.is_alive()` first and pets second, then resolves `teamN_kill_target`
+/// as a position in what remains — so that list COMPACTS as combatants die.
+///
+/// Numbering the dead here would desynchronise the two index spaces the moment
+/// anyone fell: in a 3v3 whose slot 0 has died, a click on the frame this
+/// function called 2 would write a call the simulation resolves against a
+/// two-element list, silently falling back to nearest-enemy while the marker
+/// rendered on a different frame. Skipping the dead keeps one shared meaning
+/// for a slot number, which is the whole contract between the click and the AI.
 pub fn call_slots(frames: &[CombatantFrame]) -> Vec<Option<usize>> {
     let mut next = 0;
     frames
         .iter()
         .map(|frame| {
-            if frame.pet_label.is_some() {
+            if frame.pet_label.is_some() || !frame.alive {
                 return None;
             }
             let slot = next;
