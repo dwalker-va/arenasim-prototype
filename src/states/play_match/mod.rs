@@ -33,6 +33,7 @@
 pub mod abilities;
 pub mod ability_config;
 pub mod movement_config;
+pub mod banter_config;
 pub mod equipment;
 pub mod components;
 pub mod camera;
@@ -63,6 +64,7 @@ pub mod selection;
 pub use abilities::*;
 pub use ability_config::*;
 pub use movement_config::*;
+pub use banter_config::*;
 pub use map_config::*;
 pub use components::*;
 pub use camera::*;

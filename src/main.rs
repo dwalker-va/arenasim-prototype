@@ -12,7 +12,9 @@ use arenasim::cli;
 use arenasim::combat::CombatPlugin;
 use arenasim::headless;
 use arenasim::settings::{GameSettings, SettingsPlugin};
-use arenasim::states::play_match::{AbilityConfigPlugin, MapConfigPlugin, MovementConfigPlugin};
+use arenasim::states::play_match::{
+    AbilityConfigPlugin, BanterConfigPlugin, MapConfigPlugin, MovementConfigPlugin,
+};
 use arenasim::states::play_match::equipment::EquipmentPlugin;
 use arenasim::states::{GameState, StatesPlugin};
 use arenasim::ui::UiPlugin;
@@ -156,6 +158,10 @@ fn build_graphical_app(replay: Option<headless::HeadlessMatchConfig>) -> App {
             SettingsPlugin,
             AbilityConfigPlugin,
             MovementConfigPlugin,
+            // Graphical-only by design — banter is visual, so the headless
+            // runner deliberately does NOT register this (KTD5). See the
+            // module doc in play_match/banter_config.rs.
+            BanterConfigPlugin,
             MapConfigPlugin,
             EquipmentPlugin,
             StatesPlugin,

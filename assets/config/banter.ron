@@ -1,0 +1,134 @@
+// Team Banter Configuration
+//
+// What each team says when its kill-target call changes. Loaded and validated
+// at GRAPHICAL startup only by BanterConfigPlugin
+// (src/states/play_match/banter_config.rs); the plugin panics at startup if
+// this file is missing, malformed, or fails validation.
+//
+// Unlike movement.ron, this file is NEVER read in headless mode — banter is
+// visual-only, so a malformed pool can never stop a balance sweep and the
+// content can never become a sim input.
+//
+// Missing fields fall back to the struct defaults in banter_config.rs; the
+// timing block is stated explicitly here anyway so this file is the single
+// place pacing is tuned.
+//
+// The authored unit is a whole EXCHANGE, not a line: setup and punchline are
+// written together, so the resolver can never staple a reply onto an opener
+// it was not written for. Each exchange declares the roles it needs (with an
+// optional class requirement) and an optional requirement on the called
+// target's class; the resolver keeps the exchanges the lineup satisfies,
+// favours the more specific ones without excluding the generics, and picks
+// deterministically from the match seed.
+//
+// Beat times are DERIVED, never authored: beat i starts at
+// opening_start + i * beat_gap (correction_beat_gap in the Correction
+// context). Validation rejects a pool where two beats on ONE role land
+// within line_lifetime of each other (bubbles have no per-owner offset, so
+// they would draw on top of each other) or where any beat starts after
+// latest_beat.
+//
+// Substitution: {target} is the called target's class in every context;
+// {prev_target} is the replaced target's class and is available in the
+// Correction context only.
+//
+// COVERAGE FLOOR: every context (Opening, Correction, Switch) must carry at
+// least one FULLY GENERIC exchange — all speaker classes Any and target Any —
+// so resolution can never come up empty. Validation enforces this.
+//
+// This is a seed pool with generic coverage only; the bespoke tier lands
+// later. Adding content means appending one entry, never filling a grid.
+(
+    timing: (
+        // Seconds after the call change before the first beat speaks.
+        opening_start: 2.0,
+        // Seconds between consecutive beats (Opening and Switch).
+        beat_gap: 2.2,
+        // How long each bubble stays up. Two beats on the same role must be
+        // at least this far apart.
+        line_lifetime: 2.6,
+        // Tighter pacing for corrections — they race the gates.
+        correction_beat_gap: 1.6,
+        // The countdown is 10s; no beat may start after this.
+        latest_beat: 9.0,
+        // Selection-weight multiplier per non-Any constraint. 1.0 would make
+        // specificity irrelevant; this favours a bespoke exchange without
+        // ever crowding the generics out.
+        specificity_weight: 3.0,
+    ),
+    exchanges: [
+        // ---- Opening: the countdown exchange -------------------------------
+        (
+            context: Opening,
+            speakers: [
+                (role: "caller", class: Any),
+                (role: "responder", class: Any),
+            ],
+            target: Any,
+            beats: [
+                (role: "caller",    text: "{target} dies first."),
+                (role: "responder", text: "Working on it."),
+            ],
+        ),
+        (
+            context: Opening,
+            speakers: [
+                (role: "caller", class: Any),
+                (role: "responder", class: Any),
+            ],
+            target: Any,
+            beats: [
+                (role: "caller",    text: "Kill the {target}."),
+                (role: "responder", text: "Say when."),
+            ],
+        ),
+
+        // ---- Correction: the call changed before the gates -----------------
+        (
+            context: Correction,
+            speakers: [
+                (role: "caller", class: Any),
+                (role: "responder", class: Any),
+            ],
+            target: Any,
+            beats: [
+                (role: "caller",    text: "Belay that. {target}, not the {prev_target}."),
+                (role: "responder", text: "{target} it is."),
+            ],
+        ),
+        (
+            context: Correction,
+            speakers: [
+                (role: "caller", class: Any),
+                (role: "responder", class: Any),
+            ],
+            target: Any,
+            beats: [
+                (role: "caller",    text: "Change of plan — {target}."),
+                (role: "responder", text: "Forget the {prev_target}, got it."),
+            ],
+        ),
+
+        // ---- Switch: the call changed after the gates (single beat) --------
+        (
+            context: Switch,
+            speakers: [
+                (role: "caller", class: Any),
+            ],
+            target: Any,
+            beats: [
+                (role: "caller", text: "Swap! {target}!"),
+            ],
+        ),
+        (
+            context: Switch,
+            speakers: [
+                (role: "caller", class: Any),
+            ],
+            target: Any,
+            beats: [
+                (role: "caller", text: "On the {target}, now!"),
+            ],
+        ),
+    ],
+)
