@@ -456,6 +456,35 @@ mod tests {
         }
     }
 
+    /// Every shipped exchange needs two distinct speakers, which is what keeps
+    /// a 1v1 team silent.
+    ///
+    /// The decision is that a solo combatant never speaks — not in the
+    /// countdown, and not on a mid-fight switch either. A lone fighter
+    /// announcing a target to an empty arena is the same noise the pre-gate
+    /// ability-bubble cleanup exists to remove.
+    ///
+    /// Nothing in the schema enforces that: a one-speaker exchange is
+    /// perfectly valid, and the `Switch` entries in particular *look* like
+    /// they only need one (they have a single beat). They carry a silent
+    /// "witness" role precisely so a solo lineup cannot bind them. Without
+    /// this test, appending one well-meaning single-speaker entry would make
+    /// 1v1 combatants start talking to themselves with nothing failing.
+    #[test]
+    fn shipped_exchanges_require_two_speakers_so_1v1_stays_silent() {
+        let config = load_banter_config().expect("assets/config/banter.ron must load");
+        for (index, exchange) in config.exchanges.iter().enumerate() {
+            assert!(
+                exchange.speakers.len() >= 2,
+                "exchange {} ({:?}) declares {} speaker role(s); it needs at least 2 or a solo \
+                 combatant will satisfy it and break 1v1 silence",
+                index,
+                exchange.context,
+                exchange.speakers.len()
+            );
+        }
+    }
+
     /// Missing file → loader error with a clear message. The plugin panics
     /// with this exact string, so testing the loader covers the panic path
     /// without aborting the test binary.
