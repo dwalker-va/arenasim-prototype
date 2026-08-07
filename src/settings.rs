@@ -23,6 +23,11 @@ pub struct GameSettings {
     /// a diagnostic tool, not part of the default spectator presentation)
     #[serde(default = "default_show_combat_panel")]
     pub show_combat_panel: bool,
+    /// Whether the in-match kill-call markers are shown on the team frames
+    /// (default: false — it is an experimentation affordance, not part of the
+    /// default spectator presentation)
+    #[serde(default = "default_show_call_display")]
+    pub show_call_display: bool,
 }
 
 fn default_show_aura_icons() -> bool {
@@ -30,6 +35,10 @@ fn default_show_aura_icons() -> bool {
 }
 
 fn default_show_combat_panel() -> bool {
+    false
+}
+
+fn default_show_call_display() -> bool {
     false
 }
 
@@ -74,6 +83,7 @@ impl Default for GameSettings {
             keybindings: Keybindings::default(),
             show_aura_icons: true,
             show_combat_panel: false,
+            show_call_display: false,
         }
     }
 }
@@ -252,6 +262,47 @@ fn apply_runtime_settings(
             
             info!("Applied VSync: {}", settings.vsync);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn call_display_flag_round_trips() {
+        let mut settings = GameSettings::default();
+        assert!(!settings.show_call_display, "call display defaults to off");
+        settings.show_call_display = true;
+
+        let serialized = ron::ser::to_string_pretty(&settings, ron::ser::PrettyConfig::default())
+            .expect("settings serialize");
+        let loaded: GameSettings = ron::from_str(&serialized).expect("settings deserialize");
+
+        assert!(loaded.show_call_display);
+    }
+
+    /// A settings file written before the field existed must still load — the
+    /// `#[serde(default)]` path. Emulated by stripping the field back out of a
+    /// freshly serialized payload.
+    #[test]
+    fn settings_written_before_the_field_existed_still_load() {
+        let settings = GameSettings::default();
+        let serialized = ron::ser::to_string_pretty(&settings, ron::ser::PrettyConfig::default())
+            .expect("settings serialize");
+
+        let legacy: String = serialized
+            .lines()
+            .filter(|line| !line.contains("show_call_display"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !legacy.contains("show_call_display"),
+            "legacy payload should not mention the new field"
+        );
+
+        let loaded: GameSettings = ron::from_str(&legacy).expect("legacy settings deserialize");
+        assert!(!loaded.show_call_display, "missing field falls back to the default");
     }
 }
 

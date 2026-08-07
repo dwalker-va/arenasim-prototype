@@ -88,6 +88,10 @@ pub struct DisplaySettings {
     /// Whether the combat log / timeline side panel is open. Off by default:
     /// it is a diagnostic tool, not part of the default spectator view.
     pub show_combat_panel: bool,
+    /// Whether the kill-call markers are shown on the team frames. Off by
+    /// default: it is an experimentation affordance, not part of the default
+    /// spectator view.
+    pub show_call_display: bool,
 }
 
 impl Default for SimulationSpeed {
