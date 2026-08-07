@@ -2,11 +2,18 @@
 //! constraint satisfaction, solved for the whole team at once and rooted at a
 //! focal unit.
 //!
-//! **Nothing consumes this yet.** Like step 2, the increment lands as a provable
-//! no-op: the types and the solve exist and are unit-tested, but no system calls
-//! them, so `Legacy` and `TeamPlan` both behave exactly as before and the
-//! recorded baselines stay valid. Wiring it up is the next increment, and it will
-//! be gated on `AiProfile::TeamPlan` so the change is attributable.
+//! ## Consumption status (2026-08-06) — read this before extending
+//!
+//! | Piece | Status |
+//! |---|---|
+//! | `OccupyCover` via [`solve_position`] | **LIVE** under `TeamPlan` (healer PRESSURED/FREE, `healer_postures.rs`). Measured at n=100 head-to-head: +36pt Warlock+Priest, +14pt Hunter+Priest, +10pt Warrior+Priest, -6pt (noise) Rogue+Priest. |
+//! | `HoldRange` | Wired to the Mage/Hunter kiter, **measured ~-17pt, reverted**. Constraint definition kept; see "the framing does not fit a kiter" in the design doc before retrying. |
+//! | `ScreenPartner`, `PressTarget`, `StackAnchor` | **NEVER RUN IN BATTLE.** Unit-tested against their written definitions only. All three consumed intents were under-specified in ways only measurement exposed (sight-of-ally, castability, the range ceiling) — assume these carry the same debt and budget a measurement pass before trusting them. |
+//! | [`solve_team`] / [`solve_order`] / [`focal_point`] / [`assign_intents`] / cohesion | **NO CALLERS.** The dependent team-level solve, kept because the design requires convergent AND divergent shapes from the start (retrofitting divergence would mean redoing the solve). It has never placed a unit in a real match. |
+//! | `plan.kill_target` (produced in `team_plan.rs`) | Producer-only: step 5 measured every static held call as net-harmful for some side and the consumer was reverted. Mid-match switching is the prerequisite for consuming it. |
+//!
+//! Everything below is gated on the per-team `AiProfiles`; `Legacy` never enters
+//! this module and its recorded baselines are byte-identical.
 //!
 //! ## Why a solve rather than more weights
 //!

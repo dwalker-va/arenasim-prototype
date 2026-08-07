@@ -215,20 +215,12 @@ impl Plugin for HeadlessPlugin {
                         .random_seed
                         .unwrap_or_else(crate::states::play_match::GameRng::choose_seed),
                 ),
-                ai_profile: {
-                    use crate::states::play_match::ai_profile::{AiProfile, AiProfiles};
-                    let parse = |s: &str| {
-                        AiProfile::parse(s).expect("Invalid ai_profile in headless config")
-                    };
-                    // A bare `ai_profile` still means "both teams", so every
-                    // existing config and baseline keeps its meaning; the
-                    // per-team fields override it independently.
-                    let base = self.config.ai_profile.as_deref().map(parse).unwrap_or_default();
-                    AiProfiles {
-                        team1: self.config.team1_ai_profile.as_deref().map(parse).unwrap_or(base),
-                        team2: self.config.team2_ai_profile.as_deref().map(parse).unwrap_or(base),
-                    }
-                },
+                // Single-authority resolution; `validate()` ran the same
+                // method, so this expect is unreachable on a validated config.
+                ai_profile: self
+                    .config
+                    .ai_profiles()
+                    .expect("Invalid ai_profile in headless config"),
                 suppress_log: self.suppress_log,
                 result: None,
             })

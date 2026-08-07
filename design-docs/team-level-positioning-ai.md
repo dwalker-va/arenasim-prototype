@@ -758,7 +758,10 @@ usually being asked.
 implementations play each other on one seed. Run BOTH assignments — comps are not
 evenly matched, so a single assignment confounds the AI with the comp — and report
 each side's GAIN against its own uniform baseline rather than raw head-to-head
-counts. `tests/camp_sweep.rs` does this; copy its shape.
+counts. **This methodology is a tool: `scripts/headtohead_sweep.py`** (batch
+runner, n=100 default, Wilson intervals, z-tests). For per-frame mechanism
+metrics — occlusion, blocked share, the WHY behind a win-rate delta — use
+`tests/camp_sweep.rs`.
 
 Two traps found the hard way:
 

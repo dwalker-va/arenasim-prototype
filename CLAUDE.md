@@ -153,8 +153,9 @@ For deeper context, see these focused references:
   the healer solve + kiter leash is worth +36pt to Warlock+Priest (z=5.2), +14pt
   to Hunter+Priest (z=2.2), +10pt to Warrior+Priest (z=1.8), -6pt (noise) to
   Rogue+Priest. **Sample-size warning stands:** every earlier n=12 win-rate figure
-  was noise around these values. Prefer per-frame mechanism metrics; reserve win
-  rate for ~100 matches per cell (the parallel `--batch` runner does 600 in ~4min).
+  was noise around these values. Prefer per-frame mechanism metrics
+  (`tests/camp_sweep.rs`); for win rate use `scripts/headtohead_sweep.py`
+  (~100 matches/cell via the parallel `--batch` runner, Wilson CIs, z-tests).
   **Measurement rule:** `AiProfiles` is PER-TEAM; a uniform-profile A/B cannot
   answer "is the new AI better", so set the sides differently and run both
   assignments — see *How to measure a step* in that doc, and `tests/camp_sweep.rs`.

@@ -4,23 +4,25 @@
 //! PAIRED comparison in which the AI is the only variable. `#[ignore]`d because
 //! it runs 24 full matches; it is a measurement tool, not a regression gate.
 //!
-//! # THE WIN COLUMN AT THIS SAMPLE SIZE IS NOISE
+//! # THIS FILE MEASURES MECHANISMS, NOT WIN RATES
 //!
-//! Twelve seeds cannot resolve a few points of win rate on a binary outcome.
-//! Measured 2026-08-06: re-running the headline comp at n=36 moved it from +8pt
-//! to +3pt, and the Hunter comp from -17pt to +11pt — the flagship result and the
-//! flagship problem were both largely sample noise.
+//! Division of labour, settled 2026-08-06 after n=12 win columns here produced
+//! two noise findings (+8pt that was really +36; -17pt that was really +14):
 //!
-//! Pairing does not rescue it. The pairing argument assumes the seed controls
-//! most of the variance; once the two AIs diverge the match is chaotic in the
-//! seed, so the same seed under two profiles behaves closer to two independent
-//! draws. Confirmed directly: `Legacy` and `TeamPlan+leash` both won 3/12 of the
-//! Hunter comp on COMPLETELY DISJOINT seed sets.
+//! - **Win rates** belong to `scripts/headtohead_sweep.py` — the parallel batch
+//!   runner at ~100 seeds per cell, with Wilson intervals and z-tests. The two
+//!   head-to-head tests this file briefly carried were deleted in its favour;
+//!   their per-seed history lives in the git log and the design doc.
+//! - **Per-frame mechanism metrics** belong HERE: the observer harness collects
+//!   occlusion-seconds, blocked share, heal delivered, CC time — thousands of
+//!   samples per match instead of one bit, which is why 12 seeds IS enough for
+//!   them. When a win-rate delta needs explaining, this is the tool that says
+//!   why; when a mechanism change needs confirming at scale, use the script.
 //!
-//! **Read the per-frame columns, not the win column.** Occlusion-seconds, heal
-//! delivered, blocked share and CC time aggregate thousands of samples per match
-//! and are correspondingly sensitive. Use win rate only as a final confirmation,
-//! at the ~100-per-cell scale `scripts/hunter_2v2_matrix.sh` uses.
+//! The `won` field stays for context lines in the printout, not as a verdict —
+//! pairing does not rescue a small n (once the AIs diverge, the same seed
+//! behaves as two independent draws; `Legacy` and `TeamPlan+leash` once both
+//! won 3/12 of the Hunter comp on completely disjoint seed sets).
 //!
 //! ```bash
 //! cargo test --release --test camp_sweep -- --ignored --nocapture
@@ -56,11 +58,6 @@ fn nagrand() -> Vec<ObstacleVolume> {
 
 struct Cell {
     won: bool,
-    /// Team 2's win, kept SEPARATE from `!won` because a draw is neither. The
-    /// head-to-head sweeps score one implementation per side, so reading team
-    /// 2's wins as `!won` silently credits every timeout draw to whichever
-    /// implementation happened to be on team 2.
-    won_t2: bool,
     duration: f32,
     /// Healing the Warrior received, as the sum of its positive health deltas.
     /// Measured off the observer rather than parsed out of a match log.
@@ -258,7 +255,6 @@ fn run_comp(t1: &str, t2: &str, seed: u64, team1: &[&str], team2: &[&str]) -> Ce
 
     Cell {
         won: result.winner == Some(1),
-        won_t2: result.winner == Some(2),
         duration: result.match_time,
         heal_to_warrior: heal,
         warrior_died,
@@ -276,70 +272,6 @@ fn run_comp(t1: &str, t2: &str, seed: u64, team1: &[&str], team2: &[&str]) -> Ce
     }
 }
 
-/// THE HEAD-TO-HEAD. `run`'s uniform comparison asks "does this matchup play out
-/// differently when BOTH teams change implementation" — a real question, but not
-/// "is the new AI better". Only differing profiles answer that, and only a
-/// per-team profile makes it expressible.
-///
-/// Run BOTH assignments: team 1 on TeamPlan against team 2 on Legacy, and the
-/// mirror. The comps are asymmetric (`Warrior+Priest` vs `Warlock+Priest`), so a
-/// single assignment would confound the AI with the comp.
-#[test]
-#[ignore]
-fn head_to_head_team_plan_vs_legacy() {
-    let seeds: Vec<u64> = (1..=12).collect();
-    let (mut tp_as_t1, mut tp_as_t2) = (0usize, 0usize);
-    // Draws are counted, never silently credited to a side: `!won` is not a
-    // team-2 win, and at the 300s cap a Nagrand camp can genuinely draw.
-    let mut draws = 0usize;
-    println!("\nHead-to-head, same seed, one implementation per side");
-    println!("{:>4}  {:>22}  {:>22}", "seed", "T1=TeamPlan T2=Legacy", "T1=Legacy T2=TeamPlan");
-    let label = |team_plan_won: bool, drawn: bool| {
-        if drawn {
-            "draw"
-        } else if team_plan_won {
-            "TeamPlan"
-        } else {
-            "Legacy"
-        }
-    };
-    for &seed in &seeds {
-        // Team 1 wins => TeamPlan won this one.
-        let a = run_pair("TeamPlan", "Legacy", seed);
-        // Team 2 wins => TeamPlan won this one.
-        let b = run_pair("Legacy", "TeamPlan", seed);
-        tp_as_t1 += a.won as usize;
-        tp_as_t2 += b.won_t2 as usize;
-        draws += (!a.won && !a.won_t2) as usize + (!b.won && !b.won_t2) as usize;
-        println!(
-            "{:>4}  {:>22}  {:>22}",
-            seed,
-            label(a.won, !a.won && !a.won_t2),
-            label(b.won_t2, !b.won && !b.won_t2),
-        );
-    }
-    // The two comps are NOT equally strong, so raw head-to-head counts cannot be
-    // compared to each other. Measure each side's GAIN against the uniform
-    // Legacy-vs-Legacy baseline instead — that is comp-independent.
-    let baseline: Vec<Cell> = seeds.iter().map(|&s| run("Legacy", s)).collect();
-    let base_t1 = baseline.iter().filter(|c| c.won).count();
-    let base_t2 = baseline.iter().filter(|c| c.won_t2).count();
-    let n = seeds.len();
-    let pct = |k: usize| 100.0 * k as f32 / n as f32;
-    if draws > 0 {
-        println!("\n({draws} of {} head-to-head runs DREW — excluded from both win counts)", 2 * n);
-    }
-    println!(
-        "\nLegacy vs Legacy: team 1 wins {}/{} ({:.0}%) — the comps are not even, \n\
-         so compare each side's GAIN, not the raw counts.\n\
-         \n\
-         team 1 on TeamPlan: {}/{} ({:.0}%)  -> {:+.0}pt for team 1\n\
-         team 2 on TeamPlan: {}/{} ({:.0}%)  -> {:+.0}pt for team 2",
-        base_t1, n, pct(base_t1),
-        tp_as_t1, n, pct(tp_as_t1), pct(tp_as_t1) - pct(base_t1),
-        tp_as_t2, n, pct(tp_as_t2), pct(tp_as_t2) - pct(base_t2),
-    );
-}
 
 #[test]
 #[ignore]
@@ -471,42 +403,3 @@ fn paired_legacy_vs_team_plan() {
     );
 }
 
-/// STEP 4c: the kiter comps. The pillar-camp sweep above contains no unit on the
-/// ENGAGE/KITE machine at all — the Warlock was deliberately taken off it — so it
-/// cannot see the DPS half of the solve. Mage and Hunter are the two classes that
-/// are on it.
-///
-/// Reports each side's GAIN against its own Legacy-vs-Legacy baseline, for the
-/// same reason the pillar sweep does: the comps are not evenly matched, so raw
-/// head-to-head counts are not comparable to each other.
-#[test]
-#[ignore]
-fn head_to_head_kiter_comps() {
-    let seeds: Vec<u64> = (1..=12).collect();
-    let comps: [(&str, &[&str], &[&str]); 2] = [
-        ("Mage+Priest vs Warrior+Priest", &["Mage", "Priest"], &["Warrior", "Priest"]),
-        ("Hunter+Priest vs Rogue+Priest", &["Hunter", "Priest"], &["Rogue", "Priest"]),
-    ];
-    for (label, t1, t2) in comps {
-        // Team 2's column is `won_t2`, NOT `!won` — a draw belongs to neither
-        // side, and crediting it to team 2 would fake a TeamPlan gain.
-        let baseline: Vec<Cell> = seeds.iter().map(|&s| run_comp("Legacy", "Legacy", s, t1, t2)).collect();
-        let base = baseline.iter().filter(|c| c.won).count();
-        let base_t2 = baseline.iter().filter(|c| c.won_t2).count();
-        let with_tp = seeds.iter().filter(|&&s| run_comp("TeamPlan", "Legacy", s, t1, t2).won).count();
-        let vs_tp = seeds
-            .iter()
-            .filter(|&&s| run_comp("Legacy", "TeamPlan", s, t1, t2).won_t2)
-            .count();
-        let n = seeds.len();
-        let pct = |k: usize| 100.0 * k as f32 / n as f32;
-        println!(
-            "\n{label}\n  Legacy vs Legacy        team 1 {}/{} ({:.0}%), team 2 {}/{} ({:.0}%)\n\
-               team 1 on TeamPlan      team 1 {}/{} ({:.0}%)  -> {:+.0}pt for the kiter side\n\
-               team 2 on TeamPlan      team 2 {}/{} ({:.0}%)  -> {:+.0}pt for the other side",
-            base, n, pct(base), base_t2, n, pct(base_t2),
-            with_tp, n, pct(with_tp), pct(with_tp) - pct(base),
-            vs_tp, n, pct(vs_tp), pct(vs_tp) - pct(base_t2),
-        );
-    }
-}
