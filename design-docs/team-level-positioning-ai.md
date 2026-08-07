@@ -509,7 +509,7 @@ The scorer also carries kite entry/sustain hysteresis, the out-of-mana wand
 fallback, and the seek-chase leaky bucket — none of which is a position
 constraint.
 
-So step 4 has two possible honest endings, and one must be chosen:
+So step 4 had two possible honest endings, and one had to be chosen:
 
 1. **Ranged DPS stays on the scorer permanently.** The solve becomes a
    healer-and-melee mechanism. `los_seek` and `range_band` are then never retired.
@@ -517,9 +517,29 @@ So step 4 has two possible honest endings, and one must be chosen:
    so "satisfy this, and among satisfying positions maximise that" is expressible.
    This is a real extension to the solve, not a tweak.
 
-Until one is chosen, step 4's stated goal of retiring `cover_pull` /
-`cover_seek` / `medic_chase` is **not achievable**: `Legacy` still needs all
-three, and the kiter terms are staying regardless.
+**DECIDED 2026-08-06: ending (1). Ranged DPS stays on the scorer, and step 4 is
+CLOSED.** Three grounds. The measurement: `HoldRange` on the kiter machine cost
+~17 points and a distance-maximising tie-break made it worse — the gap is
+structural, and closing it via (2) would mean the solve re-acquiring four
+mechanisms the scorer already has and has already tuned (distance-maximising
+`flee`, the range band, kite hysteresis, the OOM wand fallback) for no measured
+gain. The architecture: `argmax_interest` is ALREADY hard-constraints-plus-
+continuous-objective, so ending (2) converges the solve onto the scorer's shape
+rather than inventing a better one — different roles legitimately want different
+machinery. The dip analysis: even a kiter's committed CC plays (a hypothetical
+Mage nova-dip) would be postures BESIDE a solve, not constraint sets inside one,
+so unification buys nothing there either.
+
+Revisit ONLY if step 8's counter-formations produce a concrete team-level
+requirement for ranged DPS that the per-unit scorer cannot express (a pincer
+assigning kiters to sides is the plausible candidate). That is a new requirement
+with its own measurement, not a reopening of this decision.
+
+Consequences of closing: the retirement clause is amended — `cover_pull` /
+`medic_chase` are retired UNDER `TEAMPLAN` (measured; `cover_seek` was deleted
+outright as dead in both profiles), while `Legacy` keeps them until `Legacy`
+itself is retired, and the kiter's `los_seek` / `range_band` are permanent. The
+step-4 deliverable stands as: the healer solve, validated at n=100.
 
 #### The solve is a team problem, rooted at a focal unit
 
@@ -671,14 +691,14 @@ different from adjusting them because the AI finds them inconvenient.
    even though counter-formation *selection* is deferred — retrofitting divergence
    later would mean redoing the solve.
 
-   **STATUS 2026-08-04: half done, and the other half is blocked on a decision.**
-   The healer is on the solve and it is worth ~+8 percentage points to whichever
-   side runs it. Ranged DPS was ported, measured at roughly -17 points, and
-   reverted — see "The framing does not fit a kiter" above, which is a structural
-   limit rather than a tuning problem. The retirement clause is therefore **not
-   currently achievable**: `Legacy` still needs all three mechanisms, and the
-   kiter's `los_seek` / `range_band` are staying regardless. Pick ending (1) or
-   (2) from that section before calling step 4 done.
+   **CLOSED 2026-08-06.** The healer half shipped and is validated at n=100
+   head-to-head (+36pt Warlock+Priest z=5.2, +14pt Hunter+Priest z=2.2, +10pt
+   Warrior+Priest z=1.8, -6pt noise Rogue+Priest). Ranged DPS was ported,
+   measured at ~-17 points, reverted, and the ending DECIDED: ranged DPS stays
+   on the scorer permanently — see the decision block in "The framing does not
+   fit a kiter" for the grounds and the single narrow reopening condition
+   (step 8). Regression armor for the shipped behaviours lives in
+   `movement_probes::nagrand_teamplan`.
 5. Move kill-target selection onto the plan, held constant.
 
    **MEASURED AND REFUTED AS SPECIFIED (2026-08-06).** Four variants were built
