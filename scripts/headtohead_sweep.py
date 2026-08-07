@@ -104,11 +104,23 @@ def main() -> int:
     )
 
     tally: dict[str, dict[str, int]] = {}
+    errors = 0
     for r in csv.DictReader(open(out)):
         c = tally.setdefault(r["label"], {"t1": 0, "t2": 0, "draw": 0, "n": 0})
-        c["n"] += 1
         w = r["winner"].strip()
+        if w not in ("team1", "team2", "draw"):
+            # A failed match is not a draw and must not inflate n — counting it
+            # as one would silently bias every rate in the report.
+            errors += 1
+            continue
+        c["n"] += 1
         c["t1" if w == "team1" else "t2" if w == "team2" else "draw"] += 1
+    if errors:
+        print(f"WARNING: {errors} match(es) errored and are excluded from all rates",
+              file=sys.stderr)
+    missing = [label for label, _, _ in cells if tally.get(label, {}).get("n", 0) == 0]
+    if missing:
+        sys.exit(f"no successful matches in cell(s) {missing}; cannot analyze")
 
     n = args.seeds
     print(f"\n{'cell':6} {'T1':>4} {'T2':>4} {'draw':>5} {'T1%':>5} {'95% CI':>14}")

@@ -39,11 +39,11 @@ pub fn handle_camera_input(
     // Keyboard zoom controls
     if keybindings.action_pressed(GameAction::CameraZoomIn, &keyboard) {
         let zoom_speed = 30.0 * dt;
-        camera_controller.zoom_distance = (camera_controller.zoom_distance - zoom_speed).clamp(20.0, 150.0);
+        camera_controller.zoom_distance = (camera_controller.zoom_distance - zoom_speed).clamp(20.0, 220.0);
     }
     if keybindings.action_pressed(GameAction::CameraZoomOut, &keyboard) {
         let zoom_speed = 30.0 * dt;
-        camera_controller.zoom_distance = (camera_controller.zoom_distance + zoom_speed).clamp(20.0, 150.0);
+        camera_controller.zoom_distance = (camera_controller.zoom_distance + zoom_speed).clamp(20.0, 220.0);
     }
 
     // WASD camera panning - moves the target point
@@ -112,7 +112,7 @@ pub fn handle_camera_input(
     if !egui_wants_pointer {
         for event in mouse_wheel.read() {
             let zoom_delta = event.y * 3.0; // Zoom speed
-            camera_controller.zoom_distance = (camera_controller.zoom_distance - zoom_delta).clamp(20.0, 150.0);
+            camera_controller.zoom_distance = (camera_controller.zoom_distance - zoom_delta).clamp(20.0, 220.0);
         }
     } else {
         // Drain events if egui wants pointer

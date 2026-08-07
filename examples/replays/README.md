@@ -18,10 +18,13 @@ a `_legacy` twin on the same seed, so the pair isolates the AI.
 
 ## The Hunter+Priest regression
 
-`Hunter+Priest` vs `Rogue+Priest` on `PillaredArena`. **The healer solve is worth
-about -17pt to this comp**, against +8 to +17 for every other comp measured — the
-one place it is clearly harmful, and the reason step 4's healer half is not yet
-called done.
+`Hunter+Priest` vs `Rogue+Priest` on `PillaredArena`. **HISTORICAL: the -17pt
+regression these configs were cut for was n=12 sample noise** — the definitive
+n=100 run measures the healer solve + kiter leash at **+14pt for this comp**
+(z=2.2; CSV in `design-docs/balance/`). The configs stay because the seeds are
+still instructive to watch: the investigation they enabled found the kiter
+healer-leash bug (a Hunter fleeing clean out of its own Priest's range), which
+was real regardless of the phantom regression.
 
 These are HEAD-TO-HEAD configs: team 2 runs `Legacy` in every one, so the ONLY
 difference between a pair is team 1's Priest. Anything you see team 2 do is a

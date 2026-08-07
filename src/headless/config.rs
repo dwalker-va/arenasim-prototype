@@ -195,7 +195,9 @@ impl HeadlessMatchConfig {
     }
 
     /// Validate the configuration
-    fn validate(&self) -> Result<(), String> {
+    // `pub(crate)` so the batch runner can fail fast on a bad config instead of
+    // panicking a worker mid-sweep after the matches have been paid for.
+    pub(crate) fn validate(&self) -> Result<(), String> {
         // Validate team sizes
         if self.team1.is_empty() || self.team1.len() > 3 {
             return Err("team1 must have 1-3 members".to_string());

@@ -202,6 +202,10 @@ impl AiProfiles {
 
     /// True when the two teams differ — i.e. this match is a head-to-head of the
     /// two implementations rather than a uniform world.
+    ///
+    /// Currently exercised only by tests (`trace_label` matches exhaustively
+    /// instead); kept as the semantic query future consumers should reach for
+    /// rather than re-deriving `team1 != team2`.
     pub fn is_head_to_head(&self) -> bool {
         self.team1 != self.team2
     }

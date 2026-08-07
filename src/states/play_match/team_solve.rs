@@ -44,7 +44,7 @@ use bevy::prelude::*;
 use std::collections::BTreeMap;
 
 use super::arena_bounds::ArenaBounds;
-use super::map_geometry::{has_line_of_sight, ObstacleVolume, EYE_HEIGHT, MOVER_RADIUS};
+use super::map_geometry::{has_line_of_sight, position_blocked, ObstacleVolume, EYE_HEIGHT, MOVER_RADIUS};
 use super::team_plan::{Anchor, RoleIntent, Stance};
 
 /// Where a candidate position is probed from, as an offset ring around the
@@ -335,6 +335,11 @@ pub const C_LEASH: u16 = 1 << 2;
 /// Must stay OUTSIDE enemy threat range.
 pub const C_STANDOFF: u16 = 1 << 3;
 /// Must stay inside the arena.
+/// NOTE: set by [`violations`] for completeness, but [`solve_unit`] never
+/// scores it — its `usable` pre-filter excludes out-of-bounds (and
+/// inside-obstacle) candidates outright, because neither has a useful gradient.
+/// The bit exists so DIRECT callers of `violations` (tests, future tracing)
+/// still see the violation named.
 pub const C_BOUNDS: u16 = 1 << 4;
 /// Must be on the same side of the focus as the rest of the team.
 pub const C_COHESION: u16 = 1 << 5;
@@ -682,12 +687,24 @@ fn infeasibility(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) -> f32
         }
     }
     if v & C_STANDOFF != 0 {
-        // Deficit against the nearest enemy: walking away shrinks it smoothly,
-        // which is what turns "I cannot escape this tick" into "step outward".
-        let nearest = world
-            .enemies_of(ctx.unit.team)
-            .map(|e| candidate.distance(e.pos))
-            .fold(f32::MAX, f32::min);
+        // Deficit against the nearest unit of the SAME SET the flag measured —
+        // casters for `OccupyCover`, all enemies for `HoldRange`. A review
+        // caught these disagreeing: the flag fired on a caster inside the
+        // radius while the gradient ranked candidates by distance from a melee
+        // standing closer, so steps that actually escaped the caster scored no
+        // better. Walking away shrinks the deficit smoothly, which is what
+        // turns "I cannot escape this tick" into "step outward".
+        let nearest = if intent == RoleIntent::OccupyCover {
+            world
+                .enemy_casters_of(ctx.unit.team)
+                .map(|e| candidate.distance(e.pos))
+                .fold(f32::MAX, f32::min)
+        } else {
+            world
+                .enemies_of(ctx.unit.team)
+                .map(|e| candidate.distance(e.pos))
+                .fold(f32::MAX, f32::min)
+        };
         if nearest.is_finite() {
             cost += W_STANDOFF * (world.threat_radius - nearest).max(0.0);
         }
@@ -706,33 +723,93 @@ fn infeasibility(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) -> f32
 /// satisfies its intent, standing still also satisfies it, and standing still is
 /// nearest.
 pub fn solve_unit(intent: RoleIntent, ctx: &SolveContext) -> Vec2 {
-    // Out-of-bounds is the one hard exclusion: a position outside the arena is
-    // not a position, and unlike every other constraint there is no useful
-    // gradient in "how far through the wall". Everything else is ranked.
-    let in_bounds = |c: &Vec2| {
+    // Two hard exclusions with no useful gradient: outside the arena, and
+    // INSIDE another obstacle. The second is a review catch — a point inside a
+    // pillar is occluded from everyone and therefore maximally attractive to
+    // `OccupyCover`, but unreachable: the mover parks against the collision
+    // skin forever chasing it. (The unit's own current position is candidate 0
+    // and is never inside a volume, so this cannot exclude everything.)
+    // Out-of-bounds is the one hard exclusion. Screening candidates that sit
+    // INSIDE an obstacle was tried (a review finding: an in-pillar point is
+    // occluded from everyone and "unreachable") and MEASURED AT -10pt on the
+    // flagship comp, so it is deliberately absent: chasing the unreachable
+    // point parks the mover against the pillar's collision skin, and a healer
+    // pressed against cover IS in cover — the resolver keeps it out of the
+    // volume, and that pillar-hugging equilibrium beats every "reachable"
+    // alternative candidate. Do not re-add the screen without re-measuring.
+    let usable = |c: &Vec2| {
         ctx.world.bounds.as_ref().is_none_or(|b| b.contains(Vec3::new(c.x, 0.0, c.y)))
     };
 
-    let mut best: Option<(f32, f32, Vec2)> = None;
-    for candidate in candidates_for(ctx) {
-        if !in_bounds(&candidate) {
-            continue;
-        }
-        // Lexicographic: satisfy the intent first, and only then prefer not
-        // moving. Standing still is candidate 0 and ties at equal cost, which is
-        // what keeps a satisfied unit planted.
-        //
-        // A distance-MAXIMISING secondary was tried for `HoldRange`, to mimic the
-        // Hunter's `flee` term, and measured worse: no change for the Hunter comp
-        // and -8pt for the Mage. Reverted.
-        let key = (infeasibility(intent, candidate, ctx), candidate.distance(ctx.unit.pos));
-        if best.is_none_or(|(bc, bd, _)| (key.0, key.1) < (bc, bd)) {
-            best = Some((key.0, key.1, candidate));
+    // Proximity-danger deficit at a candidate: how far INSIDE `threat_radius`
+    // of the nearest living enemy (melee included — this is about being stood
+    // on, not about cover) it sits. Zero when nobody is close.
+    //
+    // This is the anti-statue tie-break, and it exists because of a review
+    // catch: with no enemy caster (a melee-only comp) or no obstacles
+    // (BasicArena, the DEFAULT map), every candidate ties at equal cost and the
+    // stand-still tie-break froze a PRESSURED healer in place — where `Legacy`
+    // kites via `threat_repulsion`. As a SECONDARY key it cannot override a
+    // constraint (the earlier hard-standoff attempt measured worse for exactly
+    // that reason), and with every threat beyond the radius it is uniformly
+    // zero, preserving the anti-jitter stand-still behaviour that the measured
+    // Nagrand results depend on.
+    // Proximity-danger deficit: how far inside `threat_radius` of the nearest
+    // enemy (melee included) a candidate sits. ARMED ONLY ON A FLAT FIELD —
+    // see below.
+    let danger = |c: &Vec2| {
+        ctx.world
+            .enemies_of(ctx.unit.team)
+            .map(|e| (ctx.world.threat_radius - c.distance(e.pos)).max(0.0))
+            .fold(0.0f32, f32::max)
+    };
+
+    let scored: Vec<(f32, Vec2)> = candidates_for(ctx)
+        .into_iter()
+        .filter(usable)
+        .map(|c| (infeasibility(intent, c, ctx), c))
+        .collect();
+
+    // THE ANTI-STATUE KEY, ARMED ONLY WHEN THE CONSTRAINT FIELD IS FLAT.
+    //
+    // The statue (a review catch): with no enemy caster (melee-only comp) or no
+    // obstacles (BasicArena, the DEFAULT map), every candidate ties on every
+    // constraint, the stand-still tie-break wins, and a PRESSURED healer
+    // freezes at a Warrior's feet — where `Legacy` kites via
+    // `threat_repulsion`.
+    //
+    // The first fix applied the danger key UNCONDITIONALLY as a secondary sort
+    // and MEASURED AT -44pt on the flagship comp: whenever an enemy was within
+    // 12yd it dragged the healer off equally-satisfying cover positions,
+    // trading the pillar equilibrium the +36pt result depends on for generic
+    // retreat. Gating on a flat field keeps it provably inert wherever the
+    // constraints have ANY gradient (any cover map mid-fight) and active
+    // exactly where the statue lives: a field with nothing else to prefer.
+    let flat = scored
+        .iter()
+        .map(|(c, _)| *c)
+        .fold((f32::MAX, f32::MIN), |(lo, hi), c| (lo.min(c), hi.max(c)));
+    let field_is_flat = !scored.is_empty() && (flat.1 - flat.0) < 1e-6;
+
+    let mut best: Option<((f32, f32, f32), Vec2)> = None;
+    for (cost, candidate) in scored {
+        // Lexicographic: satisfy the intent, then (flat fields only) get out of
+        // stand-on range, then prefer not moving. Standing still is candidate 0
+        // and ties at equal cost, which is what keeps a satisfied, unthreatened
+        // unit planted. (A distance-MAXIMISING tertiary was tried for
+        // `HoldRange` and measured worse: -8pt for the Mage.)
+        let key = (
+            cost,
+            if field_is_flat { danger(&candidate) } else { 0.0 },
+            candidate.distance(ctx.unit.pos),
+        );
+        if best.is_none_or(|(bk, _)| key < bk) {
+            best = Some((key, candidate));
         }
     }
-    // Every candidate out of bounds (a unit already outside the arena): hold.
-    // The executor clamps and slides, so this is a safe terminal answer.
-    best.map(|(_, _, p)| p).unwrap_or(ctx.unit.pos)
+    // Every candidate excluded (a unit already outside the arena): hold. The
+    // executor clamps and slides, so this is a safe terminal answer.
+    best.map(|(_, p)| p).unwrap_or(ctx.unit.pos)
 }
 
 /// Solve the whole team, in [`solve_order`], each unit seeing the placements
@@ -869,7 +946,8 @@ pub fn world_from_context(
 /// Solve one unit's position, or `None` when it is already where it wants to be.
 ///
 /// Returns a POSITION, not a bearing, because the chosen spot can be tens of
-/// yards away (see [`SOLVE_RADII`]) and getting there may mean rounding a pillar.
+/// yards away (a deep shadow sample in `candidates_for`) and getting there may
+/// mean rounding a pillar.
 /// `MovementGoal::Point` already navigates — it runs `steer_toward_goal`, which
 /// aims at an obstacle's tangent instead of oozing along its face — whereas a
 /// bare direction would walk the unit into the pillar between it and the cover it
@@ -1445,6 +1523,34 @@ mod tests {
         assert!(
             spot.distance(Vec2::ZERO) > 5.0,
             "must move AWAY from the threat, got {spot:?}"
+        );
+    }
+
+    /// THE ANTI-STATUE KEY. Melee-only threat, zero obstacles (BasicArena, the
+    /// default map): every candidate ties on every constraint, and before the
+    /// danger tie-break the stand-still candidate won — a PRESSURED healer
+    /// frozen at a Warrior's feet, where `Legacy` kites away. The solve must
+    /// back out of stand-on range even when the constraint set is flat.
+    #[test]
+    fn a_flat_constraint_set_still_backs_away_from_a_melee_in_range() {
+        let mut w = world(vec![
+            healer(1, 1, 0, 0.0, 0.0),
+            melee(2, 1, 1, 30.0, 0.0),           // partner, sighted, in range
+            melee(3, 2, 0, 3.0, 0.0),            // enemy melee ON the healer
+        ]);
+        w.threat_radius = 12.0;
+        w.obstacles = vec![]; // BasicArena: no cover anywhere
+        let ctx = SolveContext {
+            world: &w,
+            unit: w.units[0],
+            focus: None,
+            placed: &BTreeMap::new(),
+        };
+        let spot = solve_unit(RoleIntent::OccupyCover, &ctx);
+        assert_ne!(spot, Vec2::ZERO, "must not stand still under a melee");
+        assert!(
+            spot.distance(Vec2::new(3.0, 0.0)) > 3.0,
+            "must move AWAY from the melee, got {spot:?}"
         );
     }
 

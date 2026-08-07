@@ -30,7 +30,10 @@ cargo run --release -- --headless /tmp/test.json
   `design-docs/team-level-positioning-ai.md`). Because matches are deterministic,
   running the same seed under both profiles is a PAIRED comparison in which the AI
   is the only variable. Also available as `--ai-profile` for `--matrix`, which
-  records it in the CSV header and the output filename.
+  records it in the CSV header and the output filename. `team1_ai_profile` /
+  `team2_ai_profile` override it PER TEAM — required for head-to-head
+  measurement (a uniform A/B compares two internally consistent worlds and
+  cannot answer "is the new AI better"; see `scripts/headtohead_sweep.py`).
 - `map`: "BasicArena", "TwinPillars", "PillaredArena", or "TestVerticality"
   ("PillaredArena" is the Nagrand Arena replica — a ~120yd circular bowl with four
   octagonal pillars and 10yd starting rooms; "TwinPillars" is the original

@@ -660,6 +660,8 @@ pub fn setup_play_match(
         },
         Tonemapping::TonyMcMapface,
         Bloom::NATURAL,
+        // First-frame placement only — `update_camera_position` owns the
+        // camera from frame two via `CameraController` (scaled above).
         Transform::from_xyz(0.0, 40.0 * view_scale, 50.0 * view_scale)
             .looking_at(Vec3::ZERO, Vec3::Y),
         ArenaCamera,
@@ -689,7 +691,15 @@ pub fn setup_play_match(
     commands.insert_resource(SimulationSpeed { multiplier: 1.0 });
     
     // Initialize camera controller
-    commands.insert_resource(CameraController::default());
+    // Framed to the map THROUGH the controller, not the spawn Transform:
+    // `update_camera_position` rewrites the camera's translation from
+    // `CameraController` every frame, so a scaled spawn transform survives
+    // exactly one frame (a review catch — the first framing fix was dead code).
+    // Scaling `zoom_distance` is what actually holds the framing.
+    commands.insert_resource(CameraController {
+        zoom_distance: 60.0 * view_scale,
+        ..Default::default()
+    });
     
     // Initialize match countdown (10 seconds before gates open)
     commands.insert_resource(MatchCountdown::default());
