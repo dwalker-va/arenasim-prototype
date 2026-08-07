@@ -623,3 +623,49 @@ fn different_seeds_produce_different_matches() {
 
     assert!(differs, "seeds 1 and 2 produced identical results — RNG may not be wired");
 }
+
+/// A kill call outlives the combatant it named, and the team moves on.
+///
+/// The call is stored as a slot index, not an entity, and it is NOT cleared
+/// when that slot's occupant dies — `acquire_targets` simply stops resolving it
+/// and falls back to the nearest visible enemy. That fallback is the whole
+/// reason the call can be absolute and guardrail-free: a stale call degrades to
+/// ordinary targeting instead of parking the team on a corpse.
+///
+/// The failure this guards is silent. If the fallback regressed, a team whose
+/// called target died would simply stop attacking anything — no error, just a
+/// team standing idle, which reads as a balance shift rather than a bug.
+///
+/// The assertion is deliberately NOT "team 1 wins". Whether a held call is good
+/// is a balance question the plan measured separately (a call is worth +25 to
+/// +65pt set well and -48 to -69pt set badly), so tying a targeting-mechanics
+/// test to an outcome would make it a flaky balance assertion. What isolates
+/// the fallback is damage landing on the enemy that was NEVER called: team 1
+/// can only have dealt it by re-targeting once its call stopped resolving.
+///
+/// Covers the plan's AE5 (`docs/plans/2026-08-06-001-feat-in-match-kill-call-and-banter-plan.md`).
+#[test]
+fn a_call_survives_its_target_s_death_and_the_team_retargets() {
+    let mut config = create_config(vec!["Mage", "Priest"], vec!["Warrior", "Priest"], Some(424242));
+    config.max_duration_secs = 300.0;
+    // Call the enemy Priest (slot 1); the Warrior in slot 0 is never called.
+    config.team1_kill_target = Some(1);
+
+    let result = run_headless_match_with(config, true, None).expect("match runs");
+
+    let called = &result.team2_combatants[1];
+    let never_called = &result.team2_combatants[0];
+    assert_eq!(called.class_name, "Priest", "fixture: slot 1 is the called Priest");
+    assert_eq!(never_called.class_name, "Warrior", "fixture: slot 0 is never called");
+
+    assert!(
+        !called.survived,
+        "fixture expects the called target to die, so the fallback is exercised at all"
+    );
+    assert!(
+        never_called.damage_taken > 0.0,
+        "team 1 never attacked the enemy it did not call ({} damage taken) — the call stopped \
+         resolving when its target died and nothing picked up a new one",
+        never_called.damage_taken
+    );
+}
