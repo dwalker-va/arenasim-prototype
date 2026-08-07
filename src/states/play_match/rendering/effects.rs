@@ -272,12 +272,28 @@ pub fn cleanup_expired_spell_impacts(
 // Speech Bubble Systems
 // ==============================================================================
 
+/// Whether a speech bubble should be drawn at all, given the gate state.
+///
+/// Ability bubbles are suppressed while the gates are closed: the countdown is
+/// the buff rotation, and a Mage yelling "Frost Armor!" at an empty starting
+/// room steps on the banter that plays there. Banter always renders. The filter
+/// lives here rather than at the ~12 `spawn_speech_bubble` call sites because
+/// this renderer is graphical-only — no sim file is touched, so headless stays
+/// byte-identical by construction.
+pub fn bubble_visible(kind: BubbleKind, gates_opened: bool) -> bool {
+    match kind {
+        BubbleKind::Ability => gates_opened,
+        BubbleKind::Banter => true,
+    }
+}
+
 /// Render speech bubbles above combatants' heads
 pub fn render_speech_bubbles(
     mut contexts: EguiContexts,
     speech_bubbles: Query<&SpeechBubble>,
     combatants: Query<&Transform, With<Combatant>>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
+    countdown: Res<MatchCountdown>,
 ) {
     let Ok((camera, camera_transform)) = camera_query.single() else {
         return;
@@ -287,6 +303,11 @@ pub fn render_speech_bubbles(
     let Some(ctx) = contexts.try_ctx_mut() else { return; };
 
     for bubble in speech_bubbles.iter() {
+        // Ability bubbles stay silent until the gates open (banter always shows)
+        if !bubble_visible(bubble.kind, countdown.gates_opened) {
+            continue;
+        }
+
         // Get owner's position
         let Ok(owner_transform) = combatants.get(bubble.owner) else {
             continue;
@@ -3988,5 +4009,25 @@ pub fn cleanup_casting_orbs(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ability_bubbles_are_hidden_until_the_gates_open() {
+        // The starting-room cleanup: no buff shouting during the countdown.
+        assert!(!bubble_visible(BubbleKind::Ability, false));
+        assert!(bubble_visible(BubbleKind::Ability, true));
+    }
+
+    #[test]
+    fn banter_bubbles_render_in_both_gate_states() {
+        // Banter's whole point is the pre-gate scene, and the mid-fight shout
+        // has to survive the gates opening too.
+        assert!(bubble_visible(BubbleKind::Banter, false));
+        assert!(bubble_visible(BubbleKind::Banter, true));
     }
 }
