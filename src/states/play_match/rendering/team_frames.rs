@@ -14,12 +14,20 @@
 //! offscreen via `egui_kittest` for fast visual iteration; the thin Bevy
 //! wrapper [`render_team_frames`] collects ECS state into plain data each
 //! frame and calls it.
+//!
+//! The frames also host the in-match kill-target call. Clicking a combatant's
+//! frame sets the *opposing* team's call on that combatant — Team 1's call
+//! points at an enemy, so it marks a frame in the Team 2 column. Following the
+//! Results-screen convention, the pure draw function only reports which frame
+//! was clicked; [`render_team_frames`] applies it to [`MatchConfig`], and
+//! `acquire_targets` re-reads that config every tick, so no second
+//! target-forcing path exists.
 
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
 use crate::states::configure_match_ui::ClassIcons;
-use crate::states::match_config::CharacterClass;
+use crate::states::match_config::{CharacterClass, MatchConfig};
 use crate::states::results_ui::class_color32;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
@@ -61,10 +69,56 @@ pub struct CombatantFrame {
 }
 
 /// Both columns.
+///
+/// The two `*_called_slot` fields are already flipped from the config's
+/// point of view: they name the primary slot marked *in that column*, which
+/// is the call belonging to the other team. The wrapper does the flip once so
+/// the draw function never has to reason about whose call it is showing.
 #[derive(Default)]
 pub struct TeamFramesData {
     pub team1: Vec<CombatantFrame>,
     pub team2: Vec<CombatantFrame>,
+    /// Primary slot marked in the Team 1 column — i.e. Team 2's kill-target call.
+    pub team1_called_slot: Option<usize>,
+    /// Primary slot marked in the Team 2 column — i.e. Team 1's kill-target call.
+    pub team2_called_slot: Option<usize>,
+    /// Whether the call markers and their click affordance are shown at all.
+    pub show_calls: bool,
+}
+
+/// A frame the operator clicked, reported back by [`draw_team_frames`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CallClick {
+    /// The column that was clicked (1 or 2). The call belongs to the *other* team.
+    pub clicked_team: u8,
+    /// Index into that column's primary combatants, pets excluded — the same
+    /// indexing `MatchConfig::teamN_kill_target` uses.
+    pub slot: usize,
+}
+
+/// The `(team1_called_slot, team2_called_slot)` a config implies.
+///
+/// A team's call points at an enemy, so the flip is total: Team 1's call is
+/// what marks the Team 2 column. Paired with [`apply_call_click`], which
+/// flips the same way, so a click and the mark it produces land in the same
+/// column.
+pub fn called_slots(config: &MatchConfig) -> (Option<usize>, Option<usize>) {
+    (config.team2_kill_target, config.team1_kill_target)
+}
+
+/// Apply a frame click to the kill-target config.
+///
+/// A team's call points at an enemy, so a click in the Team 2 column sets
+/// `team1_kill_target`. Clicking the already-called combatant clears the call,
+/// matching the pre-match Kill Target Priority control's toggle-off behavior.
+pub fn apply_call_click(config: &mut MatchConfig, click: CallClick) {
+    let slot = Some(click.slot);
+    let call = if click.clicked_team == 1 {
+        &mut config.team2_kill_target
+    } else {
+        &mut config.team1_kill_target
+    };
+    *call = if *call == slot { None } else { slot };
 }
 
 // ==============================================================================
@@ -86,6 +140,20 @@ const MAX_AURA_ICONS: usize = 8;
 
 const PET_HEADER_H: f32 = 16.0;
 const PET_HP_H: f32 = 10.0;
+/// Height of the "TEAM N" caption above a column.
+const COLUMN_LABEL_H: f32 = 16.0;
+
+/// The call marker is deliberately hueless. Every hue in this UI is already
+/// spoken for by gameplay signal — class colors, gold buff borders, red
+/// debuff/CC borders, the green/yellow/red HP thresholds — so the call reads
+/// by *shape* (a reticle) and *value* (a brighter border) instead of claiming
+/// another color.
+const CALL_MARK: egui::Color32 = egui::Color32::from_rgb(236, 238, 248);
+/// Border shown while the pointer is over a clickable frame.
+const CALL_HOVER: egui::Color32 = egui::Color32::from_rgb(110, 114, 132);
+const RETICLE_R: f32 = 5.0;
+/// How far the reticle's cross ticks reach past its ring.
+const RETICLE_TICK: f32 = 2.5;
 
 fn frame_height(frame: &CombatantFrame) -> f32 {
     if frame.pet_label.is_some() {
@@ -105,89 +173,173 @@ fn frame_height(frame: &CombatantFrame) -> f32 {
 // Pure draw function (kittest-renderable)
 // ==============================================================================
 
+/// Call slot for each frame in a column, top to bottom.
+///
+/// `None` for pets: a call addresses primary combatants only, and because a
+/// pet consumes no index it can never shift a teammate's slot. The result
+/// therefore lines up with the pet-filtered `enemy_primary` list that
+/// `acquire_targets` resolves `teamN_kill_target` against.
+pub fn call_slots(frames: &[CombatantFrame]) -> Vec<Option<usize>> {
+    let mut next = 0;
+    frames
+        .iter()
+        .map(|frame| {
+            if frame.pet_label.is_some() {
+                return None;
+            }
+            let slot = next;
+            next += 1;
+            Some(slot)
+        })
+        .collect()
+}
+
+/// Screen rects of one column's frames, top to bottom — the exact geometry
+/// [`draw_team_frames`] paints and hit-tests against. Public so tests can
+/// click a frame without restating the layout math.
+pub fn column_frame_rects(
+    frames: &[CombatantFrame],
+    team: u8,
+    screen: egui::Rect,
+) -> Vec<egui::Rect> {
+    if frames.is_empty() {
+        return Vec::new();
+    }
+    let x = if team == 1 {
+        screen.left() + EDGE_MARGIN
+    } else {
+        screen.right() - EDGE_MARGIN - FRAME_W
+    };
+    let total_h = COLUMN_LABEL_H
+        + frames.iter().map(frame_height).sum::<f32>()
+        + (frames.len() as f32 - 1.0) * FRAME_SPACING;
+    let mut y = (screen.center().y - total_h / 2.0).max(60.0) + COLUMN_LABEL_H + 2.0;
+
+    frames
+        .iter()
+        .map(|frame| {
+            let h = frame_height(frame);
+            let rect = egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(FRAME_W, h));
+            y += h + FRAME_SPACING;
+            rect
+        })
+        .collect()
+}
+
 /// Draw both team-frame columns. Pure egui — no ECS access.
+///
+/// Returns the frame the operator clicked this frame, if any. Clicks are only
+/// sensed when `data.show_calls` is set: with the affordance off the frames
+/// allocate no interactable rects at all, so nothing can be called by accident
+/// and the pointer passes through to the camera as before.
 pub fn draw_team_frames(
     ctx: &egui::Context,
     data: &TeamFramesData,
     class_icons: &ClassIcons,
     spell_icons: &SpellIcons,
-) {
+) -> Option<CallClick> {
     // Anchor to available_rect (not screen_rect): egui panels shown earlier
     // this frame (e.g. the combat log SidePanel) shrink the available rect,
     // so open diagnostics push the frames aside instead of being painted
     // over. Requires render_combat_panel to run before this system.
     let avail = ctx.available_rect();
 
+    let mut clicked = None;
     egui::Area::new(egui::Id::new("team_frames"))
         .fixed_pos(egui::pos2(0.0, 0.0))
         .show(ctx, |ui| {
-            let painter = ui.painter();
-            draw_column(
-                painter,
+            // Both columns always draw; `or` picks whichever reported a click.
+            let c1 = draw_column(
+                ui,
                 &data.team1,
-                avail.left() + EDGE_MARGIN,
+                1,
                 avail,
-                "TEAM 1",
+                data.team1_called_slot,
+                data.show_calls,
                 class_icons,
                 spell_icons,
             );
-            draw_column(
-                painter,
+            let c2 = draw_column(
+                ui,
                 &data.team2,
-                avail.right() - EDGE_MARGIN - FRAME_W,
+                2,
                 avail,
-                "TEAM 2",
+                data.team2_called_slot,
+                data.show_calls,
                 class_icons,
                 spell_icons,
             );
+            clicked = c1.or(c2);
         });
+    clicked
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_column(
-    painter: &egui::Painter,
+    ui: &egui::Ui,
     frames: &[CombatantFrame],
-    x: f32,
+    team: u8,
     screen: egui::Rect,
-    label: &str,
+    called_slot: Option<usize>,
+    show_calls: bool,
     class_icons: &ClassIcons,
     spell_icons: &SpellIcons,
-) {
-    if frames.is_empty() {
-        return;
+) -> Option<CallClick> {
+    let rects = column_frame_rects(frames, team, screen);
+    if rects.is_empty() {
+        return None;
     }
 
-    let label_h = 16.0;
-    let total_h = label_h
-        + frames.iter().map(frame_height).sum::<f32>()
-        + (frames.len() as f32 - 1.0) * FRAME_SPACING;
-    let mut y = (screen.center().y - total_h / 2.0).max(60.0);
-
+    let painter = ui.painter();
     painter.text(
-        egui::pos2(x + FRAME_W / 2.0, y + label_h / 2.0),
+        egui::pos2(
+            rects[0].center().x,
+            rects[0].min.y - 2.0 - COLUMN_LABEL_H / 2.0,
+        ),
         egui::Align2::CENTER_CENTER,
-        label,
+        if team == 1 { "TEAM 1" } else { "TEAM 2" },
         egui::FontId::proportional(11.0),
         egui::Color32::from_rgb(160, 160, 175),
     );
-    y += label_h + 2.0;
 
-    for frame in frames {
-        let h = frame_height(frame);
+    let mut clicked = None;
+    for ((frame, rect), slot) in frames.iter().zip(&rects).zip(call_slots(frames)) {
+        // Only primary combatants are clickable; a pet sub-frame is inert.
+        let mut hovered = false;
+        if let (true, Some(slot)) = (show_calls, slot) {
+            let response = ui.interact(
+                *rect,
+                egui::Id::new(("team_frame_call", team, slot)),
+                egui::Sense::click(),
+            );
+            hovered = response.hovered();
+            if response.clicked() {
+                clicked = Some(CallClick {
+                    clicked_team: team,
+                    slot,
+                });
+            }
+        }
+        let called = show_calls && slot.is_some() && slot == called_slot;
         draw_frame(
             painter,
-            egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(FRAME_W, h)),
+            *rect,
             frame,
+            called,
+            hovered,
             class_icons,
             spell_icons,
         );
-        y += h + FRAME_SPACING;
     }
+    clicked
 }
 
 fn draw_frame(
     painter: &egui::Painter,
     rect: egui::Rect,
     frame: &CombatantFrame,
+    called: bool,
+    hovered: bool,
     class_icons: &ClassIcons,
     spell_icons: &SpellIcons,
 ) {
@@ -201,13 +353,18 @@ fn draw_frame(
     };
 
     // Frame background + class-colored accent stripe on the arena-facing edge.
+    // The border doubles as the call marker: brighter and thicker on the
+    // called combatant, faintly lifted on hover so the frames read as
+    // clickable while the affordance is on.
     painter.rect_filled(rect, 4.0, egui::Color32::from_rgba_unmultiplied(13, 13, 20, 235));
-    painter.rect_stroke(
-        rect,
-        4.0,
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(45, 45, 60)),
-        egui::StrokeKind::Outside,
-    );
+    let border = if called {
+        egui::Stroke::new(2.0, CALL_MARK)
+    } else if hovered {
+        egui::Stroke::new(1.0, CALL_HOVER)
+    } else {
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(45, 45, 60))
+    };
+    painter.rect_stroke(rect, 4.0, border, egui::StrokeKind::Outside);
     let stripe = egui::Rect::from_min_size(rect.min, egui::vec2(3.0, rect.height()));
     painter.rect_filled(stripe, 2.0, dimmed(class_color32(frame.class)));
 
@@ -262,6 +419,17 @@ fn draw_frame(
         egui::FontId::proportional(14.0),
         dimmed(egui::Color32::WHITE),
     );
+    // Call reticle at the header's trailing edge; the DEAD/STEALTH tag steps
+    // aside for it, since the call outlives the combatant it points at.
+    let reticle_w = 2.0 * (RETICLE_R + RETICLE_TICK);
+    let mut tag_right = inner_x + inner_w;
+    if called {
+        draw_call_reticle(
+            painter,
+            egui::pos2(inner_x + inner_w - reticle_w / 2.0, y + HEADER_H / 2.0 - 1.0),
+        );
+        tag_right -= reticle_w + 4.0;
+    }
     let tag = if !frame.alive {
         Some(("DEAD", egui::Color32::from_rgb(220, 70, 70)))
     } else if frame.stealthed {
@@ -271,7 +439,7 @@ fn draw_frame(
     };
     if let Some((text, color)) = tag {
         painter.text(
-            egui::pos2(inner_x + inner_w, y + HEADER_H / 2.0 - 1.0),
+            egui::pos2(tag_right, y + HEADER_H / 2.0 - 1.0),
             egui::Align2::RIGHT_CENTER,
             text,
             egui::FontId::proportional(11.0),
@@ -315,6 +483,22 @@ fn draw_frame(
     if !frame.debuffs.is_empty() {
         y += ROW_GAP;
         draw_aura_row(painter, inner_x, y, &frame.debuffs, spell_icons);
+    }
+}
+
+/// A crosshair reticle: ring plus four outward ticks, drawn geometrically so
+/// it needs no glyph the bundled fonts might not carry.
+fn draw_call_reticle(painter: &egui::Painter, center: egui::Pos2) {
+    let stroke = egui::Stroke::new(1.5, CALL_MARK);
+    painter.circle_stroke(center, RETICLE_R, stroke);
+    for (dx, dy) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
+        painter.line_segment(
+            [
+                center + egui::vec2(dx, dy) * (RETICLE_R * 0.5),
+                center + egui::vec2(dx, dy) * (RETICLE_R + RETICLE_TICK),
+            ],
+            stroke,
+        );
     }
 }
 
@@ -471,7 +655,8 @@ fn resource_colors(resource_type: ResourceType) -> (egui::Color32, egui::Color32
 // Bevy wrapper (collects ECS state into plain data, then draws)
 // ==============================================================================
 
-/// Collect per-combatant state into [`TeamFramesData`] and draw the frames.
+/// Collect per-combatant state into [`TeamFramesData`], draw the frames, and
+/// apply any call the operator clicked.
 pub fn render_team_frames(
     mut contexts: EguiContexts,
     abilities: Res<AbilityDefinitions>,
@@ -480,6 +665,7 @@ pub fn render_team_frames(
     combatants: Query<(Entity, &Combatant, Option<&ActiveAuras>)>,
     pet_query: Query<&Pet>,
     display_settings: Res<DisplaySettings>,
+    mut config: ResMut<MatchConfig>,
 ) {
     let Some(ctx) = contexts.try_ctx_mut() else { return; };
 
@@ -488,7 +674,15 @@ pub fn render_team_frames(
     let mut rows: Vec<_> = combatants.iter().collect();
     rows.sort_by_key(|(_, c, _)| (c.team, c.slot));
 
-    let mut data = TeamFramesData::default();
+    // `call_slots` derives each frame's slot index from the same pet-filtered
+    // ordering `acquire_targets` uses, so the marks line up with the config.
+    let (team1_called_slot, team2_called_slot) = called_slots(&config);
+    let mut data = TeamFramesData {
+        team1_called_slot,
+        team2_called_slot,
+        show_calls: display_settings.show_call_display,
+        ..default()
+    };
     for (entity, combatant, auras) in rows {
         let pet_label = pet_query
             .get(entity)
@@ -544,5 +738,146 @@ pub fn render_team_frames(
         }
     }
 
-    draw_team_frames(ctx, &data, &class_icons, &spell_icons);
+    if let Some(click) = draw_team_frames(ctx, &data, &class_icons, &spell_icons) {
+        // KTD1: writing the config is the whole mechanism — `acquire_targets`
+        // re-reads it next tick and re-forces the team onto the new target.
+        apply_call_click(&mut config, click);
+    }
+}
+
+// ==============================================================================
+// Tests
+// ==============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A minimal primary frame; only the fields the call logic reads matter.
+    fn primary(class: CharacterClass) -> CombatantFrame {
+        CombatantFrame {
+            class,
+            pet_label: None,
+            alive: true,
+            stealthed: false,
+            current_health: 100.0,
+            max_health: 100.0,
+            absorb: 0.0,
+            current_resource: 0.0,
+            max_resource: 100.0,
+            resource_type: ResourceType::Mana,
+            buffs: Vec::new(),
+            debuffs: Vec::new(),
+        }
+    }
+
+    fn pet(class: CharacterClass) -> CombatantFrame {
+        CombatantFrame {
+            pet_label: Some("Spider (pet)".to_string()),
+            ..primary(class)
+        }
+    }
+
+    #[test]
+    fn call_slots_number_primaries_in_column_order() {
+        let frames = vec![
+            primary(CharacterClass::Hunter),
+            primary(CharacterClass::Priest),
+        ];
+        assert_eq!(call_slots(&frames), vec![Some(0), Some(1)]);
+    }
+
+    #[test]
+    fn call_slots_skip_pets() {
+        // Pets are not addressable by a call, so they get no slot and no click.
+        let frames = vec![primary(CharacterClass::Hunter), pet(CharacterClass::Hunter)];
+        assert_eq!(call_slots(&frames), vec![Some(0), None]);
+    }
+
+    #[test]
+    fn pets_do_not_shift_primary_slot_indices() {
+        // Even interleaved (the wrapper sorts pets last, but the mapping must
+        // not depend on that), a pet consumes no index.
+        let frames = vec![
+            primary(CharacterClass::Hunter),
+            pet(CharacterClass::Hunter),
+            primary(CharacterClass::Priest),
+        ];
+        assert_eq!(call_slots(&frames), vec![Some(0), None, Some(1)]);
+    }
+
+    #[test]
+    fn clicking_a_column_sets_the_opposing_teams_call() {
+        let mut config = MatchConfig::default();
+        config.team1_kill_target = None;
+        config.team2_kill_target = None;
+
+        // Clicking a Team 2 frame is Team 1 calling that target.
+        apply_call_click(&mut config, CallClick { clicked_team: 2, slot: 1 });
+        assert_eq!(config.team1_kill_target, Some(1));
+        assert_eq!(config.team2_kill_target, None, "the other call is untouched");
+
+        // ...and the mirror.
+        apply_call_click(&mut config, CallClick { clicked_team: 1, slot: 0 });
+        assert_eq!(config.team2_kill_target, Some(0));
+        assert_eq!(config.team1_kill_target, Some(1));
+    }
+
+    #[test]
+    fn a_click_marks_the_column_it_was_made_in() {
+        // The click flip and the marker flip must agree, or a call would light
+        // up the wrong column.
+        let mut config = MatchConfig::default();
+        config.team1_kill_target = None;
+        config.team2_kill_target = None;
+
+        apply_call_click(&mut config, CallClick { clicked_team: 2, slot: 1 });
+        assert_eq!(called_slots(&config), (None, Some(1)));
+
+        apply_call_click(&mut config, CallClick { clicked_team: 1, slot: 0 });
+        assert_eq!(called_slots(&config), (Some(0), Some(1)));
+    }
+
+    #[test]
+    fn clicking_the_called_frame_clears_the_call() {
+        let mut config = MatchConfig::default();
+        config.team1_kill_target = Some(2);
+
+        apply_call_click(&mut config, CallClick { clicked_team: 2, slot: 2 });
+        assert_eq!(config.team1_kill_target, None);
+
+        // Clicking it again re-selects, matching the pre-match toggle.
+        apply_call_click(&mut config, CallClick { clicked_team: 2, slot: 2 });
+        assert_eq!(config.team1_kill_target, Some(2));
+    }
+
+    #[test]
+    fn clicking_a_different_frame_replaces_the_call_rather_than_clearing() {
+        let mut config = MatchConfig::default();
+        config.team1_kill_target = Some(0);
+
+        apply_call_click(&mut config, CallClick { clicked_team: 2, slot: 1 });
+        assert_eq!(config.team1_kill_target, Some(1));
+    }
+
+    #[test]
+    fn column_frame_rects_stack_down_each_screen_edge() {
+        let screen = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1500.0, 820.0));
+        let frames = vec![primary(CharacterClass::Hunter), pet(CharacterClass::Hunter)];
+
+        let left = column_frame_rects(&frames, 1, screen);
+        let right = column_frame_rects(&frames, 2, screen);
+        assert_eq!(left.len(), 2);
+        assert_eq!(left[0].min.x, EDGE_MARGIN);
+        assert_eq!(right[0].min.x, 1500.0 - EDGE_MARGIN - FRAME_W);
+        // Frames stack downward without overlapping.
+        assert!(left[1].min.y >= left[0].max.y);
+        assert!(!left[0].intersects(right[0]));
+    }
+
+    #[test]
+    fn column_frame_rects_are_empty_for_an_empty_column() {
+        let screen = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1500.0, 820.0));
+        assert!(column_frame_rects(&[], 1, screen).is_empty());
+    }
 }
