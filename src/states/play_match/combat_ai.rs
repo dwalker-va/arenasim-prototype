@@ -34,7 +34,7 @@ pub struct AbilityDispatchExtras<'w, 's> {
     map_geometry: Res<'w, super::map_config::ActiveMapGeometry>,
     /// Which AI implementation this match runs under. `Option` so a scene that
     /// never inserted it falls back to `Legacy` rather than panicking.
-    ai_profile: Option<Res<'w, super::ai_profile::AiProfile>>,
+    ai_profile: Option<Res<'w, super::ai_profile::AiProfiles>>,
 }
 
 pub fn acquire_targets(
@@ -180,6 +180,18 @@ pub fn acquire_targets(
             } else {
                 None
             };
+            // STEP 5'S PLAN CALL WAS CONSUMED HERE, AND IS DELIBERATELY NOT.
+            // Four variants were measured at n=100 (gates-open and at-contact
+            // picks, nearest-to-melee and healer-first priorities), and EVERY
+            // static held call was catastrophic for at least one side of a
+            // matchup (-48 to -69pt), while helping its mirror (+25 to +65):
+            // each comp wants a different target called, and a call held
+            // constant cannot adapt the way per-unit re-acquisition does. The
+            // full table lives in the design doc's step-5 amendment. Mid-match
+            // switching is the PREREQUISITE for consuming the call — until it
+            // exists, `plan.kill_target` stays producer-only (the step-2
+            // provable-no-op shape).
+
 
             if let Some(priority_target) = kill_target {
                 // Use the kill target
@@ -563,6 +575,9 @@ pub fn decide_abilities(
         &pet_query,
         &extras.map_geometry.volumes,
         extras.map_geometry.bounds,
+        // Resolve to the ACTING unit's team, so `ctx.ai_profile` means "the
+        // implementation I run under" and every existing gate becomes per-team
+        // for free.
         extras.ai_profile.map(|p| *p).unwrap_or_default(),
     );
 
@@ -754,6 +769,7 @@ pub fn decide_abilities(
                             mage_posture.map(bevy::prelude::Mut::into_inner),
                             directive,
                             cfg,
+                            movement_config.shared.heal_range,
                             entry,
                             sustain,
                             wand_gate,
@@ -1026,6 +1042,7 @@ pub fn decide_abilities(
                                 kite_posture.map(bevy::prelude::Mut::into_inner),
                                 directive,
                                 cfg,
+                                movement_config.shared.heal_range,
                                 entry,
                                 sustain,
                                 // No wand gate: the Hunter has no wand and shoots,

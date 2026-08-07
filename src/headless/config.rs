@@ -46,6 +46,13 @@ pub struct HeadlessMatchConfig {
     /// Legacy. See `src/states/play_match/ai_profile.rs`.
     #[serde(default)]
     pub ai_profile: Option<String>,
+    /// Per-team overrides for `ai_profile`. Setting these differently pits the
+    /// two AI implementations directly against each other on one seed, which a
+    /// match-wide profile cannot do — see `AiProfiles`.
+    #[serde(default)]
+    pub team1_ai_profile: Option<String>,
+    #[serde(default)]
+    pub team2_ai_profile: Option<String>,
     /// Optional grouping label echoed verbatim into batch-runner output. Lets a
     /// strategy-var sweep keep variants distinct (e.g. "Hunter+Spider vs Mage"
     /// vs "Hunter+Boar vs Mage") when two configs share the same class lists.
@@ -131,6 +138,8 @@ impl Default for HeadlessMatchConfig {
             max_duration_secs: default_max_duration(),
             random_seed: None,
             ai_profile: None,
+            team1_ai_profile: None,
+            team2_ai_profile: None,
             team1_rogue_openers: Vec::new(),
             team2_rogue_openers: Vec::new(),
             team1_rogue_poisons: Vec::new(),
@@ -164,8 +173,31 @@ impl HeadlessMatchConfig {
         Ok(config)
     }
 
+    /// Resolve the three profile fields to a per-team [`AiProfiles`].
+    ///
+    /// THE single authority on the precedence rule: a bare `ai_profile` means
+    /// both teams (so every pre-existing config and baseline keeps its
+    /// meaning), and `team1_ai_profile` / `team2_ai_profile` override it per
+    /// side. Before this existed, the same merge was hand-written in the
+    /// headless runner and the replay launcher, and `validate()` checked a
+    /// different field list than the runner consumed — the exact class of
+    /// drift a second implementation invites.
+    pub fn ai_profiles(
+        &self,
+    ) -> Result<crate::states::play_match::ai_profile::AiProfiles, String> {
+        use crate::states::play_match::ai_profile::{AiProfile, AiProfiles};
+        let parse = |s: Option<&str>| s.map(AiProfile::parse).transpose();
+        let base = parse(self.ai_profile.as_deref())?.unwrap_or_default();
+        Ok(AiProfiles {
+            team1: parse(self.team1_ai_profile.as_deref())?.unwrap_or(base),
+            team2: parse(self.team2_ai_profile.as_deref())?.unwrap_or(base),
+        })
+    }
+
     /// Validate the configuration
-    fn validate(&self) -> Result<(), String> {
+    // `pub(crate)` so the batch runner can fail fast on a bad config instead of
+    // panicking a worker mid-sweep after the matches have been paid for.
+    pub(crate) fn validate(&self) -> Result<(), String> {
         // Validate team sizes
         if self.team1.is_empty() || self.team1.len() > 3 {
             return Err("team1 must have 1-3 members".to_string());
@@ -183,12 +215,12 @@ impl HeadlessMatchConfig {
         Self::parse_map(&self.map)?;
 
         // Validate the AI profile here, not at plugin build: `HeadlessPlugin`
-        // `.expect()`s it, so without this a typo'd `ai_profile` panics with a
+        // `.expect()`s them, so without this a typo'd profile panics with a
         // backtrace instead of getting the clean error every other string field in
-        // this config gets.
-        if let Some(profile) = self.ai_profile.as_deref() {
-            crate::states::play_match::ai_profile::AiProfile::parse(profile)?;
-        }
+        // this config gets. Delegates to `ai_profiles()` so validation and
+        // resolution can never disagree on which fields exist — the review that
+        // added this check found exactly that divergence once already.
+        self.ai_profiles()?;
 
         // Validate kill targets
         if let Some(target) = self.team1_kill_target {

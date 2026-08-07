@@ -417,6 +417,7 @@ fn build_kiter_inputs(
     my_pos: Vec3,
     kill_target: Option<Entity>,
     config: &DpsMovementConfig,
+    heal_range: f32,
     committed_direction: Option<Vec2>,
 ) -> ScorerInputs {
     let self_team = self_team(ctx, entity);
@@ -437,6 +438,21 @@ fn build_kiter_inputs(
             .partial_cmp(&b.distance(my_pos))
             .unwrap_or(std::cmp::Ordering::Equal)
     });
+
+    // Own healer, for the leash. GATED ON THE PROFILE: `None` under `Legacy`
+    // makes the term structurally inert there rather than relying on a zero
+    // weight, so the recorded baselines cannot move.
+    let healer_point = if ctx.ai_profile.is_team_plan() {
+        ctx.combatants
+            .values()
+            .find(|i| {
+                i.team == self_team && i.is_alive && !i.is_pet && i.class.is_healer()
+                    && i.entity != entity
+            })
+            .map(|i| i.position)
+    } else {
+        None
+    };
 
     let kill_target_info = kill_target
         .and_then(|t| ctx.combatants.get(&t))
@@ -463,6 +479,10 @@ fn build_kiter_inputs(
         committed_direction,
         obstacles: ctx.obstacles.to_vec(),
         los_target,
+        healer_point,
+        // The healer's own cast range is the leash length: beyond it the kiter
+        // is simply unhealable.
+        healer_leash_range: heal_range,
     }
 }
 
@@ -485,6 +505,10 @@ pub fn evaluate_dps_posture(
     posture: Option<&mut KitePosture>,
     directive: Option<&MovementDirective>,
     config: &DpsMovementConfig,
+    // `movement.ron`'s `shared.heal_range` — the kiter leash length. Threaded
+    // rather than hardcoded so a RON retune cannot silently strand a kiter
+    // "leashed" at a range its healer cannot actually reach.
+    heal_range: f32,
     entry_trigger: bool,
     sustain: bool,
     wand_gate: Option<WandPullGate>,
@@ -627,7 +651,7 @@ pub fn evaluate_dps_posture(
             .filter(|d| now < d.committed_until)
             .and(state.last_direction);
         let inputs =
-            build_kiter_inputs(ctx, entity, my_pos, kill_target, config, committed_direction);
+            build_kiter_inputs(ctx, entity, my_pos, kill_target, config, heal_range, committed_direction);
         let chosen = score_directions(&compass_directions_16(), &inputs, &config.weights);
         if chosen != Vec2::ZERO {
             commands.entity(entity).try_insert(MovementDirective {
@@ -682,7 +706,7 @@ pub fn evaluate_dps_posture(
         .filter(|d| now < d.committed_until)
         .and(state.last_direction);
 
-    let inputs = build_kiter_inputs(ctx, entity, my_pos, kill_target, config, committed_direction);
+    let inputs = build_kiter_inputs(ctx, entity, my_pos, kill_target, config, heal_range, committed_direction);
     let chosen = score_directions(&compass_directions_16(), &inputs, &config.weights);
     if chosen == Vec2::ZERO {
         if needs_insert {

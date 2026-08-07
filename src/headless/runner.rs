@@ -176,7 +176,7 @@ pub struct HeadlessMatchState {
     pub random_seed: Option<u64>,
     /// Which AI implementation this match runs under. Parsed once at plugin
     /// build so a bad string fails fast rather than at match setup.
-    pub ai_profile: crate::states::play_match::ai_profile::AiProfile,
+    pub ai_profile: crate::states::play_match::ai_profile::AiProfiles,
     /// If true, the per-match `.txt` log file is NOT written. Set by the
     /// matrix runner where 4,900+ logs would just clutter `match_logs/`.
     pub suppress_log: bool,
@@ -215,11 +215,12 @@ impl Plugin for HeadlessPlugin {
                         .random_seed
                         .unwrap_or_else(crate::states::play_match::GameRng::choose_seed),
                 ),
-                ai_profile: match self.config.ai_profile.as_deref() {
-                    Some(p) => crate::states::play_match::ai_profile::AiProfile::parse(p)
-                        .expect("Invalid ai_profile in headless config"),
-                    None => Default::default(),
-                },
+                // Single-authority resolution; `validate()` ran the same
+                // method, so this expect is unreachable on a validated config.
+                ai_profile: self
+                    .config
+                    .ai_profiles()
+                    .expect("Invalid ai_profile in headless config"),
                 suppress_log: self.suppress_log,
                 result: None,
             })
@@ -925,7 +926,12 @@ fn run_match_impl(
                     trace.seed = config.random_seed.unwrap_or(0);
                     // Stamp the AI profile too: without it, two traces from the
                     // same seed under different profiles are indistinguishable.
-                    trace.ai_profile = profile.name();
+                    // Head-to-head runs record BOTH sides, so a trace can never
+                    // be misread as a uniform-profile match. Spelled as literals
+                    // rather than a leaked `format!`: the batch runner traces
+                    // thousands of matches per process, and a per-match
+                    // `Box::leak` would never be reclaimed.
+                    trace.ai_profile = profile.trace_label();
                 }
             }
             Err(e) => {

@@ -6354,13 +6354,24 @@ mod warrior_pillar_pathing {
 // 14.3s, and took the 12-seed paired win column from 5/12 back to 9/12 — level
 // with `Legacy`, with 28.3 occlusion-seconds per match bought against its 0.0.
 //
-// WHAT REMAINS, and why these probes still assert a pathology: post-release the
-// healer starts the fight standing next to a pillar, and `cover_pull` then pins
-// it there (11.8yd from the camp pillar on average, against `Legacy`'s 32.6yd).
-// It still loses the heal line 39% of post-contact frames and heals its Warrior
-// 295 per match against `Legacy`'s 481. That is a REACTIVE-LAYER limitation, not
-// a camp bug — `design-docs/team-level-positioning-ai.md` step 4 retires
-// `cover_pull` for the focal-rooted team solve, which is where it gets fixed.
+// STEP 4b LARGELY FIXED THIS, and the probes are kept because a smaller version
+// survives. Routing the healer's positioning through the team solve's
+// `OccupyCover` — one query for "hidden from their casters, in range of my ally,
+// and able to SEE my ally" — moved every metric:
+//
+//                          Legacy   step 3   step 4b
+//   team-1 wins (12 seeds)   9/12     9/12     10/12
+//   heal line occluded post    0%      39%       14%
+//   heal delivered to Warrior 481      295       347
+//   Warlock denied sight     0.0s    28.3s     30.8s
+//   Warrior died             3/12     4/12      2/12
+//
+// On these three seeds the blocked share fell 36.7/35.5/22.5% -> 13.8/18.1/12.3%
+// and the longest blackout 14.25s -> 6.12s. What is left is the irreducible part:
+// a healer standing near a pillar sometimes has that pillar between it and a
+// MOVING ally, and one solve tick cannot preempt where the ally runs next.
+// Closing it further needs the ally's predicted position, which is step 6's
+// lethality/extrapolation work, not step 4's.
 // Re-run `cargo test --release --test camp_sweep -- --ignored --nocapture` for
 // the current numbers.
 //

@@ -61,6 +61,12 @@ pub fn run_batch(input: PathBuf, output: PathBuf, jobs: Option<usize>) -> Result
         }
         let cfg: HeadlessMatchConfig = serde_json::from_str(trimmed)
             .map_err(|e| format!("parse batch line {}: {}", i + 1, e))?;
+        // Validate BEFORE running anything: the plugin `.expect()`s a valid
+        // profile, so an unvalidated typo panics a worker mid-sweep and takes
+        // the whole run down AFTER the matches have been paid for — with no
+        // CSV written. Failing here costs nothing and names the line.
+        cfg.validate()
+            .map_err(|e| format!("invalid config at batch line {}: {}", i + 1, e))?;
         configs.push(cfg);
     }
     let total = configs.len();

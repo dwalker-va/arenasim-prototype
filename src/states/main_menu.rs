@@ -79,7 +79,8 @@ pub fn setup_menu_scene(
         MenuSceneEntity,
     ));
 
-    let sun = spawn_arena_sun(&mut commands);
+    // Backdrop uses the default arena, so no view scaling.
+    let sun = spawn_arena_sun(&mut commands, 1.0);
     commands.entity(sun).insert(MenuSceneEntity);
 
     // Same ambient/clear-color as the match scene (resources — insert

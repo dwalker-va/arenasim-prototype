@@ -219,6 +219,8 @@ fn build_config(
     profile: AiProfile,
 ) -> HeadlessMatchConfig {
     HeadlessMatchConfig {
+        team1_ai_profile: None,
+        team2_ai_profile: None,
         // Recorded per match so a re-run from this config reproduces the sweep.
         ai_profile: Some(profile.name().to_string()),
         team1: vec![team1.name().to_string()],

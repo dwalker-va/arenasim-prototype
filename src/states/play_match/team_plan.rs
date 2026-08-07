@@ -42,7 +42,7 @@ use bevy::prelude::*;
 use std::collections::BTreeMap;
 
 use super::components::{Combatant, MatchCountdown};
-use super::ai_profile::AiProfile;
+use super::ai_profile::AiProfiles;
 use super::constants::PET_SLOT_BASE;
 use super::map_config::ActiveMapGeometry;
 use super::map_geometry::{has_line_of_sight, ObstacleVolume, EYE_HEIGHT, MOVER_RADIUS};
@@ -226,6 +226,95 @@ pub fn choose_anchor(volumes: &[ObstacleVolume], spawn_x: f32) -> Option<Anchor>
     best.map(|(_, i)| Anchor::Obstacle(i))
 }
 
+
+/// One unit as the kill-target call sees it. Reduced and pure so the rule is
+/// testable without a `World`.
+#[derive(Clone, Copy, Debug)]
+pub struct CallCandidate {
+    pub entity: Entity,
+    pub team: u8,
+    pub slot: u8,
+    pub pos: Vec2,
+    pub stealthed: bool,
+    pub is_melee: bool,
+    pub is_healer: bool,
+    pub is_pet: bool,
+}
+
+/// The team's called kill target: the enemy HEALER when one is visible, else the
+/// enemy our melee would have chosen anyway.
+///
+/// The boring rule (nearest-to-melee, no priority) was tried FIRST, deliberately,
+/// so that coordination and priority were not conflated — and the experiment came
+/// back unambiguous: THE PICK DOMINATES. With an accidentally good pick the call
+/// measured +65pt (Hunter+Priest calling the unstealthed Rogue at contact,
+/// 35% -> 100%, z=9.8); with a bad one it measured -48pt (Rogue+Priest holding
+/// the enemy's leashed, healed Hunter forever, z=-6.8). Same rule, same
+/// mechanism, opposite outcomes — the coordination is only as good as the target
+/// it converges on.
+///
+/// Healer-first is not a novel priority; it is what the WINNING Legacy runs
+/// already drifted to (the losing side's own Priest put every offensive cast on
+/// the enemy Priest), promoted from emergent drift to the explicit call.
+/// Nearest-to-melee survives as the no-healer fallback.
+///
+/// Rules:
+/// - The reference point is the centroid of our living non-pet MELEE (they are
+///   the units that must close, so the call minimises their approach); with no
+///   melee alive, the centroid of the whole living team.
+/// - Stealthed enemies cannot be called — a team call on a unit nobody can see
+///   is an order to stand around. If every enemy is stealthed, there is no call
+///   and per-unit acquisition (which handles Shadow Sight orbs) takes over.
+/// - Enemy pets are never called.
+/// - Ties break by (team, slot): deterministic, like every other tie in the
+///   planner.
+pub fn choose_kill_target(team: u8, units: &[CallCandidate]) -> Option<Entity> {
+    let own: Vec<Vec2> = units
+        .iter()
+        .filter(|u| u.team == team && !u.is_pet)
+        .map(|u| u.pos)
+        .collect();
+    if own.is_empty() {
+        return None;
+    }
+    let melee: Vec<Vec2> = units
+        .iter()
+        .filter(|u| u.team == team && !u.is_pet && u.is_melee)
+        .map(|u| u.pos)
+        .collect();
+    let reference = centroid(if melee.is_empty() { own } else { melee }.into_iter());
+    choose_from(team, units, reference)
+}
+
+fn centroid(points: impl Iterator<Item = Vec2>) -> Vec2 {
+    let mut sum = Vec2::ZERO;
+    let mut n = 0u32;
+    for p in points {
+        sum += p;
+        n += 1;
+    }
+    if n == 0 { Vec2::ZERO } else { sum / n as f32 }
+}
+
+fn choose_from(team: u8, units: &[CallCandidate], reference: Vec2) -> Option<Entity> {
+    units
+        .iter()
+        .filter(|u| u.team != team && !u.is_pet && !u.stealthed)
+        .min_by(|a, b| {
+            // Healers first, then distance, then the deterministic tie-break.
+            b.is_healer
+                .cmp(&a.is_healer)
+                .then(
+                    a.pos
+                        .distance(reference)
+                        .partial_cmp(&b.pos.distance(reference))
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+                .then(a.team.cmp(&b.team))
+                .then(a.slot.cmp(&b.slot))
+        })
+        .map(|u| u.entity)
+}
 
 /// Standoff beyond the anchor's own footprint when holding it, so a camper stands
 /// *beside* cover rather than inside its collision skin.
@@ -414,9 +503,9 @@ pub fn teams_in_contact(own: &[Vec2], enemies: &[Vec2], engage_radius: f32) -> b
 /// pet dying does not change what a team is trying to do.
 pub fn update_team_plans(
     countdown: Res<MatchCountdown>,
-    combatants: Query<(&Combatant, &Transform)>,
+    combatants: Query<(Entity, &Combatant, &Transform)>,
     geometry: Option<Res<ActiveMapGeometry>>,
-    profile: Option<Res<AiProfile>>,
+    profile: Option<Res<AiProfiles>>,
     mut plans: ResMut<TeamPlans>,
 ) {
     if !countdown.gates_opened {
@@ -432,25 +521,48 @@ pub fn update_team_plans(
     //
     // Positions are read live rather than from the roster fingerprint, so this
     // costs one O(n*m) pass over at most six units per frame.
-    let living: Vec<(u8, Vec2)> = combatants
+    let living: Vec<CallCandidate> = combatants
         .iter()
-        .filter(|(c, _)| c.is_alive())
-        .map(|(c, t)| (c.team, Vec2::new(t.translation.x, t.translation.z)))
+        .filter(|(_, c, _)| c.is_alive())
+        .map(|(e, c, t)| CallCandidate {
+            entity: e,
+            team: c.team,
+            slot: c.slot,
+            pos: Vec2::new(t.translation.x, t.translation.z),
+            stealthed: c.stealthed,
+            is_melee: c.class.is_melee(),
+            is_healer: c.class.is_healer(),
+            is_pet: c.slot >= PET_SLOT_BASE,
+        })
         .collect();
+    // Read once, up front: the contact loop below also needs it now.
+    let profiles = profile.map(|p| *p).unwrap_or_default();
+
     for team in [1u8, 2u8] {
         // Guard before touching `plans` mutably: an unconditional write would mark
         // the resource changed every frame and defeat change detection.
         if plans.has_contact(team) {
             continue;
         }
-        let own: Vec<Vec2> = living.iter().filter(|(t, _)| *t == team).map(|(_, p)| *p).collect();
-        let foes: Vec<Vec2> = living.iter().filter(|(t, _)| *t != team).map(|(_, p)| *p).collect();
+        let own: Vec<Vec2> = living.iter().filter(|u| u.team == team).map(|u| u.pos).collect();
+        let foes: Vec<Vec2> = living.iter().filter(|u| u.team != team).map(|u| u.pos).collect();
         if teams_in_contact(&own, &foes, CAMP_ENGAGE_RADIUS) {
             plans.contact[TeamPlans::index(team)] = true;
             // The camp is over. Fall back to today's behaviour — the posture layer
             // owns in-fight positioning until step 4's team solve lands.
             if plans.for_team(team).stance == Stance::Hold {
                 plans.for_team_mut(team).stance = Stance::Press;
+            }
+            // RE-PICK THE CALL AT CONTACT. A gates-open call is made with the
+            // least information the team will ever have — on Nagrand the pick is
+            // a cross-map nearest, which is close to arbitrary. Measured on
+            // Rogue+Priest: the gates-open call chose the enemy Hunter (a
+            // kiter, leashed to its healer, actively healed — the unkillable
+            // unit), held the whole team on it all match, and cost 48 points.
+            // Contact is the moment positions become meaningful, and the latch
+            // fires exactly once, so this is one re-pick, not per-tick churn.
+            if profiles.for_team(team).is_team_plan() {
+                plans.for_team_mut(team).kill_target = choose_kill_target(team, &living);
             }
         }
     }
@@ -459,7 +571,7 @@ pub fn update_team_plans(
     // a debugger. Sorted so the fingerprint does not depend on query order.
     let mut roster: Vec<(u8, u8)> = combatants
         .iter()
-        .map(|(c, _)| c)
+        .map(|(_, c, _)| c)
         .filter(|c| c.is_alive() && c.slot < PET_SLOT_BASE)
         .map(|c| (c.team, c.slot))
         .collect();
@@ -475,8 +587,8 @@ pub fn update_team_plans(
     plans.revisions += 1;
 
     // Legacy keeps the inert plan, so every recorded baseline stays reproducible.
-    // Only the TeamPlan profile selects a real plan.
-    let team_plan_active = profile.map(|p| p.is_team_plan()).unwrap_or(false);
+    // Only the TeamPlan profile selects a real plan (per team — a head-to-head
+    // match has one side planning and the other not).
     let volumes: &[ObstacleVolume] = geometry
         .as_ref()
         .map(|g| g.volumes.as_slice())
@@ -490,14 +602,14 @@ pub fn update_team_plans(
         .unwrap_or(1.0);
 
     for team in [1u8, 2u8] {
-        if !team_plan_active {
+        if !profiles.for_team(team).is_team_plan() {
             *plans.for_team_mut(team) = TeamPlan::default();
             continue;
         }
 
         let classes: Vec<CharacterClass> = combatants
             .iter()
-            .map(|(c, _)| c)
+            .map(|(_, c, _)| c)
             .filter(|c| c.team == team && c.is_alive() && c.slot < PET_SLOT_BASE)
             .map(|c| c.class)
             .collect();
@@ -524,10 +636,14 @@ pub fn update_team_plans(
         // Hold ground and make them come; without an anchor there is nothing to
         // hold, so fall back to today's behaviour.
         plan.stance = if anchor.is_some() { Stance::Hold } else { Stance::Press };
-        // Cleared, not carried: the commonest replan trigger is a death, and the
-        // dead unit is exactly the one most likely to be the stale `kill_target`.
-        // Leaving it would hand step 3's consumer a despawned `Entity`.
-        plan.kill_target = None;
+        // RE-PICKED, never carried: the commonest replan trigger is a death,
+        // and the dead unit is exactly the one most likely to be the stale
+        // call. Recomputing from the live roster gives the step-5 semantics —
+        // "held constant while the target LIVES" — without ever holding a
+        // despawned `Entity`. Between replans the call does not move, which is
+        // the whole point of a call: a per-tick re-pick would just be nearest-
+        // enemy acquisition with extra steps.
+        plan.kill_target = choose_kill_target(team, &living);
         plan.intents.clear();
     }
 }
@@ -535,6 +651,9 @@ pub fn update_team_plans(
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Only the tests still name a single-team profile; the planner itself reads
+    // the per-team `AiProfiles` resource.
+    use super::super::ai_profile::AiProfile;
 
     /// A spawn-side position for `team`, far enough apart that the two sides are
     /// NOT in contact. The planner reads live positions to latch contact, so a
@@ -575,7 +694,7 @@ mod tests {
         let mut app = App::new();
         app.insert_resource(MatchCountdown { time_remaining: 0.0, gates_opened: true });
         app.insert_resource(TeamPlans::default());
-        app.insert_resource(profile);
+        app.insert_resource(AiProfiles::uniform(profile));
         app.insert_resource(ActiveMapGeometry {
             bounds: super::super::arena_bounds::ArenaBounds::Bowl {
                 semi_x: 59.72,
@@ -902,7 +1021,7 @@ mod tests {
         let mut app = App::new();
         app.insert_resource(MatchCountdown { time_remaining: 0.0, gates_opened: true });
         app.insert_resource(TeamPlans::default());
-        app.insert_resource(AiProfile::TeamPlan);
+        app.insert_resource(AiProfiles::uniform(AiProfile::TeamPlan));
         app.insert_resource(ActiveMapGeometry {
             bounds: super::super::arena_bounds::ArenaBounds::Bowl {
                 semi_x: 59.72,
@@ -944,7 +1063,7 @@ mod tests {
         let mut app = App::new();
         app.insert_resource(MatchCountdown { time_remaining: 0.0, gates_opened: true });
         app.insert_resource(TeamPlans::default());
-        app.insert_resource(AiProfile::TeamPlan);
+        app.insert_resource(AiProfiles::uniform(AiProfile::TeamPlan));
         app.insert_resource(ActiveMapGeometry {
             bounds: super::super::arena_bounds::ArenaBounds::Bowl {
                 semi_x: 59.72,
@@ -1002,6 +1121,156 @@ mod tests {
         assert!(should_hold(Some(40.0), 15.0), "still far: keep holding");
         assert!(!should_hold(Some(14.0), 15.0), "committed: release and fight");
         assert!(!should_hold(Some(0.0), 15.0), "in melee: definitely release");
+    }
+
+    // --- the kill-target call (step 5) ---
+
+    fn e(id: u32) -> Entity {
+        Entity::from_raw(id)
+    }
+
+    fn cand(id: u32, team: u8, slot: u8, x: f32, z: f32) -> CallCandidate {
+        CallCandidate {
+            entity: e(id),
+            team,
+            slot,
+            pos: Vec2::new(x, z),
+            stealthed: false,
+            is_melee: false,
+            is_healer: false,
+            is_pet: false,
+        }
+    }
+
+    /// The rule is "the enemy our MELEE would have chosen", not "nearest to the
+    /// team centroid" — the melee is who must close, so the call minimises its
+    /// approach. Pinned with a layout where the two references disagree.
+    #[test]
+    fn the_call_is_nearest_to_our_melee_not_to_the_team() {
+        let units = vec![
+            CallCandidate { is_melee: true, ..cand(1, 1, 0, 0.0, 0.0) }, // melee at origin
+            cand(2, 1, 1, 0.0, 40.0),                                    // healer far north
+            cand(10, 2, 0, 10.0, 0.0),  // nearest to the MELEE
+            cand(11, 2, 1, 12.0, 30.0), // nearest to the team centroid (0,20)
+        ];
+        assert_eq!(choose_kill_target(1, &units), Some(e(10)));
+    }
+
+    /// With no melee alive, fall back to the team centroid — some reference is
+    /// needed and the centroid is the boring one.
+    #[test]
+    fn without_melee_the_call_is_nearest_to_the_team_centroid() {
+        let units = vec![
+            cand(1, 1, 0, 0.0, 0.0),
+            cand(2, 1, 1, 0.0, 40.0),
+            cand(10, 2, 0, 10.0, 20.0), // nearest to centroid (0,20)
+            cand(11, 2, 1, 30.0, 0.0),
+        ];
+        assert_eq!(choose_kill_target(1, &units), Some(e(10)));
+    }
+
+    /// A team call on a unit nobody can see is an order to stand around, so a
+    /// stealthed enemy is never called — and with EVERY enemy stealthed there is
+    /// no call at all, leaving per-unit acquisition (which handles Shadow Sight
+    /// orbs) in charge.
+    #[test]
+    fn stealthed_enemies_are_never_called() {
+        let mut units = vec![
+            CallCandidate { is_melee: true, ..cand(1, 1, 0, 0.0, 0.0) },
+            CallCandidate { stealthed: true, ..cand(10, 2, 0, 5.0, 0.0) }, // closest but hidden
+            cand(11, 2, 1, 20.0, 0.0),
+        ];
+        assert_eq!(choose_kill_target(1, &units), Some(e(11)), "skip the stealthed one");
+        units[2].stealthed = true;
+        assert_eq!(choose_kill_target(1, &units), None, "all hidden: no call");
+    }
+
+    /// Pets are never the call — killing a pet wins nothing — and a dead team
+    /// calls nothing.
+    #[test]
+    fn pets_are_never_called_and_an_empty_team_calls_nothing() {
+        let units = vec![
+            CallCandidate { is_melee: true, ..cand(1, 1, 0, 0.0, 0.0) },
+            CallCandidate { is_pet: true, ..cand(10, 2, 10, 2.0, 0.0) }, // pet in our face
+            cand(11, 2, 0, 30.0, 0.0),
+        ];
+        assert_eq!(choose_kill_target(1, &units), Some(e(11)), "call the owner, not the pet");
+        assert_eq!(choose_kill_target(2, &units[..2].to_vec()), None, "no enemies visible");
+        assert_eq!(choose_kill_target(1, &units[2..]), None, "no own units: no reference");
+    }
+
+    /// Equidistant enemies must resolve the same way every run.
+    #[test]
+    fn the_call_breaks_ties_deterministically() {
+        let units = vec![
+            CallCandidate { is_melee: true, ..cand(1, 1, 0, 0.0, 0.0) },
+            cand(11, 2, 1, 0.0, 10.0),
+            cand(10, 2, 0, 10.0, 0.0), // same distance, lower slot
+        ];
+        for _ in 0..16 {
+            assert_eq!(choose_kill_target(1, &units), Some(e(10)), "lowest slot wins ties");
+        }
+    }
+
+    /// App-driven: a TeamPlan team gets a call, a Legacy team never does, and a
+    /// death re-picks the call from the LIVING roster rather than holding the
+    /// corpse — "held constant while the target lives".
+    #[test]
+    fn the_call_is_repicked_when_its_target_dies() {
+        let mut app = App::new();
+        app.insert_resource(MatchCountdown { time_remaining: 0.0, gates_opened: true });
+        app.insert_resource(TeamPlans::default());
+        app.insert_resource(AiProfiles {
+            team1: AiProfile::TeamPlan,
+            team2: AiProfile::Legacy,
+        });
+        app.world_mut()
+            .spawn((Combatant::new(1, 0, CharacterClass::Warrior), spawn_pos(1)));
+        // Two enemies at distinct ranges from team 1's side.
+        let near = app
+            .world_mut()
+            .spawn((Combatant::new(2, 0, CharacterClass::Warlock), Transform::from_xyz(20.0, 0.0, 0.0)))
+            .id();
+        let far = app
+            .world_mut()
+            .spawn((Combatant::new(2, 1, CharacterClass::Priest), Transform::from_xyz(60.0, 0.0, 0.0)))
+            .id();
+        app.add_systems(Update, update_team_plans);
+        app.update();
+
+        let plans = app.world().resource::<TeamPlans>();
+        assert_eq!(
+            plans.for_team(1).kill_target,
+            Some(far),
+            "healer-first: the far Priest outranks the near Warlock"
+        );
+        assert_eq!(plans.for_team(2).kill_target, None, "a Legacy team never calls");
+
+        // The called target dies: the replan must move the call to a living
+        // enemy, not hold the corpse and not go quiet.
+        app.world_mut().entity_mut(far).get_mut::<Combatant>().unwrap().current_health = 0.0;
+        app.update();
+        assert_eq!(
+            app.world().resource::<TeamPlans>().for_team(1).kill_target,
+            Some(near),
+            "the call must be re-picked from the living roster"
+        );
+    }
+
+    /// Healer-first is the priority the -48pt experiment forced: a visible enemy
+    /// healer outranks any nearer non-healer, and distance only orders healers
+    /// against each other (or non-healers once no healer is visible). A
+    /// STEALTHED healer does not count — stealth still trumps priority.
+    #[test]
+    fn a_visible_enemy_healer_outranks_everything_nearer() {
+        let mut units = vec![
+            CallCandidate { is_melee: true, ..cand(1, 1, 0, 0.0, 0.0) },
+            cand(10, 2, 0, 5.0, 0.0), // DPS in our face
+            CallCandidate { is_healer: true, ..cand(11, 2, 1, 50.0, 0.0) },
+        ];
+        assert_eq!(choose_kill_target(1, &units), Some(e(11)), "the healer, however far");
+        units[2].stealthed = true;
+        assert_eq!(choose_kill_target(1, &units), Some(e(10)), "hidden healer: fall back");
     }
 
     #[test]
