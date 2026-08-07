@@ -6646,3 +6646,307 @@ mod pillar_self_block {
         assert_eq!(side_of(pillar, target, (5.0, 0.0)), 0.0);
     }
 }
+
+// ===========================================================================
+// Nagrand / TeamPlan regression armor (post step-4 merge)
+// ===========================================================================
+//
+// The design doc's step-1 item parked "the 16 failing PillaredArena probes"
+// until the TeamPlan work settled. Archaeology (e673490): those probes were
+// re-pointed at TwinPillars when PillaredArena became the Nagrand replica, and
+// they still pass there — they stay as regression armor for the REACTIVE
+// machinery, which is valid because `Legacy` has been byte-identical since
+// their capture. What was actually missing is any fixed-seed armor for the
+// behaviours that now exist ONLY on Nagrand under `TeamPlan`: the healer
+// solve's cover play, the kiter healer-leash, and the flat-field anti-statue
+// key. That is this module.
+//
+// Calibration data comes from the shipped measurement trail (the n=100
+// head-to-head CSV in design-docs/balance/ and the pillar_self_block numbers
+// above); thresholds sit at roughly half the measured healthy value so a real
+// regression fails loudly while seed-level drift does not. `scan_nagrand_
+// teamplan` re-prints the per-seed numbers when trajectories drift and pins
+// need re-choosing.
+mod nagrand_teamplan {
+    use super::*;
+    use arenasim::states::play_match::map_geometry::{
+        has_line_of_sight, ObstacleVolume, EYE_HEIGHT,
+    };
+    use bevy::prelude::Vec2;
+
+    /// Nagrand's four pillars (`assets/config/maps.ron`), as LoS volumes.
+    fn volumes() -> Vec<ObstacleVolume> {
+        [(-40.0, -20.0), (-40.0, 20.0), (40.0, -20.0), (40.0, 20.0)]
+            .into_iter()
+            .map(|(x, z)| ObstacleVolume::Prism {
+                center_xz: Vec2::new(x, z),
+                circumradius: 6.0,
+                sides: 8,
+                rotation: 0.0,
+                base_y: 0.0,
+                height: 5.0,
+            })
+            .collect()
+    }
+
+    fn eye(p: Vec2) -> Vec3 {
+        Vec3::new(p.x, EYE_HEIGHT, p.y)
+    }
+
+    fn xz(v: Vec3) -> Vec2 {
+        Vec2::new(v.x, v.z)
+    }
+
+    struct NagrandStats {
+        /// Sim-seconds the enemy Warlock had NO line to the team-1 Priest —
+        /// the cover the solve buys. Legacy measures ~0 here.
+        occlusion_secs: f32,
+        /// Share of paired frames with the Priest's heal line to the Warrior
+        /// blocked (the step-3/4 pathology, now bounded from above).
+        blocked_share: f32,
+        paired_frames: usize,
+    }
+
+    fn measure_pillar(seed: u64) -> NagrandStats {
+        let mut cfg =
+            create_config(vec!["Warrior", "Priest"], vec!["Warlock", "Priest"], Some(seed));
+        cfg.map = "PillaredArena".to_string();
+        cfg.ai_profile = Some("TeamPlan".to_string());
+        cfg.max_duration_secs = 300.0;
+        let (_result, timeline) = run_observed_collecting(cfg);
+        let vols = volumes();
+        let gate = timeline.gates_open_time.expect("gates never opened");
+        let priest = timeline.find(1, CharacterClass::Priest, false);
+        let warrior = timeline.find(1, CharacterClass::Warrior, false);
+        let warlock = timeline.find(2, CharacterClass::Warlock, false);
+
+        let by_time = |e| -> BTreeMap<u32, Vec3> {
+            timeline
+                .samples_from(e, gate)
+                .into_iter()
+                .map(|(t, p): (f32, Vec3)| (t.to_bits(), p))
+                .collect()
+        };
+        let (wl, wr) = (by_time(warlock), by_time(warrior));
+
+        let (mut occl, mut blocked, mut paired) = (0usize, 0usize, 0usize);
+        for (t, ppos) in timeline.samples_from(priest, gate) {
+            if let Some(wlpos) = wl.get(&t.to_bits()) {
+                if !has_line_of_sight(&vols, eye(xz(*wlpos)), eye(xz(ppos))) {
+                    occl += 1;
+                }
+            }
+            if let Some(wrpos) = wr.get(&t.to_bits()) {
+                paired += 1;
+                if !has_line_of_sight(&vols, eye(xz(ppos)), eye(xz(*wrpos))) {
+                    blocked += 1;
+                }
+            }
+        }
+        NagrandStats {
+            occlusion_secs: occl as f32 / 60.0,
+            blocked_share: blocked as f32 / paired.max(1) as f32,
+            paired_frames: paired,
+        }
+    }
+
+    /// THE COVER FLOOR. `Legacy` measures ~0 occlusion-seconds on Nagrand —
+    /// buying cover at all is the entire point of the TeamPlan work (0.0s ->
+    /// ~28s/match at n=100). Measured on these seeds: 22.3 / 22.1 / 24.0s.
+    /// The floor is under half the weakest, so a mechanism regression (the
+    /// silently unrouted, `OccupyCover` losing its occlusion constraint)
+    /// fails loudly while trajectory drift does not.
+    #[test]
+    fn teamplan_healer_buys_occlusion_on_nagrand() {
+        for seed in [7u64, 11, 12] {
+            let s = measure_pillar(seed);
+            assert!(s.paired_frames > 500, "seed {seed}: probe went vacuous");
+            println!(
+                "seed {seed:2}: occlusion {:.1}s | heal line blocked {:.0}%",
+                s.occlusion_secs,
+                100.0 * s.blocked_share
+            );
+            assert!(
+                s.occlusion_secs >= 10.0,
+                "seed {seed}: only {:.1}s of Warlock-denied sight — the solve's cover play \
+                 has regressed (Legacy measures ~0 here; healthy is ~10-14s)",
+                s.occlusion_secs
+            );
+        }
+    }
+
+    /// THE HEAL-LINE CEILING — the inverse of `pillar_self_block`'s pathology
+    /// pins. The step-3 camp measured 40-55% of frames with the healer blind
+    /// to its own Warrior; the solve brought these seeds to 13.8/18.1/12.3%.
+    /// Bounding from ABOVE at roughly double the healthy worst catches a
+    /// regression toward the old pathology while leaving room for drift.
+    #[test]
+    fn teamplan_healer_keeps_its_heal_line_on_nagrand() {
+        for seed in [7u64, 11, 12] {
+            let s = measure_pillar(seed);
+            assert!(s.paired_frames > 500, "seed {seed}: probe went vacuous");
+            assert!(
+                s.blocked_share <= 0.35,
+                "seed {seed}: heal line blocked {:.0}% of frames — regressing toward the \
+                 40-55% self-blocking pathology (healthy is 12-18%)",
+                100.0 * s.blocked_share
+            );
+        }
+    }
+
+    /// THE KITER LEASH. A `TeamPlan` Hunter must stay healable: `flee` is
+    /// unbounded distance-maximisation, and before the leash nothing stopped
+    /// it fleeing a Rogue clean out of its own Priest's 40yd cast range —
+    /// which is how the enemy deletes an unhealable kiter.
+    ///
+    /// Asserted as an AGGREGATE over three seeds, not per seed: the leash is a
+    /// soft weight (4.0, deliberately below `flee`'s 6.0 — escaping still
+    /// wins), so any single seed can spend real time out of reach. Calibrated
+    /// on seeds {2, 3, 10}: with the leash the total is 18.2s; without it
+    /// (Legacy) 119.2s. The 60s bound sits between the distributions with a
+    /// >3x margin either way. `scan_nagrand_teamplan` re-prints both
+    /// distributions when pins need re-choosing.
+    #[test]
+    fn teamplan_hunter_stays_within_its_priests_reach() {
+        let mut total_secs = 0.0f32;
+        for seed in [2u64, 3, 10] {
+            let mut cfg =
+                create_config(vec!["Hunter", "Priest"], vec!["Rogue", "Priest"], Some(seed));
+            cfg.map = "PillaredArena".to_string();
+            cfg.ai_profile = Some("TeamPlan".to_string());
+            cfg.max_duration_secs = 300.0;
+            let (_result, timeline) = run_observed_collecting(cfg);
+            let gate = timeline.gates_open_time.expect("gates never opened");
+            let hunter = timeline.find(1, CharacterClass::Hunter, false);
+            let priest = timeline.find(1, CharacterClass::Priest, false);
+            let pri: BTreeMap<u32, Vec3> = timeline
+                .samples_from(priest, gate)
+                .into_iter()
+                .map(|(t, p)| (t.to_bits(), p))
+                .collect();
+            let (mut out_of_reach, mut paired) = (0usize, 0usize);
+            for (t, hpos) in timeline.samples_from(hunter, gate) {
+                if let Some(ppos) = pri.get(&t.to_bits()) {
+                    paired += 1;
+                    if xz(hpos).distance(xz(*ppos)) > 40.0 {
+                        out_of_reach += 1;
+                    }
+                }
+            }
+            assert!(paired > 500, "seed {seed}: probe went vacuous");
+            let secs = out_of_reach as f32 / 60.0;
+            println!("seed {seed:2}: {secs:.1}s beyond heal range");
+            total_secs += secs;
+        }
+        println!("total: {total_secs:.1}s (leashed ~18s; unleashed ~119s)");
+        assert!(
+            total_secs <= 60.0,
+            "Hunter spent {total_secs:.1}s beyond its Priest's 40yd reach across the \
+             pinned seeds — the healer leash has regressed (it is TeamPlan-gated in \
+             build_kiter_inputs; leashed baseline ~18s, unleashed ~119s)",
+        );
+    }
+
+    /// THE ANTI-STATUE KEY. On an obstacle-free map with melee-only pressure,
+    /// every solve candidate ties on every constraint; before the flat-field
+    /// danger key, a PRESSURED TeamPlan healer froze in place where `Legacy`
+    /// kites. Asserts the healer keeps moving while an enemy is on top of it —
+    /// the U6 statue band idiom (statue ~0.65 u/s of pressured time; healthy
+    /// movement is well above 1.5).
+    #[test]
+    fn teamplan_healer_is_not_a_statue_on_basicarena() {
+        for seed in [1u64, 4, 7] {
+            let mut cfg =
+                create_config(vec!["Warrior", "Priest"], vec!["Rogue", "Priest"], Some(seed));
+            cfg.map = "BasicArena".to_string();
+            cfg.ai_profile = Some("TeamPlan".to_string());
+            cfg.max_duration_secs = 300.0;
+            let (_result, timeline) = run_observed_collecting(cfg);
+            let gate = timeline.gates_open_time.expect("gates never opened");
+            let priest = timeline.find(1, CharacterClass::Priest, false);
+            let rogue = timeline.find(2, CharacterClass::Rogue, false);
+            let rg: BTreeMap<u32, Vec3> = timeline
+                .samples_from(rogue, gate)
+                .into_iter()
+                .map(|(t, p)| (t.to_bits(), p))
+                .collect();
+            // Path length accumulated only while the Rogue is within the
+            // 12yd danger radius of the Priest, over the seconds that held.
+            let mut pressured_path = 0.0f32;
+            let mut pressured_frames = 0usize;
+            let mut prev: Option<Vec3> = None;
+            for (t, ppos) in timeline.samples_from(priest, gate) {
+                let near = rg
+                    .get(&t.to_bits())
+                    .is_some_and(|r| xz(*r).distance(xz(ppos)) <= 12.0);
+                if near {
+                    pressured_frames += 1;
+                    if let Some(prev) = prev {
+                        pressured_path += xz(prev).distance(xz(ppos));
+                    }
+                }
+                prev = Some(ppos);
+            }
+            let secs = pressured_frames as f32 / 60.0;
+            assert_min_occurrences(
+                &format!("seed {seed} pressured frames"),
+                pressured_frames,
+                120, // >= 2s of real melee pressure, or the probe is vacuous
+            );
+            let rate = pressured_path / secs;
+            println!(
+                "seed {seed:2}: {pressured_path:.1}u over {secs:.1}s of melee pressure \
+                 = {rate:.2} u/s"
+            );
+            assert!(
+                rate >= 1.0,
+                "seed {seed}: {rate:.2} u/s while a Rogue stands on the healer — the \
+                 flat-field anti-statue key has regressed (statue band is ~0.65)",
+            );
+        }
+    }
+
+    /// Exploratory seed scan — re-prints the per-seed numbers behind every pin
+    /// above so thresholds can be re-chosen when trajectories drift. Ignored
+    /// by default.
+    #[test]
+    #[ignore]
+    fn scan_nagrand_teamplan() {
+        for seed in 1u64..=12 {
+            let s = measure_pillar(seed);
+            println!(
+                "pillar seed {seed:2}: occl {:.1}s | blocked {:.0}% | frames {}",
+                s.occlusion_secs,
+                100.0 * s.blocked_share,
+                s.paired_frames
+            );
+        }
+        for profile in ["TeamPlan", "Legacy"] {
+            for seed in 1u64..=12 {
+                let mut cfg =
+                    create_config(vec!["Hunter", "Priest"], vec!["Rogue", "Priest"], Some(seed));
+                cfg.map = "PillaredArena".to_string();
+                cfg.ai_profile = Some(profile.to_string());
+                cfg.max_duration_secs = 300.0;
+                let (_result, timeline) = run_observed_collecting(cfg);
+                let gate = timeline.gates_open_time.expect("gates never opened");
+                let hunter = timeline.find(1, CharacterClass::Hunter, false);
+                let priest = timeline.find(1, CharacterClass::Priest, false);
+                let pri: BTreeMap<u32, Vec3> = timeline
+                    .samples_from(priest, gate)
+                    .into_iter()
+                    .map(|(t, p)| (t.to_bits(), p))
+                    .collect();
+                let mut out = 0usize;
+                for (t, hpos) in timeline.samples_from(hunter, gate) {
+                    if let Some(ppos) = pri.get(&t.to_bits()) {
+                        if xz(hpos).distance(xz(*ppos)) > 40.0 {
+                            out += 1;
+                        }
+                    }
+                }
+                println!("hunter {profile:8} seed {seed:2}: {:.1}s beyond heal range", out as f32 / 60.0);
+            }
+        }
+    }
+}

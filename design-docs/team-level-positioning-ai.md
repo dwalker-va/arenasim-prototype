@@ -642,12 +642,21 @@ different from adjusting them because the AI finds them inconvenient.
    tuned against reactive-only behaviour and need redoing. Task 7 waits behind
    this work.
 
-   **Revisit this after step 5, not after step 8.** The debt has been parked since
-   the plan was written and keeps growing, and these probes are exactly the
-   calibration that would catch a regression in the area now being changed. Steps
-   3 and 4 both left `Legacy` byte-identical, so nothing has forced the issue yet
-   — but the first step that moves `Legacy` (the `cover_*` retirement, or step 7)
-   will, and doing it under time pressure is worse than doing it deliberately.
+   **RESOLVED 2026-08-06.** Archaeology first: the "16 failing probes" were
+   re-pointed at `TwinPillars` when Nagrand landed (`e673490`) and still pass
+   there — they are KEPT as regression armor for the reactive machinery, which
+   is valid because `Legacy` has been byte-identical since their capture. The
+   real debt was that Nagrand had no fixed-seed armor for the behaviours that
+   exist only under `TeamPlan`. Added as `movement_probes::nagrand_teamplan`,
+   calibrated from the shipped measurement trail: an occlusion FLOOR (measured
+   22-24s/seed vs `Legacy`'s ~0; floor 10s), a heal-line CEILING (the inverse
+   of the `pillar_self_block` pathology pins; healthy 11-17%, ceiling 35%), the
+   kiter-leash bound (aggregate over discriminating seeds — leashed ~18s beyond
+   heal range, unleashed ~119s, bound 60s; aggregate because the leash is a
+   soft weight and single seeds are noisy), and the flat-field anti-statue
+   check on BasicArena (1.25-2.04 u/s under melee pressure vs the ~0.65 statue
+   band; floor 1.0). Each carries a non-vacuity guard and points at
+   `scan_nagrand_teamplan` for re-pinning.
 2. Land `TeamPlan` with `anchor: None` for every comp — a pure no-op — and assert
    byte-identical BasicArena and PillaredArena results. This is the guard rail
    for everything after.
