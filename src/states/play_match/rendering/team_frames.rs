@@ -254,8 +254,7 @@ pub fn draw_team_frames(
                 &data.team1,
                 1,
                 avail,
-                data.team1_called_slot,
-                data.show_calls,
+                CallAffordance::new(data.show_calls, data.team1_called_slot),
                 class_icons,
                 spell_icons,
             );
@@ -264,8 +263,7 @@ pub fn draw_team_frames(
                 &data.team2,
                 2,
                 avail,
-                data.team2_called_slot,
-                data.show_calls,
+                CallAffordance::new(data.show_calls, data.team2_called_slot),
                 class_icons,
                 spell_icons,
             );
@@ -274,14 +272,50 @@ pub fn draw_team_frames(
     clicked
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Whether a column shows and accepts kill-call interaction, and which slot
+/// the opposing team currently calls.
+///
+/// The two facts are not independent — with the affordance off there is no
+/// marker to draw and no rect to sense — so folding them into one value makes
+/// "hidden, but with a called slot" unrepresentable instead of an invalid
+/// combination every caller has to remember not to construct.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CallAffordance {
+    /// Toggled off: no marker drawn, no click sensed.
+    Hidden,
+    /// Toggled on, carrying the slot the opposing team calls, if any.
+    Active(Option<usize>),
+}
+
+impl CallAffordance {
+    fn new(show_calls: bool, called_slot: Option<usize>) -> Self {
+        if show_calls {
+            CallAffordance::Active(called_slot)
+        } else {
+            CallAffordance::Hidden
+        }
+    }
+
+    /// The called slot, or `None` when hidden — so a marker test never has to
+    /// check visibility separately.
+    fn called(self) -> Option<usize> {
+        match self {
+            CallAffordance::Active(slot) => slot,
+            CallAffordance::Hidden => None,
+        }
+    }
+
+    fn interactive(self) -> bool {
+        matches!(self, CallAffordance::Active(_))
+    }
+}
+
 fn draw_column(
     ui: &egui::Ui,
     frames: &[CombatantFrame],
     team: u8,
     screen: egui::Rect,
-    called_slot: Option<usize>,
-    show_calls: bool,
+    affordance: CallAffordance,
     class_icons: &ClassIcons,
     spell_icons: &SpellIcons,
 ) -> Option<CallClick> {
@@ -306,7 +340,7 @@ fn draw_column(
     for ((frame, rect), slot) in frames.iter().zip(&rects).zip(call_slots(frames)) {
         // Only primary combatants are clickable; a pet sub-frame is inert.
         let mut hovered = false;
-        if let (true, Some(slot)) = (show_calls, slot) {
+        if let (true, Some(slot)) = (affordance.interactive(), slot) {
             let response = ui.interact(
                 *rect,
                 egui::Id::new(("team_frame_call", team, slot)),
@@ -320,7 +354,8 @@ fn draw_column(
                 });
             }
         }
-        let called = show_calls && slot.is_some() && slot == called_slot;
+        // `called()` is `None` when hidden, so this covers visibility too.
+        let called = slot.is_some() && slot == affordance.called();
         draw_frame(
             painter,
             *rect,

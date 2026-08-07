@@ -205,7 +205,7 @@ impl Default for BanterTiming {
 
 impl BanterTiming {
     /// Gap between consecutive beats in `context`.
-    pub fn beat_gap_for(&self, context: BanterContext) -> f32 {
+    fn beat_gap_for(&self, context: BanterContext) -> f32 {
         match context {
             BanterContext::Correction => self.correction_beat_gap,
             BanterContext::Opening | BanterContext::Switch => self.beat_gap,

@@ -33,7 +33,7 @@ use super::utils::spawn_speech_line;
 /// match-start code path — the first frame of a match reports a change for both
 /// teams and the context derivation turns it into `Opening`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum LastSeenCall {
+enum LastSeenCall {
     /// No observation has been made for this team yet this match.
     #[default]
     NeverObserved,
@@ -46,7 +46,7 @@ impl LastSeenCall {
     ///
     /// `NeverObserved` differs from everything, including `None` — that is the
     /// sentinel doing its job, not an accident.
-    pub fn differs_from(&self, current: Option<usize>) -> bool {
+    fn differs_from(&self, current: Option<usize>) -> bool {
         match self {
             LastSeenCall::NeverObserved => true,
             LastSeenCall::Seen(previous) => *previous != current,
@@ -58,7 +58,7 @@ impl LastSeenCall {
     /// Collapses both "never looked" and "explicitly cleared" to `None`, which
     /// is what the `{prev_target}` substitution wants: in either case there is
     /// no previous target to name.
-    pub fn slot(&self) -> Option<usize> {
+    fn slot(&self) -> Option<usize> {
         match self {
             LastSeenCall::NeverObserved => None,
             LastSeenCall::Seen(previous) => *previous,
@@ -69,7 +69,7 @@ impl LastSeenCall {
 /// One detected call change, carrying everything the banter layer needs to
 /// pick and schedule an exchange without re-reading the world.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct CallChange {
+struct CallChange {
     /// Which team's call moved — `1` or `2`, matching `Combatant::team`.
     pub team: u8,
     /// The call as it now stands (`None` = cleared).
@@ -95,7 +95,7 @@ pub struct CallChange {
 /// - gates open   -> `Switch`     (a single-beat shout mid-fight)
 /// - gates closed, nothing seen before -> `Opening`    (the countdown exchange)
 /// - gates closed, a call was replaced -> `Correction` (`{prev_target}` is live)
-pub fn banter_context_for(previous: LastSeenCall, gates_opened: bool) -> BanterContext {
+fn banter_context_for(previous: LastSeenCall, gates_opened: bool) -> BanterContext {
     if gates_opened {
         BanterContext::Switch
     } else if previous == LastSeenCall::NeverObserved {
@@ -116,7 +116,7 @@ pub fn banter_context_for(previous: LastSeenCall, gates_opened: bool) -> BanterC
 /// yields two changes in team order. An empty return is the overwhelmingly
 /// common case and allocates nothing (`Vec::new` defers its allocation to the
 /// first push).
-pub fn detect_call_changes(
+fn detect_call_changes(
     last_seen: [LastSeenCall; 2],
     current: [Option<usize>; 2],
     gates_opened: bool,
@@ -159,21 +159,20 @@ pub fn detect_call_changes(
 ///  3. The watcher already owns per-team state that must reset per match, so
 ///     the queue rides along on a resource that exists anyway.
 ///
-/// The consumer (U6's beat scheduler) calls [`CallWatcher::take_pending`] each
-/// frame. Until it exists the queue simply accumulates, which is bounded in
-/// practice: two entries at match start plus one per operator call change, all
-/// discarded on match exit.
+/// [`play_banter_beats`] drains the queue via [`CallWatcher::take_pending`]
+/// every frame. The queue is bounded in practice regardless: two entries at
+/// match start plus one per operator call change, all discarded on match exit.
 #[derive(Resource, Debug, Default)]
 pub struct CallWatcher {
     /// Last-seen call, index 0 = team 1, index 1 = team 2.
-    pub last_seen: [LastSeenCall; 2],
+    last_seen: [LastSeenCall; 2],
     /// Changes detected but not yet consumed, oldest first.
-    pub pending: Vec<CallChange>,
+    pending: Vec<CallChange>,
 }
 
 impl CallWatcher {
     /// Removes and returns every queued change, leaving the queue empty.
-    pub fn take_pending(&mut self) -> Vec<CallChange> {
+    fn take_pending(&mut self) -> Vec<CallChange> {
         std::mem::take(&mut self.pending)
     }
 }
@@ -222,11 +221,11 @@ pub fn watch_kill_target_calls(
 /// Clears the watcher on leaving a match so the next one starts from the
 /// sentinel and reports its own opening change.
 ///
-/// This is why U4 needs no edit to `play_match/mod.rs`: the resource is
-/// `init_resource`d once for the app and reset at the state boundary, the same
-/// lifecycle `Selection` / `reset_selection_on_exit` uses. Clearing `pending`
-/// as well as `last_seen` means an unconsumed change cannot leak into the next
-/// match's queue.
+/// This is why the watcher needs no per-match setup in `play_match/mod.rs`:
+/// the resource is `init_resource`d once for the app and reset at the state
+/// boundary, the same lifecycle `Selection` / `reset_selection_on_exit` uses.
+/// Clearing `pending` as well as `last_seen` means an unconsumed change cannot
+/// leak into the next match's queue.
 pub fn reset_call_watcher_on_exit(mut watcher: ResMut<CallWatcher>) {
     *watcher = CallWatcher::default();
 }
@@ -239,8 +238,9 @@ pub fn reset_call_watcher_on_exit(mut watcher: ResMut<CallWatcher>) {
 // data: no `World`, no `Commands`, no `Res`. [`resolve_exchange`] takes a
 // lineup, the called target, a context and a seed, and returns beats already
 // bound to combatants with their text substituted and their start times
-// derived. U6 owns the Bevy plumbing that gathers those inputs and emits the
-// bubbles; none of the interesting logic needs an app to test.
+// derived. The scheduler below owns the Bevy plumbing that gathers those
+// inputs and emits the bubbles; none of the interesting logic needs an app to
+// test.
 //
 // The pipeline is filter -> weight -> pick -> bind -> substitute:
 //
@@ -262,7 +262,7 @@ pub fn reset_call_watcher_on_exit(mut watcher: ResMut<CallWatcher>) {
 /// through `from_os_rng()`, which draws one and stores it), so this is purely
 /// defensive: with no seed the banter is simply the same every run rather than
 /// the resolver panicking or silently going quiet.
-pub const BANTER_FALLBACK_SEED: u64 = 0x4B41_4C4C_4341_4C4C;
+const BANTER_FALLBACK_SEED: u64 = 0x4B41_4C4C_4341_4C4C;
 
 /// Initial hash state. Deliberately DIFFERENT from [`BANTER_FALLBACK_SEED`] —
 /// [`mix`] starts with an xor, so folding a value into an identical state would
@@ -278,14 +278,14 @@ const BANTER_HASH_INIT: u64 = 0xA076_1D64_78BD_642F;
 /// `"{target} dies first."` in a speech bubble, so a neutral pronoun is the
 /// sane failure mode. Authors are still expected to keep `{prev_target}` to
 /// `Correction` entries; this only stops a mistake looking like a crash.
-pub const UNRESOLVED_TARGET: &str = "them";
+const UNRESOLVED_TARGET: &str = "them";
 
 /// One combatant as the resolver sees them. Plain data, owned, no `World`.
 ///
 /// Pets are NOT part of a lineup — they have no voice and no slot in the
 /// pre-match roster — so the caller filters them out when building one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct BanterCombatant {
+struct BanterCombatant {
     /// Who speaks. Carried through to the resolved beat so the scheduler can
     /// hang a bubble on them without re-deriving the binding.
     pub entity: Entity,
@@ -303,7 +303,7 @@ pub struct BanterCombatant {
 /// Slot order is the roster order, and it is load-bearing: unconstrained roles
 /// fill from it, so a given lineup and exchange always bind the same way.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct BanterLineup {
+struct BanterLineup {
     /// `1` or `2`, matching `Combatant::team`. Hashed into selection so the two
     /// teams do not tell the same joke in the same match.
     pub team: u8,
@@ -318,7 +318,7 @@ pub struct BanterLineup {
 /// substitutions. A `None` target means the call was cleared (or pointed at a
 /// slot that no longer exists), which satisfies `Any` and nothing else.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct BanterCall {
+struct BanterCall {
     /// Class of the newly-called combatant.
     pub target: Option<CharacterClass>,
     /// Class of the combatant the call replaced. Only ever substituted in
@@ -328,7 +328,7 @@ pub struct BanterCall {
 
 /// One beat, ready to spawn: who says it, what it says, and when.
 #[derive(Clone, Debug, PartialEq)]
-pub struct ResolvedBeat {
+struct ResolvedBeat {
     /// The combatant bound to this beat's role.
     pub speaker: Entity,
     /// Final text — every placeholder already substituted.
@@ -340,7 +340,7 @@ pub struct ResolvedBeat {
 
 /// A picked, bound, substituted exchange — everything the scheduler needs.
 #[derive(Clone, Debug, PartialEq)]
-pub struct ResolvedExchange {
+struct ResolvedExchange {
     /// Which pool this came from. Retained so the scheduler can log and reason
     /// about a queued exchange without carrying the change alongside it.
     pub context: BanterContext,
@@ -363,7 +363,7 @@ pub struct ResolvedExchange {
 /// same joke three times. `seed` is `GameRng::seed` READ, never drawn from
 /// (KTD7) — reading a public field cannot advance the generator, so replay
 /// byte-identity is safe by construction.
-pub fn resolve_exchange(
+fn resolve_exchange(
     config: &BanterConfig,
     lineup: &BanterLineup,
     call: BanterCall,
@@ -566,7 +566,7 @@ fn context_salt(context: BanterContext) -> u64 {
 /// identical (KTD7) — hashing the lineup alone would have the same comp tell
 /// the same joke forever. Reading `GameRng::seed` is a public-field read, so it
 /// cannot advance draw order and no headless baseline can move (R15, R18).
-pub fn banter_roll(
+fn banter_roll(
     seed: Option<u64>,
     team: u8,
     context: BanterContext,
@@ -602,7 +602,7 @@ fn class_word(class: Option<CharacterClass>) -> &'static str {
 }
 
 // =============================================================================
-// Beat scheduling and emission (U6, KTD9)
+// Beat scheduling and emission (KTD9)
 // =============================================================================
 //
 // A resolved exchange is a list of beats with start times RELATIVE to the call
@@ -614,7 +614,7 @@ fn class_word(class: Option<CharacterClass>) -> &'static str {
 //  1. ONE LIVE BUBBLE PER SPEAKER. `render_speech_bubbles` projects every
 //     bubble to a fixed offset above its owner with no per-owner stacking or
 //     dedup, so two concurrent bubbles on one combatant draw on top of each
-//     other and neither is readable. U1's `validate()` enforces the gap WITHIN
+//     other and neither is readable. `BanterConfig::validate()` enforces the gap WITHIN
 //     an exchange; the scheduler enforces it ACROSS exchanges, where the
 //     config cannot see the collision coming (see [`BanterScheduler::take_due`]).
 //  2. A CORRECTION CANCELS THE UNPLAYED BEATS (KTD9). Letting the opening
@@ -632,7 +632,7 @@ fn class_word(class: Option<CharacterClass>) -> &'static str {
 
 /// One beat waiting for its moment, in scheduler-clock terms.
 #[derive(Clone, Debug, PartialEq)]
-pub struct PendingBeat {
+struct PendingBeat {
     /// Who says it. Bound at resolution; re-checked for liveness at emission.
     pub speaker: Entity,
     /// Final text — placeholders already substituted by the resolver.
@@ -656,20 +656,20 @@ pub struct PendingBeat {
 pub struct BanterScheduler {
     /// Seconds since this match's scheduler started. Absolute beat times are
     /// on this clock, so it must never run backwards within a match.
-    pub clock: f32,
+    clock: f32,
     /// Unplayed beats, index 0 = team 1, index 1 = team 2, each ascending in
     /// `at`. The two teams schedule independently: a correction on one side
     /// never touches the other's queue.
-    pub queues: [Vec<PendingBeat>; 2],
+    queues: [Vec<PendingBeat>; 2],
     /// When each speaker's live bubble expires, on the same clock. The
     /// cross-exchange half of the one-bubble-per-speaker rule. Entries are
     /// never pruned: at most one per combatant, and the whole resource is
     /// dropped on match exit.
-    pub speaking_until: HashMap<Entity, f32>,
+    speaking_until: HashMap<Entity, f32>,
     /// Per-team count of resolutions so far this match, fed to
     /// `resolve_exchange` so a team corrected three times does not tell the
     /// same joke three times.
-    pub occurrence: [u32; 2],
+    occurrence: [u32; 2],
 }
 
 /// Queue index for a team number (`1` or `2`).
@@ -683,7 +683,7 @@ fn team_index(team: u8) -> usize {
 
 impl BanterScheduler {
     /// Advance the clock by one frame's (virtual) delta.
-    pub fn advance(&mut self, delta: f32) {
+    fn advance(&mut self, delta: f32) {
         self.clock += delta;
     }
 
@@ -692,7 +692,7 @@ impl BanterScheduler {
     /// Incremented per CALL CHANGE, not per successful resolution: a change
     /// whose pool came up empty still moves the counter, so the next change
     /// does not land on the roll the silent one would have used.
-    pub fn next_occurrence(&mut self, team: u8) -> u32 {
+    fn next_occurrence(&mut self, team: u8) -> u32 {
         let slot = &mut self.occurrence[team_index(team)];
         let occurrence = *slot;
         *slot = slot.saturating_add(1);
@@ -706,7 +706,7 @@ impl BanterScheduler {
     /// stale whether or not there is anything to replace it with. Already-
     /// emitted bubbles are untouched — they are live entities on their own
     /// lifetime timer, and yanking them would blink text off mid-read.
-    pub fn cancel_team(&mut self, team: u8) {
+    fn cancel_team(&mut self, team: u8) {
         self.queues[team_index(team)].clear();
     }
 
@@ -715,7 +715,7 @@ impl BanterScheduler {
     /// Does NOT cancel on its own — [`cancel_team`](Self::cancel_team) is a
     /// separate call because a change that resolves to nothing must still
     /// cancel.
-    pub fn queue_exchange(&mut self, team: u8, exchange: &ResolvedExchange) {
+    fn queue_exchange(&mut self, team: u8, exchange: &ResolvedExchange) {
         let queue = &mut self.queues[team_index(team)];
         let now = self.clock;
         queue.extend(exchange.beats.iter().map(|beat| PendingBeat {
@@ -745,9 +745,9 @@ impl BanterScheduler {
     /// the first line of a correction precisely when the operator most wants to
     /// be told what changed. The push is bounded by one `line_lifetime` (the
     /// blocking bubble was spawned at most that long ago), and it cannot
-    /// cascade past one step, because U1's validation already keeps same-role
+    /// cascade past one step, because `BanterConfig::validate()` already keeps same-role
     /// beats within an exchange at least `line_lifetime` apart.
-    pub fn take_due(&mut self, is_alive: impl Fn(Entity) -> bool) -> Vec<PendingBeat> {
+    fn take_due(&mut self, is_alive: impl Fn(Entity) -> bool) -> Vec<PendingBeat> {
         let mut due: Vec<PendingBeat> = Vec::new();
 
         for index in 0..self.queues.len() {
@@ -1151,7 +1151,7 @@ mod tests {
     }
 
     // -------------------------------------------------------------------
-    // Exchange resolution (U5)
+    // Exchange resolution
     //
     // All of this is pure over plain data, so the fixtures below are hand-built
     // `BanterConfig`s rather than the shipped `banter.ron` — a content edit must
@@ -1819,7 +1819,7 @@ mod tests {
     }
 
     // -------------------------------------------------------------------
-    // Beat scheduling (U6)
+    // Beat scheduling
     //
     // The queue mechanics are pure — `advance` a clock, `take_due` against a
     // liveness predicate — so almost everything below runs without a `World`.
@@ -1984,7 +1984,7 @@ mod tests {
         assert_eq!(due[0].speaker, BEA);
     }
 
-    /// One live bubble per speaker, ACROSS exchanges. U1's `validate()` covers
+    /// One live bubble per speaker, ACROSS exchanges. `BanterConfig::validate()` covers
     /// the within-exchange case; only the scheduler can see a correction beat
     /// landing while an opening beat from the same speaker is still up.
     #[test]
