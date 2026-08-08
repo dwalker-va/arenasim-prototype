@@ -641,6 +641,8 @@ pub fn setup_play_match(
     // Initialize spell icons resources (for ability timeline)
     commands.insert_resource(SpellIcons::default());
     commands.insert_resource(SpellIconHandles::default());
+    commands.insert_resource(crate::states::play_match::rendering::emoji::EmojiIcons::default());
+    commands.insert_resource(crate::states::play_match::rendering::emoji::EmojiIconHandles::default());
 
     // Resolved BEFORE the camera so the camera can be framed to the map. The
     // resource is inserted further down; this is just the lookup.

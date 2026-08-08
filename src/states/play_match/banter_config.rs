@@ -292,6 +292,46 @@ impl BanterConfig {
         bad
     }
 
+    /// Emoji names a line references that have no art on disk.
+    ///
+    /// The renderer degrades a missing emoji to a grey outline, which is fine
+    /// as a runtime posture and useless as feedback — a typo'd `{emoji:skul}`
+    /// would just be a faint box mid-match. Checking at load turns that into a
+    /// startup failure naming the token, which matters more now that adding a
+    /// symbol is "drop a file and reference it" and the reference is the only
+    /// place a mistake can hide.
+    ///
+    /// Returns nothing when the directory is absent — a checkout without art
+    /// should not fail validation, since the renderer already copes.
+    fn missing_emoji(&self) -> Vec<String> {
+        let dir = std::path::Path::new("assets/icons/emoji");
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return Vec::new();
+        };
+        let available: std::collections::HashSet<String> = entries
+            .flatten()
+            .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("png"))
+            .filter_map(|e| {
+                e.path()
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .map(str::to_string)
+            })
+            .collect();
+
+        let mut missing = Vec::new();
+        for exchange in &self.exchanges {
+            for beat in &exchange.beats {
+                for name in emoji_names(&beat.text) {
+                    if !available.contains(&name) && !missing.contains(&name) {
+                        missing.push(name);
+                    }
+                }
+            }
+        }
+        missing
+    }
+
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut issues: Vec<String> = Vec::new();
         let t = &self.timing;
@@ -453,6 +493,14 @@ impl BanterConfig {
                     context
                 ));
             }
+        }
+
+        for name in self.missing_emoji() {
+            issues.push(format!(
+                "no emoji art for '{}' — expected assets/icons/emoji/{}.png (see that \
+                 directory's ATTRIBUTION.md for how to add one)",
+                name, name
+            ));
         }
 
         if issues.is_empty() {
@@ -880,4 +928,24 @@ mod tests {
             t.beat_start(BanterContext::Opening, 0),
         );
     }
+}
+
+/// Every `{emoji:<name>}` referenced by a line.
+///
+/// A tiny scanner rather than a call into `banter::vocab::parse`, so config
+/// validation does not depend on the renderer's span model — the two answer
+/// different questions and should be able to change independently.
+fn emoji_names(text: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("{emoji:") {
+        let after = &rest[start + "{emoji:".len()..];
+        let Some(end) = after.find('}') else { break };
+        let name = &after[..end];
+        if !name.is_empty() {
+            names.push(name.to_string());
+        }
+        rest = &after[end + 1..];
+    }
+    names
 }

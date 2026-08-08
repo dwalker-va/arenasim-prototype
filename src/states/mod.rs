@@ -501,6 +501,7 @@ impl Plugin for StatesPlugin {
                 // already shown this frame.
                 (
                     play_match::load_spell_icons,
+                    play_match::load_emoji_icons,
                     play_match::render_time_controls,
                     play_match::render_camera_controls,
                     play_match::render_combat_panel,
