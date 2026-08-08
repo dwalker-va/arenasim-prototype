@@ -49,13 +49,19 @@
 // unrenderable or off-conceit line cannot reach a match.
 //
 // Vocabulary in play, and what each says in context:
-//   {ability:Mortal Strike}      attack        {emoji:arrow}  directs at a target
-//   {ability:Death Coil}         kill / death  {emoji:no}     no / stop / not that
-//   {ability:Flash Heal}         healing       {emoji:yes}    yes / on it
-//   {ability:Power Word: Shield} defence       !            urgency, beware
-//   {ability:Lightning Bolt}     burst         ?            uncertainty
-//   {ability:Frost Nova}         freeze        …            hesitation, waiting
-//   {ability:Aimed Shot}         spotted       {emoji:search} where is it?
+//   {ability:Mortal Strike}      attack        {emoji:arrow}     directs at a target
+//   {ability:Death Coil}         kill / death  {emoji:no}        no / stop / not that
+//   {ability:Flash Heal}         healing       {emoji:yes}       yes / on it
+//   {ability:Power Word: Shield} defence       {emoji:seenoevil} cannot see it (stealth)
+//   {ability:Lightning Bolt}     burst         !                 urgency, beware
+//   {ability:Frost Nova}         freeze        ?                 uncertainty
+//   {ability:Aimed Shot}         spotted       …                 hesitation, waiting
+//
+// PICK EMOJI THAT ARE ACTUALLY COLOURFUL. Several Unicode dingbats render in
+// Twemoji as near-greyscale — ✔️ is dark slate, 🔍 is grey — and at 20px in a
+// moving bubble they read as smudges next to the saturated ability art. The
+// colourful sibling usually exists and says the same thing: ✅ for the check,
+// 🙈 for "I cannot see it". Check the PNG before adding a token, not after.
 //
 // ===========================================================================
 // HOW THE POOL IS TIERED
@@ -203,7 +209,7 @@
             target: Class(Rogue),
             beats: [
                 (role: "caller",    text: "{ability:Mortal Strike} {emoji:arrow} {target}"),
-                (role: "responder", text: "{emoji:search} …"),
+                (role: "responder", text: "{emoji:seenoevil} …"),
             ],
         ),
         (
@@ -250,7 +256,7 @@
             target: Any,
             beats: [
                 (role: "caller",    text: "{ability:Ambush} {emoji:arrow} {target}"),
-                (role: "responder", text: "{emoji:search} …"),
+                (role: "responder", text: "{emoji:seenoevil} …"),
             ],
         ),
         (
@@ -416,7 +422,7 @@
             target: Class(Rogue),
             beats: [
                 (role: "caller",    text: "? ! {target}"),
-                (role: "responder", text: "{emoji:search} ?"),
+                (role: "responder", text: "{emoji:seenoevil} ?"),
                 (role: "caller",    text: "…"),
             ],
         ),
