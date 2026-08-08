@@ -24,8 +24,14 @@ pub struct GameSettings {
     #[serde(default = "default_show_combat_panel")]
     pub show_combat_panel: bool,
     /// Whether the in-match kill-call markers are shown on the team frames
-    /// (default: false — it is an experimentation affordance, not part of the
-    /// default spectator presentation)
+    /// (default: true).
+    ///
+    /// Unlike the combat panel this follows in shape, the call display defaults
+    /// ON. It was briefly off, on the theory that it is an experimentation
+    /// affordance rather than part of the spectator view — but the markers show
+    /// what each team is focusing, which is match state a watcher wants, and a
+    /// control nobody can see is a control nobody uses. The toggle now exists
+    /// to get a clean view, not to opt in.
     #[serde(default = "default_show_call_display")]
     pub show_call_display: bool,
 }
@@ -39,7 +45,7 @@ fn default_show_combat_panel() -> bool {
 }
 
 fn default_show_call_display() -> bool {
-    false
+    true
 }
 
 /// Tracks whether settings have changed and require application restart
@@ -83,7 +89,7 @@ impl Default for GameSettings {
             keybindings: Keybindings::default(),
             show_aura_icons: true,
             show_combat_panel: false,
-            show_call_display: false,
+            show_call_display: true,
         }
     }
 }
@@ -272,14 +278,14 @@ mod tests {
     #[test]
     fn call_display_flag_round_trips() {
         let mut settings = GameSettings::default();
-        assert!(!settings.show_call_display, "call display defaults to off");
-        settings.show_call_display = true;
+        assert!(settings.show_call_display, "call display defaults to on");
+        settings.show_call_display = false;
 
         let serialized = ron::ser::to_string_pretty(&settings, ron::ser::PrettyConfig::default())
             .expect("settings serialize");
         let loaded: GameSettings = ron::from_str(&serialized).expect("settings deserialize");
 
-        assert!(loaded.show_call_display);
+        assert!(!loaded.show_call_display);
     }
 
     /// A settings file written before the field existed must still load — the
@@ -302,7 +308,7 @@ mod tests {
         );
 
         let loaded: GameSettings = ron::from_str(&legacy).expect("legacy settings deserialize");
-        assert!(!loaded.show_call_display, "missing field falls back to the default");
+        assert!(loaded.show_call_display, "missing field falls back to the default");
     }
 }
 

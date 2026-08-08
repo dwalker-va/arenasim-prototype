@@ -350,37 +350,65 @@ fn draw_column(
         egui::Color32::from_rgb(160, 160, 175),
     );
 
+    let now = ui.input(|i| i.time);
     let mut clicked = None;
     for ((frame, rect), slot) in frames.iter().zip(&rects).zip(call_slots(frames)) {
         // Only primary combatants are clickable; a pet sub-frame and a corpse
         // both come back with no slot and stay inert.
         let mut call_state = FrameCallState::Inert;
+        let mut press = 0.0;
         if let (true, Some(slot)) = (affordance.interactive(), slot) {
-            let response = ui.interact(
-                *rect,
-                egui::Id::new(("team_frame_call", team, slot)),
-                egui::Sense::click(),
-            );
+            let id = egui::Id::new(("team_frame_call", team, slot));
+            let response = ui.interact(*rect, id, egui::Sense::click());
             call_state = if response.hovered() {
                 FrameCallState::Hovered
             } else {
                 FrameCallState::Callable
             };
             if response.clicked() {
+                // Stamp the press in egui's own scratch memory rather than a
+                // Bevy resource: this is a draw-layer flourish with no meaning
+                // to the simulation, and routing it through the ECS would put
+                // per-frame cosmetic state somewhere systems could read it.
+                ui.ctx()
+                    .memory_mut(|m| m.data.insert_temp(id.with("press"), now));
                 clicked = Some(CallClick {
                     clicked_team: team,
                     slot,
                 });
             }
+            press = ui
+                .ctx()
+                .memory(|m| m.data.get_temp::<f64>(id.with("press")))
+                .map(|at| press_intensity(now - at))
+                .unwrap_or(0.0);
         }
         // Being called outranks hover and callable. `called()` is `None` when
         // the affordance is hidden, so this covers visibility too.
         if slot.is_some() && slot == affordance.called() {
             call_state = FrameCallState::Called;
         }
-        draw_frame(painter, *rect, frame, call_state, class_icons, spell_icons);
+        draw_frame(painter, *rect, frame, call_state, press, class_icons, spell_icons);
     }
     clicked
+}
+
+/// How long a click flash lasts, in seconds.
+const PRESS_SECS: f64 = 0.22;
+
+/// Click-flash intensity in `[0, 1]` for a press that landed `age` seconds ago.
+///
+/// Linear decay, deliberately short: this is the tactile "the click registered"
+/// tell a button gives you, not an effect. Long enough to catch at a glance,
+/// short enough that clicking through several targets does not leave a trail of
+/// fading frames competing with the call marker itself.
+///
+/// Pure so the curve is testable without a `Context`.
+fn press_intensity(age: f64) -> f32 {
+    if !(0.0..PRESS_SECS).contains(&age) {
+        return 0.0;
+    }
+    (1.0 - age / PRESS_SECS) as f32
 }
 
 /// How a frame participates in the call affordance, as one value rather than a
@@ -405,6 +433,7 @@ fn draw_frame(
     rect: egui::Rect,
     frame: &CombatantFrame,
     call_state: FrameCallState,
+    press: f32,
     class_icons: &ClassIcons,
     spell_icons: &SpellIcons,
 ) {
@@ -431,6 +460,22 @@ fn draw_frame(
         FrameCallState::Callable => egui::Stroke::new(1.0, CALL_CALLABLE),
         FrameCallState::Inert => egui::Stroke::new(1.0, egui::Color32::from_rgb(45, 45, 60)),
     };
+    // Click flash: a brief lift on the frame you just pressed. Drawn UNDER the
+    // border so the call marker stays the brightest thing even mid-press, and
+    // hueless like the rest of the call language.
+    if press > 0.0 {
+        painter.rect_filled(
+            rect,
+            4.0,
+            egui::Color32::from_rgba_unmultiplied(236, 238, 248, (press * 46.0) as u8),
+        );
+        painter.rect_stroke(
+            rect,
+            4.0,
+            egui::Stroke::new(1.0 + press, CALL_MARK.gamma_multiply(press)),
+            egui::StrokeKind::Outside,
+        );
+    }
     painter.rect_stroke(rect, 4.0, border, egui::StrokeKind::Outside);
     let stripe = egui::Rect::from_min_size(rect.min, egui::vec2(3.0, rect.height()));
     painter.rect_filled(stripe, 2.0, dimmed(class_color32(frame.class)));
@@ -843,6 +888,28 @@ mod tests {
             pet_label: Some("Spider (pet)".to_string()),
             ..primary(class)
         }
+    }
+
+    /// The click flash rises at the press and decays to nothing, and — the
+    /// part worth pinning — it does not linger.
+    ///
+    /// A press tell that outlasts the click stops reading as feedback and
+    /// starts competing with the call marker, which is the one thing on these
+    /// frames that must stay unambiguous. The negative-age case guards the
+    /// clock going backwards, which egui's time can do across a state change.
+    #[test]
+    fn press_flash_decays_and_does_not_linger() {
+        assert_eq!(press_intensity(0.0), 1.0, "full at the moment of the press");
+        assert_eq!(press_intensity(PRESS_SECS), 0.0, "gone by the end");
+        assert_eq!(press_intensity(PRESS_SECS * 2.0), 0.0, "stays gone after");
+        assert_eq!(press_intensity(-1.0), 0.0, "a backwards clock reads as no press");
+
+        let mid = press_intensity(PRESS_SECS / 2.0);
+        assert!((0.4..=0.6).contains(&mid), "decays through the middle: {mid}");
+        assert!(
+            press_intensity(PRESS_SECS * 0.25) > press_intensity(PRESS_SECS * 0.75),
+            "intensity falls monotonically"
+        );
     }
 
     #[test]

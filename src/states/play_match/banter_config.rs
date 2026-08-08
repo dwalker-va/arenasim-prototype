@@ -198,16 +198,16 @@ pub struct BanterTiming {
 impl Default for BanterTiming {
     fn default() -> Self {
         Self {
-            opening_start: 2.0,
-            // Near-immediate, but not 0.2: the deferral check below requires
-            // `line_lifetime - switch_start < beat_gap` for any context that
-            // could hold a multi-beat exchange, and 0.5 keeps the defaults
-            // internally consistent for ANY pool rather than only the shipped
-            // single-beat one.
-            switch_start: 0.5,
-            beat_gap: 2.2,
-            line_lifetime: 2.6,
-            correction_beat_gap: 1.6,
+            opening_start: 1.5,
+            // Near-immediate, but not near-zero: the deferral check below
+            // requires `line_lifetime - switch_start < beat_gap` for any
+            // context that could hold a multi-beat exchange, and 0.8 keeps the
+            // defaults internally consistent for ANY pool rather than only the
+            // shipped single-beat one.
+            switch_start: 0.8,
+            beat_gap: 3.0,
+            line_lifetime: 3.6,
+            correction_beat_gap: 2.4,
             latest_beat: 9.0,
             specificity_weight: 3.0,
         }
@@ -505,17 +505,25 @@ mod tests {
         }
     }
 
-    /// The shipped banter.ron loads, parses, and validates (also pins the
-    /// plan's timing values and the countdown bound).
+    /// The shipped banter.ron loads, parses, and validates.
+    ///
+    /// Pacing values are deliberately NOT pinned to literals — they are a feel
+    /// knob and expected to move. What is pinned is the bound that keeps the
+    /// countdown coherent, and the property that makes lines readable at all.
     #[test]
     fn shipped_banter_ron_loads_and_validates() {
         let config = load_banter_config().expect("assets/config/banter.ron must load");
-        assert_eq!(config.timing.line_lifetime, 2.6);
-        assert_eq!(config.timing.latest_beat, 9.0);
         assert!(
             config.timing.latest_beat < 10.0,
             "latest_beat must sit inside the 10s countdown, got {}",
             config.timing.latest_beat
+        );
+        assert!(
+            config.timing.line_lifetime > config.timing.opening_start,
+            "a bubble must outlive the delay before the first one speaks, or an \
+             exchange's opening line is gone before the reply arrives: lifetime {} vs start {}",
+            config.timing.line_lifetime,
+            config.timing.opening_start
         );
         for context in BanterContext::all() {
             assert!(
@@ -726,11 +734,15 @@ mod tests {
     /// an exchange-less pool cannot meet the coverage floor.
     #[test]
     fn partial_ron_uses_defaults() {
-        let config: BanterConfig = ron::from_str("(timing: (beat_gap: 3.0))")
+        let config: BanterConfig = ron::from_str("(timing: (beat_gap: 9.5))")
             .expect("partial config must parse");
-        assert_eq!(config.timing.beat_gap, 3.0);
+        assert_eq!(config.timing.beat_gap, 9.5, "the stated field wins");
+        // Compared against the default rather than a literal: this test is
+        // about serde filling the gaps, not about the current pacing, and
+        // hardcoding the number makes every retune fail an unrelated test.
         assert_eq!(
-            config.timing.line_lifetime, 2.6,
+            config.timing.line_lifetime,
+            BanterTiming::default().line_lifetime,
             "unspecified fields use defaults"
         );
         assert_eq!(config.timing.specificity_weight, 3.0);
@@ -780,15 +792,29 @@ mod tests {
         assert_eq!(exchange.specificity(), 2);
     }
 
-    /// Beat times are derived from the pacing block: `Correction` paces
-    /// tighter between beats, and `Switch` starts almost immediately.
+    /// Beat times are derived from the pacing block, not authored.
+    ///
+    /// Asserted against the timing fields rather than literals so retuning the
+    /// pacing (which is expected — it is a feel knob) does not fail a test
+    /// about the derivation.
     #[test]
     fn beat_start_derives_from_context_gap() {
         let t = BanterTiming::default();
-        assert_eq!(t.beat_start(BanterContext::Opening, 0), 2.0);
-        assert_eq!(t.beat_start(BanterContext::Opening, 1), 4.2);
-        assert_eq!(t.beat_start(BanterContext::Correction, 0), 2.0);
-        assert_eq!(t.beat_start(BanterContext::Correction, 1), 3.6);
+        assert_eq!(t.beat_start(BanterContext::Opening, 0), t.opening_start);
+        assert_eq!(
+            t.beat_start(BanterContext::Opening, 1),
+            t.opening_start + t.beat_gap
+        );
+        assert_eq!(t.beat_start(BanterContext::Correction, 0), t.opening_start);
+        assert_eq!(
+            t.beat_start(BanterContext::Correction, 1),
+            t.opening_start + t.correction_beat_gap,
+            "Correction paces tighter between beats than Opening"
+        );
+        assert!(
+            t.correction_beat_gap < t.beat_gap,
+            "a correction races the gates, so it must be the tighter of the two"
+        );
     }
 
     /// A mid-fight shout does NOT wait out the countdown-oriented

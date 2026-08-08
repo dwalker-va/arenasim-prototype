@@ -62,23 +62,34 @@
 // ---------------------------------------------------------------------------
 (
     timing: (
+        // ---- PACING -------------------------------------------------------
+        // These six values are the whole tuning surface for how banter reads,
+        // and the file is re-read at startup, so tuning is edit-and-relaunch
+        // with no rebuild. If lines feel rushed, raise `line_lifetime` first
+        // (time to read one line) and `beat_gap` second (space between them).
+        //
+        // Two bounds constrain how far you can go. `latest_beat` keeps every
+        // beat inside the 10s countdown, and validation rejects a pool where
+        // `line_lifetime` minus a context's start delay reaches its beat gap
+        // (a deferred beat could then collide with the one behind it).
+
         // Seconds after the call change before the first beat speaks. Applies
         // to Opening and Correction, both of which play during the countdown
-        // while combatants are still settling into the starting room.
-        opening_start: 2.0,
+        // while combatants are still settling into the starting room. Pulled
+        // in from 2.0 to buy room for slower beats without crowding the gates.
+        opening_start: 1.5,
         // A mid-fight Switch shout does NOT wait that out — its job is to make
-        // the operator's order legible the moment it is given. Kept at 0.5
-        // rather than lower so that `line_lifetime - switch_start` stays below
-        // `beat_gap`, which is what stops a deferred beat colliding with the
-        // one behind it if a multi-beat Switch is ever authored.
-        switch_start: 0.5,
-        // Seconds between consecutive beats (Opening and Switch).
-        beat_gap: 2.2,
-        // How long each bubble stays up. Two beats on the same role must be
-        // at least this far apart.
-        line_lifetime: 2.6,
+        // the operator's order legible the moment it is given.
+        switch_start: 0.8,
+        // Seconds between consecutive beats (Opening and Switch). Comfortably
+        // below `line_lifetime` on purpose: consecutive lines overlap a little
+        // so an exchange reads as conversation rather than as a slideshow.
+        beat_gap: 3.0,
+        // How long each bubble stays up — the read-time knob. Two beats on the
+        // same role must be at least this far apart.
+        line_lifetime: 3.6,
         // Tighter pacing for corrections — they race the gates.
-        correction_beat_gap: 1.6,
+        correction_beat_gap: 2.4,
         // The countdown is 10s; no beat may start after this.
         latest_beat: 9.0,
         // Selection-weight multiplier per non-Any constraint. 1.0 would make
