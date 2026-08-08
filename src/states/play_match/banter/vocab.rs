@@ -82,6 +82,13 @@ pub enum Symbol {
     No,
     /// Assent, "on it".
     Yes,
+    /// Searching — "where is it?". The stealth mark.
+    ///
+    /// A magnifying glass rather than the obvious 🙈: at bubble size that
+    /// emoji is an unreadable dark blob (it only resolves into a monkey at
+    /// roughly twice the size), whereas a glass is a circle and a handle and
+    /// stays legible however small it gets.
+    Search,
 }
 
 impl Symbol {
@@ -90,6 +97,7 @@ impl Symbol {
             "arrow" => Some(Symbol::Arrow),
             "no" => Some(Symbol::No),
             "yes" => Some(Symbol::Yes),
+            "search" => Some(Symbol::Search),
             _ => None,
         }
     }

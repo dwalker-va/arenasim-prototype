@@ -31,7 +31,7 @@
 //   {prev_target}            the replaced target's portrait (Correction only)
 //   {speaker}                the speaking combatant's own portrait
 //   {ability:Mortal Strike}  that ability's real icon art
-//   {sym:arrow|no|yes}       a drawn grammar mark
+//   {sym:arrow|no|yes|search}  a drawn grammar mark
 //
 // Portraits are FRAMED blue for team 1 and red for team 2 — the same colours
 // the combat-log timeline uses. A frame rather than a tint: tinting multiplied
@@ -53,7 +53,7 @@
 //   {ability:Power Word: Shield} defence       !            urgency, beware
 //   {ability:Lightning Bolt}     burst         ?            uncertainty
 //   {ability:Frost Nova}         freeze        …            hesitation, waiting
-//   {ability:Aimed Shot}         spotted
+//   {ability:Aimed Shot}         spotted       {sym:search} where is it?
 //
 // ===========================================================================
 // HOW THE POOL IS TIERED
@@ -201,7 +201,7 @@
             target: Class(Rogue),
             beats: [
                 (role: "caller",    text: "{ability:Mortal Strike} {sym:arrow} {target}"),
-                (role: "responder", text: "? ? …"),
+                (role: "responder", text: "{sym:search} …"),
             ],
         ),
         (
@@ -248,7 +248,7 @@
             target: Any,
             beats: [
                 (role: "caller",    text: "{ability:Ambush} {sym:arrow} {target}"),
-                (role: "responder", text: "? …"),
+                (role: "responder", text: "{sym:search} …"),
             ],
         ),
         (
@@ -414,7 +414,7 @@
             target: Class(Rogue),
             beats: [
                 (role: "caller",    text: "? ! {target}"),
-                (role: "responder", text: "? ?"),
+                (role: "responder", text: "{sym:search} ?"),
                 (role: "caller",    text: "…"),
             ],
         ),

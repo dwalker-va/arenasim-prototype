@@ -509,6 +509,16 @@ pub fn draw_symbol(painter: &egui::Painter, symbol: vocab::Symbol, rect: egui::R
             painter.line_segment([at(0.14, 0.52), at(0.40, 0.80)], stroke);
             painter.line_segment([at(0.40, 0.80), at(0.88, 0.20)], stroke);
         }
+        // Lens plus handle. The handle is what makes it a magnifier rather
+        // than a circle, so it is drawn heavier than the ring and set at 45°
+        // where it reads fastest.
+        vocab::Symbol::Search => {
+            painter.circle_stroke(at(0.42, 0.42), w * 0.26, stroke);
+            painter.line_segment(
+                [at(0.62, 0.62), at(0.90, 0.90)],
+                egui::Stroke::new(stroke.width * 1.2, ink),
+            );
+        }
     }
 }
 

@@ -33,7 +33,7 @@ const LINES: &[(&str, &str)] = &[
     ("open/healer", "{class:Priest:2} {ability:Flash Heal} {sym:no}"),
     ("open/urgent", "{ability:Mortal Strike} {sym:arrow} {class:Priest:2}!"),
     ("open/paladin", "{ability:Divine Shield} !…"),
-    ("open/rogue", "? ?…"),
+    ("open/rogue", "{sym:search} …"),
     ("open/charge", "{ability:Charge} {sym:arrow} {class:Mage:2}"),
     ("open/self", "{class:Warrior:1} {ability:Mortal Strike} {sym:arrow} {class:Mage:2}"),
     ("correct", "{sym:no} {class:Paladin:2} {sym:arrow} {class:Rogue:2}"),
