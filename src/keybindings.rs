@@ -33,6 +33,7 @@ pub enum GameAction {
     // Display
     ToggleAuraIcons,
     ToggleCombatPanel,
+    ToggleCallDisplay,
 }
 
 impl GameAction {
@@ -55,6 +56,7 @@ impl GameAction {
             GameAction::SpeedVeryFast => "Speed: 3x",
             GameAction::ToggleAuraIcons => "Toggle Aura Icons",
             GameAction::ToggleCombatPanel => "Toggle Combat Log Panel",
+            GameAction::ToggleCallDisplay => "Toggle Kill Call Display",
         }
     }
     
@@ -68,7 +70,8 @@ impl GameAction {
             GameAction::PausePlay | GameAction::SpeedSlow
             | GameAction::SpeedNormal | GameAction::SpeedFast
             | GameAction::SpeedVeryFast => "Simulation",
-            GameAction::ToggleAuraIcons | GameAction::ToggleCombatPanel => "Display",
+            GameAction::ToggleAuraIcons | GameAction::ToggleCombatPanel
+            | GameAction::ToggleCallDisplay => "Display",
         }
     }
     
@@ -91,6 +94,7 @@ impl GameAction {
             GameAction::SpeedVeryFast,
             GameAction::ToggleAuraIcons,
             GameAction::ToggleCombatPanel,
+            GameAction::ToggleCallDisplay,
         ]
     }
 }
@@ -302,6 +306,7 @@ impl Keybindings {
         // Display
         bindings.insert(GameAction::ToggleAuraIcons, KeyBinding::new(KeyCode::KeyV));
         bindings.insert(GameAction::ToggleCombatPanel, KeyBinding::new(KeyCode::KeyL));
+        bindings.insert(GameAction::ToggleCallDisplay, KeyBinding::new(KeyCode::KeyK));
 
         Self { bindings }
     }
@@ -450,6 +455,61 @@ impl Keybindings {
             }
         } else {
             "Unbound".to_string()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `all()` is a plain `Vec`, not compiler-enforced — an action missing from
+    /// it silently disappears from the keybinding UI.
+    #[test]
+    fn call_display_action_is_listed_and_bound() {
+        assert!(
+            GameAction::all().contains(&GameAction::ToggleCallDisplay),
+            "ToggleCallDisplay missing from GameAction::all()"
+        );
+
+        let defaults = Keybindings::create_defaults();
+        let binding = defaults
+            .get(GameAction::ToggleCallDisplay)
+            .expect("ToggleCallDisplay has no default binding");
+        assert_eq!(binding.primary, KeyCode::KeyK);
+    }
+
+    /// The default binding map is a plain `HashMap` too — every action in
+    /// `all()` must appear in it, or the action is unreachable by keyboard.
+    #[test]
+    fn every_action_has_a_default_binding() {
+        let defaults = Keybindings::create_defaults();
+        for action in GameAction::all() {
+            assert!(
+                defaults.get(action).is_some(),
+                "{:?} has no default binding",
+                action
+            );
+        }
+    }
+
+    /// Guards every action, not just the new one: no key may be claimed twice
+    /// across the default map (primary or secondary).
+    #[test]
+    fn default_bindings_do_not_collide() {
+        let defaults = Keybindings::create_defaults();
+        let mut claimed: HashMap<KeyCode, GameAction> = HashMap::new();
+
+        for action in GameAction::all() {
+            let binding = defaults.get(action).expect("action has no default binding");
+            for key in std::iter::once(binding.primary).chain(binding.secondary) {
+                if let Some(other) = claimed.insert(key, action) {
+                    panic!(
+                        "default key {:?} is bound to both {:?} and {:?}",
+                        key, other, action
+                    );
+                }
+            }
         }
     }
 }

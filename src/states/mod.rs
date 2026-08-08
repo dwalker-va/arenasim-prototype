@@ -64,6 +64,14 @@ impl Plugin for StatesPlugin {
             .init_resource::<armory_ui::ArmoryFilters>()
             // Player selection (click-to-select) — graphical-only
             .init_resource::<play_match::Selection>()
+            // Kill-target call watcher (banter) — graphical-only. Owned for the
+            // app lifetime and reset at the PlayMatch state boundary, the same
+            // lifecycle `Selection` uses, so `play_match/mod.rs` needs no
+            // per-match insert/remove pair for it.
+            .init_resource::<play_match::CallWatcher>()
+            // Banter beat queues (graphical-only), same app-lifetime-plus-
+            // state-boundary-reset lifecycle as the watcher above.
+            .init_resource::<play_match::BanterScheduler>()
             // Main menu systems (defined in main_menu module): ambient 3D
             // arena backdrop (setup/orbit/cleanup) + the egui menu overlay
             .add_systems(OnEnter(GameState::MainMenu), main_menu::setup_menu_scene)
@@ -459,6 +467,31 @@ impl Plugin for StatesPlugin {
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_state(GameState::PlayMatch)),
             )
+            // Kill-target call watcher (banter, graphical-only). An explicit
+            // per-team diff of `MatchConfig`, NOT Bevy change detection —
+            // `ResMut` deref marks the whole resource changed whether or not a
+            // field moved, and `is_changed()` fires on the first run after
+            // insert (KTD4). Ordinary `Update`: it reads the config and the
+            // countdown's gate flag, touches no sim state, and only needs to
+            // run before the beat scheduler that consumes its queue.
+            .add_systems(
+                Update,
+                play_match::watch_kill_target_calls.run_if(in_state(GameState::PlayMatch)),
+            )
+            // Banter beat scheduler (graphical-only). Drains the watcher's
+            // queue, resolves an exchange per change, and spawns each beat's
+            // speech bubble as it falls due. Ordered `.after` the watcher so a
+            // call change is picked up on the frame it is detected — both
+            // systems take `ResMut<CallWatcher>`, so Bevy would otherwise
+            // serialise them in an arbitrary order and the opening exchange
+            // would sometimes start a frame late. It writes nothing but
+            // `SpeechBubble` entities, which no sim system reads.
+            .add_systems(
+                Update,
+                play_match::play_banter_beats
+                    .after(play_match::watch_kill_target_calls)
+                    .run_if(in_state(GameState::PlayMatch)),
+            )
             // UI rendering systems
             .add_systems(
                 Update,
@@ -468,6 +501,7 @@ impl Plugin for StatesPlugin {
                 // already shown this frame.
                 (
                     play_match::load_spell_icons,
+                    play_match::load_emoji_icons,
                     play_match::render_time_controls,
                     play_match::render_camera_controls,
                     play_match::render_combat_panel,
@@ -493,6 +527,19 @@ impl Plugin for StatesPlugin {
             .add_systems(
                 OnExit(GameState::PlayMatch),
                 play_match::reset_selection_on_exit,
+            )
+            // Back to the "never observed" sentinel so the next match reports
+            // its own opening call change, and so an unconsumed change cannot
+            // leak into the next match's queue.
+            .add_systems(
+                OnExit(GameState::PlayMatch),
+                play_match::reset_call_watcher_on_exit,
+            )
+            // Drop every queued beat, the scheduler clock, and the occurrence
+            // counters, so nothing carries into the next match.
+            .add_systems(
+                OnExit(GameState::PlayMatch),
+                play_match::reset_banter_scheduler_on_exit,
             )
             .add_systems(OnExit(GameState::PlayMatch), play_match::cleanup_play_match)
             // Results systems (defined in results_ui module)

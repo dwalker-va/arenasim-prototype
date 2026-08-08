@@ -33,6 +33,8 @@
 pub mod abilities;
 pub mod ability_config;
 pub mod movement_config;
+pub mod banter_config;
+pub mod banter;
 pub mod equipment;
 pub mod components;
 pub mod camera;
@@ -63,6 +65,8 @@ pub mod selection;
 pub use abilities::*;
 pub use ability_config::*;
 pub use movement_config::*;
+pub use banter_config::*;
+pub use banter::*;
 pub use map_config::*;
 pub use components::*;
 pub use camera::*;
@@ -637,6 +641,8 @@ pub fn setup_play_match(
     // Initialize spell icons resources (for ability timeline)
     commands.insert_resource(SpellIcons::default());
     commands.insert_resource(SpellIconHandles::default());
+    commands.insert_resource(crate::states::play_match::rendering::emoji::EmojiIcons::default());
+    commands.insert_resource(crate::states::play_match::rendering::emoji::EmojiIconHandles::default());
 
     // Resolved BEFORE the camera so the camera can be framed to the map. The
     // resource is inserted further down; this is just the lookup.
@@ -739,6 +745,7 @@ pub fn setup_play_match(
     commands.insert_resource(DisplaySettings {
         show_aura_icons: game_settings.show_aura_icons,
         show_combat_panel: game_settings.show_combat_panel,
+        show_call_display: game_settings.show_call_display,
     });
 
     // Spawn arena environment (octagonal floor + chamfered stadium walls)
