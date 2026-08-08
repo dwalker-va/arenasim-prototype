@@ -8,9 +8,12 @@
 
 use bevy::prelude::*;
 
+use crate::combat::log::{CombatLog, CombatLogEventType};
+
 use super::super::banter_config::BanterContext;
-use super::super::components::MatchCountdown;
+use super::super::components::{Combatant, MatchCountdown, Pet};
 use super::super::match_config::MatchConfig;
+use super::super::utils::combat_log_id;
 
 // =============================================================================
 // Change detection (KTD4)
@@ -196,6 +199,8 @@ pub fn watch_kill_target_calls(
     config: Res<MatchConfig>,
     countdown: Option<Res<MatchCountdown>>,
     mut watcher: ResMut<CallWatcher>,
+    mut combat_log: Option<ResMut<CombatLog>>,
+    combatants: Query<&Combatant, Without<Pet>>,
 ) {
     let Some(countdown) = countdown else {
         return;
@@ -208,11 +213,69 @@ pub fn watch_kill_target_calls(
         return;
     }
 
+    if let Some(combat_log) = combat_log.as_mut() {
+        for change in &changes {
+            log_call_change(combat_log, &combatants, change);
+        }
+    }
+
     watcher.pending.extend(changes);
     watcher.last_seen = [
         LastSeenCall::Seen(current[0]),
         LastSeenCall::Seen(current[1]),
     ];
+}
+
+/// Record a mid-fight call change in the combat log.
+///
+/// Only POST-GATE changes are logged, and that is the whole point: a call made
+/// while the match is running is an operator input that redirects the fight,
+/// and without it the saved log shows a team switching targets for no visible
+/// reason. Pre-gate calls are setup, not events — they would put two
+/// near-duplicate lines at t=0 in every match and say nothing the opening
+/// state does not.
+///
+/// Naming goes through the same `combat_log_id` the rest of the log uses, so a
+/// call reads like every other line rather than announcing itself as a
+/// different kind of record.
+///
+/// Nothing is logged in headless: no call changes mid-match there, so the
+/// determinism baseline cannot move on account of this.
+fn log_call_change(
+    combat_log: &mut CombatLog,
+    combatants: &Query<&Combatant, Without<Pet>>,
+    change: &CallChange,
+) {
+    if !change.gates_opened {
+        return;
+    }
+
+    // The call indexes LIVING primaries in slot order, the same compacted list
+    // `acquire_targets` resolves against — so the name here is the combatant
+    // the AI will actually attack, not whoever occupies that raw slot.
+    let name_of = |slot: Option<usize>| -> Option<String> {
+        let slot = slot?;
+        let mut enemies: Vec<&Combatant> = combatants
+            .iter()
+            .filter(|c| c.team != change.team && c.is_alive())
+            .collect();
+        enemies.sort_by_key(|c| c.slot);
+        enemies
+            .get(slot)
+            .map(|c| combat_log_id(c.team, c.slot, c.class.name()))
+    };
+
+    let message = match (name_of(change.new_call), name_of(change.previous.slot())) {
+        (Some(new), Some(previous)) => {
+            format!("Team {} calls {} (was {})", change.team, new, previous)
+        }
+        (Some(new), None) => format!("Team {} calls {}", change.team, new),
+        (None, Some(previous)) => {
+            format!("Team {} clears its call (was {})", change.team, previous)
+        }
+        (None, None) => format!("Team {} clears its call", change.team),
+    };
+    combat_log.log(CombatLogEventType::MatchEvent, message);
 }
 
 /// Clears the watcher on leaving a match so the next one starts from the
@@ -234,6 +297,7 @@ pub fn reset_call_watcher_on_exit(mut watcher: ResMut<CallWatcher>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::states::match_config::CharacterClass;
 
     /// Both teams unobserved — the state a freshly-reset watcher is in.
     const FRESH: [LastSeenCall; 2] = [LastSeenCall::NeverObserved; 2];
@@ -383,7 +447,76 @@ mod tests {
             gates_opened,
         });
         world.insert_resource(CallWatcher::default());
+        world.insert_resource(CombatLog::default());
         world
+    }
+
+    /// Spawn a two-combatant team 2 so a call has something to name.
+    fn spawn_enemies(world: &mut World) {
+        for (slot, class) in [(0u8, CharacterClass::Warrior), (1u8, CharacterClass::Priest)] {
+            let mut combatant = Combatant::new(2, slot, class);
+            combatant.current_health = combatant.max_health;
+            world.spawn(combatant);
+        }
+    }
+
+    fn event_lines(world: &World) -> Vec<String> {
+        world
+            .resource::<CombatLog>()
+            .entries
+            .iter()
+            .filter(|e| matches!(e.event_type, CombatLogEventType::MatchEvent))
+            .map(|e| e.message.clone())
+            .collect()
+    }
+
+    /// A mid-fight call lands in the combat log, naming both ends of the swap.
+    ///
+    /// The log is the durable record; the bubble and the marker are both gone
+    /// by the time anyone reads it. Without this line a saved match shows a
+    /// team switching targets for no recorded reason.
+    #[test]
+    fn a_mid_fight_call_is_recorded_in_the_combat_log() {
+        let mut world = world_with((Some(0), None), true);
+        spawn_enemies(&mut world);
+
+        // First observation establishes the baseline call on the Warrior.
+        run_watcher(&mut world);
+        // Then the operator swaps to the Priest.
+        world.resource_mut::<MatchConfig>().team1_kill_target = Some(1);
+        run_watcher(&mut world);
+
+        let lines = event_lines(&world);
+        let swap = lines
+            .iter()
+            .find(|l| l.contains("was"))
+            .expect("the swap should be logged with its previous target");
+        assert!(swap.contains("Team 1 calls"), "names the calling team: {swap}");
+        assert!(swap.contains("Priest"), "names the new target: {swap}");
+        assert!(swap.contains("Warrior"), "names the previous target: {swap}");
+    }
+
+    /// Pre-gate calls are setup, not events, and stay out of the log.
+    ///
+    /// Logging them would put two near-duplicate lines at t=0 in every single
+    /// match while saying nothing the opening state does not already say.
+    #[test]
+    fn pre_gate_calls_are_not_logged() {
+        let mut world = world_with((Some(0), Some(0)), false);
+        spawn_enemies(&mut world);
+
+        run_watcher(&mut world);
+        // A correction before the gates open is still setup.
+        world.resource_mut::<MatchConfig>().team1_kill_target = Some(1);
+        run_watcher(&mut world);
+
+        assert!(
+            event_lines(&world).is_empty(),
+            "nothing pre-gate should reach the log, got {:?}",
+            event_lines(&world)
+        );
+        // The banter layer still sees them — only the LOG is gated.
+        assert!(!world.resource::<CallWatcher>().pending.is_empty());
     }
 
     #[test]
