@@ -2,73 +2,97 @@
 //! kept renderable.
 //!
 //! Combatants do not speak English. A line is a short sequence of GAME
-//! ICONOGRAPHY — ability art, team-tinted class portraits — stitched together
-//! with a small set of symbol glyphs. `⚔ ➡ {priest}` reads as "attack the
-//! Priest" in any language, and more importantly it reads in the game's own
-//! visual language rather than borrowing a human one.
+//! ICONOGRAPHY — real ability art and team-framed class portraits — joined by
+//! drawn grammar marks. `{ability:Mortal Strike} {sym:arrow} {target}` reads
+//! as "attack that one" in no language at all, in the visual vocabulary the
+//! player already learned from the ability bar.
 //!
 //! ## Grammar
 //!
-//! A line is plain text with `{...}` tokens spliced in:
+//! A line is punctuation with `{...}` tokens spliced in:
 //!
 //! | Token | Renders as |
 //! |---|---|
-//! | `{target}` | class portrait of the called enemy, tinted by ITS team |
+//! | `{target}` | class portrait of the called enemy, framed by ITS team |
 //! | `{prev_target}` | the replaced target's portrait (`Correction` only) |
 //! | `{speaker}` | the speaking combatant's own portrait |
-//! | `{ability:Mortal Strike}` | that ability's icon, untinted |
+//! | `{ability:Mortal Strike}` | that ability's real icon art |
+//! | `{sym:arrow}` / `{sym:no}` / `{sym:yes}` | a drawn grammar mark |
 //!
 //! The three portrait tokens are AUTHORING tokens: the resolver rewrites them
 //! into the resolved `{class:<Class>:<team>}` form once it knows who is
 //! speaking about whom, and the renderer only ever sees the resolved form.
-//! Everything outside a token is literal text.
 //!
-//! ## Why an allowlist
+//! ## Why there are no emoji here
 //!
-//! egui ships a limited monochrome emoji subset, so most emoji render as tofu
-//! boxes — `→`, `✓`, and `✗` all fail, while `➡`, `✔`, and `✖` work. The
-//! difference is invisible when authoring and obvious in the client, which is
-//! the worst possible place to find out. [`GLYPHS`] is the set verified to
-//! render, and `BanterConfig::validate()` rejects any line using a character
-//! outside it, so an unrenderable line cannot reach a match.
+//! The first version of this vocabulary was built on emoji, and it failed
+//! twice over. First on coverage: egui carries a limited subset, so `→`, `✓`,
+//! and `✗` rendered as empty boxes while `➡`, `✔`, and `✖` happened to work —
+//! a difference invisible while authoring and glaring in the client. Then on
+//! recognisability, which was the fatal one: everything egui *can* draw is
+//! monochrome, because its font atlas is a single coverage channel
+//! (`FontImage { pixels: Vec<f32> }`), so no font swap can ever produce colour
+//! emoji here. Stripped of colour, the shapes were not familiar enough to
+//! carry meaning at bubble size.
 //!
-//! Adding a glyph means proving it renders first — see `tests/glyph_probe.rs`
-//! in the history of this branch for the harness that established this set.
+//! So nothing pictographic is typeset any more. Nouns are real icon art the
+//! player already knows, the three grammar marks are drawn as vector shapes at
+//! whatever weight suits, and text carries only punctuation — `!` and `?` are
+//! ordinary font characters, not emoji, and about as widely read as marks get.
+//! [`GLYPHS`] is that punctuation set, and `BanterConfig::validate()` rejects
+//! anything else so an off-conceit line cannot reach a match.
+//!
+//! `tests/glyph_probe.rs` renders the vocabulary offscreen for iteration.
 
 use crate::states::match_config::CharacterClass;
 
-/// Symbol glyphs verified to render in egui's default fonts.
+/// Punctuation that may appear as literal text in a line.
 ///
-/// Grouped by the job each does in a line. Everything here is monochrome —
-/// egui has no colour-emoji support — which suits the UI: colour is reserved
-/// for the team tint on class portraits, so the symbols never compete with it.
-pub const GLYPHS: &[char] = &[
-    // Direction and negation — the grammar of a line.
-    '➡', '✖', '⛔', '🚫',
-    // Assent.
-    '✔', '☑', '👍',
-    // Emphasis and inquiry.
-    '!', '‼', '⚠', '❗', '❓', '⁉', '…',
-    // Combat nouns.
-    '💀', '☠', '⚔', '🛡', '❤', '♥',
-    // Timing.
-    '⏱', '⌛',
-    // Flavour.
-    '★', '☆', '⭐', '⚡', '🔥', '❄', '🎯', '💬',
-];
-
-// Deliberately NOT approved, having been rendered and rejected rather than
-// assumed: `👀` draws as two dots barely visible at bubble size, and `→ ✓ ✗ ⋯
-// ⊘ 🗣` draw as empty boxes. `❓` and `🎯` cover what `👀` was reaching for.
+/// NOT emoji. These are ordinary characters in egui's proportional font, which
+/// is exactly why they survived: `!` and `?` are among the most universally
+/// recognised marks there are, while the emoji equivalents (`❗`, `❓`) render
+/// as unfamiliar monochrome shapes at bubble size. Everything pictographic is
+/// now a real game icon or a drawn [`Symbol`]; text carries only punctuation.
+pub const GLYPHS: &[char] = &['!', '?', '…', '.', ',', '·'];
 
 /// Whether a character may appear as literal text in a banter line.
 ///
-/// Spaces are allowed as separators. Everything else must be an approved
-/// glyph — ordinary letters are rejected too, because the whole point is that
+/// Spaces are allowed as separators. Everything else must be approved
+/// punctuation — letters are rejected, because the whole point is that
 /// combatants communicate pictographically and a stray English word would
-/// break the conceit as loudly as a tofu box would.
+/// break the conceit; emoji are rejected because egui's font atlas is a single
+/// coverage channel (`FontImage { pixels: Vec<f32> }`), so no emoji can ever
+/// render in colour here no matter which font is loaded, and the monochrome
+/// fallbacks are not recognisable enough to carry meaning.
 pub fn is_speakable(c: char) -> bool {
     c == ' ' || GLYPHS.contains(&c)
+}
+
+/// A grammar mark drawn as vector shapes rather than typeset.
+///
+/// These three carry the structure of a line — direct, negate, affirm — and
+/// have no ability art to borrow and no recognisable ASCII form (`->`, `X`,
+/// and `v` all read as debris). Drawing them means they are crisp at any size,
+/// exactly the weight we choose, and immune to font coverage.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Symbol {
+    /// Directs the line at what follows: "…at this one".
+    Arrow,
+    /// Negation, refusal, "not that".
+    No,
+    /// Assent, "on it".
+    Yes,
+}
+
+impl Symbol {
+    fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "arrow" => Some(Symbol::Arrow),
+            "no" => Some(Symbol::No),
+            "yes" => Some(Symbol::Yes),
+            _ => None,
+        }
+    }
 }
 
 /// One renderable piece of a line.
@@ -80,6 +104,8 @@ pub enum Span {
     Class(CharacterClass, u8),
     /// An ability icon, keyed by the ability's display name.
     Ability(String),
+    /// A drawn grammar mark.
+    Symbol(Symbol),
     /// A token that named something unresolvable — an ability with no icon, a
     /// portrait for a slot nobody occupies. Rendered as a neutral placeholder
     /// rather than dropped, so a content mistake is visible instead of silent.
@@ -142,12 +168,17 @@ fn parse_token(body: &str) -> Span {
                 _ => Span::Unknown,
             }
         }
-        // `split(':')` on the ability name would cut a name containing a colon,
-        // so take everything after the first separator verbatim.
+        // `split(':')` on the ability name would cut a name containing a colon
+        // (`Power Word: Shield`), so take everything after the first separator
+        // verbatim.
         Some("ability") => match body.split_once(':') {
             Some((_, name)) if !name.is_empty() => Span::Ability(name.to_string()),
             _ => Span::Unknown,
         },
+        Some("sym") => parts
+            .next()
+            .and_then(Symbol::from_name)
+            .map_or(Span::Unknown, Span::Symbol),
         _ => Span::Unknown,
     }
 }
@@ -162,8 +193,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn plain_glyphs_are_one_text_span() {
-        assert_eq!(parse("⚔ ➡"), vec![Span::Text("⚔ ➡".into())]);
+    fn plain_punctuation_is_one_text_span() {
+        assert_eq!(parse("! ?"), vec![Span::Text("! ?".into())]);
+    }
+
+    #[test]
+    fn grammar_marks_parse_to_drawn_symbols() {
+        assert_eq!(parse("{sym:arrow}"), vec![Span::Symbol(Symbol::Arrow)]);
+        assert_eq!(parse("{sym:no}"), vec![Span::Symbol(Symbol::No)]);
+        assert_eq!(parse("{sym:yes}"), vec![Span::Symbol(Symbol::Yes)]);
+        assert_eq!(parse("{sym:nonsense}"), vec![Span::Unknown]);
+    }
+
+    /// Emoji are rejected outright now, not merely unapproved.
+    ///
+    /// egui's font atlas is a single coverage channel, so no emoji can render
+    /// in colour here whatever font is loaded, and the monochrome fallbacks
+    /// were not recognisable enough to carry meaning. Punctuation stayed
+    /// because `!` and `?` are ordinary font characters, not emoji.
+    #[test]
+    fn emoji_are_not_speakable_but_punctuation_is() {
+        assert!(is_speakable('!'));
+        assert!(is_speakable('?'));
+        assert!(is_speakable('…'));
+        assert!(is_speakable(' '));
+        assert!(!is_speakable('a'), "combatants do not speak English");
+        assert!(!is_speakable('⚔'), "nouns are real ability art now");
+        assert!(!is_speakable('➡'), "grammar marks are drawn, not typeset");
+        assert!(!is_speakable('→'), "and this one never rendered at all");
     }
 
     #[test]
@@ -177,9 +234,10 @@ mod tests {
     #[test]
     fn tokens_and_text_interleave_in_order() {
         assert_eq!(
-            parse("⚔ ➡ {class:Mage:1}!"),
+            parse("{sym:arrow} {class:Mage:1}!"),
             vec![
-                Span::Text("⚔ ➡ ".into()),
+                Span::Symbol(Symbol::Arrow),
+                Span::Text(" ".into()),
                 Span::Class(CharacterClass::Mage, 1),
                 Span::Text("!".into()),
             ]
@@ -207,7 +265,7 @@ mod tests {
 
     #[test]
     fn an_unclosed_brace_is_literal_text() {
-        assert_eq!(parse("⚔ {class"), vec![Span::Text("⚔ {class".into())]);
+        assert_eq!(parse("! {class"), vec![Span::Text("! {class".into())]);
     }
 
     #[test]
@@ -225,11 +283,10 @@ mod tests {
     }
 
     #[test]
-    fn letters_are_not_speakable_but_approved_glyphs_are() {
-        assert!(is_speakable('⚔'));
-        assert!(is_speakable(' '));
-        assert!(!is_speakable('a'), "combatants do not speak English");
-        assert!(!is_speakable('→'), "the plain arrow renders as tofu");
-        assert!(is_speakable('➡'), "the heavy arrow is the one that renders");
+    fn an_unclosed_brace_after_a_symbol_is_literal() {
+        assert_eq!(
+            parse("{sym:no} {class"),
+            vec![Span::Symbol(Symbol::No), Span::Text(" {class".into())]
+        );
     }
 }

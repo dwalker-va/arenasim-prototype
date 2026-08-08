@@ -532,8 +532,11 @@ mod tests {
             ],
             target: ClassConstraint::Any,
             beats: vec![
-                BanterBeat { role: "caller".to_string(), text: "⚔ ➡ {target}".to_string() },
-                BanterBeat { role: "responder".to_string(), text: "✔".to_string() },
+                BanterBeat {
+                    role: "caller".to_string(),
+                    text: "{ability:Mortal Strike} {sym:arrow} {target}".to_string(),
+                },
+                BanterBeat { role: "responder".to_string(), text: "{sym:yes}".to_string() },
             ],
         }
     }

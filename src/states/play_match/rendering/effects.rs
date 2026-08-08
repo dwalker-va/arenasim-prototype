@@ -447,6 +447,9 @@ pub fn render_speech_bubbles(
                         }
                     }
                 }
+                vocab::Span::Symbol(symbol) => {
+                    draw_symbol(&painter, *symbol, icon_rect_at(x, mid_y));
+                }
                 vocab::Span::Unknown => {
                     painter.rect_stroke(
                         icon_rect_at(x, mid_y),
@@ -468,6 +471,46 @@ const BUBBLE_TEXT_SIZE: f32 = 18.0;
 const BUBBLE_ICON: f32 = 20.0;
 const UV_FULL: egui::Rect =
     egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+
+/// Draw a grammar mark as vector shapes inside `rect`.
+///
+/// Drawn rather than typeset because these three carry the structure of every
+/// line and there is no art to borrow: the emoji equivalents rendered as
+/// unfamiliar monochrome shapes (egui's font atlas is coverage-only, so colour
+/// emoji are impossible), and `->` / `X` / `v` read as debris. Drawing them
+/// makes them crisp at any size and exactly as heavy as the surrounding text.
+///
+/// Coordinates are fractions of the slot so the marks scale with the icons.
+pub fn draw_symbol(painter: &egui::Painter, symbol: vocab::Symbol, rect: egui::Rect) {
+    let ink = egui::Color32::BLACK;
+    let w = rect.width();
+    let at = |fx: f32, fy: f32| egui::pos2(rect.min.x + w * fx, rect.min.y + w * fy);
+    let stroke = egui::Stroke::new((w * 0.14).max(2.0), ink);
+
+    match symbol {
+        // Shaft plus a solid head — a chevron alone reads as a "greater than".
+        vocab::Symbol::Arrow => {
+            painter.line_segment([at(0.08, 0.5), at(0.62, 0.5)], stroke);
+            painter.add(egui::Shape::convex_polygon(
+                vec![at(0.55, 0.24), at(0.95, 0.5), at(0.55, 0.76)],
+                ink,
+                egui::Stroke::NONE,
+            ));
+        }
+        // A cross, not a circle-slash: at this size the slash's ring eats the
+        // contrast and the whole mark turns into a blob.
+        vocab::Symbol::No => {
+            painter.line_segment([at(0.18, 0.18), at(0.82, 0.82)], stroke);
+            painter.line_segment([at(0.82, 0.18), at(0.18, 0.82)], stroke);
+        }
+        // Deliberately asymmetric — the long upstroke is what separates a tick
+        // from a "v" at a glance.
+        vocab::Symbol::Yes => {
+            painter.line_segment([at(0.14, 0.52), at(0.40, 0.80)], stroke);
+            painter.line_segment([at(0.40, 0.80), at(0.88, 0.20)], stroke);
+        }
+    }
+}
 
 /// A square icon slot at `x`, vertically centred on `mid_y`.
 fn icon_rect_at(x: f32, mid_y: f32) -> egui::Rect {

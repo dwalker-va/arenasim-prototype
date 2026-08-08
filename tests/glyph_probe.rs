@@ -6,7 +6,7 @@
 //! bubble background, so the vocabulary can be iterated without launching the
 //! client and driving it to a countdown.
 //!
-//! Class portraits are drawn as team-tinted placeholder squares here: the real
+//! Class portraits are drawn as framed placeholder plates here: the real
 //! textures are Bevy assets that only exist in a running app, and kittest has
 //! no Bevy. Judge the GRAMMAR — the order, spacing, and whether the glyph
 //! sequence carries meaning — not the portrait art.
@@ -20,6 +20,7 @@ use bevy_egui::egui;
 use egui_kittest::Harness;
 
 use arenasim::states::play_match::banter::vocab::{self, Span};
+use arenasim::states::play_match::rendering::effects::draw_symbol;
 
 const SCREEN: [f32; 2] = [720.0, 700.0];
 const TEXT: f32 = 18.0;
@@ -27,19 +28,19 @@ const ICON: f32 = 20.0;
 
 /// Representative resolved lines, as the renderer would receive them.
 const LINES: &[(&str, &str)] = &[
-    ("open/generic", "⚔ ➡ {class:Priest:2}"),
-    ("open/reply", "✔"),
-    ("open/healer", "{class:Priest:2} ❤ ✖"),
-    ("open/urgent", "⚔ ➡ {class:Priest:2} ‼"),
-    ("open/paladin", "{ability:Divine Shield} ⚠ ⏱"),
-    ("open/rogue", "❓ ❓ …"),
-    ("open/charge", "{ability:Charge} ➡ {class:Mage:2}"),
-    ("open/self", "{class:Warrior:1} ⚔ ➡ {class:Mage:2}"),
-    ("correct", "✖ {class:Paladin:2} ➡ {class:Rogue:2}"),
-    ("correct/what", "… {class:Paladin:2} ❓ ⁉"),
-    ("switch", "‼ ➡ {class:Warlock:2}"),
-    ("switch/healer", "{class:Priest:2} ❤ ⛔ ‼"),
-    ("unresolved", "✖ ❓ ➡ {class:Rogue:2}"),
+    ("open/generic", "{ability:Mortal Strike} {sym:arrow} {class:Priest:2}"),
+    ("open/reply", "{sym:yes}"),
+    ("open/healer", "{class:Priest:2} {ability:Flash Heal} {sym:no}"),
+    ("open/urgent", "{ability:Mortal Strike} {sym:arrow} {class:Priest:2}!"),
+    ("open/paladin", "{ability:Divine Shield} !…"),
+    ("open/rogue", "? ?…"),
+    ("open/charge", "{ability:Charge} {sym:arrow} {class:Mage:2}"),
+    ("open/self", "{class:Warrior:1} {ability:Mortal Strike} {sym:arrow} {class:Mage:2}"),
+    ("correct", "{sym:no} {class:Paladin:2} {sym:arrow} {class:Rogue:2}"),
+    ("correct/what", "… {class:Paladin:2} ?!"),
+    ("switch", "! {sym:arrow} {class:Warlock:2}"),
+    ("switch/healer", "{class:Priest:2} {ability:Flash Heal} {sym:no}!"),
+    ("unresolved", "{sym:no} ? {sym:arrow} {class:Rogue:2}"),
 ];
 
 fn team_tint(team: u8) -> egui::Color32 {
@@ -130,6 +131,9 @@ fn draw_bubble(ui: &egui::Ui, origin: egui::Pos2, line: &str) -> f32 {
                     egui::StrokeKind::Inside,
                 );
             }
+            // The real drawing routine, so the preview shows exactly the marks
+            // the client draws rather than a stand-in.
+            Span::Symbol(symbol) => draw_symbol(painter, *symbol, icon),
             Span::Unknown => {
                 painter.rect_stroke(
                     icon,
