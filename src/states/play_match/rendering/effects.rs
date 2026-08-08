@@ -395,17 +395,38 @@ pub fn render_speech_bubbles(
                 }
                 vocab::Span::Class(class, team) => {
                     let icon_rect = icon_rect_at(x, mid_y);
-                    // Tinted by the team that owns the class, so a line naming
-                    // an enemy shows them in the enemy's colour. On a white
-                    // bubble the tint reads as ownership, not decoration.
+                    // Team ownership is carried by a BORDER, not a tint.
+                    //
+                    // Tinting was tried first and multiplies the portrait's own
+                    // colours, which muddies the silhouette exactly when the
+                    // reader needs to identify a class at a glance in a bubble
+                    // that is on screen for a few seconds. A frame around the
+                    // art says the same thing and costs the art nothing.
                     match class_icons.textures.get(class) {
                         Some(texture) => {
-                            painter.image(*texture, icon_rect, UV_FULL, team_tint(*team));
+                            painter.image(*texture, icon_rect, UV_FULL, egui::Color32::WHITE);
                         }
+                        // No texture: a dark plate carrying the class initial,
+                        // so the line still reads if art is missing.
                         None => {
-                            painter.rect_filled(icon_rect, 3.0, team_tint(*team));
+                            painter.rect_filled(icon_rect, 3.0, egui::Color32::from_gray(40));
+                            painter.text(
+                                icon_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                &class.name()[0..1],
+                                egui::FontId::proportional(13.0),
+                                egui::Color32::WHITE,
+                            );
                         }
                     }
+                    // Inside, so the frame overlays the art's edge rather than
+                    // bleeding into the glyph beside it.
+                    painter.rect_stroke(
+                        icon_rect,
+                        3.0,
+                        egui::Stroke::new(2.0, team_tint(*team)),
+                        egui::StrokeKind::Inside,
+                    );
                 }
                 vocab::Span::Ability(name) => {
                     let icon_rect = icon_rect_at(x, mid_y);
@@ -456,7 +477,7 @@ fn icon_rect_at(x: f32, mid_y: f32) -> egui::Rect {
     )
 }
 
-/// The colour a team's class portraits are tinted.
+/// The colour of the frame around a team's class portraits.
 ///
 /// Same blue/red the combat-log timeline already uses for team headers, so a
 /// portrait in a bubble reads as the same team a reader has seen elsewhere.

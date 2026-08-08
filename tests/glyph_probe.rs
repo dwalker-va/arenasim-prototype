@@ -101,16 +101,24 @@ fn draw_bubble(ui: &egui::Ui, origin: egui::Pos2, line: &str) -> f32 {
                     egui::Color32::BLACK,
                 );
             }
-            // Stand-in for the real portrait: the tint is what carries team
-            // ownership, and the tint is the part worth judging here.
+            // Stand-in for the real portrait. The dark plate approximates
+            // busy icon art; the team-coloured FRAME is what carries ownership
+            // and is the part worth judging here. (Tinting the art itself was
+            // tried in the client and muddied the class silhouette.)
             Span::Class(class, team) => {
-                painter.rect_filled(icon, 3.0, team_tint(*team));
+                painter.rect_filled(icon, 3.0, egui::Color32::from_gray(40));
                 painter.text(
                     icon.center(),
                     egui::Align2::CENTER_CENTER,
                     &class.name()[0..1],
                     egui::FontId::proportional(13.0),
-                    egui::Color32::BLACK,
+                    egui::Color32::WHITE,
+                );
+                painter.rect_stroke(
+                    icon,
+                    3.0,
+                    egui::Stroke::new(2.0, team_tint(*team)),
+                    egui::StrokeKind::Inside,
                 );
             }
             Span::Ability(_) => {
