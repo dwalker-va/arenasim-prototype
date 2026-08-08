@@ -19,11 +19,13 @@
 // without belonging to any language, in the visual vocabulary the player
 // already learned from the ability bar.
 //
-// NO EMOJI. egui's font atlas is a single coverage channel, so colour emoji
-// are impossible here whatever font is loaded, and the monochrome fallbacks
-// are not recognisable enough to carry meaning. Everything pictographic is
-// therefore either real icon art or a vector mark drawn by the renderer; the
-// only literal text permitted is punctuation.
+// NO TYPESET EMOJI. egui's font atlas is a single coverage channel, so colour
+// emoji are impossible here whatever font is loaded, and the monochrome
+// fallbacks are not recognisable enough to carry meaning. Everything
+// pictographic is therefore an IMAGE — real ability art, a class portrait, or
+// an emoji PNG referenced by `{emoji:<filename stem>}` (see
+// assets/icons/emoji/ATTRIBUTION.md). The only literal text permitted is
+// punctuation.
 //
 // Tokens (see src/states/play_match/banter/vocab.rs for the grammar):
 //
@@ -31,7 +33,7 @@
 //   {prev_target}            the replaced target's portrait (Correction only)
 //   {speaker}                the speaking combatant's own portrait
 //   {ability:Mortal Strike}  that ability's real icon art
-//   {sym:arrow|no|yes|search}  a drawn grammar mark
+//   {emoji:arrow}            art from assets/icons/emoji/arrow.png
 //
 // Portraits are FRAMED blue for team 1 and red for team 2 — the same colours
 // the combat-log timeline uses. A frame rather than a tint: tinting multiplied

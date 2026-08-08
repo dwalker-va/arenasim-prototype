@@ -68,8 +68,16 @@ pub(super) struct BanterCombatant {
     /// repo has no per-combatant names (`assets/config/characters.ron` carries
     /// class-level names only), so class is the only handle banter has.
     pub class: CharacterClass,
-    /// Dead combatants stay in the lineup so slot order is stable, but are
-    /// never bound as speakers.
+    /// Never bound as a speaker when `false`.
+    ///
+    /// The only production builder (`scheduler::team_rosters`) DROPS the dead
+    /// rather than flagging them, because the same list is indexed by a call
+    /// slot and `acquire_targets` compacts over the dead — so in the client
+    /// this is always `true`. It stays a field so the resolver's binding rule
+    /// is total for hand-built lineups (the tests) and so re-admitting the dead
+    /// to the roster could never make a corpse talk. Do NOT re-admit them
+    /// without splitting the speaker lineup from the call-indexed roster: the
+    /// two index spaces would drift the moment anyone fell.
     pub alive: bool,
 }
 
@@ -368,12 +376,6 @@ fn banter_roll(
     ((hash >> 16) & 0xFF_FFFF) as f32 / 16_777_216.0
 }
 
-/// Substitute `{target}` and `{prev_target}` into one beat's text.
-///
-/// `{prev_target}` resolves in `Correction` ONLY — it is the one context where
-/// a previous call exists as a thing worth naming. Elsewhere it falls back with
-/// everything else rather than leaking a literal brace into a bubble; see
-/// [`UNRESOLVED_TARGET`].
 /// The class of a bound speaker, looked up in the lineup it was bound from.
 ///
 /// `None` is unreachable in practice — the entity came out of this very lineup
@@ -387,6 +389,12 @@ fn speaker_class(lineup: &BanterLineup, speaker: Entity) -> Option<CharacterClas
         .map(|ally| ally.class)
 }
 
+/// Substitute `{target}`, `{prev_target}` and `{speaker}` into one beat's text.
+///
+/// `{prev_target}` resolves in `Correction` ONLY — it is the one context where
+/// a previous call exists as a thing worth naming. Elsewhere it falls back with
+/// everything else rather than leaking a literal brace into a bubble; see
+/// [`UNRESOLVED_TARGET`].
 fn render_line(
     text: &str,
     call: BanterCall,

@@ -337,16 +337,24 @@ fn team_frames_2v2() {
     harness.snapshot("team_frames");
 }
 
-/// The same scene with the call affordance on and one combatant called per
-/// column — Team 2 calling the Team 1 Priest, Team 1 calling the (dead) Team 2
-/// Rogue, which also exercises the reticle sharing the header with a DEAD tag.
+/// The same scene with the call affordance on and a call marked in each column.
+///
+/// Team 2 calls the Team 1 Priest (slot 1) and Team 1 calls the Team 2 Warlock
+/// (slot 0), so both columns show the callable border and a reticle — one on a
+/// frame with a full aura row, one on a frame without.
+///
+/// The Team 2 call is deliberately slot 0, not slot 1: the dead consume no slot
+/// (`call_slots`), so slot 1 in that column would resolve to nothing and draw
+/// no marker at all. That behavior is pinned by
+/// `the_dead_are_not_callable_and_do_not_consume_a_slot`, which asserts it
+/// directly instead of asking a PNG to show an absence.
 #[test]
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
 fn team_frames_with_calls() {
     let mut data = mock_data();
     data.show_calls = true;
     data.team1_called_slot = Some(1);
-    data.team2_called_slot = Some(1);
+    data.team2_called_slot = Some(0);
     let class_icons = ClassIcons::default();
     let spell_icons = SpellIcons::default();
 

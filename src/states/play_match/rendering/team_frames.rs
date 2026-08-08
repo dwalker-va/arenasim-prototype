@@ -531,8 +531,10 @@ fn draw_frame(
         egui::FontId::proportional(14.0),
         dimmed(egui::Color32::WHITE),
     );
-    // Call reticle at the header's trailing edge; the DEAD/STEALTH tag steps
-    // aside for it, since the call outlives the combatant it points at.
+    // Call reticle at the header's trailing edge; the STEALTH tag steps aside
+    // for it, since a stealthed combatant is still callable. A DEAD frame never
+    // reaches `Called` — `call_slots` gives the dead no slot — so the reticle
+    // and the DEAD tag cannot share a header.
     let reticle_w = 2.0 * (RETICLE_R + RETICLE_TICK);
     let mut tag_right = inner_x + inner_w;
     if call_state == FrameCallState::Called {

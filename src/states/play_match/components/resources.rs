@@ -88,9 +88,11 @@ pub struct DisplaySettings {
     /// Whether the combat log / timeline side panel is open. Off by default:
     /// it is a diagnostic tool, not part of the default spectator view.
     pub show_combat_panel: bool,
-    /// Whether the kill-call markers are shown on the team frames. Off by
-    /// default: it is an experimentation affordance, not part of the default
-    /// spectator view.
+    /// Whether the kill-call markers are shown on the team frames. ON by
+    /// default (see `GameSettings::show_call_display`): the markers show what
+    /// each team is focusing, which is match state a watcher wants, and a
+    /// control nobody can see is a control nobody uses. The toggle exists to
+    /// get a clean view, not to opt in.
     pub show_call_display: bool,
 }
 

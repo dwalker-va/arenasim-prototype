@@ -266,8 +266,6 @@ impl BanterConfig {
         self.exchanges.iter().filter(move |e| e.context == context)
     }
 
-    /// Check value and pool sanity. Returns the list of violations on
-    /// failure — every offender is named, so one load reports every problem.
     /// Characters in a line that egui cannot draw, ignoring `{...}` tokens.
     ///
     /// Token bodies are skipped because they hold class and ability NAMES —
@@ -332,6 +330,8 @@ impl BanterConfig {
         missing
     }
 
+    /// Check value and pool sanity. Returns the list of violations on
+    /// failure — every offender is named, so one load reports every problem.
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut issues: Vec<String> = Vec::new();
         let t = &self.timing;
@@ -582,9 +582,9 @@ mod tests {
             beats: vec![
                 BanterBeat {
                     role: "caller".to_string(),
-                    text: "{ability:Mortal Strike} {sym:arrow} {target}".to_string(),
+                    text: "{ability:Mortal Strike} {emoji:arrow} {target}".to_string(),
                 },
-                BanterBeat { role: "responder".to_string(), text: "{sym:yes}".to_string() },
+                BanterBeat { role: "responder".to_string(), text: "{emoji:yes}".to_string() },
             ],
         }
     }
@@ -653,6 +653,42 @@ mod tests {
                 exchange.context,
                 exchange.speakers.len()
             );
+        }
+    }
+
+    /// Every `{ability:...}` the shipped pool names must be a real ability.
+    ///
+    /// `validate()` catches a typo'd `{emoji:...}` because the art is a
+    /// directory it can read; ability names have no such check at load, and
+    /// the renderer degrades an unknown one to a faint grey outline — a
+    /// content mistake that is invisible in the RON and nearly invisible in
+    /// the client. This test is that missing guard, run from `cargo test`.
+    #[test]
+    fn shipped_banter_only_names_real_abilities() {
+        use crate::states::play_match::ability_config::load_ability_definitions;
+        use crate::states::play_match::banter::vocab;
+
+        let config = load_banter_config().expect("assets/config/banter.ron must load");
+        let definitions =
+            load_ability_definitions().expect("assets/config/abilities.ron must load");
+        let known: std::collections::HashSet<&str> =
+            definitions.iter().map(|(_, c)| c.name.as_str()).collect();
+
+        for (index, exchange) in config.exchanges.iter().enumerate() {
+            for (i, beat) in exchange.beats.iter().enumerate() {
+                for span in vocab::parse(&beat.text) {
+                    if let vocab::Span::Ability(name) = span {
+                        assert!(
+                            known.contains(name.as_str()),
+                            "exchanges[{}] beat {} names ability '{}', which is not in \
+                             abilities.ron — it would render as an empty outline",
+                            index,
+                            i,
+                            name
+                        );
+                    }
+                }
+            }
         }
     }
 
