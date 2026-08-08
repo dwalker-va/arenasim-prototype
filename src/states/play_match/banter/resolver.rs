@@ -11,6 +11,7 @@ use bevy::prelude::*;
 
 use super::super::banter_config::{BanterConfig, BanterContext, BanterExchange};
 use super::super::match_config::CharacterClass;
+use super::vocab;
 
 // =============================================================================
 // Exchange resolution (KTD7, KTD8, KTD10)
@@ -52,7 +53,7 @@ const BANTER_HASH_INIT: u64 = 0xA076_1D64_78BD_642F;
 /// `"{target} dies first."` in a speech bubble, so a neutral pronoun is the
 /// sane failure mode. Authors are still expected to keep `{prev_target}` to
 /// `Correction` entries; this only stops a mistake looking like a crash.
-const UNRESOLVED_TARGET: &str = "them";
+const UNRESOLVED_TARGET: &str = "❓";
 
 /// One combatant as the resolver sees them. Plain data, owned, no `World`.
 ///
@@ -98,6 +99,12 @@ pub(super) struct BanterCall {
     /// Class of the combatant the call replaced. Only ever substituted in
     /// `Correction`.
     pub prev_target: Option<CharacterClass>,
+    /// Team that owns both of the above — the speaker's opposition.
+    ///
+    /// Carried so a portrait can be tinted by the team it belongs to. A line
+    /// pointing at an enemy shows that enemy in THEIR colour, which is what
+    /// makes `⚔ ➡ {portrait}` unambiguous about which side is being named.
+    pub enemy_team: u8,
 }
 
 /// One beat, ready to spawn: who says it, what it says, and when.
@@ -184,7 +191,13 @@ pub(super) fn resolve_exchange(
             // Cannot miss: the filter above dropped any exchange with a beat on
             // an undeclared role, and `bind_roles` binds every declared one.
             speaker: bound[role_index(exchange, &beat.role)],
-            text: render_line(&beat.text, call, context),
+            text: render_line(
+                &beat.text,
+                call,
+                context,
+                speaker_class(lineup, bound[role_index(exchange, &beat.role)]),
+                lineup.team,
+            ),
             start: config.timing.beat_start(context, index),
         })
         .collect();
@@ -361,18 +374,44 @@ fn banter_roll(
 /// a previous call exists as a thing worth naming. Elsewhere it falls back with
 /// everything else rather than leaking a literal brace into a bubble; see
 /// [`UNRESOLVED_TARGET`].
-fn render_line(text: &str, call: BanterCall, context: BanterContext) -> String {
+/// The class of a bound speaker, looked up in the lineup it was bound from.
+///
+/// `None` is unreachable in practice — the entity came out of this very lineup
+/// — but returning an `Option` keeps the `{speaker}` substitution total rather
+/// than panicking a renderer over a content token.
+fn speaker_class(lineup: &BanterLineup, speaker: Entity) -> Option<CharacterClass> {
+    lineup
+        .allies
+        .iter()
+        .find(|ally| ally.entity == speaker)
+        .map(|ally| ally.class)
+}
+
+fn render_line(
+    text: &str,
+    call: BanterCall,
+    context: BanterContext,
+    speaker: Option<CharacterClass>,
+    speaking_team: u8,
+) -> String {
     let prev = match context {
         BanterContext::Correction => call.prev_target,
         BanterContext::Opening | BanterContext::Switch => None,
     };
-    text.replace("{prev_target}", class_word(prev))
-        .replace("{target}", class_word(call.target))
+    text.replace("{prev_target}", &portrait(prev, call.enemy_team))
+        .replace("{target}", &portrait(call.target, call.enemy_team))
+        .replace("{speaker}", &portrait(speaker, speaking_team))
 }
 
-/// A class's display name, or the fallback when there is nothing to name.
-fn class_word(class: Option<CharacterClass>) -> &'static str {
-    class.map_or(UNRESOLVED_TARGET, |class| class.name())
+/// A class portrait token, or the fallback when there is nobody to point at.
+///
+/// The fallback is a glyph rather than a word: every other piece of a line is
+/// pictographic, so "them" would be the one place the illusion broke.
+fn portrait(class: Option<CharacterClass>, team: u8) -> String {
+    class.map_or_else(
+        || UNRESOLVED_TARGET.to_string(),
+        |class| vocab::class_token(class, team),
+    )
 }
 
 // =============================================================================
@@ -417,7 +456,7 @@ mod tests {
     }
 
     fn called(target: CharacterClass) -> BanterCall {
-        BanterCall { target: Some(target), prev_target: None }
+        BanterCall { target: Some(target), prev_target: None, enemy_team: 2 }
     }
 
     /// The label prefix a resolved exchange's first beat carries, for
@@ -720,10 +759,16 @@ mod tests {
         )
         .expect("resolves");
 
-        assert_eq!(resolved.beats[0].text, "generic: kill the Warlock.");
+        // The authoring token becomes a RESOLVED portrait token carrying both
+        // the class and the team that owns it — the renderer needs the team to
+        // tint the portrait, and resolution is the only place that knows it.
+        assert_eq!(
+            resolved.beats[0].text,
+            "generic: kill the {class:Warlock:2}."
+        );
         assert!(
-            !resolved.beats[0].text.contains('{'),
-            "no placeholder may survive into a bubble"
+            !resolved.beats[0].text.contains("{target}"),
+            "no authoring placeholder may survive into a bubble"
         );
     }
 
@@ -739,8 +784,8 @@ mod tests {
             ],
             target: ClassConstraint::Any,
             beats: vec![
-                beat("caller", "Forget the {prev_target} — {target} now."),
-                beat("responder", "Understood."),
+                beat("caller", "✖ {prev_target} ➡ {target}"),
+                beat("responder", "✔"),
             ],
         };
         let config = config_with(vec![
@@ -751,22 +796,26 @@ mod tests {
         let call = BanterCall {
             target: Some(CharacterClass::Rogue),
             prev_target: Some(CharacterClass::Paladin),
+            enemy_team: 2,
         };
         let resolve = |context| {
             resolve_exchange(&config, &team, call, context, A_SEED, 0).expect("resolves")
         };
 
+        // Both portraits resolve, each carrying the enemy team so the renderer
+        // can tint them.
         assert_eq!(
             resolve(BanterContext::Correction).beats[0].text,
-            "Forget the Paladin — Rogue now."
+            "✖ {class:Paladin:2} ➡ {class:Rogue:2}"
         );
 
         // Outside Correction the previous call is not a thing worth naming, so
-        // it renders as the neutral fallback — never the class, never a brace.
+        // it renders as the neutral glyph — never the portrait, never a raw
+        // authoring token.
         let switch = resolve(BanterContext::Switch);
-        assert_eq!(switch.beats[0].text, "Forget the them — Rogue now.");
+        assert_eq!(switch.beats[0].text, "✖ ❓ ➡ {class:Rogue:2}");
         assert!(!switch.beats[0].text.contains("Paladin"));
-        assert!(!switch.beats[0].text.contains('{'));
+        assert!(!switch.beats[0].text.contains("{prev_target}"));
     }
 
     /// An absent target renders the fallback rather than a raw placeholder — a
@@ -789,7 +838,10 @@ mod tests {
         )
         .expect("a fully-generic exchange survives a cleared call");
 
-        assert_eq!(resolved.beats[0].text, "generic: kill the them.");
+        // The portrait token is gone, replaced by the neutral glyph — never a
+        // raw `{target}` leaking into a bubble.
+        assert_eq!(resolved.beats[0].text, "generic: kill the ❓.");
+        assert!(!resolved.beats[0].text.contains("{target}"));
     }
 
     /// KTD7's defensive branch. Headless never runs this and the client always

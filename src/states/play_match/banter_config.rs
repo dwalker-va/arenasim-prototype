@@ -268,6 +268,30 @@ impl BanterConfig {
 
     /// Check value and pool sanity. Returns the list of violations on
     /// failure — every offender is named, so one load reports every problem.
+    /// Characters in a line that egui cannot draw, ignoring `{...}` tokens.
+    ///
+    /// Token bodies are skipped because they hold class and ability NAMES —
+    /// ordinary letters, resolved into icons long before anything is drawn.
+    /// Only the literal text between tokens has to be speakable.
+    fn unspeakable_chars(text: &str) -> Vec<char> {
+        let mut bad = Vec::new();
+        let mut in_token = false;
+        for c in text.chars() {
+            match c {
+                '{' => in_token = true,
+                '}' => in_token = false,
+                _ if in_token => {}
+                _ if crate::states::play_match::banter::vocab::is_speakable(c) => {}
+                _ => {
+                    if !bad.contains(&c) {
+                        bad.push(c);
+                    }
+                }
+            }
+        }
+        bad
+    }
+
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut issues: Vec<String> = Vec::new();
         let t = &self.timing;
@@ -350,6 +374,24 @@ impl BanterConfig {
                     issues.push(format!(
                         "{}: duplicate speaker role '{}' — roles must be unique within an exchange",
                         label, speaker.role
+                    ));
+                }
+            }
+
+            // Every character outside a token must be one egui can draw.
+            //
+            // This is the guard that makes the pictographic vocabulary safe to
+            // author. egui carries only a subset of emoji, so `→` and `✓`
+            // render as tofu boxes while `➡` and `✔` render fine — a
+            // difference invisible in the RON and glaring in the client.
+            // Rejecting at load turns "shipped a box" into "the game refuses to
+            // start and names the character".
+            for (i, beat) in exchange.beats.iter().enumerate() {
+                for bad in Self::unspeakable_chars(&beat.text) {
+                    issues.push(format!(
+                        "{}: beat {} uses '{}' (U+{:04X}), which is not in the approved glyph set \
+                         — it would render as an empty box. See banter::vocab::GLYPHS.",
+                        label, i, bad, bad as u32
                     ));
                 }
             }
@@ -490,8 +532,8 @@ mod tests {
             ],
             target: ClassConstraint::Any,
             beats: vec![
-                BanterBeat { role: "caller".to_string(), text: "{target} dies first.".to_string() },
-                BanterBeat { role: "responder".to_string(), text: "On it.".to_string() },
+                BanterBeat { role: "caller".to_string(), text: "⚔ ➡ {target}".to_string() },
+                BanterBeat { role: "responder".to_string(), text: "✔".to_string() },
             ],
         }
     }

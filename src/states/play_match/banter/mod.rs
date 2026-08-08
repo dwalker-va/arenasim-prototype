@@ -21,6 +21,7 @@
 
 mod resolver;
 mod scheduler;
+pub mod vocab;
 mod watcher;
 
 // Re-exported ITEM BY ITEM rather than with the `pub use child::*;` globs

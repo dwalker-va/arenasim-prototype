@@ -320,6 +320,8 @@ pub fn play_banter_beats(
             let call = BanterCall {
                 target: class_at(enemies, change.new_call),
                 prev_target: class_at(enemies, change.previous.slot()),
+                // Teams are 1 and 2, so the opposition is whichever this is not.
+                enemy_team: if change.team == 1 { 2 } else { 1 },
             };
             let lineup = BanterLineup {
                 team: change.team,
@@ -809,7 +811,10 @@ mod tests {
         run_scheduler(&mut world, 1.0);
         let spoken = bubbles(&mut world);
         assert_eq!(spoken.len(), 1, "Switch is a single-beat shout");
-        assert_eq!(spoken[0].1, "Switch to the Warlock!", "slot 1 of team 2");
+        assert_eq!(
+            spoken[0].1, "Switch to the {class:Warlock:2}!",
+            "slot 1 of team 2, resolved to a portrait token the renderer can tint"
+        );
 
         // ...and nothing follows it.
         for _ in 0..6 {
