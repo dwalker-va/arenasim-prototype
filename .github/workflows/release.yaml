@@ -72,3 +72,64 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$env:GITHUB_REF_NAME" "$env:APP_NAME-$env:GITHUB_REF_NAME-windows-x64.zip"
+
+  macos:
+    needs: create-release
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the target
+        run: rustup target add aarch64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-macos
+
+      - name: Build
+        run: cargo build --release --locked --target aarch64-apple-darwin
+
+      # A bare Unix executable double-clicked in Finder opens a Terminal window
+      # rather than the game, so the bundle is what makes "double-click the
+      # thing I sent you" work at all. Assets go beside the binary in
+      # Contents/MacOS/ for the same executable-relative resolution the Windows
+      # zip relies on.
+      - name: Assemble the app bundle
+        run: |
+          set -euo pipefail
+          APP="$APP_NAME.app"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+
+          cp "target/aarch64-apple-darwin/release/$BINARY" "$APP/Contents/MacOS/"
+          cp -R assets "$APP/Contents/MacOS/assets"
+          cp packaging/macos/AppIcon.icns "$APP/Contents/Resources/"
+          cp packaging/macos/Info.plist "$APP/Contents/"
+
+          # Stamp the tag over the placeholder versions, minus the leading "v".
+          VERSION="${GITHUB_REF_NAME#v}"
+          plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP/Contents/Info.plist"
+          plutil -replace CFBundleVersion -string "$VERSION" "$APP/Contents/Info.plist"
+          plutil -lint "$APP/Contents/Info.plist"
+
+      # An ad-hoc signature is not notarization and does not avoid Gatekeeper.
+      # It exists because an arm64 binary must carry *some* valid signature to
+      # execute at all, and copying files into a bundle invalidates the one
+      # the linker applied.
+      - name: Ad-hoc sign the bundle
+        run: codesign --force --deep --sign - "$APP_NAME.app"
+
+      - name: Build the disk image
+        run: |
+          set -euo pipefail
+          DMG="$APP_NAME-$GITHUB_REF_NAME-macos-arm64.dmg"
+          STAGE="$(mktemp -d)"
+          cp -R "$APP_NAME.app" "$STAGE/"
+          # A symlink to /Applications makes the window a drag-to-install target
+          # without needing a background image or window scripting.
+          ln -s /Applications "$STAGE/Applications"
+          hdiutil create -volname "$APP_NAME" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" "$APP_NAME-$GITHUB_REF_NAME-macos-arm64.dmg"
