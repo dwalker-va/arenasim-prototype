@@ -164,7 +164,7 @@ pub fn entries_for_class(class: CharacterClass, defs: &AbilityDefinitions) -> Ve
 }
 
 /// Transport state: what is selected, whether it is running, and where it is.
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct SandboxPlayback {
     pub selected: Option<SandboxEntry>,
     pub family: Option<EntryFamily>,
@@ -181,6 +181,29 @@ pub struct SandboxPlayback {
     pub stop_requested: bool,
     /// Set by the UI to advance exactly one fixed tick while paused.
     pub step_requested: bool,
+    /// Speed to return to when the transport unpauses.
+    ///
+    /// Held so Resume and Play restore the rung actually being watched. Assuming
+    /// 1x would silently throw away a 0.1x setting the moment the user paused to
+    /// look at something.
+    pub resume_speed: f32,
+}
+
+impl Default for SandboxPlayback {
+    fn default() -> Self {
+        Self {
+            selected: None,
+            family: None,
+            looping: false,
+            playing: false,
+            elapsed: 0.0,
+            duration: 0.0,
+            restart_requested: false,
+            stop_requested: false,
+            step_requested: false,
+            resume_speed: 1.0,
+        }
+    }
 }
 
 impl SandboxPlayback {
