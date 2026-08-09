@@ -230,7 +230,11 @@ impl Plugin for HeadlessPlugin {
         systems::configure_combat_system_ordering(app);
 
         // Add core combat systems using the shared API (always run in headless mode)
-        systems::add_core_combat_systems(app, || true);
+        // Headless runs both layers unconditionally — the split exists only so
+        // the graphical client can run resolution without the AI (the Animation
+        // Sandbox). Passing always-true for both leaves behaviour, and every
+        // recorded baseline, exactly as it was.
+        systems::add_core_combat_systems(app, || true, || true);
 
         // Add headless-specific systems after combat resolution.
         app.add_systems(Startup, headless_setup_match)

@@ -30,8 +30,14 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 use super::match_config::{
-    CharacterClass, MageArmor, PaladinAura, RogueOpener, RoguePoison, WarriorShout,
+    ArenaMap, CharacterClass, MageArmor, PaladinAura, RogueOpener, RoguePoison, WarriorShout,
 };
+use super::play_match::ai_profile::AiProfiles;
+use super::play_match::components::{
+    ArenaDampening, GameRng, MatchCountdown, ShadowSightState, SimulationSpeed,
+};
+use super::play_match::map_config::MapGeometryConfig;
+use super::play_match::team_plan::TeamPlans;
 use super::play_match::equipment::{
     enforce_two_hand_conflicts, resolve_loadout, DefaultLoadouts, ItemDefinitions,
 };
@@ -107,8 +113,27 @@ pub fn setup_sandbox(
     config: Res<SandboxConfig>,
     item_defs: Res<ItemDefinitions>,
     default_loadouts: Res<DefaultLoadouts>,
+    map_geometry: Res<MapGeometryConfig>,
     mut stage: ResMut<SandboxStage>,
 ) {
+    // The resolution systems this state shares with a match read these. They are
+    // normally inserted by `setup_play_match`, which never runs here.
+    //
+    // `MatchCountdown` is inserted with the gates ALREADY OPEN: much of the
+    // combat layer no-ops before the gates open, and the sandbox has no
+    // countdown to wait through.
+    commands.insert_resource(MatchCountdown {
+        time_remaining: 0.0,
+        gates_opened: true,
+    });
+    commands.insert_resource(ArenaDampening::default());
+    commands.insert_resource(ShadowSightState::default());
+    commands.insert_resource(SimulationSpeed { multiplier: 1.0 });
+    commands.insert_resource(GameRng::default());
+    commands.insert_resource(TeamPlans::default());
+    commands.insert_resource(AiProfiles::default());
+    commands.insert_resource(map_geometry.active_for(ArenaMap::BasicArena));
+
     commands.insert_resource(AmbientLight {
         color: Color::WHITE,
         brightness: 220.0,

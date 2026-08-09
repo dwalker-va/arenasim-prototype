@@ -43,7 +43,6 @@ pub enum GameState {
 
 use play_match::systems::{
     CombatSystemPhase, configure_combat_system_ordering, add_core_combat_systems,
-    add_sandbox_combat_systems,
 };
 
 /// Run condition for the shared combat VISUAL layer.
@@ -196,11 +195,10 @@ impl Plugin for StatesPlugin {
         // Configure combat system phase ordering and add core combat systems
         // These are shared between graphical and headless modes
         configure_combat_system_ordering(app);
-        add_core_combat_systems(app, in_state(GameState::PlayMatch));
-        // The sandbox's own resolution-side subset. Registered separately so
-        // `add_core_combat_systems` is never widened — headless stays
-        // byte-identical by construction.
-        add_sandbox_combat_systems(app, in_state(GameState::AnimationSandbox));
+        // Resolution runs in both combat scenes; the AI and match clock only in
+        // a real match. One registration, so no system's `SystemTypeSet` becomes
+        // ambiguous and the `spawn_projectile_visuals` ordering below stays legal.
+        add_core_combat_systems(app, in_combat_scene, in_state(GameState::PlayMatch));
 
         // SCHEDULES: the sim runs in `FixedUpdate`, visuals in `Update`.
         //
