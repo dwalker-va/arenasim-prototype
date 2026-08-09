@@ -160,6 +160,13 @@ impl Plugin for StatesPlugin {
             // Animation sandbox systems (defined in animation_sandbox module).
             // Graphical-only: no headless registration, and it reaches no
             // simulation registration of its own — see add_sandbox_combat_systems.
+            // Spell icons are normally inserted by `setup_play_match`, which
+            // never runs in the sandbox. `init_resource` only fills a gap, so
+            // the per-match `insert_resource` still wins and match behaviour is
+            // unchanged — this just stops the sandbox reading a resource that
+            // does not exist yet.
+            .init_resource::<play_match::SpellIcons>()
+            .init_resource::<play_match::SpellIconHandles>()
             .init_resource::<animation_sandbox::SandboxConfig>()
             .init_resource::<animation_sandbox::SandboxStage>()
             .init_resource::<animation_sandbox::playback::SandboxPlayback>()
@@ -178,6 +185,11 @@ impl Plugin for StatesPlugin {
             .add_systems(
                 Update,
                 (
+                    // Both loaders self-guard on an internal `loaded` flag, so
+                    // registering them here as well as in their own states is
+                    // idempotent — the same trick the Armory uses for item icons.
+                    play_match::load_spell_icons,
+                    configure_match_ui::load_class_icons,
                     animation_sandbox::restage_on_config_change,
                     animation_sandbox::playback::sustain_staged_units,
                     animation_sandbox::playback::drive_playback,
