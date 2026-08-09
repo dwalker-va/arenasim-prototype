@@ -1,6 +1,10 @@
 # Rust / Cargo
 /target/
-Cargo.lock
+# Cargo.lock is deliberately COMMITTED. This is an application, not a library,
+# and two things depend on a fixed dependency set: a release tag must rebuild
+# into the same binary, and the seeded-RNG determinism the balance methodology
+# rests on assumes `rand` does not drift underneath it (see the pin comment in
+# Cargo.toml).
 
 # IDE
 .idea/
