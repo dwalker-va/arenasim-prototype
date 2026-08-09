@@ -25,7 +25,9 @@
 //! grouping, and color — not icon or font fidelity.
 
 use arenasim::states::animation_sandbox::playback::{BodyAnimation, EntryFamily, SandboxEntry};
-use arenasim::states::animation_sandbox::ui::{draw_sandbox_ui, EntryRow, SandboxView};
+use arenasim::states::animation_sandbox::ui::{
+    draw_sandbox_ui, CameraPreset, EntryRow, SandboxView,
+};
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::abilities::AbilityType;
 use egui_kittest::Harness;
@@ -71,12 +73,27 @@ fn view(selected: Option<SandboxEntry>, paused: bool, dummy_enabled: bool) -> Sa
         dummy_class: CharacterClass::Warrior,
         rows: mage_rows(),
         selected,
+        selected_label: selected.map(|_| "Frostbolt".to_string()),
+        selected_details: if selected.is_none() { Vec::new() } else { vec![
+            ("Cast time".into(), "1.50s".into()),
+            ("Range".into(), "30 yd".into()),
+            ("Mana".into(), "24".into()),
+            ("Cooldown".into(), "0s".into()),
+            ("School".into(), "Frost".into()),
+            ("Projectile".into(), "35 yd/s".into()),
+            ("Aura".into(), "MovementSpeedSlow".into()),
+        ] },
+        applied_preset: Some(CameraPreset::ThreeQuarter),
         looping: true,
         paused,
         speed: if paused { 0.0 } else { 0.25 },
-        elapsed: 0.42,
-        duration: 1.50,
-        }
+        // Nothing selected means no pass, so the track and readout must be
+        // empty — mocking a live duration here would make the snapshot show a
+        // state the real screen cannot reach.
+        elapsed: if selected.is_some() { 0.42 } else { 0.0 },
+        duration: if selected.is_some() { 1.50 } else { 0.0 },
+        loop_tail: 0.6,
+    }
 }
 
 fn render(name: &str, view: SandboxView) {

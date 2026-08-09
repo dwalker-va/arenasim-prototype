@@ -243,7 +243,7 @@ impl SandboxPlayback {
 
 /// Tail held after a pass finishes before a loop restarts, so the last frames
 /// of an effect are seen rather than being cut off by the next pass.
-const LOOP_TAIL_SECS: f32 = 0.6;
+pub const LOOP_TAIL_SECS: f32 = 0.6;
 
 /// Starts, advances, and loops the selected entry.
 pub fn drive_playback(
