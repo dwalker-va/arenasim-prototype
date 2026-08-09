@@ -6,7 +6,7 @@ use bevy::prelude::*;
 use bevy::window::{MonitorSelection, PresentMode, PrimaryWindow, WindowMode};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use crate::keybindings::Keybindings;
 
 /// User-configurable game settings
@@ -97,9 +97,7 @@ impl Default for GameSettings {
 impl GameSettings {
     /// Get the path to the settings file
     fn settings_path() -> PathBuf {
-        // Store in the same directory as the executable for now
-        // In production, you'd use directories::ProjectDirs for proper cross-platform support
-        PathBuf::from("settings.ron")
+        crate::paths::settings_path()
     }
 
     /// Load settings from file, or return default if file doesn't exist
@@ -132,9 +130,21 @@ impl GameSettings {
 
     /// Save settings to file
     pub fn save(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let path = Self::settings_path();
+        self.save_to(&Self::settings_path())
+    }
+
+    /// Save settings to an explicit path, creating its parent directory first —
+    /// an installed build's per-user data directory does not exist yet.
+    fn save_to(&self, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+        if let Some(parent) = path.parent() {
+            // Empty in a checkout, where the path is the bare `settings.ron`.
+            if !parent.as_os_str().is_empty() {
+                fs::create_dir_all(parent)?;
+            }
+        }
+
         let contents = ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default())?;
-        fs::write(&path, contents)?;
+        fs::write(path, contents)?;
         info!("Saved settings to {:?}", path);
         Ok(())
     }
@@ -286,6 +296,35 @@ mod tests {
         let loaded: GameSettings = ron::from_str(&serialized).expect("settings deserialize");
 
         assert!(!loaded.show_call_display);
+    }
+
+    /// An installed build's per-user data directory does not exist before the
+    /// first save, so the save has to create it rather than failing.
+    #[test]
+    fn saving_creates_the_parent_directory() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("ArenaSim/settings.ron");
+
+        GameSettings::default().save_to(&path).expect("save settings");
+
+        let contents = fs::read_to_string(&path).expect("read settings back");
+        ron::from_str::<GameSettings>(&contents).expect("settings deserialize");
+    }
+
+    /// A save that cannot be written must surface an error rather than panic —
+    /// `save_settings_on_change` logs it and the game carries on.
+    #[test]
+    fn saving_to_an_unwritable_location_reports_an_error() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        // A regular file where a directory would have to be: nothing below it
+        // can be created or written.
+        let blocker = dir.path().join("not-a-directory");
+        fs::write(&blocker, "").expect("write blocker");
+
+        assert!(
+            GameSettings::default().save_to(&blocker.join("settings.ron")).is_err(),
+            "an unwritable destination should report an error"
+        );
     }
 
     /// A settings file written before the field existed must still load — the
