@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>ArenaSim</title>
+  <defs>
+    <clipPath id="pillar0"><rect x="178.36" y="129.04" width="53.25" height="110.08" rx="9.22"/></clipPath>
+    <clipPath id="pillar1"><rect x="349.56" y="160.85" width="53.25" height="110.08" rx="9.22"/></clipPath>
+    <clipPath id="pillar4"><rect x="109.19" y="207.79" width="53.25" height="110.08" rx="9.22"/></clipPath>
+    <clipPath id="pillar5"><rect x="280.39" y="239.60" width="53.25" height="110.08" rx="9.22"/></clipPath>
+  </defs>
+  <rect width="512" height="512" rx="112.64"
+        ry="112.64" fill="#1a202c"/>
+  <ellipse cx="256" cy="294.40" rx="202.24"
+           ry="93.03" fill="#c4a064"/>
+  <ellipse cx="256" cy="294.40"
+           rx="186.88"
+           ry="85.96"
+           fill="#2c3547"/>
+  <g clip-path="url(#pillar0)">
+    <rect x="178.36" y="129.04" width="53.25" height="110.08" fill="#a88552"/>
+    <rect x="178.36" y="129.04" width="26.62" height="110.08" fill="#eaca8e"/>
+  </g>
+  <ellipse cx="204.99" cy="129.04" rx="26.62" ry="12.25" fill="#eaca8e"/>
+  <g clip-path="url(#pillar1)">
+    <rect x="349.56" y="160.85" width="53.25" height="110.08" fill="#a88552"/>
+    <rect x="349.56" y="160.85" width="26.62" height="110.08" fill="#eaca8e"/>
+  </g>
+  <ellipse cx="376.18" cy="160.85" rx="26.62" ry="12.25" fill="#eaca8e"/>
+  <ellipse cx="230.40" cy="307.20" rx="35.84" ry="16.49" fill="#6496ff"/>
+  <ellipse cx="281.60" cy="307.20" rx="35.84" ry="16.49" fill="#ff6464"/>
+  <g clip-path="url(#pillar4)">
+    <rect x="109.19" y="207.79" width="53.25" height="110.08" fill="#a88552"/>
+    <rect x="109.19" y="207.79" width="26.62" height="110.08" fill="#eaca8e"/>
+  </g>
+  <ellipse cx="135.82" cy="207.79" rx="26.62" ry="12.25" fill="#eaca8e"/>
+  <g clip-path="url(#pillar5)">
+    <rect x="280.39" y="239.60" width="53.25" height="110.08" fill="#a88552"/>
+    <rect x="280.39" y="239.60" width="26.62" height="110.08" fill="#eaca8e"/>
+  </g>
+  <ellipse cx="307.01" cy="239.60" rx="26.62" ry="12.25" fill="#eaca8e"/>
+</svg>
