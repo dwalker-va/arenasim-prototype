@@ -6,6 +6,10 @@
 # rests on assumes `rand` does not drift underneath it (see the pin comment in
 # Cargo.toml).
 
+# Python bytecode from packaging/generate_icon.py
+__pycache__/
+*.pyc
+
 # IDE
 .idea/
 .vscode/
