@@ -26,16 +26,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create the release
+      # Created as a DRAFT so a half-finished release is never downloadable. If
+      # one platform job fails, the draft stays private and the tag can simply
+      # be re-run; the publish job at the end is what makes it public, and it
+      # only runs once both platforms have uploaded.
+      #
+      # Creating is also made idempotent, because the failure this guards
+      # against is exactly the one that makes you re-run the workflow.
+      - name: Create the draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists; reusing it."
+            exit 0
+          fi
           # The notes carry the per-OS steps for opening unsigned software, so
           # they ship with every release rather than living only in the repo.
           gh release create "$GITHUB_REF_NAME" \
             --title "$APP_NAME $GITHUB_REF_NAME" \
             --notes-file packaging/release-notes.md \
-            --verify-tag
+            --verify-tag \
+            --draft
 
   windows:
     needs: create-release
@@ -61,19 +73,25 @@ jobs:
       # Assets sit beside the executable because Bevy resolves its asset
       # directory relative to the running binary once CARGO_MANIFEST_DIR is
       # absent, which it is for anyone who unpacks this zip.
+      # Everything goes inside one named folder so the zip extracts as a single
+      # tidy directory rather than scattering an .exe and an assets/ folder
+      # loose into Downloads — and so the executable and its assets cannot get
+      # separated, which is the one way to make the game fail to start.
       - name: Stage the artifact
         run: |
-          New-Item -ItemType Directory -Path staging | Out-Null
-          Copy-Item "target/x86_64-pc-windows-msvc/release/$env:BINARY.exe" staging/
-          Copy-Item -Recurse assets staging/assets
+          New-Item -ItemType Directory -Path "staging/${env:APP_NAME}" | Out-Null
+          Copy-Item "target/x86_64-pc-windows-msvc/release/${env:BINARY}.exe" "staging/${env:APP_NAME}/"
+          Copy-Item -Recurse assets "staging/${env:APP_NAME}/assets"
 
       - name: Archive
-        run: Compress-Archive -Path staging/* -DestinationPath "$env:APP_NAME-$env:GITHUB_REF_NAME-windows-x64.zip"
+        run: Compress-Archive -Path "staging/${env:APP_NAME}" -DestinationPath "${env:APP_NAME}-${env:GITHUB_REF_NAME}-windows-x64.zip"
 
+      # --clobber so a re-run replaces the asset instead of failing on a
+      # duplicate name.
       - name: Upload to the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$env:GITHUB_REF_NAME" "$env:APP_NAME-$env:GITHUB_REF_NAME-windows-x64.zip"
+        run: gh release upload "${env:GITHUB_REF_NAME}" "${env:APP_NAME}-${env:GITHUB_REF_NAME}-windows-x64.zip" --clobber
 
   macos:
     needs: create-release
@@ -134,4 +152,15 @@ jobs:
       - name: Upload to the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" "$APP_NAME-$GITHUB_REF_NAME-macos-arm64.dmg"
+        run: gh release upload "$GITHUB_REF_NAME" "$APP_NAME-$GITHUB_REF_NAME-macos-arm64.dmg" --clobber
+
+  # Both platforms uploaded, so the release is complete and can go public.
+  # Nothing is downloadable before this point.
+  publish:
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false --repo "$GITHUB_REPOSITORY"
