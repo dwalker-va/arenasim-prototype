@@ -25,9 +25,23 @@ use super::super::match_config::CharacterClass;
 use super::super::play_match::abilities::AbilityType;
 use super::super::play_match::ability_config::AbilityDefinitions;
 use super::super::play_match::components::{
-    Celebrating, CastingState, Combatant, DeathAnimation, VisualBody,
+    Celebrating, CastingState, Combatant, DeathAnimation, MatchResults, VictoryCelebration,
+    VisualBody,
 };
 use super::SandboxStage;
+
+/// Seconds the match's victory clock is seeded with when the sandbox plays the
+/// winner bounce, and the floor it is never allowed to fall below.
+///
+/// `update_victory_celebration` is the ONLY thing that animates `Celebrating`,
+/// and it early-returns unless a [`VictoryCelebration`] resource exists — so the
+/// sandbox has to supply one or the entry plays nothing at all. But that same
+/// system transitions to `GameState::Results` the moment the clock reaches zero,
+/// which would eject the user from the sandbox. The clock is therefore seeded
+/// above one bounce pass and floored every frame, so it drives the bounce and
+/// can never fire the transition.
+const CELEBRATION_SECS: f32 = 5.0;
+const CELEBRATION_FLOOR_SECS: f32 = 1.0;
 
 /// Body motion that no ability triggers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,6 +155,9 @@ pub struct SandboxPlayback {
     pub duration: f32,
     /// Set by the UI to (re)start the selected entry on the next tick.
     pub restart_requested: bool,
+    /// Set by the UI to stop the current entry and return the caster to rest on
+    /// the next tick.
+    pub stop_requested: bool,
     /// Set by the UI to advance exactly one fixed tick while paused.
     pub step_requested: bool,
 }
@@ -152,6 +169,31 @@ impl SandboxPlayback {
         self.family = Some(family);
         self.elapsed = 0.0;
         self.playing = false;
+    }
+
+    /// Stops the current entry and asks the driver to tear its body state down.
+    ///
+    /// Clearing `playing` alone is NOT enough: [`drive_playback`] returns early
+    /// when it is false, so a `Celebrating` / `DeathAnimation` / `CastingState`
+    /// left on the caster would never be removed — and the victory clock the
+    /// bounce needs would keep running toward its Results transition.
+    pub fn stop(&mut self) {
+        self.playing = false;
+        self.restart_requested = false;
+        self.stop_requested = true;
+    }
+
+    /// Stops playback AND drops the selection.
+    ///
+    /// Used when the caster class changes: entries are per-class, so a
+    /// selection made against the previous class would otherwise stay live in
+    /// the transport and let `Play` cast, say, a Mage's Frostbolt on a Warrior.
+    pub fn clear_selection(&mut self) {
+        self.stop();
+        self.selected = None;
+        self.family = None;
+        self.elapsed = 0.0;
+        self.duration = 0.0;
     }
 }
 
@@ -168,8 +210,25 @@ pub fn drive_playback(
     defs: Res<AbilityDefinitions>,
     mut bodies: Query<(&mut Transform, &VisualBody)>,
     children: Query<&Children>,
+    celebration: Option<ResMut<VictoryCelebration>>,
 ) {
     let Some(caster) = stage.caster else { return };
+
+    // Floor the victory clock BEFORE anything can return early. Every path out
+    // of this system leaves the resource in place for at least a frame, and a
+    // clock that reaches zero transitions to `GameState::Results`.
+    if let Some(mut celebration) = celebration {
+        if celebration.time_remaining < CELEBRATION_FLOOR_SECS {
+            celebration.time_remaining = CELEBRATION_FLOOR_SECS;
+        }
+    }
+
+    if playback.stop_requested {
+        playback.stop_requested = false;
+        playback.playing = false;
+        clear_body_state(&mut commands, caster, &children, &mut bodies);
+        return;
+    }
 
     if playback.restart_requested {
         playback.restart_requested = false;
@@ -247,6 +306,21 @@ fn start_entry(
                     commands
                         .entity(caster)
                         .insert(Celebrating { bounce_offset: 0.0 });
+                    // `Celebrating` is inert on its own: the bounce is written
+                    // by `update_victory_celebration`, which bails without this
+                    // resource — and `update_walk_animation` explicitly cedes
+                    // the Y axis to it, so the caster would stand frozen.
+                    commands.insert_resource(VictoryCelebration {
+                        winner: None,
+                        time_remaining: CELEBRATION_SECS,
+                        match_results: MatchResults {
+                            winner: None,
+                            duration_secs: 0.0,
+                            team1_combatants: Vec::new(),
+                            team2_combatants: Vec::new(),
+                            pet_damage_links: Default::default(),
+                        },
+                    });
                 }
                 // The walk bob is driven by real movement, so the sandbox has
                 // to actually move the unit — see `walk_the_caster`.
@@ -273,6 +347,9 @@ fn clear_body_state(
         e.remove::<Celebrating>();
         e.remove::<CastingState>();
     }
+    // Paired with the insert in `start_entry`: left behind, the match's victory
+    // clock keeps ticking down to its `GameState::Results` transition.
+    commands.remove_resource::<VictoryCelebration>();
     if let Ok(kids) = children.get(caster) {
         for child in kids.iter() {
             if let Ok((mut transform, body)) = bodies.get_mut(child) {
@@ -289,7 +366,6 @@ fn clear_body_state(
 /// at render rates above the tick rate). So showing the bob means actually
 /// moving the unit, not faking the component state.
 pub fn walk_the_caster(
-    time: Res<Time>,
     playback: Res<SandboxPlayback>,
     stage: Res<SandboxStage>,
     mut movers: Query<&mut Transform, With<Combatant>>,
@@ -311,10 +387,20 @@ pub fn walk_the_caster(
         return;
     }
 
-    let angle = time.elapsed_secs() * 0.8;
-    let radius = 3.0;
-    transform.translation.x = stage.caster_home.x + angle.cos() * radius;
-    transform.translation.z = stage.caster_home.z + angle.sin() * radius;
+    // Phase comes from the pass clock, not absolute elapsed time, and the circle
+    // is centred one radius BEHIND the staged position — so the walk starts
+    // exactly at `caster_home` and eases away from it. Keying the angle off
+    // `time.elapsed_secs()` put the caster at an arbitrary point on the circle
+    // on its first frame, which teleported it up to 2 * radius and drove
+    // `update_walk_animation`'s per-frame XZ delta straight into its
+    // `WALK_MAX_PHASE_STEP` clamp — a lurch, in the one entry whose whole
+    // subject is how walking reads.
+    const WALK_RADIUS: f32 = 3.0;
+    const WALK_ANGULAR_SPEED: f32 = 0.8;
+    let angle = playback.elapsed * WALK_ANGULAR_SPEED;
+    transform.translation.x =
+        stage.caster_home.x - WALK_RADIUS + angle.cos() * WALK_RADIUS;
+    transform.translation.z = stage.caster_home.z + angle.sin() * WALK_RADIUS;
 }
 
 /// Keeps the staged units alive and castable across repeated plays.
@@ -372,5 +458,38 @@ mod tests {
         assert!(mage
             .iter()
             .any(|l| l.family == EntryFamily::HardCast));
+    }
+
+    #[test]
+    fn the_victory_clock_outlasts_a_bounce_pass_without_reaching_its_floor() {
+        // `update_victory_celebration` derives the bounce phase from
+        // `CELEBRATION_SECS - time_remaining`, and the floor freezes that phase.
+        // If a pass could outlive the unfloored part of the clock, the bounce
+        // would stall visibly partway through — and if the floor were removed,
+        // the clock would hit zero and eject the user to the Results screen.
+        let pass = BodyAnimation::VictoryBounce.duration() + LOOP_TAIL_SECS;
+        assert!(pass < CELEBRATION_SECS - CELEBRATION_FLOOR_SECS);
+        assert!(CELEBRATION_FLOOR_SECS > 0.0);
+    }
+
+    #[test]
+    fn clearing_the_selection_stops_playback_and_drops_the_entry() {
+        // Entries are per-class, so a stale selection surviving a caster change
+        // would let `Play` cast an ability the staged class does not have.
+        let mut playback = SandboxPlayback::default();
+        playback.select(
+            SandboxEntry::Ability(AbilityType::Frostbolt),
+            EntryFamily::HardCast,
+        );
+        playback.playing = true;
+        playback.restart_requested = true;
+
+        playback.clear_selection();
+
+        assert_eq!(playback.selected, None);
+        assert_eq!(playback.family, None);
+        assert!(!playback.playing);
+        assert!(!playback.restart_requested);
+        assert!(playback.stop_requested, "the driver must tear body state down");
     }
 }

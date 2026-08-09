@@ -184,9 +184,19 @@ impl Plugin for StatesPlugin {
                     animation_sandbox::playback::walk_the_caster,
                     animation_sandbox::ui::sandbox_ui,
                     animation_sandbox::ui::apply_camera_preset,
-                    animation_sandbox::ui::apply_step_request,
                 )
                     .chain()
+                    .run_if(in_state(GameState::AnimationSandbox)),
+            )
+            // Single-stepping injects a virtual-time delta, so it MUST land in
+            // `First` (after `TimeSystem` overwrites delta, before
+            // `RunFixedMainLoop` spends it on the fixed accumulator). In
+            // `Update` it was both too late for this frame's fixed loop and
+            // overwritten before the next one — a Step that advanced nothing.
+            .add_systems(
+                First,
+                animation_sandbox::ui::apply_step_request
+                    .after(bevy::time::TimeSystem)
                     .run_if(in_state(GameState::AnimationSandbox)),
             )
             // Play match systems (defined in play_match module)

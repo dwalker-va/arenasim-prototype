@@ -6,7 +6,7 @@ use bevy_egui::{egui, EguiContexts};
 use super::super::match_config::CharacterClass;
 use super::super::play_match::ability_config::AbilityDefinitions;
 use super::playback::{entries_for_class, EntryFamily, SandboxPlayback};
-use super::{SandboxConfig, SandboxStage, STAGE_SEPARATION};
+use super::{SandboxConfig, STAGE_SEPARATION};
 
 /// Playback speeds offered in the sandbox.
 ///
@@ -65,7 +65,6 @@ pub fn sandbox_ui(
     mut pending_preset: ResMut<PendingCameraPreset>,
     mut virtual_time: ResMut<Time<Virtual>>,
     defs: Res<AbilityDefinitions>,
-    stage: Res<SandboxStage>,
     mut next_state: ResMut<NextState<super::super::GameState>>,
 ) {
     let Some(ctx) = contexts.try_ctx_mut() else {
@@ -89,7 +88,11 @@ pub fn sandbox_ui(
                     && !selected
                 {
                     config.caster_class = class;
-                    playback.playing = false;
+                    // The entry list is per-class, so the previous class's
+                    // selection has to go with it — otherwise the transport
+                    // keeps `Play` live and casts an ability the newly staged
+                    // class does not own.
+                    playback.clear_selection();
                 }
             }
 
@@ -98,7 +101,7 @@ pub fn sandbox_ui(
             let mut dummy_enabled = config.dummy_enabled;
             if ui.checkbox(&mut dummy_enabled, "Staged").changed() {
                 config.dummy_enabled = dummy_enabled;
-                playback.playing = false;
+                playback.stop();
             }
             if config.dummy_enabled {
                 for &class in CharacterClass::all() {
@@ -109,6 +112,9 @@ pub fn sandbox_ui(
                         && !selected
                     {
                         config.dummy_class = class;
+                        // Restaging despawns the dummy a running cast is aimed
+                        // at, which would silently fizzle mid-preview.
+                        playback.stop();
                     }
                 }
             }
@@ -213,7 +219,6 @@ pub fn sandbox_ui(
                         .weak(),
                 );
             }
-            let _ = &stage;
         });
     });
 }
@@ -246,15 +251,27 @@ pub fn apply_camera_preset(
 }
 
 /// Advances exactly one fixed tick while paused.
+///
+/// Runs in `First`, AFTER `TimeSystem` and therefore before
+/// `RunFixedMainLoop`. That ordering is the whole system: Bevy's frame order is
+/// `First -> ... -> RunFixedMainLoop -> Update`, `run_fixed_main_schedule` feeds
+/// the fixed accumulator from `Time<Virtual>::delta()`, and `Time::advance_by`
+/// OVERWRITES delta rather than adding to it. Registered in `Update` (where the
+/// button is pressed) the injected delta was stamped after the fixed loop had
+/// already read this frame's, then overwritten by `time_system` at the top of
+/// the next one — so the sim never saw it and Step advanced nothing at all.
 pub fn apply_step_request(
     mut playback: ResMut<SandboxPlayback>,
     mut virtual_time: ResMut<Time<Virtual>>,
+    fixed_time: Res<Time<Fixed>>,
 ) {
     if !playback.step_requested {
         return;
     }
     playback.step_requested = false;
-    virtual_time.advance_by(std::time::Duration::from_secs_f32(1.0 / 60.0));
+    // Exactly one timestep, read from the clock that will spend it, so the step
+    // stays one tick if the fixed rate is ever retuned.
+    virtual_time.advance_by(fixed_time.timestep());
 }
 
 /// Restores normal time on the way out, so a paused sandbox cannot leave the

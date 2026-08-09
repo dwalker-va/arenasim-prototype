@@ -34,14 +34,14 @@ use super::match_config::{
 };
 use super::play_match::ai_profile::AiProfiles;
 use super::play_match::components::{
-    ArenaDampening, GameRng, MatchCountdown, ShadowSightState, SimulationSpeed,
+    ArenaDampening, GameRng, MatchCountdown, ShadowSightState, SimulationSpeed, VictoryCelebration,
 };
-use super::play_match::map_config::MapGeometryConfig;
-use super::play_match::team_plan::TeamPlans;
 use super::play_match::equipment::{
     enforce_two_hand_conflicts, resolve_loadout, DefaultLoadouts, ItemDefinitions,
 };
-use super::play_match::spawn_combatant;
+use super::play_match::map_config::{ActiveMapGeometry, MapGeometryConfig};
+use super::play_match::team_plan::TeamPlans;
+use super::play_match::{spawn_combatant, PlayMatchEntity};
 
 /// Marks every entity the sandbox spawns, so teardown despawns exactly its own
 /// scene. The sandbox does NOT reuse `PlayMatchEntity` for this: that marker is
@@ -302,9 +302,18 @@ pub fn restage_on_config_change(
 }
 
 /// Tears down everything the sandbox spawned.
+///
+/// `SandboxEntity` covers only what [`setup_sandbox`] spawns directly. Playing
+/// an entry runs the match's OWN resolution systems, and everything they spawn —
+/// projectiles, cast-ending markers, impact bursts, casting orbs, floating
+/// combat text — is tagged `PlayMatchEntity`, because those systems have no idea
+/// which scene they are running under. Despawning only the first set left a
+/// bolt frozen in mid-air (its movement system is gated off outside a combat
+/// scene) sitting in the main-menu backdrop until the next match's
+/// `cleanup_play_match` finally swept it.
 pub fn cleanup_sandbox(
     mut commands: Commands,
-    entities: Query<Entity, With<SandboxEntity>>,
+    entities: Query<Entity, Or<(With<SandboxEntity>, With<PlayMatchEntity>)>>,
     mut stage: ResMut<SandboxStage>,
 ) {
     for entity in entities.iter() {
@@ -312,6 +321,23 @@ pub fn cleanup_sandbox(
     }
     *stage = SandboxStage::default();
     commands.remove_resource::<AmbientLight>();
+
+    // Mirror `cleanup_play_match`: these are the resources `setup_sandbox`
+    // inserted, and leaving them behind is not inert. `setup_play_match` reads a
+    // surviving `GameRng`/`AiProfiles` as "a replay pre-seeded this match" and
+    // honours them — so a sandbox visit would silently hand the next match the
+    // seed minted when the sandbox opened.
+    commands.remove_resource::<GameRng>();
+    commands.remove_resource::<AiProfiles>();
+    commands.remove_resource::<TeamPlans>();
+    commands.remove_resource::<SimulationSpeed>();
+    commands.remove_resource::<MatchCountdown>();
+    commands.remove_resource::<ArenaDampening>();
+    commands.remove_resource::<ActiveMapGeometry>();
+    commands.remove_resource::<ShadowSightState>();
+    // Inserted by the victory-bounce entry; its clock drives a transition to
+    // `GameState::Results` if it is ever allowed to run down.
+    commands.remove_resource::<VictoryCelebration>();
 }
 
 #[cfg(test)]
