@@ -6,7 +6,7 @@
 use bevy::prelude::*;
 use crate::combat::log::{CombatLog, CombatantId};
 use super::match_config::{self, CharacterClass};
-use super::components::{FloatingTextState, SpeechBubble, PlayMatchEntity, PetType, Combatant, Pet};
+use super::components::{BubbleKind, FloatingTextState, SpeechBubble, PlayMatchEntity, PetType, Combatant, Pet};
 
 /// Floating combat text horizontal spread (multiplied by -0.5 to +0.5 range)
 /// Adjust this to control how far left/right numbers can appear from their spawn point
@@ -123,12 +123,33 @@ pub fn log_ability_use(
 /// Helper function to spawn a speech bubble when a combatant uses an ability.
 ///
 /// The speech bubble displays the ability name and fades out after 2 seconds.
+/// Tagged [`BubbleKind::Ability`], so the renderer hides it while the gates are
+/// still closed — see [`spawn_speech_line`] for arbitrary text that always shows.
 pub fn spawn_speech_bubble(commands: &mut Commands, owner: Entity, ability_name: &str) {
     commands.spawn((
         SpeechBubble {
             owner,
             text: format!("{}!", ability_name),
             lifetime: 2.0, // 2 seconds
+            kind: BubbleKind::Ability,
+        },
+        PlayMatchEntity,
+    ));
+}
+
+/// Helper function to spawn a speech bubble carrying an arbitrary line of text.
+///
+/// The sibling of [`spawn_speech_bubble`] for banter: `text` is displayed
+/// verbatim (no `"{}!"` decoration) and `lifetime` is the caller's, since a
+/// conversational beat is not on the ability bubble's 2-second clock. Tagged
+/// [`BubbleKind::Banter`], so it renders during the pre-match countdown too.
+pub fn spawn_speech_line(commands: &mut Commands, owner: Entity, text: String, lifetime: f32) {
+    commands.spawn((
+        SpeechBubble {
+            owner,
+            text,
+            lifetime,
+            kind: BubbleKind::Banter,
         },
         PlayMatchEntity,
     ));
@@ -192,6 +213,53 @@ mod tests {
         let pet = pet_combatant_id(1, 1, PetType::Spider);
         assert_eq!(owner, "Team 1 Hunter #2");
         assert_eq!(pet, "Team 1 Spider #2");
+    }
+
+    /// Run a closure that queues commands, apply them, and hand back the world.
+    fn world_after(f: impl FnOnce(&mut Commands)) -> World {
+        use bevy::ecs::world::CommandQueue;
+
+        let mut world = World::new();
+        let mut queue = CommandQueue::default();
+        {
+            let mut commands = Commands::new(&mut queue, &world);
+            f(&mut commands);
+        }
+        queue.apply(&mut world);
+        world
+    }
+
+    #[test]
+    fn test_spawn_speech_bubble_keeps_ability_formatting() {
+        // Pins the pre-existing behavior: "{name}!", 2s, and the Ability kind
+        // that keeps it hidden until the gates open.
+        let owner = Entity::from_raw(7);
+        let mut world = world_after(|commands| spawn_speech_bubble(commands, owner, "Frostbolt"));
+
+        let mut q = world.query::<(&SpeechBubble, &PlayMatchEntity)>();
+        let (bubble, _) = q.single(&world).expect("one bubble spawned");
+        assert_eq!(bubble.owner, owner);
+        assert_eq!(bubble.text, "Frostbolt!");
+        assert_eq!(bubble.lifetime, 2.0);
+        assert_eq!(bubble.kind, BubbleKind::Ability);
+    }
+
+    #[test]
+    fn test_spawn_speech_line_preserves_text_and_lifetime() {
+        // Banter text is verbatim — no "!" appended — and the caller owns the
+        // lifetime, since a conversational beat is not on the 2s ability clock.
+        let owner = Entity::from_raw(3);
+        let line = "Kill the Priest first, then the pet.".to_string();
+        let mut world = world_after(|commands| {
+            spawn_speech_line(commands, owner, line.clone(), 4.5)
+        });
+
+        let mut q = world.query::<(&SpeechBubble, &PlayMatchEntity)>();
+        let (bubble, _) = q.single(&world).expect("one bubble spawned");
+        assert_eq!(bubble.owner, owner);
+        assert_eq!(bubble.text, "Kill the Priest first, then the pet.");
+        assert_eq!(bubble.lifetime, 4.5);
+        assert_eq!(bubble.kind, BubbleKind::Banter);
     }
 
     #[test]
