@@ -1,0 +1,74 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: Release
+
+# Version tags only. A tag like `docs-snapshot` must not publish a release.
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+
+# Required for `gh release`. The repository's Actions settings must also allow
+# workflows read-and-write permissions, which is a one-time manual setting this
+# file cannot grant itself.
+permissions:
+  contents: write
+
+env:
+  BINARY: arenasim
+  APP_NAME: ArenaSim
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # One job owns creating the release so the platform jobs, which run in
+  # parallel, only ever upload to it. Both trying to create it would race.
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$APP_NAME $GITHUB_REF_NAME" \
+            --generate-notes \
+            --verify-tag
+
+  windows:
+    needs: create-release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Explicit target rather than relying on the runner's host triple: if the
+      # image's architecture ever changes, this fails loudly instead of quietly
+      # publishing a binary for the wrong one.
+      - name: Install the target
+        run: rustup target add x86_64-pc-windows-msvc
+
+      # Bevy is the dominant build cost here; without a cache every release
+      # recompiles the whole dependency graph from scratch.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-windows
+
+      - name: Build
+        run: cargo build --release --locked --target x86_64-pc-windows-msvc
+
+      # Assets sit beside the executable because Bevy resolves its asset
+      # directory relative to the running binary once CARGO_MANIFEST_DIR is
+      # absent, which it is for anyone who unpacks this zip.
+      - name: Stage the artifact
+        run: |
+          New-Item -ItemType Directory -Path staging | Out-Null
+          Copy-Item "target/x86_64-pc-windows-msvc/release/$env:BINARY.exe" staging/
+          Copy-Item -Recurse assets staging/assets
+
+      - name: Archive
+        run: Compress-Archive -Path staging/* -DestinationPath "$env:APP_NAME-$env:GITHUB_REF_NAME-windows-x64.zip"
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$env:GITHUB_REF_NAME" "$env:APP_NAME-$env:GITHUB_REF_NAME-windows-x64.zip"
