@@ -23,6 +23,9 @@
 //!
 //! [`add_sandbox_combat_systems`]: crate::states::play_match::systems::add_sandbox_combat_systems
 
+pub mod playback;
+pub mod ui;
+
 use bevy::prelude::*;
 use std::collections::HashMap;
 
@@ -43,7 +46,7 @@ pub struct SandboxEntity;
 
 /// Distance from the stage centre to each combatant, in yards. Wide enough that
 /// a projectile visibly travels, close enough that both units stay framed.
-const STAGE_SEPARATION: f32 = 8.0;
+pub(crate) const STAGE_SEPARATION: f32 = 8.0;
 
 /// Radius of the staging floor. Large enough that no ability's travel or AoE
 /// visual runs off the edge at the framing distances the presets use.
@@ -83,6 +86,11 @@ impl Default for SandboxConfig {
 pub struct SandboxStage {
     pub caster: Option<Entity>,
     pub dummy: Option<Entity>,
+    /// Where the caster was staged. The walk-bob entry drives the caster around
+    /// the floor (the bob keys off real movement), so its position has to be
+    /// restorable — otherwise the next entry plays off-centre and the camera
+    /// presets frame empty floor.
+    pub caster_home: Vec3,
 }
 
 /// Builds the staging scene: floor, light, camera, caster, optional dummy.
@@ -160,6 +168,7 @@ fn stage_units(
     default_loadouts: &DefaultLoadouts,
     stage: &mut SandboxStage,
 ) {
+    let caster_home = Vec3::new(-STAGE_SEPARATION, 1.0, 0.0);
     let caster = spawn_staged_unit(
         commands,
         meshes,
@@ -167,11 +176,12 @@ fn stage_units(
         asset_server,
         1,
         config.caster_class,
-        Vec3::new(-STAGE_SEPARATION, 1.0, 0.0),
+        caster_home,
         item_defs,
         default_loadouts,
     );
     stage.caster = Some(caster);
+    stage.caster_home = caster_home;
 
     stage.dummy = config.dummy_enabled.then(|| {
         spawn_staged_unit(

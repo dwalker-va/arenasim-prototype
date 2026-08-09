@@ -163,17 +163,31 @@ impl Plugin for StatesPlugin {
             // simulation registration of its own — see add_sandbox_combat_systems.
             .init_resource::<animation_sandbox::SandboxConfig>()
             .init_resource::<animation_sandbox::SandboxStage>()
+            .init_resource::<animation_sandbox::playback::SandboxPlayback>()
+            .init_resource::<animation_sandbox::ui::PendingCameraPreset>()
             .add_systems(
                 OnEnter(GameState::AnimationSandbox),
                 animation_sandbox::setup_sandbox,
             )
             .add_systems(
                 OnExit(GameState::AnimationSandbox),
-                animation_sandbox::cleanup_sandbox,
+                (
+                    animation_sandbox::cleanup_sandbox,
+                    animation_sandbox::ui::reset_time_on_exit,
+                ),
             )
             .add_systems(
                 Update,
-                animation_sandbox::restage_on_config_change
+                (
+                    animation_sandbox::restage_on_config_change,
+                    animation_sandbox::playback::sustain_staged_units,
+                    animation_sandbox::playback::drive_playback,
+                    animation_sandbox::playback::walk_the_caster,
+                    animation_sandbox::ui::sandbox_ui,
+                    animation_sandbox::ui::apply_camera_preset,
+                    animation_sandbox::ui::apply_step_request,
+                )
+                    .chain()
                     .run_if(in_state(GameState::AnimationSandbox)),
             )
             // Play match systems (defined in play_match module)
