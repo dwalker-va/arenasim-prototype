@@ -76,6 +76,9 @@ fn handle_escape_key(
             GameState::Armory => {
                 next_state.set(GameState::MainMenu);
             }
+            GameState::AnimationSandbox => {
+                next_state.set(GameState::MainMenu);
+            }
         }
     }
 }

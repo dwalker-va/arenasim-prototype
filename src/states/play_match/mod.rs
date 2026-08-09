@@ -1114,7 +1114,10 @@ fn weapon_mount(kind: WeaponKind, hand: WeaponHand) -> Transform {
 ///
 /// Creates a capsule mesh colored by class, with darker shades for duplicates.
 /// The `duplicate_index` parameter determines how much to darken (0 = base color, 1+ = darkened).
-fn spawn_combatant(
+/// `pub(crate)` so the Animation Sandbox can stage a combatant with exactly the
+/// body, `VisualBody` child and `WeaponSocket` children a match produces —
+/// staging a look-alike would let the sandbox drift from what a match shows.
+pub(crate) fn spawn_combatant(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,

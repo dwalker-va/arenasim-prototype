@@ -253,6 +253,91 @@ where
     );
 }
 
+/// Adds the RESOLUTION-side combat systems used by the Animation Sandbox.
+///
+/// The sandbox replaces the AI decision layer with user input: the user picks
+/// an ability and the sandbox starts it directly. Everything downstream of that
+/// decision — casting, channeling, projectiles, auras, instant-effect
+/// processing, auto-attacks — is the same code a match runs, which is what
+/// makes a previewed animation faithful to its in-match appearance.
+///
+/// Deliberately omitted, because the sandbox supplies or suppresses each:
+/// `acquire_targets`, `decide_abilities`, `pet_ai_system`, `check_interrupts`,
+/// `process_interrupts`, `tick_kite_occlusion`, `move_to_target` (the AI would
+/// fight and walk away), `update_countdown`, `update_dampening`,
+/// `update_team_plans`, the Shadow Sight systems (no match clock), and
+/// `flush_decision_trace_system` (no trace file).
+///
+/// [`add_core_combat_systems`] is NOT called or modified by this function.
+/// Headless registration is therefore byte-identical by construction rather
+/// than by test — the sandbox cannot reach it.
+pub fn add_sandbox_combat_systems<M>(app: &mut App, run_condition: impl Condition<M> + Clone)
+where
+    M: 'static,
+{
+    app.init_resource::<super::decision_trace::DecisionTrace>();
+
+    // Phase 1: resources, auras, and instant-effect processing.
+    // Same relative order as `add_core_combat_systems` — the ordering comments
+    // there (divine shield / berserker rage before `apply_pending_auras`,
+    // backlash after dispels) apply here for the same reasons.
+    app.add_systems(
+        FixedUpdate,
+        (
+            regenerate_resources,
+            process_dot_ticks,
+            process_hot_ticks,
+            update_auras,
+            slow_zone_system,
+            totem_pulse_system,
+            process_divine_shield,
+            process_berserker_rage,
+            apply_pending_auras,
+            process_dispels,
+            process_backlash,
+            process_holy_shock_heals,
+            process_holy_shock_damage,
+            process_mana_burn,
+        )
+            .chain()
+            .in_set(CombatSystemPhase::ResourcesAndAuras)
+            .run_if(run_condition.clone()),
+    );
+
+    app.add_systems(
+        FixedUpdate,
+        ApplyDeferred
+            .after(CombatSystemPhase::ResourcesAndAuras)
+            .before(CombatSystemPhase::CombatAndMovement)
+            .run_if(run_condition.clone()),
+    );
+
+    // Phase 2: cast resolution and projectile travel.
+    app.add_systems(
+        FixedUpdate,
+        (
+            process_aura_breaks,
+            process_casting,
+            process_channeling,
+            move_projectiles,
+            move_trap_launch_projectiles,
+            process_projectile_hits,
+            trap_system,
+        )
+            .chain()
+            .in_set(CombatSystemPhase::CombatAndMovement)
+            .run_if(run_condition.clone()),
+    );
+
+    // Phase 3: auto-attacks (drives the weapon-swing animation).
+    app.add_systems(
+        FixedUpdate,
+        combat_auto_attack
+            .in_set(CombatSystemPhase::CombatResolution)
+            .run_if(run_condition),
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

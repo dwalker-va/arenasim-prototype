@@ -164,6 +164,7 @@ pub fn cleanup_menu_scene(
 pub enum MenuAction {
     StartMatch,
     Armory,
+    AnimationSandbox,
     Options,
     Exit,
 }
@@ -242,6 +243,7 @@ pub fn draw_main_menu(ctx: &egui::Context, time_secs: f32) -> Option<MenuAction>
                 for (label, button_action) in [
                     ("MATCH", MenuAction::StartMatch),
                     ("ARMORY", MenuAction::Armory),
+                    ("ANIMATIONS", MenuAction::AnimationSandbox),
                     ("OPTIONS", MenuAction::Options),
                     ("EXIT", MenuAction::Exit),
                 ] {
@@ -439,6 +441,10 @@ pub fn main_menu_ui(
         Some(MenuAction::Armory) => {
             info!("Armory button pressed - transitioning to Armory");
             next_state.set(GameState::Armory);
+        }
+        Some(MenuAction::AnimationSandbox) => {
+            info!("Animations button pressed - transitioning to AnimationSandbox");
+            next_state.set(GameState::AnimationSandbox);
         }
         Some(MenuAction::Options) => {
             info!("Options button pressed - transitioning to Options");
