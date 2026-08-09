@@ -30,9 +30,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # The notes carry the per-OS steps for opening unsigned software, so
+          # they ship with every release rather than living only in the repo.
           gh release create "$GITHUB_REF_NAME" \
             --title "$APP_NAME $GITHUB_REF_NAME" \
-            --generate-notes \
+            --notes-file packaging/release-notes.md \
             --verify-tag
 
   windows:
