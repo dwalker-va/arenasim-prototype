@@ -181,7 +181,7 @@ impl Plugin for StatesPlugin {
                     animation_sandbox::restage_on_config_change,
                     animation_sandbox::playback::sustain_staged_units,
                     animation_sandbox::playback::drive_playback,
-                    animation_sandbox::playback::walk_the_caster,
+                    animation_sandbox::playback::position_caster,
                     animation_sandbox::ui::sandbox_ui,
                     animation_sandbox::ui::apply_camera_preset,
                 )
@@ -233,22 +233,35 @@ impl Plugin for StatesPlugin {
         // The rule: anything that affects the SIMULATION belongs in
         // `FixedUpdate` with a real phase constraint. `Update` is for systems
         // that should run once per rendered frame.
+        // Camera drag/zoom/pan is split out of the match-chrome block below and
+        // widened, so the Animation Sandbox gets real camera control rather than
+        // only its framing presets — you cannot judge an animation from four
+        // fixed angles. One registration, widened, so no `SystemTypeSet` becomes
+        // ambiguous (see `add_core_combat_systems`).
         app.add_systems(
                 Update,
                 (
-                    play_match::handle_time_controls,
                     play_match::handle_camera_input,
+                    play_match::update_camera_position,
+                )
+                    .chain()
+                    .run_if(in_combat_scene),
+            )
+            .add_systems(
+                Update,
+                (
+                    play_match::handle_time_controls,
                     // pick_selected_combatant consumes the pending_pick flag set
                     // by handle_camera_input on click-release; must run after it.
                     play_match::pick_selected_combatant,
                     // sync_selection_ring spawns/despawns the ring when the
                     // Selection resource changes — runs after picking.
                     play_match::sync_selection_ring,
-                    play_match::update_camera_position,
                     play_match::animate_gate_bars,
                     play_match::update_play_match,
                 )
                     .chain()
+                    .after(play_match::handle_camera_input)
                     .run_if(in_state(GameState::PlayMatch)),
             )
             // Graphical-only, but it must run IN the sim schedule: it attaches

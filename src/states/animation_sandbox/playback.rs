@@ -25,10 +25,10 @@ use super::super::match_config::CharacterClass;
 use super::super::play_match::abilities::AbilityType;
 use super::super::play_match::ability_config::AbilityDefinitions;
 use super::super::play_match::components::{
-    Celebrating, CastingState, Combatant, DeathAnimation, MatchResults, VictoryCelebration,
-    VisualBody,
+    ActiveAuras, Celebrating, CastingState, ChannelingState, Combatant, DeathAnimation,
+    MatchResults, PlayMatchEntity, VictoryCelebration, VisualBody,
 };
-use super::SandboxStage;
+use super::{SandboxEntity, SandboxStage};
 
 /// Seconds the match's victory clock is seeded with when the sandbox plays the
 /// winner bounce, and the floor it is never allowed to fall below.
@@ -37,23 +37,41 @@ use super::SandboxStage;
 /// and it early-returns unless a [`VictoryCelebration`] resource exists — so the
 /// sandbox has to supply one or the entry plays nothing at all. But that same
 /// system transitions to `GameState::Results` the moment the clock reaches zero,
-/// which would eject the user from the sandbox. The clock is therefore seeded
-/// above one bounce pass and floored every frame, so it drives the bounce and
-/// can never fire the transition.
+/// which would eject the user from the sandbox. The clock is therefore REWOUND
+/// to the top whenever it falls to the floor, so it drives the bounce forever
+/// and can never fire the transition.
+///
+/// Rewinding rather than clamping matters: `update_victory_celebration` derives
+/// its bounce phase from `CELEBRATION_SECS - time_remaining`, so a clamped clock
+/// stops advancing and the bounce FREEZES at whatever height it held. The rewind
+/// distance is `CELEBRATION_SECS - CELEBRATION_FLOOR_SECS` = 4.0s, an exact
+/// multiple of the 0.5s bounce period, so the wrap is phase-continuous and the
+/// bounce shows no seam.
 const CELEBRATION_SECS: f32 = 5.0;
 const CELEBRATION_FLOOR_SECS: f32 = 1.0;
+/// Period of the celebration bounce (`update_victory_celebration` runs it at
+/// 2 Hz). The rewind distance must be a whole number of these; the invariant is
+/// enforced by test rather than computed from, so this is test-only.
+#[cfg(test)]
+const CELEBRATION_BOUNCE_PERIOD_SECS: f32 = 0.5;
 
 /// Body motion that no ability triggers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BodyAnimation {
     WalkBob,
+    /// Weapon swings driven by the real attack timer. Its own entry because the
+    /// sandbox never sets a target, and `combat_auto_attack` needs one — so
+    /// without this there was no way to preview the swing animations at all,
+    /// which matters most now that weapons are visible.
+    AutoAttack,
     DeathSink,
     VictoryBounce,
 }
 
 impl BodyAnimation {
-    pub const ALL: [BodyAnimation; 3] = [
+    pub const ALL: [BodyAnimation; 4] = [
         BodyAnimation::WalkBob,
+        BodyAnimation::AutoAttack,
         BodyAnimation::DeathSink,
         BodyAnimation::VictoryBounce,
     ];
@@ -61,6 +79,7 @@ impl BodyAnimation {
     pub fn label(self) -> &'static str {
         match self {
             BodyAnimation::WalkBob => "Walk bob",
+            BodyAnimation::AutoAttack => "Auto attack",
             BodyAnimation::DeathSink => "Death sink",
             BodyAnimation::VictoryBounce => "Victory bounce",
         }
@@ -72,6 +91,8 @@ impl BodyAnimation {
     pub fn duration(self) -> f32 {
         match self {
             BodyAnimation::WalkBob => 3.0,
+            // Long enough for several swings at any weapon speed.
+            BodyAnimation::AutoAttack => 6.0,
             BodyAnimation::DeathSink => DeathAnimation::DURATION,
             BodyAnimation::VictoryBounce => 3.0,
         }
@@ -211,6 +232,9 @@ pub fn drive_playback(
     mut bodies: Query<(&mut Transform, &VisualBody)>,
     children: Query<&Children>,
     celebration: Option<ResMut<VictoryCelebration>>,
+    mut auras: Query<&mut ActiveAuras>,
+    mut combatants: Query<&mut Combatant>,
+    leftovers: Query<Entity, (With<PlayMatchEntity>, Without<SandboxEntity>)>,
 ) {
     let Some(caster) = stage.caster else { return };
 
@@ -219,24 +243,35 @@ pub fn drive_playback(
     // clock that reaches zero transitions to `GameState::Results`.
     if let Some(mut celebration) = celebration {
         if celebration.time_remaining < CELEBRATION_FLOOR_SECS {
-            celebration.time_remaining = CELEBRATION_FLOOR_SECS;
+            celebration.time_remaining = CELEBRATION_SECS;
         }
     }
 
     if playback.stop_requested {
         playback.stop_requested = false;
         playback.playing = false;
-        clear_body_state(&mut commands, caster, &children, &mut bodies);
+        clear_body_state(&mut commands, &stage, &children, &mut bodies, &mut auras, &mut combatants, &leftovers);
         return;
     }
 
     if playback.restart_requested {
         playback.restart_requested = false;
-        clear_body_state(&mut commands, caster, &children, &mut bodies);
+        clear_body_state(&mut commands, &stage, &children, &mut bodies, &mut auras, &mut combatants, &leftovers);
         if start_entry(&mut commands, &playback, caster, stage.dummy, &defs) {
             playback.playing = true;
             playback.elapsed = 0.0;
             playback.duration = entry_duration(&playback, &defs);
+            // Auto-attack is the ONLY entry that wants a live target:
+            // `combat_auto_attack` skips any combatant without one. Every other
+            // entry leaves it cleared so nothing swings under the animation
+            // being judged.
+            if playback.selected == Some(SandboxEntry::Body(BodyAnimation::AutoAttack)) {
+                if let (Some(dummy), Ok(mut combatant)) =
+                    (stage.dummy, combatants.get_mut(caster))
+                {
+                    combatant.target = Some(dummy);
+                }
+            }
         }
         return;
     }
@@ -252,7 +287,7 @@ pub fn drive_playback(
             playback.restart_requested = true;
         } else {
             playback.playing = false;
-            clear_body_state(&mut commands, caster, &children, &mut bodies);
+            clear_body_state(&mut commands, &stage, &children, &mut bodies, &mut auras, &mut combatants, &leftovers);
         }
     }
 }
@@ -322,9 +357,10 @@ fn start_entry(
                         },
                     });
                 }
-                // The walk bob is driven by real movement, so the sandbox has
-                // to actually move the unit — see `walk_the_caster`.
-                BodyAnimation::WalkBob => {}
+                // Both of these are driven from `position_caster`, which owns
+                // the combatant transform: the bob needs real movement, and the
+                // swing needs the caster inside its own weapon's range.
+                BodyAnimation::WalkBob | BodyAnimation::AutoAttack => {}
             }
             true
         }
@@ -338,18 +374,51 @@ fn start_entry(
 /// component alone would leave the caster lying on the floor for the next pass.
 fn clear_body_state(
     commands: &mut Commands,
-    caster: Entity,
+    stage: &SandboxStage,
     children: &Query<&Children>,
     bodies: &mut Query<(&mut Transform, &VisualBody)>,
+    auras: &mut Query<&mut ActiveAuras>,
+    combatants: &mut Query<&mut Combatant>,
+    leftovers: &Query<Entity, (With<PlayMatchEntity>, Without<SandboxEntity>)>,
 ) {
+    let Some(caster) = stage.caster else { return };
+
     if let Ok(mut e) = commands.get_entity(caster) {
         e.remove::<DeathAnimation>();
         e.remove::<Celebrating>();
         e.remove::<CastingState>();
+        e.remove::<ChannelingState>();
     }
     // Paired with the insert in `start_entry`: left behind, the match's victory
     // clock keeps ticking down to its `GameState::Results` transition.
     commands.remove_resource::<VictoryCelebration>();
+
+    // Auras are the real state carrier, and clearing them is what returns the
+    // units to a PRISTINE look rather than just an idle one. Several visuals are
+    // driven by aura presence and only revert when the aura goes: the Polymorph
+    // mesh swap (`update_polymorph_visuals` restores the capsule when the aura
+    // is gone — otherwise you get a sheep holding an axe, because the weapon
+    // sockets are unaffected by the swap), the Unstable Affliction glow, DoT
+    // drips, shield bubbles, and ice blocks. Without this, previewing Polymorph
+    // and then switching entries left the dummy transformed indefinitely.
+    for unit in stage.caster.into_iter().chain(stage.dummy) {
+        if let Ok(mut active) = auras.get_mut(unit) {
+            active.auras.clear();
+        }
+        if let Ok(mut combatant) = combatants.get_mut(unit) {
+            combatant.target = None;
+        }
+    }
+
+    // Effects spawned by the shared resolution systems are tagged
+    // `PlayMatchEntity`, not `SandboxEntity` — projectiles still in flight,
+    // impact bursts, casting orbs, floating text. The staged units carry BOTH
+    // markers, so excluding `SandboxEntity` is what keeps this from despawning
+    // the caster and dummy along with the debris.
+    for entity in leftovers.iter() {
+        commands.entity(entity).despawn();
+    }
+
     if let Ok(kids) = children.get(caster) {
         for child in kids.iter() {
             if let Ok((mut transform, body)) = bodies.get_mut(child) {
@@ -359,48 +428,77 @@ fn clear_body_state(
     }
 }
 
-/// Walks the caster in a slow circle while the walk-bob entry plays.
+/// Distance a melee caster stands from the dummy for the auto-attack entry.
+/// Comfortably inside `MELEE_RANGE` (2.5) so no swing is dropped for being a
+/// hair out of range.
+const MELEE_STANDOFF: f32 = 2.0;
+
+/// Places the caster for whichever entry is playing.
 ///
-/// `update_walk_animation` keys the bob off real per-tick XZ movement (a
-/// deliberate choice — gating it on "moved since last frame" strobed the body
-/// at render rates above the tick rate). So showing the bob means actually
-/// moving the unit, not faking the component state.
-pub fn walk_the_caster(
+/// Owns the combatant transform so the two position-driven entries share a
+/// single writer:
+///
+/// - **Walk bob** — `update_walk_animation` keys the bob off real per-tick XZ
+///   movement (gating it on "moved since last frame" strobed the body at render
+///   rates above the tick rate), so showing the bob means actually moving the
+///   unit rather than faking component state.
+/// - **Auto attack** — `combat_auto_attack` only swings inside the attacker's
+///   own range, so a melee caster left at the staged 16yd separation would
+///   never swing at all.
+///
+/// Every other entry returns the caster to its staged position, so the next one
+/// plays centred and the camera presets keep framing it.
+pub fn position_caster(
     playback: Res<SandboxPlayback>,
     stage: Res<SandboxStage>,
+    config: Res<super::SandboxConfig>,
     mut movers: Query<&mut Transform, With<Combatant>>,
 ) {
     let Some(caster) = stage.caster else { return };
-    let Ok(mut transform) = movers.get_mut(caster) else {
-        return;
+    let entry = playback.playing.then_some(playback.selected).flatten();
+
+    let target = match entry {
+        Some(SandboxEntry::Body(BodyAnimation::WalkBob)) => {
+            // Phase comes from the pass clock, not absolute elapsed time, and
+            // the circle is centred one radius BEHIND the staged position, so
+            // the walk starts exactly at `caster_home` and eases away from it.
+            // Keying the angle off `time.elapsed_secs()` put the caster at an
+            // arbitrary point on the circle on its first frame, teleporting it
+            // up to 2 * radius and driving `update_walk_animation`'s per-frame
+            // XZ delta into its `WALK_MAX_PHASE_STEP` clamp.
+            //
+            // The radius is deliberately small. At 3yd the caster walked clean
+            // out of the camera presets' shot, which made the one entry whose
+            // whole subject is locomotion the hardest one to actually watch.
+            const WALK_RADIUS: f32 = 1.4;
+            const WALK_ANGULAR_SPEED: f32 = 1.4;
+            let angle = playback.elapsed * WALK_ANGULAR_SPEED;
+            Vec3::new(
+                stage.caster_home.x - WALK_RADIUS + angle.cos() * WALK_RADIUS,
+                stage.caster_home.y,
+                stage.caster_home.z + angle.sin() * WALK_RADIUS,
+            )
+        }
+        Some(SandboxEntry::Body(BodyAnimation::AutoAttack)) => {
+            // Melee must close. Ranged is already in range at the staged
+            // separation and must NOT close: the Hunter's Auto Shot is
+            // cancelled inside its dead zone, so walking it in would silence
+            // the very animation being previewed.
+            if config.caster_class.is_melee() {
+                let dummy_x = -stage.caster_home.x;
+                Vec3::new(dummy_x - MELEE_STANDOFF, stage.caster_home.y, 0.0)
+            } else {
+                stage.caster_home
+            }
+        }
+        _ => stage.caster_home,
     };
 
-    let walking =
-        playback.playing && playback.selected == Some(SandboxEntry::Body(BodyAnimation::WalkBob));
-
-    if !walking {
-        // Restore the staged position so the next entry plays centred and the
-        // camera presets keep framing the unit.
-        if transform.translation != stage.caster_home {
-            transform.translation = stage.caster_home;
+    if let Ok(mut transform) = movers.get_mut(caster) {
+        if transform.translation != target {
+            transform.translation = target;
         }
-        return;
     }
-
-    // Phase comes from the pass clock, not absolute elapsed time, and the circle
-    // is centred one radius BEHIND the staged position — so the walk starts
-    // exactly at `caster_home` and eases away from it. Keying the angle off
-    // `time.elapsed_secs()` put the caster at an arbitrary point on the circle
-    // on its first frame, which teleported it up to 2 * radius and drove
-    // `update_walk_animation`'s per-frame XZ delta straight into its
-    // `WALK_MAX_PHASE_STEP` clamp — a lurch, in the one entry whose whole
-    // subject is how walking reads.
-    const WALK_RADIUS: f32 = 3.0;
-    const WALK_ANGULAR_SPEED: f32 = 0.8;
-    let angle = playback.elapsed * WALK_ANGULAR_SPEED;
-    transform.translation.x =
-        stage.caster_home.x - WALK_RADIUS + angle.cos() * WALK_RADIUS;
-    transform.translation.z = stage.caster_home.z + angle.sin() * WALK_RADIUS;
 }
 
 /// Keeps the staged units alive and castable across repeated plays.
@@ -470,6 +568,20 @@ mod tests {
         let pass = BodyAnimation::VictoryBounce.duration() + LOOP_TAIL_SECS;
         assert!(pass < CELEBRATION_SECS - CELEBRATION_FLOOR_SECS);
         assert!(CELEBRATION_FLOOR_SECS > 0.0);
+    }
+
+    #[test]
+    fn the_victory_clock_rewind_is_phase_continuous() {
+        // The clock is REWOUND at the floor rather than clamped there, because a
+        // clamped clock stops advancing and freezes the bounce mid-air. The
+        // rewind distance must be a whole number of bounce periods, or the wrap
+        // shows as a visible hitch every few seconds.
+        let rewind = CELEBRATION_SECS - CELEBRATION_FLOOR_SECS;
+        let periods = rewind / CELEBRATION_BOUNCE_PERIOD_SECS;
+        assert!(
+            (periods - periods.round()).abs() < 1e-5,
+            "rewind of {rewind}s is {periods} bounce periods, not a whole number"
+        );
     }
 
     #[test]

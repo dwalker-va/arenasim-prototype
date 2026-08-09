@@ -1,12 +1,14 @@
 //! The sandbox panel: selection, transport, and camera framing.
 
 use bevy::prelude::*;
+
+use super::super::play_match::components::{CameraController, CameraMode};
 use bevy_egui::{egui, EguiContexts};
 
 use super::super::match_config::CharacterClass;
 use super::super::play_match::ability_config::AbilityDefinitions;
 use super::playback::{entries_for_class, EntryFamily, SandboxPlayback};
-use super::{SandboxConfig, STAGE_SEPARATION};
+use super::SandboxConfig;
 
 /// Playback speeds offered in the sandbox.
 ///
@@ -225,29 +227,30 @@ pub fn sandbox_ui(
 
 /// Moves the sandbox camera to a requested preset.
 ///
-/// Sets the transform directly rather than driving a controller, so ordinary
-/// camera input afterwards is not snapped back.
+/// Writes the ORBIT (yaw / pitch / zoom / look-at) rather than the transform.
+/// `update_camera_position` rebuilds the transform from the controller every
+/// frame, so a preset that set the transform directly would be overwritten
+/// before it was ever seen. Going through the controller also means a preset is
+/// a starting angle the user can immediately drag away from, rather than a mode
+/// that fights their input.
 pub fn apply_camera_preset(
     mut pending: ResMut<PendingCameraPreset>,
     config: Res<SandboxConfig>,
-    mut cameras: Query<&mut Transform, With<Camera3d>>,
+    mut controller: ResMut<CameraController>,
 ) {
     let Some(preset) = pending.0.take() else {
         return;
     };
 
-    // Frame the caster alone, or the midpoint of the pair when a dummy is
-    // staged, so relational visuals sit in the middle of the shot.
-    let focus = if config.dummy_enabled {
-        Vec3::new(0.0, 1.2, 0.0)
-    } else {
-        Vec3::new(-STAGE_SEPARATION, 1.2, 0.0)
-    };
+    let focus = super::stage_focus(&config);
+    let offset = preset.offset();
+    let horizontal = offset.xz().length();
 
-    for mut transform in cameras.iter_mut() {
-        *transform =
-            Transform::from_translation(focus + preset.offset()).looking_at(focus, Vec3::Y);
-    }
+    controller.mode = CameraMode::Manual;
+    controller.manual_target = focus;
+    controller.zoom_distance = offset.length();
+    controller.yaw = offset.x.atan2(offset.z);
+    controller.pitch = offset.y.atan2(horizontal);
 }
 
 /// Advances exactly one fixed tick while paused.
@@ -294,7 +297,7 @@ mod tests {
     #[test]
     fn presets_all_look_at_the_stage_from_outside_it() {
         for preset in CameraPreset::ALL {
-            assert!(preset.offset().length() > STAGE_SEPARATION);
+            assert!(preset.offset().length() > super::super::STAGE_SEPARATION);
         }
     }
 }

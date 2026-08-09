@@ -34,7 +34,8 @@ use super::match_config::{
 };
 use super::play_match::ai_profile::AiProfiles;
 use super::play_match::components::{
-    ArenaDampening, GameRng, MatchCountdown, ShadowSightState, SimulationSpeed, VictoryCelebration,
+    ArenaCamera, ArenaDampening, CameraController, CameraMode, GameRng, MatchCountdown,
+    ShadowSightState, SimulationSpeed, VictoryCelebration,
 };
 use super::play_match::equipment::{
     enforce_two_hand_conflicts, resolve_loadout, DefaultLoadouts, ItemDefinitions,
@@ -42,6 +43,16 @@ use super::play_match::equipment::{
 use super::play_match::map_config::{ActiveMapGeometry, MapGeometryConfig};
 use super::play_match::team_plan::TeamPlans;
 use super::play_match::{spawn_combatant, PlayMatchEntity};
+
+/// Point the camera frames: the midpoint of the pair when a dummy is staged, so
+/// relational visuals sit in the middle of the shot, otherwise the caster.
+pub(crate) fn stage_focus(config: &SandboxConfig) -> Vec3 {
+    if config.dummy_enabled {
+        Vec3::new(0.0, 1.2, 0.0)
+    } else {
+        Vec3::new(-STAGE_SEPARATION, 1.2, 0.0)
+    }
+}
 
 /// Marks every entity the sandbox spawns, so teardown despawns exactly its own
 /// scene. The sandbox does NOT reuse `PlayMatchEntity` for this: that marker is
@@ -172,9 +183,20 @@ pub fn setup_sandbox(
         &mut stage,
     );
 
+    // `ArenaCamera` + a `CameraController` so the match's own drag / zoom / pan
+    // systems drive this camera too. Manual mode is the point: the follow modes
+    // chase combatant centroids, which is meaningless with a static stage, and
+    // the user needs to get to an arbitrary angle to judge an animation.
+    commands.insert_resource(CameraController {
+        mode: CameraMode::Manual,
+        zoom_distance: 18.0,
+        manual_target: stage_focus(&config),
+        ..Default::default()
+    });
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(0.0, 6.0, 18.0).looking_at(Vec3::new(0.0, 1.2, 0.0), Vec3::Y),
+        ArenaCamera,
+        Transform::from_xyz(0.0, 6.0, 18.0).looking_at(stage_focus(&config), Vec3::Y),
         SandboxEntity,
     ));
 }
