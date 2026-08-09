@@ -127,8 +127,13 @@ jobs:
 
           # Stamp the tag over the placeholder versions, minus the leading "v".
           VERSION="${GITHUB_REF_NAME#v}"
+          # CFBundleVersion is the build number LaunchServices compares, and it
+          # must be one to three period-separated integers. The tag filter
+          # permits a suffix (v0.1.0-rc1), so drop it here — the marketing
+          # string above keeps the full tag.
+          BUILD_VERSION="${VERSION%%-*}"
           plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP/Contents/Info.plist"
-          plutil -replace CFBundleVersion -string "$VERSION" "$APP/Contents/Info.plist"
+          plutil -replace CFBundleVersion -string "$BUILD_VERSION" "$APP/Contents/Info.plist"
           plutil -lint "$APP/Contents/Info.plist"
 
       # An ad-hoc signature is not notarization and does not avoid Gatekeeper.

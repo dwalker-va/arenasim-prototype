@@ -46,18 +46,22 @@ pub fn match_log_dir() -> PathBuf {
 /// Whether the binary at `exe_path` is running from a development checkout,
 /// determined by looking for a Cargo manifest in any ancestor directory.
 ///
-/// **Why not `CARGO_MANIFEST_DIR`?** It is the tempting discriminator — Bevy's
-/// own asset resolution keys on it — and it is wrong here. `cargo run` sets it,
-/// but `scripts/hunter_2v2_matrix.sh`, `scripts/mage_2v2_matrix.sh`,
-/// `scripts/shaman_2v2_matrix.sh` and `scripts/run_combat_tests.sh` all invoke
-/// `target/release/arenasim` directly, where it is unset. Those are exactly the
-/// workflows that must keep writing into the checkout, so keying on the env var
-/// would relocate their output to the per-user directory.
+/// **Why not `CARGO_MANIFEST_DIR` alone?** It is the tempting discriminator —
+/// Bevy's own asset resolution keys on it — and on its own it is wrong here.
+/// `cargo run` sets it, but `scripts/hunter_2v2_matrix.sh`,
+/// `scripts/mage_2v2_matrix.sh`, `scripts/shaman_2v2_matrix.sh` and
+/// `scripts/run_combat_tests.sh` all invoke `target/release/arenasim` directly,
+/// where it is unset. Those are exactly the workflows that must keep writing
+/// into the checkout, so keying on the env var ALONE would relocate their output
+/// to the per-user directory.
 ///
 /// Walking up from the executable's own directory classifies `cargo run` and a
 /// direct `target/release` invocation alike as development, and classifies a
 /// `.app` bundle or an unpacked zip as installed. It needs no build-time flag
 /// and no marker file that packaging could forget to ship.
+///
+/// It is not sufficient ON ITS OWN, though — see [`detect_development`], which
+/// covers the checkout whose build directory lives outside the repo.
 pub fn is_development_build(exe_path: &Path) -> bool {
     // `ancestors()` yields the executable path itself first; that probe just
     // misses harmlessly. Starting there is what makes a manifest-adjacent
@@ -65,6 +69,45 @@ pub fn is_development_build(exe_path: &Path) -> bool {
     exe_path
         .ancestors()
         .any(|dir| dir.join("Cargo.toml").is_file())
+}
+
+/// Whether this process is running from a development checkout, from the two
+/// independent signals — neither of which is sufficient alone.
+///
+/// `CARGO_MANIFEST_DIR` is set by `cargo run`, `cargo test` and `cargo bench`
+/// for the process they launch, and is never set for an end user's build. It
+/// misses the balance scripts, which invoke `target/release/arenasim` directly
+/// (that is what [`is_development_build`] is for). But it is the ONLY signal in
+/// the case the manifest walk misses: a checkout whose `CARGO_TARGET_DIR` (or
+/// `build.target-dir`) points outside the repo, where the executable has no
+/// manifest above it at all. Without this arm such a checkout classifies as
+/// installed and `assets_dir()` resolves to `<target-dir>/debug/assets`, so
+/// startup panics reading `config/abilities.ron`.
+///
+/// `exe` is `None` when the executable path could not be resolved, which
+/// degrades to development — checkout-relative paths — rather than guessing
+/// "installed" and relocating a developer's files.
+fn detect_development(manifest_dir_set: bool, exe: Option<&Path>) -> bool {
+    manifest_dir_set || exe.map(is_development_build).unwrap_or(true)
+}
+
+/// [`detect_development`] for the running process, resolved once.
+fn is_development() -> bool {
+    static DEV: OnceLock<bool> = OnceLock::new();
+
+    *DEV.get_or_init(|| {
+        let exe = match std::env::current_exe() {
+            Ok(exe) => Some(exe),
+            Err(e) => {
+                warn!("Could not resolve the executable path ({e}); using relative paths");
+                None
+            }
+        };
+        detect_development(
+            std::env::var_os("CARGO_MANIFEST_DIR").is_some(),
+            exe.as_deref(),
+        )
+    })
 }
 
 /// Root of the game's read-only asset tree.
@@ -98,10 +141,10 @@ fn install_root() -> Option<&'static Path> {
     static ROOT: OnceLock<Option<PathBuf>> = OnceLock::new();
 
     ROOT.get_or_init(|| {
-        let exe = std::env::current_exe().ok()?;
-        if is_development_build(&exe) {
+        if is_development() {
             return None;
         }
+        let exe = std::env::current_exe().ok()?;
         exe.parent().map(Path::to_path_buf)
     })
     .as_deref()
@@ -127,17 +170,7 @@ fn user_data_dir() -> Option<&'static Path> {
 
     DATA_DIR
         .get_or_init(|| {
-            let exe = match std::env::current_exe() {
-                Ok(exe) => exe,
-                Err(e) => {
-                    // Degrade to checkout-relative paths rather than guessing
-                    // "installed" and relocating a developer's files.
-                    warn!("Could not resolve the executable path ({e}); using relative paths");
-                    return None;
-                }
-            };
-
-            if is_development_build(&exe) {
+            if is_development() {
                 return None;
             }
 
@@ -208,6 +241,56 @@ mod tests {
         let exe = root.path().join("arenasim");
 
         assert!(is_development_build(&exe));
+    }
+
+    /// The case the manifest walk alone gets wrong: `CARGO_TARGET_DIR` (or
+    /// `build.target-dir`) pointing outside the checkout puts the executable
+    /// where no `Cargo.toml` sits above it, so `cargo run` / `cargo test` would
+    /// classify as INSTALLED and resolve assets to `<target-dir>/debug/assets`,
+    /// panicking at startup. `CARGO_MANIFEST_DIR` is what rescues it.
+    #[test]
+    fn cargo_sets_the_manifest_dir_even_when_the_target_dir_is_outside_the_checkout() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let exe = root.path().join("debug/deps/arenasim-abc123");
+
+        assert!(
+            !is_development_build(&exe),
+            "no manifest above an external target dir — the walk cannot see it"
+        );
+        assert!(
+            detect_development(true, Some(&exe)),
+            "CARGO_MANIFEST_DIR being set must still classify this as development"
+        );
+    }
+
+    /// The balance scripts' case: `target/release/arenasim` invoked directly,
+    /// so `CARGO_MANIFEST_DIR` is unset and the manifest walk is the only
+    /// signal. It must still be development.
+    #[test]
+    fn a_direct_invocation_inside_the_checkout_is_development_without_the_env_var() {
+        let root = tempfile::tempdir().expect("tempdir");
+        std::fs::write(root.path().join("Cargo.toml"), "[package]\n").expect("write manifest");
+        let exe = root.path().join("target/release/arenasim");
+        std::fs::create_dir_all(exe.parent().unwrap()).expect("create target dir");
+
+        assert!(detect_development(false, Some(&exe)));
+    }
+
+    /// An end user's build: no manifest above it and no cargo in the
+    /// environment. Neither signal fires, so it is installed.
+    #[test]
+    fn an_installed_build_trips_neither_signal() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let exe = root.path().join("ArenaSim.app/Contents/MacOS/arenasim");
+
+        assert!(!detect_development(false, Some(&exe)));
+    }
+
+    /// An unresolvable executable path degrades to development — relative
+    /// paths — rather than relocating a developer's files.
+    #[test]
+    fn an_unresolvable_executable_degrades_to_development() {
+        assert!(detect_development(false, None));
     }
 
     /// A development build must produce byte-identical paths to the ones
