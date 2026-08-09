@@ -537,6 +537,15 @@ pub fn sustain_staged_units(
         if let Ok(mut combatant) = combatants.get_mut(entity) {
             combatant.current_health = combatant.max_health;
             combatant.current_mana = combatant.max_mana;
+            // Rogues spawn stealthed (`Combatant::new`), and in a match the
+            // class AI breaks stealth on its opener. No class AI runs here, so
+            // a staged Rogue would stay stealthed forever — and stealth fades
+            // both the body and the weapon materials, so every animation it
+            // plays, the auto-attack swing most visibly, renders invisible.
+            //
+            // If a stealth preview is ever added as its own entry, this has to
+            // become conditional on that entry rather than unconditional.
+            combatant.stealthed = false;
         }
     }
 }
