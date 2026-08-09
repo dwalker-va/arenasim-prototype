@@ -572,7 +572,8 @@ impl CombatLog {
     
     /// Save the combat log to a file with match metadata
     /// If `output_path` is provided, saves to that exact path.
-    /// Otherwise, generates a timestamped filename in match_logs/
+    /// Otherwise, generates a timestamped filename in the log directory the
+    /// path seam picks — `match_logs/` in a checkout.
     pub fn save_to_file(&self, match_metadata: &MatchMetadata, output_path: Option<&str>) -> std::io::Result<String> {
         use std::fs::{self, File};
         use std::io::Write;
@@ -588,14 +589,17 @@ impl CombatLog {
             path.to_string()
         } else {
             // Create logs directory if it doesn't exist
-            fs::create_dir_all("match_logs")?;
+            let dir = crate::paths::match_log_dir();
+            fs::create_dir_all(&dir)?;
 
             // Generate filename with timestamp
             let timestamp = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
-            format!("match_logs/match_{}.txt", timestamp)
+            dir.join(format!("match_{}.txt", timestamp))
+                .to_string_lossy()
+                .into_owned()
         };
         
         let mut file = File::create(&filename)?;

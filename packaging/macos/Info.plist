@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Bundle metadata for the packaged macOS app.
+
+  The release workflow copies this into ArenaSim.app/Contents/ and overwrites
+  both version strings with the tag being built, so the values below are only
+  what an unversioned local build gets.
+
+  The reference Bevy CI template ships no Info.plist at all, which is why its
+  bundles get a generic icon and no bundle identifier. CFBundleIconFile is what
+  puts the icon in the Dock; CFBundleIdentifier is what lets macOS keep per-app
+  state coherent across launches.
+-->
+<plist version="1.0">
+<dict>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+
+    <key>CFBundleName</key>
+    <string>ArenaSim</string>
+    <key>CFBundleDisplayName</key>
+    <string>ArenaSim</string>
+
+    <!-- Must match the binary's filename inside Contents/MacOS/. -->
+    <key>CFBundleExecutable</key>
+    <string>arenasim</string>
+
+    <key>CFBundleIdentifier</key>
+    <string>com.dwalker.arenasim</string>
+
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+
+    <!-- Names Contents/Resources/AppIcon.icns; the extension is implied. -->
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>0.1.0</string>
+
+    <!-- Apple Silicon only, so Big Sur is the floor regardless. -->
+    <key>LSMinimumSystemVersion</key>
+    <string>11.0</string>
+
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.strategy-games</string>
+
+    <key>NSHighResolutionCapable</key>
+    <true/>
+</dict>
+</plist>

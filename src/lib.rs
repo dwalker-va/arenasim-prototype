@@ -10,6 +10,7 @@ pub mod cli;
 pub mod combat;
 pub mod headless;
 pub mod keybindings;
+pub mod paths;
 pub mod settings;
 pub mod states;
 pub mod ui;

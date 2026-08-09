@@ -61,7 +61,10 @@ pub fn load_emoji_icons(
     }
 
     if handles.handles.is_empty() {
-        let dir = std::path::Path::new("assets").join(EMOJI_DIR);
+        // Via the path seam, not a working-directory-relative literal: a
+        // packaged build runs with a working directory of `/`, so a relative
+        // scan finds nothing and every bubble falls back to a placeholder.
+        let dir = crate::paths::asset_path(EMOJI_DIR);
         let Ok(entries) = std::fs::read_dir(&dir) else {
             // No directory is a legitimate state (nobody has added art yet).
             // Mark loaded so this does not re-scan every frame forever.

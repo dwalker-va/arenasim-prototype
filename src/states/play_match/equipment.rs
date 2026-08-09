@@ -648,9 +648,9 @@ impl DefaultLoadouts {
 
 /// Load item definitions from assets/config/items.ron
 pub fn load_item_definitions() -> Result<ItemDefinitions, String> {
-    let config_path = "assets/config/items.ron";
+    let config_path = crate::paths::asset_path_str("config/items.ron");
 
-    let contents = std::fs::read_to_string(config_path)
+    let contents = std::fs::read_to_string(&config_path)
         .map_err(|e| format!("Failed to read {}: {}", config_path, e))?;
 
     let config: ItemsConfig = ron::from_str(&contents)
@@ -665,9 +665,9 @@ pub fn load_item_definitions() -> Result<ItemDefinitions, String> {
 
 /// Load default loadouts from assets/config/loadouts.ron
 pub fn load_default_loadouts(items: &ItemDefinitions) -> Result<DefaultLoadouts, String> {
-    let config_path = "assets/config/loadouts.ron";
+    let config_path = crate::paths::asset_path_str("config/loadouts.ron");
 
-    let contents = std::fs::read_to_string(config_path)
+    let contents = std::fs::read_to_string(&config_path)
         .map_err(|e| format!("Failed to read {}: {}", config_path, e))?;
 
     let config: LoadoutsConfig = ron::from_str(&contents)
