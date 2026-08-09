@@ -26,6 +26,9 @@ const SETTINGS_FILE: &str = "settings.ron";
 /// Match log directory name — unchanged from the pre-distribution literal.
 const MATCH_LOG_DIR: &str = "match_logs";
 
+/// Asset tree name — unchanged from the pre-distribution literals.
+const ASSETS_DIR: &str = "assets";
+
 /// Path to the settings file.
 pub fn settings_path() -> PathBuf {
     settings_path_from(user_data_dir())
@@ -62,6 +65,55 @@ pub fn is_development_build(exe_path: &Path) -> bool {
     exe_path
         .ancestors()
         .any(|dir| dir.join("Cargo.toml").is_file())
+}
+
+/// Root of the game's read-only asset tree.
+///
+/// Bevy's own `AssetServer` already resolves relative to the executable, but
+/// the RON config files are read straight off the filesystem rather than
+/// through it, so they need this. Without it a packaged build panics at startup
+/// on `assets/config/abilities.ron` before a window ever opens.
+pub fn assets_dir() -> PathBuf {
+    assets_dir_from(install_root())
+}
+
+/// Path to one asset, named relative to the asset root
+/// (e.g. `"config/abilities.ron"`).
+pub fn asset_path(relative: &str) -> PathBuf {
+    assets_dir().join(relative)
+}
+
+/// [`asset_path`] as a string, for the config loaders that take `&str` and then
+/// reuse the same value in their error and log messages.
+pub fn asset_path_str(relative: &str) -> String {
+    asset_path(relative).display().to_string()
+}
+
+/// Directory the executable lives in, or `None` for a development build.
+///
+/// Installed layouts put `assets/` beside the binary — `Contents/MacOS/assets`
+/// inside a `.app`, and next to the `.exe` in the unpacked Windows zip — which
+/// is the same convention Bevy's asset reader falls back to.
+fn install_root() -> Option<&'static Path> {
+    static ROOT: OnceLock<Option<PathBuf>> = OnceLock::new();
+
+    ROOT.get_or_init(|| {
+        let exe = std::env::current_exe().ok()?;
+        if is_development_build(&exe) {
+            return None;
+        }
+        exe.parent().map(Path::to_path_buf)
+    })
+    .as_deref()
+}
+
+/// Asset root for a given install root — `None` meaning a development build,
+/// which keeps today's exact checkout-relative `assets` path.
+fn assets_dir_from(install_root: Option<&Path>) -> PathBuf {
+    match install_root {
+        Some(dir) => dir.join(ASSETS_DIR),
+        None => PathBuf::from(ASSETS_DIR),
+    }
 }
 
 /// Per-user data directory, or `None` when this is a development build or the
@@ -184,6 +236,37 @@ mod tests {
     fn the_running_test_binary_classifies_as_development() {
         assert_eq!(settings_path(), PathBuf::from("settings.ron"));
         assert_eq!(match_log_dir(), PathBuf::from("match_logs"));
+    }
+
+    /// A development build reads assets from the checkout exactly as before.
+    #[test]
+    fn development_build_reads_assets_from_the_checkout() {
+        assert_eq!(assets_dir_from(None), PathBuf::from("assets"));
+        assert_eq!(
+            assets_dir_from(None).join("config/abilities.ron"),
+            PathBuf::from("assets/config/abilities.ron"),
+            "must stay byte-identical to the literal it replaced"
+        );
+    }
+
+    /// An installed build reads them from beside the executable — inside the
+    /// `.app` or next to the unpacked `.exe`, never from the working directory.
+    #[test]
+    fn installed_build_reads_assets_beside_the_executable() {
+        let exe_dir = Path::new("/Applications/ArenaSim.app/Contents/MacOS");
+
+        assert_eq!(
+            assets_dir_from(Some(exe_dir)),
+            PathBuf::from("/Applications/ArenaSim.app/Contents/MacOS/assets")
+        );
+    }
+
+    /// The running test binary sits in the checkout, so the real resolver must
+    /// hand back today's relative asset path.
+    #[test]
+    fn the_running_test_binary_reads_assets_relatively() {
+        assert_eq!(asset_path("config/abilities.ron"),
+                   PathBuf::from("assets/config/abilities.ron"));
     }
 
     /// `ProjectDirs` resolving to nothing must degrade to today's behavior

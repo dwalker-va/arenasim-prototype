@@ -302,8 +302,8 @@ impl BanterConfig {
     /// Returns nothing when the directory is absent — a checkout without art
     /// should not fail validation, since the renderer already copes.
     fn missing_emoji(&self) -> Vec<String> {
-        let dir = std::path::Path::new("assets/icons/emoji");
-        let Ok(entries) = std::fs::read_dir(dir) else {
+        let dir = crate::paths::asset_path("icons/emoji");
+        let Ok(entries) = std::fs::read_dir(&dir) else {
             return Vec::new();
         };
         let available: std::collections::HashSet<String> = entries
@@ -533,8 +533,8 @@ pub fn load_banter_config_from(path: &str) -> Result<BanterConfig, String> {
 
 /// Load banter configuration from assets/config/banter.ron
 pub fn load_banter_config() -> Result<BanterConfig, String> {
-    let config_path = "assets/config/banter.ron";
-    let config = load_banter_config_from(config_path)?;
+    let config_path = crate::paths::asset_path_str("config/banter.ron");
+    let config = load_banter_config_from(&config_path)?;
     info!(
         "Loaded banter configuration from {} ({} exchanges)",
         config_path,

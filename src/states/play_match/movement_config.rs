@@ -703,8 +703,8 @@ pub fn load_movement_config_from(path: &str) -> Result<MovementConfig, String> {
 
 /// Load movement configuration from assets/config/movement.ron
 pub fn load_movement_config() -> Result<MovementConfig, String> {
-    let config_path = "assets/config/movement.ron";
-    let config = load_movement_config_from(config_path)?;
+    let config_path = crate::paths::asset_path_str("config/movement.ron");
+    let config = load_movement_config_from(&config_path)?;
     info!("Loaded movement configuration from {}", config_path);
     Ok(config)
 }

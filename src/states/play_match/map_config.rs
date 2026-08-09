@@ -583,8 +583,8 @@ pub fn load_map_geometry_config_from(path: &str) -> Result<MapGeometryConfig, St
 
 /// Load map geometry configuration from assets/config/maps.ron
 pub fn load_map_geometry_config() -> Result<MapGeometryConfig, String> {
-    let config_path = "assets/config/maps.ron";
-    let config = load_map_geometry_config_from(config_path)?;
+    let config_path = crate::paths::asset_path_str("config/maps.ron");
+    let config = load_map_geometry_config_from(&config_path)?;
     info!("Loaded map geometry configuration from {}", config_path);
     Ok(config)
 }
