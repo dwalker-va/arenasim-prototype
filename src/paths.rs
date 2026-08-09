@@ -1,0 +1,197 @@
+//! Where the game's writable files belong.
+//!
+//! A development checkout and an installed build want different answers. In a
+//! checkout, `settings.ron` and `match_logs/` sit next to the manifest — every
+//! script, matrix sweep and probe in this repo assumes that. A double-clicked
+//! macOS app, by contrast, runs with a working directory of `/`, so those same
+//! relative writes fail silently: settings revert on every launch and no match
+//! is ever recorded. Installed builds therefore write under the per-user data
+//! directory instead.
+//!
+//! Every write site asks this module rather than building a path itself.
+
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+
+use bevy::log::warn;
+
+/// Application name for the per-user data directory. On macOS this resolves to
+/// `~/Library/Application Support/ArenaSim`, on Windows to
+/// `%APPDATA%\ArenaSim\data`.
+const APP_NAME: &str = "ArenaSim";
+
+/// Settings file name — unchanged from the pre-distribution hardcoded literal.
+const SETTINGS_FILE: &str = "settings.ron";
+
+/// Match log directory name — unchanged from the pre-distribution literal.
+const MATCH_LOG_DIR: &str = "match_logs";
+
+/// Path to the settings file.
+pub fn settings_path() -> PathBuf {
+    settings_path_from(user_data_dir())
+}
+
+/// Directory that defaulted match logs are written to.
+///
+/// Only the DEFAULT location. An explicitly-passed output path (`--out`, `-o`,
+/// `--output`) bypasses this entirely, which is what the balance scripts rely
+/// on.
+pub fn match_log_dir() -> PathBuf {
+    match_log_dir_from(user_data_dir())
+}
+
+/// Whether the binary at `exe_path` is running from a development checkout,
+/// determined by looking for a Cargo manifest in any ancestor directory.
+///
+/// **Why not `CARGO_MANIFEST_DIR`?** It is the tempting discriminator — Bevy's
+/// own asset resolution keys on it — and it is wrong here. `cargo run` sets it,
+/// but `scripts/hunter_2v2_matrix.sh`, `scripts/mage_2v2_matrix.sh`,
+/// `scripts/shaman_2v2_matrix.sh` and `scripts/run_combat_tests.sh` all invoke
+/// `target/release/arenasim` directly, where it is unset. Those are exactly the
+/// workflows that must keep writing into the checkout, so keying on the env var
+/// would relocate their output to the per-user directory.
+///
+/// Walking up from the executable's own directory classifies `cargo run` and a
+/// direct `target/release` invocation alike as development, and classifies a
+/// `.app` bundle or an unpacked zip as installed. It needs no build-time flag
+/// and no marker file that packaging could forget to ship.
+pub fn is_development_build(exe_path: &Path) -> bool {
+    // `ancestors()` yields the executable path itself first; that probe just
+    // misses harmlessly. Starting there is what makes a manifest-adjacent
+    // binary (not only the nested `target/release` case) classify correctly.
+    exe_path
+        .ancestors()
+        .any(|dir| dir.join("Cargo.toml").is_file())
+}
+
+/// Per-user data directory, or `None` when this is a development build or the
+/// platform gave us nothing usable.
+///
+/// Memoized: both entry points are called on every settings save and every
+/// match end, and neither the executable's location nor the user's home
+/// directory changes mid-run.
+fn user_data_dir() -> Option<&'static Path> {
+    static DATA_DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
+
+    DATA_DIR
+        .get_or_init(|| {
+            let exe = match std::env::current_exe() {
+                Ok(exe) => exe,
+                Err(e) => {
+                    // Degrade to checkout-relative paths rather than guessing
+                    // "installed" and relocating a developer's files.
+                    warn!("Could not resolve the executable path ({e}); using relative paths");
+                    return None;
+                }
+            };
+
+            if is_development_build(&exe) {
+                return None;
+            }
+
+            let dirs = directories::ProjectDirs::from("", "", APP_NAME);
+            if dirs.is_none() {
+                // No home directory to hang it off. Relative paths may well
+                // fail to write, but a failed save is survivable and refusing
+                // to start is not.
+                warn!("Could not resolve a per-user data directory; using relative paths");
+            }
+            dirs.map(|dirs| dirs.data_dir().to_path_buf())
+        })
+        .as_deref()
+}
+
+/// Settings path for a given data directory — `None` meaning a development
+/// build (or an unresolvable data directory), which keeps today's exact
+/// relative path.
+fn settings_path_from(data_dir: Option<&Path>) -> PathBuf {
+    match data_dir {
+        Some(dir) => dir.join(SETTINGS_FILE),
+        None => PathBuf::from(SETTINGS_FILE),
+    }
+}
+
+/// Match log directory for a given data directory. See [`settings_path_from`].
+fn match_log_dir_from(data_dir: Option<&Path>) -> PathBuf {
+    match data_dir {
+        Some(dir) => dir.join(MATCH_LOG_DIR),
+        None => PathBuf::from(MATCH_LOG_DIR),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+
+    /// A binary under `target/release/` inside a checkout — the common case for
+    /// both `cargo run` and a direct `target/release/arenasim` invocation.
+    #[test]
+    fn executable_nested_under_a_manifest_is_a_development_build() {
+        let root = tempfile::tempdir().expect("tempdir");
+        std::fs::write(root.path().join("Cargo.toml"), "[package]\n").expect("write manifest");
+        let exe = root.path().join("target/release/arenasim");
+        std::fs::create_dir_all(exe.parent().unwrap()).expect("create target dir");
+
+        assert!(is_development_build(&exe));
+    }
+
+    /// An unpacked zip or a `.app` bundle: no manifest anywhere above it.
+    #[test]
+    fn executable_with_no_manifest_above_it_is_an_installed_build() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let exe = root.path().join("ArenaSim/arenasim");
+        std::fs::create_dir_all(exe.parent().unwrap()).expect("create dir");
+
+        assert!(!is_development_build(&exe));
+    }
+
+    /// The manifest-adjacent binary. `target/release` is nested, so a walk that
+    /// only inspects grandparents would still pass the test above while getting
+    /// this one wrong.
+    #[test]
+    fn executable_beside_a_manifest_is_a_development_build() {
+        let root = tempfile::tempdir().expect("tempdir");
+        std::fs::write(root.path().join("Cargo.toml"), "[package]\n").expect("write manifest");
+        let exe = root.path().join("arenasim");
+
+        assert!(is_development_build(&exe));
+    }
+
+    /// A development build must produce byte-identical paths to the ones
+    /// hardcoded today, so checkout workflows are unaffected.
+    #[test]
+    fn development_build_yields_todays_relative_paths() {
+        assert_eq!(settings_path_from(None), PathBuf::from("settings.ron"));
+        assert_eq!(match_log_dir_from(None), PathBuf::from("match_logs"));
+    }
+
+    #[test]
+    fn installed_build_yields_distinct_paths_under_the_data_dir() {
+        let data = tempfile::tempdir().expect("tempdir");
+        let settings = settings_path_from(Some(data.path()));
+        let logs = match_log_dir_from(Some(data.path()));
+
+        assert!(settings.starts_with(data.path()), "settings under data dir: {settings:?}");
+        assert!(logs.starts_with(data.path()), "logs under data dir: {logs:?}");
+        assert_ne!(settings, logs);
+    }
+
+    /// The real resolver must classify this test binary (which lives under
+    /// `target/debug/deps/` in the checkout) as development, so the seam's
+    /// public entry points return today's paths while developing.
+    #[test]
+    fn the_running_test_binary_classifies_as_development() {
+        assert_eq!(settings_path(), PathBuf::from("settings.ron"));
+        assert_eq!(match_log_dir(), PathBuf::from("match_logs"));
+    }
+
+    /// `ProjectDirs` resolving to nothing must degrade to today's behavior
+    /// rather than panicking — the game still has to start.
+    #[test]
+    fn unresolvable_data_dir_falls_back_to_relative_paths() {
+        let none: Option<&Path> = None;
+        assert_eq!(settings_path_from(none), PathBuf::from("settings.ron"));
+        assert_eq!(match_log_dir_from(none), PathBuf::from("match_logs"));
+    }
+}
