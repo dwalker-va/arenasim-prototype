@@ -189,14 +189,16 @@ pub fn setup_sandbox(
     // the user needs to get to an arbitrary angle to judge an animation.
     commands.insert_resource(CameraController {
         mode: CameraMode::Manual,
-        zoom_distance: 18.0,
+        // Wide enough that both staged units sit clear of the side panels,
+        // which overlay the 3D view rather than shrinking it.
+        zoom_distance: 26.0,
         manual_target: stage_focus(&config),
         ..Default::default()
     });
     commands.spawn((
         Camera3d::default(),
         ArenaCamera,
-        Transform::from_xyz(0.0, 6.0, 18.0).looking_at(stage_focus(&config), Vec3::Y),
+        Transform::from_xyz(0.0, 9.0, 24.0).looking_at(stage_focus(&config), Vec3::Y),
         SandboxEntity,
     ));
 }
