@@ -69,12 +69,17 @@ impl CameraPreset {
     }
 
     /// Camera position for this preset, relative to the framed point.
+    ///
+    /// Framed wide enough that the pair sits clear of the edges: the side
+    /// panels overlay the 3D view rather than shrinking it, so ~450px of the
+    /// window is covered and a distance that looks fine in isolation puts the
+    /// combatants under the panels.
     pub(crate) fn offset(self) -> Vec3 {
         match self {
-            CameraPreset::Front => Vec3::new(0.0, 4.0, 16.0),
-            CameraPreset::ThreeQuarter => Vec3::new(11.0, 7.0, 13.0),
-            CameraPreset::Side => Vec3::new(18.0, 3.0, 0.0),
-            CameraPreset::Top => Vec3::new(0.0, 20.0, 0.1),
+            CameraPreset::Front => Vec3::new(0.0, 5.0, 23.0),
+            CameraPreset::ThreeQuarter => Vec3::new(15.0, 9.0, 19.0),
+            CameraPreset::Side => Vec3::new(26.0, 4.0, 0.0),
+            CameraPreset::Top => Vec3::new(0.0, 30.0, 0.1),
         }
     }
 }
