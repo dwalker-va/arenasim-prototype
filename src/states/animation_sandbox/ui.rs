@@ -197,15 +197,11 @@ fn paint_icon(painter: &egui::Painter, rect: egui::Rect, icon: Option<egui::Text
             );
         }
         None => {
-            // The harness has no textures; a framed slot keeps the row's rhythm
-            // so layout still reads truthfully in a snapshot.
-            painter.rect_filled(rect, 2.0, TILE_BG);
-            painter.rect_stroke(
-                rect,
-                2.0,
-                egui::Stroke::new(1.0, TILE_FRAME),
-                egui::StrokeKind::Inside,
-            );
+            // Draw NOTHING, but keep the space reserved so labels stay on one
+            // column. A framed empty square reads as an unchecked checkbox —
+            // the wrong affordance for a row that fires an action — and the
+            // body animations have no icon by nature, not by failure, so there
+            // is nothing there to stand in for.
         }
     }
 }
@@ -309,8 +305,26 @@ fn class_grid(
                     egui::Stroke::new(1.0, TITLE_GOLD),
                     egui::StrokeKind::Inside,
                 );
-            } else if response.hovered() {
-                painter.rect_filled(rect, 3.0, TILE_BG);
+            } else {
+                // A grid cell takes its affordance from the tile itself, not
+                // from its contents, so it keeps a frame whether or not the
+                // icon resolved. List rows are the opposite — there the frame
+                // reads as a checkbox.
+                painter.rect_filled(
+                    rect,
+                    3.0,
+                    if response.hovered() {
+                        egui::Color32::from_rgb(42, 42, 58)
+                    } else {
+                        TILE_BG
+                    },
+                );
+                painter.rect_stroke(
+                    rect,
+                    3.0,
+                    egui::Stroke::new(1.0, TILE_FRAME),
+                    egui::StrokeKind::Inside,
+                );
             }
             paint_icon(painter, rect.shrink(3.0), *icon, false);
             if response.on_hover_text(format!("{class:?}")).clicked() && !selected {
