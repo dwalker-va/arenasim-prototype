@@ -164,9 +164,27 @@ pub fn cleanup_menu_scene(
 pub enum MenuAction {
     StartMatch,
     Armory,
+    AnimationSandbox,
     Options,
     Exit,
 }
+
+/// The menu's buttons, in display order.
+///
+/// Single source of truth: the button loop renders these and
+/// `paint_backdrop_scrims` sizes the scrim from the count, so adding an entry
+/// cannot leave the last button hanging outside the backdrop.
+const MENU_ITEMS: [(&str, MenuAction); 5] = [
+    ("MATCH", MenuAction::StartMatch),
+    ("ARMORY", MenuAction::Armory),
+    ("ANIMATIONS", MenuAction::AnimationSandbox),
+    ("OPTIONS", MenuAction::Options),
+    ("EXIT", MenuAction::Exit),
+];
+
+/// Vertical distance between successive button centres, in points. Matches the
+/// button height plus the 10pt spacer the loop adds.
+const BUTTON_PITCH: f32 = 73.0;
 
 /// Draws the main menu. Pure egui — no Bevy ECS types — so the snapshot test
 /// can render it offscreen. `time_secs` drives the title pulse; the test
@@ -239,12 +257,7 @@ pub fn draw_main_menu(ctx: &egui::Context, time_secs: f32) -> Option<MenuAction>
                 ui.add_space(42.0);
 
                 // Menu buttons
-                for (label, button_action) in [
-                    ("MATCH", MenuAction::StartMatch),
-                    ("ARMORY", MenuAction::Armory),
-                    ("OPTIONS", MenuAction::Options),
-                    ("EXIT", MenuAction::Exit),
-                ] {
+                for (label, button_action) in MENU_ITEMS {
                     if menu_button(ui, label).clicked() {
                         action = Some(button_action);
                     }
@@ -411,10 +424,19 @@ fn paint_backdrop_scrims(ui: &egui::Ui) {
     painter.add(egui::Shape::mesh(mesh));
 
     // 3. Center scrim column behind the title + buttons (the menu content is
-    //    laid out from a 150px top spacer down to the EXIT button).
+    //    laid out from a 150px top spacer down to the last button).
+    //
+    //    The height is DERIVED from the button count, not hardcoded: adding a
+    //    fifth entry to `MENU_ITEMS` previously left the last button hanging
+    //    outside the scrim, because the 540px figure was tuned for four.
+    let extra_buttons = MENU_ITEMS.len() as f32 - 4.0;
+    let column_height = 540.0 + BUTTON_PITCH * extra_buttons;
     let column = egui::Rect::from_center_size(
-        egui::pos2(screen.center().x, screen.top() + 390.0),
-        egui::vec2(480.0, 540.0),
+        egui::pos2(
+            screen.center().x,
+            screen.top() + 390.0 + BUTTON_PITCH * extra_buttons / 2.0,
+        ),
+        egui::vec2(480.0, column_height),
     );
     painter.rect_filled(column, 16.0, egui::Color32::from_black_alpha(120));
 }
@@ -439,6 +461,10 @@ pub fn main_menu_ui(
         Some(MenuAction::Armory) => {
             info!("Armory button pressed - transitioning to Armory");
             next_state.set(GameState::Armory);
+        }
+        Some(MenuAction::AnimationSandbox) => {
+            info!("Animations button pressed - transitioning to AnimationSandbox");
+            next_state.set(GameState::AnimationSandbox);
         }
         Some(MenuAction::Options) => {
             info!("Options button pressed - transitioning to Options");

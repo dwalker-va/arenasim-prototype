@@ -230,7 +230,13 @@ fn get_class_stats(class: CharacterClass) -> ClassStats {
 }
 
 /// Get the list of abilities for a class
-fn get_class_abilities(class: CharacterClass) -> Vec<AbilityType> {
+/// `pub(crate)` so the Animation Sandbox builds its ability list from the same
+/// per-class source this screen shows. NOTE: this list is hand-maintained and
+/// NOT exhaustiveness-checked, so an ability missing here is missing from both
+/// surfaces. Nothing asserts full coverage today — the sandbox's
+/// `every_class_lists_its_abilities_plus_the_body_animations` only proves each
+/// class lists at least one ability, so a dropped entry still passes.
+pub(crate) fn get_class_abilities(class: CharacterClass) -> Vec<AbilityType> {
     match class {
         CharacterClass::Warrior => vec![
             AbilityType::BattleShout,
