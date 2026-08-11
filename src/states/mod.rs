@@ -413,6 +413,18 @@ impl Plugin for StatesPlugin {
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_combat_scene),
             )
+            // Transform puff visual effects (separate group to avoid tuple size limits)
+            // The cloud pop at both ends of a polymorph — graphical only.
+            .add_systems(
+                Update,
+                (
+                    play_match::spawn_transform_puff_visuals, // Attach cloud lobes to new puffs
+                    play_match::update_transform_puffs,       // Expand, rise and fade
+                    play_match::cleanup_expired_transform_puffs, // Remove expired puffs
+                )
+                    .after(CombatSystemPhase::CombatResolution)
+                    .run_if(in_combat_scene),
+            )
             // Dispel ribbon visual effects (separate group to avoid tuple size limits)
             // The spiraling "you got cleansed" indicator — graphical only.
             .add_systems(

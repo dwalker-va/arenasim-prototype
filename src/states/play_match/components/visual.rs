@@ -189,6 +189,26 @@ pub struct DispelRibbon {
     pub spin: f32,
 }
 
+/// Visual effect for a polymorph transition — a cluster of pale cloud lobes that
+/// puffs outward at the victim's torso. Spawned at BOTH the transform-in and the
+/// restore, in the same style: the sim cannot distinguish an expiry from a damage
+/// break, so one puff covers every direction.
+///
+/// Static by design — it carries the position it was spawned at rather than
+/// following the victim, so it marks the point the transform happened instead of
+/// dragging behind a fleeing sheep. Kept short-lived: polymorph breaks on ANY
+/// damage, so a rapid apply-break pair must read as two distinct pops, not one
+/// smear.
+#[derive(Component)]
+pub struct TransformPuff {
+    /// World position the puff was spawned at (the victim's torso).
+    pub position: Vec3,
+    /// Time remaining before despawn (seconds).
+    pub lifetime: f32,
+    /// Initial lifetime for the expand/fade curve.
+    pub initial_lifetime: f32,
+}
+
 /// Visual effect for Psychic Scream — a self-centered expanding shadow burst
 /// around the caster that conveys the AoE fear radius. Spawned on cast, expands
 /// outward to roughly the scream radius and fades over its lifetime. Distinct

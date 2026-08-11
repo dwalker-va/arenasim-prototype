@@ -14,8 +14,8 @@ use std::time::Duration;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
 use arenasim::states::play_match::components::{
-    ActiveAuras, Aura, AuraType, Combatant, OriginalMesh, PolymorphedVisual, SheepPart, VisualBody,
-    WalkAnim,
+    ActiveAuras, Aura, AuraType, Combatant, OriginalMesh, PolymorphedVisual, SheepPart,
+    TransformPuff, VisualBody, WalkAnim,
 };
 use arenasim::states::play_match::{update_polymorph_visuals, update_sheep_hop};
 use arenasim::CharacterClass;
@@ -81,6 +81,10 @@ impl Harness {
         (unit, body, mesh, material)
     }
 
+    fn puffs(&mut self) -> usize {
+        self.app.world_mut().query::<&TransformPuff>().iter(self.app.world()).count()
+    }
+
     fn sheep_parts_of(&mut self, owner: Entity) -> usize {
         self.app
             .world_mut()
@@ -111,10 +115,12 @@ fn transforms_and_restores() {
     );
     let parts = h.sheep_parts_of(unit);
     assert!(parts >= 8, "expected head/muzzle/ears/legs/tail, got {parts}");
+    assert_eq!(h.puffs(), 1, "one puff marks the transform-in");
 
     // Idempotent while the aura holds
     h.app.update();
     assert_eq!(h.sheep_parts_of(unit), parts, "parts must not accumulate");
+    assert_eq!(h.puffs(), 1, "puffs must not accumulate either");
 
     // Exit path: component REMOVED (what update_auras does when the vec empties)
     h.app.world_mut().entity_mut(unit).remove::<ActiveAuras>();
@@ -127,6 +133,7 @@ fn transforms_and_restores() {
         "class material restored"
     );
     assert_eq!(h.sheep_parts_of(unit), 0, "parts despawned");
+    assert_eq!(h.puffs(), 2, "a second puff marks the restore");
 }
 
 #[test]
