@@ -87,8 +87,25 @@ pub struct OriginalMesh(pub Handle<Mesh>);
 
 /// Marker component indicating the combatant is currently polymorphed.
 /// Used to track mesh swapping state.
+///
+/// Carries the body material the sheep's wool coat displaced: unlike the mesh
+/// (see [`OriginalMesh`]) nothing else records it, and `update_stealth_visuals`
+/// edits the material asset in place, so the handle has to survive the swap.
 #[derive(Component)]
-pub struct PolymorphedVisual;
+pub struct PolymorphedVisual {
+    pub original_material: Handle<StandardMaterial>,
+}
+
+/// One primitive of a polymorphed combatant's sheep body (head, ear, leg, ...),
+/// spawned as a child of the victim's [`VisualBody`] while the aura lasts.
+///
+/// `owner` is the SIM entity, not the body child: restore despawns only the
+/// parts belonging to the unit whose polymorph ended, so two sheep on the field
+/// at once cannot strip each other.
+#[derive(Component)]
+pub struct SheepPart {
+    pub owner: Entity,
+}
 
 /// A rising flame particle for fire spell effects (e.g., Immolate).
 /// Spawned at target location, rises upward while shrinking and fading.
