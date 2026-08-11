@@ -521,6 +521,10 @@ pub fn position_caster(
     let Some(caster) = stage.caster else { return };
     let entry = playback.playing.then_some(playback.selected).flatten();
 
+    // The dummy is staged mirrored across the origin from the caster; both the
+    // auto-attack approach and the dummy's own staging below key off this.
+    let dummy_home = Vec3::new(-stage.caster_home.x, stage.caster_home.y, 0.0);
+
     let target = match entry {
         Some(SandboxEntry::Body(BodyAnimation::WalkBob)) => circle_walk(
             stage.caster_home,
@@ -534,8 +538,7 @@ pub fn position_caster(
             // cancelled inside its dead zone, so walking it in would silence
             // the very animation being previewed.
             if config.caster_class.is_melee() {
-                let dummy_x = -stage.caster_home.x;
-                Vec3::new(dummy_x - MELEE_STANDOFF, stage.caster_home.y, 0.0)
+                dummy_home - Vec3::X * MELEE_STANDOFF
             } else {
                 stage.caster_home
             }
@@ -549,10 +552,7 @@ pub fn position_caster(
         }
     }
 
-    // The dummy is staged mirrored across the origin from the caster, which is
-    // also how the auto-attack branch above finds it.
     let Some(dummy) = stage.dummy else { return };
-    let dummy_home = Vec3::new(-stage.caster_home.x, stage.caster_home.y, 0.0);
     let dummy_target = match entry {
         Some(SandboxEntry::Ability(AbilityType::Polymorph)) => {
             circle_walk(dummy_home, playback.elapsed, SHEEP_RADIUS, SHEEP_ANGULAR_SPEED)

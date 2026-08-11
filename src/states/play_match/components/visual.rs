@@ -87,14 +87,17 @@ pub struct OriginalMesh(pub Handle<Mesh>);
 
 /// Marker component indicating the combatant is currently polymorphed.
 /// Used to track mesh swapping state.
-///
-/// Carries the body material the sheep's wool coat displaced: unlike the mesh
-/// (see [`OriginalMesh`]) nothing else records it, and `update_stealth_visuals`
-/// edits the material asset in place, so the handle has to survive the swap.
 #[derive(Component)]
-pub struct PolymorphedVisual {
-    pub original_material: Handle<StandardMaterial>,
-}
+pub struct PolymorphedVisual;
+
+/// The body material a polymorph's wool coat displaced, stored on the
+/// [`VisualBody`] child beside [`OriginalMesh`] for the same reason that
+/// component exists: nothing else records it, and `update_stealth_visuals`
+/// edits the material asset in place, so the handle has to survive the swap.
+/// Mirrors `OriginalWeaponMaterial`'s insert-at-swap / remove-at-restore
+/// lifecycle.
+#[derive(Component)]
+pub struct OriginalBodyMaterial(pub Handle<StandardMaterial>);
 
 /// One primitive of a polymorphed combatant's sheep body (head, ear, leg, ...),
 /// spawned as a child of the victim's [`VisualBody`] while the aura lasts.

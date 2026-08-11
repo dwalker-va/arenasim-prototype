@@ -723,6 +723,7 @@ pub fn update_polymorph_visuals(
         &mut MeshMaterial3d<StandardMaterial>,
         &OriginalMesh,
         &VisualBody,
+        Option<&OriginalBodyMaterial>,
     )>,
     parts: Query<(Entity, &SheepPart)>,
 ) {
@@ -736,7 +737,17 @@ pub fn update_polymorph_visuals(
             });
 
         if is_polymorphed && polymorphed_marker.is_none() {
-            // Just transformed.
+            // Just transformed. Locate the body child before allocating
+            // anything: without one there is nothing to restore, so the marker
+            // stays off and this branch retries next frame — and per-retry
+            // material allocation would be pure asset churn.
+            let Some(body_child) = children.iter().find(|&c| bodies.contains(c)) else {
+                continue;
+            };
+            let Ok((mut mesh3d, mut material, _, body, _)) = bodies.get_mut(body_child) else {
+                continue;
+            };
+
             let wool = materials.add(StandardMaterial {
                 base_color: SHEEP_WOOL_COLOR,
                 perceptual_roughness: 1.0,
@@ -747,59 +758,55 @@ pub fn update_polymorph_visuals(
                 perceptual_roughness: 0.9,
                 ..default()
             });
-            let mut displaced_material = None;
-            let mut torso_world_y = None;
-            for child in children.iter() {
-                let Ok((mut mesh3d, mut material, _, body)) = bodies.get_mut(child) else {
-                    continue;
-                };
-                torso_world_y = Some(transform.translation.y + body.rest_y);
-                // Floor height in the body's local space. Derived rather than
-                // hardcoded because pets render their body at an offset from
-                // the sim entity's `y` (see `VisualBody::rest_y`).
-                let ground_y = -(transform.translation.y + body.rest_y);
-                let torso_y = ground_y + SHEEP_LEG_LEN + SHEEP_TORSO_HALF.y;
 
-                // The torso is the body's OWN mesh, whose transform belongs to
-                // the walk bob and the death sink, so its offset and squash are
-                // baked into the mesh instead of applied as a scale.
-                *mesh3d = Mesh3d(meshes.add(
-                    Sphere::new(1.0)
-                        .mesh()
-                        .uv(24, 12)
-                        .scaled_by(SHEEP_TORSO_HALF)
-                        .translated_by(Vec3::Y * torso_y),
-                ));
-                displaced_material = Some(material.0.clone());
-                *material = MeshMaterial3d(wool.clone());
+            // The body's world rest height. Derived rather than hardcoded
+            // because pets render their body at an offset from the sim
+            // entity's `y` (see `VisualBody::rest_y`). Negated, it is the
+            // floor height in the body's local space.
+            let body_rest_world_y = transform.translation.y + body.rest_y;
+            let ground_y = -body_rest_world_y;
+            let torso_y = ground_y + SHEEP_LEG_LEN + SHEEP_TORSO_HALF.y;
 
-                spawn_sheep_parts(
-                    &mut commands,
-                    &mut meshes,
-                    &wool,
-                    &skin,
-                    child,
-                    entity,
-                    ground_y,
-                    torso_y,
-                );
-            }
-            // Without a body child there is nothing to restore; leaving the
-            // marker off retries next frame rather than stranding the unit.
-            if let Some(original_material) = displaced_material {
-                commands
-                    .entity(entity)
-                    .try_insert(PolymorphedVisual { original_material });
-                spawn_transform_puff(&mut commands, transform.translation, torso_world_y);
-            }
-        } else if let (false, Some(marker)) = (is_polymorphed, polymorphed_marker) {
+            // The torso is the body's OWN mesh, whose transform belongs to
+            // the walk bob and the death sink, so its offset and squash are
+            // baked into the mesh instead of applied as a scale.
+            *mesh3d = Mesh3d(meshes.add(
+                Sphere::new(1.0)
+                    .mesh()
+                    .uv(24, 12)
+                    .scaled_by(SHEEP_TORSO_HALF)
+                    .translated_by(Vec3::Y * torso_y),
+            ));
+            commands
+                .entity(body_child)
+                .try_insert(OriginalBodyMaterial(material.0.clone()));
+            *material = MeshMaterial3d(wool.clone());
+
+            spawn_sheep_parts(
+                &mut commands,
+                &mut meshes,
+                &wool,
+                &skin,
+                body_child,
+                entity,
+                ground_y,
+                torso_y,
+            );
+            commands.entity(entity).try_insert(PolymorphedVisual);
+            spawn_transform_puff(&mut commands, transform.translation, Some(body_rest_world_y));
+        } else if !is_polymorphed && polymorphed_marker.is_some() {
             // Just restored — by expiry, damage break, dispel or death. Death is
             // one of those paths, so this doubles as the death-break puff.
             let mut torso_world_y = None;
             for child in children.iter() {
-                if let Ok((mut mesh3d, mut material, original_mesh, body)) = bodies.get_mut(child) {
+                if let Ok((mut mesh3d, mut material, original_mesh, body, original_body_material)) =
+                    bodies.get_mut(child)
+                {
                     *mesh3d = Mesh3d(original_mesh.0.clone());
-                    *material = MeshMaterial3d(marker.original_material.clone());
+                    if let Some(displaced) = original_body_material {
+                        *material = MeshMaterial3d(displaced.0.clone());
+                        commands.entity(child).remove::<OriginalBodyMaterial>();
+                    }
                     torso_world_y = Some(transform.translation.y + body.rest_y);
                 }
             }
