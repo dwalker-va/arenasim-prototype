@@ -3857,6 +3857,7 @@ pub fn animate_weapon_swings(
             Option<&ActiveAuras>,
             Option<&CastingState>,
             Option<&ChannelingState>,
+            Option<&PolymorphedVisual>,
         ),
         Without<WeaponSocket>,
     >,
@@ -3867,7 +3868,8 @@ pub fn animate_weapon_swings(
 
     let dt = time.delta_secs();
     for (mut socket, mut transform, mut visibility) in sockets.iter_mut() {
-        let Ok((combatant, owner_tf, auras, casting, channeling)) = owners.get(socket.owner)
+        let Ok((combatant, owner_tf, auras, casting, channeling, polymorphed_marker)) =
+            owners.get(socket.owner)
         else {
             continue;
         };
@@ -3875,10 +3877,13 @@ pub fn animate_weapon_swings(
         // A polymorphed victim's body swaps to the sheep form — a sheep
         // gripping a full-size axe gives it away, so hide the sockets (the
         // glTF subtree inherits). Stealth does NOT hide: the weapons fade
-        // with the body instead (`update_weapon_stealth_fade`).
-        let polymorphed = auras.is_some_and(|a| {
-            a.auras.iter().any(|au| au.effect_type == AuraType::Polymorph)
-        });
+        // with the body instead (`update_weapon_stealth_fade`). Keyed off
+        // the `PolymorphedVisual` marker (not re-derived from auras) so the
+        // body swap in `update_polymorph_visuals` is the single source of
+        // truth — a killing blow leaves the aura on the corpse until it
+        // ticks out naturally, but the marker (and thus this hide) flips
+        // back the same frame the body is restored.
+        let polymorphed = polymorphed_marker.is_some();
         let wanted = if polymorphed {
             Visibility::Hidden
         } else {
@@ -3906,7 +3911,7 @@ pub fn animate_weapon_swings(
         let mut target_dist = f32::INFINITY;
         if combatant.is_alive() {
             if let Some(target) = combatant.target {
-                if let Ok((target_combatant, target_tf, _, _, _)) = owners.get(target) {
+                if let Ok((target_combatant, target_tf, _, _, _, _)) = owners.get(target) {
                     if target_combatant.is_alive() {
                         socket.aim = target_tf.translation;
                         target_dist = owner_tf.translation.distance(target_tf.translation);

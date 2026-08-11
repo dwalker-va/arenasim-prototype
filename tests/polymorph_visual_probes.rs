@@ -217,7 +217,6 @@ fn sheep_stands_on_the_floor() {
         centers.push(1.0 + t.translation.y);
     }
     centers.sort_by(f32::total_cmp);
-    println!("part world y centers: {centers:?}");
     let lowest = centers[0];
     let highest = *centers.last().unwrap();
     // Legs are 0.30 long with their origin at the middle, so a centre at 0.15
