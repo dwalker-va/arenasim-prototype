@@ -9,12 +9,20 @@
 //!
 //! Runs on `MinimalPlugins` + `AssetPlugin` — no window, no GPU.
 
+use std::time::Duration;
+
 use bevy::prelude::*;
+use bevy::time::TimeUpdateStrategy;
 use arenasim::states::play_match::components::{
     ActiveAuras, Aura, AuraType, Combatant, OriginalMesh, PolymorphedVisual, SheepPart, VisualBody,
+    WalkAnim,
 };
-use arenasim::states::play_match::update_polymorph_visuals;
+use arenasim::states::play_match::{update_polymorph_visuals, update_sheep_hop};
 use arenasim::CharacterClass;
+
+/// Fixed tick for the harness. Real time barely advances between `update()`
+/// calls in a test, which would leave the hop's idle clock (0.1s) unreachable.
+const TICK: Duration = Duration::from_millis(100);
 
 fn poly_aura() -> Aura {
     Aura {
@@ -36,7 +44,9 @@ impl Harness {
         app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()));
         app.init_asset::<Mesh>();
         app.init_asset::<StandardMaterial>();
-        app.add_systems(Update, update_polymorph_visuals);
+        app.insert_resource(TimeUpdateStrategy::ManualDuration(TICK));
+        // Chained: the hop only drives units the swap has already marked.
+        app.add_systems(Update, (update_polymorph_visuals, update_sheep_hop).chain());
         Harness { app }
     }
 
@@ -64,6 +74,7 @@ impl Harness {
             .spawn((
                 Transform::from_xyz(0.0, 1.0, 0.0),
                 Combatant::new(team, slot, CharacterClass::Mage),
+                WalkAnim { phase: 0.0, previous_xz: Vec2::ZERO, idle_time: 0.0 },
             ))
             .id();
         self.app.world_mut().entity_mut(unit).add_child(body);
@@ -152,6 +163,37 @@ fn restore_is_owner_scoped() {
     assert_eq!(h.sheep_parts_of(a), 0, "A stripped");
     assert_eq!(h.sheep_parts_of(b), b_parts, "B untouched");
     assert!(h.app.world().get::<PolymorphedVisual>(b).is_some());
+}
+
+#[test]
+fn hop_lifts_a_moving_sheep_and_settles_a_still_one() {
+    let mut h = Harness::new();
+    let (unit, body, _, _) = h.spawn_unit(1, 0);
+    h.app.world_mut().entity_mut(unit).insert(ActiveAuras { auras: vec![poly_aura()] });
+    h.app.update();
+    assert!(h.app.world().get::<PolymorphedVisual>(unit).is_some());
+
+    // Walk it. The hop is distance-driven, so travel is what raises the body —
+    // a quarter of a hop step per tick puts it through a full arc.
+    let mut peak = f32::MIN;
+    for tick in 1..=6 {
+        h.app.world_mut().get_mut::<Transform>(unit).unwrap().translation.x = tick as f32 * 0.225;
+        h.app.update();
+        peak = peak.max(h.app.world().get::<Transform>(body).unwrap().translation.y);
+    }
+    assert!(peak > 0.15, "hop should clear the walk bob's 0.10, got {peak}");
+
+    // The shared `WalkAnim` baseline must track the sheep's position, or the
+    // walk bob resumes on a stale delta when the polymorph breaks.
+    let walk = h.app.world().get::<WalkAnim>(unit).unwrap();
+    assert!((walk.previous_xz.x - 6.0 * 0.225).abs() < 1e-4, "baseline left stale");
+
+    // Stand still: idle after 0.1s, then ease back to `rest_y` (0.0 here).
+    for _ in 0..20 {
+        h.app.update();
+    }
+    let resting = h.app.world().get::<Transform>(body).unwrap().translation.y;
+    assert!(resting.abs() < 0.01, "a stationary sheep should settle to rest, got {resting}");
 }
 
 #[test]

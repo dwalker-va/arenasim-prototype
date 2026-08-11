@@ -556,11 +556,15 @@ impl Plugin for StatesPlugin {
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_combat_scene),
             )
-            // Walking animation: vertical bob on moving combatants/pets.
-            // Must run after movement has settled so the post-movement XZ is read.
+            // Walking animation: vertical bob on moving combatants/pets, and
+            // the hop that replaces it while a unit is polymorphed. Must run
+            // after movement has settled so the post-movement XZ is read.
             .add_systems(
                 Update,
-                play_match::update_walk_animation
+                (
+                    play_match::update_walk_animation,
+                    play_match::update_sheep_hop,
+                )
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_combat_scene),
             )
