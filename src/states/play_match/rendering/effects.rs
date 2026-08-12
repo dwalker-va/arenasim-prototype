@@ -682,37 +682,369 @@ pub fn follow_shield_bubbles(
 // Polymorph Visual Effect System
 // ==============================================================================
 
+/// Half-extents of the sheep torso, in the [`VisualBody`]'s local space. These
+/// reproduce the footprint of the cuboid placeholder the sheep replaced
+/// (0.8 x 0.6 x 1.0), so the transformed unit occupies the same volume it did.
+const SHEEP_TORSO_HALF: Vec3 = Vec3::new(0.40, 0.30, 0.50);
+/// Leg length; also the torso's clearance above the floor.
+const SHEEP_LEG_LEN: f32 = 0.30;
+const SHEEP_HEAD_RADIUS: f32 = 0.22;
+/// Wool: off-white and fully rough, so the sheep reads as fleece rather than as
+/// a lit surface next to the glossy class capsules.
+const SHEEP_WOOL_COLOR: Color = Color::srgb(0.93, 0.91, 0.85);
+/// Face, ears and legs — the bare-skin parts.
+const SHEEP_SKIN_COLOR: Color = Color::srgb(0.30, 0.26, 0.26);
+
 /// System that swaps combatant meshes when polymorphed.
-/// Polymorphed combatants are rendered as a cuboid to show the "transfiguration" effect.
+///
+/// The victim's body becomes a sheep: the [`VisualBody`]'s own mesh is swapped
+/// to the wool torso, and the head, ears, legs and tail ride along as
+/// [`SheepPart`] children of it (so they inherit the walk bob and despawn with
+/// the unit for free). Weapon sockets are hidden separately, by
+/// `animate_weapon_swings`.
 pub fn update_polymorph_visuals(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     // The aura state lives on the sim entity; the mesh lives on its `VisualBody`
-    // child, so this joins across the hierarchy.
-    combatants: Query<(Entity, &ActiveAuras, Option<&PolymorphedVisual>, &Children), With<Combatant>>,
-    mut bodies: Query<(&mut Mesh3d, &OriginalMesh), With<VisualBody>>,
+    // child, so this joins across the hierarchy. `ActiveAuras` is OPTIONAL
+    // because `update_auras` removes the component outright once the last aura
+    // expires — required for the component, not the vec, to signal the end.
+    combatants: Query<(
+        Entity,
+        &Combatant,
+        &Transform,
+        Option<&ActiveAuras>,
+        Option<&PolymorphedVisual>,
+        &Children,
+    )>,
+    mut bodies: Query<(
+        &mut Mesh3d,
+        &mut MeshMaterial3d<StandardMaterial>,
+        &OriginalMesh,
+        &VisualBody,
+        Option<&OriginalBodyMaterial>,
+    )>,
+    parts: Query<(Entity, &SheepPart)>,
 ) {
-    for (entity, auras, polymorphed_marker, children) in combatants.iter() {
-        let is_polymorphed = auras.auras.iter().any(|a| a.effect_type == AuraType::Polymorph);
+    for (entity, combatant, transform, auras, polymorphed_marker, children) in combatants.iter() {
+        // A killing blow leaves the aura ON the corpse — `update_auras` skips
+        // dead combatants entirely — so death has to count as an exit path here
+        // or the loser stays a sheep for the rest of the match.
+        let is_polymorphed = combatant.is_alive()
+            && auras.is_some_and(|a| {
+                a.auras.iter().any(|au| au.effect_type == AuraType::Polymorph)
+            });
 
         if is_polymorphed && polymorphed_marker.is_none() {
-            // Combatant just got polymorphed - swap to cuboid (sheep/pig box shape)
-            // Using a squat cuboid to represent the transformed creature
-            let poly_mesh = meshes.add(Cuboid::new(0.8, 0.6, 1.0));
+            // Just transformed. Locate the body child before allocating
+            // anything: without one there is nothing to restore, so the marker
+            // stays off and this branch retries next frame — and per-retry
+            // material allocation would be pure asset churn.
+            let Some(body_child) = children.iter().find(|&c| bodies.contains(c)) else {
+                continue;
+            };
+            let Ok((mut mesh3d, mut material, _, body, _)) = bodies.get_mut(body_child) else {
+                continue;
+            };
+
+            let wool = materials.add(StandardMaterial {
+                base_color: SHEEP_WOOL_COLOR,
+                perceptual_roughness: 1.0,
+                ..default()
+            });
+            let skin = materials.add(StandardMaterial {
+                base_color: SHEEP_SKIN_COLOR,
+                perceptual_roughness: 0.9,
+                ..default()
+            });
+
+            // The body's world rest height. Derived rather than hardcoded
+            // because pets render their body at an offset from the sim
+            // entity's `y` (see `VisualBody::rest_y`). Negated, it is the
+            // floor height in the body's local space.
+            let body_rest_world_y = transform.translation.y + body.rest_y;
+            let ground_y = -body_rest_world_y;
+            let torso_y = ground_y + SHEEP_LEG_LEN + SHEEP_TORSO_HALF.y;
+
+            // The torso is the body's OWN mesh, whose transform belongs to
+            // the walk bob and the death sink, so its offset and squash are
+            // baked into the mesh instead of applied as a scale.
+            *mesh3d = Mesh3d(meshes.add(
+                Sphere::new(1.0)
+                    .mesh()
+                    .uv(24, 12)
+                    .scaled_by(SHEEP_TORSO_HALF)
+                    .translated_by(Vec3::Y * torso_y),
+            ));
+            commands
+                .entity(body_child)
+                .try_insert(OriginalBodyMaterial(material.0.clone()));
+            *material = MeshMaterial3d(wool.clone());
+
+            spawn_sheep_parts(
+                &mut commands,
+                &mut meshes,
+                &wool,
+                &skin,
+                body_child,
+                entity,
+                ground_y,
+                torso_y,
+            );
+            commands.entity(entity).try_insert(PolymorphedVisual);
+            spawn_transform_puff(&mut commands, transform.translation, Some(body_rest_world_y));
+        } else if !is_polymorphed && polymorphed_marker.is_some() {
+            // Just restored — by expiry, damage break, dispel or death. Death is
+            // one of those paths, so this doubles as the death-break puff.
+            let mut torso_world_y = None;
             for child in children.iter() {
-                if let Ok((mut mesh3d, _)) = bodies.get_mut(child) {
-                    *mesh3d = Mesh3d(poly_mesh.clone());
+                if let Ok((mut mesh3d, mut material, original_mesh, body, original_body_material)) =
+                    bodies.get_mut(child)
+                {
+                    *mesh3d = Mesh3d(original_mesh.0.clone());
+                    if let Some(displaced) = original_body_material {
+                        *material = MeshMaterial3d(displaced.0.clone());
+                        commands.entity(child).remove::<OriginalBodyMaterial>();
+                    }
+                    torso_world_y = Some(transform.translation.y + body.rest_y);
                 }
             }
-            commands.entity(entity).insert(PolymorphedVisual);
-        } else if !is_polymorphed && polymorphed_marker.is_some() {
-            // Polymorph ended - restore original capsule mesh
-            for child in children.iter() {
-                if let Ok((mut mesh3d, original_mesh)) = bodies.get_mut(child) {
-                    *mesh3d = Mesh3d(original_mesh.0.clone());
+            spawn_transform_puff(&mut commands, transform.translation, torso_world_y);
+            // Owner-scoped: a global sweep would strip a second sheep that is
+            // still polymorphed.
+            for (part_entity, part) in parts.iter() {
+                if part.owner == entity {
+                    commands.entity(part_entity).despawn();
                 }
             }
             commands.entity(entity).remove::<PolymorphedVisual>();
+        }
+    }
+}
+
+/// Spawn the sheep's non-torso primitives as children of `body`, tagged for
+/// `owner` so restore despawns exactly this unit's set.
+///
+/// `ground_y` and `torso_y` are local heights in the body's space: the floor and
+/// the torso's centre.
+#[allow(clippy::too_many_arguments)]
+fn spawn_sheep_parts(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    wool: &Handle<StandardMaterial>,
+    skin: &Handle<StandardMaterial>,
+    body: Entity,
+    owner: Entity,
+    ground_y: f32,
+    torso_y: f32,
+) {
+    // One unit sphere, posed per part by the child transforms.
+    let ball = meshes.add(Sphere::new(1.0).mesh().uv(16, 10));
+    // Legs run from the floor up INTO the torso's interior, not just to its
+    // lowest plane: the torso is an ellipsoid, so at the corners where the
+    // legs sit its underside curves ~0.14 above the bottom — a leg stopping
+    // at the bottom plane floats visibly disconnected.
+    let leg_len = SHEEP_LEG_LEN + SHEEP_TORSO_HALF.y;
+    let leg = meshes.add(Cylinder::new(0.06, leg_len));
+
+    let head_y = torso_y + 0.14;
+    let head_z = SHEEP_TORSO_HALF.z * 0.85;
+    let mut part = |mesh: Handle<Mesh>, material: Handle<StandardMaterial>, transform: Transform| {
+        let child = commands
+            .spawn((
+                Mesh3d(mesh),
+                MeshMaterial3d(material),
+                transform,
+                SheepPart { owner },
+            ))
+            .id();
+        commands.entity(body).add_child(child);
+    };
+
+    // Head, with a darker muzzle poking out of the fleece.
+    part(
+        ball.clone(),
+        wool.clone(),
+        Transform::from_xyz(0.0, head_y, head_z).with_scale(Vec3::splat(SHEEP_HEAD_RADIUS)),
+    );
+    part(
+        ball.clone(),
+        skin.clone(),
+        Transform::from_xyz(0.0, head_y - 0.06, head_z + 0.16)
+            .with_scale(Vec3::new(0.11, 0.09, 0.13)),
+    );
+    // Ears: flat lozenges angled up and out, one per side.
+    for side in [-1.0f32, 1.0] {
+        part(
+            ball.clone(),
+            skin.clone(),
+            Transform::from_xyz(side * 0.19, head_y + 0.08, head_z - 0.06)
+                .with_rotation(Quat::from_rotation_z(side * 0.5))
+                .with_scale(Vec3::new(0.14, 0.04, 0.08)),
+        );
+    }
+    // Legs at the corners of the torso footprint; the cylinder's origin is its
+    // middle, so centring at half a leg up keeps the feet exactly on `ground_y`
+    // while the top half embeds in the torso.
+    for (x, z) in [(-1.0f32, -1.0f32), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+        part(
+            leg.clone(),
+            skin.clone(),
+            Transform::from_xyz(
+                x * SHEEP_TORSO_HALF.x * 0.6,
+                ground_y + leg_len * 0.5,
+                z * SHEEP_TORSO_HALF.z * 0.6,
+            ),
+        );
+    }
+    // Tail.
+    part(
+        ball,
+        wool.clone(),
+        Transform::from_xyz(0.0, torso_y + 0.12, -SHEEP_TORSO_HALF.z - 0.02)
+            .with_scale(Vec3::new(0.09, 0.11, 0.09)),
+    );
+}
+
+// ==============================================================================
+// Transform Puff (polymorph apply / restore)
+// ==============================================================================
+// A pale cloud that puffs at the victim's torso on BOTH transform directions
+// (see TransformPuff). Graphical only; registered in states/mod.rs, never in
+// headless systems.rs.
+
+/// Lifetime (seconds) of the puff. Short on purpose: polymorph breaks on ANY
+/// damage, so an apply and its break can land within a second of each other and
+/// must read as two pops rather than one smear.
+const PUFF_LIFETIME: f32 = 0.45;
+/// Radius (yards) of the puff's central lobe.
+const PUFF_CENTER_RADIUS: f32 = 0.24;
+/// Outer lobes as (offset from the puff's origin, radius) — staggered sizes and
+/// heights so the cluster reads as billowing cloud rather than a sphere.
+const PUFF_LOBES: [(Vec3, f32); 4] = [
+    (Vec3::new(0.26, 0.06, 0.10), 0.19),
+    (Vec3::new(-0.22, -0.04, 0.20), 0.16),
+    (Vec3::new(0.06, 0.22, -0.24), 0.21),
+    (Vec3::new(-0.12, 0.14, 0.26), 0.14),
+];
+/// Cluster scale at spawn and at expiry. The expansion is eased so the puff
+/// pops open and then coasts, the shape of real smoke.
+const PUFF_SCALE_START: f32 = 0.55;
+const PUFF_SCALE_END: f32 = 2.1;
+/// Upward drift (yards/sec) — cloud rises as it dissipates.
+const PUFF_RISE_SPEED: f32 = 0.7;
+/// Soft white with a warm tint, which separates from both arena floors.
+const PUFF_COLOR: Color = Color::srgba(1.0, 0.97, 0.92, 0.55);
+const PUFF_EMISSIVE: LinearRgba = LinearRgba::new(2.6, 2.5, 2.3, 1.0);
+
+/// Spawn a puff at a transforming unit's torso. `torso_world_y` comes from the
+/// unit's [`VisualBody`] (pets render their body off the sim entity's `y`); a
+/// unit without one falls back to its logical position.
+fn spawn_transform_puff(commands: &mut Commands, unit_pos: Vec3, torso_world_y: Option<f32>) {
+    let position = Vec3::new(
+        unit_pos.x,
+        torso_world_y.unwrap_or(unit_pos.y),
+        unit_pos.z,
+    );
+    commands.spawn((
+        TransformPuff {
+            position,
+            lifetime: PUFF_LIFETIME,
+            initial_lifetime: PUFF_LIFETIME,
+        },
+        PlayMatchEntity,
+    ));
+}
+
+/// Attach the cloud cluster to newly spawned [`TransformPuff`] markers.
+///
+/// The lobes are children sharing the parent's mesh and material, so the update
+/// system animates the whole cluster by driving the PARENT alone — and the
+/// cleanup despawn takes the children with it.
+pub fn spawn_transform_puff_visuals(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    new_puffs: Query<(Entity, &TransformPuff), (Added<TransformPuff>, Without<Mesh3d>)>,
+) {
+    for (puff_entity, puff) in new_puffs.iter() {
+        let ball = meshes.add(Sphere::new(1.0).mesh().uv(12, 8));
+        let material = materials.add(StandardMaterial {
+            base_color: PUFF_COLOR,
+            emissive: PUFF_EMISSIVE,
+            alpha_mode: AlphaMode::Add,
+            ..default()
+        });
+
+        commands.entity(puff_entity).try_insert((
+            Mesh3d(ball.clone()),
+            MeshMaterial3d(material.clone()),
+            Transform::from_translation(puff.position)
+                .with_scale(Vec3::splat(PUFF_SCALE_START * PUFF_CENTER_RADIUS)),
+        ));
+
+        // Lobe offsets are in the puff's own units, so the parent's scale
+        // expands the cluster outward as well as inflating each lobe. The
+        // parent's scale already carries the centre radius, so each lobe
+        // divides it back out to reach its own.
+        for (offset, radius) in PUFF_LOBES {
+            let lobe = commands
+                .spawn((
+                    Mesh3d(ball.clone()),
+                    MeshMaterial3d(material.clone()),
+                    Transform::from_translation(offset / PUFF_CENTER_RADIUS)
+                        .with_scale(Vec3::splat(radius / PUFF_CENTER_RADIUS)),
+                ))
+                .id();
+            commands.entity(puff_entity).add_child(lobe);
+        }
+    }
+}
+
+/// Expand, rise and fade the puff cluster.
+pub fn update_transform_puffs(
+    time: Res<Time>,
+    mut puffs: Query<(&mut TransformPuff, &mut Transform, &MeshMaterial3d<StandardMaterial>)>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let dt = time.delta_secs();
+
+    for (mut puff, mut transform, material_handle) in puffs.iter_mut() {
+        puff.lifetime -= dt;
+
+        // Progress: 1.0 (just spawned) → 0.0 (expired).
+        let progress = (puff.lifetime / puff.initial_lifetime).clamp(0.0, 1.0);
+        let elapsed = 1.0 - progress;
+
+        // sqrt easing: most of the expansion lands in the first few frames.
+        let scale = PUFF_SCALE_START + (PUFF_SCALE_END - PUFF_SCALE_START) * elapsed.sqrt();
+        transform.scale = Vec3::splat(scale * PUFF_CENTER_RADIUS);
+        transform.translation.y = puff.position.y + PUFF_RISE_SPEED * elapsed * puff.initial_lifetime;
+
+        // Fade on the square so the cloud thins out early and leaves no
+        // lingering haze over the restored unit.
+        let fade = progress * progress;
+        if let Some(material) = materials.get_mut(&material_handle.0) {
+            material.base_color = PUFF_COLOR.with_alpha(PUFF_COLOR.alpha() * fade);
+            material.emissive = LinearRgba::new(
+                PUFF_EMISSIVE.red * fade,
+                PUFF_EMISSIVE.green * fade,
+                PUFF_EMISSIVE.blue * fade,
+                1.0,
+            );
+        }
+    }
+}
+
+/// Cleanup expired transform puffs. Despawn is recursive, so the lobes go too.
+pub fn cleanup_expired_transform_puffs(
+    mut commands: Commands,
+    puffs: Query<(Entity, &TransformPuff)>,
+) {
+    for (entity, puff) in puffs.iter() {
+        if puff.lifetime <= 0.0 {
+            commands.entity(entity).despawn();
         }
     }
 }
@@ -2977,6 +3309,89 @@ const WALK_IDLE_EPSILON: f32 = 0.001;
 /// XZ delta in a single frame.
 const WALK_MAX_PHASE_STEP: f32 = std::f32::consts::PI;
 
+/// Seconds without movement before a gait declares itself idle. Must stay above
+/// one render frame at any refresh rate — see [`WalkAnim::idle_time`].
+const WALK_IDLE_HOLD: f32 = 0.1;
+
+/// Rate the body eases back to `rest_y` once idle, in arena units per second.
+const GAIT_SETTLE_RATE: f32 = 0.6;
+
+/// Peak height of a polymorphed unit's hop above `rest_y`, in arena units.
+/// Far above the walk bob: a sheep's gait is meant to read from the camera's
+/// default framing, and at the bob's 0.10 it did not.
+const HOP_AMPLITUDE: f32 = 0.28;
+
+/// Arena units of horizontal travel per hop cycle. Shorter than
+/// `WALK_STEP_LENGTH` so the polymorph wander — which runs at 20% movement
+/// speed — reads as quick little hops rather than one slow arc per pace.
+const HOP_STEP_LENGTH: f32 = 0.9;
+
+/// Shapes the hop arc. `sin` clipped at zero already grounds half the cycle;
+/// the exponent narrows the airborne half further, so the sheep pauses on the
+/// ground between hops instead of rolling smoothly between them.
+const HOP_SHARPNESS: f32 = 1.6;
+
+/// Fold this frame's horizontal travel into a gait's phase and idle clock, and
+/// report whether the unit should be held at rest.
+///
+/// Idle is TIME-based, not frame-based: the sim moves units only on FixedUpdate
+/// ticks, so at render rates above the tick rate every other frame sees zero
+/// movement. Snapping to rest on those frames strobed the gait (and every
+/// attached weapon) at frame rate.
+fn advance_gait(
+    walk: &mut WalkAnim,
+    current_xz: Vec2,
+    step_length: f32,
+    alive: bool,
+    delta_secs: f32,
+) -> bool {
+    let distance = (current_xz - walk.previous_xz).length();
+    walk.previous_xz = current_xz;
+
+    if distance >= WALK_IDLE_EPSILON {
+        // Coming out of a real stop, restart the cycle at its zero crossing so
+        // the first moving frame matches the rest height.
+        if walk.idle_time > WALK_IDLE_HOLD {
+            walk.phase = 0.0;
+        }
+        walk.idle_time = 0.0;
+    } else {
+        walk.idle_time += delta_secs;
+    }
+
+    let idle = !alive || walk.idle_time > WALK_IDLE_HOLD;
+    if !idle {
+        let step = (distance / step_length * std::f32::consts::TAU).min(WALK_MAX_PHASE_STEP);
+        walk.phase = (walk.phase + step).rem_euclid(std::f32::consts::TAU);
+    }
+    idle
+}
+
+/// Write a gait's vertical offset to a unit's [`VisualBody`] child.
+///
+/// Settling into idle EASES down to rest instead of snapping — a gait can stop
+/// at any height, and a one-frame drop reads as a pop (more so with weapons
+/// riding the body).
+fn apply_gait_offset(
+    children: &Children,
+    bodies: &mut Query<(&mut Transform, &VisualBody)>,
+    idle: bool,
+    offset: f32,
+    settle_step: f32,
+) {
+    for child in children.iter() {
+        let Ok((mut body_transform, body)) = bodies.get_mut(child) else {
+            continue;
+        };
+        if idle {
+            let err = body.rest_y - body_transform.translation.y;
+            body_transform.translation.y += err.clamp(-settle_step, settle_step);
+        } else {
+            body_transform.translation.y = body.rest_y + offset;
+        }
+    }
+}
+
 /// Drive the walking bob on combatant and pet capsules.
 ///
 /// Reads each unit's post-movement XZ, advances phase by the horizontal
@@ -2994,7 +3409,9 @@ const WALK_MAX_PHASE_STEP: f32 = std::f32::consts::PI;
 /// `animate_death` (corpse sink) and `update_victory_celebration` (winner
 /// bounce). All three now write the same child's local Y and run in the same
 /// post-`CombatResolution` window, so excluding their drivers is still the
-/// cleanest way to avoid the last-writer-wins race.
+/// cleanest way to avoid the last-writer-wins race. `Without<PolymorphedVisual>`
+/// does the same for [`update_sheep_hop`], which owns the gait while a unit is
+/// a sheep.
 ///
 /// Graphical-mode only — registered in `StatesPlugin::build()`, never in
 /// `add_core_combat_systems`. Visual-only; touches no gameplay state.
@@ -3002,53 +3419,80 @@ pub fn update_walk_animation(
     time: Res<Time>,
     mut movers: Query<
         (&Transform, &mut WalkAnim, &Combatant, &Children),
-        (Without<DeathAnimation>, Without<Celebrating>, Without<VisualBody>),
+        (
+            Without<DeathAnimation>,
+            Without<Celebrating>,
+            Without<VisualBody>,
+            Without<PolymorphedVisual>,
+        ),
     >,
     mut bodies: Query<(&mut Transform, &VisualBody)>,
 ) {
     for (transform, mut walk, combatant, children) in movers.iter_mut() {
         // Read the sim entity's XZ, but write only the child's local Y.
-        let current_xz = transform.translation.xz();
-        let distance = (current_xz - walk.previous_xz).length();
-        walk.previous_xz = current_xz;
+        let idle = advance_gait(
+            &mut walk,
+            transform.translation.xz(),
+            WALK_STEP_LENGTH,
+            combatant.is_alive(),
+            time.delta_secs(),
+        );
+        apply_gait_offset(
+            children,
+            &mut bodies,
+            idle,
+            walk.phase.sin() * WALK_BOB_AMPLITUDE,
+            GAIT_SETTLE_RATE * time.delta_secs(),
+        );
+    }
+}
 
-        // Idle is TIME-based, not frame-based: the sim moves units only on
-        // FixedUpdate ticks, so at render rates above the tick rate every
-        // other frame sees zero movement. Snapping to rest on those frames
-        // strobed the bob (and every attached weapon) at frame rate.
-        if distance >= WALK_IDLE_EPSILON {
-            // Coming out of a real stop, restart the cycle at its zero
-            // crossing so the first bobbing frame matches the rest height.
-            if walk.idle_time > 0.1 {
-                walk.phase = 0.0;
-            }
-            walk.idle_time = 0.0;
-        } else {
-            walk.idle_time += time.delta_secs();
-        }
-        let idle = !combatant.is_alive() || walk.idle_time > 0.1;
-        if !idle {
-            let step =
-                (distance / WALK_STEP_LENGTH * std::f32::consts::TAU).min(WALK_MAX_PHASE_STEP);
-            walk.phase = (walk.phase + step).rem_euclid(std::f32::consts::TAU);
-        }
-
-        // Settling into idle EASES down to rest instead of snapping — the
-        // walk can stop at any bob height, and a one-frame drop reads as a
-        // pop (more so with weapons riding the body).
-        let settle_step = 0.6 * time.delta_secs();
-        for child in children.iter() {
-            let Ok((mut body_transform, body)) = bodies.get_mut(child) else {
-                continue;
-            };
-            if idle {
-                let err = body.rest_y - body_transform.translation.y;
-                body_transform.translation.y += err.clamp(-settle_step, settle_step);
-            } else {
-                body_transform.translation.y =
-                    body.rest_y + walk.phase.sin() * WALK_BOB_AMPLITUDE;
-            }
-        }
+/// Drive the hopping gait on polymorphed units, replacing the walk bob.
+///
+/// Distance-driven exactly like the bob, so the polymorph wander's 20% movement
+/// speed reads as slow hopping and a sheep that is not moving holds still. Only
+/// the waveform differs: `sin` clipped at zero and sharpened, which grounds the
+/// sheep between hops instead of easing it through a continuous sine.
+///
+/// Shares [`WalkAnim`] with the bob rather than carrying its own state, so the
+/// bob's baseline (`previous_xz`, `idle_time`) stays live through the sheep form
+/// and does not resume on a stale per-frame delta when the polymorph breaks.
+///
+/// Query filters mirror [`update_walk_animation`]: death and celebration own the
+/// Y axis when present, and `Without<VisualBody>` keeps the mover query disjoint
+/// from the body query it writes through.
+///
+/// Graphical-mode only — registered in `StatesPlugin::build()`, never in
+/// `add_core_combat_systems`. Visual-only; touches no gameplay state.
+pub fn update_sheep_hop(
+    time: Res<Time>,
+    mut movers: Query<
+        (&Transform, &mut WalkAnim, &Combatant, &Children),
+        (
+            With<PolymorphedVisual>,
+            Without<DeathAnimation>,
+            Without<Celebrating>,
+            Without<VisualBody>,
+        ),
+    >,
+    mut bodies: Query<(&mut Transform, &VisualBody)>,
+) {
+    for (transform, mut walk, combatant, children) in movers.iter_mut() {
+        let idle = advance_gait(
+            &mut walk,
+            transform.translation.xz(),
+            HOP_STEP_LENGTH,
+            combatant.is_alive(),
+            time.delta_secs(),
+        );
+        let lift = walk.phase.sin().max(0.0).powf(HOP_SHARPNESS) * HOP_AMPLITUDE;
+        apply_gait_offset(
+            children,
+            &mut bodies,
+            idle,
+            lift,
+            GAIT_SETTLE_RATE * time.delta_secs(),
+        );
     }
 }
 
@@ -3419,6 +3863,7 @@ pub fn animate_weapon_swings(
             Option<&ActiveAuras>,
             Option<&CastingState>,
             Option<&ChannelingState>,
+            Option<&PolymorphedVisual>,
         ),
         Without<WeaponSocket>,
     >,
@@ -3429,18 +3874,22 @@ pub fn animate_weapon_swings(
 
     let dt = time.delta_secs();
     for (mut socket, mut transform, mut visibility) in sockets.iter_mut() {
-        let Ok((combatant, owner_tf, auras, casting, channeling)) = owners.get(socket.owner)
+        let Ok((combatant, owner_tf, auras, casting, channeling, polymorphed_marker)) =
+            owners.get(socket.owner)
         else {
             continue;
         };
 
-        // A polymorphed victim's body swaps to the sheep cuboid — a sheep
+        // A polymorphed victim's body swaps to the sheep form — a sheep
         // gripping a full-size axe gives it away, so hide the sockets (the
         // glTF subtree inherits). Stealth does NOT hide: the weapons fade
-        // with the body instead (`update_weapon_stealth_fade`).
-        let polymorphed = auras.is_some_and(|a| {
-            a.auras.iter().any(|au| au.effect_type == AuraType::Polymorph)
-        });
+        // with the body instead (`update_weapon_stealth_fade`). Keyed off
+        // the `PolymorphedVisual` marker (not re-derived from auras) so the
+        // body swap in `update_polymorph_visuals` is the single source of
+        // truth — a killing blow leaves the aura on the corpse until it
+        // ticks out naturally, but the marker (and thus this hide) flips
+        // back the same frame the body is restored.
+        let polymorphed = polymorphed_marker.is_some();
         let wanted = if polymorphed {
             Visibility::Hidden
         } else {
@@ -3468,7 +3917,7 @@ pub fn animate_weapon_swings(
         let mut target_dist = f32::INFINITY;
         if combatant.is_alive() {
             if let Some(target) = combatant.target {
-                if let Ok((target_combatant, target_tf, _, _, _)) = owners.get(target) {
+                if let Ok((target_combatant, target_tf, _, _, _, _)) = owners.get(target) {
                     if target_combatant.is_alive() {
                         socket.aim = target_tf.translation;
                         target_dist = owner_tf.translation.distance(target_tf.translation);

@@ -90,6 +90,26 @@ pub struct OriginalMesh(pub Handle<Mesh>);
 #[derive(Component)]
 pub struct PolymorphedVisual;
 
+/// The body material a polymorph's wool coat displaced, stored on the
+/// [`VisualBody`] child beside [`OriginalMesh`] for the same reason that
+/// component exists: nothing else records it, and `update_stealth_visuals`
+/// edits the material asset in place, so the handle has to survive the swap.
+/// Mirrors `OriginalWeaponMaterial`'s insert-at-swap / remove-at-restore
+/// lifecycle.
+#[derive(Component)]
+pub struct OriginalBodyMaterial(pub Handle<StandardMaterial>);
+
+/// One primitive of a polymorphed combatant's sheep body (head, ear, leg, ...),
+/// spawned as a child of the victim's [`VisualBody`] while the aura lasts.
+///
+/// `owner` is the SIM entity, not the body child: restore despawns only the
+/// parts belonging to the unit whose polymorph ended, so two sheep on the field
+/// at once cannot strip each other.
+#[derive(Component)]
+pub struct SheepPart {
+    pub owner: Entity,
+}
+
 /// A rising flame particle for fire spell effects (e.g., Immolate).
 /// Spawned at target location, rises upward while shrinking and fading.
 #[derive(Component)]
@@ -170,6 +190,26 @@ pub struct DispelRibbon {
     pub initial_lifetime: f32,
     /// Spin accumulator (seconds) driving the ribbon's slow Y-axis rotation
     pub spin: f32,
+}
+
+/// Visual effect for a polymorph transition — a cluster of pale cloud lobes that
+/// puffs outward at the victim's torso. Spawned at BOTH the transform-in and the
+/// restore, in the same style: the sim cannot distinguish an expiry from a damage
+/// break, so one puff covers every direction.
+///
+/// Static by design — it carries the position it was spawned at rather than
+/// following the victim, so it marks the point the transform happened instead of
+/// dragging behind a fleeing sheep. Kept short-lived: polymorph breaks on ANY
+/// damage, so a rapid apply-break pair must read as two distinct pops, not one
+/// smear.
+#[derive(Component)]
+pub struct TransformPuff {
+    /// World position the puff was spawned at (the victim's torso).
+    pub position: Vec3,
+    /// Time remaining before despawn (seconds).
+    pub lifetime: f32,
+    /// Initial lifetime for the expand/fade curve.
+    pub initial_lifetime: f32,
 }
 
 /// Visual effect for Psychic Scream — a self-centered expanding shadow burst

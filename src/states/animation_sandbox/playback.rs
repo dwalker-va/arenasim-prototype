@@ -25,8 +25,8 @@ use super::super::match_config::CharacterClass;
 use super::super::play_match::abilities::AbilityType;
 use super::super::play_match::ability_config::AbilityDefinitions;
 use super::super::play_match::components::{
-    ActiveAuras, Celebrating, CastingState, ChannelingState, Combatant, DeathAnimation,
-    MatchResults, PlayMatchEntity, VictoryCelebration, VisualBody,
+    ActiveAuras, Celebrating, CastingState, ChannelingState, Combatant, DRTracker,
+    DeathAnimation, MatchResults, PlayMatchEntity, VictoryCelebration, VisualBody,
 };
 use super::{SandboxEntity, SandboxStage};
 
@@ -315,11 +315,21 @@ pub fn drive_playback(
     }
 }
 
+/// Extra pass time for Polymorph, whose subject only EXISTS after the cast
+/// resolves: at `cast_time` alone the pass ends one loop tail (0.6s) after the
+/// victim becomes a sheep, which is not long enough to read the hop.
+const POLYMORPH_HOLD_SECS: f32 = 4.0;
+
 /// Length of one pass of the selected entry.
 fn entry_duration(playback: &SandboxPlayback, defs: &AbilityDefinitions) -> f32 {
     match playback.selected {
         Some(SandboxEntry::Ability(ability)) => {
-            defs.get(&ability).map(|c| c.cast_time).unwrap_or(1.0)
+            let cast_time = defs.get(&ability).map(|c| c.cast_time).unwrap_or(1.0);
+            if ability == AbilityType::Polymorph {
+                cast_time + POLYMORPH_HOLD_SECS
+            } else {
+                cast_time
+            }
         }
         Some(SandboxEntry::Body(body)) => body.duration(),
         None => 0.0,
@@ -456,10 +466,39 @@ fn clear_body_state(
 /// hair out of range.
 const MELEE_STANDOFF: f32 = 2.0;
 
-/// Places the caster for whichever entry is playing.
+/// Radius and angular speed of the circle a staged unit walks for the
+/// position-driven entries. The radius is deliberately small: at 3yd the unit
+/// walked clean out of the camera presets' shot, which made the entries whose
+/// whole subject is locomotion the hardest ones to actually watch.
+const WALK_RADIUS: f32 = 1.4;
+const WALK_ANGULAR_SPEED: f32 = 1.4;
+
+/// The sheep's circle. Slower than the caster's walk because the hop is what is
+/// being judged, and in a match the polymorph wander runs at 20% movement speed
+/// — a sheep sprinting a circle would misrepresent the gait it drives.
+const SHEEP_RADIUS: f32 = 1.0;
+const SHEEP_ANGULAR_SPEED: f32 = 0.9;
+
+/// Walks a unit around a circle centred one radius BEHIND `home`, so the walk
+/// starts exactly at `home` and eases away from it.
 ///
-/// Owns the combatant transform so the two position-driven entries share a
-/// single writer:
+/// Phase comes from the pass clock, not absolute elapsed time. Keying the angle
+/// off `time.elapsed_secs()` put the unit at an arbitrary point on the circle on
+/// its first frame, teleporting it up to 2 * radius and driving the gait
+/// systems' per-frame XZ delta into their `WALK_MAX_PHASE_STEP` clamp.
+fn circle_walk(home: Vec3, elapsed: f32, radius: f32, angular_speed: f32) -> Vec3 {
+    let angle = elapsed * angular_speed;
+    Vec3::new(
+        home.x - radius + angle.cos() * radius,
+        home.y,
+        home.z + angle.sin() * radius,
+    )
+}
+
+/// Places the staged units for whichever entry is playing.
+///
+/// Owns the combatant transforms so the position-driven entries share a single
+/// writer:
 ///
 /// - **Walk bob** — `update_walk_animation` keys the bob off real per-tick XZ
 ///   movement (gating it on "moved since last frame" strobed the body at render
@@ -468,9 +507,11 @@ const MELEE_STANDOFF: f32 = 2.0;
 /// - **Auto attack** — `combat_auto_attack` only swings inside the attacker's
 ///   own range, so a melee caster left at the staged 16yd separation would
 ///   never swing at all.
+/// - **Polymorph** — `update_sheep_hop` is distance-driven for the same reason,
+///   so the DUMMY (the unit that turns into a sheep) is what walks here.
 ///
-/// Every other entry returns the caster to its staged position, so the next one
-/// plays centred and the camera presets keep framing it.
+/// Every other entry returns both units to their staged positions, so the next
+/// one plays centred and the camera presets keep framing it.
 pub fn position_caster(
     playback: Res<SandboxPlayback>,
     stage: Res<SandboxStage>,
@@ -480,36 +521,24 @@ pub fn position_caster(
     let Some(caster) = stage.caster else { return };
     let entry = playback.playing.then_some(playback.selected).flatten();
 
+    // The dummy is staged mirrored across the origin from the caster; both the
+    // auto-attack approach and the dummy's own staging below key off this.
+    let dummy_home = Vec3::new(-stage.caster_home.x, stage.caster_home.y, 0.0);
+
     let target = match entry {
-        Some(SandboxEntry::Body(BodyAnimation::WalkBob)) => {
-            // Phase comes from the pass clock, not absolute elapsed time, and
-            // the circle is centred one radius BEHIND the staged position, so
-            // the walk starts exactly at `caster_home` and eases away from it.
-            // Keying the angle off `time.elapsed_secs()` put the caster at an
-            // arbitrary point on the circle on its first frame, teleporting it
-            // up to 2 * radius and driving `update_walk_animation`'s per-frame
-            // XZ delta into its `WALK_MAX_PHASE_STEP` clamp.
-            //
-            // The radius is deliberately small. At 3yd the caster walked clean
-            // out of the camera presets' shot, which made the one entry whose
-            // whole subject is locomotion the hardest one to actually watch.
-            const WALK_RADIUS: f32 = 1.4;
-            const WALK_ANGULAR_SPEED: f32 = 1.4;
-            let angle = playback.elapsed * WALK_ANGULAR_SPEED;
-            Vec3::new(
-                stage.caster_home.x - WALK_RADIUS + angle.cos() * WALK_RADIUS,
-                stage.caster_home.y,
-                stage.caster_home.z + angle.sin() * WALK_RADIUS,
-            )
-        }
+        Some(SandboxEntry::Body(BodyAnimation::WalkBob)) => circle_walk(
+            stage.caster_home,
+            playback.elapsed,
+            WALK_RADIUS,
+            WALK_ANGULAR_SPEED,
+        ),
         Some(SandboxEntry::Body(BodyAnimation::AutoAttack)) => {
             // Melee must close. Ranged is already in range at the staged
             // separation and must NOT close: the Hunter's Auto Shot is
             // cancelled inside its dead zone, so walking it in would silence
             // the very animation being previewed.
             if config.caster_class.is_melee() {
-                let dummy_x = -stage.caster_home.x;
-                Vec3::new(dummy_x - MELEE_STANDOFF, stage.caster_home.y, 0.0)
+                dummy_home - Vec3::X * MELEE_STANDOFF
             } else {
                 stage.caster_home
             }
@@ -522,6 +551,20 @@ pub fn position_caster(
             transform.translation = target;
         }
     }
+
+    let Some(dummy) = stage.dummy else { return };
+    let dummy_target = match entry {
+        Some(SandboxEntry::Ability(AbilityType::Polymorph)) => {
+            circle_walk(dummy_home, playback.elapsed, SHEEP_RADIUS, SHEEP_ANGULAR_SPEED)
+        }
+        _ => dummy_home,
+    };
+
+    if let Ok(mut transform) = movers.get_mut(dummy) {
+        if transform.translation != dummy_target {
+            transform.translation = dummy_target;
+        }
+    }
 }
 
 /// Keeps the staged units alive and castable across repeated plays.
@@ -531,12 +574,20 @@ pub fn position_caster(
 /// into matches. Restoring health here leaves the damage path itself untouched.
 pub fn sustain_staged_units(
     stage: Res<SandboxStage>,
-    mut combatants: Query<&mut Combatant>,
+    mut combatants: Query<(&mut Combatant, Option<&mut DRTracker>)>,
 ) {
     for entity in stage.caster.into_iter().chain(stage.dummy) {
-        if let Ok(mut combatant) = combatants.get_mut(entity) {
+        if let Ok((mut combatant, dr)) = combatants.get_mut(entity) {
             combatant.current_health = combatant.max_health;
             combatant.current_mana = combatant.max_mana;
+            // Diminishing returns escalate per CC application and the reset
+            // timer re-arms each time — a looping Polymorph entry re-applies
+            // every ~6s, so by the third pass the dummy is IMMUNE and the
+            // transform silently stops. Same sustain rationale as the health
+            // restore above: keep the entry replayable, leave sim code alone.
+            if let Some(mut dr) = dr {
+                dr.reset();
+            }
             // Rogues spawn stealthed (`Combatant::new`), and in a match the
             // class AI breaks stealth on its opener. No class AI runs here, so
             // a staged Rogue would stay stealthed forever — and stealth fades

@@ -376,7 +376,7 @@ impl Plugin for StatesPlugin {
                     play_match::animate_orb_consumption,    // Orb pickup shrink/move animation
                     play_match::update_shield_bubbles,      // Spawn/despawn shield bubbles
                     play_match::follow_shield_bubbles,      // Update bubble positions
-                    play_match::update_polymorph_visuals,   // Cuboid mesh when polymorphed
+                    play_match::update_polymorph_visuals,   // Sheep body swap when polymorphed
                     play_match::spawn_flame_visuals,        // Visual meshes for flame particles
                     play_match::update_flame_particles,     // Move/fade flame particles
                 )
@@ -409,6 +409,18 @@ impl Plugin for StatesPlugin {
                     play_match::spawn_dispel_visuals,          // Spawn burst when dispel succeeds
                     play_match::update_dispel_bursts,          // Expand sphere and fade
                     play_match::cleanup_expired_dispel_bursts, // Remove expired bursts
+                )
+                    .after(CombatSystemPhase::CombatResolution)
+                    .run_if(in_combat_scene),
+            )
+            // Transform puff visual effects (separate group to avoid tuple size limits)
+            // The cloud pop at both ends of a polymorph — graphical only.
+            .add_systems(
+                Update,
+                (
+                    play_match::spawn_transform_puff_visuals, // Attach cloud lobes to new puffs
+                    play_match::update_transform_puffs,       // Expand, rise and fade
+                    play_match::cleanup_expired_transform_puffs, // Remove expired puffs
                 )
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_combat_scene),
@@ -556,11 +568,15 @@ impl Plugin for StatesPlugin {
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_combat_scene),
             )
-            // Walking animation: vertical bob on moving combatants/pets.
-            // Must run after movement has settled so the post-movement XZ is read.
+            // Walking animation: vertical bob on moving combatants/pets, and
+            // the hop that replaces it while a unit is polymorphed. Must run
+            // after movement has settled so the post-movement XZ is read.
             .add_systems(
                 Update,
-                play_match::update_walk_animation
+                (
+                    play_match::update_walk_animation,
+                    play_match::update_sheep_hop,
+                )
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_combat_scene),
             )
