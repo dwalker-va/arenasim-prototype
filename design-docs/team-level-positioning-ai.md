@@ -568,6 +568,14 @@ caster" is one position query, not two behaviours arbitrated by an HP threshold.
 
 ### CC targeting is stance-derived, not static
 
+> **Superseded 2026-08-07 by [cc-value-model.md](cc-value-model.md).** The
+> diagnosis below holds — a hard-coded CC guard turned out to be a stance
+> assumption in disguise — but the remedy (a stance → CC-target table) is a
+> special case of pricing CC by expected denial, and every row of the table
+> below falls out of that model without a stance branch. Stance remains an input
+> to the denial rate; it stops being what selects CC targets. Read the newer doc
+> before implementing this section.
+
 The layer model's first concrete payoff outside positioning. CC target selection
 is currently a fixed per-unit rule, and the Mage's Polymorph is the clearest case:
 `try_polymorph` reads `combatant.cc_target` and **hard-rejects** the kill target,

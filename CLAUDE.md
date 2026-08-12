@@ -163,6 +163,14 @@ For deeper context, see these focused references:
   answer "is the new AI better", so set the sides differently and run both
   assignments — see *How to measure a step* in that doc, and `tests/camp_sweep.rs`.
   Background on the camp: **[the camp handoff](design-docs/2026-08-01-nagrand-camp-handoff.md)**.
+- **[CC Value Model](design-docs/cc-value-model.md)** - PROPOSED (nothing built)
+  design for pricing CC by expected denial instead of assigning it by role
+  (`is_healer()`). Read before touching any CC targeting logic — Fear,
+  Polymorph, Hammer of Justice, Kidney Shot, Wind Shear, Spell Lock. Documents
+  the measured defect it exists to fix (the Warlock's healer-lockout Fear is
+  disabled whenever the Warlock is assigned to damage the healer, and 33% of
+  its healer Fears break early on friendly damage), and supersedes the CC half
+  of the `TeamPlan` doc's *CC targeting is stance-derived* section.
 - **[Stat Scaling](design-docs/stat-scaling-system.md)** - Damage/healing formulas and coefficients
 - **[Game Design](design-docs/game-design-doc.md)** - High-level game vision
 - **[Documented Solutions](docs/solutions/)** - Documented solutions to past problems (bugs, implementation patterns, workflows) organized by category, with YAML frontmatter (`module`, `tags`, `category`). Relevant when implementing or debugging in documented areas.

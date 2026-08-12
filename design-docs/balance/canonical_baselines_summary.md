@@ -1,5 +1,122 @@
 # Canonical Balance Baselines
 
+> ## Regenerated 2026-08-11 against COMMITTED HEAD (20144b9)
+>
+> The three `canonical_*.csv` files are now a valid reference for the **committed
+> codebase**, replacing the 2026-07-09 set. The narrative below is the
+> 2026-07-09 write-up and has NOT been rewritten; read this block first.
+>
+> ### Why the previous set had to be discarded
+>
+> **The 2026-07-09 baselines did not reproduce against committed HEAD**, and had
+> not for some time — roughly a month of commits landed in between (team-solve,
+> probe recalibration, PR #95 fixes, kill-call banter). Nothing was wrong with
+> how they were generated; they simply aged out, and nothing detected it.
+>
+> The drift is **symmetric and cancels in aggregate** — mean per-cell delta
+> across matches with no Warlock was +0.01pt (2v2) / -0.10pt (3v3) — but
+> individual cells swing up to **±50pt in both directions**, and per-class it
+> reaches 1.1pt. So a stale-baseline diff mixes real effect with arbitrarily
+> large per-cell noise. One cell (`Warrior+Warlock+Shaman vs Mage+Rogue+Hunter`)
+> read 84/100 in the old CSV and 3/100 at HEAD, which looked like a catastrophic
+> regression and was pure cascade.
+>
+> **Lesson: a single swung cell is never evidence.** Compare comp aggregates,
+> which ARE drift-stable (the HEAD canary reproduces 2026-07-09's 49.6/48.8 to
+> within 0.1pt), or run a controlled A/B.
+>
+> ### Class standings — committed HEAD reference
+>
+> | Class | 1v1 | 2v2 comp | 3v3 comp |
+> |---|---|---|---|
+> | Mage | 62.5 | 65.5 | 67.1 |
+> | Shaman | 43.1 | 59.5 | 50.0 |
+> | Paladin | 70.6 | 59.3 | 49.8 |
+> | Priest | 31.2 | 51.6 | 49.9 |
+> | Rogue | 78.8 | 41.9 | 52.3 |
+> | Hunter | 44.3 | 45.1 | 39.0 |
+> | Warlock | 37.1 | 42.6 | 46.4 |
+> | Warrior | 23.8 | 39.3 | 45.1 |
+>
+> 3v3 anomaly canary is **clean** — `Mage+Rogue+Warlock` at 49.7/48.8, below
+> threshold, as it has been since the 2026-07-09 shield-scaling fix.
+>
+> ### Regeneration is now ~40 minutes, not ~22 hours
+>
+> The headless runner did not put `FixedUpdate` — where every combat system
+> actually runs — on the single-threaded executor, so the whole simulation
+> dispatched through the shared `ComputeTaskPool`. Committed HEAD runs the
+> matrices at **3 matches/s**; with that one line it is **69-78/s**, a **26x**
+> speedup (the 2v2 alone took 7.7 hours at HEAD).
+>
+> These baselines were generated with a HEAD binary carrying ONLY that patch,
+> and its result-neutrality was **verified, not assumed**: the 1v1 and 2v2
+> outputs are byte-identical to pure-HEAD runs across **84,800 matches** (winner
+> AND duration). The fix is independent of any gameplay work and is worth
+> landing on its own — it is what made a properly controlled balance measurement
+> affordable.
+>
+> ---
+>
+> ## Pending (uncommitted): the Warlock DoT/Fear cost cut
+>
+> Four ability costs, all Warlock: Corruption, Curse of Agony and Immolate
+> 25 -> 16 (matching Dispel Magic, so a DoT application costs what the dispel
+> answering it costs); Fear 30 -> 22. Unstable Affliction untouched at 30.
+> Rationale: `2026-08-09-warlock-dot-vs-dispel-cost.md`.
+>
+> Results: `2026-08-10-warlock-costcut-{1v1,2v2,3v3}.csv`. **Diff them against
+> `canonical_*.csv` directly** — the canonical set IS the matched control. That
+> is not an assumption: the binary carrying this uncommitted work was run on the
+> HEAD assets over the full matrix and is **byte-identical to HEAD across all
+> 241,600 matches** in winner and duration, because `cc_policy` defaults to
+> `Identity`. So every delta below is caused by the four mana costs and nothing
+> else, and matches with no Warlock are identical by construction (verified:
+> 0 of 4,900 / 44,100 / 61,250).
+>
+> ### Effect, exact
+>
+> | Class | 1v1 | 2v2 comp | 3v3 comp |
+> |---|---|---|---|
+> | **Warlock** | **37.1 -> 40.3 (+3.2)** | **42.6 -> 45.6 (+3.0)** | **46.4 -> 51.5 (+5.1)** |
+> | Paladin | 70.6 -> 67.6 (-3.0) | 59.3 -> 58.1 (-1.2) | 49.8 -> 49.6 (-0.2) |
+> | Hunter | 44.3 (0.0) | 45.1 -> 44.7 (-0.4) | 39.0 -> 37.4 (-1.6) |
+> | Mage | 62.5 (0.0) | 65.5 -> 65.1 (-0.4) | 67.1 -> 65.7 (-1.4) |
+> | Rogue | 78.8 (0.0) | 41.9 -> 41.2 (-0.7) | 52.3 -> 51.1 (-1.2) |
+> | Warrior | 23.8 (0.0) | 39.3 -> 38.7 (-0.6) | 45.1 -> 44.4 (-0.7) |
+> | Priest | 31.2 -> 31.1 (-0.1) | 51.6 -> 51.8 (+0.2) | 49.9 -> 49.8 (-0.1) |
+> | Shaman | 43.1 -> 43.0 (-0.1) | 59.5 -> 59.1 (-0.4) | 50.0 -> 50.1 (+0.1) |
+>
+> No over-correction: the Warlock reaches par in 3v3 (51.5) and stays below par
+> in 2v2 (45.6), up from second-weakest. The bill falls mostly on the **Paladin
+> in 1v1 (-3.0)** — the long mana war is exactly where a cheaper Warlock gains.
+>
+> ### What shapes it helped
+>
+> - **Anything that can dispel — a step function, not a gradient.** 2v2 by
+>   opposing dispeller count: 0 -> **+0.8 (z=1.00, ns)**, 1 -> **+5.8**,
+>   2 -> **+5.8**. 3v3: 0 -> +1.0 (ns), 1 -> +5.3, 2 -> **+7.4**. Against comps
+>   with no dispeller it did essentially nothing, which is precisely the
+>   mechanism it was designed around.
+> - **Long games.** 2v2: 0-30s **+0.9 (ns)** -> 30-45s +4.5 -> 45-60s +7.5 ->
+>   60-90s +6.9 -> **90s+ +11.1**. 3v3 is monotone: +0.5 (ns) -> +2.1 -> +6.0 ->
+>   +10.4 -> **+13.6**.
+> - **Paired with a healer.** With +4.5, without +2.4. By partner: **Priest
+>   +7.2**, Hunter +3.8, Paladin +3.3, Shaman +3.1, Mage +2.9, then the burst
+>   partners Rogue +1.5 and Warrior +1.3 — matching the length gradient.
+>
+> Nothing got measurably worse: worst cell -4.5pt (2v2, z=-1.17) and -12.0pt
+> (3v3, z=-2.05); one z=-2 cell in ~1,900 is chance. No shape bucket is negative.
+>
+> ### Action: one real regression
+>
+> **`Mage+Rogue+Warlock` crosses back into anomaly territory, and this change
+> causes it**: HEAD **49.7 / 48.8** (clean) -> **51.3 / 50.9** (flagged). A
+> zero-healer triple-DPS comp beating the competitive field is the shape this
+> project has twice decided is wrong; the 2026-07-09 cycle cleared it via shield
+> scaling. Other zero-healer Warlock comps rose in step (Mage+Warlock+Warrior
+> 43.9/43.8 -> 46.6/46.7; Hunter+Mage+Warlock 47.2/38.0 -> 48.8/40.0).
+
 **Generated 2026-07-09** — regenerated after the **Priest sustain cycle**:
 (1) Power Word: Shield now scales with spell power (25 + 0.4 × SP ≈ 70 absorb
 at the stock 112-SP loadout, was flat 50), (2) new Priest ability **Mana
