@@ -171,6 +171,7 @@ pub fn check_orb_pickups(
                     target: combatant_entity,
                     aura: Aura {
                         effect_type: AuraType::ShadowSight,
+                        unique_per_caster: false,
                         duration: SHADOW_SIGHT_DURATION,
                         magnitude: 1.0, // Unused for this aura type
                         break_on_damage_threshold: 0.0, // Does not break on damage

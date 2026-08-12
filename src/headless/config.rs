@@ -53,6 +53,28 @@ pub struct HeadlessMatchConfig {
     pub team1_ai_profile: Option<String>,
     #[serde(default)]
     pub team2_ai_profile: Option<String>,
+    /// Which CC-selection model to run. "Identity" (default, today's behaviour)
+    /// or "Priced". A SEPARATE axis from `ai_profile` on purpose, so the CC
+    /// model can be measured under Legacy positioning — see `cc_policy.rs`.
+    #[serde(default)]
+    pub cc_policy: Option<String>,
+    /// Per-team overrides. Required for head-to-head measurement: a uniform A/B
+    /// compares two internally consistent worlds and cannot answer "is the new
+    /// model better".
+    #[serde(default)]
+    pub team1_cc_policy: Option<String>,
+    #[serde(default)]
+    pub team2_cc_policy: Option<String>,
+    /// Which interrupt-selection model to run. "Identity" (default) or "Priced".
+    /// A SEPARATE axis from `cc_policy` because it governs a different decision
+    /// — see `cc_policy.rs`. Default recommended: the priced variant is
+    /// measured and does not beat the heuristic.
+    #[serde(default)]
+    pub interrupt_policy: Option<String>,
+    #[serde(default)]
+    pub team1_interrupt_policy: Option<String>,
+    #[serde(default)]
+    pub team2_interrupt_policy: Option<String>,
     /// Optional grouping label echoed verbatim into batch-runner output. Lets a
     /// strategy-var sweep keep variants distinct (e.g. "Hunter+Spider vs Mage"
     /// vs "Hunter+Boar vs Mage") when two configs share the same class lists.
@@ -128,6 +150,12 @@ impl Default for HeadlessMatchConfig {
         Self {
             team1: Vec::new(),
             team2: Vec::new(),
+            cc_policy: None,
+            team1_cc_policy: None,
+            team2_cc_policy: None,
+            interrupt_policy: None,
+            team1_interrupt_policy: None,
+            team2_interrupt_policy: None,
             label: None,
             map: default_map(),
             team1_kill_target: None,
@@ -182,6 +210,53 @@ impl HeadlessMatchConfig {
     /// headless runner and the replay launcher, and `validate()` checked a
     /// different field list than the runner consumed — the exact class of
     /// drift a second implementation invites.
+    /// Resolve the per-team interrupt policies for this config.
+    ///
+    /// Mirrors `cc_policies` exactly; the two axes are configured the same way
+    /// and resolved independently.
+    pub fn interrupt_policies(
+        &self,
+    ) -> Result<crate::states::play_match::cc_policy::InterruptPolicies, String> {
+        use crate::states::play_match::cc_policy::{InterruptPolicies, InterruptPolicy};
+        let base = match &self.interrupt_policy {
+            Some(s) => InterruptPolicy::parse(s)?,
+            None => InterruptPolicy::default(),
+        };
+        let team1 = match &self.team1_interrupt_policy {
+            Some(s) => InterruptPolicy::parse(s)?,
+            None => base,
+        };
+        let team2 = match &self.team2_interrupt_policy {
+            Some(s) => InterruptPolicy::parse(s)?,
+            None => base,
+        };
+        Ok(InterruptPolicies { team1, team2 })
+    }
+
+    /// Resolve the per-team CC policies for this config.
+    ///
+    /// `cc_policy` sets both sides; `team1_cc_policy` / `team2_cc_policy`
+    /// override per side. Mirrors `ai_profiles` exactly so the two axes are
+    /// configured the same way.
+    pub fn cc_policies(
+        &self,
+    ) -> Result<crate::states::play_match::cc_policy::CcPolicies, String> {
+        use crate::states::play_match::cc_policy::{CcPolicies, CcPolicy};
+        let base = match &self.cc_policy {
+            Some(s) => CcPolicy::parse(s)?,
+            None => CcPolicy::default(),
+        };
+        let team1 = match &self.team1_cc_policy {
+            Some(s) => CcPolicy::parse(s)?,
+            None => base,
+        };
+        let team2 = match &self.team2_cc_policy {
+            Some(s) => CcPolicy::parse(s)?,
+            None => base,
+        };
+        Ok(CcPolicies { team1, team2 })
+    }
+
     pub fn ai_profiles(
         &self,
     ) -> Result<crate::states::play_match::ai_profile::AiProfiles, String> {
@@ -221,6 +296,8 @@ impl HeadlessMatchConfig {
         // resolution can never disagree on which fields exist — the review that
         // added this check found exactly that divergence once already.
         self.ai_profiles()?;
+        self.cc_policies()?;
+        self.interrupt_policies()?;
 
         // Validate kill targets
         if let Some(target) = self.team1_kill_target {

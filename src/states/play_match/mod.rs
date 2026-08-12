@@ -42,6 +42,8 @@ pub mod auras;
 pub mod effects;
 pub mod match_flow;
 pub mod ai_profile;
+pub mod cc_policy;
+pub mod cc_value;
 pub mod team_plan;
 pub mod team_solve;
 pub mod arena_bounds;
@@ -624,8 +626,18 @@ pub fn setup_play_match(
     // exactly. Present => honour them; absent => fresh defaults as normal.
     existing_rng: Option<Res<GameRng>>,
     existing_profile: Option<Res<ai_profile::AiProfiles>>,
+    existing_cc_policy: Option<Res<cc_policy::CcPolicies>>,
+    existing_interrupt_policy: Option<Res<cc_policy::InterruptPolicies>>,
 ) {
     info!("Setting up Play Match scene with config: {:?}", *config);
+
+    // CC axes — inserted in BOTH modes (dual-registration rule), honouring a
+    // `--replay` pre-insert. Without this the graphical client had no
+    // `CcPolicies` at all and every match silently ran `Identity`.
+    let cc_policies = existing_cc_policy.map(|p| *p).unwrap_or_default();
+    commands.insert_resource(cc_policies);
+    let interrupt_policies = existing_interrupt_policy.map(|p| *p).unwrap_or_default();
+    commands.insert_resource(interrupt_policies);
 
     // Clear combat log for new match
     combat_log.clear();
@@ -1172,6 +1184,7 @@ fn spawn_combatant(
         Visibility::default(),
         combatant,
         DRTracker::default(),
+        RecentDamage::default(),
         FloatingTextState {
             next_pattern_index: 0,
         },
@@ -1305,6 +1318,7 @@ fn spawn_pet(
         Visibility::default(),
         pet_combatant,
         DRTracker::default(),
+        RecentDamage::default(),
         Pet {
             owner: owner_entity,
             pet_type,
@@ -1360,6 +1374,8 @@ pub fn cleanup_play_match(
     // unaffected by this exit-time cleanup.
     commands.remove_resource::<GameRng>();
     commands.remove_resource::<ai_profile::AiProfiles>();
+    commands.remove_resource::<cc_policy::CcPolicies>();
+    commands.remove_resource::<cc_policy::InterruptPolicies>();
     commands.remove_resource::<team_plan::TeamPlans>();
     // Remove optional resources (may not exist if match didn't finish)
     commands.remove_resource::<VictoryCelebration>();

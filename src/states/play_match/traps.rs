@@ -113,6 +113,7 @@ pub fn trap_system(
                             target: target_entity,
                             aura: Aura {
                                 effect_type: AuraType::Incapacitate,
+                                unique_per_caster: false,
                                 duration: 8.0,
                                 magnitude: 0.0,
                                 tick_interval: 0.0,
@@ -242,6 +243,7 @@ pub fn slow_zone_system(
                         // Apply new slow aura directly (no DR for zone-managed auras)
                         auras.auras.push(Aura {
                             effect_type: AuraType::MovementSpeedSlow,
+                            unique_per_caster: false,
                             duration: 2.0,
                             magnitude: zone.slow_magnitude,
                             tick_interval: 0.0,
@@ -264,6 +266,7 @@ pub fn slow_zone_system(
                     commands.entity(target_entity).try_insert(ActiveAuras {
                         auras: vec![Aura {
                             effect_type: AuraType::MovementSpeedSlow,
+                            unique_per_caster: false,
                             duration: 2.0,
                             magnitude: zone.slow_magnitude,
                             tick_interval: 0.0,

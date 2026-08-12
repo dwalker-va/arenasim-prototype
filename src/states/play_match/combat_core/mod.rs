@@ -169,6 +169,7 @@ mod tests {
     fn create_absorb_aura(amount: f32, ability_name: &str) -> Aura {
         Aura {
             effect_type: AuraType::Absorb,
+            unique_per_caster: false,
             duration: 30.0,
             magnitude: amount,
             break_on_damage_threshold: 0.0,
@@ -428,6 +429,7 @@ mod tests {
         let mut auras = ActiveAuras {
             auras: vec![Aura {
                 effect_type: AuraType::DamageImmunity,
+                unique_per_caster: false,
                 duration: 8.0,
                 magnitude: 0.0,
                 break_on_damage_threshold: -1.0,
@@ -480,6 +482,7 @@ mod tests {
         let mut auras = ActiveAuras {
             auras: vec![Aura {
                 effect_type: AuraType::SpellResistanceBuff,
+                unique_per_caster: false,
                 duration: 300.0,
                 magnitude: 60.0,
                 break_on_damage_threshold: -1.0,
@@ -563,6 +566,7 @@ mod tests {
         let auras = ActiveAuras {
             auras: vec![Aura {
                 effect_type: AuraType::MovementSpeedSlow,
+                unique_per_caster: false,
                 duration: 5.0,
                 magnitude: 0.7,
                 break_on_damage_threshold: 0.0,
@@ -597,6 +601,7 @@ mod tests {
         let auras = ActiveAuras {
             auras: vec![Aura {
                 effect_type: AuraType::WeakenedSoul,
+                unique_per_caster: false,
                 duration: 15.0,
                 magnitude: 0.0,
                 break_on_damage_threshold: 0.0,
@@ -735,6 +740,7 @@ mod tests {
     fn create_aura(effect_type: AuraType, magnitude: f32) -> Aura {
         Aura {
             effect_type,
+            unique_per_caster: false,
             duration: 30.0,
             magnitude,
             break_on_damage_threshold: 0.0,

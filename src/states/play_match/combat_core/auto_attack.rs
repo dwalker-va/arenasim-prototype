@@ -551,6 +551,7 @@ pub fn combat_auto_attack(
             target: attacker_entity,
             aura: Aura {
                 effect_type: AuraType::MovementSpeedSlow,
+                unique_per_caster: false,
                 duration: 5.0,
                 magnitude: 0.7, // 30% slow (0.7 = 70% speed)
                 break_on_damage_threshold: -1.0,
@@ -573,6 +574,7 @@ pub fn combat_auto_attack(
             target: attacker_entity,
             aura: Aura {
                 effect_type: AuraType::AttackSpeedSlow,
+                unique_per_caster: false,
                 duration: 5.0,
                 magnitude: 0.25,
                 break_on_damage_threshold: -1.0,

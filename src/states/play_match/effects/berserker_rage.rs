@@ -52,6 +52,7 @@ pub fn process_berserker_rage(
 
             let immunity_aura = Aura {
                 effect_type: AuraType::FearImmunity,
+                unique_per_caster: false,
                 duration: immunity_duration,
                 magnitude: immunity_magnitude,
                 tick_interval: 0.0,

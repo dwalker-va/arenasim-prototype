@@ -26,6 +26,8 @@ use crate::states::play_match::components::{
     DRTracker, Pet,
 };
 use crate::states::play_match::ai_profile::AiProfiles;
+use crate::states::play_match::cc_policy::CcPolicies;
+use crate::states::play_match::components::RecentDamage;
 use crate::states::play_match::arena_bounds::ArenaBounds;
 use crate::states::play_match::map_geometry::ObstacleVolume;
 
@@ -59,6 +61,9 @@ pub struct CombatSnapshot {
     /// Per-TEAM, so a head-to-head match can run one implementation against
     /// the other. `context_for` resolves it to the acting unit's own team.
     pub ai_profile: AiProfiles,
+    pub cc_policy: CcPolicies,
+    pub recent_damage: BTreeMap<Entity, f32>,
+    pub recent_damage_dealt: BTreeMap<Entity, f32>,
 }
 
 impl CombatSnapshot {
@@ -90,11 +95,24 @@ impl CombatSnapshot {
             (With<ChannelingState>, Without<CastingState>),
         >,
         dr_tracker_query: &Query<(Entity, &DRTracker)>,
+        recent_damage_query: &Query<(Entity, &RecentDamage)>,
         pet_query: &Query<&Pet>,
         obstacles: &[ObstacleVolume],
         bounds: ArenaBounds,
         ai_profile: AiProfiles,
+        cc_policy: CcPolicies,
     ) -> Self {
+        // Trailing gross-damage rate per entity, for the CC value model's break
+        // term. Snapshotted here so every class AI sees one consistent view.
+        let recent_damage: BTreeMap<Entity, f32> = recent_damage_query
+            .iter()
+            .map(|(e, r)| (e, r.rate()))
+            .collect();
+        let recent_damage_dealt: BTreeMap<Entity, f32> = recent_damage_query
+            .iter()
+            .map(|(e, r)| (e, r.dealt_rate()))
+            .collect();
+
         let mut combatants: BTreeMap<Entity, CombatantInfo> = BTreeMap::new();
         let mut active_auras: BTreeMap<Entity, Vec<Aura>> = BTreeMap::new();
         let mut ability_cooldowns: BTreeMap<Entity, BTreeMap<AbilityType, f32>> = BTreeMap::new();
@@ -121,6 +139,7 @@ impl CombatSnapshot {
                                     combatant: &Combatant,
                                     transform: &Transform,
                                     casting_ability: Option<AbilityType>,
+                                    casting_remaining: f32,
                                     combatants: &mut BTreeMap<Entity, CombatantInfo>,
                                     ability_cooldowns: &mut BTreeMap<
             Entity,
@@ -151,6 +170,7 @@ impl CombatSnapshot {
                 target: combatant.target,
                 is_pet: pet_comp.is_some(),
                 casting_ability,
+                casting_remaining,
                 pet_type: pet_comp.map(|p| p.pet_type),
                 pet: owner_to_pet.get(&entity).copied(),
             });
@@ -165,20 +185,20 @@ impl CombatSnapshot {
         };
 
         for (entity, combatant, transform, auras_opt, _, _) in aura_query.iter() {
-            insert_combatant(entity, &combatant, transform, None, &mut combatants, &mut ability_cooldowns);
+            insert_combatant(entity, &combatant, transform, None, 0.0, &mut combatants, &mut ability_cooldowns);
             if let Some(auras) = auras_opt {
                 active_auras.insert(entity, auras.auras.clone());
             }
         }
 
         for (entity, combatant, transform, auras_opt, cast_state) in casting_auras.iter() {
-            insert_combatant(entity, combatant, transform, Some(cast_state.ability), &mut combatants, &mut ability_cooldowns);
+            insert_combatant(entity, combatant, transform, Some(cast_state.ability), cast_state.time_remaining, &mut combatants, &mut ability_cooldowns);
             if let Some(auras) = auras_opt {
                 active_auras.insert(entity, auras.auras.clone());
             }
         }
         for (entity, combatant, transform, auras_opt, channel_state) in channeling_auras.iter() {
-            insert_combatant(entity, combatant, transform, Some(channel_state.ability), &mut combatants, &mut ability_cooldowns);
+            insert_combatant(entity, combatant, transform, Some(channel_state.ability), channel_state.duration_remaining, &mut combatants, &mut ability_cooldowns);
             if let Some(auras) = auras_opt {
                 active_auras.insert(entity, auras.auras.clone());
             }
@@ -189,7 +209,7 @@ impl CombatSnapshot {
             .map(|(entity, tracker)| (entity, tracker.clone()))
             .collect();
 
-        Self { combatants, active_auras, dr_trackers, ability_cooldowns, obstacles: obstacles.to_vec(), bounds, ai_profile }
+        Self { combatants, active_auras, dr_trackers, ability_cooldowns, obstacles: obstacles.to_vec(), bounds, ai_profile, cc_policy, recent_damage, recent_damage_dealt }
     }
 
     /// Borrow a `CombatContext` view of this snapshot for the given combatant.
@@ -200,6 +220,13 @@ impl CombatSnapshot {
             bounds: self.bounds,
             // The acting unit's OWN profile — this is what makes every
             // downstream `ctx.ai_profile.is_team_plan()` gate per-team.
+            cc_policy: self
+                .combatants
+                .get(&self_entity)
+                .map(|c| self.cc_policy.for_team(c.team))
+                .unwrap_or_default(),
+            recent_damage: &self.recent_damage,
+            recent_damage_dealt: &self.recent_damage_dealt,
             ai_profile: self
                 .combatants
                 .get(&self_entity)

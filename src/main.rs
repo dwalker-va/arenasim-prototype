@@ -180,16 +180,28 @@ fn build_graphical_app(replay: Option<headless::HeadlessMatchConfig>) -> App {
             let profile = cfg
                 .ai_profiles()
                 .unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(1) });
+            // The CC axes resolve the same way and MUST be carried too. They
+            // were not, and a replay silently ran both `Identity` and `Priced`
+            // configs as `Identity` — the graphical match played identically
+            // under both while the headless run of the same seed diverged.
+            let cc_policy = cfg
+                .cc_policies()
+                .unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(1) });
+            let interrupt_policy = cfg
+                .interrupt_policies()
+                .unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(1) });
             let rng = match cfg.random_seed {
                 Some(seed) => arenasim::states::play_match::GameRng::from_seed(seed),
                 None => arenasim::states::play_match::GameRng::default(),
             };
             println!(
-                "Replaying: {:?} vs {:?} on {} | profile {:?} | seed {:?}",
-                cfg.team1, cfg.team2, cfg.map, profile, rng.seed,
+                "Replaying: {:?} vs {:?} on {} | profile {:?} | cc {:?} | interrupts {:?} | seed {:?}",
+                cfg.team1, cfg.team2, cfg.map, profile, cc_policy, interrupt_policy, rng.seed,
             );
             app.insert_resource(match_config)
                 .insert_resource(profile)
+                .insert_resource(cc_policy)
+                .insert_resource(interrupt_policy)
                 .insert_resource(rng)
                 .insert_state(GameState::PlayMatch);
         }

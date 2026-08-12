@@ -35,6 +35,13 @@ pub struct AbilityDispatchExtras<'w, 's> {
     /// Which AI implementation this match runs under. `Option` so a scene that
     /// never inserted it falls back to `Legacy` rather than panicking.
     ai_profile: Option<Res<'w, super::ai_profile::AiProfiles>>,
+    /// Which CC-selection model each team runs under. `Option` so a scene that
+    /// never inserted it falls back to `Identity` (today's behaviour).
+    cc_policy: Option<Res<'w, super::cc_policy::CcPolicies>>,
+    /// Trailing gross-damage window per combatant, for the CC value model's
+    /// break term. Bundled here rather than as a bare query argument because
+    /// `decide_abilities` is already at Bevy's 16 system-param limit.
+    recent_damage: Query<'w, 's, (Entity, &'static RecentDamage)>,
 }
 
 pub fn acquire_targets(
@@ -572,6 +579,7 @@ pub fn decide_abilities(
         &casting_auras,
         &channeling_auras,
         &dr_tracker_query,
+        &extras.recent_damage,
         &pet_query,
         &extras.map_geometry.volumes,
         extras.map_geometry.bounds,
@@ -579,6 +587,7 @@ pub fn decide_abilities(
         // implementation I run under" and every existing gate becomes per-team
         // for free.
         extras.ai_profile.map(|p| *p).unwrap_or_default(),
+        extras.cc_policy.map(|p| *p).unwrap_or_default(),
     );
 
     // Queue for instant ability attacks (Ambush, Sinister Strike, Mortal Strike)
@@ -1359,6 +1368,88 @@ pub fn decide_abilities(
         }
     }
 }
+
+/// Damage-equivalent value of denying one enemy cast — the `I` term's magnitude.
+///
+/// Healing and damage are one currency here (see `super::cc_value::CastValue`), with two
+/// discounts that stop the model over-valuing a cast that was never going to
+/// matter:
+///
+/// - **Overheal.** Healing past a target's missing health buys the enemy nothing,
+///   so denying it buys us nothing. Capped at the heal target's actual deficit.
+/// - **Dampening.** `ArenaDampening` ramps all healing toward zero, so a heal
+///   denied at 80% dampening is worth a fifth of the same heal denied at the
+///   gates. Without this the AI systematically over-values CCing healers late.
+fn cast_denial_value(
+    caster: &Combatant,
+    cast_ability: AbilityType,
+    cast_target: Option<Entity>,
+    abilities: &AbilityDefinitions,
+    // `entity -> (team, current_health, max_health)`, snapshotted before the
+    // mutable pass so this can read a heal target's deficit without borrowing
+    // the combatant query the caller is iterating mutably.
+    hp: &std::collections::BTreeMap<Entity, (u8, f32, f32)>,
+    dampening: Option<&ArenaDampening>,
+    my_team: u8,
+) -> super::cc_value::CastValue {
+    let def = abilities.get_unchecked(&cast_ability);
+    let mut value = super::cc_value::CastValue::default();
+
+    let target_state = cast_target.and_then(|t| hp.get(&t).copied());
+
+    if def.is_heal() {
+        let raw = (def.healing_base_min + def.healing_base_max) / 2.0
+            + def.healing_coefficient * caster.spell_power;
+        // Only the part that would actually land on a hurt ally counts.
+        let deficit = target_state
+            .map(|(_, hp, max)| (max - hp).max(0.0))
+            .unwrap_or(raw);
+        let effective = raw.min(deficit);
+        value.healing_denied = dampening.map_or(effective, |d| d.apply(effective));
+    }
+
+    if def.is_damage() {
+        // Damage only counts when it is aimed at US.
+        let aimed_at_us = target_state.map(|(team, _, _)| team == my_team).unwrap_or(false);
+        if aimed_at_us {
+            let scaling = match def.damage_scales_with {
+                super::abilities::ScalingStat::AttackPower => caster.attack_power,
+                super::abilities::ScalingStat::SpellPower => caster.spell_power,
+                super::abilities::ScalingStat::None => 0.0,
+            };
+            value.damage_denied = (def.damage_base_min + def.damage_base_max) / 2.0
+                + def.damage_coefficient * scaling;
+        }
+    }
+
+    // Auras the cast would apply: damage-over-time is still damage, and crowd
+    // control landing on US is worth denying even though it deals nothing.
+    // Omitting these made the priced policy walk past Unstable Affliction and
+    // Fear entirely, which the Shaman comparison caught.
+    if let Some(aura) = def.applies_aura.as_ref() {
+        let aimed_at_us = target_state.map(|(team, _, _)| team == my_team).unwrap_or(false);
+        if aimed_at_us {
+            match aura.aura_type {
+                AuraType::DamageOverTime => {
+                    let ticks = if aura.tick_interval > 0.0 {
+                        (aura.duration / aura.tick_interval).max(1.0)
+                    } else {
+                        1.0
+                    };
+                    value.damage_denied += aura.magnitude * ticks;
+                }
+                t if super::cc_value::denies_actions(t) => {
+                    value.control_denied +=
+                        super::cc_value::CastValue::control_value(aura.duration);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    value
+}
+
 pub fn check_interrupts(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
@@ -1374,11 +1465,40 @@ pub fn check_interrupts(
     // Wind Shear to prefer interrupting the enemy healer mid-cast.
     casting_combatants: Query<(Entity, &Combatant, &Transform), With<CastingState>>,
     celebration: Option<Res<VictoryCelebration>>,
+    // Which INTERRUPT-selection model each team runs under. Deliberately a
+    // different axis from `CcPolicies`: this system decides which cast to
+    // interrupt, not which enemy to crowd-control, and the two measured with
+    // opposite signs. `Option` so a scene that never inserted it falls back
+    // to `Identity` (today's behaviour).
+    interrupt_policy: Option<Res<super::cc_policy::InterruptPolicies>>,
+    // Healing denied late in a match is worth less — all healing is scaled
+    // toward zero by dampening, so an interrupt's value must be too.
+    dampening: Option<Res<ArenaDampening>>,
 ) {
     // Don't interrupt during victory celebration
     if celebration.is_some() {
         return;
     }
+
+    // Snapshot HP before the mutable pass. Only needed by the priced path, so
+    // it stays empty (and free) under the default policy.
+    let any_priced = interrupt_policy
+        .as_ref()
+        .map(|p| p.team1.is_priced() || p.team2.is_priced())
+        .unwrap_or(false);
+    let hp_snapshot: std::collections::BTreeMap<Entity, (u8, f32, f32)> = if any_priced {
+        combatants
+            .iter()
+            .map(|(e, c, _)| (e, (c.team, c.current_health, c.max_health)))
+            .chain(
+                casting_combatants
+                    .iter()
+                    .map(|(e, c, _)| (e, (c.team, c.current_health, c.max_health))),
+            )
+            .collect()
+    } else {
+        std::collections::BTreeMap::new()
+    };
 
     for (entity, mut combatant, transform) in combatants.iter_mut() {
         if !combatant.is_alive() {
@@ -1402,7 +1522,143 @@ pub fn check_interrupts(
         // range, preferring the enemy HEALER mid-cast (then nearest, then lowest
         // entity id for determinism) so Wind Shear locks enemy heals rather than
         // only the kill target's casts.
-        let target_entity = if combatant.class == match_config::CharacterClass::Shaman {
+        let priced = interrupt_policy
+            .as_ref()
+            .map(|p| p.for_team(combatant.team).is_priced())
+            .unwrap_or(false);
+
+        // PRICED: every interrupter scans for the most valuable cast in range
+        // rather than reacting to whatever its own kill target happens to be
+        // doing. Today's Warrior/Rogue policy makes NO value judgement at all —
+        // it will spend a 15s cooldown on a Frostbolt as readily as on the Flash
+        // Heal that decides the game. Interrupts are instant, so `I` is always
+        // claimable; there is no "holding" across frames (that risks never
+        // firing), only picking the best of what is live this instant.
+        let priced_target = if priced {
+            let interrupt_ability = match combatant.class {
+                match_config::CharacterClass::Warrior => Some(AbilityType::Pummel),
+                match_config::CharacterClass::Rogue if !combatant.stealthed => {
+                    Some(AbilityType::Kick)
+                }
+                match_config::CharacterClass::Shaman => Some(AbilityType::WindShear),
+                _ => None,
+            };
+            match interrupt_ability {
+                None => None,
+                Some(ability) => {
+                    let range = abilities.get_unchecked(&ability).range;
+                    let my_pos = transform.translation;
+                    let mut best: Option<(Entity, f32)> = None;
+                    for (e, c, t) in casting_combatants.iter() {
+                        if c.team == combatant.team || !c.is_alive() {
+                            continue;
+                        }
+                        // Casts only: channels live in a disjoint query and are
+                        // folded in immediately below, so both are candidates.
+                        match casting_targets.get(e) {
+                            Ok(cs) if !cs.interrupted => {
+                                if my_pos.distance(t.translation) > range {
+                                    continue;
+                                }
+                                if let Ok(a) = all_auras.get(e) {
+                                    if a.auras.iter().any(|au| {
+                                        au.effect_type == AuraType::DamageImmunity
+                                    }) {
+                                        continue;
+                                    }
+                                }
+                                let denial = cast_denial_value(
+                                    c,
+                                    cs.ability,
+                                    cs.target,
+                                    &abilities,
+                                    &hp_snapshot,
+                                    dampening.as_deref(),
+                                    combatant.team,
+                                );
+                                let v = super::cc_value::interrupt_value_with_lockout(
+                                    denial,
+                                    cs.time_remaining,
+                                    // Interrupts are instant, so nothing is out
+                                    // of reach on timing grounds.
+                                    0.0,
+                                    abilities.get_unchecked(&ability).lockout_duration,
+                                    abilities.get_unchecked(&cs.ability).cast_time,
+                                );
+                                if v <= 0.0 {
+                                    continue;
+                                }
+                                // Ties break on entity id for determinism.
+                                let better = match best {
+                                    None => true,
+                                    Some((be, bv)) => v > bv || (v == bv && e < be),
+                                };
+                                if better {
+                                    best = Some((e, v));
+                                }
+                            }
+                            _ => continue,
+                        }
+                    }
+                    // Channels are interruptible too, and the legacy policy
+                    // interrupts them; leaving them out of the priced scan would
+                    // be a regression rather than a refinement.
+                    for (e, c, t) in casting_combatants.iter() {
+                        if c.team == combatant.team || !c.is_alive() {
+                            continue;
+                        }
+                        let Ok(ch) = channeling_targets.get(e) else { continue };
+                        if ch.interrupted || my_pos.distance(t.translation) > range {
+                            continue;
+                        }
+                        if let Ok(a) = all_auras.get(e) {
+                            if a.auras.iter().any(|au| au.effect_type == AuraType::DamageImmunity) {
+                                continue;
+                            }
+                        }
+                        let denial = cast_denial_value(
+                            c,
+                            ch.ability,
+                            Some(ch.target),
+                            &abilities,
+                            &hp_snapshot,
+                            dampening.as_deref(),
+                            combatant.team,
+                        );
+                        let v = super::cc_value::interrupt_value_with_lockout(
+                            denial,
+                            ch.duration_remaining,
+                            0.0,
+                            abilities.get_unchecked(&ability).lockout_duration,
+                            abilities.get_unchecked(&ch.ability).cast_time.max(1.0),
+                        );
+                        if v <= 0.0 {
+                            continue;
+                        }
+                        let better = match best {
+                            None => true,
+                            Some((be, bv)) => v > bv || (v == bv && e < be),
+                        };
+                        if better {
+                            best = Some((e, v));
+                        }
+                    }
+                    best.map(|(e, _)| e)
+                }
+            }
+        } else {
+            None
+        };
+
+        let target_entity = if priced {
+            match priced_target {
+                Some(e) => e,
+                // Nothing worth interrupting in range this frame. Deliberately
+                // NOT falling back to the legacy pick: spending the cooldown on
+                // a zero-value cast is the behaviour being replaced.
+                None => continue,
+            }
+        } else if combatant.class == match_config::CharacterClass::Shaman {
             let my_pos = transform.translation;
             let wind_shear_range = abilities.get_unchecked(&AbilityType::WindShear).range;
             let mut best: Option<(Entity, bool, f32)> = None;

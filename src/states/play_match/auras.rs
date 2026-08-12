@@ -88,6 +88,61 @@ pub fn update_auras(
     }
 }
 
+/// Maintain each combatant's [`RecentDamage`] window — the trailing gross damage
+/// rate the CC value model's break term needs.
+///
+/// Runs in phase 1, so each frame it observes the *previous* frame's fully
+/// resolved health and absorb totals. Gross damage is reconstructed the same way
+/// the step-0 probe harness reconstructs it — health lost plus absorb pool
+/// consumed — because `DamageTakenThisFrame` carries only the post-absorb figure
+/// and absorbed damage does not break CC. Deriving it identically here keeps the
+/// shipped estimator and the measured one from drifting apart.
+///
+/// Writes only to `RecentDamage`, which nothing reads unless `CcPolicy::Priced`
+/// is active, so this cannot perturb a `Legacy` seed.
+pub fn track_recent_damage(
+    mut combatants: Query<(&Combatant, Option<&ActiveAuras>, &mut RecentDamage)>,
+) {
+    for (combatant, auras, mut recent) in combatants.iter_mut() {
+        let absorb: f32 = auras
+            .map(|a| {
+                a.auras
+                    .iter()
+                    .filter(|x| x.effect_type == AuraType::Absorb)
+                    .map(|x| x.magnitude)
+                    .sum()
+            })
+            .unwrap_or(0.0);
+
+        // Use the CUMULATIVE `damage_taken` counter, not the health delta.
+        //
+        // Health delta is wrong and was measurably so: a unit being healed as
+        // fast as it is damaged shows no health loss, so its incoming damage
+        // read as ZERO — and healed units are exactly the ones that matter.
+        // With the health-delta version the denial rate evaluated to 0 for every
+        // enemy, the Warlock's team peel never fired at all (8 Death Coils -> 0),
+        // and win rate went 3/8 -> 0/8. `damage_taken` is monotonic, so healing
+        // cannot mask it.
+        if let Some(prev_damage) = recent.last_damage_taken {
+            let health_damage = (combatant.damage_taken - prev_damage).max(0.0);
+            // Absorbed damage never reaches `damage_taken`, so add the shield
+            // consumption to recover the GROSS figure the predictor expects
+            // (it models the absorb pool explicitly and would otherwise
+            // subtract the shield twice).
+            let absorb_consumed = (recent.last_absorb - absorb).max(0.0);
+            recent.record_frame(health_damage + absorb_consumed);
+        }
+        // Damage DEALT, from the same kind of cumulative counter.
+        if let Some(prev_dealt) = recent.last_damage_dealt {
+            recent.record_dealt_frame((combatant.damage_dealt - prev_dealt).max(0.0));
+        }
+        recent.last_damage_dealt = Some(combatant.damage_dealt);
+
+        recent.last_damage_taken = Some(combatant.damage_taken);
+        recent.last_absorb = absorb;
+    }
+}
+
 /// Reflect an instant-CC aura into the per-frame snapshot maps used by `CombatContext`
 /// and the class-AI dispatch loop.
 ///
@@ -193,7 +248,7 @@ pub fn apply_pending_auras(
     mut combat_log: ResMut<CombatLog>,
     dampening: Res<ArenaDampening>,
     pending_auras: Query<(Entity, &AuraPending)>,
-    mut combatants: Query<(&mut Combatant, Option<&mut ActiveAuras>, &Transform, Option<&mut DRTracker>)>,
+    mut combatants: Query<(Entity, &mut Combatant, Option<&mut ActiveAuras>, &Transform, Option<&mut DRTracker>)>,
     charging_query: Query<&ChargingState>,
     disengaging_query: Query<&DisengagingState>,
     mut fct_states: Query<&mut FloatingTextState>,
@@ -214,6 +269,55 @@ pub fn apply_pending_auras(
     // when both teams apply pending auras simultaneously.
     let mut new_auras_map: BTreeMap<Entity, Vec<Aura>> = BTreeMap::new();
 
+    // A caster may hold only ONE instance of a unique crowd control at a time.
+    //
+    // Nothing enforced this, so a single Mage could keep two enemies polymorphed
+    // simultaneously — and the priced CC model duly found that exploit, sheeping
+    // both members of an enemy team and then dealing no damage for seven seconds
+    // because `pre_cast_ok`'s friendly-CC guard stops the team attacking anything
+    // carrying a break-on-damage aura.
+    //
+    // Keyed on (caster, ability_name) rather than aura TYPE, which is what keeps
+    // AoE crowd control intact: Psychic Scream fears a whole group and shares
+    // `AuraType::Fear` with the Warlock's single-target Fear, but they are
+    // different abilities and do not supersede one another.
+    //
+    // Runs as a pre-pass so the superseded aura is gone before the new one is
+    // applied — including when the new target IS the old one (a refresh), where
+    // removing first keeps a single instance rather than stacking two.
+    let mut superseding: Vec<(Entity, String)> = Vec::new();
+    for (_, pending) in pending_auras.iter() {
+        if !pending.aura.unique_per_caster {
+            continue;
+        }
+        let Some(caster) = pending.aura.caster else {
+            continue;
+        };
+        superseding.push((caster, pending.aura.ability_name.clone()));
+    }
+    if !superseding.is_empty() {
+        for (entity, _, active, _, _) in combatants.iter_mut() {
+            let Some(mut active) = active else {
+                continue;
+            };
+            active.auras.retain(|a| {
+                let superseded = a.unique_per_caster
+                    && a.caster.is_some_and(|c| {
+                        superseding
+                            .iter()
+                            .any(|(caster, name)| *caster == c && *name == a.ability_name)
+                    });
+                if superseded {
+                    debug!(
+                        "Superseded {} on {:?} — its caster landed a new one",
+                        a.ability_name, entity
+                    );
+                }
+                !superseded
+            });
+        }
+    }
+
     for (pending_entity, pending) in pending_auras.iter() {
         // Invariant: aura duration should be positive
         debug_assert!(
@@ -232,7 +336,7 @@ pub fn apply_pending_auras(
         );
 
         // Get target combatant
-        let Ok((mut target_combatant, mut active_auras, target_transform, mut dr_tracker)) = combatants.get_mut(pending.target) else {
+        let Ok((_, mut target_combatant, mut active_auras, target_transform, mut dr_tracker)) = combatants.get_mut(pending.target) else {
             commands.entity(pending_entity).despawn();
             continue;
         };
@@ -1220,6 +1324,7 @@ mod tests {
     fn make_cc_aura(effect_type: AuraType, duration: f32) -> Aura {
         Aura {
             effect_type,
+            unique_per_caster: false,
             duration,
             magnitude: 0.0,
             break_on_damage_threshold: -1.0,

@@ -89,6 +89,7 @@ pub fn pet_ai_system(
                 is_pet: false,
                 // Pet AI doesn't read casts; this coarse snapshot omits CastingState.
                 casting_ability: None,
+                casting_remaining: 0.0,
                 pet_type: None,
                 pet: owner_to_pet.get(&entity).copied(),
             })
@@ -193,6 +194,7 @@ pub fn pet_ai_system(
         }
 
         let my_pos = transform.translation;
+        let empty_recent_damage = std::collections::BTreeMap::new();
         let ctx = CombatContext {
             combatants: &combatant_info,
             active_auras: &active_auras_map,
@@ -202,6 +204,9 @@ pub fn pet_ai_system(
             bounds: map_geometry.bounds,
             // Pets have no team-level behaviours; Legacy is always correct here.
             ai_profile: Default::default(),
+            cc_policy: Default::default(),
+            recent_damage: &empty_recent_damage,
+            recent_damage_dealt: &empty_recent_damage,
             self_entity: entity,
         };
 

@@ -23,10 +23,26 @@ for diagnosis prefer the per-frame mechanism metrics in `tests/camp_sweep.rs`
 (occlusion-seconds, blocked share), which aggregate thousands of samples per
 match instead of one bit.
 
+The same methodology applies to any per-team axis. `--axis cc_policy` sweeps
+the CC value model (`Priced` vs `Identity`) instead of the AI profile, and
+`--axis interrupt_policy` sweeps interrupt selection. Both pin the AI profile to
+`Legacy` on both sides so positioning is not a confound —
+`design-docs/cc-value-model.md` requires that separation. The two CC axes are
+separate for the same reason: they govern different decisions and measured with
+opposite signs, so bundling them would hide one behind the other.
+
+NOTE for asymmetric comps: if only one side owns the class the variant affects
+(e.g. only team 1 has a Warlock when sweeping the healer-Fear gate), the
+opposite assignment is a NULL CONTROL and should show no effect. That is a
+feature — it validates the measurement — but do not read it as "the change
+did nothing".
+
 Example:
     scripts/headtohead_sweep.py --team1 Warrior,Priest --team2 Warlock,Priest
     scripts/headtohead_sweep.py --team1 Hunter,Priest --team2 Rogue,Priest \
         --map PillaredArena --seeds 100 --profile TeamPlan
+    scripts/headtohead_sweep.py --team1 Warlock,Warrior --team2 Priest,Mage \
+        --axis cc_policy --profile Priced
 """
 
 import argparse
@@ -64,16 +80,30 @@ def main() -> int:
     ap.add_argument("--map", default="PillaredArena")
     ap.add_argument("--seeds", type=int, default=100, help="seeds per cell (default 100)")
     ap.add_argument("--seed-base", type=int, default=1)
-    ap.add_argument("--profile", default="TeamPlan", help="profile under test vs Legacy")
+    ap.add_argument("--profile", default=None,
+                    help="variant under test (default: TeamPlan for ai_profile, Priced for cc_policy)")
+    ap.add_argument("--axis", default="ai_profile",
+                    choices=["ai_profile", "cc_policy", "interrupt_policy"],
+                    help="which per-team axis to sweep (default ai_profile)")
+    ap.add_argument("--team1-kill-target", type=int, default=None,
+                    help="0-based enemy slot team 1 focuses (the in-match kill call)")
+    ap.add_argument("--team2-kill-target", type=int, default=None)
     ap.add_argument("--max-duration", type=float, default=300.0)
     ap.add_argument("--keep", metavar="PREFIX", help="keep the JSONL/CSV at this path prefix")
     args = ap.parse_args()
 
     t1, t2 = args.team1.split(","), args.team2.split(",")
+    # Each axis has its own baseline value and its own default variant.
+    baseline = {"ai_profile": "Legacy", "cc_policy": "Identity",
+                "interrupt_policy": "Identity"}[args.axis]
+    if args.profile is None:
+        args.profile = {"ai_profile": "TeamPlan", "cc_policy": "Priced",
+                        "interrupt_policy": "Priced"}[args.axis]
+    key1, key2 = f"team1_{args.axis}", f"team2_{args.axis}"
     cells = [
-        ("LL", "Legacy", "Legacy"),
-        ("TL", args.profile, "Legacy"),
-        ("LT", "Legacy", args.profile),
+        ("LL", baseline, baseline),
+        ("TL", args.profile, baseline),
+        ("LT", baseline, args.profile),
     ]
 
     workdir = Path(tempfile.mkdtemp(prefix="headtohead_"))
@@ -89,13 +119,23 @@ def main() -> int:
                     "map": args.map,
                     "max_duration_secs": args.max_duration,
                     "random_seed": seed,
-                    "team1_ai_profile": p1,
-                    "team2_ai_profile": p2,
+                    key1: p1,
+                    key2: p2,
+                    # Hold the OTHER axis fixed. Sweeping the CC model while the
+                    # positioning layer also varies would confound the two.
+                    **({"ai_profile": "Legacy"} if args.axis != "ai_profile" else {}),
+                    # An explicit kill call, when the scenario under test is
+                    # "the team called this target" rather than free targeting.
+                    **({"team1_kill_target": args.team1_kill_target}
+                       if args.team1_kill_target is not None else {}),
+                    **({"team2_kill_target": args.team2_kill_target}
+                       if args.team2_kill_target is not None else {}),
                 }) + "\n")
 
     total = len(cells) * args.seeds
     print(f"{total} matches: {args.team1} vs {args.team2} on {args.map}, "
-          f"{args.profile} vs Legacy, seeds {args.seed_base}..{args.seed_base + args.seeds - 1}",
+          f"{args.axis}: {args.profile} vs {baseline}, "
+          f"seeds {args.seed_base}..{args.seed_base + args.seeds - 1}",
           file=sys.stderr)
     subprocess.run(
         ["cargo", "run", "--release", "--quiet", "--",

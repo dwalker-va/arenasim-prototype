@@ -94,6 +94,10 @@
             mana_cost: 60.0,
             cooldown: 0.0,
             applies_aura: Some((
+                // One caster holds ONE of these at a time; a new cast
+                // supersedes the old. Keyed per ABILITY, so Psychic
+                // Scream (AoE, same AuraType) is unaffected.
+                unique_per_caster: true,
                 aura_type: Polymorph,
                 duration: 10.0,
                 magnitude: 1.0,
@@ -468,6 +472,10 @@
             mana_cost: 30.0,
             cooldown: 0.0,
             applies_aura: Some((
+                // One caster holds ONE of these at a time; a new cast
+                // supersedes the old. Keyed per ABILITY, so Psychic
+                // Scream (AoE, same AuraType) is unaffected.
+                unique_per_caster: true,
                 aura_type: Fear,
                 duration: 8.0,
                 magnitude: 0.0,

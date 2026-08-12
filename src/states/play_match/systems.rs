@@ -35,6 +35,7 @@ pub use super::combat_core::regenerate_resources;
 pub use super::shadow_sight::track_shadow_sight_timer;
 pub use super::auras::process_dot_ticks;
 pub use super::auras::process_hot_ticks;
+pub use super::auras::track_recent_damage;
 pub use super::auras::update_auras;
 pub use super::auras::apply_pending_auras;
 // Effect processing (instant ability effects)
@@ -188,6 +189,11 @@ where
             // Must never draw from GameRng: it shares this schedule with the AI,
             // so a draw would shift every downstream roll.
             update_team_plans,
+            // Trailing gross-damage window for the CC value model's break term.
+            // Write-only unless `CcPolicy::Priced` is active, so it cannot move a
+            // Legacy seed; registered unconditionally so both profiles observe
+            // the same world state.
+            track_recent_damage,
         )
             .chain()
             .in_set(CombatSystemPhase::ResourcesAndAuras)

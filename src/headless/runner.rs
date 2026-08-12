@@ -19,7 +19,8 @@ use crate::states::play_match::systems::{
     self, combatant_id, pet_combatant_id, ArenaDampening, Combatant, FloatingTextState, GameRng, MatchCountdown,
     ShadowSightState, SimulationSpeed,
 };
-use crate::states::play_match::components::{ActiveAuras, AuraType, Pet, PetType, DRTracker, Totem, TotemElement};
+use crate::states::play_match::abilities::AbilityType;
+use crate::states::play_match::components::{ActiveAuras, AuraType, CastingState, Pet, PetType, DRTracker, RecentDamage, Totem, TotemElement};
 use crate::states::play_match::constants::PET_SLOT_BASE;
 use crate::states::play_match::decision_trace::{DecisionTrace, TraceWriter};
 use crate::states::match_config::CharacterClass;
@@ -50,6 +51,10 @@ pub struct ObservedCombatant {
     pub class: CharacterClass,
     /// True for pet entities (Felhunter / Spider / Boar / Bird)
     pub is_pet: bool,
+    /// Which pet this is, or `None` for a player. `class` reports the OWNER's
+    /// class for pets, so it cannot distinguish them; a probe that needs to know
+    /// a Felhunter (the only unit with Devour Magic) is present needs this.
+    pub pet_type: Option<PetType>,
     /// False once current_health hits 0. Dead combatants stay in the
     /// snapshot (their entities are not despawned) with frozen positions.
     pub alive: bool,
@@ -66,6 +71,52 @@ pub struct ObservedCombatant {
     /// Lets probes assert a combatant carries (or does not carry) a totem buff
     /// without `&World` access. Empty when the entity has no `ActiveAuras`.
     pub aura_types: Vec<AuraType>,
+    /// Full read-only view of each active aura, in `ActiveAuras` vec order and
+    /// index-aligned with `aura_types`. Carries the fields a CC-lifecycle probe
+    /// needs that a bare effect type cannot supply — remaining duration, break
+    /// budget and progress against it, absorb magnitude, and the caster (for
+    /// team attribution). Empty when the entity has no `ActiveAuras`.
+    pub auras: Vec<ObservedAura>,
+    /// The ability this combatant is currently hard-casting, with the seconds
+    /// left on the cast bar, or `None` when not casting. Lets a probe see a cast
+    /// disappear the frame a CC lands — the observable behind "casts actually
+    /// cancelled" and, later, the `I` (interrupt value) term.
+    pub casting: Option<(AbilityType, f32)>,
+    /// This combatant's current kill target. Lets a probe reason about *who is
+    /// attacking whom*, which is what actually predicts whether damage will keep
+    /// arriving on a CC'd unit — the target's own damage history does not.
+    pub target: Option<Entity>,
+    /// The trailing gross-damage rate `RecentDamage` currently reports for this
+    /// unit. Exposed because this quantity underpins the CC value model's break
+    /// term and denial rate, and it has already been silently wrong once — a
+    /// health-delta implementation read zero for any unit being healed.
+    pub recent_damage_rate: f32,
+}
+
+/// A read-only snapshot of one active aura on one combatant, for probes that
+/// must follow an aura across frames rather than merely detect its presence.
+///
+/// Purely additive to [`ObservedCombatant::aura_types`], which existing probes
+/// use and which is left untouched.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ObservedAura {
+    /// What this aura does.
+    pub effect_type: AuraType,
+    /// Seconds left before expiry. Counts down each frame.
+    pub duration_remaining: f32,
+    /// Effect magnitude. For `Absorb` this is the remaining shield pool, which
+    /// is what makes absorbed-vs-health damage separable from observation alone.
+    pub magnitude: f32,
+    /// `0.0` breaks on any damage, positive is a damage budget, negative never
+    /// breaks.
+    pub break_on_damage_threshold: f32,
+    /// Damage counted against the threshold so far. Post-absorb: absorbed damage
+    /// never lands here, which is why a shield protects crowd control.
+    pub accumulated_damage: f32,
+    /// Who applied it, when known. Lets a probe attribute a CC to a team.
+    pub caster: Option<Entity>,
+    /// Source ability name, as carried on the aura for combat-log purposes.
+    pub ability_name: String,
 }
 
 /// A read-only snapshot of one Shaman totem on a frame. Totems are NOT
@@ -177,6 +228,12 @@ pub struct HeadlessMatchState {
     /// Which AI implementation this match runs under. Parsed once at plugin
     /// build so a bad string fails fast rather than at match setup.
     pub ai_profile: crate::states::play_match::ai_profile::AiProfiles,
+    /// Which CC-selection model each team runs under. Parsed once at plugin
+    /// build, like `ai_profile`.
+    pub cc_policy: crate::states::play_match::cc_policy::CcPolicies,
+    /// Which interrupt-selection model each team runs under. A separate axis
+    /// from `cc_policy`; see `cc_policy.rs`.
+    pub interrupt_policy: crate::states::play_match::cc_policy::InterruptPolicies,
     /// If true, the per-match `.txt` log file is NOT written. Set by the
     /// matrix runner where 4,900+ logs would just clutter `match_logs/`.
     pub suppress_log: bool,
@@ -201,6 +258,14 @@ impl Plugin for HeadlessPlugin {
 
         app.insert_resource(match_config)
             .insert_resource(HeadlessMatchState {
+                cc_policy: self
+                    .config
+                    .cc_policies()
+                    .expect("Invalid cc_policy in match configuration"),
+                interrupt_policy: self
+                    .config
+                    .interrupt_policies()
+                    .expect("Invalid interrupt_policy in match configuration"),
                 max_duration: self.config.max_duration_secs,
                 elapsed_time: 0.0,
                 output_path: self.config.output_path.clone(),
@@ -280,6 +345,14 @@ fn headless_setup_match(
     let ai_profile = headless_state.ai_profile;
     info!("AI profile: {:?}", ai_profile);
     commands.insert_resource(ai_profile);
+    // CC policy — inserted in BOTH modes, and a SEPARATE axis from the AI
+    // profile so the CC model can be measured under Legacy positioning.
+    let cc_policy = headless_state.cc_policy;
+    info!("CC policy: {:?}", cc_policy);
+    commands.insert_resource(cc_policy);
+    let interrupt_policy = headless_state.interrupt_policy;
+    info!("Interrupt policy: {:?}", interrupt_policy);
+    commands.insert_resource(interrupt_policy);
     // Team plans — inserted in BOTH modes (dual-registration rule).
     commands.insert_resource(crate::states::play_match::team_plan::TeamPlans::default());
 
@@ -327,6 +400,7 @@ fn headless_setup_match(
                 Transform::from_translation(position),
                 combatant,
                 DRTracker::default(),
+                RecentDamage::default(),
                 FloatingTextState {
                     next_pattern_index: 0,
                 },
@@ -350,6 +424,7 @@ fn headless_setup_match(
                     Transform::from_translation(pet_pos),
                     pet_combatant,
                     DRTracker::default(),
+                RecentDamage::default(),
                     Pet { owner: entity, pet_type: PetType::Felhunter },
                     FloatingTextState { next_pattern_index: 0 },
                 ));
@@ -372,6 +447,7 @@ fn headless_setup_match(
                     Transform::from_translation(pet_pos),
                     pet_combatant,
                     DRTracker::default(),
+                RecentDamage::default(),
                     Pet { owner: entity, pet_type },
                     FloatingTextState { next_pattern_index: 0 },
                 ));
@@ -408,6 +484,7 @@ fn headless_setup_match(
                 Transform::from_translation(position),
                 combatant,
                 DRTracker::default(),
+                RecentDamage::default(),
                 FloatingTextState {
                     next_pattern_index: 0,
                 },
@@ -431,6 +508,7 @@ fn headless_setup_match(
                     Transform::from_translation(pet_pos),
                     pet_combatant,
                     DRTracker::default(),
+                RecentDamage::default(),
                     Pet { owner: entity, pet_type: PetType::Felhunter },
                     FloatingTextState { next_pattern_index: 0 },
                 ));
@@ -453,6 +531,7 @@ fn headless_setup_match(
                     Transform::from_translation(pet_pos),
                     pet_combatant,
                     DRTracker::default(),
+                RecentDamage::default(),
                     Pet { owner: entity, pet_type },
                     FloatingTextState { next_pattern_index: 0 },
                 ));
@@ -786,6 +865,23 @@ fn observe_frame(world: &World) -> FrameObservation {
             .get::<ActiveAuras>()
             .map(|a| a.auras.iter().map(|aura| aura.effect_type).collect())
             .unwrap_or_default();
+        let auras = entity_ref
+            .get::<ActiveAuras>()
+            .map(|a| {
+                a.auras
+                    .iter()
+                    .map(|aura| ObservedAura {
+                        effect_type: aura.effect_type,
+                        duration_remaining: aura.duration,
+                        magnitude: aura.magnitude,
+                        break_on_damage_threshold: aura.break_on_damage_threshold,
+                        accumulated_damage: aura.accumulated_damage,
+                        caster: aura.caster,
+                        ability_name: aura.ability_name.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         combatants.insert(
             entity_ref.id(),
             ObservedCombatant {
@@ -794,12 +890,25 @@ fn observe_frame(world: &World) -> FrameObservation {
                 slot: combatant.slot,
                 class: combatant.class,
                 is_pet: entity_ref.contains::<Pet>(),
+                pet_type: entity_ref.get::<Pet>().map(|p| p.pet_type),
                 alive: combatant.is_alive(),
                 current_health: combatant.current_health,
                 max_health: combatant.max_health,
                 current_mana: combatant.current_mana,
                 max_mana: combatant.max_mana,
                 aura_types,
+                auras,
+                casting: entity_ref
+                    .get::<CastingState>()
+                    .filter(|c| !c.interrupted)
+                    .map(|c| (c.ability, c.time_remaining)),
+                target: combatant.target,
+                recent_damage_rate: entity_ref
+                    .get::<RecentDamage>()
+                    .map(|r| r.rate())
+                    // -1.0 distinguishes "component absent" from "component
+                    // present but reporting zero".
+                    .unwrap_or(-1.0),
             },
         );
     }
@@ -888,16 +997,23 @@ fn run_match_impl(
             .edit_schedule(PreUpdate, single)
             .edit_schedule(Update, single)
             // FixedUpdate is where EVERY combat system actually runs
-            // (`add_core_combat_systems` registers all three phases there),
-            // so omitting it left the whole simulation dispatching through
-            // the shared ComputeTaskPool — precisely the collapse this block
-            // exists to prevent. Symptom: `--jobs 4` and `--jobs 16` landed
-            // within 5% of each other at ~290% CPU, system time exceeding
-            // user time.
+            // (`add_core_combat_systems` registers all three phases there), so
+            // omitting it left the whole simulation dispatching through the
+            // shared ComputeTaskPool — precisely the collapse this block exists
+            // to prevent. Symptom: `--jobs 4` and `--jobs 16` were within 5% of
+            // each other (198s vs 189s for 512 matches) at ~290% CPU with system
+            // time exceeding user time.
             .edit_schedule(FixedUpdate, single)
             .edit_schedule(PostUpdate, single)
             .edit_schedule(Last, single)
             .edit_schedule(Startup, single);
+        // NOT applied to the graphical client, deliberately. It runs ONE match,
+        // so there is no cross-match parallelism to protect, and the change buys
+        // it nothing. Safe to differ because executor kind provably does not
+        // affect outcomes here: 512 matches produced byte-identical CSVs under
+        // both executors. Combat systems are `.chain()`ed within each phase and
+        // the phases are explicitly ordered, so execution order is fully
+        // constrained either way.
     }
 
     // Registration guard (debug builds / cargo test only): movement config

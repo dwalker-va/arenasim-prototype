@@ -48,6 +48,7 @@ fn combatant_info(entity: Entity, team: u8, class: CharacterClass, position: Vec
         target: None,
         is_pet: false,
         casting_ability: None,
+        casting_remaining: 0.0,
         pet_type: None,
         pet: None,
     }
@@ -59,6 +60,7 @@ fn combatant_info(entity: Entity, team: u8, class: CharacterClass, position: Vec
 fn attack_power_aura() -> Aura {
     Aura {
         effect_type: AuraType::AttackPowerIncrease,
+        unique_per_caster: false,
         duration: 30.0,
         magnitude: 1.0,
         break_on_damage_threshold: -1.0,
@@ -142,8 +144,12 @@ fn run_charge_decision(obstacles: Vec<ObstacleVolume>) -> DecisionTrace {
 
     let dr_trackers = BTreeMap::new();
     let ability_cooldowns = BTreeMap::new();
+    let empty_rates: BTreeMap<Entity, f32> = BTreeMap::new();
 
     let ctx = CombatContext {
+        cc_policy: Default::default(),
+        recent_damage: &empty_rates,
+        recent_damage_dealt: &empty_rates,
         ai_profile: Default::default(),
         bounds: Default::default(),
         combatants: &combatants,
