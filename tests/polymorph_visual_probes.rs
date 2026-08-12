@@ -219,8 +219,8 @@ fn sheep_stands_on_the_floor() {
     centers.sort_by(f32::total_cmp);
     let lowest = centers[0];
     let highest = *centers.last().unwrap();
-    // Legs are 0.30 long with their origin at the middle, so a centre at 0.15
-    // means their feet touch the floor.
-    assert!((lowest - 0.15).abs() < 0.01, "legs should stand on the floor, got {lowest}");
+    // Legs are 0.60 long (floor to torso interior) with their origin at the
+    // middle, so a centre at 0.30 means their feet touch the floor.
+    assert!((lowest - 0.30).abs() < 0.01, "legs should stand on the floor, got {lowest}");
     assert!(highest < 1.0, "sheep should stay well under the capsule top, got {highest}");
 }

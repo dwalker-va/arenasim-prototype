@@ -594,6 +594,14 @@ impl DRTracker {
         self.states[category.index()].level >= DR_IMMUNE_LEVEL
     }
 
+    /// Clear every category back to fresh (level 0, no timer). Used by the
+    /// animation sandbox's sustain system so looping a CC entry replays at
+    /// full duration instead of escalating to immunity — never called from
+    /// match code.
+    pub fn reset(&mut self) {
+        self.states = [DRState::default(); DRCategory::COUNT];
+    }
+
     /// Tick all DR timers. Called from update_auras() each frame.
     pub fn tick_timers(&mut self, dt: f32) {
         for state in &mut self.states {

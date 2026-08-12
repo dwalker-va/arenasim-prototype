@@ -25,8 +25,8 @@ use super::super::match_config::CharacterClass;
 use super::super::play_match::abilities::AbilityType;
 use super::super::play_match::ability_config::AbilityDefinitions;
 use super::super::play_match::components::{
-    ActiveAuras, Celebrating, CastingState, ChannelingState, Combatant, DeathAnimation,
-    MatchResults, PlayMatchEntity, VictoryCelebration, VisualBody,
+    ActiveAuras, Celebrating, CastingState, ChannelingState, Combatant, DRTracker,
+    DeathAnimation, MatchResults, PlayMatchEntity, VictoryCelebration, VisualBody,
 };
 use super::{SandboxEntity, SandboxStage};
 
@@ -574,12 +574,20 @@ pub fn position_caster(
 /// into matches. Restoring health here leaves the damage path itself untouched.
 pub fn sustain_staged_units(
     stage: Res<SandboxStage>,
-    mut combatants: Query<&mut Combatant>,
+    mut combatants: Query<(&mut Combatant, Option<&mut DRTracker>)>,
 ) {
     for entity in stage.caster.into_iter().chain(stage.dummy) {
-        if let Ok(mut combatant) = combatants.get_mut(entity) {
+        if let Ok((mut combatant, dr)) = combatants.get_mut(entity) {
             combatant.current_health = combatant.max_health;
             combatant.current_mana = combatant.max_mana;
+            // Diminishing returns escalate per CC application and the reset
+            // timer re-arms each time — a looping Polymorph entry re-applies
+            // every ~6s, so by the third pass the dummy is IMMUNE and the
+            // transform silently stops. Same sustain rationale as the health
+            // restore above: keep the entry replayable, leave sim code alone.
+            if let Some(mut dr) = dr {
+                dr.reset();
+            }
             // Rogues spawn stealthed (`Combatant::new`), and in a match the
             // class AI breaks stealth on its opener. No class AI runs here, so
             // a staged Rogue would stay stealthed forever — and stealth fades

@@ -841,7 +841,12 @@ fn spawn_sheep_parts(
 ) {
     // One unit sphere, posed per part by the child transforms.
     let ball = meshes.add(Sphere::new(1.0).mesh().uv(16, 10));
-    let leg = meshes.add(Cylinder::new(0.06, SHEEP_LEG_LEN));
+    // Legs run from the floor up INTO the torso's interior, not just to its
+    // lowest plane: the torso is an ellipsoid, so at the corners where the
+    // legs sit its underside curves ~0.14 above the bottom — a leg stopping
+    // at the bottom plane floats visibly disconnected.
+    let leg_len = SHEEP_LEG_LEN + SHEEP_TORSO_HALF.y;
+    let leg = meshes.add(Cylinder::new(0.06, leg_len));
 
     let head_y = torso_y + 0.14;
     let head_z = SHEEP_TORSO_HALF.z * 0.85;
@@ -880,14 +885,15 @@ fn spawn_sheep_parts(
         );
     }
     // Legs at the corners of the torso footprint; the cylinder's origin is its
-    // middle, so it stands on `ground_y` at half a leg up.
+    // middle, so centring at half a leg up keeps the feet exactly on `ground_y`
+    // while the top half embeds in the torso.
     for (x, z) in [(-1.0f32, -1.0f32), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
         part(
             leg.clone(),
             skin.clone(),
             Transform::from_xyz(
                 x * SHEEP_TORSO_HALF.x * 0.6,
-                ground_y + SHEEP_LEG_LEN * 0.5,
+                ground_y + leg_len * 0.5,
                 z * SHEEP_TORSO_HALF.z * 0.6,
             ),
         );
