@@ -887,6 +887,14 @@ fn run_match_impl(
         app.edit_schedule(First, single)
             .edit_schedule(PreUpdate, single)
             .edit_schedule(Update, single)
+            // FixedUpdate is where EVERY combat system actually runs
+            // (`add_core_combat_systems` registers all three phases there),
+            // so omitting it left the whole simulation dispatching through
+            // the shared ComputeTaskPool — precisely the collapse this block
+            // exists to prevent. Symptom: `--jobs 4` and `--jobs 16` landed
+            // within 5% of each other at ~290% CPU, system time exceeding
+            // user time.
+            .edit_schedule(FixedUpdate, single)
             .edit_schedule(PostUpdate, single)
             .edit_schedule(Last, single)
             .edit_schedule(Startup, single);
