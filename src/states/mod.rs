@@ -578,6 +578,7 @@ impl Plugin for StatesPlugin {
                 (
                     play_match::update_walk_animation,
                     play_match::update_sheep_hop,
+                    play_match::update_fear_run,
                 )
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_combat_scene),

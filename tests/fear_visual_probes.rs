@@ -18,7 +18,10 @@ use arenasim::states::play_match::components::{
     ActiveAuras, Aura, AuraType, Combatant, FearShroud, FearedVisual, OriginalBodyMaterial,
     OriginalMesh, PolymorphedVisual, VisualBody, WalkAnim,
 };
-use arenasim::states::play_match::{update_fear_shroud, update_fear_visuals};
+use arenasim::states::play_match::{
+    update_fear_run, update_fear_shroud, update_fear_visuals, update_sheep_hop,
+    update_walk_animation,
+};
 use arenasim::CharacterClass;
 
 /// Fixed tick for the harness.
@@ -295,4 +298,236 @@ fn polymorph_wins_while_co_held() {
         "fear treatment applies once the sheep look lifts"
     );
     assert_eq!(h.shrouds_of(unit), 1);
+}
+
+// ---------------------------------------------------------------------------
+// U2: panic-run gait with composed tremble (R2, R4, KTD2).
+//
+// These probes exercise the gait systems in `rendering/effects/gait.rs`, not
+// the treatment-owning systems above. The body's local `Transform.y` is the
+// only observable — appearance is untestable, but the WAVEFORM (cadence /
+// amplitude / time-driven vs distance-driven) and the one-writer arbitration
+// are. A separate, lighter harness: gait needs only `WalkAnim`, `Transform`,
+// `Combatant`, and a `VisualBody` child — no meshes or materials.
+// ---------------------------------------------------------------------------
+
+/// Distance moved per tick when driving the distance-based gaits. Comfortably
+/// above `WALK_IDLE_EPSILON` so phase advances every frame.
+const GAIT_STEP: f32 = 0.15;
+
+/// An app with `MinimalPlugins` (for `Time`) and a manual clock, ready for gait
+/// systems to be registered onto.
+fn gait_app() -> App {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(TICK));
+    app
+}
+
+/// Spawn a unit (`WalkAnim` + `Combatant` + `Transform`) with a `VisualBody`
+/// child at `rest_y = 0`. Returns `(unit, body)`.
+fn spawn_gait_unit(app: &mut App) -> (Entity, Entity) {
+    let body = app
+        .world_mut()
+        .spawn((VisualBody { rest_y: 0.0 }, Transform::default()))
+        .id();
+    let unit = app
+        .world_mut()
+        .spawn((
+            Transform::from_xyz(0.0, 1.0, 0.0),
+            Combatant::new(1, 0, CharacterClass::Warlock),
+            WalkAnim { phase: 0.0, previous_xz: Vec2::ZERO, idle_time: 0.0 },
+        ))
+        .id();
+    app.world_mut().entity_mut(unit).add_child(body);
+    (unit, body)
+}
+
+fn body_y(app: &App, body: Entity) -> f32 {
+    app.world().get::<Transform>(body).unwrap().translation.y
+}
+
+fn move_unit(app: &mut App, unit: Entity, dx: f32) {
+    app.world_mut().get_mut::<Transform>(unit).unwrap().translation.x += dx;
+}
+
+/// Run all three gaits registered together, moving one unit `dx` per tick for
+/// `ticks` frames; return the body's local Y after each frame. The optional
+/// marker selects which gait owns the body (`None` = walk).
+fn moving_gait_trace(marker: Option<&'static str>, ticks: usize) -> Vec<f32> {
+    let mut app = gait_app();
+    app.add_systems(
+        Update,
+        (update_walk_animation, update_sheep_hop, update_fear_run),
+    );
+    let (unit, body) = spawn_gait_unit(&mut app);
+    match marker {
+        Some("fear") => {
+            app.world_mut().entity_mut(unit).insert(FearedVisual);
+        }
+        Some("poly") => {
+            app.world_mut().entity_mut(unit).insert(PolymorphedVisual);
+        }
+        _ => {}
+    }
+    let mut ys = Vec::with_capacity(ticks);
+    for _ in 0..ticks {
+        move_unit(&mut app, unit, GAIT_STEP);
+        app.update();
+        ys.push(body_y(&app, body));
+    }
+    ys
+}
+
+/// R4: over a fixed moving window, the fear gait's body-Y trace differs
+/// measurably from both the walk bob and the sheep hop — distinct cadence and
+/// amplitude, not the same waveform under a different marker.
+#[test]
+fn fear_gait_distinct_from_walk_and_hop() {
+    let walk = moving_gait_trace(None, 30);
+    let hop = moving_gait_trace(Some("poly"), 30);
+    let fear = moving_gait_trace(Some("fear"), 30);
+
+    let max_abs_diff = |a: &[f32], b: &[f32]| {
+        a.iter().zip(b).map(|(x, y)| (x - y).abs()).fold(0.0f32, f32::max)
+    };
+
+    let vs_walk = max_abs_diff(&fear, &walk);
+    let vs_hop = max_abs_diff(&fear, &hop);
+    assert!(vs_walk > 0.03, "fear gait must differ from the walk bob (max diff {vs_walk})");
+    assert!(vs_hop > 0.03, "fear gait must differ from the sheep hop (max diff {vs_hop})");
+}
+
+/// R2 (the load-bearing fixed-timestep-strobe assertion): a STATIONARY feared
+/// unit still trembles. With zero sim displacement the distance-driven bob
+/// contributes nothing, so any body-Y variation is the time-driven tremble
+/// alone — proving it rides the wall clock, not "sim moved this frame".
+#[test]
+fn stationary_feared_unit_still_trembles() {
+    let mut app = gait_app();
+    app.add_systems(Update, update_fear_run);
+    let (unit, body) = spawn_gait_unit(&mut app);
+    app.world_mut().entity_mut(unit).insert(FearedVisual);
+
+    let start_x = app.world().get::<Transform>(unit).unwrap().translation.x;
+
+    let mut ys = Vec::new();
+    for _ in 0..30 {
+        // Deliberately never move the unit.
+        app.update();
+        ys.push(body_y(&app, body));
+    }
+
+    let end_x = app.world().get::<Transform>(unit).unwrap().translation.x;
+    assert_eq!(start_x, end_x, "the unit must be stationary — zero sim displacement");
+
+    let min = ys.iter().cloned().fold(f32::MAX, f32::min);
+    let max = ys.iter().cloned().fold(f32::MIN, f32::max);
+    assert!(
+        max - min > 0.02,
+        "a stationary feared unit must still tremble over time (body-Y range {})",
+        max - min
+    );
+}
+
+/// One-writer invariant (query side): a `FearedVisual` unit is excluded from
+/// `update_walk_animation`'s query. With ONLY the walk system running, a moving
+/// feared unit's body is never written (stays at rest), while a normal unit's
+/// body bobs.
+#[test]
+fn feared_unit_excluded_from_walk_query() {
+    let mut app = gait_app();
+    app.add_systems(Update, update_walk_animation);
+    let (normal, normal_body) = spawn_gait_unit(&mut app);
+    let (feared, feared_body) = spawn_gait_unit(&mut app);
+    app.world_mut().entity_mut(feared).insert(FearedVisual);
+
+    let mut normal_bobbed = false;
+    for _ in 0..10 {
+        move_unit(&mut app, normal, GAIT_STEP);
+        move_unit(&mut app, feared, GAIT_STEP);
+        app.update();
+        if body_y(&app, normal_body).abs() > 1e-6 {
+            normal_bobbed = true;
+        }
+        assert_eq!(
+            body_y(&app, feared_body),
+            0.0,
+            "feared unit is excluded from the walk query — its body stays untouched"
+        );
+    }
+    assert!(normal_bobbed, "the walk system bobs a non-feared moving unit");
+}
+
+/// One-writer invariant (co-hold): a unit with BOTH `FearedVisual` and
+/// `PolymorphedVisual` is driven by the hop only — `update_fear_run` carries
+/// `Without<PolymorphedVisual>` and never touches it, while the hop does.
+#[test]
+fn co_held_unit_driven_by_hop_not_fear_run() {
+    // fear_run alone must leave the co-held unit untouched.
+    let mut app = gait_app();
+    app.add_systems(Update, update_fear_run);
+    let (unit, body) = spawn_gait_unit(&mut app);
+    app.world_mut().entity_mut(unit).insert(FearedVisual);
+    app.world_mut().entity_mut(unit).insert(PolymorphedVisual);
+    for _ in 0..10 {
+        move_unit(&mut app, unit, GAIT_STEP);
+        app.update();
+        assert_eq!(
+            body_y(&app, body),
+            0.0,
+            "update_fear_run must exclude a co-held (polymorphed) unit"
+        );
+    }
+
+    // The hop alone DOES drive the co-held unit.
+    let mut app2 = gait_app();
+    app2.add_systems(Update, update_sheep_hop);
+    let (unit2, body2) = spawn_gait_unit(&mut app2);
+    app2.world_mut().entity_mut(unit2).insert(FearedVisual);
+    app2.world_mut().entity_mut(unit2).insert(PolymorphedVisual);
+    let mut hopped = false;
+    for _ in 0..10 {
+        move_unit(&mut app2, unit2, GAIT_STEP);
+        app2.update();
+        if body_y(&app2, body2).abs() > 1e-6 {
+            hopped = true;
+        }
+    }
+    assert!(hopped, "the sheep hop drives the co-held unit");
+}
+
+/// Restore / no residual: after `FearedVisual` is removed, the walk gait
+/// resumes and eases the body back to its rest baseline. The Y self-zeroes via
+/// the shared writer — no frozen tremble offset persists (KTD2).
+#[test]
+fn restore_leaves_no_residual_offset() {
+    let mut app = gait_app();
+    app.add_systems(
+        Update,
+        (update_walk_animation, update_sheep_hop, update_fear_run),
+    );
+    let (unit, body) = spawn_gait_unit(&mut app);
+    app.world_mut().entity_mut(unit).insert(FearedVisual);
+
+    // Feared and moving → the body carries a live composed offset.
+    for _ in 0..10 {
+        move_unit(&mut app, unit, GAIT_STEP);
+        app.update();
+    }
+    assert!(
+        body_y(&app, body).abs() > 1e-6,
+        "the fear gait produced a live body offset"
+    );
+
+    // Fear breaks; the unit stops. The walk gait must ease back to rest.
+    app.world_mut().entity_mut(unit).remove::<FearedVisual>();
+    for _ in 0..25 {
+        app.update(); // stationary
+    }
+    assert!(
+        body_y(&app, body).abs() < 1e-3,
+        "body returns to its rest baseline after restore — no residual offset (got {})",
+        body_y(&app, body)
+    );
 }
