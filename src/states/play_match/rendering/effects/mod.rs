@@ -1,0 +1,54 @@
+//! Visual Effects Systems
+//!
+//! Floating combat text, spell impact effects, speech bubbles, shield bubbles, and dispel bursts.
+
+mod floating_text;
+pub use floating_text::*;
+mod spell_impact;
+pub use spell_impact::*;
+mod speech_bubbles;
+pub use speech_bubbles::*;
+mod shield_bubbles;
+pub use shield_bubbles::*;
+mod polymorph;
+pub use polymorph::*;
+mod transform_puffs;
+pub use transform_puffs::*;
+mod flame;
+pub use flame::*;
+mod drain_life;
+pub use drain_life::*;
+mod healing_light;
+pub use healing_light::*;
+mod dispel_burst;
+pub use dispel_burst::*;
+mod dispel_ribbon;
+pub use dispel_ribbon::*;
+mod windfury;
+pub use windfury::*;
+mod scream;
+pub use scream::*;
+mod berserk;
+pub use berserk::*;
+mod death_coil;
+pub use death_coil::*;
+mod pet;
+pub use pet::*;
+mod traps;
+pub use traps::*;
+mod ice_block;
+pub use ice_block::*;
+mod slow_zone;
+pub use slow_zone::*;
+mod movement_trails;
+pub use movement_trails::*;
+mod affliction;
+pub use affliction::*;
+mod gait;
+pub use gait::*;
+mod totems;
+pub use totems::*;
+mod weapon_swing;
+pub use weapon_swing::*;
+mod casting_orbs;
+pub use casting_orbs::*;
