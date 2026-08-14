@@ -378,11 +378,14 @@ impl Plugin for StatesPlugin {
                     play_match::follow_shield_bubbles,      // Update bubble positions
                     play_match::update_polymorph_visuals,   // Sheep body swap when polymorphed
                     play_match::update_fear_visuals,        // Shadow-husk tint when feared
-                    play_match::update_fear_shroud,         // Breathing fear shroud pulse
+                    // Fear sub-effects nested to keep the outer tuple within Bevy's 20-limit.
                     (
+                        play_match::update_fear_shroud,        // Breathing fear shroud pulse
                         play_match::update_fear_mote_emitters, // Spawn rising fear motes per feared unit
                         play_match::update_fear_motes,         // Float/fade fear motes
                         play_match::cleanup_fear_motes,        // Despawn expired fear motes
+                        play_match::update_fear_flashes,       // Grow/fade apply+break shadow flash
+                        play_match::cleanup_fear_flashes,      // Despawn expired fear flashes
                     ),
                     play_match::spawn_flame_visuals,        // Visual meshes for flame particles
                     play_match::update_flame_particles,     // Move/fade flame particles

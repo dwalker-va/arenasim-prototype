@@ -158,6 +158,19 @@ pub struct FearMote {
     pub initial_lifetime: f32,
 }
 
+/// A brief shadow flash burst spawned at BOTH the Fear apply and the Fear break,
+/// mirroring [`TransformPuff`]'s dual-direction role. Kept short-lived (~0.4s):
+/// Fear breaks on ANY damage, so an apply and its break can land within a second
+/// of each other and must each read as a distinct pop rather than one smear.
+/// Grows and fades over its lifetime, then self-despawns.
+#[derive(Component)]
+pub struct FearFlash {
+    /// Time remaining before despawn (seconds).
+    pub lifetime: f32,
+    /// Initial lifetime for the grow/fade curve.
+    pub initial_lifetime: f32,
+}
+
 /// A rising flame particle for fire spell effects (e.g., Immolate).
 /// Spawned at target location, rises upward while shrinking and fading.
 #[derive(Component)]

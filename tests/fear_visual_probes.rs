@@ -15,12 +15,13 @@ use std::time::Duration;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
 use arenasim::states::play_match::components::{
-    ActiveAuras, Aura, AuraType, Combatant, FearMote, FearMoteEmitter, FearShroud, FearedVisual,
-    OriginalBodyMaterial, OriginalMesh, PolymorphedVisual, VisualBody, WalkAnim,
+    ActiveAuras, Aura, AuraType, Combatant, FearFlash, FearMote, FearMoteEmitter, FearShroud,
+    FearedVisual, OriginalBodyMaterial, OriginalMesh, PolymorphedVisual, VisualBody, WalkAnim,
 };
 use arenasim::states::play_match::{
-    cleanup_fear_motes, update_fear_mote_emitters, update_fear_motes, update_fear_run,
-    update_fear_shroud, update_fear_visuals, update_sheep_hop, update_walk_animation,
+    cleanup_fear_flashes, cleanup_fear_motes, update_fear_flashes, update_fear_mote_emitters,
+    update_fear_motes, update_fear_run, update_fear_shroud, update_fear_visuals, update_sheep_hop,
+    update_walk_animation,
 };
 use arenasim::CharacterClass;
 
@@ -73,6 +74,12 @@ impl Harness {
                 update_fear_mote_emitters,
                 update_fear_motes,
                 cleanup_fear_motes,
+                // Flash trio (U4): the apply/break flashes are spawned by
+                // `update_fear_visuals` above; these tick their grow/fade and
+                // despawn the expired ones. Chained so a just-spawned flash is
+                // not cleaned up the same tick it is born.
+                update_fear_flashes,
+                cleanup_fear_flashes,
             )
                 .chain(),
         );
@@ -150,6 +157,22 @@ impl Harness {
     /// particles, not owner-scoped).
     fn motes(&mut self) -> usize {
         self.app.world_mut().query::<&FearMote>().iter(self.app.world()).count()
+    }
+
+    /// Live fear-flash count across the whole world (flashes are unattached
+    /// world bursts, spawned by both transition branches of `update_fear_visuals`).
+    fn flashes(&mut self) -> usize {
+        self.app.world_mut().query::<&FearFlash>().iter(self.app.world()).count()
+    }
+
+    /// The set of live fear-flash entities — lets a probe prove a NEW flash was
+    /// spawned by a transition, independent of whether older flashes have expired.
+    fn flash_entities(&mut self) -> std::collections::HashSet<Entity> {
+        self.app
+            .world_mut()
+            .query_filtered::<Entity, With<FearFlash>>()
+            .iter(self.app.world())
+            .collect()
     }
 
     /// Cumulative motes the unit's emitter has spawned (the cadence counter).
@@ -647,4 +670,99 @@ fn motes_stop_on_restore_and_drain_to_zero() {
     );
     // ...and every in-flight mote self-expired — no orphans left behind.
     assert_eq!(h.motes(), 0, "all motes drained to zero after restore");
+}
+
+// ---------------------------------------------------------------------------
+// U4: apply / break shadow flash (R5, R6 / AE2).
+//
+// Appearance is untestable; what is observable — and what these probes pin — is
+// that a flash entity is spawned on BOTH transitions (apply and break), that the
+// break flash fires even inside a sub-second window (AE2: Fear breaks on any
+// damage), and that the flashes self-expire so their count stays bounded across
+// repeated fear cycles (no accumulation). The main `Harness` now registers the
+// flash trio alongside the treatment and mote systems.
+// ---------------------------------------------------------------------------
+
+/// R5: Fear landing spawns an apply flash.
+#[test]
+fn apply_flash_spawns_on_fear() {
+    let mut h = Harness::new();
+    let (unit, _body, _) = h.spawn_unit(1, 0);
+    assert_eq!(h.flashes(), 0, "no flash before fear");
+
+    h.app.world_mut().entity_mut(unit).insert(ActiveAuras { auras: vec![fear_aura()] });
+    h.app.update();
+    assert!(h.app.world().get::<FearedVisual>(unit).is_some(), "unit is feared");
+    assert!(h.flashes() >= 1, "an apply flash is spawned when Fear lands");
+}
+
+/// AE2 / R6: Fear broken 0.4s after it lands still spawns a break flash — the
+/// flash mechanism fires inside a sub-second window. The break flash is
+/// identified as a NEW flash entity (not present before the break), so the
+/// assertion holds regardless of whether the apply flash has already expired.
+#[test]
+fn break_flash_spawns_in_sub_second_window() {
+    let mut h = Harness::new();
+    let (unit, _body, _) = h.spawn_unit(1, 0);
+    h.app.world_mut().entity_mut(unit).insert(ActiveAuras { auras: vec![fear_aura()] });
+    h.app.update(); // apply
+
+    // ~0.4s pass (4 ticks at the 0.1s harness tick) — a sub-second fear window.
+    for _ in 0..4 {
+        h.app.update();
+    }
+    let before = h.flash_entities();
+
+    // Damage break: aura vec emptied. `update_fear_visuals` takes the
+    // transition-out branch and spawns a break flash.
+    h.app.world_mut().get_mut::<ActiveAuras>(unit).unwrap().auras.clear();
+    h.app.update();
+    assert!(h.app.world().get::<FearedVisual>(unit).is_none(), "restored");
+
+    let after = h.flash_entities();
+    let new_flashes = after.difference(&before).count();
+    assert!(
+        new_flashes >= 1,
+        "a break flash spawns even when Fear breaks inside a sub-second window \
+         (new flashes: {new_flashes})"
+    );
+}
+
+/// Flashes self-expire: over repeated apply/break cycles the live `FearFlash`
+/// count stays bounded — the flashes are removed by cleanup, they do not
+/// accumulate on the corpse of the effect.
+#[test]
+fn flashes_self_expire_and_stay_bounded() {
+    let mut h = Harness::new();
+    let (unit, _body, _) = h.spawn_unit(1, 0);
+
+    let mut peak = 0usize;
+    for _ in 0..5 {
+        // Apply.
+        h.app
+            .world_mut()
+            .entity_mut(unit)
+            .insert(ActiveAuras { auras: vec![fear_aura()] });
+        for _ in 0..6 {
+            h.app.update();
+            peak = peak.max(h.flashes());
+        }
+        // Break.
+        h.app.world_mut().get_mut::<ActiveAuras>(unit).unwrap().auras.clear();
+        for _ in 0..6 {
+            h.app.update();
+            peak = peak.max(h.flashes());
+        }
+        h.app.world_mut().entity_mut(unit).remove::<ActiveAuras>();
+    }
+
+    // Each cycle spawns at most an apply + a break flash, each ~0.4s-lived
+    // (4 ticks). With 6 ticks between transitions they never pile up: the live
+    // count stays small and bounded — the flashes are being cleaned up.
+    assert!(peak <= 3, "flash count must stay bounded across cycles (peaked at {peak})");
+    // And after a long idle they have all drained.
+    for _ in 0..10 {
+        h.app.update();
+    }
+    assert_eq!(h.flashes(), 0, "all flashes self-expired");
 }

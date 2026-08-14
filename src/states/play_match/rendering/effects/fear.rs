@@ -64,7 +64,7 @@ pub fn update_fear_visuals(
     )>,
     shroud: Query<(Entity, &FearShroud)>,
 ) {
-    for (entity, combatant, _transform, auras, feared_marker, children) in combatants.iter() {
+    for (entity, combatant, transform, auras, feared_marker, children) in combatants.iter() {
         // A killing blow leaves the aura ON the corpse — `update_auras` skips
         // dead combatants entirely — so death has to count as an exit path here
         // or the husk sticks to the corpse for the rest of the match.
@@ -79,9 +79,13 @@ pub fn update_fear_visuals(
             let Some(body_child) = children.iter().find(|&c| bodies.contains(c)) else {
                 continue;
             };
-            let Ok((mut material, _body, _)) = bodies.get_mut(body_child) else {
+            let Ok((mut material, body, _)) = bodies.get_mut(body_child) else {
                 continue;
             };
+            // The body's world rest height, for placing the flash at the torso.
+            // Derived rather than hardcoded because pets render their body at an
+            // offset from the sim entity's `y` (see `VisualBody::rest_y`).
+            let body_rest_world_y = transform.translation.y + body.rest_y;
 
             let husk = materials.add(StandardMaterial {
                 base_color: FEAR_HUSK_COLOR,
@@ -118,16 +122,29 @@ pub fn update_fear_visuals(
             commands.entity(body_child).add_child(shroud_entity);
 
             commands.entity(entity).try_insert(FearedVisual);
+
+            // Apply flash (R5): a brief shadow burst at the torso as the terror
+            // treatment applies. Spawned from this transition-in branch — the
+            // state is readable here, so no core-side marker is needed.
+            spawn_fear_flash(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                transform.translation,
+                Some(body_rest_world_y),
+            );
         } else if !is_feared && feared_marker.is_some() {
             // Just restored — by expiry, damage break, dispel or death. NO
             // `Without<DeathAnimation>` filter: the death sink and this restore
             // must compose in the same frame (KTD4).
+            let mut torso_world_y = None;
             for child in children.iter() {
-                if let Ok((mut material, _body, original_body_material)) = bodies.get_mut(child) {
+                if let Ok((mut material, body, original_body_material)) = bodies.get_mut(child) {
                     if let Some(displaced) = original_body_material {
                         *material = MeshMaterial3d(displaced.0.clone());
                         commands.entity(child).remove::<OriginalBodyMaterial>();
                     }
+                    torso_world_y = Some(transform.translation.y + body.rest_y);
                 }
             }
             // Owner-scoped: a global sweep would strip a second unit that is
@@ -138,6 +155,19 @@ pub fn update_fear_visuals(
                 }
             }
             commands.entity(entity).remove::<FearedVisual>();
+
+            // Break flash (R6 / AE2): the same short shadow burst as the body
+            // restores. NO `Without<DeathAnimation>` filter on the query, so a
+            // unit killed while feared still flashes as the treatment lifts. Kept
+            // short enough (~0.4s) that a Fear broken almost instantly still shows
+            // a distinct end event.
+            spawn_fear_flash(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                transform.translation,
+                torso_world_y,
+            );
         }
     }
 }
@@ -287,6 +317,106 @@ pub fn update_fear_shroud(
         if let Some(mat) = materials.get_mut(&material.0) {
             let base = FEAR_SHROUD_COLOR.to_srgba();
             mat.base_color = Color::srgba(base.red, base.green, base.blue, 0.18 + 0.14 * phase);
+        }
+    }
+}
+
+// ==============================================================================
+// Apply / break shadow flash (R5, R6 / AE2)
+// ==============================================================================
+//
+// A brief shadow-violet burst spawned from BOTH transition branches of
+// `update_fear_visuals` — the apply flash (R5) and the break flash (R6). The
+// state is readable right there, so no core-side marker is needed and headless
+// byte-identity holds by construction. Mirrors the transform-puff trio: a helper
+// spawns the flash from the marker-owning system, `update_fear_flashes` grows +
+// fades it, and `cleanup_fear_flashes` despawns it once expired. Kept short
+// (~0.4s) so a Fear broken almost instantly still reads as a distinct end event
+// (AE2).
+
+/// Lifetime (seconds) of the flash. Short on purpose: Fear breaks on ANY damage,
+/// so an apply and its break can land within a second of each other and must
+/// each read as a distinct pop rather than one smear.
+const FEAR_FLASH_LIFETIME: f32 = 0.4;
+/// Scale of the flash sphere at spawn and at expiry. It pops open then fades.
+const FEAR_FLASH_SCALE_START: f32 = 0.35;
+const FEAR_FLASH_SCALE_END: f32 = 1.5;
+/// Dark-violet additive color (Shadow school). Alpha is the peak; it fades to 0.
+const FEAR_FLASH_COLOR: Color = Color::srgba(0.30, 0.10, 0.55, 0.8);
+const FEAR_FLASH_EMISSIVE: LinearRgba = LinearRgba::new(1.6, 0.5, 2.4, 1.0);
+
+/// Spawn a short shadow flash at a fear-transitioning unit's torso. Called from
+/// both transition branches of `update_fear_visuals`. `torso_world_y` comes from
+/// the unit's [`VisualBody`] rest height (pets render their body off the sim
+/// entity's `y`); a unit without one falls back to its logical position.
+pub(crate) fn spawn_fear_flash(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    unit_pos: Vec3,
+    torso_world_y: Option<f32>,
+) {
+    let position = Vec3::new(unit_pos.x, torso_world_y.unwrap_or(unit_pos.y), unit_pos.z);
+    let mesh = meshes.add(Sphere::new(1.0).mesh().uv(16, 10));
+    let material = materials.add(StandardMaterial {
+        base_color: FEAR_FLASH_COLOR,
+        emissive: FEAR_FLASH_EMISSIVE,
+        alpha_mode: AlphaMode::Add,
+        unlit: true,
+        ..default()
+    });
+    commands.spawn((
+        FearFlash {
+            lifetime: FEAR_FLASH_LIFETIME,
+            initial_lifetime: FEAR_FLASH_LIFETIME,
+        },
+        Mesh3d(mesh),
+        MeshMaterial3d(material),
+        Transform::from_translation(position).with_scale(Vec3::splat(FEAR_FLASH_SCALE_START)),
+        PlayMatchEntity,
+    ));
+}
+
+/// Update: grow each flash sphere and fade its alpha with remaining life.
+/// Time-driven (never gated on sim movement — the fixed-timestep-strobe trap).
+pub fn update_fear_flashes(
+    time: Res<Time>,
+    mut flashes: Query<(&mut FearFlash, &mut Transform, &MeshMaterial3d<StandardMaterial>)>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let dt = time.delta_secs();
+    for (mut flash, mut transform, material_handle) in flashes.iter_mut() {
+        flash.lifetime -= dt;
+
+        // Progress: 1.0 (just spawned) → 0.0 (expired).
+        let progress = (flash.lifetime / flash.initial_lifetime).clamp(0.0, 1.0);
+        let elapsed = 1.0 - progress;
+
+        // sqrt easing: most of the expansion lands in the first few frames.
+        let scale = FEAR_FLASH_SCALE_START
+            + (FEAR_FLASH_SCALE_END - FEAR_FLASH_SCALE_START) * elapsed.sqrt();
+        transform.scale = Vec3::splat(scale);
+
+        // Fade on the square so the burst thins out early.
+        let fade = progress * progress;
+        if let Some(material) = materials.get_mut(&material_handle.0) {
+            material.base_color = FEAR_FLASH_COLOR.with_alpha(FEAR_FLASH_COLOR.alpha() * fade);
+            material.emissive = LinearRgba::new(
+                FEAR_FLASH_EMISSIVE.red * fade,
+                FEAR_FLASH_EMISSIVE.green * fade,
+                FEAR_FLASH_EMISSIVE.blue * fade,
+                1.0,
+            );
+        }
+    }
+}
+
+/// Cleanup: despawn flashes whose lifetime has run out. Separate from the update
+/// so the grow/fade and the despawn stay single-responsibility (the trio shape).
+pub fn cleanup_fear_flashes(mut commands: Commands, flashes: Query<(Entity, &FearFlash)>) {
+    for (entity, flash) in flashes.iter() {
+        if flash.lifetime <= 0.0 {
+            commands.entity(entity).despawn();
         }
     }
 }
