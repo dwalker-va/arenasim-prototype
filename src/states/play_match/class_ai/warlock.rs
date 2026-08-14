@@ -146,7 +146,7 @@ fn pick_healer_to_fear(
         // kill-window proxy alone. `D` folds in the healing-capped-by-delivery
         // insight AND any damage the healer is landing on us, so a wanding
         // out-of-mana healer correctly prices near zero.
-        let d = ctx.denial_rate_of(healer);
+        let d = ctx.denial_rate_of(healer, abilities);
         let own = if d > 0.0 { d * t_eff } else { kill_window_value(t_eff, delivery) };
         // Step 5: credit this CC for the uplift it creates in a TEAMMATE's CC.
         // Fearing the healer stops it dispelling, which is what lets a Mage's
@@ -374,7 +374,7 @@ fn pick_death_coil_peel(
                 continue;
             }
             // `D` = what removing this unit is worth per second, to the TEAM.
-            let d = ctx.denial_rate_of(e);
+            let d = ctx.denial_rate_of(e, abilities);
             if d <= 0.0 {
                 continue;
             }

@@ -561,6 +561,24 @@ pub struct DenialInputs {
 /// than a burst one.
 pub const DAMAGE_DENIAL_DISCOUNT: f32 = 0.5;
 
+// A "press" discount was built here and REMOVED after measurement: crowd control
+// is defensive tempo, so a team already winning the race arguably should not
+// spend casts on denial — the same idea `movement.ron`'s `press_advantage_margin`
+// already applies to healer cover-seeking.
+//
+// It does not work, for a reason worth recording. The cell it was built for
+// (`Mage+Priest vs Rogue+Priest`, a 90% matchup the identity heuristic wins by
+// never sheeping) was **completely unchanged** at -12pt, because the Polymorphs
+// there are OPENING casts — mean target health at cast is 95-100%, so neither
+// team has an HP lead yet and the discount never fires. Meanwhile it cost
+// Paladin+Warrior 6 points (+83 -> +77) and Warlock+Priest 3 (-18 -> -21) by
+// suppressing crowd control during transient leads. Net across seven cells
+// +51 -> +46.
+//
+// The lesson: a health-fraction lead measures the CURRENT state, and "we win
+// this matchup by racing" is a PRIOR. Denial-versus-tempo is real, but it needs
+// an instrument that exists at t=0.
+
 /// Damage-equivalent value per second of taking this unit out of the game.
 ///
 /// Additive because the two components are genuinely separate throughput: a unit

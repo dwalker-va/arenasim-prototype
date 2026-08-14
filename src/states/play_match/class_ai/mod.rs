@@ -638,16 +638,41 @@ impl<'a> CombatContext<'a> {
     /// Denying healing is worth exactly the damage it fails to erase, so a
     /// healer whose team is taking nothing prices at zero however much throughput
     /// it nominally has. Non-healers price at zero.
-    pub fn enemy_healing_capped(&self, enemy: Entity) -> f32 {
+    /// The fast heal whose affordability decides whether a healer can still
+    /// function at all. Per-class and explicit rather than "the cheapest heal",
+    /// because the question is not what it can technically cast but what it
+    /// would actually spend a global on under pressure.
+    fn primary_heal_of(class: CharacterClass) -> Option<AbilityType> {
+        match class {
+            CharacterClass::Priest => Some(AbilityType::FlashHeal),
+            CharacterClass::Paladin => Some(AbilityType::FlashOfLight),
+            CharacterClass::Shaman => Some(AbilityType::LesserHealingWave),
+            _ => None,
+        }
+    }
+
+    pub fn enemy_healing_capped(&self, enemy: Entity, abilities: &AbilityDefinitions) -> f32 {
         let Some(info) = self.combatants.get(&enemy) else {
             return 0.0;
         };
         if !info.class.is_healer() || !info.is_alive {
             return 0.0;
         }
-        // An out-of-resource healer heals nothing regardless of intent.
-        if info.max_mana > 0.0 && info.current_mana / info.max_mana < 0.05 {
-            return 0.0;
+        // A healer that cannot AFFORD a heal denies nothing, however full the
+        // health bars are.
+        //
+        // This was a flat 5%-of-max-mana floor, which is far below the price of
+        // a cast and so let a dry healer price as a full crowd-control target.
+        // Measured in `Mage+Priest vs Rogue+Priest`: **3 of 3** Polymorphs the
+        // priced Mage spent on the enemy Priest landed on it at ~10% mana — a
+        // Priest that could not cast Flash Heal at all. Reading the actual cost
+        // from `AbilityDefinitions` rather than guessing a fraction is the same
+        // discipline the Mage's out-of-mana wand latch uses.
+        if let Some(heal) = Self::primary_heal_of(info.class) {
+            let cost = abilities.get_unchecked(&heal).mana_cost;
+            if info.current_mana < cost {
+                return 0.0;
+            }
         }
         // Our delivery onto their team is the cap.
         self.combatants
@@ -659,11 +684,11 @@ impl<'a> CombatContext<'a> {
 
     /// The `D` term for `enemy`: damage-equivalent value per second of removing
     /// it from the game. See `cc_value::denial_rate`.
-    pub fn denial_rate_of(&self, enemy: Entity) -> f32 {
+    pub fn denial_rate_of(&self, enemy: Entity, abilities: &AbilityDefinitions) -> f32 {
         crate::states::play_match::cc_value::denial_rate(
             &crate::states::play_match::cc_value::DenialInputs {
                 damage_to_us: self.enemy_damage_to_us(enemy),
-                healing_capped: self.enemy_healing_capped(enemy),
+                healing_capped: self.enemy_healing_capped(enemy, abilities),
             },
         )
     }
@@ -769,7 +794,7 @@ impl<'a> CombatContext<'a> {
         let dr = self.dr_multiplier(target, DRCategory::Incapacitates);
         let recovered = aura.duration * dr;
         // Priced at what denying that unit is worth per second.
-        recovered * self.denial_rate_of(target)
+        recovered * self.denial_rate_of(target, abilities)
     }
 
     /// The duration multiplier a CC of `category` would land with on `entity`

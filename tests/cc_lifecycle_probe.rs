@@ -154,6 +154,15 @@ struct CcRecord {
     /// anything from an ally, and counting it as a dispeller is a live
     /// mis-specification in `dispel_exposed`.
     free_dispellers: usize,
+    /// Target's health fraction when the CC landed. The direct test of
+    /// "is the model crowd-controlling something it is about to kill" — a kill
+    /// is permanent and crowd control is not, so CC on a dying target trades the
+    /// former for the latter.
+    target_hp_frac: f32,
+    /// Target's mana fraction at application. `enemy_healing_capped` only zeroes
+    /// a healer's denial value below 5%, which is well under the cost of a heal
+    /// — so a healer that cannot afford to cast still prices as a full CC target.
+    target_mana_frac: f32,
     /// Team the CC LANDED on. Lets a report attribute an application to the
     /// side that cast it when both sides own the same crowd control.
     target_team: u8,
@@ -242,6 +251,8 @@ struct Live {
     pet_dispel_available: bool,
     target_team: u8,
     free_dispellers: usize,
+    target_hp_frac: f32,
+    target_mana_frac: f32,
 }
 
 struct CcTracker {
@@ -473,6 +484,16 @@ impl CcTracker {
                         ranged_at_cast: atk.iter().filter(|c| !c.class.is_melee()).count(),
                         pet_dispel_available,
                         free_dispellers,
+                        target_hp_frac: if obs.max_health > 0.0 {
+                            obs.current_health / obs.max_health
+                        } else {
+                            0.0
+                        },
+                        target_mana_frac: if obs.max_mana > 0.0 {
+                            obs.current_mana / obs.max_mana
+                        } else {
+                            1.0
+                        },
                         target_team: obs.team,
                         dots_at_cast: obs
                             .auras
@@ -564,6 +585,8 @@ impl CcTracker {
             pet_dispel_available: live.pet_dispel_available,
             target_team: live.target_team,
             free_dispellers: live.free_dispellers,
+            target_hp_frac: live.target_hp_frac,
+            target_mana_frac: live.target_mana_frac,
             // First damage strictly AFTER application, up to and including the
             // frame the CC ended on (the breaking hit lands on that frame).
             time_to_first_damage: self
@@ -1706,6 +1729,28 @@ fn report_mage_polymorph_choice_by_policy() {
         }
         let denied: f32 = recs.iter().map(|r| r.actual).sum();
         println!("  total seconds of enemy action denied: {denied:.1}s");
+
+        // Hypothesis 1: crowd control landed on a target we are about to kill.
+        let dying: Vec<&CcRecord> = recs.iter().filter(|r| r.target_hp_frac < 0.35).collect();
+        println!(
+            "  cast on a target below 35% HP: {}/{} ({:.0}%)   mean HP at cast {:.0}%",
+            dying.len(),
+            recs.len(),
+            100.0 * dying.len() as f32 / recs.len() as f32,
+            100.0 * mean(&recs.iter().map(|r| r.target_hp_frac).collect::<Vec<_>>()),
+        );
+        // Hypothesis 2: crowd control spent on a healer that cannot afford a heal.
+        let healers: Vec<&CcRecord> = recs.iter().filter(|r| r.target_class.is_healer()).collect();
+        if !healers.is_empty() {
+            let dry = healers.iter().filter(|r| r.target_mana_frac < 0.20).count();
+            println!(
+                "  on healers: {}   of which under 20% mana: {} ({:.0}%)   mean mana {:.0}%",
+                healers.len(),
+                dry,
+                100.0 * dry as f32 / healers.len() as f32,
+                100.0 * mean(&healers.iter().map(|r| r.target_mana_frac).collect::<Vec<_>>()),
+            );
+        }
     }
 }
 

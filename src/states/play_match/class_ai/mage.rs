@@ -309,7 +309,7 @@ fn pick_polymorph_target(
             .unwrap_or(0.0)
             .max(committed_rate);
         let forgone = forgone_damage(delivery, value_duration, aura.break_on_damage == 0.0);
-        let value = interrupt + ctx.denial_rate_of(target) * value_duration - forgone;
+        let value = interrupt + ctx.denial_rate_of(target, abilities) * value_duration - forgone;
         // What the sheep displaces: a Frostbolt. Priced through the same
         // expected-damage helper the Warlock uses for its DoTs so both classes
         // compare CC against their rotation on one scale.
