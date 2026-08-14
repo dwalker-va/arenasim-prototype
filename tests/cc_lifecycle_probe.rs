@@ -1729,6 +1729,29 @@ fn report_mage_polymorph_choice_by_policy() {
         }
         let denied: f32 = recs.iter().map(|r| r.actual).sum();
         println!("  total seconds of enemy action denied: {denied:.1}s");
+        // WHEN are these cast? "Opening tempo" requires them to be early.
+        let mut times: Vec<f32> = recs.iter().map(|r| r.applied_at).collect();
+        times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        println!(
+            "  cast at (sim seconds, gates open at 10): median {:.1}  min {:.1}  max {:.1}   \
+             first 20s of combat: {}/{}",
+            times[times.len() / 2],
+            times[0],
+            times[times.len() - 1],
+            recs.iter().filter(|r| r.applied_at < 30.0).count(),
+            recs.len(),
+        );
+
+        // Are WE attacking the thing we just crowd-controlled? `attackers_at_cast`
+        // counts units hostile to the target — i.e. ours — pointed at it.
+        let engaged = recs.iter().filter(|r| r.attackers_at_cast > 0).count();
+        println!(
+            "  cast on a target OUR team was attacking: {}/{} ({:.0}%)   mean attackers {:.2}",
+            engaged,
+            recs.len(),
+            100.0 * engaged as f32 / recs.len() as f32,
+            mean(&recs.iter().map(|r| r.attackers_at_cast as f32).collect::<Vec<_>>()),
+        );
 
         // Hypothesis 1: crowd control landed on a target we are about to kill.
         let dying: Vec<&CcRecord> = recs.iter().filter(|r| r.target_hp_frac < 0.35).collect();
@@ -1743,6 +1766,7 @@ fn report_mage_polymorph_choice_by_policy() {
         let healers: Vec<&CcRecord> = recs.iter().filter(|r| r.target_class.is_healer()).collect();
         if !healers.is_empty() {
             let dry = healers.iter().filter(|r| r.target_mana_frac < 0.20).count();
+            let _ = &healers;
             println!(
                 "  on healers: {}   of which under 20% mana: {} ({:.0}%)   mean mana {:.0}%",
                 healers.len(),

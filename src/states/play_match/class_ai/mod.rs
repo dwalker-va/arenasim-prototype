@@ -703,6 +703,22 @@ impl<'a> CombatContext<'a> {
     /// CC stick* — an externality the first CC in a chain creates and, without
     /// this, captures none of.
     ///
+    /// The dispel this unit would answer with, if any. Pets included — the
+    /// Felhunter's Devour Magic is the cheapest answer on the board.
+    fn dispel_ability_of(c: &CombatantInfo) -> Option<AbilityType> {
+        if c.pet_type == Some(PetType::Felhunter) {
+            return Some(AbilityType::DevourMagic);
+        }
+        if c.is_pet {
+            return None;
+        }
+        match c.class {
+            CharacterClass::Priest => Some(AbilityType::DispelMagic),
+            CharacterClass::Paladin => Some(AbilityType::PaladinCleanse),
+            _ => None,
+        }
+    }
+
     /// How many units on `target`'s side can take a dispellable aura OFF an
     /// ally right now, excluding the target itself.
     ///
@@ -714,6 +730,15 @@ impl<'a> CombatContext<'a> {
     ///
     /// The Felhunter counts: Devour Magic is instant, free and off the global
     /// cooldown, which makes it the cheapest answer on the board.
+    ///
+    /// **"Free" includes off cooldown.** A dispeller whose dispel is on
+    /// cooldown cannot answer anything, and treating it as though it could is
+    /// what stopped chain crowd control from emerging: every link in a chain was
+    /// priced as equally answerable, so the second cast — at half duration from
+    /// diminishing returns AND a full dispel discount — never looked worth a
+    /// global. In reality the second cast is the SAFE one, because the answer
+    /// was just spent. Devour Magic's 8s cooldown is longer than the 5s a
+    /// half-duration Polymorph lasts.
     pub fn free_ally_dispellers(&self, target: Entity) -> u32 {
         let Some(info) = self.combatants.get(&target) else {
             return 0;
@@ -724,12 +749,15 @@ impl<'a> CombatContext<'a> {
                 c.team == info.team
                     && c.is_alive
                     && c.entity != target
-                    && (c.pet_type == Some(PetType::Felhunter)
-                        || (!c.is_pet
-                            && matches!(
-                                c.class,
-                                CharacterClass::Priest | CharacterClass::Paladin
-                            )))
+                    && Self::dispel_ability_of(c).is_some_and(|ability| {
+                        // On cooldown is as good as absent.
+                        self.ability_cooldowns
+                            .get(&c.entity)
+                            .and_then(|cds| cds.get(&ability))
+                            .copied()
+                            .unwrap_or(0.0)
+                            <= 0.0
+                    })
                     && !self
                         .active_auras
                         .get(&c.entity)
