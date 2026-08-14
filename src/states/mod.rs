@@ -377,6 +377,8 @@ impl Plugin for StatesPlugin {
                     play_match::update_shield_bubbles,      // Spawn/despawn shield bubbles
                     play_match::follow_shield_bubbles,      // Update bubble positions
                     play_match::update_polymorph_visuals,   // Sheep body swap when polymorphed
+                    play_match::update_fear_visuals,        // Shadow-husk tint when feared
+                    play_match::update_fear_shroud,         // Breathing fear shroud pulse
                     play_match::spawn_flame_visuals,        // Visual meshes for flame particles
                     play_match::update_flame_particles,     // Move/fade flame particles
                 )

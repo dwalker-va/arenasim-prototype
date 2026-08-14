@@ -110,6 +110,26 @@ pub struct SheepPart {
     pub owner: Entity,
 }
 
+/// Marker component indicating the combatant is currently feared (the terror
+/// treatment is applied). Single source of truth for the Fear signature look:
+/// the body-tint swap, the breathing shroud, and every exit-path restore key
+/// off this marker's presence/absence — never re-derived from `ActiveAuras`.
+/// Keyed on `AuraType::Fear`, so Death Coil's horror (a Fear-type aura) inherits
+/// the treatment for free. Distinct from [`PolymorphedVisual`]: a unit can be
+/// both feared and polymorphed (different DR categories), and the sheep look
+/// wins while polymorphed (the fear system carries `Without<PolymorphedVisual>`).
+#[derive(Component)]
+pub struct FearedVisual;
+
+/// The breathing shadow aura sphere spawned as a child of a feared combatant's
+/// [`VisualBody`]. Mirrors [`SheepPart`]'s owner scoping: `owner` is the SIM
+/// entity, so restore despawns exactly this unit's shroud and two
+/// simultaneously-feared units never strip each other's.
+#[derive(Component)]
+pub struct FearShroud {
+    pub owner: Entity,
+}
+
 /// A rising flame particle for fire spell effects (e.g., Immolate).
 /// Spawned at target location, rises upward while shrinking and fading.
 #[derive(Component)]
