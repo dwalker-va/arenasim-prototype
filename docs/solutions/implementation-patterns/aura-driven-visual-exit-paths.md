@@ -60,7 +60,7 @@ Both traps fail silently and permanently — no panic, no log line, just a unit 
 
 ## Examples
 
-`update_polymorph_visuals` in `src/states/play_match/rendering/effects.rs` implements both fixes; `restores_on_death_with_aura_still_present` and the component-removal branch of `transforms_and_restores` in `tests/polymorph_visual_probes.rs` pin them.
+`update_polymorph_visuals` in `src/states/play_match/rendering/effects/polymorph.rs` implements both fixes; `restores_on_death_with_aura_still_present` and the component-removal branch of `transforms_and_restores` in `tests/polymorph_visual_probes.rs` pin them.
 
 ## Related
 

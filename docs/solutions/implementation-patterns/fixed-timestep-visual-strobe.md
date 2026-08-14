@@ -51,7 +51,7 @@ if (transform.translation - anim.last_pos).length() < 0.001 {
 }
 ```
 
-Right — time-accumulated animation, no movement gate (casting orb, `src/states/play_match/rendering/effects.rs`):
+Right — time-accumulated animation, no movement gate (casting orb, `src/states/play_match/rendering/effects/casting_orbs.rs`):
 
 ```rust
 let dt = time.delta_secs();

@@ -41,7 +41,7 @@ The procedure that worked, in dependency order:
 
 The pilot's verified defects were all in steps 2-5 territory: exit paths that silently never restored, visuals drifting from the body state, floating attachments, and query-conflict panics. Following the procedure means the next signature (Fear's terror treatment is machinery-heavier — an aura-driven shake/tint/wisp vocabulary intended for reuse across the CC tier) inherits the solved shape instead of rediscovering it.
 
-One standing prerequisite: `src/states/play_match/rendering/effects.rs` was ~4k lines after the pilot. Split it into per-effect submodules (`rendering/effects/{polymorph,puffs,gait}.rs`) **before** the next signature lands in it — flagged by review on PR dwalker-va/arenasim-prototype#103.
+The standing prerequisite has shipped: `effects.rs` (~4.6k lines after the pilot) was split into per-effect submodules under `rendering/effects/` (PR dwalker-va/arenasim-prototype#106), so the next signature (Fear) lands in the cleanly-isolated `rendering/effects/{polymorph,gait,transform_puffs}.rs` neighborhood rather than a 4k-line file. See `byte-identical-module-split.md` for the split's byte-identity verification technique and the two traps it surfaced.
 
 ## When to Apply
 
@@ -51,7 +51,7 @@ One standing prerequisite: `src/states/play_match/rendering/effects.rs` was ~4k 
 
 ## Examples
 
-The Polymorph pilot itself: `update_polymorph_visuals` + `spawn_sheep_parts` + `update_sheep_hop` + the transform-puff trio in `src/states/play_match/rendering/effects.rs`, probes in `tests/polymorph_visual_probes.rs`, sandbox staging in `src/states/animation_sandbox/playback.rs`.
+The Polymorph pilot itself: `update_polymorph_visuals` + `spawn_sheep_parts` (`src/states/play_match/rendering/effects/polymorph.rs`), `update_sheep_hop` (`rendering/effects/gait.rs`), and the transform-puff trio (`rendering/effects/transform_puffs.rs`); probes in `tests/polymorph_visual_probes.rs`, sandbox staging in `src/states/animation_sandbox/playback.rs`.
 
 ## Related
 
@@ -60,3 +60,4 @@ The Polymorph pilot itself: `update_polymorph_visuals` + `spawn_sheep_parts` + `
 - `aura-driven-visual-exit-paths.md` — the two exit-path traps (component removal, death) any aura-keyed visual must handle
 - `animation-sandbox-cc-entry-gotchas.md` — staging requirements for reviewing CC entries in the sandbox
 - `cosmetic-marker-cross-mode-spawn-parity.md` — when a core-side marker IS needed (state not readable at render time)
+- `byte-identical-module-split.md` — how the `effects.rs` split (this procedure's prerequisite) was done and verified, and the traps a large-module split reliably hits
