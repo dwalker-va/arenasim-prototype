@@ -130,6 +130,34 @@ pub struct FearShroud {
     pub owner: Entity,
 }
 
+/// Interval-timer state for the rising fear-mote emitter, attached to a feared
+/// unit and gated by [`FearedVisual`]. Collapses the affliction detector +
+/// emitter into one system: while the marker holds, motes spawn every
+/// `FEAR_MOTE_INTERVAL`. When the marker is removed the unit simply stops being
+/// iterated (no new motes), and any in-flight motes finish their own lifetime —
+/// no owner-scoped despawn is needed. Mirrors [`DotDripEmitter`]'s
+/// accumulator/count fields.
+#[derive(Component, Default)]
+pub struct FearMoteEmitter {
+    /// Seconds accumulated toward the next mote spawn.
+    pub spawn_accumulator: f32,
+    /// Count of motes spawned — doubles as the visual-only jitter seed.
+    pub motes_spawned: u32,
+}
+
+/// One rising shadow mote spawned by a [`FearMoteEmitter`]. A transient world
+/// particle (NOT owner-scoped, NOT a child): it floats upward and fades over
+/// its lifetime, then self-despawns. Mirrors [`DotDrip`] / [`FlameParticle`].
+#[derive(Component)]
+pub struct FearMote {
+    /// Velocity vector (primarily upward with slight horizontal drift).
+    pub velocity: Vec3,
+    /// Time remaining before despawn (seconds).
+    pub lifetime: f32,
+    /// Initial lifetime for the fade calculation.
+    pub initial_lifetime: f32,
+}
+
 /// A rising flame particle for fire spell effects (e.g., Immolate).
 /// Spawned at target location, rises upward while shrinking and fading.
 #[derive(Component)]

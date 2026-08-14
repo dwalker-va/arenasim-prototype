@@ -142,6 +142,131 @@ pub fn update_fear_visuals(
     }
 }
 
+// ==============================================================================
+// Rising fear-motes emitter (R3 / KTD3)
+// ==============================================================================
+//
+// A per-feared-unit emitter (gated on `FearedVisual`) spawns small dark-violet
+// shadow motes that rise off the unit and fade, on a loop, for the aura's
+// duration. Three-system shape mirroring the affliction drip emitter:
+// `update_fear_mote_emitters` (tick + spawn) / `update_fear_motes` (float +
+// fade) / `cleanup_fear_motes` (despawn expired). Motes are transient world
+// particles — `PlayMatchEntity`-tagged, `AlphaMode::Add`, self-expiring — so
+// they need no owner-scoped despawn: when `FearedVisual` is removed the emitter
+// simply stops being iterated and in-flight motes finish their own lifetime.
+
+/// Seconds between mote spawns off a feared unit.
+const FEAR_MOTE_INTERVAL: f32 = 0.5;
+/// A mote's lifetime, in seconds (fades to zero over this window).
+const FEAR_MOTE_LIFETIME: f32 = 1.2;
+/// Upward rise speed of a mote, in yards/second.
+const FEAR_MOTE_RISE_SPEED: f32 = 0.9;
+/// A mote's dark-violet additive color (alpha is the peak; it fades to 0).
+const FEAR_MOTE_COLOR: Color = Color::srgba(0.35, 0.18, 0.55, 0.7);
+
+/// Cheap deterministic jitter in [0,1) from a seed — visual-only, so it does
+/// not touch the sim's seeded GameRng. Same hash as the affliction drips.
+fn fear_mote_jitter(seed: u32) -> f32 {
+    let s = seed.wrapping_mul(747_796_405).wrapping_add(2_891_336_453);
+    ((s >> 9) & 0xFFFF) as f32 / 65536.0
+}
+
+/// Emitter: for each unit currently wearing `FearedVisual`, spawn a rising
+/// shadow mote every `FEAR_MOTE_INTERVAL`. The interval-timer state lives on the
+/// unit itself (`FearMoteEmitter`), lazily inserted the first tick a unit is
+/// feared — so this one system does the affliction pattern's detector + emitter
+/// work. Removing `FearedVisual` drops the unit from this query, so spawning
+/// stops on restore with no despawn bookkeeping.
+pub fn update_fear_mote_emitters(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut feared: Query<(Entity, &Transform, Option<&mut FearMoteEmitter>), With<FearedVisual>>,
+) {
+    let dt = time.delta_secs();
+    for (entity, transform, emitter) in feared.iter_mut() {
+        // First feared tick: attach the timer and wait for the next frame. A
+        // fresh emitter avoids inheriting a stale accumulator across re-fears.
+        let Some(mut emitter) = emitter else {
+            commands.entity(entity).try_insert(FearMoteEmitter::default());
+            continue;
+        };
+
+        emitter.spawn_accumulator += dt;
+        while emitter.spawn_accumulator >= FEAR_MOTE_INTERVAL {
+            emitter.spawn_accumulator -= FEAR_MOTE_INTERVAL;
+            let seed = entity.index().wrapping_add(emitter.motes_spawned.wrapping_mul(7));
+            emitter.motes_spawned = emitter.motes_spawned.wrapping_add(1);
+
+            // Jittered spawn point around the torso, rising with slight drift.
+            let angle = fear_mote_jitter(seed) * std::f32::consts::TAU;
+            let radius = 0.20 + 0.25 * fear_mote_jitter(seed + 1);
+            let height = 0.40 + 0.40 * fear_mote_jitter(seed + 2);
+            let offset = Vec3::new(angle.cos() * radius, height, angle.sin() * radius);
+            let drift = Vec3::new(
+                (fear_mote_jitter(seed + 3) - 0.5) * 0.30,
+                FEAR_MOTE_RISE_SPEED,
+                (fear_mote_jitter(seed + 4) - 0.5) * 0.30,
+            );
+
+            let mesh = meshes.add(Sphere::new(0.09));
+            let material = materials.add(StandardMaterial {
+                base_color: FEAR_MOTE_COLOR,
+                emissive: LinearRgba::new(0.40, 0.15, 0.70, 1.0),
+                alpha_mode: AlphaMode::Add,
+                unlit: true,
+                ..default()
+            });
+
+            commands.spawn((
+                FearMote {
+                    velocity: drift,
+                    lifetime: FEAR_MOTE_LIFETIME,
+                    initial_lifetime: FEAR_MOTE_LIFETIME,
+                },
+                Mesh3d(mesh),
+                MeshMaterial3d(material),
+                Transform::from_translation(transform.translation + offset),
+                PlayMatchEntity,
+            ));
+        }
+    }
+}
+
+/// Update: float each mote upward along its velocity and fade its alpha with
+/// remaining life. Time-driven (never gated on sim movement — the
+/// fixed-timestep-strobe trap), so motes rise off a stationary feared unit too.
+pub fn update_fear_motes(
+    time: Res<Time>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut motes: Query<(&mut FearMote, &mut Transform, &MeshMaterial3d<StandardMaterial>)>,
+) {
+    let dt = time.delta_secs();
+    for (mut mote, mut transform, material_handle) in motes.iter_mut() {
+        mote.lifetime -= dt;
+        transform.translation += mote.velocity * dt;
+
+        let life_ratio = (mote.lifetime / mote.initial_lifetime).clamp(0.0, 1.0);
+        if let Some(material) = materials.get_mut(&material_handle.0) {
+            let base = FEAR_MOTE_COLOR.to_srgba();
+            material.base_color =
+                Color::srgba(base.red, base.green, base.blue, base.alpha * life_ratio);
+        }
+    }
+}
+
+/// Cleanup: despawn motes whose lifetime has run out. Separate from the update
+/// so the float/fade and the despawn stay single-responsibility (the plan's
+/// three-system shape).
+pub fn cleanup_fear_motes(mut commands: Commands, motes: Query<(Entity, &FearMote)>) {
+    for (entity, mote) in motes.iter() {
+        if mote.lifetime <= 0.0 {
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
 /// System that breathes each [`FearShroud`]: a slow pulse of scale and material
 /// alpha over ~2s, reading as a labored terror breath. Time-driven (never gated
 /// on sim movement — the fixed-timestep-strobe trap), so a stationary feared

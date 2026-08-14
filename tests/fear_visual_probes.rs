@@ -15,12 +15,12 @@ use std::time::Duration;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
 use arenasim::states::play_match::components::{
-    ActiveAuras, Aura, AuraType, Combatant, FearShroud, FearedVisual, OriginalBodyMaterial,
-    OriginalMesh, PolymorphedVisual, VisualBody, WalkAnim,
+    ActiveAuras, Aura, AuraType, Combatant, FearMote, FearMoteEmitter, FearShroud, FearedVisual,
+    OriginalBodyMaterial, OriginalMesh, PolymorphedVisual, VisualBody, WalkAnim,
 };
 use arenasim::states::play_match::{
-    update_fear_run, update_fear_shroud, update_fear_visuals, update_sheep_hop,
-    update_walk_animation,
+    cleanup_fear_motes, update_fear_mote_emitters, update_fear_motes, update_fear_run,
+    update_fear_shroud, update_fear_visuals, update_sheep_hop, update_walk_animation,
 };
 use arenasim::CharacterClass;
 
@@ -62,7 +62,20 @@ impl Harness {
         app.init_asset::<Mesh>();
         app.init_asset::<StandardMaterial>();
         app.insert_resource(TimeUpdateStrategy::ManualDuration(TICK));
-        app.add_systems(Update, (update_fear_visuals, update_fear_shroud).chain());
+        app.add_systems(
+            Update,
+            (
+                update_fear_visuals,
+                update_fear_shroud,
+                // Mote trio (U3): emitter spawns, update floats/fades, cleanup
+                // despawns. Chained so a spawned mote is not floated/cleaned up
+                // the same tick it is born.
+                update_fear_mote_emitters,
+                update_fear_motes,
+                cleanup_fear_motes,
+            )
+                .chain(),
+        );
         Harness { app }
     }
 
@@ -131,6 +144,23 @@ impl Harness {
             .query::<&OriginalBodyMaterial>()
             .iter(self.app.world())
             .count()
+    }
+
+    /// Live fear-mote count across the whole world (motes are unattached world
+    /// particles, not owner-scoped).
+    fn motes(&mut self) -> usize {
+        self.app.world_mut().query::<&FearMote>().iter(self.app.world()).count()
+    }
+
+    /// Cumulative motes the unit's emitter has spawned (the cadence counter).
+    /// Frozen once `FearedVisual` is gone (the emitter stops being iterated),
+    /// which is exactly what proves emitter-stops-on-restore.
+    fn motes_spawned(&self, unit: Entity) -> u32 {
+        self.app
+            .world()
+            .get::<FearMoteEmitter>(unit)
+            .map(|e| e.motes_spawned)
+            .unwrap_or(0)
     }
 }
 
@@ -530,4 +560,91 @@ fn restore_leaves_no_residual_offset() {
         "body returns to its rest baseline after restore — no residual offset (got {})",
         body_y(&app, body)
     );
+}
+
+// ---------------------------------------------------------------------------
+// U3: rising fear-motes emitter (R3 / KTD3).
+//
+// Appearance is untestable; what is observable — and what these probes pin —
+// is the CADENCE (motes spawn on the interval, not every tick and not never),
+// the LIFETIME BOUND (each mote self-expires, so the live count stays bounded
+// under a long feared window instead of growing without limit), and
+// EMITTER-STOPS-ON-RESTORE (removing `FearedVisual` freezes the spawn counter
+// and lets in-flight motes drain to zero with no orphans). These run on the
+// main `Harness`, which now registers the mote trio alongside the treatment.
+// ---------------------------------------------------------------------------
+
+/// R3: while `FearedVisual` holds, motes spawn on roughly the fixed interval
+/// (~1 per 0.5s at the 0.1s tick — far below one-per-tick, far above never),
+/// and the live count stays bounded because each mote self-expires. Over 5s of
+/// fear ~10 motes are spawned in total, yet only a handful are ever alive at
+/// once.
+#[test]
+fn motes_spawn_on_cadence_and_stay_bounded() {
+    let mut h = Harness::new();
+    let (unit, _body, _) = h.spawn_unit(1, 0);
+    h.app.world_mut().entity_mut(unit).insert(ActiveAuras { auras: vec![fear_aura()] });
+
+    // 50 ticks = 5.0s of fear at the 0.1s harness tick.
+    let mut peak_live = 0usize;
+    for _ in 0..50 {
+        h.app.update();
+        peak_live = peak_live.max(h.motes());
+    }
+
+    // Cadence: interval 0.5s over ~5s feared → ~10 spawns, minus ~1 arming
+    // tick. Anything in [8, 11] proves it fires on the interval rather than
+    // every tick (which would be ~50) or never (0).
+    let spawned = h.motes_spawned(unit);
+    assert!(
+        (8..=11).contains(&spawned),
+        "expected ~10 motes spawned over 5s of fear, got {spawned}"
+    );
+
+    // Lifetime bound: mote lifetime 1.2s / interval 0.5s caps concurrency at 3
+    // (a 4th would mean expiry is not firing). The peak live count over the
+    // whole run must never exceed that — no unbounded growth.
+    assert!(
+        peak_live <= 3,
+        "live mote count must stay bounded (<=3); peaked at {peak_live}"
+    );
+    assert!(peak_live >= 1, "at least one mote should be alive mid-fear");
+}
+
+/// Emitter-stops-on-restore: once `FearedVisual` is removed the spawn counter
+/// freezes (no new motes), and every in-flight mote finishes its own lifetime
+/// and despawns — no orphans, no leak.
+#[test]
+fn motes_stop_on_restore_and_drain_to_zero() {
+    let mut h = Harness::new();
+    let (unit, _body, _) = h.spawn_unit(1, 0);
+    h.app.world_mut().entity_mut(unit).insert(ActiveAuras { auras: vec![fear_aura()] });
+
+    // Fear for 2s → emitter armed, some motes in flight.
+    for _ in 0..20 {
+        h.app.update();
+    }
+    let spawned_before = h.motes_spawned(unit);
+    assert!(spawned_before >= 2, "emitter should have spawned motes while feared");
+    assert!(h.motes() >= 1, "motes in flight while feared");
+
+    // Fear breaks (aura vec emptied). `update_fear_visuals` removes
+    // `FearedVisual`, so the emitter stops being iterated.
+    h.app.world_mut().get_mut::<ActiveAuras>(unit).unwrap().auras.clear();
+    h.app.update();
+    assert!(h.app.world().get::<FearedVisual>(unit).is_none(), "restored");
+
+    // Run well past a mote lifetime (1.2s → 12 ticks; 20 gives margin).
+    for _ in 0..20 {
+        h.app.update();
+    }
+
+    // No new motes were spawned after restore (counter frozen)...
+    assert_eq!(
+        h.motes_spawned(unit),
+        spawned_before,
+        "emitter must not spawn any mote after FearedVisual is removed"
+    );
+    // ...and every in-flight mote self-expired — no orphans left behind.
+    assert_eq!(h.motes(), 0, "all motes drained to zero after restore");
 }
