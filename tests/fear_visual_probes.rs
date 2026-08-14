@@ -20,8 +20,8 @@ use arenasim::states::play_match::components::{
 };
 use arenasim::states::play_match::{
     cleanup_fear_flashes, cleanup_fear_motes, update_fear_flashes, update_fear_mote_emitters,
-    update_fear_motes, update_fear_run, update_fear_shroud, update_fear_visuals, update_sheep_hop,
-    update_walk_animation,
+    update_fear_motes, update_fear_run, update_fear_shroud, update_fear_visuals,
+    update_polymorph_visuals, update_sheep_hop, update_walk_animation,
 };
 use arenasim::CharacterClass;
 
@@ -48,6 +48,18 @@ fn horror_aura() -> Aura {
         duration: 3.0,
         magnitude: 0.0,
         break_on_damage_threshold: -1.0,
+        ..Default::default()
+    }
+}
+
+/// A plain Polymorph aura, for the co-hold arbitration probe that runs the real
+/// polymorph system alongside the fear one.
+fn polymorph_aura() -> Aura {
+    Aura {
+        effect_type: AuraType::Polymorph,
+        duration: 8.0,
+        magnitude: 0.0,
+        break_on_damage_threshold: 0.0,
         ..Default::default()
     }
 }
@@ -351,6 +363,52 @@ fn polymorph_wins_while_co_held() {
         "fear treatment applies once the sheep look lifts"
     );
     assert_eq!(h.shrouds_of(unit), 1);
+}
+
+/// KTD1 co-hold, the OTHER ordering, running BOTH real systems: a unit feared
+/// FIRST and then polymorphed must not have Polymorph clobber the shared
+/// `OriginalBodyMaterial`. `update_polymorph_visuals` carries the mirror
+/// `Without<FearedVisual>` guard, so it defers while the unit is feared; the
+/// body must restore to the TRUE material, never the husk. (The single stored
+/// slot cannot hold two displacers, so the guard keeps exactly one active.)
+#[test]
+fn fear_then_polymorph_does_not_clobber_material() {
+    let mut h = Harness::new();
+    // Run the real polymorph system alongside the fear systems.
+    h.app.add_systems(Update, update_polymorph_visuals);
+    let (unit, body, real_mat) = h.spawn_unit(1, 0);
+
+    // Fear lands first: husk tint, real material stored.
+    h.app.world_mut().entity_mut(unit).insert(ActiveAuras { auras: vec![fear_aura()] });
+    h.app.update();
+    assert!(h.app.world().get::<FearedVisual>(unit).is_some(), "fear applied first");
+    let husk = h.body_material(body);
+    assert_ne!(husk, real_mat, "husk tint applied");
+    assert_eq!(h.stored_materials(), 1, "real material stored once");
+
+    // Polymorph the already-feared unit — must be deferred (Without<FearedVisual>),
+    // so it never overwrites the stored real material with the husk.
+    h.app.world_mut().get_mut::<ActiveAuras>(unit).unwrap().auras.push(polymorph_aura());
+    h.app.update();
+    assert!(
+        h.app.world().get::<PolymorphedVisual>(unit).is_none(),
+        "sheep deferred while the unit is already feared"
+    );
+    assert_eq!(h.body_material(body), husk, "body still the fear husk, not wool");
+    assert_eq!(h.stored_materials(), 1, "still exactly one stored material — no second capture");
+
+    // Both CCs end. Fear restores; polymorph never applied, so nothing to undo.
+    h.app.world_mut().get_mut::<ActiveAuras>(unit).unwrap().auras.clear();
+    h.app.update();
+    h.app.update();
+    assert!(h.app.world().get::<FearedVisual>(unit).is_none(), "fear restored");
+    assert!(h.app.world().get::<PolymorphedVisual>(unit).is_none());
+    assert_eq!(
+        h.body_material(body),
+        real_mat,
+        "body restored to the TRUE material, not the husk — the OriginalBodyMaterial slot was never clobbered"
+    );
+    assert_eq!(h.stored_materials(), 0, "stored material cleared on restore");
 }
 
 // ---------------------------------------------------------------------------
@@ -662,11 +720,12 @@ fn motes_stop_on_restore_and_drain_to_zero() {
         h.app.update();
     }
 
-    // No new motes were spawned after restore (counter frozen)...
-    assert_eq!(
-        h.motes_spawned(unit),
-        spawned_before,
-        "emitter must not spawn any mote after FearedVisual is removed"
+    // The emitter component was dropped on restore, so no new motes spawn while
+    // unfeared and a re-fear starts from a genuine fresh default (matching the
+    // emitter's doc comment)...
+    assert!(
+        h.app.world().get::<FearMoteEmitter>(unit).is_none(),
+        "emitter must be removed on restore so a re-fear starts fresh"
     );
     // ...and every in-flight mote self-expired — no orphans left behind.
     assert_eq!(h.motes(), 0, "all motes drained to zero after restore");

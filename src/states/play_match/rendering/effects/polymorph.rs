@@ -34,14 +34,23 @@ pub fn update_polymorph_visuals(
     // child, so this joins across the hierarchy. `ActiveAuras` is OPTIONAL
     // because `update_auras` removes the component outright once the last aura
     // expires — required for the component, not the vec, to signal the end.
-    combatants: Query<(
-        Entity,
-        &Combatant,
-        &Transform,
-        Option<&ActiveAuras>,
-        Option<&PolymorphedVisual>,
-        &Children,
-    )>,
+    // `Without<FearedVisual>` makes the two body treatments mutually exclusive:
+    // whichever CC's visual grabs the body first holds the single
+    // `OriginalBodyMaterial` slot until it lifts, then the other applies. Without
+    // this, a Fear-then-Polymorph sequence has Polymorph overwrite the real
+    // material handle Fear stored, leaving the unit stuck on the husk tint.
+    // (Fear's query carries the mirror `Without<PolymorphedVisual>`.)
+    combatants: Query<
+        (
+            Entity,
+            &Combatant,
+            &Transform,
+            Option<&ActiveAuras>,
+            Option<&PolymorphedVisual>,
+            &Children,
+        ),
+        Without<FearedVisual>,
+    >,
     mut bodies: Query<(
         &mut Mesh3d,
         &mut MeshMaterial3d<StandardMaterial>,

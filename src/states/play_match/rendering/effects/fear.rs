@@ -155,6 +155,10 @@ pub fn update_fear_visuals(
                 }
             }
             commands.entity(entity).remove::<FearedVisual>();
+            // Drop the mote emitter too, so a re-fear starts from a genuine
+            // fresh default (matching the emitter's own doc comment) rather than
+            // inheriting a stale spawn accumulator.
+            commands.entity(entity).remove::<FearMoteEmitter>();
 
             // Break flash (R6 / AE2): the same short shadow burst as the body
             // restores. NO `Without<DeathAnimation>` filter on the query, so a
