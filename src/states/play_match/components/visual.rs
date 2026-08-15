@@ -110,6 +110,83 @@ pub struct SheepPart {
     pub owner: Entity,
 }
 
+/// Marker component indicating the combatant is currently feared (the terror
+/// treatment is applied). Single source of truth for the Fear signature look:
+/// the body-tint swap, the breathing shroud, and every exit-path restore key
+/// off this marker's presence/absence — never re-derived from `ActiveAuras`.
+/// Keyed on `AuraType::Fear`, so Death Coil's horror (a Fear-type aura) inherits
+/// the treatment for free. Distinct from [`PolymorphedVisual`]: a unit can be
+/// both feared and polymorphed (different DR categories), and the sheep look
+/// wins while polymorphed (the fear system carries `Without<PolymorphedVisual>`).
+#[derive(Component)]
+pub struct FearedVisual;
+
+/// The breathing shadow aura sphere spawned as a child of a feared combatant's
+/// [`VisualBody`]. Mirrors [`SheepPart`]'s owner scoping: `owner` is the SIM
+/// entity, so restore despawns exactly this unit's shroud and two
+/// simultaneously-feared units never strip each other's.
+#[derive(Component)]
+pub struct FearShroud {
+    pub owner: Entity,
+}
+
+/// Interval-timer state for the rising fear-mote emitter, attached to a feared
+/// unit and gated by [`FearedVisual`]. Collapses the affliction detector +
+/// emitter into one system: while the marker holds, motes spawn every
+/// `FEAR_MOTE_INTERVAL`. When the marker is removed the unit simply stops being
+/// iterated (no new motes), and any in-flight motes finish their own lifetime —
+/// no owner-scoped despawn is needed. Mirrors [`DotDripEmitter`]'s
+/// accumulator/count fields.
+#[derive(Component, Default)]
+pub struct FearMoteEmitter {
+    /// Seconds accumulated toward the next mote spawn.
+    pub spawn_accumulator: f32,
+    /// Count of motes spawned — doubles as the visual-only jitter seed.
+    pub motes_spawned: u32,
+}
+
+/// One rising shadow mote spawned by a [`FearMoteEmitter`]. A transient world
+/// particle (NOT owner-scoped, NOT a child): it floats upward and fades over
+/// its lifetime, then self-despawns. Mirrors [`DotDrip`] / [`FlameParticle`].
+#[derive(Component)]
+pub struct FearMote {
+    /// Velocity vector (primarily upward with slight horizontal drift).
+    pub velocity: Vec3,
+    /// Time remaining before despawn (seconds).
+    pub lifetime: f32,
+    /// Initial lifetime for the fade calculation.
+    pub initial_lifetime: f32,
+}
+
+/// A glass-like shard flung from the fear shroud when it shatters on break — a
+/// transient, unattached world particle with ballistic motion (gravity) and a
+/// tumble, that fades and self-despawns. The dynamic replacement for the break
+/// flash: the shroud appears to break apart and fall away.
+#[derive(Component)]
+pub struct FearShard {
+    /// Current velocity (outward + up at spawn; gravity pulls it down each tick).
+    pub velocity: Vec3,
+    /// Tumble rate about each local axis (radians/sec).
+    pub angular_velocity: Vec3,
+    /// Time remaining before despawn (seconds).
+    pub lifetime: f32,
+    /// Initial lifetime for the fade calculation.
+    pub initial_lifetime: f32,
+}
+
+/// A brief shadow flash burst spawned at BOTH the Fear apply and the Fear break,
+/// mirroring [`TransformPuff`]'s dual-direction role. Kept short-lived (~0.4s):
+/// Fear breaks on ANY damage, so an apply and its break can land within a second
+/// of each other and must each read as a distinct pop rather than one smear.
+/// Grows and fades over its lifetime, then self-despawns.
+#[derive(Component)]
+pub struct FearFlash {
+    /// Time remaining before despawn (seconds).
+    pub lifetime: f32,
+    /// Initial lifetime for the grow/fade curve.
+    pub initial_lifetime: f32,
+}
+
 /// A rising flame particle for fire spell effects (e.g., Immolate).
 /// Spawned at target location, rises upward while shrinking and fading.
 #[derive(Component)]

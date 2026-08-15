@@ -40,6 +40,26 @@ const HOP_STEP_LENGTH: f32 = 0.9;
 /// ground between hops instead of rolling smoothly between them.
 const HOP_SHARPNESS: f32 = 1.6;
 
+/// Peak height of a feared unit's panic bob above `rest_y`, in arena units.
+/// Above the walk bob (0.10) and below the sheep hop (0.28): a fast, frantic
+/// stride, not a leap.
+const FEAR_BOB_AMPLITUDE: f32 = 0.18;
+
+/// Arena units of horizontal travel per panic-bob cycle. Shorter than
+/// `WALK_STEP_LENGTH` (1.5) so a feared unit fleeing at full speed churns its
+/// legs at a visibly higher cadence than a normal walk.
+const FEAR_STEP_LENGTH: f32 = 0.8;
+
+/// Amplitude of the time-driven panic tremble on the body Y offset, in arena
+/// units. Small — it reads as a shiver riding on top of the run, not a bounce.
+const FEAR_TREMBLE_AMPLITUDE: f32 = 0.04;
+
+/// Angular frequency of the panic tremble, in radians per second. ~6.7 Hz — a
+/// rapid vibration distinct from any gait cadence. Driven by the wall clock
+/// (`Res<Time>`), never by sim displacement, so a stationary-but-feared unit
+/// still trembles (the fixed-timestep-strobe trap).
+const FEAR_TREMBLE_FREQ: f32 = 42.0;
+
 /// Fold this frame's horizontal travel into a gait's phase and idle clock, and
 /// report whether the unit should be held at rest.
 ///
@@ -120,7 +140,8 @@ fn apply_gait_offset(
 /// post-`CombatResolution` window, so excluding their drivers is still the
 /// cleanest way to avoid the last-writer-wins race. `Without<PolymorphedVisual>`
 /// does the same for [`update_sheep_hop`], which owns the gait while a unit is
-/// a sheep.
+/// a sheep, and `Without<FearedVisual>` for [`update_fear_run`], which owns it
+/// while a unit is feared.
 ///
 /// Graphical-mode only — registered in `StatesPlugin::build()`, never in
 /// `add_core_combat_systems`. Visual-only; touches no gameplay state.
@@ -133,6 +154,7 @@ pub fn update_walk_animation(
             Without<Celebrating>,
             Without<VisualBody>,
             Without<PolymorphedVisual>,
+            Without<FearedVisual>,
         ),
     >,
     mut bodies: Query<(&mut Transform, &VisualBody)>,
@@ -200,6 +222,86 @@ pub fn update_sheep_hop(
             &mut bodies,
             idle,
             lift,
+            GAIT_SETTLE_RATE * time.delta_secs(),
+        );
+    }
+}
+
+/// Drive the panic-run gait on feared units, replacing the walk bob.
+///
+/// Two motions compose into the single body-Y write this system owns:
+///
+/// 1. A **fast panic bob** — distance-driven exactly like the walk bob and the
+///    sheep hop (`advance_gait` / [`WalkAnim`]), but at a higher cadence
+///    (`FEAR_STEP_LENGTH < WALK_STEP_LENGTH`) and amplitude
+///    (`FEAR_BOB_AMPLITUDE > WALK_BOB_AMPLITUDE`), so a fleeing unit churns
+///    frantically. Zeroed when the unit is idle, so a stationary feared unit
+///    does not bob.
+/// 2. A **time-driven tremble** — a small, rapid vibration read as raw panic,
+///    layered on TOP of the bob. It is driven by the wall clock
+///    (`time.elapsed_secs()`), NOT sim displacement, so a feared unit that is
+///    standing still STILL trembles. Gating it on "sim moved this frame" would
+///    strobe it at render rate and freeze it whenever the sim paused between
+///    fixed ticks — the fixed-timestep-strobe trap.
+///
+/// Both ride `translation.y` only. Because the tremble stays on the single axis
+/// `apply_gait_offset` manages, it self-resets the frame the walk gait resumes:
+/// when [`FearedVisual`] is removed this system stops running and
+/// [`update_walk_animation`] takes over the same child's Y, easing back to
+/// `rest_y` — no residual offset is left behind. (A lateral X/Z shudder would
+/// have to zero itself explicitly on restore; Y is chosen precisely so the
+/// shared writer cleans up for free — see the plan's KTD2.)
+///
+/// Shares [`WalkAnim`] with the bob and hop rather than carrying its own state,
+/// so `previous_xz` / `idle_time` stay live through the fear window and the walk
+/// bob resumes on a live baseline when the fear breaks.
+///
+/// `With<FearedVisual>, Without<PolymorphedVisual>` makes the gait arbitration
+/// total for a unit carrying both markers (a real state — Fear and Polymorph are
+/// different DR categories and co-exist): the sheep hop wins, mirroring the body
+/// treatment. `Without<VisualBody>` keeps the mover query disjoint from the body
+/// query it writes through.
+///
+/// Graphical-mode only — registered in `StatesPlugin::build()`, never in
+/// `add_core_combat_systems`. Visual-only; touches no gameplay state.
+pub fn update_fear_run(
+    time: Res<Time>,
+    mut movers: Query<
+        (&Transform, &mut WalkAnim, &Combatant, &Children),
+        (
+            With<FearedVisual>,
+            Without<PolymorphedVisual>,
+            // Death and celebration own the body Y when present, mirroring the
+            // walk bob and sheep hop — the `FearedVisual` removal on death is a
+            // deferred Command, so without these the panic run would race the
+            // death sink for one frame.
+            Without<DeathAnimation>,
+            Without<Celebrating>,
+            Without<VisualBody>,
+        ),
+    >,
+    mut bodies: Query<(&mut Transform, &VisualBody)>,
+) {
+    for (transform, mut walk, combatant, children) in movers.iter_mut() {
+        let idle = advance_gait(
+            &mut walk,
+            transform.translation.xz(),
+            FEAR_STEP_LENGTH,
+            combatant.is_alive(),
+            time.delta_secs(),
+        );
+        // Distance-gated bob: zero while the unit holds still.
+        let bob = if idle { 0.0 } else { walk.phase.sin() * FEAR_BOB_AMPLITUDE };
+        // Time-driven tremble: always present, even at a dead stop.
+        let tremble = (time.elapsed_secs() * FEAR_TREMBLE_FREQ).sin() * FEAR_TREMBLE_AMPLITUDE;
+        // Write the composed offset unconditionally (idle = false): the tremble
+        // must survive idle frames, and restore is handled by the walk gait
+        // resuming — never by easing here — so nothing is left frozen.
+        apply_gait_offset(
+            children,
+            &mut bodies,
+            false,
+            bob + tremble,
             GAIT_SETTLE_RATE * time.delta_secs(),
         );
     }

@@ -10,6 +10,8 @@ mod speech_bubbles;
 pub use speech_bubbles::*;
 mod shield_bubbles;
 pub use shield_bubbles::*;
+mod fear;
+pub use fear::*;
 mod polymorph;
 pub use polymorph::*;
 mod transform_puffs;
