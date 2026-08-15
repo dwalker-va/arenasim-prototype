@@ -135,7 +135,10 @@ impl EntryFamily {
     /// Whether this mechanism's start path is wired yet. Extended as each
     /// mechanism's unit lands; `Unsupported` is never playable.
     pub fn is_playable(self) -> bool {
-        matches!(self, EntryFamily::Cast | EntryFamily::Body)
+        matches!(
+            self,
+            EntryFamily::Cast | EntryFamily::Channel | EntryFamily::Body
+        )
     }
 }
 
@@ -433,9 +436,6 @@ fn start_entry(
 ) -> bool {
     match playback.selected {
         Some(SandboxEntry::Ability(ability)) => {
-            if playback.family != Some(EntryFamily::Cast) {
-                return false;
-            }
             let Some(config) = defs.get(&ability) else {
                 return false;
             };
@@ -448,10 +448,31 @@ fn start_entry(
             } else {
                 caster
             };
-            commands
-                .entity(caster)
-                .insert(CastingState::new(ability, target, config.cast_time));
-            true
+            match playback.family {
+                // M1 / hard casts — resolve through process_casting.
+                Some(EntryFamily::Cast) => {
+                    commands
+                        .entity(caster)
+                        .insert(CastingState::new(ability, target, config.cast_time));
+                    true
+                }
+                // M2 channels — shared entry point (mirror warlock.rs:819);
+                // process_channeling resolves the ticks and drives the beam.
+                Some(EntryFamily::Channel) => {
+                    commands.entity(caster).insert(ChannelingState {
+                        ability,
+                        duration_remaining: config.channel_duration.unwrap_or(5.0),
+                        time_until_next_tick: config.channel_tick_interval,
+                        tick_interval: config.channel_tick_interval,
+                        target,
+                        interrupted: false,
+                        interrupted_display_time: 0.0,
+                        ticks_applied: 0,
+                    });
+                    true
+                }
+                _ => false,
+            }
         }
         Some(SandboxEntry::Body(body)) => {
             match body {
@@ -715,15 +736,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn playable_mechanisms_are_cast_and_body_for_now() {
-        // Cast (hard casts + M1 instants) and Body play; Channel/Component/
-        // Entity/Residue are wired in later units; Unsupported never plays.
+    fn wired_mechanisms_are_playable_and_unsupported_never_is() {
+        // Wired so far: Cast (hard casts + M1 instants), Channel, Body.
+        // Component/Entity/Residue land in later units; Unsupported never plays.
         assert!(EntryFamily::Cast.is_playable());
+        assert!(EntryFamily::Channel.is_playable());
         assert!(EntryFamily::Body.is_playable());
-        assert!(!EntryFamily::Channel.is_playable());
-        assert!(!EntryFamily::Component.is_playable());
-        assert!(!EntryFamily::Entity.is_playable());
-        assert!(!EntryFamily::Residue.is_playable());
         assert!(!EntryFamily::Unsupported.is_playable());
     }
 
