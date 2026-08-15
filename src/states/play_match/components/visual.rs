@@ -158,6 +158,22 @@ pub struct FearMote {
     pub initial_lifetime: f32,
 }
 
+/// A glass-like shard flung from the fear shroud when it shatters on break — a
+/// transient, unattached world particle with ballistic motion (gravity) and a
+/// tumble, that fades and self-despawns. The dynamic replacement for the break
+/// flash: the shroud appears to break apart and fall away.
+#[derive(Component)]
+pub struct FearShard {
+    /// Current velocity (outward + up at spawn; gravity pulls it down each tick).
+    pub velocity: Vec3,
+    /// Tumble rate about each local axis (radians/sec).
+    pub angular_velocity: Vec3,
+    /// Time remaining before despawn (seconds).
+    pub lifetime: f32,
+    /// Initial lifetime for the fade calculation.
+    pub initial_lifetime: f32,
+}
+
 /// A brief shadow flash burst spawned at BOTH the Fear apply and the Fear break,
 /// mirroring [`TransformPuff`]'s dual-direction role. Kept short-lived (~0.4s):
 /// Fear breaks on ANY damage, so an apply and its break can land within a second

@@ -15,13 +15,15 @@ use std::time::Duration;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
 use arenasim::states::play_match::components::{
-    ActiveAuras, Aura, AuraType, Combatant, FearFlash, FearMote, FearMoteEmitter, FearShroud,
-    FearedVisual, OriginalBodyMaterial, OriginalMesh, PolymorphedVisual, VisualBody, WalkAnim,
+    ActiveAuras, Aura, AuraType, Combatant, FearFlash, FearMote, FearMoteEmitter, FearShard,
+    FearShroud, FearedVisual, OriginalBodyMaterial, OriginalMesh, PolymorphedVisual, VisualBody,
+    WalkAnim,
 };
 use arenasim::states::play_match::{
-    cleanup_fear_flashes, cleanup_fear_motes, update_fear_flashes, update_fear_mote_emitters,
-    update_fear_motes, update_fear_run, update_fear_shroud, update_fear_visuals,
-    update_polymorph_visuals, update_sheep_hop, update_walk_animation,
+    cleanup_fear_flashes, cleanup_fear_motes, cleanup_fear_shards, update_fear_flashes,
+    update_fear_mote_emitters, update_fear_motes, update_fear_run, update_fear_shards,
+    update_fear_shroud, update_fear_visuals, update_polymorph_visuals, update_sheep_hop,
+    update_walk_animation,
 };
 use arenasim::CharacterClass;
 
@@ -92,6 +94,10 @@ impl Harness {
                 // not cleaned up the same tick it is born.
                 update_fear_flashes,
                 cleanup_fear_flashes,
+                // Shatter trio (break effect): shards spawned by the break branch
+                // of update_fear_visuals, then integrated + cleaned up.
+                update_fear_shards,
+                cleanup_fear_shards,
             )
                 .chain(),
         );
@@ -185,6 +191,21 @@ impl Harness {
             .query_filtered::<Entity, With<FearFlash>>()
             .iter(self.app.world())
             .collect()
+    }
+
+    /// Live shatter-shard count across the whole world.
+    fn shards(&mut self) -> usize {
+        self.app.world_mut().query::<&FearShard>().iter(self.app.world()).count()
+    }
+
+    /// Lowest Y across all live shards — proves they fall (drops over time).
+    fn min_shard_y(&mut self) -> f32 {
+        self.app
+            .world_mut()
+            .query::<(&FearShard, &Transform)>()
+            .iter(self.app.world())
+            .map(|(_, t)| t.translation.y)
+            .fold(f32::INFINITY, f32::min)
     }
 
     /// Cumulative motes the unit's emitter has spawned (the cadence counter).
@@ -760,7 +781,7 @@ fn apply_flash_spawns_on_fear() {
 /// identified as a NEW flash entity (not present before the break), so the
 /// assertion holds regardless of whether the apply flash has already expired.
 #[test]
-fn break_flash_spawns_in_sub_second_window() {
+fn break_shatter_spawns_in_sub_second_window() {
     let mut h = Harness::new();
     let (unit, _body, _) = h.spawn_unit(1, 0);
     h.app.world_mut().entity_mut(unit).insert(ActiveAuras { auras: vec![fear_aura()] });
@@ -770,21 +791,46 @@ fn break_flash_spawns_in_sub_second_window() {
     for _ in 0..4 {
         h.app.update();
     }
-    let before = h.flash_entities();
+    assert_eq!(h.shards(), 0, "no shards while feared");
 
     // Damage break: aura vec emptied. `update_fear_visuals` takes the
-    // transition-out branch and spawns a break flash.
+    // transition-out branch and SHATTERS the shroud into shards (the dynamic
+    // break effect that replaced the flash).
     h.app.world_mut().get_mut::<ActiveAuras>(unit).unwrap().auras.clear();
     h.app.update();
     assert!(h.app.world().get::<FearedVisual>(unit).is_none(), "restored");
-
-    let after = h.flash_entities();
-    let new_flashes = after.difference(&before).count();
     assert!(
-        new_flashes >= 1,
-        "a break flash spawns even when Fear breaks inside a sub-second window \
-         (new flashes: {new_flashes})"
+        h.shards() >= 1,
+        "the shroud shatters even when Fear breaks inside a sub-second window"
     );
+}
+
+/// The shatter shards fall under gravity and drain to zero — no orphans.
+#[test]
+fn shatter_shards_fall_and_drain() {
+    let mut h = Harness::new();
+    let (unit, _body, _) = h.spawn_unit(1, 0);
+    h.app.world_mut().entity_mut(unit).insert(ActiveAuras { auras: vec![fear_aura()] });
+    h.app.update(); // apply
+
+    // Break → shatter burst.
+    h.app.world_mut().get_mut::<ActiveAuras>(unit).unwrap().auras.clear();
+    h.app.update();
+    let count = h.shards();
+    assert!(count >= 8, "a shatter burst spawns a ring of shards (got {count})");
+    let y_at_spawn = h.min_shard_y();
+
+    // Several ticks: gravity drags the shards down (the lowest shard falls).
+    for _ in 0..5 {
+        h.app.update();
+    }
+    assert!(h.min_shard_y() < y_at_spawn, "shards fall under gravity");
+
+    // Past their lifetime (0.8s → 8 ticks; 12 gives margin) they all drain.
+    for _ in 0..12 {
+        h.app.update();
+    }
+    assert_eq!(h.shards(), 0, "all shatter shards self-expired");
 }
 
 /// Flashes self-expire: over repeated apply/break cycles the live `FearFlash`
@@ -815,9 +861,9 @@ fn flashes_self_expire_and_stay_bounded() {
         h.app.world_mut().entity_mut(unit).remove::<ActiveAuras>();
     }
 
-    // Each cycle spawns at most an apply + a break flash, each ~0.4s-lived
-    // (4 ticks). With 6 ticks between transitions they never pile up: the live
-    // count stays small and bounded — the flashes are being cleaned up.
+    // Each cycle spawns one apply flash (~0.3s-lived); the break now SHATTERS
+    // rather than flashing, so no break flash is added. With 6 ticks between
+    // transitions the apply flashes never pile up — the count stays bounded.
     assert!(peak <= 3, "flash count must stay bounded across cycles (peaked at {peak})");
     // And after a long idle they have all drained.
     for _ in 0..10 {

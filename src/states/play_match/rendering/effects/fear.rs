@@ -168,12 +168,12 @@ pub fn update_fear_visuals(
             // inheriting a stale spawn accumulator.
             commands.entity(entity).remove::<FearMoteEmitter>();
 
-            // Break flash (R6 / AE2): the same short shadow burst as the body
-            // restores. NO `Without<DeathAnimation>` filter on the query, so a
-            // unit killed while feared still flashes as the treatment lifts. Kept
-            // short enough (~0.4s) that a Fear broken almost instantly still shows
-            // a distinct end event.
-            spawn_fear_flash(
+            // Break effect (R6 / AE2): the shroud SHATTERS into falling shards as
+            // the treatment lifts — the dynamic replacement for the break flash.
+            // NO `Without<DeathAnimation>` filter on the query, so a unit killed
+            // while feared still shatters. The burst is brief so a Fear broken
+            // almost instantly still reads as a distinct end event.
+            spawn_fear_shatter(
                 &mut commands,
                 &mut meshes,
                 &mut materials,
@@ -432,6 +432,128 @@ pub fn update_fear_flashes(
 pub fn cleanup_fear_flashes(mut commands: Commands, flashes: Query<(Entity, &FearFlash)>) {
     for (entity, flash) in flashes.iter() {
         if flash.lifetime <= 0.0 {
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
+// ==============================================================================
+// Shroud shatter (dynamic Fear break)
+// ==============================================================================
+//
+// When Fear ends, the fitted shroud bursts into a ring of glass-like shards that
+// fly outward, tumble, and fall away under gravity — the dynamic replacement for
+// the break flash. Spawned from the break branch of `update_fear_visuals`. Shards
+// are transient `PlayMatchEntity` world particles (not owner-scoped) that
+// self-expire, so no restore bookkeeping is needed. All variation comes from the
+// deterministic `fear_mote_jitter` hash, NEVER the seeded `GameRng`, so headless
+// stays byte-identical.
+
+/// Number of shards in a shatter burst.
+const FEAR_SHARD_COUNT: u32 = 14;
+/// Shard lifetime (seconds) — long enough to arc out and fall.
+const FEAR_SHARD_LIFETIME: f32 = 0.8;
+/// Downward acceleration on shards (arena units/sec^2).
+const FEAR_SHARD_GRAVITY: f32 = 7.5;
+/// Outward launch speed off the shroud surface.
+const FEAR_SHARD_OUTWARD_SPEED: f32 = 1.6;
+/// Upward launch speed (shards pop up a little before falling).
+const FEAR_SHARD_UP_SPEED: f32 = 1.3;
+/// Peak tumble rate about each axis (radians/sec).
+const FEAR_SHARD_SPIN: f32 = 9.0;
+/// Base alpha of a shard at spawn (glass-like, fades to 0).
+const FEAR_SHARD_ALPHA: f32 = 0.85;
+
+/// Spawn a burst of shroud shards around the unit at `torso_world_y` — the
+/// dynamic Fear-break effect. Each shard launches outward + up from a point on
+/// the shroud ring, tumbling, and falls under gravity while fading.
+fn spawn_fear_shatter(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    unit_pos: Vec3,
+    torso_world_y: Option<f32>,
+) {
+    let center = Vec3::new(unit_pos.x, torso_world_y.unwrap_or(unit_pos.y), unit_pos.z);
+    // One thin pane mesh shared across the burst — reads as a glass fragment.
+    let mesh = meshes.add(Cuboid::new(0.14, 0.14, 0.02));
+
+    for i in 0..FEAR_SHARD_COUNT {
+        // Deterministic per-shard variation (visual-only hash, not GameRng).
+        let seed = unit_pos.x.to_bits().wrapping_add(i.wrapping_mul(2_654_435_761));
+        let j = |k: u32| fear_mote_jitter(seed.wrapping_add(k));
+
+        // Ring position around the fitted shroud, spread over its height.
+        let angle =
+            (i as f32 / FEAR_SHARD_COUNT as f32) * std::f32::consts::TAU + (j(0) - 0.5) * 0.4;
+        let (sin, cos) = angle.sin_cos();
+        let height = (j(1) - 0.5) * (FEAR_SHROUD_LENGTH + FEAR_SHROUD_RADIUS);
+        let radial = Vec3::new(cos, 0.0, sin);
+        let spawn = center + radial * FEAR_SHROUD_RADIUS + Vec3::Y * height;
+
+        // Launch outward + up, with a jittered tumble.
+        let velocity = radial * (FEAR_SHARD_OUTWARD_SPEED * (0.7 + 0.6 * j(2)))
+            + Vec3::Y * (FEAR_SHARD_UP_SPEED * (0.5 + j(3)));
+        let angular_velocity = Vec3::new(
+            (j(4) - 0.5) * 2.0 * FEAR_SHARD_SPIN,
+            (j(5) - 0.5) * 2.0 * FEAR_SHARD_SPIN,
+            (j(6) - 0.5) * 2.0 * FEAR_SHARD_SPIN,
+        );
+
+        let material = materials.add(StandardMaterial {
+            base_color: FEAR_SHROUD_COLOR.with_alpha(FEAR_SHARD_ALPHA),
+            emissive: LinearRgba::new(0.6, 0.25, 1.0, 1.0),
+            // Blend (not Add) so a shard reads as a solid glass fragment rather
+            // than a glow; shards separate immediately, so no coplanar Z-fight.
+            alpha_mode: AlphaMode::Blend,
+            cull_mode: None,
+            ..default()
+        });
+
+        commands.spawn((
+            FearShard {
+                velocity,
+                angular_velocity,
+                lifetime: FEAR_SHARD_LIFETIME,
+                initial_lifetime: FEAR_SHARD_LIFETIME,
+            },
+            Mesh3d(mesh.clone()),
+            MeshMaterial3d(material),
+            Transform::from_translation(spawn).with_rotation(Quat::from_rotation_y(angle)),
+            PlayMatchEntity,
+        ));
+    }
+}
+
+/// Integrate each shard: gravity-pulled ballistic motion, tumble, and alpha
+/// fade. Time-driven (the fixed-timestep-strobe trap), so shards fall smoothly
+/// regardless of sim tick rate.
+pub fn update_fear_shards(
+    time: Res<Time>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut shards: Query<(&mut FearShard, &mut Transform, &MeshMaterial3d<StandardMaterial>)>,
+) {
+    let dt = time.delta_secs();
+    for (mut shard, mut transform, material_handle) in shards.iter_mut() {
+        shard.lifetime -= dt;
+        shard.velocity.y -= FEAR_SHARD_GRAVITY * dt;
+        transform.translation += shard.velocity * dt;
+        let spin = shard.angular_velocity * dt;
+        transform.rotate(Quat::from_euler(EulerRot::XYZ, spin.x, spin.y, spin.z));
+
+        let life_ratio = (shard.lifetime / shard.initial_lifetime).clamp(0.0, 1.0);
+        if let Some(material) = materials.get_mut(&material_handle.0) {
+            let base = FEAR_SHROUD_COLOR.to_srgba();
+            material.base_color =
+                Color::srgba(base.red, base.green, base.blue, FEAR_SHARD_ALPHA * life_ratio);
+        }
+    }
+}
+
+/// Despawn shards whose lifetime has elapsed.
+pub fn cleanup_fear_shards(mut commands: Commands, shards: Query<(Entity, &FearShard)>) {
+    for (entity, shard) in shards.iter() {
+        if shard.lifetime <= 0.0 {
             commands.entity(entity).despawn();
         }
     }
