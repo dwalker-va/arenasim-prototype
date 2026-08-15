@@ -754,6 +754,56 @@ pub fn forgone_damage(delivery_rate: f32, t_eff: f32, suppresses_our_damage: boo
     delivery_rate.max(0.0) * t_eff.max(0.0)
 }
 
+// ---------------------------------------------------------------------------
+// Frost Nova: three attempts, all measured, none kept (2026-08-15)
+// ---------------------------------------------------------------------------
+//
+// The mechanic is real and the model is blind to it. `denies_actions` excludes
+// Root — correctly, since a rooted caster keeps casting — but against a unit
+// whose damage needs melee reach a root IS action denial, which makes Frost Nova
+// as strong as a Polymorph against a Warrior or a Rogue, provided the Mage then
+// leaves melee range. It is also the INSTANT answer where Polymorph is a 1.5s
+// cast the same Warrior would simply Pummel.
+//
+// Baseline for every figure below: Frost Nova left unpriced, net +60 across
+// seven Mage matchups (n=300 each).
+//
+// 1. Denial pricing gated on "nobody in reach at cast". Net +60 -> -3.
+//    Warrior+Priest +3 -> -9, Rogue+Priest -12 -> -23, Paladin+Warrior halved.
+//    The gate is backwards: if nobody is in reach the target is ALREADY denied
+//    by geometry and the root adds nothing. A root is worth what it stops them
+//    RE-ESTABLISHING.
+//
+// 2. Forward-looking value plus a cooldown reservation. Net -3 -> +9, still far
+//    below +60. Denial seconds became duration minus the time they would have
+//    spent closing anyway, which DERIVES the shipped heuristic instead of
+//    asserting it: a melee already on you closes in 0s, so value peaks exactly
+//    where "cast it when something is on me" fires. The reservation was
+//    self-calibrating — spend the charge when the moment is at least 80% as good
+//    as the best this board offers — specifically to avoid the under-use a flat
+//    cooldown tax would cause.
+//
+//    It under-used anyway, and badly: against Rogue+Priest the heuristic casts
+//    97 novas over 15 matches and the priced model 21. The binding gate is COST,
+//    not the reservation — a Frostbolt is ~100 damage, while a Rogue's ~25
+//    dmg/s halved by `DAMAGE_DENIAL_DISCOUNT` over 6s is ~75. That discount is
+//    right when choosing a crowd-control target and wrong for a defensive
+//    escape, where the damage avoided is not deferred at all.
+//
+// 3. Discounting a hard cast by the odds it survives an interrupter.
+//    Byte-identical across 2,100 matches — it never fires. Frost Nova is
+//    Priority 4 in `decide_mage_action` and Polymorph is Priority 5, so when a
+//    melee is adjacent the nova is chosen before Polymorph is ever evaluated.
+//    The PRIORITY ORDER already encodes "instant when threatened, cast when
+//    free", and the model need not derive what the ordering hardcodes. The term
+//    would matter for a class where an instant and a cast compete at one
+//    priority.
+//
+// What is missing is on the COST side, not the value side: `C` prices mana and a
+// displaced cast, both consumable, and cannot express either the scarcity of a
+// 25s cooldown or the fact that a defensive tool's value is damage AVOIDED
+// rather than damage deferred.
+
 /// Whether an aura type denies its target the ability to *act*.
 ///
 /// Delegates to the simulation's own `is_incapacitating` so the accounting can

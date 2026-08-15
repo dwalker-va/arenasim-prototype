@@ -1778,6 +1778,132 @@ fn report_mage_polymorph_choice_by_policy() {
     }
 }
 
+
+/// Score the priced model on DENIAL rather than win rate.
+///
+/// Every behavioural step in this work was judged on win rate, which is exactly
+/// the instrument that cannot see compounding: fifteen continuous seconds of
+/// control and three separate five-second windows produce the same `D x T_eff`
+/// and can produce the same win rate, while being worth very different amounts.
+///
+/// Attribution is PER SIDE — the shared accounting sums both teams, which cannot
+/// answer "did OUR policy deny more". Each cell is run in both assignments so
+/// the two policies meet across the same table on the same seeds.
+///
+/// Three metrics, weakest to strongest:
+///
+/// - **denied seconds** — enemy member-seconds spent unable to act. Volume.
+/// - **counterplay-free seconds** — two or more enemies denied at once, one of
+///   them a healer, so nothing on that side can answer. This is the "cross CC"
+///   shape, and it requires coordination between two casters.
+/// - **longest unbroken lockout** on any single enemy, per match. The direct
+///   measure of chaining: it only grows if a new application lands before the
+///   previous one lapses.
+#[test]
+#[ignore = "step-0 report: prints a table, asserts nothing. Run with --nocapture"]
+fn report_denial_scoring_by_policy() {
+    struct Tally {
+        denied: f32,
+        counterplay_free: f32,
+        longest: Vec<f32>,
+    }
+
+    let cells: [(&str, Vec<&str>, Vec<&str>); 6] = [
+        ("2v2 vs Paladin+Warrior", vec!["Mage", "Priest"], vec!["Paladin", "Warrior"]),
+        ("2v2 vs Rogue+Priest", vec!["Mage", "Priest"], vec!["Rogue", "Priest"]),
+        ("2v2 vs Warlock+Priest", vec!["Mage", "Priest"], vec!["Warlock", "Priest"]),
+        ("2v2 Warlock: vs Priest+Rogue", vec!["Warlock", "Priest"], vec!["Priest", "Rogue"]),
+        // 3v3: counterplay-free requires TWO enemies locked at once including a
+        // healer, which in a 2v2 means the whole enemy team. More bodies and
+        // more crowd control should give the metric room to register.
+        ("3v3 Mage+Warlock+Priest", vec!["Mage", "Warlock", "Priest"],
+            vec!["Rogue", "Paladin", "Warrior"]),
+        ("3v3 vs double healer", vec!["Mage", "Warlock", "Priest"],
+            vec!["Priest", "Paladin", "Rogue"]),
+    ];
+
+    println!("\n=== denial inflicted, by the policy that inflicted it ===");
+    println!("(both assignments per cell, 20 seeds each, so the policies meet on the same seeds)\n");
+
+    for (label, t1, t2) in cells {
+        // policy name -> what that side inflicted on the other
+        let mut by_policy: BTreeMap<&str, Tally> = BTreeMap::new();
+        for p in ["Identity", "Priced"] {
+            by_policy.insert(p, Tally { denied: 0.0, counterplay_free: 0.0, longest: Vec::new() });
+        }
+
+        for (p1, p2) in [("Priced", "Identity"), ("Identity", "Priced")] {
+            for seed in 1..=20u64 {
+                let mut cfg = config(&t1, &t2, seed);
+                cfg.team1_cc_policy = Some(p1.to_string());
+                cfg.team2_cc_policy = Some(p2.to_string());
+
+                // Per-team-being-denied accumulators, plus per-entity lockout runs.
+                let mut denied = [0.0f32; 3];
+                let mut cpf = [0.0f32; 3];
+                let mut run: BTreeMap<Entity, f32> = BTreeMap::new();
+                let mut best = [0.0f32; 3];
+
+                run_headless_match_observed(cfg, true, None, |frame| {
+                    for team in [1u8, 2u8] {
+                        let locked: Vec<&arenasim::headless::ObservedCombatant> = frame
+                            .combatants
+                            .values()
+                            .filter(|c| c.team == team && c.alive && !c.is_pet)
+                            .filter(|c| c.auras.iter().any(|a| denies_actions(a.effect_type)))
+                            .collect();
+                        denied[team as usize] += FRAME_DT * locked.len() as f32;
+                        if locked.len() >= 2 && locked.iter().any(|c| c.class.is_healer()) {
+                            cpf[team as usize] += FRAME_DT;
+                        }
+                    }
+                    // Unbroken lockout per entity: extend while denied, reset when not.
+                    for (e, c) in &frame.combatants {
+                        if c.is_pet || !c.alive {
+                            continue;
+                        }
+                        let held = c.auras.iter().any(|a| denies_actions(a.effect_type));
+                        let cur = run.entry(*e).or_insert(0.0);
+                        if held {
+                            *cur += FRAME_DT;
+                            let t = c.team as usize;
+                            if *cur > best[t] {
+                                best[t] = *cur;
+                            }
+                        } else {
+                            *cur = 0.0;
+                        }
+                    }
+                })
+                .expect("match should run");
+
+                // Team 1 ran p1 and inflicted on team 2, and vice versa.
+                for (policy, victim) in [(p1, 2usize), (p2, 1usize)] {
+                    let t = by_policy.get_mut(policy).unwrap();
+                    t.denied += denied[victim];
+                    t.counterplay_free += cpf[victim];
+                    t.longest.push(best[victim]);
+                }
+            }
+        }
+
+        println!("-- {label} --");
+        for p in ["Identity", "Priced"] {
+            let t = &by_policy[p];
+            let n = t.longest.len().max(1) as f32;
+            println!(
+                "  {:<9} denied {:>7.1}s   counterplay-free {:>6.1}s   longest lockout {:.2}s (max {:.2}s)",
+                p,
+                t.denied / n,
+                t.counterplay_free / n,
+                mean(&t.longest),
+                t.longest.iter().copied().fold(0.0f32, f32::max),
+            );
+        }
+        println!();
+    }
+}
+
 #[test]
 #[ignore = "step-0 report: prints a table, asserts nothing. Run with --nocapture"]
 fn report_single_match_detail() {
