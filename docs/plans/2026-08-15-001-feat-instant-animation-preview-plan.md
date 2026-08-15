@@ -23,6 +23,23 @@ execution: code
 
 ---
 
+## Implementation status — 2026-08-15 (branch `feat/instant-animation-preview`)
+
+**Shipped** (tested, committed; graphical-only, no `class_ai`/`combat_core` changes, byte-identity held):
+- **U1 + U3** — mechanism classifier (Cast/Channel/Component/Entity/Residue/Body/Unsupported) and the `Cast` path: every hard cast + single-target damage/aura/projectile instant plays via a zero-duration `CastingState`, with the KTD5 target rule and generalized hold. Fixes the Drain Life / Frost Shock misclassification. (`only Wind Shear` refined to `Wind Shear + Heroic Strike` — the latter has no distinct cast visual; classifier test updated accordingly.)
+- **U2** — `Channel` (Drain Life, AE2), verified live.
+- **U4** — `Component`: `*Pending` spawns (Divine Shield, Berserker Rage, Holy Shock, dispels) + `drive_sandbox_dash` for Charge/Disengage (KTD6).
+- **U6** — Residue (Psychic Scream: fear aura + `ScreamBurst`).
+- **U7 part 1** — dropped the false "instants not playable yet" heading; accurate per-row state.
+- **Bug fix** (U3-exposed) — stat-buff auras (PW: Fortitude, Arcane Intellect) were accumulating max HP/mana across passes; teardown now reverts the `MaxHealth`/`MaxMana` bakes.
+
+**Deferred to a follow-up plan/PR:**
+- **U5** — the 9 entity/pet abilities (4 totems, 2 traps, 3 pet commands). Blocked on a reuse-vs-reconstruct decision for the private `class_ai` spawn helpers (`totem_spec`, `try_place_trap_at`) and on staging a Hunter pet + a pet-command driver.
+- **U7 AE3** — relational dummy-off gating (needs a `needs_dummy` flag on the view rows).
+- **Integration probes** (`tests/animation_sandbox_playback.rs`) — the shipped units are covered by unit tests + a live graphical check; the observed-run harness is deferred.
+
+---
+
 ## Product Contract
 
 Carried forward from the origin plan; see it for full text. Relevant IDs this plan advances:
