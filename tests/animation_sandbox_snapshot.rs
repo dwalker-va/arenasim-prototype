@@ -49,14 +49,14 @@ fn mage_rows() -> Vec<EntryRow> {
     };
 
     vec![
-        ability(AbilityType::Frostbolt, "Frostbolt", EntryFamily::HardCast),
-        ability(AbilityType::Polymorph, "Polymorph", EntryFamily::HardCast),
-        ability(AbilityType::FrostNova, "Frost Nova", EntryFamily::Instant),
-        ability(AbilityType::FrostArmor, "Frost Armor", EntryFamily::Instant),
+        ability(AbilityType::Frostbolt, "Frostbolt", EntryFamily::Cast),
+        ability(AbilityType::Polymorph, "Polymorph", EntryFamily::Cast),
+        ability(AbilityType::FrostNova, "Frost Nova", EntryFamily::Cast),
+        ability(AbilityType::FrostArmor, "Frost Armor", EntryFamily::Cast),
         ability(
             AbilityType::ArcaneIntellect,
             "Arcane Intellect",
-            EntryFamily::Instant,
+            EntryFamily::Cast,
         ),
         body(BodyAnimation::WalkBob),
         body(BodyAnimation::AutoAttack),

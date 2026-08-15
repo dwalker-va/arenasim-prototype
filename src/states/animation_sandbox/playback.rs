@@ -23,7 +23,7 @@ use bevy::prelude::*;
 
 use super::super::match_config::CharacterClass;
 use super::super::play_match::abilities::AbilityType;
-use super::super::play_match::ability_config::AbilityDefinitions;
+use super::super::play_match::ability_config::{AbilityConfig, AbilityDefinitions};
 use super::super::play_match::components::{
     ActiveAuras, Celebrating, CastingState, ChannelingState, Combatant, DRTracker,
     DeathAnimation, MatchResults, PlayMatchEntity, VictoryCelebration, VisualBody,
@@ -106,21 +106,102 @@ pub enum SandboxEntry {
     Body(BodyAnimation),
 }
 
-/// How an entry has to be started, which is also what decides whether it is
-/// playable at all in this phase.
+/// How an entry is started — the *application mechanism*, not `cast_time`. This
+/// is the keystone classification (KTD1): it decides which start path an entry
+/// takes and whether it is playable yet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntryFamily {
-    /// Started by inserting a `CastingState`; the sim resolves it.
-    HardCast,
-    /// Applied inline inside class AI code today. Listed, not yet playable.
-    Instant,
-    /// Started by inserting the component that drives the motion.
+    /// Routed through `process_casting` by inserting a `CastingState` with the
+    /// ability's own `cast_time` (0.0 for instants). Covers hard casts AND
+    /// single-target damage/aura/projectile instants (M1) — the same code path.
+    Cast,
+    /// Channeled — inserts a `ChannelingState` (M2). Drain Life.
+    Channel,
+    /// Inserts a bespoke `*Pending` or movement component whose resolver / a
+    /// sandbox-owned driver produces the visual (M3).
+    Component,
+    /// Spawns a world entity (totem, trap) or issues a `PetCommand` (M4).
+    Entity,
+    /// M1 for the aura plus a directly-spawned caster cosmetic (Psychic Scream).
+    Residue,
+    /// Body motion started by inserting the driving component.
     Body,
+    /// Defined as data (`abilities.ron`) but with no application code, so it has
+    /// nothing to preview. Wind Shear only.
+    Unsupported,
 }
 
 impl EntryFamily {
+    /// Whether this mechanism's start path is wired yet. Extended as each
+    /// mechanism's unit lands; `Unsupported` is never playable.
     pub fn is_playable(self) -> bool {
-        !matches!(self, EntryFamily::Instant)
+        matches!(self, EntryFamily::Cast | EntryFamily::Body)
+    }
+}
+
+/// Aura types applied to an ENEMY (debuffs / CC). Used by the target rule
+/// (KTD5): an offensive entry aims at the dummy, a friendly buff at the caster.
+fn is_hostile_aura(aura: super::super::play_match::components::AuraType) -> bool {
+    use super::super::play_match::components::AuraType::*;
+    matches!(
+        aura,
+        MovementSpeedSlow
+            | Root
+            | Stun
+            | DamageOverTime
+            | SpellSchoolLockout
+            | HealingReduction
+            | Fear
+            | Polymorph
+            | CastTimeIncrease
+            | Incapacitate
+            | AttackPowerReduction
+            | AttackSpeedSlow
+            | Silence
+            | WeakenedSoul
+    )
+}
+
+/// Whether a Cast/Channel entry should aim at the dummy (offensive/relational)
+/// rather than the caster (self/friendly buff). Damage, mana burn, an interrupt,
+/// or a hostile aura mark it offensive.
+fn entry_targets_dummy(config: &AbilityConfig) -> bool {
+    if config.damage_base_max > 0.0 || config.mana_burn_amount > 0.0 || config.is_interrupt {
+        return true;
+    }
+    match config.applies_aura.as_ref() {
+        Some(aura) => is_hostile_aura(aura.aura_type),
+        None => false,
+    }
+}
+
+/// Classifies an ability by its application mechanism (KTD1). Config fields
+/// resolve channels and the Cast default; a small explicit table handles the
+/// component/entity/residue/unsupported cases config alone can't distinguish.
+fn mechanism_for(ability: AbilityType, config: &AbilityConfig) -> EntryFamily {
+    use AbilityType::*;
+    match ability {
+        // M3 — bespoke `*Pending` (resolvers run in the sandbox) and the two
+        // movement instants (sandbox-owned dash driver, KTD6).
+        DivineShield | BerserkerRage | HolyShock | DispelMagic | PaladinCleanse | Purge
+        | DevourMagic | Charge | Disengage => EntryFamily::Component,
+        // M4 — world-entity drops and pet-command dispatch.
+        AirTotem | WaterTotem | EarthTotem | FireTotem | FreezingTrap | FrostTrap | SpiderWeb
+        | BoarCharge | MastersCall => EntryFamily::Entity,
+        // M1 aura + a directly-spawned caster cosmetic.
+        PsychicScream => EntryFamily::Residue,
+        // Data-only (no application code) / no distinct visual beyond the swing.
+        WindShear | HeroicStrike => EntryFamily::Unsupported,
+        // Config-derived default: channels, else Cast (hard casts and every
+        // single-target damage/aura/projectile instant resolve through a
+        // `CastingState`).
+        _ => {
+            if config.channel_duration.is_some() {
+                EntryFamily::Channel
+            } else {
+                EntryFamily::Cast
+            }
+        }
     }
 }
 
@@ -141,11 +222,7 @@ pub fn entries_for_class(class: CharacterClass, defs: &AbilityDefinitions) -> Ve
         .into_iter()
         .filter_map(|ability| {
             let config = defs.get(&ability)?;
-            let family = if config.cast_time > 0.0 {
-                EntryFamily::HardCast
-            } else {
-                EntryFamily::Instant
-            };
+            let family = mechanism_for(ability, config);
             Some(EntryListing {
                 entry: SandboxEntry::Ability(ability),
                 family,
@@ -315,28 +392,29 @@ pub fn drive_playback(
     }
 }
 
-/// Extra pass time for Polymorph, whose subject only EXISTS after the cast
-/// resolves: at `cast_time` alone the pass ends one loop tail (0.6s) after the
-/// victim becomes a sheep, which is not long enough to read the hop.
-const POLYMORPH_HOLD_SECS: f32 = 4.0;
-
-/// Extra pass time for Fear, whose subject only EXISTS after the cast resolves —
-/// same reason as Polymorph. The feared treatment (shadow husk, breathing
-/// shroud, tremble, rising motes, panic-run gait) all keys off the applied
-/// `Fear` aura, so at `cast_time` alone the pass ends one loop tail after the
-/// victim starts fleeing, far too short to read the panic run apart from a
-/// polymorphed hop.
-const FEAR_HOLD_SECS: f32 = 4.0;
+/// Extra pass time held after an aura-applying cast resolves, so the applied
+/// state is actually watchable. A CC's/DoT's/buff's subject only EXISTS after
+/// the cast lands: at `cast_time` alone the pass ends one loop tail (0.6s) after
+/// the aura applies, far too short to read (e.g. a sheep's hop, a fear panic
+/// run, a shield bubble). Generalizes the old per-ability Polymorph/Fear holds
+/// to every aura entry (KTD5); non-aura casts (pure damage) need no hold.
+const AURA_HOLD_SECS: f32 = 4.0;
 
 /// Length of one pass of the selected entry.
 fn entry_duration(playback: &SandboxPlayback, defs: &AbilityDefinitions) -> f32 {
     match playback.selected {
         Some(SandboxEntry::Ability(ability)) => {
-            let cast_time = defs.get(&ability).map(|c| c.cast_time).unwrap_or(1.0);
-            match ability {
-                AbilityType::Polymorph => cast_time + POLYMORPH_HOLD_SECS,
-                AbilityType::Fear => cast_time + FEAR_HOLD_SECS,
-                _ => cast_time,
+            let Some(config) = defs.get(&ability) else {
+                return 1.0;
+            };
+            // Channels run for their channel duration; aura entries hold past
+            // cast_time so the applied state reads; everything else is cast_time.
+            if let Some(channel) = config.channel_duration {
+                channel
+            } else if config.applies_aura.is_some() {
+                config.cast_time + AURA_HOLD_SECS
+            } else {
+                config.cast_time
             }
         }
         Some(SandboxEntry::Body(body)) => body.duration(),
@@ -355,16 +433,21 @@ fn start_entry(
 ) -> bool {
     match playback.selected {
         Some(SandboxEntry::Ability(ability)) => {
-            if playback.family != Some(EntryFamily::HardCast) {
+            if playback.family != Some(EntryFamily::Cast) {
                 return false;
             }
             let Some(config) = defs.get(&ability) else {
                 return false;
             };
-            // Self-targeting is the honest fallback when no dummy is staged:
-            // the cast itself still plays, and the UI separately disables the
-            // relational entries rather than letting them look complete.
-            let target = dummy.unwrap_or(caster);
+            // Target rule (KTD5): offensive/relational entries aim at the dummy
+            // (self is the honest fallback when none is staged, and the UI
+            // separately disables relational entries dummy-off); self/friendly
+            // buffs aim at the caster, so the buff visual lands on the right unit.
+            let target = if entry_targets_dummy(config) {
+                dummy.unwrap_or(caster)
+            } else {
+                caster
+            };
             commands
                 .entity(caster)
                 .insert(CastingState::new(ability, target, config.cast_time));
@@ -632,11 +715,65 @@ mod tests {
     use super::*;
 
     #[test]
-    fn instants_are_listed_but_not_playable_in_this_phase() {
-        // Hiding them would make partial coverage look like full coverage.
-        assert!(!EntryFamily::Instant.is_playable());
-        assert!(EntryFamily::HardCast.is_playable());
+    fn playable_mechanisms_are_cast_and_body_for_now() {
+        // Cast (hard casts + M1 instants) and Body play; Channel/Component/
+        // Entity/Residue are wired in later units; Unsupported never plays.
+        assert!(EntryFamily::Cast.is_playable());
         assert!(EntryFamily::Body.is_playable());
+        assert!(!EntryFamily::Channel.is_playable());
+        assert!(!EntryFamily::Component.is_playable());
+        assert!(!EntryFamily::Entity.is_playable());
+        assert!(!EntryFamily::Residue.is_playable());
+        assert!(!EntryFamily::Unsupported.is_playable());
+    }
+
+    #[test]
+    fn mechanism_classification_matches_application_shape() {
+        use AbilityType::*;
+        let defs = AbilityDefinitions::default();
+        let mech = |a: AbilityType| mechanism_for(a, defs.get(&a).unwrap());
+        // Channel, not a not-playable "instant" — regression on the cast_time
+        // classifier bug (KTD1).
+        assert_eq!(mech(DrainLife), EntryFamily::Channel);
+        // Frost Shock is cast_time 0 but Cast-routable, so it is playable.
+        assert_eq!(mech(FrostShock), EntryFamily::Cast);
+        assert!(mech(FrostShock).is_playable());
+        // Representative mechanism buckets.
+        assert_eq!(mech(IceBarrier), EntryFamily::Cast); // self buff
+        assert_eq!(mech(Corruption), EntryFamily::Cast); // offensive aura
+        assert_eq!(mech(EarthTotem), EntryFamily::Entity); // drop
+        assert_eq!(mech(FreezingTrap), EntryFamily::Entity); // drop
+        assert_eq!(mech(SpiderWeb), EntryFamily::Entity); // pet command
+        assert_eq!(mech(DivineShield), EntryFamily::Component);
+        assert_eq!(mech(Charge), EntryFamily::Component); // movement
+        assert_eq!(mech(PsychicScream), EntryFamily::Residue);
+        assert_eq!(mech(WindShear), EntryFamily::Unsupported);
+    }
+
+    #[test]
+    fn every_ability_classifies_and_only_two_are_unsupported() {
+        // Wind Shear is data-only (no application code); Heroic Strike's
+        // next-swing bonus has no distinct cast visual (preview via Auto attack).
+        // Everything else maps to a real, previewable mechanism.
+        let defs = AbilityDefinitions::default();
+        let unsupported: Vec<AbilityType> = defs
+            .iter()
+            .filter(|(a, c)| mechanism_for(**a, c) == EntryFamily::Unsupported)
+            .map(|(a, _)| *a)
+            .collect();
+        assert_eq!(unsupported.len(), 2, "unexpected Unsupported set: {unsupported:?}");
+        assert!(unsupported.contains(&AbilityType::WindShear));
+        assert!(unsupported.contains(&AbilityType::HeroicStrike));
+    }
+
+    #[test]
+    fn target_rule_sends_buffs_to_caster_and_offense_to_dummy() {
+        let defs = AbilityDefinitions::default();
+        let cfg = |a: AbilityType| defs.get(&a).unwrap();
+        assert!(!entry_targets_dummy(cfg(AbilityType::IceBarrier))); // self buff
+        assert!(!entry_targets_dummy(cfg(AbilityType::ArcaneIntellect))); // ally buff
+        assert!(entry_targets_dummy(cfg(AbilityType::Corruption))); // DoT
+        assert!(entry_targets_dummy(cfg(AbilityType::MortalStrike))); // damage
     }
 
     #[test]
@@ -662,9 +799,7 @@ mod tests {
         // something that actually plays.
         let defs = AbilityDefinitions::default();
         let mage = entries_for_class(CharacterClass::Mage, &defs);
-        assert!(mage
-            .iter()
-            .any(|l| l.family == EntryFamily::HardCast));
+        assert!(mage.iter().any(|l| l.family == EntryFamily::Cast));
     }
 
     #[test]
@@ -700,7 +835,7 @@ mod tests {
         let mut playback = SandboxPlayback::default();
         playback.select(
             SandboxEntry::Ability(AbilityType::Frostbolt),
-            EntryFamily::HardCast,
+            EntryFamily::Cast,
         );
         playback.playing = true;
         playback.restart_requested = true;
