@@ -2089,6 +2089,33 @@ sweep rather than that one cell.
 
 ---
 
+## Correction: what "byte-identical" covers, and what it does not (2026-08-15)
+
+The feature commit claims `CcPolicy::Identity` is byte-identical across 241,600
+matches. That is true **of the value model**, and it was measured before the
+`unique_per_caster` mechanic landed in the same commit. The mechanic is a
+deliberate behaviour change and the unqualified claim overstates it.
+
+Re-measured against the recorded HEAD baseline, holding the mana costs at HEAD so
+only the mechanic differs:
+
+| bracket | matches | differ | winner flips |
+|---|---|---|---|
+| 1v1 | 6,400 | **0** | 0 |
+| 2v2 | 78,400 | **222** (0.28%) | **9** (0.011%) |
+
+**All 222 involve a Warlock**, and that is the whole story: Polymorph and Fear
+are the two abilities marked unique, and the identity-policy Mage never holds two
+Polymorphs at once, so only the Warlock's Fear is affected — it could previously
+hold two targets feared simultaneously and now cannot. 1v1 has no second target
+to hold, hence zero.
+
+So the accurate claim is: **the value model is inert under `Identity`; the
+uniqueness mechanic is a small, intended correction on top of it**, touching a
+quarter of a percent of 2v2 matches and flipping nine.
+
+---
+
 ## Migration plan
 
 ### Gating: a new axis, not `AiProfile`
