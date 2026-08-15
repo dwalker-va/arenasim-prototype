@@ -28,7 +28,7 @@ use super::super::play_match::components::{
     ActiveAuras, AuraType, BerserkerRagePending, Celebrating, CastingState, ChannelingState,
     ChargingState, Combatant, DRTracker, DeathAnimation, DisengagingState, DispelPending,
     DivineShieldPending, HolyShockDamagePending, HolyShockHealPending, MatchResults,
-    PlayMatchEntity, VictoryCelebration, VisualBody,
+    PlayMatchEntity, ScreamBurst, VictoryCelebration, VisualBody,
 };
 use super::super::play_match::{DISENGAGE_SPEED, MELEE_RANGE};
 use super::{SandboxEntity, SandboxStage};
@@ -140,7 +140,11 @@ impl EntryFamily {
     pub fn is_playable(self) -> bool {
         matches!(
             self,
-            EntryFamily::Cast | EntryFamily::Channel | EntryFamily::Component | EntryFamily::Body
+            EntryFamily::Cast
+                | EntryFamily::Channel
+                | EntryFamily::Component
+                | EntryFamily::Residue
+                | EntryFamily::Body
         )
     }
 }
@@ -621,6 +625,24 @@ fn start_entry(
                 Some(EntryFamily::Component) => {
                     start_component_entry(commands, ability, caster, dummy, caster_info)
                 }
+                // Residue (Psychic Scream): M1 applies the fear aura to the
+                // dummy, but the caster-centered burst is spawned inline in the
+                // AI path (keyed on `Added<ScreamBurst>`, not the aura), so M1
+                // alone won't produce it — spawn the marker directly (KTD3).
+                Some(EntryFamily::Residue) => {
+                    commands
+                        .entity(caster)
+                        .insert(CastingState::new(ability, target, config.cast_time));
+                    commands.spawn((
+                        ScreamBurst {
+                            caster,
+                            lifetime: 0.6,
+                            initial_lifetime: 0.6,
+                        },
+                        PlayMatchEntity,
+                    ));
+                    true
+                }
                 _ => false,
             }
         }
@@ -846,12 +868,14 @@ pub fn position_caster(
         // (elapsed - cast_time) keeps the dummy at home (circle angle 0 = home)
         // through the cast, then walks it out from home once the aura applies —
         // so the sandbox no longer shows the victim fleeing before it is hit.
-        Some(SandboxEntry::Ability(ability @ (AbilityType::Polymorph | AbilityType::Fear))) => {
+        Some(SandboxEntry::Ability(
+            ability @ (AbilityType::Polymorph | AbilityType::Fear | AbilityType::PsychicScream),
+        )) => {
             let cast_time = defs.get(&ability).map(|c| c.cast_time).unwrap_or(1.5);
             let walk_elapsed = (playback.elapsed - cast_time).max(0.0);
             // The panic run reads faster / more erratic than the sheep hop, so
-            // Fear circles at the caster's brisker walk pace, Polymorph at the
-            // sheep's deliberately slow one.
+            // Fear / Psychic Scream circle at the caster's brisker walk pace,
+            // Polymorph at the sheep's deliberately slow one.
             let (radius, speed) = match ability {
                 AbilityType::Polymorph => (SHEEP_RADIUS, SHEEP_ANGULAR_SPEED),
                 _ => (WALK_RADIUS, WALK_ANGULAR_SPEED),
