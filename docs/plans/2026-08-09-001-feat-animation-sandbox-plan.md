@@ -15,10 +15,75 @@ execution: code
 
 - **Objective:** Give the client a dedicated screen where any ability's animation can be played on demand, on an inert caster, under playback and camera controls good enough to actually judge it.
 - **Product authority:** The Product Contract below. The Planning Contract governs how it is built.
-- **Execution profile:** Deep, nine units, two phases. Phase A (U1-U7) delivers the sandbox for the 14 hard-cast abilities and the body animations. Phase B (U8-U9) extracts a shared ability-application seam so the 56 instant abilities become playable. Phase A is graphical-only; Phase B touches simulation code and is gated on byte-identity at every step.
+- **Execution profile:** Deep, nine units, two phases. Phase A (U1-U7) delivers the sandbox for the 14 hard-cast abilities and the body animations — **shipped/merged as of 2026-08-15.** Phase B was originally scoped to extract a shared ability-application seam so the 56 instant abilities become playable; the **2026-08-15 Refresh amendment (below) supersedes that** — instant coverage needs no simulation-code change and is delivered by four graphical-only trigger mechanisms (U8′/U8a–U8e). Both phases are now graphical-only.
 - **Delivery:** Phase A and Phase B ship as **separate branches and separate PRs**. Phase A touches no simulation code and is byte-identity safe by construction; Phase B is a balance-sensitive refactor across eight class-AI files and earns its own review. Do not combine them. Until Phase B lands, R4, R17 and R18 are satisfied for the hard-cast family only, and the selection panel shows instant entries as not-yet-playable (U4) so coverage is visible rather than hidden.
 - **Stop conditions:** Any `tests/determinism_pin.rs` failure, or any diff in a pinned-seed headless match log, stops work until the cause is removed — byte-identity is non-negotiable (R20). In U8, a class whose instant-application body cannot be extracted without behavior change stops that class's extraction for redesign rather than being forced.
 - **Open blockers:** None.
+
+---
+
+## Refresh amendment — 2026-08-15
+
+Phase A shipped and merged (through the Polymorph #103, effects.rs-split #106, and Fear #107 lines). This amendment refreshes Phase B against the code as it now stands. **Where it conflicts with the original text below, the amendment wins.** The original Phase B (U8/U9) is retained for history but superseded by the reframed unit list here.
+
+### What shipped vs. what the plan described (drift)
+
+- The sandbox shipped as **three** files — `src/states/animation_sandbox/{mod.rs, playback.rs, ui.rs}` — not the planned `staging.rs` / `registry.rs` / `transport.rs` / `camera.rs`. The registry lives in `playback.rs::entries_for_class`; transport in `playback.rs::SandboxPlayback` + `drive_playback`; camera presets in `ui.rs`. **Every file reference in U8/U9 below that names `registry.rs` should read `playback.rs`.**
+- `effects.rs` was split into `src/states/play_match/rendering/effects/` (26 submodules). All `effects.rs` references are stale; the relevant instant visuals live in per-effect submodules (`polymorph.rs`, `fear.rs`, `totems.rs`, `traps.rs`, `scream.rs`, `ice_block.rs`, `berserk.rs`, `death_coil.rs`, `dispel_burst.rs`, …).
+- The Mage AI has **no** Fire Blast / Counterspell / Ice Block / Blink / Cold Snap — U4/U5's illustrative examples were speculative. The real Mage instants are Ice Barrier, Mage Armor, Arcane Intellect, Frost Nova.
+- `Wind Shear` and `Earth Shock` (Shaman) are named in the module header but **not implemented** — no function exists. They cannot be previewed until implemented, regardless of the seam.
+
+### Two correctness gaps in the original plan
+
+- **The family classifier is too coarse.** `entries_for_class` (`playback.rs:144`) is `cast_time > 0.0 ? HardCast : Instant`. That mislabels **channels** (Drain Life: `cast_time: 0.0` but `channel_duration: Some(5.0)`) and **CastingState-routed "instants"** (Shaman Frost Shock: `cast_time: 0.0` but inserts a `CastingState` at `shaman.rs:330`) as un-playable instants. Family must be decided by **how the ability is applied**, not by `cast_time` alone.
+- **AE1 and AE2 were misfiled under Phase A.** AE1 plays **Power Word: Shield** (instant, `cast_time 0`) and AE2 plays **Drain Life** (a channel). Neither is a hard cast, so the shipped Phase A greys both out as not-playable — Phase A never satisfied its own two headline acceptance examples. AE2 is unlocked by the channel mechanism (M2 below); AE1 by the CastingState mechanism (M1 below).
+
+### The premise correction (this is the point of the refresh)
+
+**KTD3 is largely wrong. The 56 instants do NOT require a balance-sensitive `apply_ability` refactor across the class-AI files.** The plan conflated *faithfully re-running the instant's game logic* with *faithfully showing the instant's visual*. The sandbox only needs the visual, and every instant's visual is produced by a system the sandbox can already reach **without touching simulation code**, through one of four trigger mechanisms:
+
+- **M1 — Synthetic zero-duration `CastingState`** (graphical-only, and *faithful by R16's own standard*). Verified at `casting.rs:667`: the completed-cast path applies `def.applies_aura` via the exact same `AuraPending::from_ability(target, caster, def)` the inline paths use, plus damage/FCT/projectile-spawn/`CastEnding`. So **any single-target damage-and/or-def-aura-and/or-projectile instant** resolves identically through a `CastingState::new(ability, target, 0.0)` — the same path hard casts already use, which the plan blessed as faithful. This covers the large majority of instants.
+- **M2 — `ChannelingState` insert** (graphical-only). Channels have a shared entry point too (`warlock.rs:819`). Unlocks Drain Life / AE2.
+- **M3 — Direct driving-component insert** (graphical-only, exactly like the shipped `DeathSink`/`VictoryBounce` body entries). For instants whose visual is driven by a bespoke `*Pending` component or a movement component that `process_casting` does not spawn: insert the component, its existing resolver system produces the visual.
+- **M4 — Direct entity spawn** (graphical-only). For instants whose effect is a world entity dropped away from the caster: spawn it.
+
+Only a **thin residue** is spawned inside the class-AI inline path and reachable by none of the above: the two **caster-centered cosmetic AoE spawns** — Frost Nova's frost ring and Psychic Scream's `ScreamBurst`. Their *auras* still route via M1; only the cosmetic marker is inline. Even these are handled graphically by spawning the marker directly (the marker types already exist in `rendering/effects/`), so **full coverage is achievable with zero simulation changes** — turning Phase B from the riskiest part of the plan into one that is byte-identity-safe by construction, like Phase A.
+
+**Tradeoff, stated honestly.** The original seam's one advantage was single-source-of-truth: sandbox and AI would apply instants through one function and could never drift. The graphical-only approach reproduces trigger choices in the sandbox and accepts *bounded* drift risk. That risk is small: M1 routes through the real resolver (drift-free); M2/M3/M4 use a component/entity as the contract, the same bet the shipped body entries already make. Given the user wants full coverage and the seam touches "the most balance-sensitive code in the repo," the graphical-only reframe is the recommended path. The seam remains available as a higher-fidelity, higher-cost alternative if drift ever bites.
+
+### Instant inventory by mechanism (all 8 class-AI files, verified 2026-08-15)
+
+| Mechanism | Abilities (fn → mechanism) |
+|---|---|
+| **M1** synthetic `CastingState` (single-target dmg/aura/projectile) | Warlock: Corruption, Curse of Agony/Weakness/Tongues (`try_cast_curse`), Death Coil (projectile). Mage: Ice Barrier, Mage/Frost/Molten Armor, Arcane Intellect. Warrior: Rend, Mortal Strike (dmg + HealingReduction aura). Rogue: Ambush, Sinister Strike, Cheap Shot, Kidney Shot (dmg + stun aura). Priest: Power Word: Fortitude, **Power Word: Shield** (absorb aura → bubble; the SP-scaling and the invisible WeakenedSoul are lost, but the *visual* is faithful). Hunter: Arcane Shot, Concussive Shot, Serpent Sting (projectiles). Paladin: Hammer of Justice, Paladin Aura. Shaman: **Frost Shock** (already CastingState — just needs the classifier fix). |
+| **M2** `ChannelingState` insert | Warlock: Drain Life (**AE2**). |
+| **M3** driving-component insert | Paladin: Divine Shield (`DivineShieldPending`), Holy Shock heal/damage (`HolyShock{Heal,Damage}Pending`), Cleanse (`DispelPending`). Shaman: Purge (`DispelPending`). Priest/Warlock: Dispel Magic (`DispelPending` via shared `try_dispel_ally`). Warrior: Berserker Rage (`BerserkerRagePending`), Charge (`ChargingState`). Hunter: Disengage (`DisengagingState`). |
+| **M4** entity spawn | Shaman: 4 element totems (`Totem`). Hunter: Freezing Trap / Frost Trap (`Trap` / `TrapLaunchProjectile`), Spider Web / Boar Charge / Master's Call (`PetCommand` on the pet entity). |
+| **Residue** inline cosmetic (M1 aura + direct marker spawn) | Mage: Frost Nova (frost ring). Priest: Psychic Scream (`ScreamBurst`). |
+| **N/A / special** | Warrior Heroic Strike (self next-swing bonus — no distinct visual beyond the swing; map to the AutoAttack body entry or skip). Shaman Wind Shear, Earth Shock (unimplemented). |
+
+Notes distilled from the per-class scan: the entanglements the *original seam* would have had to absorb — `QueuedInstantAttack`/`QueuedAoeDamage` return-Vecs, `same_frame_cc_queue`, per-frame `HashSet` dedup sets, hand-built auras bypassing `from_ability` — are **irrelevant to the graphical-only path**, because the sandbox never re-runs the decision body that threads them; it triggers the downstream resolver directly. (`QueuedInstantAttack` is in fact vestigial for Hunter — the param is `_instant_attacks`, never pushed.)
+
+### Revised Phase B units (supersede U8/U9)
+
+Each unit below is **graphical-only** unless flagged. All touch only `src/states/animation_sandbox/{playback.rs, ui.rs}` plus, where noted, spawn an existing component/entity/marker. None edits `class_ai/` or `combat_core/`. `determinism_pin` therefore holds by construction; run it anyway as the guard.
+
+- **U8′ (was U8). Family classification by application mechanism, not `cast_time`.** Replace the `cast_time > 0` test in `entries_for_class` with a mechanism tag (HardCast / Channel / Instant-M1 / Instant-M3 / Instant-M4 / Residue / N-A) derived per ability. This is the keystone: it fixes the channel and Frost-Shock misclassifications and drives which start path each entry takes. Files: `playback.rs`.
+- **U8a. Channel playback (M2).** Start channels by inserting `ChannelingState` (mirror the hard-cast `CastingState` branch in `start_entry`). Unlocks Drain Life / **AE2**. Files: `playback.rs`.
+- **U8b. CastingState-routable instant playback (M1).** In `start_entry`, start M1 instants via `CastingState::new(ability, target, 0.0)`. Unlocks the majority of instants incl. **AE1** (PW:Shield bubble). Files: `playback.rs`. Note: this is *the same code path* as the hard-cast branch with a 0.0 duration — likely a one-line generalization.
+- **U8c. Component-insert instant playback (M3).** For `*Pending`/movement instants, insert the driving component in `start_entry` (the body-animation branch is the template). Requires `clear_body_state` to also strip these components between passes. Files: `playback.rs`.
+- **U8d. Entity-spawn instant playback (M4).** Spawn the totem/trap/pet-command entity in `start_entry`; extend the leftover-`PlayMatchEntity` sweep in `clear_body_state` to reclaim them (it already despawns non-`SandboxEntity` `PlayMatchEntity`s, so totems/traps are likely covered free; PetCommand on the staged pet needs handling if a pet is staged). Files: `playback.rs`.
+- **U8e. Residue: caster-centered AoE cosmetics.** Frost Nova / Psychic Scream: start via M1 for the aura, and spawn the `FrostRing` / `ScreamBurst` marker directly. Files: `playback.rs` (+ read-only use of the existing marker types in `rendering/effects/`).
+- **U9′ (was U9). Registry + dummy-off signalling.** Drop the not-yet-playable marking (`ui.rs:469`), and disable relational entries when the dummy is off with the reason shown (**AE3**), unchanged in intent from U9. Files: `playback.rs`, `ui.rs`.
+
+### Verification implications
+
+- The "Byte-identity" and "Headless baseline diff" and "Behavior sweep" rows of the Verification Contract that were scoped to U8 are now **trivially satisfied** — no Phase B unit edits simulation code. Keep `cargo test --test determinism_pin` as a guard, but the per-class characterization-baseline discipline (original U8 execution note) is no longer needed.
+- The remaining risk is purely visual/behavioral in the sandbox: each mechanism must clear cleanly between passes (extend `clear_body_state`) and each relational entry must gate on the dummy. These are `tests/animation_sandbox_*` concerns, not balance concerns.
+
+### Recommended sequence
+
+U8′ (classifier) → U8a + U8b together (the two shared-entry-point mechanisms, biggest coverage for least code) → U8c → U8d → U8e → U9′. After U8b the two headline acceptance examples (AE1, AE2) are both met, which the original Phase A wrongly claimed.
 
 ---
 
@@ -205,7 +270,7 @@ Deferred to planning:
 
   Byte-identity rests on two facts rather than on the function being untouched: `.chain()` ordering edges are structural, so per-system conditions cannot reorder anything; and headless's conditions are constant-true, so no system's execution changes. `determinism_pin` and the recorded headless baselines are the proof.
 
-- KTD3. **The instant-ability seam is extracted, and it is the dominant cost of this plan.** 56 of the 70 abilities are instant (`cast_time: 0.0`) and are applied inline inside each class AI's `try_*` functions — there is no shared "apply ability X from A to B" entry point. Only the 14 hard-cast abilities route through `process_casting`, which the sandbox can drive by inserting a `CastingState`. Satisfying R4 and R16 together therefore requires extracting a behavior-preserving `apply_ability` seam from seven class-AI files — the most balance-sensitive code in the repo. This is why the plan is phased: Phase A ships a working sandbox against the 14 hard casts and the body animations without touching simulation code at all; Phase B does the extraction one class at a time behind the determinism pin. Ability-driven entry (the settled decision) is unaffected and remains correct — only its full-coverage cost changed.
+- KTD3. **[SUPERSEDED by the 2026-08-15 Refresh amendment — the seam is NOT the dominant cost and is not needed; see that section.]** The instant-ability seam is extracted, and it is the dominant cost of this plan. 56 of the 70 abilities are instant (`cast_time: 0.0`) and are applied inline inside each class AI's `try_*` functions — there is no shared "apply ability X from A to B" entry point. Only the 14 hard-cast abilities route through `process_casting`, which the sandbox can drive by inserting a `CastingState`. Satisfying R4 and R16 together therefore requires extracting a behavior-preserving `apply_ability` seam from seven class-AI files — the most balance-sensitive code in the repo. This is why the plan is phased: Phase A ships a working sandbox against the 14 hard casts and the body animations without touching simulation code at all; Phase B does the extraction one class at a time behind the determinism pin. Ability-driven entry (the settled decision) is unaffected and remains correct — only its full-coverage cost changed.
 
 - KTD4. **The dummy survives by never entering the death path, not by an immunity aura.** R19 needs a dummy that outlives repeated damage, and a new `DamageImmunity`-style aura would be a simulation-visible mechanic that could leak into matches. Instead the sandbox restores the dummy's health after each resolution tick in a sandbox-only system, leaving the damage path itself untouched. Nothing in `src/states/play_match/combat_core/` changes.
 
@@ -347,6 +412,8 @@ Phase B touches simulation code. Every unit below is gated on `tests/determinism
 
 ### U8. Extract the shared ability-application seam
 
+> **SUPERSEDED by the 2026-08-15 Refresh amendment (see "Revised Phase B units").** The seam-extraction approach below is retained for history. The refresh shows instant coverage needs no simulation-code change; use U8′/U8a–U8e instead.
+
 - **Goal:** One call site can apply any instant ability from a caster to a target, with match behavior unchanged.
 - **Requirements:** R4, R16, R20
 - **Dependencies:** U7
@@ -357,6 +424,8 @@ Phase B touches simulation code. Every unit below is gated on `tests/determinism
 - **Verification:** `cargo test` green and zero diff across the per-class baseline logs.
 
 ### U9. Instant playback and dummy-off signalling
+
+> **SUPERSEDED by the 2026-08-15 Refresh amendment (U9′).** `registry.rs` does not exist; that logic is in `playback.rs`.
 
 - **Goal:** All 70 abilities are playable; playing a relational entry without a dummy is legible rather than silently empty.
 - **Requirements:** R4, R17, R18, and AE3
