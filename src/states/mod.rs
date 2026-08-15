@@ -376,8 +376,20 @@ impl Plugin for StatesPlugin {
                     play_match::animate_orb_consumption,    // Orb pickup shrink/move animation
                     play_match::update_shield_bubbles,      // Spawn/despawn shield bubbles
                     play_match::follow_shield_bubbles,      // Update bubble positions
-                    play_match::update_polymorph_visuals,   // Sheep body swap when polymorphed
-                    play_match::update_fear_visuals,        // Shadow-husk tint when feared
+                    // Polymorph BEFORE Fear, chained so a sync point flushes
+                    // PolymorphedVisual before Fear evaluates its
+                    // `Without<PolymorphedVisual>` filter. A unit hit by both on the
+                    // same frame would otherwise get BOTH markers (each insert is a
+                    // deferred Command the other can't see that frame) and then
+                    // deadlock — both treatments exclude a double-marked unit, so
+                    // neither could ever restore. Chaining keeps at most one marker
+                    // set (sheep wins the tie). See
+                    // tests/fear_visual_probes.rs::simultaneous_fear_and_polymorph_do_not_deadlock.
+                    (
+                        play_match::update_polymorph_visuals, // Sheep body swap when polymorphed
+                        play_match::update_fear_visuals,      // Shadow-husk tint when feared
+                    )
+                        .chain(),
                     // Fear sub-effects nested to keep the outer tuple within Bevy's 20-limit.
                     (
                         play_match::update_fear_shroud,        // Breathing fear shroud pulse

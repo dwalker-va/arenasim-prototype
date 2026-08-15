@@ -386,6 +386,80 @@ fn polymorph_wins_while_co_held() {
     assert_eq!(h.shrouds_of(unit), 1);
 }
 
+/// REGRESSION REPRO: Fear and Polymorph landing on the SAME unit on the SAME
+/// frame, with the two treatment systems UNCHAINED (as they are in
+/// states/mod.rs). Both transition-ins see the other's marker still absent (its
+/// insert is a deferred Command), so both fire — leaving the unit with BOTH
+/// markers, after which each system's `Without<Other>` filter permanently
+/// excludes it and neither can ever restore. Asserts the unit restores after the
+/// auras end (i.e. does NOT deadlock into a stuck sheep with a dangling marker).
+#[test]
+fn simultaneous_fear_and_polymorph_do_not_deadlock() {
+    let mut app = App::new();
+    app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()));
+    app.init_asset::<Mesh>();
+    app.init_asset::<StandardMaterial>();
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(TICK));
+    // Polymorph runs BEFORE Fear with a sync point between them (chain), so the
+    // PolymorphedVisual insert is applied before Fear evaluates its
+    // `Without<PolymorphedVisual>` filter — Fear then defers on the same frame
+    // and only one marker is ever set. This mirrors the fixed states/mod.rs
+    // registration; without the chain the two race and deadlock into a stuck
+    // double-marker state.
+    app.add_systems(Update, (update_polymorph_visuals, update_fear_visuals).chain());
+
+    let mesh = app.world_mut().resource_mut::<Assets<Mesh>>().add(Capsule3d::new(0.5, 1.5));
+    let real_mat =
+        app.world_mut().resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial::default());
+    let body = app
+        .world_mut()
+        .spawn((
+            Mesh3d(mesh.clone()),
+            MeshMaterial3d(real_mat.clone()),
+            OriginalMesh(mesh.clone()),
+            VisualBody { rest_y: 0.0 },
+            Transform::default(),
+        ))
+        .id();
+    let unit = app
+        .world_mut()
+        .spawn((
+            Transform::from_xyz(0.0, 1.0, 0.0),
+            Combatant::new(1, 0, CharacterClass::Warlock),
+        ))
+        .id();
+    app.world_mut().entity_mut(unit).add_child(body);
+
+    // Both CCs land the same frame.
+    app.world_mut()
+        .entity_mut(unit)
+        .insert(ActiveAuras { auras: vec![fear_aura(), polymorph_aura()] });
+    app.update();
+
+    let has_fear = app.world().get::<FearedVisual>(unit).is_some();
+    let has_poly = app.world().get::<PolymorphedVisual>(unit).is_some();
+    eprintln!("after same-frame co-apply: FearedVisual={has_fear}, PolymorphedVisual={has_poly}");
+
+    // Both CCs end; run several frames and the treatment MUST fully restore.
+    app.world_mut().entity_mut(unit).remove::<ActiveAuras>();
+    for _ in 0..5 {
+        app.update();
+    }
+    assert!(
+        app.world().get::<FearedVisual>(unit).is_none(),
+        "FearedVisual must clear after the auras end (deadlock if it persists)"
+    );
+    assert!(
+        app.world().get::<PolymorphedVisual>(unit).is_none(),
+        "PolymorphedVisual must clear after the auras end (deadlock if it persists)"
+    );
+    assert_eq!(
+        app.world().get::<MeshMaterial3d<StandardMaterial>>(body).unwrap().0,
+        real_mat,
+        "body must restore to the true material (stuck-sheep/husk if not)"
+    );
+}
+
 /// KTD1 co-hold, the OTHER ordering, running BOTH real systems: a unit feared
 /// FIRST and then polymorphed must not have Polymorph clobber the shared
 /// `OriginalBodyMaterial`. `update_polymorph_visuals` carries the mirror
