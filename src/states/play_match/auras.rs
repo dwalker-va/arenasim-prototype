@@ -92,28 +92,18 @@ pub fn update_auras(
 /// rate the CC value model's break term needs.
 ///
 /// Runs in phase 1, so each frame it observes the *previous* frame's fully
-/// resolved health and absorb totals. Gross damage is reconstructed the same way
-/// the step-0 probe harness reconstructs it — health lost plus absorb pool
-/// consumed — because `DamageTakenThisFrame` carries only the post-absorb figure
-/// and absorbed damage does not break CC. Deriving it identically here keeps the
-/// shipped estimator and the measured one from drifting apart.
+/// resolved totals. Gross damage is health lost plus damage absorbed, because
+/// `DamageTakenThisFrame` carries only the post-absorb figure and absorbed
+/// damage does not break CC. Both halves come from MONOTONIC counters on
+/// `Combatant` — differencing the remaining absorb pool instead would read a
+/// shield that merely EXPIRED (or was dispelled/purged, both of which happen
+/// earlier in this same phase) as a gross-damage spike of the whole remaining
+/// shield.
 ///
 /// Writes only to `RecentDamage`, which nothing reads unless `CcPolicy::Priced`
 /// is active, so this cannot perturb a `Legacy` seed.
-pub fn track_recent_damage(
-    mut combatants: Query<(&Combatant, Option<&ActiveAuras>, &mut RecentDamage)>,
-) {
-    for (combatant, auras, mut recent) in combatants.iter_mut() {
-        let absorb: f32 = auras
-            .map(|a| {
-                a.auras
-                    .iter()
-                    .filter(|x| x.effect_type == AuraType::Absorb)
-                    .map(|x| x.magnitude)
-                    .sum()
-            })
-            .unwrap_or(0.0);
-
+pub fn track_recent_damage(mut combatants: Query<(&Combatant, &mut RecentDamage)>) {
+    for (combatant, mut recent) in combatants.iter_mut() {
         // Use the CUMULATIVE `damage_taken` counter, not the health delta.
         //
         // Health delta is wrong and was measurably so: a unit being healed as
@@ -129,7 +119,8 @@ pub fn track_recent_damage(
             // consumption to recover the GROSS figure the predictor expects
             // (it models the absorb pool explicitly and would otherwise
             // subtract the shield twice).
-            let absorb_consumed = (recent.last_absorb - absorb).max(0.0);
+            let absorb_consumed =
+                (combatant.damage_absorbed - recent.last_damage_absorbed).max(0.0);
             recent.record_frame(health_damage + absorb_consumed);
         }
         // Damage DEALT, from the same kind of cumulative counter.
@@ -139,7 +130,7 @@ pub fn track_recent_damage(
         recent.last_damage_dealt = Some(combatant.damage_dealt);
 
         recent.last_damage_taken = Some(combatant.damage_taken);
-        recent.last_absorb = absorb;
+        recent.last_damage_absorbed = combatant.damage_absorbed;
     }
 }
 
@@ -282,41 +273,14 @@ pub fn apply_pending_auras(
     // `AuraType::Fear` with the Warlock's single-target Fear, but they are
     // different abilities and do not supersede one another.
     //
-    // Runs as a pre-pass so the superseded aura is gone before the new one is
-    // applied — including when the new target IS the old one (a refresh), where
-    // removing first keeps a single instance rather than stacking two.
+    // Collected from auras that ACTUALLY LAND and applied as a post-pass below.
+    // Keying it off the *pending* queue instead was a free CC removal: a Fear
+    // queued onto a bubbled / Berserker-Raged / charging / DR-immune / dead
+    // target is rejected further down, but the pre-pass had already stripped the
+    // caster's live Fear off a different enemy. The same-target refresh case the
+    // pre-pass also covered is handled independently by the DR-category CC
+    // replacement at the add site.
     let mut superseding: Vec<(Entity, String)> = Vec::new();
-    for (_, pending) in pending_auras.iter() {
-        if !pending.aura.unique_per_caster {
-            continue;
-        }
-        let Some(caster) = pending.aura.caster else {
-            continue;
-        };
-        superseding.push((caster, pending.aura.ability_name.clone()));
-    }
-    if !superseding.is_empty() {
-        for (entity, _, active, _, _) in combatants.iter_mut() {
-            let Some(mut active) = active else {
-                continue;
-            };
-            active.auras.retain(|a| {
-                let superseded = a.unique_per_caster
-                    && a.caster.is_some_and(|c| {
-                        superseding
-                            .iter()
-                            .any(|(caster, name)| *caster == c && *name == a.ability_name)
-                    });
-                if superseded {
-                    debug!(
-                        "Superseded {} on {:?} — its caster landed a new one",
-                        a.ability_name, entity
-                    );
-                }
-                !superseded
-            });
-        }
-    }
 
     for (pending_entity, pending) in pending_auras.iter() {
         // Invariant: aura duration should be positive
@@ -800,6 +764,15 @@ pub fn apply_pending_auras(
             }
         }
 
+        // This one landed, so it supersedes its caster's previous instance
+        // (see the post-pass below). Recorded HERE rather than off the pending
+        // queue so a rejected application never strips a live crowd control.
+        if aura_to_add.unique_per_caster {
+            if let Some(caster) = aura_to_add.caster {
+                superseding.push((caster, aura_to_add.ability_name.clone()));
+            }
+        }
+
         // Add aura to target
         if let Some(mut active_auras) = active_auras {
             // Add to existing ActiveAuras component
@@ -815,6 +788,36 @@ pub fn apply_pending_auras(
 
         // Remove the pending aura entity
         commands.entity(pending_entity).despawn();
+    }
+
+    // Post-pass: retire each caster's PREVIOUS instance of a unique crowd
+    // control now that the replacement has actually landed. `applied_this_frame`
+    // is set on every aura added above and cleared by `update_auras` at the top
+    // of the next frame, so it exactly identifies the new instances — which is
+    // what lets one caster land two different unique abilities (or the same one
+    // on two targets in one frame) without them cancelling each other.
+    if !superseding.is_empty() {
+        for (entity, _, active, _, _) in combatants.iter_mut() {
+            let Some(mut active) = active else {
+                continue;
+            };
+            active.auras.retain(|a| {
+                let superseded = a.unique_per_caster
+                    && !a.applied_this_frame
+                    && a.caster.is_some_and(|c| {
+                        superseding
+                            .iter()
+                            .any(|(caster, name)| *caster == c && *name == a.ability_name)
+                    });
+                if superseded {
+                    debug!(
+                        "Superseded {} on {:?} — its caster landed a new one",
+                        a.ability_name, entity
+                    );
+                }
+                !superseded
+            });
+        }
     }
 
     // Now insert ActiveAuras components for entities that didn't have them

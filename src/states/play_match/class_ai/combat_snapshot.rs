@@ -104,14 +104,12 @@ impl CombatSnapshot {
     ) -> Self {
         // Trailing gross-damage rate per entity, for the CC value model's break
         // term. Snapshotted here so every class AI sees one consistent view.
-        let recent_damage: BTreeMap<Entity, f32> = recent_damage_query
-            .iter()
-            .map(|(e, r)| (e, r.rate()))
-            .collect();
-        let recent_damage_dealt: BTreeMap<Entity, f32> = recent_damage_query
-            .iter()
-            .map(|(e, r)| (e, r.dealt_rate()))
-            .collect();
+        let mut recent_damage: BTreeMap<Entity, f32> = BTreeMap::new();
+        let mut recent_damage_dealt: BTreeMap<Entity, f32> = BTreeMap::new();
+        for (e, r) in recent_damage_query.iter() {
+            recent_damage.insert(e, r.rate());
+            recent_damage_dealt.insert(e, r.dealt_rate());
+        }
 
         let mut combatants: BTreeMap<Entity, CombatantInfo> = BTreeMap::new();
         let mut active_auras: BTreeMap<Entity, Vec<Aura>> = BTreeMap::new();

@@ -955,7 +955,9 @@ fn cast_hammer_of_justice(
         );
         let hoj_aura = Aura {
             effect_type: aura_def.aura_type,
-            unique_per_caster: false,
+            // Read from config, like every other field here — hardcoding `false`
+            // would silently ignore an `unique_per_caster: true` on this ability.
+            unique_per_caster: aura_def.unique_per_caster,
             duration: aura_def.duration,
             magnitude: aura_def.magnitude,
             break_on_damage_threshold: aura_def.break_on_damage,

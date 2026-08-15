@@ -1381,7 +1381,10 @@ pub fn decide_abilities(
 ///   denied at 80% dampening is worth a fifth of the same heal denied at the
 ///   gates. Without this the AI systematically over-values CCing healers late.
 fn cast_denial_value(
-    caster: &Combatant,
+    // The caster's scaling stats, as `(spell_power, attack_power)`. Scalars
+    // rather than `&Combatant` so a channeler — which lives in the same
+    // mutably-borrowed query as the interrupter — can be priced from a snapshot.
+    caster: (f32, f32),
     cast_ability: AbilityType,
     cast_target: Option<Entity>,
     abilities: &AbilityDefinitions,
@@ -1392,6 +1395,7 @@ fn cast_denial_value(
     dampening: Option<&ArenaDampening>,
     my_team: u8,
 ) -> super::cc_value::CastValue {
+    let (caster_spell_power, caster_attack_power) = caster;
     let def = abilities.get_unchecked(&cast_ability);
     let mut value = super::cc_value::CastValue::default();
 
@@ -1399,7 +1403,7 @@ fn cast_denial_value(
 
     if def.is_heal() {
         let raw = (def.healing_base_min + def.healing_base_max) / 2.0
-            + def.healing_coefficient * caster.spell_power;
+            + def.healing_coefficient * caster_spell_power;
         // Only the part that would actually land on a hurt ally counts.
         let deficit = target_state
             .map(|(_, hp, max)| (max - hp).max(0.0))
@@ -1413,8 +1417,8 @@ fn cast_denial_value(
         let aimed_at_us = target_state.map(|(team, _, _)| team == my_team).unwrap_or(false);
         if aimed_at_us {
             let scaling = match def.damage_scales_with {
-                super::abilities::ScalingStat::AttackPower => caster.attack_power,
-                super::abilities::ScalingStat::SpellPower => caster.spell_power,
+                super::abilities::ScalingStat::AttackPower => caster_attack_power,
+                super::abilities::ScalingStat::SpellPower => caster_spell_power,
                 super::abilities::ScalingStat::None => 0.0,
             };
             value.damage_denied = (def.damage_base_min + def.damage_base_max) / 2.0
@@ -1431,8 +1435,11 @@ fn cast_denial_value(
         if aimed_at_us {
             match aura.aura_type {
                 AuraType::DamageOverTime => {
+                    // Whole ticks only, matching `cc_value::dot_expected_damage`
+                    // — a partial tick never lands, and counting it inflates
+                    // every DoT cast this policy prices.
                     let ticks = if aura.tick_interval > 0.0 {
-                        (aura.duration / aura.tick_interval).max(1.0)
+                        (aura.duration / aura.tick_interval).floor().max(1.0)
                     } else {
                         1.0
                     };
@@ -1500,6 +1507,53 @@ pub fn check_interrupts(
         std::collections::BTreeMap::new()
     };
 
+    // Channelers, snapshotted for the same reason. A channeling unit has NO
+    // `CastingState` (`ChannelingState` is inserted in its place), so it does
+    // not appear in `casting_combatants` at all — scanning that query for
+    // channels found nothing, and with the priced path deliberately refusing to
+    // fall back to the legacy pick that silently made channels uninterruptible.
+    // It DOES appear in `combatants` (`Without<CastingState>`), which the outer
+    // loop borrows mutably, hence the pre-pass copy.
+    struct ChannelCandidate {
+        entity: Entity,
+        team: u8,
+        spell_power: f32,
+        attack_power: f32,
+        position: Vec3,
+        ability: AbilityType,
+        remaining: f32,
+        target: Entity,
+        cast_time: f32,
+    }
+    let channelers: Vec<ChannelCandidate> = if any_priced {
+        combatants
+            .iter()
+            .filter(|(_, c, _)| c.is_alive())
+            .filter_map(|(e, c, t)| {
+                let ch = channeling_targets.get(e).ok()?;
+                if ch.interrupted {
+                    return None;
+                }
+                Some(ChannelCandidate {
+                    entity: e,
+                    team: c.team,
+                    spell_power: c.spell_power,
+                    attack_power: c.attack_power,
+                    position: t.translation,
+                    ability: ch.ability,
+                    remaining: ch.duration_remaining,
+                    target: ch.target,
+                    // A channel has no cast bar, so its value-per-second (what
+                    // prices the school lockout) is spread over the channel's
+                    // remaining duration rather than a nominal `cast_time` of 0.
+                    cast_time: ch.duration_remaining.max(0.1),
+                })
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
     for (entity, mut combatant, transform) in combatants.iter_mut() {
         if !combatant.is_alive() {
             continue;
@@ -1544,6 +1598,10 @@ pub fn check_interrupts(
                 _ => None,
             };
             match interrupt_ability {
+                // Nothing to spend, so nothing to scan for. The cooldown is
+                // re-checked below for the legacy path; hoisting it here keeps
+                // the priced scan off the hot path while an interrupt is down.
+                Some(ability) if combatant.ability_cooldowns.contains_key(&ability) => None,
                 None => None,
                 Some(ability) => {
                     let range = abilities.get_unchecked(&ability).range;
@@ -1553,8 +1611,8 @@ pub fn check_interrupts(
                         if c.team == combatant.team || !c.is_alive() {
                             continue;
                         }
-                        // Casts only: channels live in a disjoint query and are
-                        // folded in immediately below, so both are candidates.
+                        // Casts only: channels carry no `CastingState`, so they
+                        // are folded in from the snapshot immediately below.
                         match casting_targets.get(e) {
                             Ok(cs) if !cs.interrupted => {
                                 if my_pos.distance(t.translation) > range {
@@ -1568,7 +1626,7 @@ pub fn check_interrupts(
                                     }
                                 }
                                 let denial = cast_denial_value(
-                                    c,
+                                    (c.spell_power, c.attack_power),
                                     cs.ability,
                                     cs.target,
                                     &abilities,
@@ -1602,13 +1660,15 @@ pub fn check_interrupts(
                     }
                     // Channels are interruptible too, and the legacy policy
                     // interrupts them; leaving them out of the priced scan would
-                    // be a regression rather than a refinement.
-                    for (e, c, t) in casting_combatants.iter() {
-                        if c.team == combatant.team || !c.is_alive() {
+                    // be a regression rather than a refinement. They come from
+                    // the pre-pass snapshot, NOT `casting_combatants` — a
+                    // channeler has no `CastingState`.
+                    for ch in channelers.iter() {
+                        let e = ch.entity;
+                        if ch.team == combatant.team {
                             continue;
                         }
-                        let Ok(ch) = channeling_targets.get(e) else { continue };
-                        if ch.interrupted || my_pos.distance(t.translation) > range {
+                        if my_pos.distance(ch.position) > range {
                             continue;
                         }
                         if let Ok(a) = all_auras.get(e) {
@@ -1617,7 +1677,7 @@ pub fn check_interrupts(
                             }
                         }
                         let denial = cast_denial_value(
-                            c,
+                            (ch.spell_power, ch.attack_power),
                             ch.ability,
                             Some(ch.target),
                             &abilities,
@@ -1627,10 +1687,10 @@ pub fn check_interrupts(
                         );
                         let v = super::cc_value::interrupt_value_with_lockout(
                             denial,
-                            ch.duration_remaining,
+                            ch.remaining,
                             0.0,
                             abilities.get_unchecked(&ability).lockout_duration,
-                            abilities.get_unchecked(&ch.ability).cast_time.max(1.0),
+                            ch.cast_time,
                         );
                         if v <= 0.0 {
                             continue;

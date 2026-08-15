@@ -33,7 +33,7 @@ use crate::states::play_match::decision_trace::{
 
 use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
 use crate::states::play_match::cc_value::{
-    action_cost, denies_actions, displaces_target, dot_expected_damage, enabling_value,
+    action_cost, displaces_target, dot_expected_damage, enabling_value,
     expected_incoming, kill_window_value, predict_t_eff, AttackerMix, CostInputs, TEffInputs,
 };
 
@@ -216,20 +216,21 @@ fn pick_healer_to_fear(
 /// Does `target`'s team have a dispeller free to act? Used on BOTH sides of the
 /// CC-versus-rotation comparison: a free dispeller shortens the Fear *and* the
 /// DoT the Fear displaces, so pricing only one of them would bias the choice.
+///
+/// Counted by CAPABILITY, through the same `CombatContext` helper the CC side
+/// uses — `is_healer()` counted the Shaman, whose Purge cannot take anything off
+/// an ally, and missed the Felhunter, which owns the cheapest dispel on the
+/// board. The two sides of the comparison must price the same world.
+///
+/// Unlike `free_ally_dispellers` this includes the target itself and ignores the
+/// dispel cooldown: the horizon here is a DoT's whole lifetime, not one cast.
 fn dispel_exposed_for(target: Entity, ctx: &CombatContext) -> bool {
     let Some(info) = ctx.combatants.get(&target) else {
         return false;
     };
-    ctx.combatants.values().any(|c| {
-        c.team == info.team
-            && c.is_alive
-            && c.class.is_healer()
-            && !ctx
-                .active_auras
-                .get(&c.entity)
-                .map(|auras| auras.iter().any(|a| denies_actions(a.effect_type)))
-                .unwrap_or(false)
-    })
+    ctx.combatants
+        .values()
+        .any(|c| c.team == info.team && ctx.can_dispel_allies(c.entity))
 }
 
 /// Expected effective seconds a Fear on `target` would deliver, via the shared
@@ -274,7 +275,7 @@ fn predicted_fear_window(
         if other.team == info.team || !other.is_alive || other.target != Some(target) {
             continue;
         }
-        if other.class.is_melee() {
+        if other.is_melee_attacker() {
             mix.melee += 1;
         } else {
             mix.ranged += 1;

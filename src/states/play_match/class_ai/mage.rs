@@ -131,6 +131,7 @@ const MIN_POLYMORPH_T_EFF: f32 = 1.0;
 /// them.
 fn pick_polymorph_target(
     combatant: &Combatant,
+    my_pos: Vec3,
     ctx: &CombatContext,
     abilities: &AbilityDefinitions,
 ) -> Option<Entity> {
@@ -161,6 +162,20 @@ fn pick_polymorph_target(
     for info in ctx.alive_enemies() {
         let target = info.entity;
         if ctx.entity_is_immune(target) || ctx.is_dr_immune(target, DRCategory::Incapacitates) {
+            continue;
+        }
+        // Only candidates the cast could actually reach. Ranking over
+        // unreachable enemies and then handing the winner to `pre_cast_ok`
+        // meant a distant, high-value target SUPPRESSED the sheep entirely
+        // rather than yielding to the best in-range one — the identity path has
+        // no such choice to lose, so this is a priced-path-only defect.
+        if my_pos.distance(info.position) > def.range
+            || !crate::states::play_match::map_geometry::has_line_of_sight(
+                ctx.obstacles,
+                my_pos,
+                info.position,
+            )
+        {
             continue;
         }
         let already_ccd = ctx
@@ -198,7 +213,7 @@ fn pick_polymorph_target(
             if other.team == info.team || !other.is_alive || other.target != Some(target) {
                 continue;
             }
-            if other.class.is_melee() {
+            if other.is_melee_attacker() {
                 mix.melee += 1;
             } else {
                 mix.ranged += 1;
@@ -814,7 +829,7 @@ fn try_polymorph(
     // from `T_eff` rather than asserted, so sheeping a unit nobody is hitting is
     // allowed and sheeping one under fire is not.
     let cc_target = if ctx.cc_policy.is_priced() && MAGE_PRICED_POLYMORPH {
-        match pick_polymorph_target(combatant, ctx, abilities) {
+        match pick_polymorph_target(combatant, my_pos, ctx, abilities) {
             Some(t) => t,
             None => {
                 builder.reject(ability, RejectionReason::NoValidTarget);

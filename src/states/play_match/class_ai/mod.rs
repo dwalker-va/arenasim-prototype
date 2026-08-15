@@ -136,6 +136,19 @@ impl CombatantInfo {
         }
     }
 
+    /// Does this unit have to stand in melee reach to deal its damage?
+    ///
+    /// **Not `class.is_melee()`.** A pet carries its OWNER's `class`
+    /// (`Combatant::new_pet`), so a Felhunter reads as a Warlock and a Spider as
+    /// a Hunter — yet every pet in the roster is a melee auto-attacker. Asking
+    /// the class alone put all four pets in the RANGED bucket of
+    /// `cc_value::AttackerMix`, which is the bucket a displacing CC does NOT
+    /// discount: a Fear on a target being chewed by a Felhunter was priced as
+    /// though the pet would keep hitting it while it fled.
+    pub fn is_melee_attacker(&self) -> bool {
+        self.is_pet || self.class.is_melee()
+    }
+
     /// Health as a percentage (0.0 to 1.0)
     pub fn health_pct(&self) -> f32 {
         if self.max_health > 0.0 {
@@ -747,8 +760,8 @@ impl<'a> CombatContext<'a> {
             .values()
             .filter(|c| {
                 c.team == info.team
-                    && c.is_alive
                     && c.entity != target
+                    && self.can_dispel_allies(c.entity)
                     && Self::dispel_ability_of(c).is_some_and(|ability| {
                         // On cooldown is as good as absent.
                         self.ability_cooldowns
@@ -758,41 +771,50 @@ impl<'a> CombatContext<'a> {
                             .unwrap_or(0.0)
                             <= 0.0
                     })
-                    && !self
-                        .active_auras
-                        .get(&c.entity)
-                        .map(|auras| {
-                            auras.iter().any(|a| {
-                                crate::states::play_match::cc_value::denies_actions(a.effect_type)
-                            })
-                        })
-                        .unwrap_or(false)
             })
             .count() as u32
+    }
+
+    /// Can this unit take a dispellable aura off an ALLY right now — capability,
+    /// alive, and able to act? The cooldown-agnostic half of
+    /// [`Self::free_ally_dispellers`], for callers whose horizon is longer than
+    /// one dispel cooldown (a DoT's whole lifetime, say).
+    ///
+    /// **Not `is_healer()`.** The Shaman is a healer with no ally dispel at all
+    /// (Purge is offensive — `try_purge_enemy` skips its own team), and the
+    /// Warlock's Felhunter is not a healer but owns the cheapest dispel on the
+    /// board. Every caller must agree on this population or the two sides of a
+    /// CC-versus-rotation comparison get priced against different worlds.
+    pub fn can_dispel_allies(&self, entity: Entity) -> bool {
+        let Some(c) = self.combatants.get(&entity) else {
+            return false;
+        };
+        c.is_alive
+            && Self::dispel_ability_of(c).is_some()
+            && !self
+                .active_auras
+                .get(&entity)
+                .map(|auras| {
+                    auras.iter().any(|a| {
+                        crate::states::play_match::cc_value::denies_actions(a.effect_type)
+                    })
+                })
+                .unwrap_or(false)
     }
 
     /// Returns 0 unless `target` is a dispeller that is currently free to act
     /// AND some living teammate actually owns a breakable CC to land. Depth 1:
     /// this reads teammates' raw capability, never their uplifted scores.
     pub fn dispel_denial_uplift(&self, target: Entity, abilities: &AbilityDefinitions) -> f32 {
-        let Some(info) = self.combatants.get(&target) else {
-            return 0.0;
-        };
-        // Only a free dispeller is worth denying.
-        if !info.class.is_healer() || !info.is_alive {
+        if self.combatants.get(&target).is_none() {
             return 0.0;
         }
-        if self
-            .active_auras
-            .get(&target)
-            .map(|auras| {
-                auras.iter().any(|a| {
-                    crate::states::play_match::cc_value::denies_actions(a.effect_type)
-                })
-            })
-            .unwrap_or(false)
-        {
-            return 0.0; // already locked — no further uplift to create
+        // Only a free dispeller is worth denying — and "dispeller" is a
+        // CAPABILITY, not `is_healer()`. Counting the Shaman here credited a
+        // lockout with denying a dispel it could never have cast; the check also
+        // covers "alive" and "already locked, so no further uplift to create".
+        if !self.can_dispel_allies(target) {
+            return 0.0;
         }
 
         let my_team = self.self_info().map(|i| i.team).unwrap_or(0);

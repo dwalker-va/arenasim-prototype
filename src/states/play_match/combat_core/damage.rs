@@ -134,6 +134,9 @@ pub fn apply_damage_with_absorb(
     let actual_damage = remaining_damage.min(target.current_health);
     target.current_health = (target.current_health - remaining_damage).max(0.0);
     target.damage_taken += actual_damage;
+    // Monotonic counter so `RecentDamage` can recover the GROSS figure without
+    // differencing the absorb pool (which also falls on expiry and dispel).
+    target.damage_absorbed += total_absorbed;
 
     // Post-condition: health should still be valid
     debug_assert!(

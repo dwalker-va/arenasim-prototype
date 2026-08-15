@@ -428,7 +428,7 @@ fn headless_setup_match(
                     Transform::from_translation(pet_pos),
                     pet_combatant,
                     DRTracker::default(),
-                RecentDamage::default(),
+                    RecentDamage::default(),
                     Pet { owner: entity, pet_type: PetType::Felhunter },
                     FloatingTextState { next_pattern_index: 0 },
                 ));
@@ -451,7 +451,7 @@ fn headless_setup_match(
                     Transform::from_translation(pet_pos),
                     pet_combatant,
                     DRTracker::default(),
-                RecentDamage::default(),
+                    RecentDamage::default(),
                     Pet { owner: entity, pet_type },
                     FloatingTextState { next_pattern_index: 0 },
                 ));
@@ -512,7 +512,7 @@ fn headless_setup_match(
                     Transform::from_translation(pet_pos),
                     pet_combatant,
                     DRTracker::default(),
-                RecentDamage::default(),
+                    RecentDamage::default(),
                     Pet { owner: entity, pet_type: PetType::Felhunter },
                     FloatingTextState { next_pattern_index: 0 },
                 ));
@@ -535,7 +535,7 @@ fn headless_setup_match(
                     Transform::from_translation(pet_pos),
                     pet_combatant,
                     DRTracker::default(),
-                RecentDamage::default(),
+                    RecentDamage::default(),
                     Pet { owner: entity, pet_type },
                     FloatingTextState { next_pattern_index: 0 },
                 ));

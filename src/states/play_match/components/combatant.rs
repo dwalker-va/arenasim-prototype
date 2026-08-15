@@ -174,6 +174,14 @@ pub struct Combatant {
     pub damage_dealt: f32,
     /// Total damage this combatant has taken
     pub damage_taken: f32,
+    /// Total damage absorbed by this combatant's shields — monotonic, and the
+    /// only honest source for "how much did a shield eat this frame".
+    ///
+    /// Differencing the remaining absorb POOL cannot answer that: the pool also
+    /// drops when a shield expires or is dispelled/purged, which
+    /// `RecentDamage` would then have logged as a damage spike that never
+    /// happened.
+    pub damage_absorbed: f32,
     /// Total healing this combatant has done
     pub healing_done: f32,
     /// Total physical damage prevented by this combatant's armor stat.
@@ -279,6 +287,7 @@ impl Combatant {
             cc_target: None,
             damage_dealt: 0.0,
             damage_taken: 0.0,
+            damage_absorbed: 0.0,
             healing_done: 0.0,
             damage_mitigated_by_armor: 0.0,
             damage_mitigated_by_resistance: [0.0; 6],
@@ -666,8 +675,14 @@ pub struct RecentDamage {
     /// would report zero incoming damage — the case the denial rate exists to
     /// detect.
     pub last_damage_taken: Option<f32>,
-    /// Absorb pool seen last frame, for the delta.
-    pub last_absorb: f32,
+    /// Cumulative `Combatant::damage_absorbed` seen last frame, for the delta.
+    ///
+    /// Deliberately the monotonic COUNTER, not the remaining absorb pool: the
+    /// pool also falls when a shield expires or is dispelled/purged, and
+    /// differencing it logged that drop as gross damage the unit never took —
+    /// a phantom spike of the whole remaining shield, right when the CC value
+    /// model was reading the rate.
+    pub last_damage_absorbed: f32,
 }
 
 impl RecentDamage {
@@ -675,6 +690,9 @@ impl RecentDamage {
     pub const WINDOW_SECS: f32 = 2.0;
     /// Frames in the window, at the simulation's fixed 60Hz timestep.
     pub const WINDOW_FRAMES: usize = 120;
+    /// Seconds one retained sample covers — the fixed timestep, derived from the
+    /// window so the two can never disagree.
+    const SAMPLE_SECS: f32 = Self::WINDOW_SECS / Self::WINDOW_FRAMES as f32;
 
     /// Record one frame's gross damage. Called every frame, including with
     /// `0.0`, so the ring advances and old damage ages out.
@@ -699,8 +717,8 @@ impl RecentDamage {
             return 0.0;
         }
         let total: f32 = self.dealt_samples.iter().sum();
-        let covered = self.dealt_samples.len() as f32 / 60.0;
-        total / covered.max(1.0 / 60.0)
+        let covered = self.dealt_samples.len() as f32 * Self::SAMPLE_SECS;
+        total / covered.max(Self::SAMPLE_SECS)
     }
 
     /// Mean gross damage per second over the window.
@@ -712,8 +730,8 @@ impl RecentDamage {
             return 0.0;
         }
         let total: f32 = self.samples.iter().sum();
-        let covered = self.samples.len() as f32 / 60.0;
-        total / covered.max(1.0 / 60.0)
+        let covered = self.samples.len() as f32 * Self::SAMPLE_SECS;
+        total / covered.max(Self::SAMPLE_SECS)
     }
 }
 
