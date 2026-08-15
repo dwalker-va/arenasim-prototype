@@ -25,7 +25,7 @@ use super::super::match_config::CharacterClass;
 use super::super::play_match::abilities::AbilityType;
 use super::super::play_match::ability_config::{AbilityConfig, AbilityDefinitions};
 use super::super::play_match::components::{
-    ActiveAuras, Celebrating, CastingState, ChannelingState, Combatant, DRTracker,
+    ActiveAuras, AuraType, Celebrating, CastingState, ChannelingState, Combatant, DRTracker,
     DeathAnimation, MatchResults, PlayMatchEntity, VictoryCelebration, VisualBody,
 };
 use super::{SandboxEntity, SandboxStage};
@@ -548,6 +548,22 @@ fn clear_body_state(
     // and then switching entries left the dummy transformed indefinitely.
     for unit in stage.caster.into_iter().chain(stage.dummy) {
         if let Ok(mut active) = auras.get_mut(unit) {
+            // Revert the MaxHealth/MaxMana stat bakes BEFORE the blunt clear.
+            // `auras.clear()` drops the aura without running the `-= magnitude`
+            // revert that normal expiry does (auras.rs), so a looping stat buff
+            // (PW: Fortitude, Arcane Intellect) would otherwise accumulate its
+            // bonus every pass — the staged unit's max HP/mana climbing without
+            // bound. Mirrors the expiry revert; other buffs (AP/crit/SP) are
+            // computed from active auras at use-time and need no revert here.
+            if let Ok(mut combatant) = combatants.get_mut(unit) {
+                for aura in active.auras.iter() {
+                    match aura.effect_type {
+                        AuraType::MaxHealthIncrease => combatant.max_health -= aura.magnitude,
+                        AuraType::MaxManaIncrease => combatant.max_mana -= aura.magnitude,
+                        _ => {}
+                    }
+                }
+            }
             active.auras.clear();
         }
         if let Ok(mut combatant) = combatants.get_mut(unit) {
