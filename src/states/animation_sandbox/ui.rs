@@ -467,22 +467,22 @@ pub fn draw_sandbox_ui(ctx: &egui::Context, view: &SandboxView) -> Vec<SandboxAc
         .show(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 section(ui, "ABILITIES");
-                ui.label(
-                    egui::RichText::new("Instant abilities are not playable yet")
-                        .color(MUTED_TEXT)
-                        .size(11.0),
-                );
-                ui.add_space(2.0);
                 for row in view.rows.iter().filter(|r| r.family != EntryFamily::Body) {
                     let selected = view.selected == Some(row.entry);
                     let playable = row.family.is_playable();
-                    let tag = (!playable).then_some("instant");
+                    let tag = (!playable).then_some(match row.family {
+                        EntryFamily::Unsupported => "n/a",
+                        _ => "soon",
+                    });
                     let response = icon_row(ui, row.icon, &row.label, tag, selected, playable);
                     if !playable {
-                        response.on_hover_text(
-                            "Instant abilities are applied inside class AI code and need the \
-                             shared application seam (Phase B).",
-                        );
+                        response.on_hover_text(match row.family {
+                            EntryFamily::Unsupported => {
+                                "Not previewable: defined as data but with no application code \
+                                 (or no distinct cast visual)."
+                            }
+                            _ => "This ability's preview mechanism is not wired yet.",
+                        });
                     } else if response.clicked() {
                         actions.push(SandboxAction::Select(row.entry, row.family));
                     }
