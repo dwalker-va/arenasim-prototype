@@ -77,6 +77,20 @@ Both directions are required. A guard on only one side (the original plan guarde
 `Without<PolymorphedVisual>`) fixes Polymorph-first but leaves Fear-then-Polymorph
 corrupting the slot — which is exactly what code review caught.
 
+**But the symmetric guards ALONE deadlock on same-frame co-application — they need a sync
+point.** Marker inserts are deferred `Command`s. If both CCs land on the same unit on the
+same frame with the two systems unordered, each system's `Without<Other>` filter still
+sees the other's marker absent (not yet applied), so **both** transition-ins fire and the
+unit ends up carrying **both** markers. From then on each system excludes the double-marked
+unit, so **neither can ever restore** — a permanent stuck state (worse than the clobber:
+the shroud/parts and one marker dangle for the rest of the match). Fix: **order the two
+systems with a sync point** — `(update_polymorph_visuals, update_fear_visuals).chain()` —
+so the first's marker is flushed before the second evaluates its filter, and at most one
+marker is ever set (a deterministic tie-break: sheep wins). The `Without` filters and the
+ordered sync point are two halves of one fix; shipping the filters without the ordering
+trades the clobber for a deadlock. Regression: `simultaneous_fear_and_polymorph_do_not_deadlock`
+in `tests/fear_visual_probes.rs` (fail-first without the chain).
+
 **Two adjacent gotchas the wrong mental model produced:**
 
 1. **The transition-in guard is the treatment's own MARKER absence, not
