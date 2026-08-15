@@ -25,7 +25,7 @@ use super::super::match_config::CharacterClass;
 use super::super::play_match::abilities::AbilityType;
 use super::super::play_match::ability_config::{AbilityConfig, AbilityDefinitions};
 use super::super::play_match::components::{
-    ActiveAuras, AuraType, BerserkerRagePending, Celebrating, CastingState, ChannelingState,
+    ActiveAuras, AuraPending, AuraType, BerserkerRagePending, Celebrating, CastingState, ChannelingState,
     ChargingState, Combatant, DRTracker, DeathAnimation, DisengagingState, DispelPending,
     DivineShieldPending, HolyShockDamagePending, HolyShockHealPending, MatchResults,
     PlayMatchEntity, ScreamBurst, VictoryCelebration, VisualBody,
@@ -391,6 +391,30 @@ pub fn drive_playback(
                     (stage.dummy, combatants.get_mut(caster))
                 {
                     combatant.target = Some(dummy);
+                }
+            }
+            // A dispel needs a dispellable aura present BEFORE process_dispels
+            // runs, or no DispelBurst spawns. Stage a magic buff on the dummy
+            // directly into its ActiveAuras (immediate — an AuraPending would
+            // resolve AFTER process_dispels in the Phase-1 order and be missed).
+            // Cleared between passes by clear_body_state.
+            if let (Some(SandboxEntry::Ability(ab)), Some(dummy)) =
+                (playback.selected, stage.dummy)
+            {
+                if matches!(
+                    ab,
+                    AbilityType::DispelMagic
+                        | AbilityType::PaladinCleanse
+                        | AbilityType::Purge
+                        | AbilityType::DevourMagic
+                ) {
+                    if let Some(def) = defs.get(&AbilityType::ArcaneIntellect) {
+                        if let Some(pending) = AuraPending::from_ability(dummy, caster, def) {
+                            if let Ok(mut active) = auras.get_mut(dummy) {
+                                active.auras.push(pending.aura);
+                            }
+                        }
+                    }
                 }
             }
         }
