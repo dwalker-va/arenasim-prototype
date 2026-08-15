@@ -524,6 +524,7 @@ pub fn position_caster(
     playback: Res<SandboxPlayback>,
     stage: Res<SandboxStage>,
     config: Res<super::SandboxConfig>,
+    defs: Res<AbilityDefinitions>,
     mut movers: Query<&mut Transform, With<Combatant>>,
 ) {
     let Some(caster) = stage.caster else { return };
@@ -562,16 +563,23 @@ pub fn position_caster(
 
     let Some(dummy) = stage.dummy else { return };
     let dummy_target = match entry {
-        Some(SandboxEntry::Ability(AbilityType::Polymorph)) => {
-            circle_walk(dummy_home, playback.elapsed, SHEEP_RADIUS, SHEEP_ANGULAR_SPEED)
-        }
-        // Fear's panic-run gait is distance-driven, same as the sheep hop, so the
-        // DUMMY (the feared unit) must actually walk or the gait shows nothing.
-        // The panic run is meant to read as faster and more erratic than the
-        // sheep hop, so it circles at the caster's brisker walk pace rather than
-        // the sheep's deliberately slow one.
-        Some(SandboxEntry::Ability(AbilityType::Fear)) => {
-            circle_walk(dummy_home, playback.elapsed, WALK_RADIUS, WALK_ANGULAR_SPEED)
+        // CC entries: the dummy is the VICTIM, and its distance-driven gait
+        // (sheep hop / panic run) needs it to actually move or the gait shows
+        // nothing. Hold it still until the cast lands: driving the circle by
+        // (elapsed - cast_time) keeps the dummy at home (circle angle 0 = home)
+        // through the cast, then walks it out from home once the aura applies —
+        // so the sandbox no longer shows the victim fleeing before it is hit.
+        Some(SandboxEntry::Ability(ability @ (AbilityType::Polymorph | AbilityType::Fear))) => {
+            let cast_time = defs.get(&ability).map(|c| c.cast_time).unwrap_or(1.5);
+            let walk_elapsed = (playback.elapsed - cast_time).max(0.0);
+            // The panic run reads faster / more erratic than the sheep hop, so
+            // Fear circles at the caster's brisker walk pace, Polymorph at the
+            // sheep's deliberately slow one.
+            let (radius, speed) = match ability {
+                AbilityType::Polymorph => (SHEEP_RADIUS, SHEEP_ANGULAR_SPEED),
+                _ => (WALK_RADIUS, WALK_ANGULAR_SPEED),
+            };
+            circle_walk(dummy_home, walk_elapsed, radius, speed)
         }
         _ => dummy_home,
     };

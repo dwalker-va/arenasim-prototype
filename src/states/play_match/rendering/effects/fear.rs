@@ -22,9 +22,14 @@ use crate::states::play_match::components::*;
 const FEAR_HUSK_COLOR: Color = Color::srgb(0.28, 0.16, 0.40);
 /// The breathing shroud's dark-violet additive color.
 const FEAR_SHROUD_COLOR: Color = Color::srgba(0.35, 0.18, 0.55, 0.25);
-/// Shroud radius as a multiple of the body extent — slightly larger than the
-/// body so it reads as an aura wrapping it.
-const FEAR_SHROUD_SCALE: f32 = 1.25;
+/// The shroud is a capsule shell FITTED to the combatant body
+/// (`Capsule3d::new(0.5, 1.5)`), proud of its surface by a small margin so it
+/// reads as a shadow shroud worn over the form rather than a bubble around it.
+const FEAR_SHROUD_RADIUS: f32 = 0.5 + 0.1;
+const FEAR_SHROUD_LENGTH: f32 = 1.5;
+/// Peak breath swell of the fitted shell (fraction) — kept subtle so the shroud
+/// hugs the body rather than ballooning off it.
+const FEAR_SHROUD_SWELL: f32 = 0.05;
 /// Breathing period of the shroud, in seconds.
 const FEAR_SHROUD_PERIOD: f32 = 2.0;
 
@@ -101,9 +106,10 @@ pub fn update_fear_visuals(
                 .try_insert(OriginalBodyMaterial(material.0.clone()));
             *material = MeshMaterial3d(husk);
 
-            // Breathing shroud: a slightly-larger-than-body additive sphere,
-            // owner-scoped so restore despawns exactly this unit's shroud.
-            let shroud_mesh = meshes.add(Sphere::new(1.0));
+            // Breathing shroud: a capsule shell FITTED to the body (not a bubble
+            // around it), additive and owner-scoped so restore despawns exactly
+            // this unit's shroud.
+            let shroud_mesh = meshes.add(Capsule3d::new(FEAR_SHROUD_RADIUS, FEAR_SHROUD_LENGTH));
             let shroud_material = materials.add(StandardMaterial {
                 base_color: FEAR_SHROUD_COLOR,
                 emissive: LinearRgba::new(0.5, 0.25, 0.9, 1.0),
@@ -115,7 +121,9 @@ pub fn update_fear_visuals(
                 .spawn((
                     Mesh3d(shroud_mesh),
                     MeshMaterial3d(shroud_material),
-                    Transform::from_scale(Vec3::splat(FEAR_SHROUD_SCALE)),
+                    // Base scale 1.0 — the mesh is already sized to the body;
+                    // the breath system swells it subtly.
+                    Transform::default(),
                     FearShroud { owner: entity },
                 ))
                 .id();
@@ -314,9 +322,8 @@ pub fn update_fear_shroud(
     let phase = 0.5
         + 0.5 * (time.elapsed_secs() * std::f32::consts::TAU / FEAR_SHROUD_PERIOD).sin();
     for (mut transform, material) in shrouds.iter_mut() {
-        // Scale swells ~8% about the rest radius.
-        let scale = FEAR_SHROUD_SCALE * (1.0 + 0.08 * phase);
-        transform.scale = Vec3::splat(scale);
+        // Subtle swell about the fitted rest size — a labored terror breath.
+        transform.scale = Vec3::splat(1.0 + FEAR_SHROUD_SWELL * phase);
         // Alpha breathes with it so the shroud swells and glows on the inhale.
         if let Some(mat) = materials.get_mut(&material.0) {
             let base = FEAR_SHROUD_COLOR.to_srgba();
@@ -341,9 +348,12 @@ pub fn update_fear_shroud(
 /// Lifetime (seconds) of the flash. Short on purpose: Fear breaks on ANY damage,
 /// so an apply and its break can land within a second of each other and must
 /// each read as a distinct pop rather than one smear.
-const FEAR_FLASH_LIFETIME: f32 = 0.4;
-/// Scale of the flash sphere at spawn and at expiry. It pops open then fades.
-const FEAR_FLASH_SCALE_START: f32 = 0.35;
+const FEAR_FLASH_LIFETIME: f32 = 0.3;
+/// Scale of the flash at spawn and at expiry, as a multiple of the FITTED shroud
+/// capsule: it starts AT the shroud's size and flares outward modestly as it
+/// fades, so the break reads as the shroud tearing away rather than a big sphere
+/// popping up.
+const FEAR_FLASH_SCALE_START: f32 = 1.0;
 const FEAR_FLASH_SCALE_END: f32 = 1.5;
 /// Dark-violet additive color (Shadow school). Alpha is the peak; it fades to 0.
 const FEAR_FLASH_COLOR: Color = Color::srgba(0.30, 0.10, 0.55, 0.8);
@@ -361,7 +371,9 @@ pub(crate) fn spawn_fear_flash(
     torso_world_y: Option<f32>,
 ) {
     let position = Vec3::new(unit_pos.x, torso_world_y.unwrap_or(unit_pos.y), unit_pos.z);
-    let mesh = meshes.add(Sphere::new(1.0).mesh().uv(16, 10));
+    // Capsule matched to the fitted shroud, so the flash reads as the shroud
+    // flaring off rather than a big sphere popping up.
+    let mesh = meshes.add(Capsule3d::new(FEAR_SHROUD_RADIUS, FEAR_SHROUD_LENGTH));
     let material = materials.add(StandardMaterial {
         base_color: FEAR_FLASH_COLOR,
         emissive: FEAR_FLASH_EMISSIVE,
