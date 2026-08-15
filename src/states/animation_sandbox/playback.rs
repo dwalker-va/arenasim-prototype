@@ -25,9 +25,12 @@ use super::super::match_config::CharacterClass;
 use super::super::play_match::abilities::AbilityType;
 use super::super::play_match::ability_config::{AbilityConfig, AbilityDefinitions};
 use super::super::play_match::components::{
-    ActiveAuras, AuraType, Celebrating, CastingState, ChannelingState, Combatant, DRTracker,
-    DeathAnimation, MatchResults, PlayMatchEntity, VictoryCelebration, VisualBody,
+    ActiveAuras, AuraType, BerserkerRagePending, Celebrating, CastingState, ChannelingState,
+    ChargingState, Combatant, DRTracker, DeathAnimation, DisengagingState, DispelPending,
+    DivineShieldPending, HolyShockDamagePending, HolyShockHealPending, MatchResults,
+    PlayMatchEntity, VictoryCelebration, VisualBody,
 };
+use super::super::play_match::{DISENGAGE_SPEED, MELEE_RANGE};
 use super::{SandboxEntity, SandboxStage};
 
 /// Seconds the match's victory clock is seeded with when the sandbox plays the
@@ -137,7 +140,7 @@ impl EntryFamily {
     pub fn is_playable(self) -> bool {
         matches!(
             self,
-            EntryFamily::Cast | EntryFamily::Channel | EntryFamily::Body
+            EntryFamily::Cast | EntryFamily::Channel | EntryFamily::Component | EntryFamily::Body
         )
     }
 }
@@ -360,7 +363,18 @@ pub fn drive_playback(
     if playback.restart_requested {
         playback.restart_requested = false;
         clear_body_state(&mut commands, &stage, &children, &mut bodies, &mut auras, &mut combatants, &leftovers);
-        if start_entry(&mut commands, &playback, caster, stage.dummy, &defs) {
+        // Snapshot the caster's identity/stats for component-mechanism entries
+        // whose `*Pending` carries them to its resolver (Holy Shock scales off
+        // spell power / crit; Divine Shield / Berserker Rage / dispels need
+        // team/slot/class).
+        let caster_info = combatants.get(caster).ok().map(|c| CasterInfo {
+            team: c.team,
+            slot: c.slot,
+            class: c.class,
+            spell_power: c.spell_power,
+            crit_chance: c.crit_chance,
+        });
+        if start_entry(&mut commands, &playback, caster, stage.dummy, &defs, caster_info) {
             playback.playing = true;
             playback.elapsed = 0.0;
             playback.duration = entry_duration(&playback, &defs);
@@ -410,11 +424,18 @@ fn entry_duration(playback: &SandboxPlayback, defs: &AbilityDefinitions) -> f32 
             let Some(config) = defs.get(&ability) else {
                 return 1.0;
             };
-            // Channels run for their channel duration; aura entries hold past
-            // cast_time so the applied state reads; everything else is cast_time.
+            // Channels run for their channel duration; aura entries and the
+            // component/residue mechanisms (bubble, dash, holy flash, scream
+            // burst) hold past cast_time so the applied state reads; a pure
+            // damage cast is just cast_time.
+            let holds = config.applies_aura.is_some()
+                || matches!(
+                    playback.family,
+                    Some(EntryFamily::Component) | Some(EntryFamily::Residue)
+                );
             if let Some(channel) = config.channel_duration {
                 channel
-            } else if config.applies_aura.is_some() {
+            } else if holds {
                 config.cast_time + AURA_HOLD_SECS
             } else {
                 config.cast_time
@@ -425,14 +446,139 @@ fn entry_duration(playback: &SandboxPlayback, defs: &AbilityDefinitions) -> f32 
     }
 }
 
+/// Caster stat snapshot for component-mechanism entries whose `*Pending`
+/// carries the caster's identity/stats to its resolver.
+#[derive(Clone, Copy)]
+struct CasterInfo {
+    team: u8,
+    slot: u8,
+    class: CharacterClass,
+    spell_power: f32,
+    crit_chance: f32,
+}
+
+/// Starts an M3 (component-insert) entry. `*Pending` components are spawned as
+/// standalone `PlayMatchEntity` entities whose existing resolvers (all NON
+/// decide-gated) produce the visual; the two movement instants insert their dash
+/// component for the sandbox-owned `drive_sandbox_dash` to advance, because
+/// their real driver `move_to_target` is AI-decision-gated off here (KTD6).
+fn start_component_entry(
+    commands: &mut Commands,
+    ability: AbilityType,
+    caster: Entity,
+    dummy: Option<Entity>,
+    caster_info: Option<CasterInfo>,
+) -> bool {
+    let Some(info) = caster_info else {
+        return false;
+    };
+    match ability {
+        AbilityType::DivineShield => {
+            commands.spawn((
+                DivineShieldPending {
+                    caster,
+                    caster_team: info.team,
+                    caster_slot: info.slot,
+                    caster_class: info.class,
+                },
+                PlayMatchEntity,
+            ));
+        }
+        AbilityType::BerserkerRage => {
+            commands.spawn((
+                BerserkerRagePending {
+                    caster,
+                    caster_team: info.team,
+                    caster_slot: info.slot,
+                    caster_class: info.class,
+                },
+                PlayMatchEntity,
+            ));
+        }
+        AbilityType::HolyShock => {
+            // Damage on the dummy is the more legible preview; heal self if the
+            // dummy is off.
+            if let Some(dummy) = dummy {
+                commands.spawn((
+                    HolyShockDamagePending {
+                        caster_spell_power: info.spell_power,
+                        caster_crit_chance: info.crit_chance,
+                        caster_team: info.team,
+                        caster_slot: info.slot,
+                        caster_class: info.class,
+                        target: dummy,
+                    },
+                    PlayMatchEntity,
+                ));
+            } else {
+                commands.spawn((
+                    HolyShockHealPending {
+                        caster_spell_power: info.spell_power,
+                        caster_crit_chance: info.crit_chance,
+                        caster_team: info.team,
+                        caster_slot: info.slot,
+                        caster_class: info.class,
+                        target: caster,
+                    },
+                    PlayMatchEntity,
+                ));
+            }
+        }
+        AbilityType::DispelMagic
+        | AbilityType::PaladinCleanse
+        | AbilityType::Purge
+        | AbilityType::DevourMagic => {
+            let target = dummy.unwrap_or(caster);
+            let (log_prefix, removes_poison, heal_on_success): (
+                &'static str,
+                bool,
+                Option<(Entity, f32)>,
+            ) = match ability {
+                AbilityType::PaladinCleanse => ("[CLEANSE]", true, None),
+                AbilityType::Purge => ("[PURGE]", false, None),
+                AbilityType::DevourMagic => ("[DEVOUR]", false, Some((caster, 20.0))),
+                _ => ("[DISPEL]", false, None),
+            };
+            commands.spawn((
+                DispelPending {
+                    target,
+                    dispeller: caster,
+                    log_prefix,
+                    caster_class: info.class,
+                    heal_on_success,
+                    aura_type_filter: None,
+                    removes_poison,
+                },
+                PlayMatchEntity,
+            ));
+        }
+        AbilityType::Charge => {
+            commands
+                .entity(caster)
+                .insert(ChargingState { target: dummy.unwrap_or(caster) });
+        }
+        AbilityType::Disengage => {
+            // The caster stages at -x with the dummy at +x, so the retreat leap
+            // is in -x.
+            commands.entity(caster).insert(DisengagingState {
+                direction: Vec3::new(-1.0, 0.0, 0.0),
+                distance_remaining: 12.0,
+            });
+        }
+        _ => return false,
+    }
+    true
+}
+
 /// Starts the entry. Returns false when it could not start (no target for an
-/// ability that needs one, or an instant that has no seam yet).
+/// ability that needs one, or a mechanism whose start path is not wired yet).
 fn start_entry(
     commands: &mut Commands,
     playback: &SandboxPlayback,
     caster: Entity,
     dummy: Option<Entity>,
     defs: &AbilityDefinitions,
+    caster_info: Option<CasterInfo>,
 ) -> bool {
     match playback.selected {
         Some(SandboxEntry::Ability(ability)) => {
@@ -470,6 +616,10 @@ fn start_entry(
                         ticks_applied: 0,
                     });
                     true
+                }
+                // M3 — bespoke `*Pending` / movement components.
+                Some(EntryFamily::Component) => {
+                    start_component_entry(commands, ability, caster, dummy, caster_info)
                 }
                 _ => false,
             }
@@ -533,6 +683,8 @@ fn clear_body_state(
         e.remove::<Celebrating>();
         e.remove::<CastingState>();
         e.remove::<ChannelingState>();
+        e.remove::<ChargingState>();
+        e.remove::<DisengagingState>();
     }
     // Paired with the insert in `start_entry`: left behind, the match's victory
     // clock keeps ticking down to its `GameState::Results` transition.
@@ -646,6 +798,7 @@ pub fn position_caster(
     config: Res<super::SandboxConfig>,
     defs: Res<AbilityDefinitions>,
     mut movers: Query<&mut Transform, With<Combatant>>,
+    dashing: Query<(), Or<(With<ChargingState>, With<DisengagingState>)>>,
 ) {
     let Some(caster) = stage.caster else { return };
     let entry = playback.playing.then_some(playback.selected).flatten();
@@ -676,7 +829,11 @@ pub fn position_caster(
     };
 
     if let Ok(mut transform) = movers.get_mut(caster) {
-        if transform.translation != target {
+        // While the caster is mid-dash (Charge/Disengage), `drive_sandbox_dash`
+        // owns its transform — resetting it to home here would zero the dash's
+        // per-frame progress (KTD6).
+        let is_dashing = dashing.get(caster).is_ok();
+        if !is_dashing && transform.translation != target {
             transform.translation = target;
         }
     }
@@ -707,6 +864,74 @@ pub fn position_caster(
     if let Ok(mut transform) = movers.get_mut(dummy) {
         if transform.translation != dummy_target {
             transform.translation = dummy_target;
+        }
+    }
+}
+
+/// Sandbox-owned dash driver for the two movement instants (KTD6).
+///
+/// In a match, `move_to_target` advances `ChargingState` / `DisengagingState` —
+/// but that system is AI-decision-gated (`in_state(PlayMatch)`) and does NOT run
+/// in the sandbox, so a Charge/Disengage entry would insert its component and
+/// then sit still. This mirrors the charge/disengage motion from
+/// `combat_core/movement.rs` (minus the obstacle resolve — the sandbox floor has
+/// none) so the two dashes animate. `position_caster` cedes the caster transform
+/// while a dash component is present, so this is the sole writer during a dash.
+pub fn drive_sandbox_dash(
+    mut commands: Commands,
+    time: Res<Time>,
+    stage: Res<SandboxStage>,
+    mut movers: Query<(
+        &mut Transform,
+        &Combatant,
+        Option<&ChargingState>,
+        Option<&DisengagingState>,
+    )>,
+) {
+    let Some(caster) = stage.caster else { return };
+    // Copy the charge target's position out before the mutable borrow below.
+    let charge_target_pos = stage
+        .dummy
+        .and_then(|d| movers.get(d).ok())
+        .map(|(t, ..)| t.translation);
+
+    let dt = time.delta_secs();
+    let Ok((mut transform, combatant, charging, disengaging)) = movers.get_mut(caster) else {
+        return;
+    };
+
+    if charging.is_some() {
+        let Some(target_pos) = charge_target_pos else {
+            commands.entity(caster).remove::<ChargingState>();
+            return;
+        };
+        let from = transform.translation;
+        let flat = Vec3::new(target_pos.x - from.x, 0.0, target_pos.z - from.z);
+        if flat.length() <= MELEE_RANGE {
+            commands.entity(caster).remove::<ChargingState>();
+            return;
+        }
+        let dir = flat.normalize_or_zero();
+        if dir != Vec3::ZERO {
+            let speed = combatant.base_movement_speed * 4.0; // CHARGE_SPEED_MULTIPLIER
+            transform.translation = from + dir * speed * dt;
+            transform.rotation = Quat::from_rotation_y(dir.x.atan2(dir.z));
+        }
+    } else if let Some(dis) = disengaging {
+        if dis.distance_remaining > 0.0 {
+            let amount = DISENGAGE_SPEED * dt;
+            transform.translation += dis.direction * amount;
+            let remaining = dis.distance_remaining - amount;
+            if remaining <= 0.0 {
+                commands.entity(caster).remove::<DisengagingState>();
+            } else {
+                commands.entity(caster).try_insert(DisengagingState {
+                    direction: dis.direction,
+                    distance_remaining: remaining,
+                });
+            }
+        } else {
+            commands.entity(caster).remove::<DisengagingState>();
         }
     }
 }

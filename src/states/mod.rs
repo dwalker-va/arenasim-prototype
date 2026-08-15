@@ -194,6 +194,7 @@ impl Plugin for StatesPlugin {
                     animation_sandbox::playback::sustain_staged_units,
                     animation_sandbox::playback::drive_playback,
                     animation_sandbox::playback::position_caster,
+                    animation_sandbox::playback::drive_sandbox_dash,
                     animation_sandbox::ui::sandbox_ui,
                     animation_sandbox::ui::apply_camera_preset,
                 )
