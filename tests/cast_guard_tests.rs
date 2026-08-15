@@ -37,6 +37,7 @@ fn target_info(entity: Entity, team: u8, class: CharacterClass) -> CombatantInfo
         target: None,
         is_pet: false,
         casting_ability: None,
+        casting_remaining: 0.0,
         pet_type: None,
         pet: None,
     }
@@ -46,6 +47,7 @@ fn target_info(entity: Entity, team: u8, class: CharacterClass) -> CombatantInfo
 fn make_aura(effect_type: AuraType, ability_name: &str, caster: Option<Entity>) -> Aura {
     Aura {
         effect_type,
+        unique_per_caster: false,
         duration: 10.0,
         magnitude: 1.0,
         break_on_damage_threshold: -1.0,
@@ -76,6 +78,9 @@ struct TestWorld {
     dr_trackers: BTreeMap<Entity, DRTracker>,
     ability_cooldowns: BTreeMap<Entity, BTreeMap<AbilityType, f32>>,
     obstacles: Vec<ObstacleVolume>,
+    /// Empty: these fixtures exercise pre-cast guards, none of which read the
+    /// trailing-damage window. Owned by the fixture so `ctx()` can borrow it.
+    recent_damage: BTreeMap<Entity, f32>,
 }
 
 impl TestWorld {
@@ -99,11 +104,15 @@ impl TestWorld {
             dr_trackers: BTreeMap::new(),
             ability_cooldowns: BTreeMap::new(),
             obstacles: Vec::new(),
+            recent_damage: BTreeMap::new(),
         }
     }
 
     fn ctx(&self) -> CombatContext<'_> {
         CombatContext {
+        cc_policy: Default::default(),
+        recent_damage: &self.recent_damage,
+        recent_damage_dealt: &self.recent_damage,
         ai_profile: Default::default(),
         bounds: Default::default(),
             combatants: &self.combatants,
@@ -456,6 +465,9 @@ fn classify_returns_friendly_breakable_cc_when_opt_in_and_friendly_cc_present() 
     active_auras_map.insert(world.target, target_active.auras.clone());
 
     let ctx = CombatContext {
+        cc_policy: Default::default(),
+        recent_damage: &world.recent_damage,
+        recent_damage_dealt: &world.recent_damage,
         ai_profile: Default::default(),
         bounds: Default::default(),
         combatants: &world.combatants,

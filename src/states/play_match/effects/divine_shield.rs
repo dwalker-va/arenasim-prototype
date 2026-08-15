@@ -43,6 +43,7 @@ pub fn process_divine_shield(
 
             let immunity_aura = Aura {
                 effect_type: AuraType::DamageImmunity,
+                unique_per_caster: false,
                 duration: immunity_duration,
                 magnitude: immunity_magnitude,
                 tick_interval: 0.0,

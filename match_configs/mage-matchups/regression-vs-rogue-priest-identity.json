@@ -1,0 +1,6 @@
+{
+  "team1": ["Mage", "Priest"],
+  "team2": ["Rogue", "Priest"],
+  "random_seed": 6,
+  "map": "BasicArena"
+}

@@ -174,6 +174,14 @@ pub struct Combatant {
     pub damage_dealt: f32,
     /// Total damage this combatant has taken
     pub damage_taken: f32,
+    /// Total damage absorbed by this combatant's shields — monotonic, and the
+    /// only honest source for "how much did a shield eat this frame".
+    ///
+    /// Differencing the remaining absorb POOL cannot answer that: the pool also
+    /// drops when a shield expires or is dispelled/purged, which
+    /// `RecentDamage` would then have logged as a damage spike that never
+    /// happened.
+    pub damage_absorbed: f32,
     /// Total healing this combatant has done
     pub healing_done: f32,
     /// Total physical damage prevented by this combatant's armor stat.
@@ -279,6 +287,7 @@ impl Combatant {
             cc_target: None,
             damage_dealt: 0.0,
             damage_taken: 0.0,
+            damage_absorbed: 0.0,
             healing_done: 0.0,
             damage_mitigated_by_armor: 0.0,
             damage_mitigated_by_resistance: [0.0; 6],
@@ -326,6 +335,7 @@ impl Combatant {
         }
         Some(super::Aura {
             effect_type: super::AuraType::WeaponPoison,
+            unique_per_caster: false,
             // Effectively permanent for any match (cap is 300s); a finite value
             // avoids `inf` in the buff-bar duration readout.
             duration: 3600.0,
@@ -614,6 +624,115 @@ pub struct InterruptPending {
     pub ability: AbilityType,
     /// Duration of the spell school lockout (in seconds)
     pub lockout_duration: f32,
+}
+
+/// Rolling record of gross damage a combatant has taken recently, for the CC
+/// value model's break term (`cc_value::predict_t_eff`).
+///
+/// Why this exists rather than deriving a rate on demand: `DamageTakenThisFrame`
+/// is a single frame and is cleared every tick, so nothing in the world can
+/// answer "how hard is this unit being hit right now". Step 0 measured that a
+/// trailing rate — despite being a weak *classifier* of whether a CC breaks — is
+/// a substantially better *duration* estimator than any composition-only proxy
+/// (a per-class-DPS estimator scored 45%/34% precision/recall against 60%/72%,
+/// and put Fear-on-healers 3.8s off). So the rate has to be real.
+///
+/// Gross, not post-absorb: absorbed damage does not break CC, and the predictor
+/// models the absorb pool explicitly, so feeding it a post-absorb rate would
+/// subtract the shield twice.
+///
+/// **Write-only in `AiProfile::Legacy` behaviour terms** — the tracker is
+/// maintained every frame but only ever read behind `CcPolicy::Priced`, so its
+/// presence cannot move a Legacy seed.
+#[derive(Component, Default, Debug, Clone)]
+pub struct RecentDamage {
+    /// Gross damage per frame over the trailing window, oldest first.
+    ///
+    /// Frame-indexed rather than timestamped, and that is load-bearing. The
+    /// first version stored `(sim_time, amount)` and filtered by a cutoff — but
+    /// systems run in `FixedUpdate`, where `Res<Time>` is `Time<Fixed>`, while
+    /// the observation surface reads the generic `Time`. The two clocks
+    /// disagree, so every sample fell outside its own window and `rate()`
+    /// returned **zero on every frame for every unit**, silently zeroing the CC
+    /// break term and every denial rate. The timestep is a fixed 1/60, so a
+    /// frame count is an exact window and cannot desynchronise from anything.
+    samples: std::collections::VecDeque<f32>,
+    /// Gross damage this unit DEALT per frame over the same window.
+    ///
+    /// Tracked separately because attributing a victim's incoming damage evenly
+    /// across its attackers is badly wrong when they differ in output: measured,
+    /// a Warlock dealt **1180** damage in a match while its Felhunter dealt
+    /// **170**, so an even split credited the pet with roughly seven times its
+    /// real contribution — which is exactly why the value model wanted to
+    /// crowd-control the pet over the healer.
+    dealt_samples: std::collections::VecDeque<f32>,
+    /// Cumulative `Combatant::damage_dealt` seen last frame.
+    pub last_damage_dealt: Option<f32>,
+    /// Cumulative `Combatant::damage_taken` seen last frame, for the delta.
+    /// `None` until the first sample.
+    ///
+    /// Deliberately NOT health: healing masks health loss, so a healed unit
+    /// would report zero incoming damage — the case the denial rate exists to
+    /// detect.
+    pub last_damage_taken: Option<f32>,
+    /// Cumulative `Combatant::damage_absorbed` seen last frame, for the delta.
+    ///
+    /// Deliberately the monotonic COUNTER, not the remaining absorb pool: the
+    /// pool also falls when a shield expires or is dispelled/purged, and
+    /// differencing it logged that drop as gross damage the unit never took —
+    /// a phantom spike of the whole remaining shield, right when the CC value
+    /// model was reading the rate.
+    pub last_damage_absorbed: f32,
+}
+
+impl RecentDamage {
+    /// Seconds of history retained.
+    pub const WINDOW_SECS: f32 = 2.0;
+    /// Frames in the window, at the simulation's fixed 60Hz timestep.
+    pub const WINDOW_FRAMES: usize = 120;
+    /// Seconds one retained sample covers — the fixed timestep, derived from the
+    /// window so the two can never disagree.
+    const SAMPLE_SECS: f32 = Self::WINDOW_SECS / Self::WINDOW_FRAMES as f32;
+
+    /// Record one frame's gross damage. Called every frame, including with
+    /// `0.0`, so the ring advances and old damage ages out.
+    pub fn record_frame(&mut self, gross: f32) {
+        self.samples.push_back(gross.max(0.0));
+        while self.samples.len() > Self::WINDOW_FRAMES {
+            self.samples.pop_front();
+        }
+    }
+
+    /// Record one frame's damage DEALT by this unit.
+    pub fn record_dealt_frame(&mut self, dealt: f32) {
+        self.dealt_samples.push_back(dealt.max(0.0));
+        while self.dealt_samples.len() > Self::WINDOW_FRAMES {
+            self.dealt_samples.pop_front();
+        }
+    }
+
+    /// Mean damage per second this unit has been DEALING over the window.
+    pub fn dealt_rate(&self) -> f32 {
+        if self.dealt_samples.is_empty() {
+            return 0.0;
+        }
+        let total: f32 = self.dealt_samples.iter().sum();
+        let covered = self.dealt_samples.len() as f32 * Self::SAMPLE_SECS;
+        total / covered.max(Self::SAMPLE_SECS)
+    }
+
+    /// Mean gross damage per second over the window.
+    ///
+    /// Divides by the window actually covered, so an early-match reading is not
+    /// flattered by a short history.
+    pub fn rate(&self) -> f32 {
+        if self.samples.is_empty() {
+            return 0.0;
+        }
+        let total: f32 = self.samples.iter().sum();
+        let covered = self.samples.len() as f32 * Self::SAMPLE_SECS;
+        total / covered.max(Self::SAMPLE_SECS)
+    }
 }
 
 /// Component tracking damage taken this frame for aura breaking purposes.

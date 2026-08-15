@@ -171,6 +171,11 @@ pub struct Aura {
     pub time_until_next_tick: f32,
     /// For DoT effects: who applied this aura (for damage attribution)
     pub caster: Option<Entity>,
+    /// Whether one caster may hold only ONE of these at a time — see
+    /// `AuraEffect::unique_per_caster`. Carried on the aura so
+    /// `apply_pending_auras` can enforce it without an `AbilityDefinitions`
+    /// lookup.
+    pub unique_per_caster: bool,
     /// Name of the ability that created this aura (for logging)
     pub ability_name: String,
     /// For Fear: current run direction (x, z normalized)
@@ -398,6 +403,7 @@ impl AuraPending {
             target,
             aura: Aura {
                 effect_type: aura_effect.aura_type,
+                unique_per_caster: aura_effect.unique_per_caster,
                 duration: aura_effect.duration,
                 magnitude: aura_effect.magnitude
                     + spell_power * aura_effect.magnitude_coefficient,
@@ -438,6 +444,7 @@ impl AuraPending {
             target,
             aura: Aura {
                 effect_type: aura_effect.aura_type,
+                unique_per_caster: aura_effect.unique_per_caster,
                 duration: aura_effect.duration,
                 magnitude: aura_effect.magnitude,
                 break_on_damage_threshold: aura_effect.break_on_damage,
@@ -477,6 +484,7 @@ impl AuraPending {
             target,
             aura: Aura {
                 effect_type: aura_effect.aura_type,
+                unique_per_caster: aura_effect.unique_per_caster,
                 duration: aura_effect.duration,
                 magnitude: aura_effect.magnitude,
                 break_on_damage_threshold: aura_effect.break_on_damage,

@@ -1,0 +1,16 @@
+{
+  "label": "pillaredarena-seed1-regression-Identity",
+  "team1": [
+    "Warlock",
+    "Priest"
+  ],
+  "team2": [
+    "Priest",
+    "Rogue"
+  ],
+  "map": "PillaredArena",
+  "team1_kill_target": 0,
+  "cc_policy": "Identity",
+  "random_seed": 1,
+  "max_duration_secs": 300.0
+}

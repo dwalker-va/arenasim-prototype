@@ -1,0 +1,7 @@
+{
+  "team1": ["Mage", "Priest"],
+  "team2": ["Paladin", "Warrior"],
+  "random_seed": 3,
+  "map": "BasicArena",
+  "cc_policy": "Priced"
+}

@@ -1,0 +1,15 @@
+{
+  "label": "mage-seed14-Priced",
+  "team1": [
+    "Mage",
+    "Priest"
+  ],
+  "team2": [
+    "Warlock",
+    "Priest"
+  ],
+  "map": "BasicArena",
+  "cc_policy": "Priced",
+  "random_seed": 14,
+  "max_duration_secs": 300.0
+}

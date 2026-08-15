@@ -17,7 +17,7 @@ use arenasim::states::play_match::class_ai::combat_snapshot::CombatSnapshot;
 use arenasim::states::play_match::class_ai::CombatantInfo;
 use arenasim::states::play_match::{
     ActiveAuras, Aura, AuraType, CastingState, ChannelingState, ChargingState, Combatant,
-    DRCategory, DRTracker, DisengagingState, DispelType, Pet,
+    DRCategory, DRTracker, DisengagingState, DispelType, Pet, RecentDamage,
 };
 
 fn target_info(entity: Entity, team: u8, class: CharacterClass) -> CombatantInfo {
@@ -37,6 +37,7 @@ fn target_info(entity: Entity, team: u8, class: CharacterClass) -> CombatantInfo
         target: None,
         is_pet: false,
         casting_ability: None,
+        casting_remaining: 0.0,
         pet_type: None,
         pet: None,
     }
@@ -45,6 +46,7 @@ fn target_info(entity: Entity, team: u8, class: CharacterClass) -> CombatantInfo
 fn make_aura(effect_type: AuraType, ability_name: &str) -> Aura {
     Aura {
         effect_type,
+        unique_per_caster: false,
         duration: 4.0,
         magnitude: 1.0,
         break_on_damage_threshold: -1.0,
@@ -68,6 +70,9 @@ fn empty_snapshot_with(caster: Entity, target: Entity) -> CombatSnapshot {
     combatants.insert(caster, target_info(caster, 1, CharacterClass::Mage));
     combatants.insert(target, target_info(target, 2, CharacterClass::Warrior));
     CombatSnapshot {
+        cc_policy: Default::default(),
+        recent_damage: Default::default(),
+        recent_damage_dealt: Default::default(),
         ai_profile: Default::default(),
         bounds: Default::default(),
         combatants,
@@ -203,10 +208,22 @@ fn build_snapshot_from_world(world: &mut World) -> CombatSnapshot {
             (With<ChannelingState>, Without<CastingState>),
         >,
         Query<(Entity, &'static DRTracker)>,
+        Query<(Entity, &'static RecentDamage)>,
         Query<&'static Pet>,
     )> = SystemState::new(world);
-    let (aura_q, casting_q, channeling_q, dr_q, pet_q) = state.get_mut(world);
-    CombatSnapshot::build(&aura_q, &casting_q, &channeling_q, &dr_q, &pet_q, &[], Default::default(), Default::default())
+    let (aura_q, casting_q, channeling_q, dr_q, recent_q, pet_q) = state.get_mut(world);
+    CombatSnapshot::build(
+        &aura_q,
+        &casting_q,
+        &channeling_q,
+        &dr_q,
+        &recent_q,
+        &pet_q,
+        &[],
+        Default::default(),
+        Default::default(),
+        Default::default(),
+    )
 }
 
 fn spawn_combatant(world: &mut World, team: u8, slot: u8, class: CharacterClass, pos: Vec3) -> Entity {

@@ -32,6 +32,19 @@ use crate::states::play_match::decision_trace::{
 };
 
 use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
+use crate::states::play_match::cc_value::{
+    action_cost, displaces_target, dot_expected_damage, enabling_value,
+    expected_incoming, kill_window_value, predict_t_eff, AttackerMix, CostInputs, TEffInputs,
+};
+
+/// Expected effective seconds below which a Fear is not worth its 1.5s cast and
+/// GCD. A CC that will be broken almost immediately buys nothing but Fears DR,
+/// which then blocks the fear that WOULD have stuck.
+///
+/// Deliberately conservative while the break classifier sits at 60% precision
+/// (see the design doc's *Predictor v2*): a low floor means a mis-predicted
+/// break costs a declined Fear rather than a wasted one.
+const MIN_FEAR_T_EFF: f32 = 1.5;
 
 use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
@@ -64,28 +77,249 @@ fn is_being_kited(
 /// the Warlock resumes its damage rotation until the window reopens.
 fn pick_healer_to_fear(
     kill_target: Entity,
+    combatant: &Combatant,
     ctx: &CombatContext,
+    abilities: &AbilityDefinitions,
 ) -> Option<Entity> {
-    ctx.alive_enemies()
-        .into_iter()
-        .filter(|info| info.class.is_healer())
-        .map(|info| info.entity)
-        // Don't Fear the target we're actively trying to kill.
-        .filter(|&healer| healer != kill_target)
-        .find(|&healer| {
-            if ctx.entity_is_immune(healer) || ctx.is_dr_immune(healer, DRCategory::Fears) {
-                return false;
-            }
-            // Already stunned/feared/rooted? No value in re-CCing.
-            let already_ccd = ctx.active_auras
-                .get(&healer)
-                .map(|auras| auras.iter().any(|a| matches!(
-                    a.effect_type,
-                    AuraType::Stun | AuraType::Fear | AuraType::Root
-                )))
-                .unwrap_or(false);
-            !already_ccd
+    let priced = ctx.cc_policy.is_priced();
+    let mut best: Option<(Entity, f32)> = None;
+
+    for info in ctx.alive_enemies() {
+        if !info.class.is_healer() {
+            continue;
+        }
+        let healer = info.entity;
+
+        // Identity policy: the original guard. Never Fear the unit we are
+        // killing, on the assumption our own damage would break it — an
+        // assumption that is right when we are actually burning that unit and
+        // wrong the rest of the time, which is the defect this step fixes.
+        if !priced && healer == kill_target {
+            continue;
+        }
+
+        if ctx.entity_is_immune(healer) || ctx.is_dr_immune(healer, DRCategory::Fears) {
+            continue;
+        }
+        // Already stunned/feared/rooted? No value in re-CCing, under either policy.
+        let already_ccd = ctx
+            .active_auras
+            .get(&healer)
+            .map(|auras| {
+                auras.iter().any(|a| {
+                    matches!(a.effect_type, AuraType::Stun | AuraType::Fear | AuraType::Root)
+                })
+            })
+            .unwrap_or(false);
+        if already_ccd {
+            continue;
+        }
+
+        if !priced {
+            // First match wins, exactly as before.
+            return Some(healer);
+        }
+
+        // Priced policy: ask what the Fear is actually WORTH — how long it would
+        // last, times what our team can deliver into the window it opens —
+        // and take the best, including the kill target when nothing is set to
+        // break the CC.
+        let (t_eff, delivery) = predicted_fear_window(healer, kill_target, ctx, abilities);
+        if t_eff < MIN_FEAR_T_EFF {
+            continue;
+        }
+        // The window a Fear opens is worth what our team can put through it, so
+        // this is the RANKING signal: prefer the healer whose lockout we can
+        // actually exploit.
+        //
+        // It is deliberately NOT gated against the displaced Shadow Bolt. That
+        // was tried and measured: `kill_window_value` prices only *healing
+        // denied, capped by delivery* (~4s x ~12 dmg/s ~= 48), while a Shadow
+        // Bolt lands 100+, so the comparison rejected every Fear and collapsed
+        // `Priced` into `Identity` — 6/6 and 4/4 Fears, +0pt on every cell. The
+        // arithmetic is not wrong, it is incomplete: a Fear also denies the
+        // healer's damage, dispels and shields, and an 8s lockout on a
+        // two-person team is a 2v1. Pricing the full denial rate is step 3's
+        // job (`D`), and until it exists this term must rank rather than veto.
+        // Step 3: rank by `D x T_eff` — the denial rate this healer actually
+        // represents, times how long the CC would hold — rather than by the
+        // kill-window proxy alone. `D` folds in the healing-capped-by-delivery
+        // insight AND any damage the healer is landing on us, so a wanding
+        // out-of-mana healer correctly prices near zero.
+        let d = ctx.denial_rate_of(healer, abilities);
+        let own = if d > 0.0 { d * t_eff } else { kill_window_value(t_eff, delivery) };
+        // Step 5: credit this CC for the uplift it creates in a TEAMMATE's CC.
+        // Fearing the healer stops it dispelling, which is what lets a Mage's
+        // Polymorph survive its full duration instead of being removed on sight.
+        // Without this the chain's opener captures none of the value it creates.
+        let value = own + enabling_value(ctx.dispel_denial_uplift(healer, abilities));
+        // NO veto on low delivery, and the reason is measured. `delivery` comes
+        // from the target's TRAILING damage, which is zero at exactly the moment
+        // a Fear is most wanted — before the burst it is meant to open. Vetoing
+        // on it suppressed every opening Fear and collapsed `Priced` back into
+        // `Identity` (6/6 and 4/4 Fears, +0pt on every cell). A veto needs a
+        // FORWARD delivery estimate, and step 0 measured composition-only
+        // estimation as substantially worse than trailing (precision 60% -> 45%),
+        // so no such estimate exists yet.
+        // Step 4: is the CC worth what it costs? This is where "whether to CC
+        // at all" stops being the ability's POSITION in the priority ladder and
+        // becomes a comparison. Cost is dominated by mana — the binding
+        // resource in these matches — so a Fear is cheap at full pool and
+        // correctly prohibitive when nearly dry, where the last casts belong to
+        // damage instead.
+        //
+        // NOT gated against a Shadow Bolt's raw damage: that was tried with the
+        // kill-window proxy and rejected every Fear (see `kill_window_value`).
+        // `displaced_value` is left at zero until the rotation itself is priced,
+        // so this gate currently prices mana scarcity only, which is the part
+        // measurement actually supports.
+        // What this Fear displaces is a DoT re-application, not a nuke — the
+        // Warlock casts ~1-2 Shadow Bolts a match and a dozen DoTs. Priced at
+        // its EXPECTED damage, which against a dispeller is far below full
+        // duration: measured, 46% of applications are removed after ~2.1s.
+        let corruption = abilities.get_unchecked(&AbilityType::Corruption);
+        let displaced = corruption
+            .applies_aura
+            .as_ref()
+            .map(|a| {
+                dot_expected_damage(
+                    a.magnitude,
+                    a.tick_interval,
+                    a.duration,
+                    // The same dispeller that shortens the CC also shortens the
+                    // DoT it displaces — both sides of the comparison move.
+                    dispel_exposed_for(healer, ctx),
+                )
+            })
+            .unwrap_or(0.0);
+        let cost = action_cost(&CostInputs {
+            mana_cost: abilities.get_unchecked(&AbilityType::Fear).mana_cost,
+            current_mana: combatant.current_mana,
+            displaced_value: displaced,
+        });
+        if value < cost {
+            continue;
+        }
+        // Ties break on entity id so the choice stays deterministic at a seed.
+        let better = match best {
+            None => true,
+            Some((be, bv)) => value > bv || (value == bv && healer < be),
+        };
+        if better {
+            best = Some((healer, value));
+        }
+    }
+
+    best.map(|(e, _)| e)
+}
+
+/// Does `target`'s team have a dispeller free to act? Used on BOTH sides of the
+/// CC-versus-rotation comparison: a free dispeller shortens the Fear *and* the
+/// DoT the Fear displaces, so pricing only one of them would bias the choice.
+///
+/// Counted by CAPABILITY, through the same `CombatContext` helper the CC side
+/// uses — `is_healer()` counted the Shaman, whose Purge cannot take anything off
+/// an ally, and missed the Felhunter, which owns the cheapest dispel on the
+/// board. The two sides of the comparison must price the same world.
+///
+/// Unlike `free_ally_dispellers` this includes the target itself and ignores the
+/// dispel cooldown: the horizon here is a DoT's whole lifetime, not one cast.
+fn dispel_exposed_for(target: Entity, ctx: &CombatContext) -> bool {
+    let Some(info) = ctx.combatants.get(&target) else {
+        return false;
+    };
+    ctx.combatants
+        .values()
+        .any(|c| c.team == info.team && ctx.can_dispel_allies(c.entity))
+}
+
+/// Expected effective seconds a Fear on `target` would deliver, via the shared
+/// CC value model. See `design-docs/cc-value-model.md`.
+fn predicted_fear_window(
+    target: Entity,
+    kill_target: Entity,
+    ctx: &CombatContext,
+    abilities: &AbilityDefinitions,
+) -> (f32, f32) {
+    let def = abilities.get_unchecked(&AbilityType::Fear);
+    let Some(aura) = def.applies_aura.as_ref() else {
+        return (0.0, 0.0);
+    };
+    let Some(info) = ctx.combatants.get(&target) else {
+        return (0.0, 0.0);
+    };
+
+    // The duration Fear would ACTUALLY land with, after diminishing returns.
+    // `predict_t_eff` must not re-apply DR, so it is folded in here.
+    let applied_duration = aura.duration * ctx.dr_multiplier(target, DRCategory::Fears);
+
+    // Absorb shields sit in front of the break budget: absorbed damage never
+    // reaches the break accumulator, so a shielded target holds a Fear longer.
+    let absorb_remaining: f32 = ctx
+        .active_auras
+        .get(&target)
+        .map(|auras| {
+            auras
+                .iter()
+                .filter(|a| a.effect_type == AuraType::Absorb)
+                .map(|a| a.magnitude)
+                .sum()
         })
+        .unwrap_or(0.0);
+
+    // Who is actually pointed at this target, and by what delivery mode. Step 0
+    // found this is what separates CC that breaks from CC that does not — the
+    // target's own damage history alone does not.
+    let mut mix = AttackerMix::default();
+    for other in ctx.combatants.values() {
+        if other.team == info.team || !other.is_alive || other.target != Some(target) {
+            continue;
+        }
+        if other.is_melee_attacker() {
+            mix.melee += 1;
+        } else {
+            mix.ranged += 1;
+        }
+    }
+
+    let trailing = ctx.recent_damage.get(&target).copied().unwrap_or(0.0);
+
+    // Can their side answer with a dispel? Counted by CAPABILITY rather than
+    // role: the Shaman is a healer whose Purge is offensive only.
+    // `None` when the aura is not dispellable at all — Fear is, but reading it
+    // off the aura keeps this honest if the ability changes.
+    let free_dispellers = aura
+        .aura_type
+        .is_magic_dispellable()
+        .then(|| ctx.free_ally_dispellers(target));
+
+    let incoming = expected_incoming(trailing, mix);
+    let displaces = displaces_target(AuraType::Fear);
+    let t_eff = predict_t_eff(&TEffInputs {
+        applied_duration,
+        break_threshold: aura.break_on_damage,
+        accumulated_damage: 0.0,
+        incoming,
+        displaces_target: displaces,
+        absorb_remaining,
+        free_dispellers,
+    })
+    .t_eff;
+
+    // What our team can deliver onto the KILL TARGET during that window.
+    //
+    // Two cases, and the difference matters. Fearing the kill target itself
+    // displaces the very unit we are damaging, so delivery during the window is
+    // the post-displacement rate — the same quantity the break term already
+    // computes. Fearing a DIFFERENT unit leaves our damage on the kill target
+    // untouched, so its own trailing rate applies.
+    let delivery = if target == kill_target {
+        incoming.effective_rate(displaces)
+    } else {
+        ctx.recent_damage.get(&kill_target).copied().unwrap_or(0.0)
+    };
+
+    (t_eff, delivery)
 }
 
 /// Distance (yards) within which an enemy is treated as "training" the Warlock
@@ -104,7 +338,58 @@ fn pick_death_coil_peel(
     me: Entity,
     my_pos: Vec3,
     ctx: &CombatContext,
+    abilities: &AbilityDefinitions,
 ) -> Option<Entity> {
+    // PRICED: peel for the TEAM. Pick the enemy with the highest denial rate
+    // (`D`) that Death Coil can actually reach and usefully lock down.
+    //
+    // The identity version below asks "is something threatening ME", measuring
+    // from `my_pos` within an 8yd self-peel radius and gating on
+    // `info.target == Some(me)`. Measured consequence: in an audited match the
+    // enemy Rogue hit our Priest 14 times and this Warlock 3, and Death Coil
+    // fired ONCE — the Warlock peeled only for itself while its healer died.
+    if ctx.cc_policy.is_priced() {
+        let range = abilities.get_unchecked(&AbilityType::DeathCoil).range;
+        let mut best: Option<(Entity, f32)> = None;
+        // Pets included: a pet beating on our healer is exactly what a peel
+        // is for, and `D` already prices its damage.
+        for info in ctx.alive_enemies_including_pets() {
+            let e = info.entity;
+            if info.position.distance(my_pos) > range {
+                continue;
+            }
+            // Death Coil diminishes on the Horror bucket, not Fears.
+            if ctx.entity_is_immune(e) || ctx.is_dr_immune(e, DRCategory::Horror) {
+                continue;
+            }
+            let already_ccd = ctx
+                .active_auras
+                .get(&e)
+                .map(|auras| {
+                    auras.iter().any(|a| {
+                        matches!(a.effect_type, AuraType::Stun | AuraType::Fear | AuraType::Root)
+                    })
+                })
+                .unwrap_or(false);
+            if already_ccd {
+                continue;
+            }
+            // `D` = what removing this unit is worth per second, to the TEAM.
+            let d = ctx.denial_rate_of(e, abilities);
+            if d <= 0.0 {
+                continue;
+            }
+            let better = match best {
+                None => true,
+                Some((be, bd)) => d > bd || (d == bd && e < be),
+            };
+            if better {
+                best = Some((e, d));
+            }
+        }
+        return best.map(|(e, _)| e);
+    }
+
     let mut threats: Vec<(Entity, f32)> = ctx.alive_enemies()
         .into_iter()
         .filter(|info| {
@@ -176,7 +461,7 @@ pub fn decide_warlock_action(
     // breaks). Death Coil's horror never breaks on damage, so it guarantees a 3s
     // peel and heals the Warlock for the hit. Reactive defensive cooldown, so it
     // outranks the damage rotation.
-    if let Some(peel_target) = pick_death_coil_peel(entity, my_pos, ctx) {
+    if let Some(peel_target) = pick_death_coil_peel(entity, my_pos, ctx, abilities) {
         if let Some(peel_info) = ctx.combatants.get(&peel_target) {
             let peel_pos = peel_info.position;
             if try_death_coil(
@@ -244,7 +529,7 @@ pub fn decide_warlock_action(
     // it). Diminishing Returns on the Fears category self-limits the chain, so
     // this can't perma-lock; between DR windows the Warlock falls through to its
     // normal rotation below.
-    if let Some(healer_entity) = pick_healer_to_fear(target_entity, ctx) {
+    if let Some(healer_entity) = pick_healer_to_fear(target_entity, combatant, ctx, abilities) {
         if let Some(healer_info) = ctx.combatants.get(&healer_entity) {
             let healer_pos = healer_info.position;
             if try_fear(

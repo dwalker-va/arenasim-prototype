@@ -94,6 +94,10 @@
             mana_cost: 60.0,
             cooldown: 0.0,
             applies_aura: Some((
+                // One caster holds ONE of these at a time; a new cast
+                // supersedes the old. Keyed per ABILITY, so Psychic
+                // Scream (AoE, same AuraType) is unaffected.
+                unique_per_caster: true,
                 aura_type: Polymorph,
                 duration: 10.0,
                 magnitude: 1.0,
@@ -430,7 +434,26 @@
             icon: "icons/abilities/spell_shadow_abominationexplosion.jpg",
             cast_time: 0.0,
             range: 30.0,
-            mana_cost: 25.0,
+            // 16, deliberately just UNDER Dispel Magic's 18.
+            //
+            // The Warlock's game against a dispeller is an exchange: it applies a
+            // DoT, the healer removes it. Measured over 80 matches, 46% of DoT
+            // applications were dispelled with a mean lifetime of 2.1s — Curse of
+            // Agony applied at 19.25s was gone at 19.28s. At the old 25 mana the
+            // Warlock lost that exchange on BOTH axes, paying 25 against an 18-mana
+            // dispel that is instant and off cooldown.
+            //
+            // In TBC the Warlock's edge here came from dispel-resistance talents:
+            // dispels sometimes failed outright, wasting the healer's global and
+            // mana. Rather than import that extra RNG — the dispel roll is already
+            // random by design, see `process_dispels` — the same advantage is
+            // expressed plainly in the spell cost. The Warlock wins the exchange
+            // slightly on mana every time, instead of winning it a lot at random.
+            //
+            // Measured at n=120/cell, Warlock+Priest vs Priest+Rogue, free
+            // targeting: BasicArena 37% -> 49%, PillaredArena 34% -> 43%
+            // (pooled +10pt, z ~ 2.3).
+            mana_cost: 16.0,
             cooldown: 0.0,
             applies_aura: Some((
                 aura_type: DamageOverTime,
@@ -465,9 +488,33 @@
             icon: "icons/abilities/spell_shadow_possession.jpg",
             cast_time: 1.5,
             range: 30.0,
-            mana_cost: 30.0,
+            // 22 — deliberately ABOVE both the DoTs it displaces (16) and
+            // Dispel Magic (18). The intended price ordering is
+            // **DoT < dispel < CC**: hard crowd control is the strongest effect
+            // of the three and should cost the most.
+            //
+            // Was 30, which broke that ordering's spirit by overshooting. The
+            // CC-to-DoT price ratio matters more than either number alone, and
+            // at 30-vs-16 it had drifted to 1.9 — Fear cost nearly two DoT
+            // applications. Measured effect of the CC value model
+            // (`cc_policy: Priced`) at n=300 per cell, varying only this cost:
+            //
+            //   Fear 30: BasicArena +9pt (z=2.13), PillaredArena -1pt (z=-0.17)
+            //   Fear 22: BasicArena +8pt (z=2.06), PillaredArena +6pt (z=1.57)
+            //   Fear 16: BasicArena +11pt (z=2.65), PillaredArena +11pt (z=2.61)
+            //
+            // The map-dependence that survived seven separate investigations was
+            // THIS: on the ~40% longer map, an over-priced Fear costs more
+            // because the same mana pool must cover more casts. 16 removes it
+            // entirely but inverts the ordering (CC cheaper than a dispel); 22
+            // keeps the ordering and recovers most of the effect.
+            mana_cost: 22.0,
             cooldown: 0.0,
             applies_aura: Some((
+                // One caster holds ONE of these at a time; a new cast
+                // supersedes the old. Keyed per ABILITY, so Psychic
+                // Scream (AoE, same AuraType) is unaffected.
+                unique_per_caster: true,
                 aura_type: Fear,
                 duration: 8.0,
                 magnitude: 0.0,
@@ -483,7 +530,10 @@
             icon: "icons/abilities/spell_fire_immolation.jpg",
             cast_time: 2.0,
             range: 30.0,
-            mana_cost: 25.0,
+            // 16, matching Corruption: same DoT-versus-dispel exchange.
+            // Dispel Magic removes it for 18 mana, instantly, off cooldown.
+            // See design-docs/balance/2026-08-09-warlock-dot-vs-dispel-cost.md.
+            mana_cost: 16.0,
             cooldown: 0.0,
             damage_base_min: 10.0,
             damage_base_max: 12.0,
@@ -524,7 +574,10 @@
             icon: "icons/abilities/spell_shadow_curseofsargeras.jpg",
             cast_time: 0.0,
             range: 30.0,
-            mana_cost: 25.0,
+            // 16, matching Corruption: same DoT-versus-dispel exchange.
+            // Dispel Magic removes it for 18 mana, instantly, off cooldown.
+            // See design-docs/balance/2026-08-09-warlock-dot-vs-dispel-cost.md.
+            mana_cost: 16.0,
             cooldown: 0.0,
             applies_aura: Some((
                 aura_type: DamageOverTime,

@@ -232,6 +232,14 @@ fn build_config(
     HeadlessMatchConfig {
         team1_ai_profile: None,
         team2_ai_profile: None,
+        // The matrix measures the AI profile axis; CC policy stays at its
+        // default so a sweep is not silently mixing two variables.
+        cc_policy: None,
+        team1_cc_policy: None,
+        team2_cc_policy: None,
+        interrupt_policy: None,
+        team1_interrupt_policy: None,
+        team2_interrupt_policy: None,
         // Recorded per match so a re-run from this config reproduces the sweep.
         ai_profile: Some(profile.name().to_string()),
         team1: vec![team1.name().to_string()],

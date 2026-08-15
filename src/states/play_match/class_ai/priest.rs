@@ -643,6 +643,7 @@ fn try_power_word_shield(
         target: shield_entity,
         aura: Aura {
             effect_type: AuraType::WeakenedSoul,
+            unique_per_caster: false,
             duration: 15.0,
             magnitude: 0.0,
             break_on_damage_threshold: -1.0,

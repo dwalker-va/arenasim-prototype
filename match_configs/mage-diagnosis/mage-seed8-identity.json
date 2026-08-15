@@ -1,0 +1,15 @@
+{
+  "label": "mage-seed8-Identity",
+  "team1": [
+    "Mage",
+    "Priest"
+  ],
+  "team2": [
+    "Warlock",
+    "Priest"
+  ],
+  "map": "BasicArena",
+  "cc_policy": "Identity",
+  "random_seed": 8,
+  "max_duration_secs": 300.0
+}

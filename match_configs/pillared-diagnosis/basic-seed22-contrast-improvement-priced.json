@@ -1,0 +1,16 @@
+{
+  "label": "basicarena-seed22-contrast-improvement-Priced",
+  "team1": [
+    "Warlock",
+    "Priest"
+  ],
+  "team2": [
+    "Priest",
+    "Rogue"
+  ],
+  "map": "BasicArena",
+  "team1_kill_target": 0,
+  "cc_policy": "Priced",
+  "random_seed": 22,
+  "max_duration_secs": 300.0
+}

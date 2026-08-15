@@ -35,6 +35,7 @@ pub use super::combat_core::regenerate_resources;
 pub use super::shadow_sight::track_shadow_sight_timer;
 pub use super::auras::process_dot_ticks;
 pub use super::auras::process_hot_ticks;
+pub use super::auras::track_recent_damage;
 pub use super::auras::update_auras;
 pub use super::auras::apply_pending_auras;
 // Effect processing (instant ability effects)
@@ -220,6 +221,16 @@ pub fn add_core_combat_systems<M, N>(
             // Must never draw from GameRng: it shares this schedule with the AI,
             // so a draw would shift every downstream roll.
             update_team_plans.run_if(decide.clone()),
+            // Trailing gross-damage window for the CC value model's break term.
+            //
+            // Write-only unless `CcPolicy::Priced` is active, so it cannot move a
+            // Legacy seed. Deliberately NOT behind `decide`, unlike its
+            // neighbours: it is resolution-layer bookkeeping rather than a
+            // decision, and its window is FRAME-based (120 frames = 2s), so
+            // skipping frames would break the time base and leave the decision
+            // layer reading a stale rate whenever it resumed. It observes the
+            // world; it does not act on it.
+            track_recent_damage,
         )
             .chain()
             .in_set(CombatSystemPhase::ResourcesAndAuras)

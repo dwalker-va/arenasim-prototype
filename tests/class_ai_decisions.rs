@@ -41,6 +41,7 @@ fn info(entity: Entity, team: u8, class: CharacterClass) -> CombatantInfo {
         target: None,
         is_pet: false,
         casting_ability: None,
+        casting_remaining: 0.0,
         pet_type: None,
         pet: None,
     }
@@ -50,6 +51,7 @@ fn pet_info(entity: Entity, team: u8, owner_class: CharacterClass) -> CombatantI
     CombatantInfo {
         is_pet: true,
         casting_ability: None,
+        casting_remaining: 0.0,
         pet_type: Some(PetType::Felhunter),
         ..info(entity, team, owner_class)
     }
@@ -58,6 +60,7 @@ fn pet_info(entity: Entity, team: u8, owner_class: CharacterClass) -> CombatantI
 fn aura_with(effect_type: AuraType, caster: Option<Entity>, break_on_damage_threshold: f32) -> Aura {
     Aura {
         effect_type,
+        unique_per_caster: false,
         duration: 5.0,
         magnitude: 1.0,
         break_on_damage_threshold,
@@ -82,6 +85,9 @@ fn snapshot_for(self_entity: Entity, team: u8, class: CharacterClass) -> CombatS
     let mut combatants = BTreeMap::new();
     combatants.insert(self_entity, info(self_entity, team, class));
     CombatSnapshot {
+        cc_policy: Default::default(),
+        recent_damage: Default::default(),
+        recent_damage_dealt: Default::default(),
         ai_profile: Default::default(),
         bounds: Default::default(),
         combatants,
@@ -950,6 +956,9 @@ fn snapshot_with(members: &[CombatantInfo]) -> CombatSnapshot {
         combatants.insert(m.entity, *m);
     }
     CombatSnapshot {
+        cc_policy: Default::default(),
+        recent_damage: Default::default(),
+        recent_damage_dealt: Default::default(),
         ai_profile: Default::default(),
         bounds: Default::default(),
         combatants,

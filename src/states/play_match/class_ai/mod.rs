@@ -41,6 +41,7 @@ use super::components::{Aura, ActiveAuras, Combatant, AuraType, DispelPending, P
 use super::constants::GCD;
 use super::{is_spell_school_locked, is_silenced};
 use super::ai_profile::AiProfile;
+use super::cc_policy::CcPolicy;
 use super::arena_bounds::ArenaBounds;
 use super::map_geometry::ObstacleVolume;
 use super::utils::log_ability_use;
@@ -77,6 +78,12 @@ pub struct CombatantInfo {
     /// reason about interruptibility — e.g. the Rogue's Kidney Shot chain firing
     /// on a cast whose school is NOT covered by an active lockout.
     pub casting_ability: Option<AbilityType>,
+    /// Seconds left on `casting_ability`'s cast bar, 0 when not casting.
+    ///
+    /// Needed by the `I` (interrupt value) term: a CC is only worth crediting
+    /// for cancelling a cast it can actually beat, and that comparison needs the
+    /// REMAINING time, not the ability's nominal cast time.
+    pub casting_remaining: f32,
     pub pet_type: Option<PetType>,
     /// Owner→pet reverse lookup. For pet-owning combatants (Hunter, Warlock)
     /// this is `Some(pet_entity)`. For pets themselves and non-owners, `None`.
@@ -127,6 +134,19 @@ impl CombatantInfo {
             ),
             None => super::utils::combatant_id(self.team, self.slot, self.class),
         }
+    }
+
+    /// Does this unit have to stand in melee reach to deal its damage?
+    ///
+    /// **Not `class.is_melee()`.** A pet carries its OWNER's `class`
+    /// (`Combatant::new_pet`), so a Felhunter reads as a Warlock and a Spider as
+    /// a Hunter — yet every pet in the roster is a melee auto-attacker. Asking
+    /// the class alone put all four pets in the RANGED bucket of
+    /// `cc_value::AttackerMix`, which is the bucket a displacing CC does NOT
+    /// discount: a Fear on a target being chewed by a Felhunter was priced as
+    /// though the pet would keep hitting it while it fled.
+    pub fn is_melee_attacker(&self) -> bool {
+        self.is_pet || self.class.is_melee()
     }
 
     /// Health as a percentage (0.0 to 1.0)
@@ -190,6 +210,16 @@ pub struct CombatContext<'a> {
     /// Which AI implementation this match runs under. Read at the decision sites
     /// of opt-in behaviours; see `ai_profile.rs`.
     pub ai_profile: AiProfile,
+    /// Which CC-selection model the ACTING unit's team runs under. Orthogonal to
+    /// `ai_profile` on purpose — see `cc_policy.rs`.
+    pub cc_policy: CcPolicy,
+    /// Trailing gross-damage rate per entity over `RecentDamage::WINDOW_SECS`.
+    /// The magnitude input to the CC break term; step 0 showed no
+    /// composition-only proxy substitutes for it.
+    pub recent_damage: &'a BTreeMap<Entity, f32>,
+    /// Trailing damage each unit has been DEALING. The correct basis for
+    /// `D`'s threat component — see `enemy_damage_to_us`.
+    pub recent_damage_dealt: &'a BTreeMap<Entity, f32>,
     /// The combatant making the decision
     pub self_entity: Entity,
 }
@@ -296,6 +326,32 @@ impl<'a> CombatContext<'a> {
         self.combatants
             .values()
             .filter(|c| c.team != my_team && c.is_alive && !c.is_pet)
+            .collect()
+    }
+
+    /// Alive enemies **including pets** — the candidate set for CC valuation.
+    ///
+    /// `alive_enemies` excludes pets, which meant no CC decision in any class
+    /// could even see a Felhunter. Combined with `pet_ai` gating on the *pet's
+    /// own* auras (so crowd-controlling an owner does nothing to its pet), that
+    /// made Devour Magic **unanswerable**: it strips a Polymorph 0.03s after it
+    /// lands and nothing could stop it.
+    ///
+    /// A pet carries damage, dispels and crowd control of its own, and
+    /// `denial_rate` already prices all three without caring whether the unit is
+    /// a pet — so this was a filter problem, not a modelling one. Pets carry
+    /// their own `DRTracker`, so diminishing returns apply to the pet rather
+    /// than its owner, and cannot be re-summoned, so CC spent on one is not
+    /// wasted on a unit that simply comes back.
+    ///
+    /// Deliberately a SEPARATE accessor rather than a change to
+    /// `alive_enemies`: that method is used throughout the class AIs, and
+    /// widening it would alter the `Identity` path everywhere at once.
+    pub fn alive_enemies_including_pets(&self) -> Vec<&CombatantInfo> {
+        let my_team = self.self_info().map(|i| i.team).unwrap_or(0);
+        self.combatants
+            .values()
+            .filter(|c| c.team != my_team && c.is_alive)
             .collect()
     }
 
@@ -551,6 +607,259 @@ impl<'a> CombatContext<'a> {
             .get(&entity)
             .map(|tracker| tracker.is_immune(category))
             .unwrap_or(false)
+    }
+
+    /// Damage per second `enemy` is currently landing on **our team** — any
+    /// member, not just the evaluating unit.
+    ///
+    /// Per-attacker attribution is not tracked, so an attacker's share is its
+    /// even split of the damage actually arriving on the unit it is pointed at.
+    /// That is an approximation, but it is grounded in measured damage rather
+    /// than a class constant, and it prices correctly to zero in the cases that
+    /// matter: an enemy targeting nobody, or one whose target is taking nothing
+    /// because it is kited, out of range, or the attacker is out of resources.
+    ///
+    /// This is the observable behind `cc_value::DenialInputs::damage_to_us`, and
+    /// the reason it exists is a measured defect — every class AI's peel logic
+    /// asked "is this threatening ME", so a melee killing the team's healer
+    /// registered as no threat at all.
+    pub fn enemy_damage_to_us(&self, enemy: Entity) -> f32 {
+        let Some(info) = self.combatants.get(&enemy) else {
+            return 0.0;
+        };
+        let Some(victim) = info.target else {
+            return 0.0;
+        };
+        // Only count damage landing on OUR side.
+        let my_team = self.self_info().map(|i| i.team).unwrap_or(0);
+        match self.combatants.get(&victim) {
+            Some(v) if v.team == my_team => {}
+            _ => return 0.0,
+        }
+        // This unit's OWN recent output — not a share of what arrives on its
+        // victim. Even-splitting a victim's incoming damage across its attackers
+        // is badly wrong when they differ: measured, a Warlock dealt 1180 damage
+        // in a match while its Felhunter dealt 170, so the split credited the pet
+        // with ~7x its real contribution and the value model duly preferred to
+        // crowd-control the pet over the healer.
+        self.recent_damage_dealt.get(&enemy).copied().unwrap_or(0.0)
+    }
+
+    /// Healing per second `enemy` would deliver, capped by what our team is
+    /// actually landing on theirs.
+    ///
+    /// Denying healing is worth exactly the damage it fails to erase, so a
+    /// healer whose team is taking nothing prices at zero however much throughput
+    /// it nominally has. Non-healers price at zero.
+    /// The fast heal whose affordability decides whether a healer can still
+    /// function at all. Per-class and explicit rather than "the cheapest heal",
+    /// because the question is not what it can technically cast but what it
+    /// would actually spend a global on under pressure.
+    fn primary_heal_of(class: CharacterClass) -> Option<AbilityType> {
+        match class {
+            CharacterClass::Priest => Some(AbilityType::FlashHeal),
+            CharacterClass::Paladin => Some(AbilityType::FlashOfLight),
+            CharacterClass::Shaman => Some(AbilityType::LesserHealingWave),
+            _ => None,
+        }
+    }
+
+    pub fn enemy_healing_capped(&self, enemy: Entity, abilities: &AbilityDefinitions) -> f32 {
+        let Some(info) = self.combatants.get(&enemy) else {
+            return 0.0;
+        };
+        if !info.class.is_healer() || !info.is_alive {
+            return 0.0;
+        }
+        // A healer that cannot AFFORD a heal denies nothing, however full the
+        // health bars are.
+        //
+        // This was a flat 5%-of-max-mana floor, which is far below the price of
+        // a cast and so let a dry healer price as a full crowd-control target.
+        // Measured in `Mage+Priest vs Rogue+Priest`: **3 of 3** Polymorphs the
+        // priced Mage spent on the enemy Priest landed on it at ~10% mana — a
+        // Priest that could not cast Flash Heal at all. Reading the actual cost
+        // from `AbilityDefinitions` rather than guessing a fraction is the same
+        // discipline the Mage's out-of-mana wand latch uses.
+        if let Some(heal) = Self::primary_heal_of(info.class) {
+            let cost = abilities.get_unchecked(&heal).mana_cost;
+            if info.current_mana < cost {
+                return 0.0;
+            }
+        }
+        // Our delivery onto their team is the cap.
+        self.combatants
+            .values()
+            .filter(|c| c.team == info.team && c.is_alive && !c.is_pet)
+            .map(|c| self.recent_damage.get(&c.entity).copied().unwrap_or(0.0))
+            .sum()
+    }
+
+    /// The `D` term for `enemy`: damage-equivalent value per second of removing
+    /// it from the game. See `cc_value::denial_rate`.
+    pub fn denial_rate_of(&self, enemy: Entity, abilities: &AbilityDefinitions) -> f32 {
+        crate::states::play_match::cc_value::denial_rate(
+            &crate::states::play_match::cc_value::DenialInputs {
+                damage_to_us: self.enemy_damage_to_us(enemy),
+                healing_capped: self.enemy_healing_capped(enemy, abilities),
+            },
+        )
+    }
+
+    /// Uplift a teammate's best CC would gain if `target` were locked down —
+    /// the observable behind `cc_value::enabling_value`.
+    ///
+    /// The concrete mechanism is dispel denial. A break-on-any-damage CC
+    /// (Polymorph, Freezing Trap) is worth close to nothing while a free
+    /// dispeller can remove it, and its full duration once that dispeller is
+    /// locked. So CCing a healer is worth extra *because it makes a teammate's
+    /// CC stick* — an externality the first CC in a chain creates and, without
+    /// this, captures none of.
+    ///
+    /// The dispel this unit would answer with, if any. Pets included — the
+    /// Felhunter's Devour Magic is the cheapest answer on the board.
+    fn dispel_ability_of(c: &CombatantInfo) -> Option<AbilityType> {
+        if c.pet_type == Some(PetType::Felhunter) {
+            return Some(AbilityType::DevourMagic);
+        }
+        if c.is_pet {
+            return None;
+        }
+        match c.class {
+            CharacterClass::Priest => Some(AbilityType::DispelMagic),
+            CharacterClass::Paladin => Some(AbilityType::PaladinCleanse),
+            _ => None,
+        }
+    }
+
+    /// How many units on `target`'s side can take a dispellable aura OFF an
+    /// ally right now, excluding the target itself.
+    ///
+    /// **Not `is_healer()`.** The Shaman is a healer and cannot dispel an ally
+    /// at all — its Purge is offensive (`try_purge_enemy` skips its own team) —
+    /// so counting it inflated the dispeller population and blurred the signal.
+    /// Measured over 286 dispellable applications, the correct population
+    /// separates removal 61%-vs-11%, where `is_healer` managed only 46%-vs-24%.
+    ///
+    /// The Felhunter counts: Devour Magic is instant, free and off the global
+    /// cooldown, which makes it the cheapest answer on the board.
+    ///
+    /// **"Free" includes off cooldown.** A dispeller whose dispel is on
+    /// cooldown cannot answer anything, and treating it as though it could is
+    /// what stopped chain crowd control from emerging: every link in a chain was
+    /// priced as equally answerable, so the second cast — at half duration from
+    /// diminishing returns AND a full dispel discount — never looked worth a
+    /// global. In reality the second cast is the SAFE one, because the answer
+    /// was just spent. Devour Magic's 8s cooldown is longer than the 5s a
+    /// half-duration Polymorph lasts.
+    pub fn free_ally_dispellers(&self, target: Entity) -> u32 {
+        let Some(info) = self.combatants.get(&target) else {
+            return 0;
+        };
+        self.combatants
+            .values()
+            .filter(|c| {
+                c.team == info.team
+                    && c.entity != target
+                    && self.can_dispel_allies(c.entity)
+                    && Self::dispel_ability_of(c).is_some_and(|ability| {
+                        // On cooldown is as good as absent.
+                        self.ability_cooldowns
+                            .get(&c.entity)
+                            .and_then(|cds| cds.get(&ability))
+                            .copied()
+                            .unwrap_or(0.0)
+                            <= 0.0
+                    })
+            })
+            .count() as u32
+    }
+
+    /// Can this unit take a dispellable aura off an ALLY right now — capability,
+    /// alive, and able to act? The cooldown-agnostic half of
+    /// [`Self::free_ally_dispellers`], for callers whose horizon is longer than
+    /// one dispel cooldown (a DoT's whole lifetime, say).
+    ///
+    /// **Not `is_healer()`.** The Shaman is a healer with no ally dispel at all
+    /// (Purge is offensive — `try_purge_enemy` skips its own team), and the
+    /// Warlock's Felhunter is not a healer but owns the cheapest dispel on the
+    /// board. Every caller must agree on this population or the two sides of a
+    /// CC-versus-rotation comparison get priced against different worlds.
+    pub fn can_dispel_allies(&self, entity: Entity) -> bool {
+        let Some(c) = self.combatants.get(&entity) else {
+            return false;
+        };
+        c.is_alive
+            && Self::dispel_ability_of(c).is_some()
+            && !self
+                .active_auras
+                .get(&entity)
+                .map(|auras| {
+                    auras.iter().any(|a| {
+                        crate::states::play_match::cc_value::denies_actions(a.effect_type)
+                    })
+                })
+                .unwrap_or(false)
+    }
+
+    /// Returns 0 unless `target` is a dispeller that is currently free to act
+    /// AND some living teammate actually owns a breakable CC to land. Depth 1:
+    /// this reads teammates' raw capability, never their uplifted scores.
+    pub fn dispel_denial_uplift(&self, target: Entity, abilities: &AbilityDefinitions) -> f32 {
+        if self.combatants.get(&target).is_none() {
+            return 0.0;
+        }
+        // Only a free dispeller is worth denying — and "dispeller" is a
+        // CAPABILITY, not `is_healer()`. Counting the Shaman here credited a
+        // lockout with denying a dispel it could never have cast; the check also
+        // covers "alive" and "already locked, so no further uplift to create".
+        if !self.can_dispel_allies(target) {
+            return 0.0;
+        }
+
+        let my_team = self.self_info().map(|i| i.team).unwrap_or(0);
+        // Does any living teammate own a CC that a dispel would answer, and can
+        // it deliver? Polymorph is the case that exists in this roster.
+        let teammate_can_follow_up = self.combatants.values().any(|c| {
+            c.team == my_team
+                && c.is_alive
+                && c.entity != self.self_entity
+                && matches!(c.class, CharacterClass::Mage)
+                && !self
+                    .ability_cooldowns
+                    .get(&c.entity)
+                    .map(|cds| cds.contains_key(&AbilityType::Polymorph))
+                    .unwrap_or(false)
+        });
+        if !teammate_can_follow_up {
+            return 0.0;
+        }
+
+        // The uplift is the duration that CC would gain by surviving instead of
+        // being dispelled — its full applied duration, DR included.
+        let def = abilities.get_unchecked(&AbilityType::Polymorph);
+        let Some(aura) = def.applies_aura.as_ref() else {
+            return 0.0;
+        };
+        let dr = self.dr_multiplier(target, DRCategory::Incapacitates);
+        let recovered = aura.duration * dr;
+        // Priced at what denying that unit is worth per second.
+        recovered * self.denial_rate_of(target, abilities)
+    }
+
+    /// The duration multiplier a CC of `category` would land with on `entity`
+    /// right now, from its diminishing-returns level: 1.0 / 0.5 / 0.25 / 0.0.
+    ///
+    /// Read-only — unlike `DRTracker::apply`, this does NOT advance the DR
+    /// level, so the AI can price a CC before deciding to cast it.
+    pub fn dr_multiplier(&self, entity: Entity, category: DRCategory) -> f32 {
+        self.dr_trackers
+            .get(&entity)
+            .map(|t| {
+                crate::states::play_match::constants::DR_MULTIPLIERS
+                    [t.level(category).min(3) as usize]
+            })
+            .unwrap_or(1.0)
     }
 
     /// Start a decision-trace `ability_decision` builder for the current

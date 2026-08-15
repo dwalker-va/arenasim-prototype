@@ -52,6 +52,16 @@ pub struct AuraEffect {
     /// edit can't silently no-op.
     #[serde(default)]
     pub magnitude_coefficient: f32,
+    /// Whether one caster may hold only ONE instance of this aura at a time.
+    ///
+    /// Landing a new one supersedes the caster's previous instance, wherever it
+    /// sits. True for single-target hard crowd control (Polymorph, Fear); false
+    /// for everything else, which notably keeps AoE crowd control such as
+    /// Psychic Scream working — it is keyed per ABILITY, not per aura type, so
+    /// a Warlock's Fear and a Priest's Psychic Scream do not supersede one
+    /// another despite sharing `AuraType::Fear`.
+    #[serde(default)]
+    pub unique_per_caster: bool,
     /// Damage threshold that breaks the aura.
     /// - Negative (default -1.0) = doesn't break on damage
     /// - 0.0 = breaks on ANY damage (e.g., Polymorph)

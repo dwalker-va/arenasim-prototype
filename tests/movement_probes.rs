@@ -2575,6 +2575,7 @@ mod paladin_unit {
             target: None,
             is_pet: false,
             casting_ability: None,
+        casting_remaining: 0.0,
             pet_type: None,
             pet: None,
         }
@@ -2584,6 +2585,9 @@ mod paladin_unit {
         let mut combatants = BTreeMap::new();
         combatants.insert(self_entity, info(self_entity, 1, CharacterClass::Paladin, Vec3::ZERO));
         CombatSnapshot {
+        cc_policy: Default::default(),
+        recent_damage: Default::default(),
+        recent_damage_dealt: Default::default(),
         ai_profile: Default::default(),
             bounds: Default::default(),
             combatants,
@@ -2801,6 +2805,7 @@ mod bucket_a_unit {
             target: None,
             is_pet: false,
             casting_ability: None,
+        casting_remaining: 0.0,
             pet_type: None,
             pet: None,
         }
@@ -2809,6 +2814,7 @@ mod bucket_a_unit {
     fn cc_aura(effect_type: AuraType) -> Aura {
         Aura {
             effect_type,
+            unique_per_caster: false,
             duration: 4.0,
             magnitude: 1.0,
             break_on_damage_threshold: -1.0,
@@ -2844,6 +2850,9 @@ mod bucket_a_unit {
         }
         (
             CombatSnapshot {
+        cc_policy: Default::default(),
+        recent_damage: Default::default(),
+        recent_damage_dealt: Default::default(),
         ai_profile: Default::default(),
             bounds: Default::default(),
                 combatants,
@@ -4318,6 +4327,7 @@ mod u9_seek_reset {
     fn cc_aura(effect: AuraType) -> Aura {
         Aura {
             effect_type: effect,
+            unique_per_caster: false,
             duration: 3.0,
             magnitude: 1.0,
             break_on_damage_threshold: -1.0,
@@ -4370,6 +4380,7 @@ mod u9_seek_reset {
             target,
             is_pet: false,
             casting_ability: None,
+        casting_remaining: 0.0,
             pet_type: None,
             pet: None,
         }
@@ -4414,7 +4425,11 @@ mod u9_seek_reset {
         let ability_cooldowns = BTreeMap::new();
         let obstacles = Vec::new();
 
+        let empty_recent_damage: BTreeMap<Entity, f32> = BTreeMap::new();
         let ctx = CombatContext {
+            cc_policy: Default::default(),
+            recent_damage: &empty_recent_damage,
+            recent_damage_dealt: &empty_recent_damage,
         ai_profile: Default::default(),
             bounds: Default::default(),
             combatants: &combatants,
@@ -4752,10 +4767,16 @@ mod u10_press {
                 s.match_time,
             );
         }
-        // Seed 2 specifically resolves deep into dampening (past 75s).
+        // One seed must resolve deep into dampening (past 75s) so the attrition
+        // endgame stays covered. RE-PINNED 2026-08-09 from seed 2 to seed 12:
+        // Corruption's mana cost went 25 -> 16 (see
+        // `design-docs/balance/2026-08-09-warlock-dot-vs-dispel-cost.md`), the
+        // Warlock side resolves faster, and seed 2 dropped from 92.7s to 69.4s.
+        // Seed 12 sits at 89.8s — the largest margin in `scan_press_seeds`, so a
+        // further small drift will not immediately re-break this.
         assert!(
-            measure(2).match_time > 75.0,
-            "seed 2 should resolve past the 75s dampening onset (real attrition endgame)",
+            measure(12).match_time > 75.0,
+            "seed 12 should resolve past the 75s dampening onset (real attrition endgame)",
         );
     }
 

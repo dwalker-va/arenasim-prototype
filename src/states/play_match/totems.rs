@@ -37,6 +37,7 @@ fn make_totem_aura(
     let tick_interval = if aura_type == AuraType::HealingOverTime { 1.0 } else { 0.0 };
     Aura {
         effect_type: aura_type,
+        unique_per_caster: false,
         duration: TOTEM_BUFF_REFRESH_WINDOW,
         magnitude,
         break_on_damage_threshold: -1.0,

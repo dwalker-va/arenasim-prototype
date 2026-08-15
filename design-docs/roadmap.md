@@ -212,6 +212,44 @@ fixed in `0a4a93f`; these are the lower-priority remainder.
 - [x] ~~Victory celebration animations~~ (basic version done)
 - [x] ~~Spell projectile visuals~~ (Frostbolt, etc. done)
 
+## Mana sustain mechanics (raised 2026-08-09) — a missing balance axis
+
+**Every class has a mana pool and none has the tooling to manage it.** Matches
+routinely end with all four combatants on ~10 of 296 mana, fighting the last
+20-40% of the game with wands, and the Warlock casts about **eleven spells** in a
+50-70 second match.
+
+TBC gave each caster a sustain answer, and none of them exist here:
+
+| class | missing tooling |
+|---|---|
+| Warlock | **Life Tap** (health -> mana), **Drain Mana** |
+| Mage | **Evocation**, mana gems |
+| Priest | **Shadowfiend** |
+| Paladin / Shaman | (equivalents worth deciding) |
+
+**Why this matters more than it looks.** Today the only lever on mana economy is
+per-spell cost, so every economy problem has to be solved by re-pricing spells —
+and spell costs also encode the *relative* value of abilities against each other.
+The two roles conflict. Two changes on 2026-08-09 make the point:
+
+- Corruption 25 -> 16, to stop the Warlock losing the DoT-versus-dispel exchange
+  (Dispel Magic is 18 mana, instant, no cooldown).
+- Fear 30 -> 22, because the first change had shifted the CC-to-DoT price ratio
+  to 1.9 and re-opened a map-dependent regression.
+
+Neither was about sustain, yet both were forced to move the sustain dial. With
+Life Tap in the kit, the Warlock's longevity could be tuned **without** touching
+what its spells are worth relative to one another.
+
+This also interacts with everything in `cc-value-model.md`: mana is the binding
+resource in these matches (not the GCD), so the cost half of any action-value
+model is really a mana model. Sustain tooling changes the shape of that
+constraint, not just its magnitude.
+
+Long-term and design-led rather than urgent, but it should land before any
+serious pass at long-game balance.
+
 ## Milestone 3: Depth
 
 - [ ] Full ability roster per class (currently ~4 per class)
