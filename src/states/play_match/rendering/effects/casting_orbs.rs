@@ -2,7 +2,6 @@ use bevy::prelude::*;
 use bevy::color::LinearRgba;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
-use crate::states::GameState;
 
 // ==============================================================================
 // Casting Orb (gathering-orb casting animation)
@@ -61,7 +60,6 @@ pub fn spawn_casting_orbs(
     new_channels: Query<(Entity, &ChannelingState), Added<ChannelingState>>,
     existing_orbs: Query<&CastingOrb>,
     casters: Query<&Transform, With<Combatant>>,
-    game_state: Res<State<GameState>>,
 ) {
     let starts = new_casts
         .iter()
@@ -120,18 +118,16 @@ pub fn spawn_casting_orbs(
             None => def.cast_time,
         };
 
-        // The Animation Sandbox routes an INSTANT through a synthetic 0-cast-time
-        // `CastingState` purely to apply its effect via `process_casting`. An
-        // instant has no windup, so it must not show a casting orb / release
-        // flash — a physical instant (Mortal Strike, shouts) getting a magical
-        // cast flash is exactly wrong. Suppress the orb only in the sandbox, only
-        // for the 0-total Growing case: hard casts (orb) and channels (Holding)
-        // are untouched, and matches stay byte-identical (Frost Shock's real
-        // 0-cast orb is unaffected).
-        if matches!(phase, CastingOrbPhase::Growing)
-            && cast_total <= 0.0
-            && *game_state.get() == GameState::AnimationSandbox
-        {
+        // A casting orb represents cast-time WINDUP (it grows with progress), so
+        // an instant (0 cast time) must not show one. This matters in two places:
+        // the Animation Sandbox routes instants through a synthetic 0-cast
+        // `CastingState` for effect application (a physical instant like Mortal
+        // Strike getting a magical cast flash is exactly wrong), and in real
+        // matches Frost Shock is the one ability coded as a 0-cast `CastingState`
+        // — it should not blip a windup orb either. Skip the 0-total Growing case
+        // everywhere; hard casts (orb) and channels (Holding phase) are untouched.
+        // Graphical-only, so headless byte-identity is unaffected.
+        if matches!(phase, CastingOrbPhase::Growing) && cast_total <= 0.0 {
             continue;
         }
 
