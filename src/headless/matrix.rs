@@ -113,7 +113,11 @@ pub fn run_matrix(
     // Per-run subdir scopes trace output to this invocation, eliminating
     // collisions with concurrent matrix runs that share match_logs/traces/.
     let traces_dir = if trace_mode.is_enabled() {
-        let dir = format!("match_logs/traces/{}", timestamp);
+        let dir = crate::paths::match_log_dir()
+            .join("traces")
+            .join(timestamp.to_string())
+            .to_string_lossy()
+            .into_owned();
         fs::create_dir_all(&dir).map_err(|e| format!("create {}: {}", dir, e))?;
         Some(dir)
     } else {
@@ -187,7 +191,8 @@ pub fn run_matrix(
         }
     }
 
-    fs::create_dir_all("match_logs").map_err(|e| format!("create match_logs/: {}", e))?;
+    let log_dir = crate::paths::match_log_dir();
+    fs::create_dir_all(&log_dir).map_err(|e| format!("create {}/: {}", log_dir.display(), e))?;
 
     // Profile in the filename (Legacy omitted so historical paths are unchanged)
     // so a paired A/B writes two files instead of silently overwriting one.
@@ -195,12 +200,18 @@ pub fn run_matrix(
         AiProfile::Legacy => String::new(),
         other => format!("_{}", other.name()),
     };
-    let csv_path = format!("match_logs/matrix_{}{}.csv", timestamp, profile_tag);
+    let csv_path = log_dir
+        .join(format!("matrix_{}{}.csv", timestamp, profile_tag))
+        .to_string_lossy()
+        .into_owned();
     write_csv(&csv_path, classes, &stats, n, seed_base, profile)
         .map_err(|e| format!("write {}: {}", csv_path, e))?;
     println!("Wrote {}", csv_path);
 
-    let md_path = format!("match_logs/matrix_{}{}.md", timestamp, profile_tag);
+    let md_path = log_dir
+        .join(format!("matrix_{}{}.md", timestamp, profile_tag))
+        .to_string_lossy()
+        .into_owned();
     write_markdown(&md_path, classes, &stats, n, seed_base, profile, elapsed)
         .map_err(|e| format!("write {}: {}", md_path, e))?;
     println!("Wrote {}", md_path);

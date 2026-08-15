@@ -12,7 +12,9 @@ use arenasim::cli;
 use arenasim::combat::CombatPlugin;
 use arenasim::headless;
 use arenasim::settings::{GameSettings, SettingsPlugin};
-use arenasim::states::play_match::{AbilityConfigPlugin, MapConfigPlugin, MovementConfigPlugin};
+use arenasim::states::play_match::{
+    AbilityConfigPlugin, BanterConfigPlugin, MapConfigPlugin, MovementConfigPlugin,
+};
 use arenasim::states::play_match::equipment::EquipmentPlugin;
 use arenasim::states::{GameState, StatesPlugin};
 use arenasim::ui::UiPlugin;
@@ -38,7 +40,7 @@ fn main() {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
-            format!("match_logs/batch_{}.csv", ts).into()
+            arenasim::paths::match_log_dir().join(format!("batch_{}.csv", ts))
         });
         if let Err(e) = headless::run_batch(batch_path, out, args.jobs) {
             eprintln!("Batch run failed: {}", e);
@@ -98,7 +100,8 @@ fn run_headless_mode(
             .map(|d| d.as_secs())
             .unwrap_or(0);
         Some(headless::runner::TraceConfig {
-            output_path: format!("match_logs/match_{}_trace.jsonl", ts).into(),
+            output_path: arenasim::paths::match_log_dir()
+                .join(format!("match_{}_trace.jsonl", ts)),
         })
     } else {
         None
@@ -156,6 +159,10 @@ fn build_graphical_app(replay: Option<headless::HeadlessMatchConfig>) -> App {
             SettingsPlugin,
             AbilityConfigPlugin,
             MovementConfigPlugin,
+            // Graphical-only by design — banter is visual, so the headless
+            // runner deliberately does NOT register this (KTD5). See the
+            // module doc in play_match/banter_config.rs.
+            BanterConfigPlugin,
             MapConfigPlugin,
             EquipmentPlugin,
             StatesPlugin,

@@ -8,7 +8,17 @@ thousands of matches in parallel to measure balance.
 Matches are CPU vs CPU. The player's leverage is everything *before* the gates open:
 composition, gear, kill/CC targets, and per-class strategy choices.
 
-## Quick Start
+## Download and play
+
+Grab a build from the [latest release](https://github.com/dwalker-va/arenasim-prototype/releases/latest)
+— `.dmg` for Apple Silicon Macs, `.zip` for 64-bit Windows. Nothing to install
+and no toolchain required.
+
+The builds are unsigned, so your OS warns you the first time you open one. The
+release notes give the exact click path for each platform; it is a one-time
+step.
+
+## Build it yourself
 
 **Prerequisites:** [Rust](https://rustup.rs/) (stable toolchain)
 
@@ -205,7 +215,14 @@ is not yet implemented.
 
 ## License
 
-MIT
+The code is MIT-licensed — see [LICENSE](LICENSE).
+
+The ability, class, and item icons under `assets/icons/` are World of Warcraft
+artwork sourced from Wowhead. They are **not** covered by that grant and remain
+the property of their respective owners; they are here for a non-commercial
+hobby project. Fork or redistribute and that artwork is yours to clear or
+replace. The Rajdhani typeface is under the SIL Open Font License, and the
+application icon is original work covered by the MIT grant.
 
 ---
 

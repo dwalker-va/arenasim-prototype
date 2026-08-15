@@ -61,6 +61,12 @@ pub fn render_time_controls(
         info!("Combat panel toggled to: {}", display_settings.show_combat_panel);
     }
 
+    // Handle K key toggle for the kill-call markers on the team frames
+    if keybindings.action_just_pressed(GameAction::ToggleCallDisplay, &keyboard) {
+        display_settings.show_call_display = !display_settings.show_call_display;
+        info!("Call display toggled to: {}", display_settings.show_call_display);
+    }
+
     // Use try_ctx_mut to gracefully handle window close
     let Some(ctx) = contexts.try_ctx_mut() else { return; };
 
@@ -186,6 +192,20 @@ pub fn render_time_controls(
                 }
                 ui.label(
                     egui::RichText::new("Log [L]")
+                        .size(12.0)
+                        .color(egui::Color32::from_rgb(200, 200, 200))
+                );
+            });
+
+            // Kill-call markers on the team frames toggle
+            ui.horizontal(|ui| {
+                let mut show_calls = display_settings.show_call_display;
+                if ui.checkbox(&mut show_calls, "").changed() {
+                    display_settings.show_call_display = show_calls;
+                    info!("Call display toggled to: {}", display_settings.show_call_display);
+                }
+                ui.label(
+                    egui::RichText::new("Calls [K]")
                         .size(12.0)
                         .color(egui::Color32::from_rgb(200, 200, 200))
                 );

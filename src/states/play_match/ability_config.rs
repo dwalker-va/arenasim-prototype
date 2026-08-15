@@ -476,9 +476,9 @@ impl AbilityDefinitions {
 
 /// Load ability definitions from assets/config/abilities.ron
 pub fn load_ability_definitions() -> Result<AbilityDefinitions, String> {
-    let config_path = "assets/config/abilities.ron";
+    let config_path = crate::paths::asset_path_str("config/abilities.ron");
 
-    let contents = std::fs::read_to_string(config_path)
+    let contents = std::fs::read_to_string(&config_path)
         .map_err(|e| format!("Failed to read {}: {}", config_path, e))?;
 
     let config: AbilitiesConfig = ron::from_str(&contents)

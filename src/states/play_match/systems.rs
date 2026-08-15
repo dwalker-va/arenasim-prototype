@@ -136,22 +136,53 @@ pub fn configure_combat_system_ordering(app: &mut App) {
 /// These are the systems needed for the combat loop to function.
 /// Both graphical and headless modes need these.
 ///
+/// ## Two layers, two conditions
+///
+/// The systems split into a **resolution** layer (auras, casting, projectiles,
+/// effects, auto-attacks — everything downstream of a decision) and a
+/// **decision** layer (target acquisition, ability choice, pet AI, interrupts,
+/// AI movement, and the match clock). The Animation Sandbox needs the first and
+/// must not run the second: it supplies the decision itself, and an AI fighting
+/// underneath is precisely what makes an animation hard to judge.
+///
+/// The split is expressed as a per-system `run_if` INSIDE the existing
+/// `.chain()` rather than as two separate registrations. That matters twice
+/// over:
+///
+/// - `.chain()` ordering edges are structural, so per-system conditions cannot
+///   reorder anything. Headless passes an always-true condition for both
+///   layers, so every system runs exactly as before and the recorded baselines
+///   stay valid.
+/// - Registering the resolution systems a second time for the sandbox would
+///   make their `SystemTypeSet`s ambiguous, and Bevy then refuses any
+///   `.after()`/`.before()` that names one — `spawn_projectile_visuals` orders
+///   against `process_channeling` and `move_projectiles`, so a second
+///   registration panicked the app at schedule init.
+///
 /// # Arguments
 /// * `app` - The Bevy App to add systems to
-/// * `run_condition` - A run condition (e.g., `in_state(GameState::PlayMatch)`)
+/// * `scene_condition` - where combat RESOLUTION runs
+/// * `decision_condition` - where the AI and match clock ALSO run; must be a
+///   subset of `scene_condition`
 ///
 /// # Example
 /// ```ignore
-/// // For graphical mode
-/// add_core_combat_systems(&mut app, in_state(GameState::PlayMatch));
+/// // Graphical: resolution in both combat scenes, decisions only in a match
+/// add_core_combat_systems(&mut app, in_combat_scene, in_state(GameState::PlayMatch));
 ///
-/// // For headless mode (always run)
-/// add_core_combat_systems(&mut app, || true);
+/// // Headless: everything, always
+/// add_core_combat_systems(&mut app, || true, || true);
 /// ```
-pub fn add_core_combat_systems<M>(app: &mut App, run_condition: impl Condition<M> + Clone)
-where
+pub fn add_core_combat_systems<M, N>(
+    app: &mut App,
+    scene_condition: impl Condition<M> + Clone,
+    decision_condition: impl Condition<N> + Clone,
+) where
     M: 'static,
+    N: 'static,
 {
+    let run_condition = scene_condition;
+    let decide = decision_condition;
     // Initialize DecisionTrace resource (idempotent — safe to call from both
     // headless and graphical setup paths).
     app.init_resource::<super::decision_trace::DecisionTrace>();
@@ -160,10 +191,11 @@ where
     app.add_systems(
         FixedUpdate,
         (
-            update_countdown,
-            update_dampening, // Ramp heal/absorb dampening BEFORE any healing applies this frame
+            update_countdown.run_if(decide.clone()),
+            // Ramp heal/absorb dampening BEFORE any healing applies this frame
+            update_dampening.run_if(decide.clone()),
             regenerate_resources,
-            track_shadow_sight_timer,
+            track_shadow_sight_timer.run_if(decide.clone()),
             process_dot_ticks,
             process_hot_ticks,     // HoT healing — like process_dot_ticks, must run BEFORE update_auras
             update_auras,
@@ -188,11 +220,16 @@ where
             // depends on it.
             // Must never draw from GameRng: it shares this schedule with the AI,
             // so a draw would shift every downstream roll.
-            update_team_plans,
+            update_team_plans.run_if(decide.clone()),
             // Trailing gross-damage window for the CC value model's break term.
+            //
             // Write-only unless `CcPolicy::Priced` is active, so it cannot move a
-            // Legacy seed; registered unconditionally so both profiles observe
-            // the same world state.
+            // Legacy seed. Deliberately NOT behind `decide`, unlike its
+            // neighbours: it is resolution-layer bookkeeping rather than a
+            // decision, and its window is FRAME-based (120 frames = 2s), so
+            // skipping frames would break the time base and leave the decision
+            // layer reading a stale rate whenever it resumed. It observes the
+            // world; it does not act on it.
             track_recent_damage,
         )
             .chain()
@@ -214,32 +251,33 @@ where
         FixedUpdate,
         (
             process_aura_breaks,
-            acquire_targets,
-            check_orb_pickups,
-            cleanup_consumed_orbs,
+            acquire_targets.run_if(decide.clone()),
+            check_orb_pickups.run_if(decide.clone()),
+            cleanup_consumed_orbs.run_if(decide.clone()),
             // Per-frame occlusion accumulator for the Mage/Hunter kiters. MUST
             // run before decide_abilities so the chase reads a fresh bucket, and
             // it ticks casting kiters too (they're excluded from decide_abilities'
             // query), capturing the mid-cast juke the ability pass never sees.
-            tick_kite_occlusion,
-            decide_abilities,
+            tick_kite_occlusion.run_if(decide.clone()),
+            decide_abilities.run_if(decide.clone()),
             ApplyDeferred, // Flush PetCommand components spawned by Hunter
                             // AI in decide_abilities so pet_ai_system sees
                             // them on the same tick (per U3 of the pet
                             // engagement plan). Without this, PetCommand has
                             // one-tick lag.
-            pet_ai_system,
+            pet_ai_system.run_if(decide.clone()),
             ApplyDeferred, // Flush CastingState for interrupt checks
-            check_interrupts,
-            process_interrupts,
+            check_interrupts.run_if(decide.clone()),
+            process_interrupts.run_if(decide.clone()),
             process_casting,
             process_channeling,
             move_projectiles,
             move_trap_launch_projectiles,  // Arc travel for launched traps — before trap_system
             process_projectile_hits,
-            move_to_target,
+            move_to_target.run_if(decide.clone()),
             trap_system,  // After movement — needs current positions for proximity check
-            despawn_pets_of_dead_owners,  // Kill pets whose owner has died
+            // Kill pets whose owner has died
+            despawn_pets_of_dead_owners.run_if(decide.clone()),
         )
             .chain()
             .in_set(CombatSystemPhase::CombatAndMovement)
@@ -251,7 +289,7 @@ where
         FixedUpdate,
         (
             combat_auto_attack,
-            flush_decision_trace_system,
+            flush_decision_trace_system.run_if(decide),
         )
             .chain()
             .in_set(CombatSystemPhase::CombatResolution)

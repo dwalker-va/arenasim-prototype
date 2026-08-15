@@ -32,7 +32,7 @@ Graphical systems often need to know *how* a sim event resolved, but the sim's o
 Spawn a bare, write-only marker entity in core combat code at the exact site where the event resolves, and follow all three legs:
 
 1. **Spawn unconditionally in BOTH modes.** The spawn lives in shared core systems (`src/states/play_match/combat_core/`), never gated on graphical mode. Headless spawns the markers too and simply never reads them.
-2. **Consume graphical-only.** The consumer (e.g. `consume_swing_signals`, `consume_cast_ending_signals` in `src/states/play_match/rendering/effects.rs`) is registered only in `src/states/mod.rs`, in `FixedUpdate` after `CombatSystemPhase::CombatResolution` — FixedUpdate can tick several times per rendered frame, and a marker consumed a tick late desyncs from its event. The consumer despawns each marker as it reads it.
+2. **Consume graphical-only.** The consumer (e.g. `consume_swing_signals` in `src/states/play_match/rendering/effects/weapon_swing.rs`, `consume_cast_ending_signals` in `rendering/effects/casting_orbs.rs`) is registered only in `src/states/mod.rs`, in `FixedUpdate` after `CombatSystemPhase::CombatResolution` — FixedUpdate can tick several times per rendered frame, and a marker consumed a tick late desyncs from its event. The consumer despawns each marker as it reads it.
 3. **Tag `PlayMatchEntity`.** In headless, un-consumed markers accumulate for the match; the match-exit `PlayMatchEntity` sweep is what reclaims them. Without the tag they leak.
 
 The marker carries only what the consumer needs to route (source entity + an outcome enum). Nothing in sim code ever queries the marker type — that is what keeps headless results byte-identical.

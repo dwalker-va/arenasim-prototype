@@ -1,0 +1,171 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: Release
+
+# Version tags only. A tag like `docs-snapshot` must not publish a release.
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+
+# Required for `gh release`. The repository's Actions settings must also allow
+# workflows read-and-write permissions, which is a one-time manual setting this
+# file cannot grant itself.
+permissions:
+  contents: write
+
+env:
+  BINARY: arenasim
+  APP_NAME: ArenaSim
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # One job owns creating the release so the platform jobs, which run in
+  # parallel, only ever upload to it. Both trying to create it would race.
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Created as a DRAFT so a half-finished release is never downloadable. If
+      # one platform job fails, the draft stays private and the tag can simply
+      # be re-run; the publish job at the end is what makes it public, and it
+      # only runs once both platforms have uploaded.
+      #
+      # Creating is also made idempotent, because the failure this guards
+      # against is exactly the one that makes you re-run the workflow.
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists; reusing it."
+            exit 0
+          fi
+          # The notes carry the per-OS steps for opening unsigned software, so
+          # they ship with every release rather than living only in the repo.
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$APP_NAME $GITHUB_REF_NAME" \
+            --notes-file packaging/release-notes.md \
+            --verify-tag \
+            --draft
+
+  windows:
+    needs: create-release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Explicit target rather than relying on the runner's host triple: if the
+      # image's architecture ever changes, this fails loudly instead of quietly
+      # publishing a binary for the wrong one.
+      - name: Install the target
+        run: rustup target add x86_64-pc-windows-msvc
+
+      # Bevy is the dominant build cost here; without a cache every release
+      # recompiles the whole dependency graph from scratch.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-windows
+
+      - name: Build
+        run: cargo build --release --locked --target x86_64-pc-windows-msvc
+
+      # Assets sit beside the executable because Bevy resolves its asset
+      # directory relative to the running binary once CARGO_MANIFEST_DIR is
+      # absent, which it is for anyone who unpacks this zip.
+      # Everything goes inside one named folder so the zip extracts as a single
+      # tidy directory rather than scattering an .exe and an assets/ folder
+      # loose into Downloads — and so the executable and its assets cannot get
+      # separated, which is the one way to make the game fail to start.
+      - name: Stage the artifact
+        run: |
+          New-Item -ItemType Directory -Path "staging/${env:APP_NAME}" | Out-Null
+          Copy-Item "target/x86_64-pc-windows-msvc/release/${env:BINARY}.exe" "staging/${env:APP_NAME}/"
+          Copy-Item -Recurse assets "staging/${env:APP_NAME}/assets"
+
+      - name: Archive
+        run: Compress-Archive -Path "staging/${env:APP_NAME}" -DestinationPath "${env:APP_NAME}-${env:GITHUB_REF_NAME}-windows-x64.zip"
+
+      # --clobber so a re-run replaces the asset instead of failing on a
+      # duplicate name.
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${env:GITHUB_REF_NAME}" "${env:APP_NAME}-${env:GITHUB_REF_NAME}-windows-x64.zip" --clobber
+
+  macos:
+    needs: create-release
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the target
+        run: rustup target add aarch64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-macos
+
+      - name: Build
+        run: cargo build --release --locked --target aarch64-apple-darwin
+
+      # A bare Unix executable double-clicked in Finder opens a Terminal window
+      # rather than the game, so the bundle is what makes "double-click the
+      # thing I sent you" work at all. Assets go beside the binary in
+      # Contents/MacOS/ for the same executable-relative resolution the Windows
+      # zip relies on.
+      - name: Assemble the app bundle
+        run: |
+          set -euo pipefail
+          APP="$APP_NAME.app"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+
+          cp "target/aarch64-apple-darwin/release/$BINARY" "$APP/Contents/MacOS/"
+          cp -R assets "$APP/Contents/MacOS/assets"
+          cp packaging/macos/AppIcon.icns "$APP/Contents/Resources/"
+          cp packaging/macos/Info.plist "$APP/Contents/"
+
+          # Stamp the tag over the placeholder versions, minus the leading "v".
+          VERSION="${GITHUB_REF_NAME#v}"
+          # CFBundleVersion is the build number LaunchServices compares, and it
+          # must be one to three period-separated integers. The tag filter
+          # permits a suffix (v0.1.0-rc1), so drop it here — the marketing
+          # string above keeps the full tag.
+          BUILD_VERSION="${VERSION%%-*}"
+          plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP/Contents/Info.plist"
+          plutil -replace CFBundleVersion -string "$BUILD_VERSION" "$APP/Contents/Info.plist"
+          plutil -lint "$APP/Contents/Info.plist"
+
+      # An ad-hoc signature is not notarization and does not avoid Gatekeeper.
+      # It exists because an arm64 binary must carry *some* valid signature to
+      # execute at all, and copying files into a bundle invalidates the one
+      # the linker applied.
+      - name: Ad-hoc sign the bundle
+        run: codesign --force --deep --sign - "$APP_NAME.app"
+
+      - name: Build the disk image
+        run: |
+          set -euo pipefail
+          DMG="$APP_NAME-$GITHUB_REF_NAME-macos-arm64.dmg"
+          STAGE="$(mktemp -d)"
+          cp -R "$APP_NAME.app" "$STAGE/"
+          # A symlink to /Applications makes the window a drag-to-install target
+          # without needing a background image or window scripting.
+          ln -s /Applications "$STAGE/Applications"
+          hdiutil create -volname "$APP_NAME" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" "$APP_NAME-$GITHUB_REF_NAME-macos-arm64.dmg" --clobber
+
+  # Both platforms uploaded, so the release is complete and can go public.
+  # Nothing is downloadable before this point.
+  publish:
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false --repo "$GITHUB_REPOSITORY"

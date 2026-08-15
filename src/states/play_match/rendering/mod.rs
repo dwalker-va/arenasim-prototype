@@ -9,6 +9,7 @@
 
 pub mod combat_log;
 pub mod effects;
+pub mod emoji;
 pub mod hud;
 pub mod overlays;
 pub mod team_frames;
@@ -16,6 +17,7 @@ pub mod team_frames;
 // Re-export all public items for backwards compatibility
 pub use combat_log::*;
 pub use effects::*;
+pub use emoji::*;
 pub use hud::*;
 pub use overlays::*;
 pub use team_frames::*;

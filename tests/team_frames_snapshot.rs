@@ -18,14 +18,31 @@
 //! textures, so class icons render as class-color fallback squares and aura
 //! icons as gold/red fallback blocks; fonts are egui defaults. Layout,
 //! spacing, and color iterate faithfully.
+//!
+//! The click tests below are NOT `#[ignore]`d: kittest's renderer is lazy, so
+//! driving the harness and reading back `draw_team_frames`'s action needs no
+//! GPU — only `snapshot()` does.
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use bevy_egui::egui;
 use egui_kittest::Harness;
 
 use arenasim::states::configure_match_ui::ClassIcons;
-use arenasim::states::match_config::CharacterClass;
+use arenasim::states::match_config::{CharacterClass, MatchConfig};
 use arenasim::states::play_match::{
-    draw_team_frames, CombatantFrame, FrameAura, ResourceType, SpellIcons, TeamFramesData,
+    apply_call_click, column_frame_rects, draw_team_frames, CallClick, CombatantFrame, FrameAura,
+    ResourceType, SpellIcons, TeamFramesData,
 };
+
+/// The harness viewport, and therefore `ctx.available_rect()` — the rect the
+/// frame layout is measured against.
+const SCREEN: [f32; 2] = [1500.0, 820.0];
+
+fn screen_rect() -> egui::Rect {
+    egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(SCREEN[0], SCREEN[1]))
+}
 
 fn aura(icon_key: &str, remaining: f32, is_buff: bool, is_hard_cc: bool) -> FrameAura {
     FrameAura {
@@ -40,8 +57,14 @@ fn aura(icon_key: &str, remaining: f32, is_buff: bool, is_hard_cc: bool) -> Fram
 /// HP states, all three resource types, absorb overlay, buff + debuff rows
 /// (including overflow), stealth tag, pet frames. (Cast bars live on the
 /// overhead nameplate, not in the frames.)
+///
+/// Call markers start hidden; the tests that want them set `show_calls` and
+/// the called slots themselves.
 fn mock_data() -> TeamFramesData {
     TeamFramesData {
+        team1_called_slot: None,
+        team2_called_slot: None,
+        show_calls: false,
         team1: vec![
             CombatantFrame {
                 class: CharacterClass::Warrior,
@@ -140,6 +163,163 @@ fn mock_data() -> TeamFramesData {
     }
 }
 
+/// Drive `draw_team_frames` in a kittest harness, returning every [`CallClick`]
+/// it reported. Only `snapshot()` needs a GPU, so this is a plain test.
+fn run_clicks(data: TeamFramesData, pointer: Option<egui::Pos2>) -> Vec<CallClick> {
+    let clicks = Rc::new(RefCell::new(Vec::new()));
+    let sink = Rc::clone(&clicks);
+    let class_icons = ClassIcons::default();
+    let spell_icons = SpellIcons::default();
+
+    let mut harness = Harness::builder().with_size(SCREEN).build(move |ctx| {
+        if let Some(click) = draw_team_frames(ctx, &data, &class_icons, &spell_icons) {
+            sink.borrow_mut().push(click);
+        }
+    });
+
+    // egui hit-tests against the previous pass's widget rects, so the frames
+    // must be laid out once before the pointer arrives, and press and release
+    // need separate passes.
+    harness.run();
+    if let Some(pos) = pointer {
+        harness.input_mut().events.push(egui::Event::PointerMoved(pos));
+        harness.run();
+        for pressed in [true, false] {
+            harness.input_mut().events.push(egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::default(),
+            });
+            harness.run();
+        }
+    }
+
+    let out = clicks.borrow().clone();
+    out
+}
+
+/// Guard the click tests against a silent miss: if a scenario's index no
+/// longer points at the frame it means to, the test should fail loudly rather
+/// than pass because nothing was hit.
+fn assert_is_pet(frames: &[CombatantFrame], index: usize, expected: bool) {
+    assert_eq!(
+        frames[index].pet_label.is_some(),
+        expected,
+        "frame {index} is not the kind of frame this test targets"
+    );
+}
+
+#[test]
+fn clicking_an_enemy_frame_reports_its_column_and_slot() {
+    let mut data = mock_data();
+    data.show_calls = true;
+    let target = column_frame_rects(&data.team2, 2, screen_rect())[0].center();
+
+    assert_eq!(
+        run_clicks(data, Some(target)),
+        vec![CallClick {
+            clicked_team: 2,
+            slot: 0
+        }]
+    );
+}
+
+/// A dead combatant is not callable, and — the part that actually matters —
+/// it consumes no slot index.
+///
+/// `acquire_targets` builds `enemy_primary` by skipping the dead before it
+/// skips pets, so that list COMPACTS as combatants fall and a call index is a
+/// position in what remains. If the frames numbered the dead, the two index
+/// spaces would drift apart the moment anyone died: a click on what the UI
+/// called slot 1 would write a call the simulation resolved against a shorter
+/// list, silently falling back to nearest-enemy while the marker rendered on
+/// somebody else. The bug is invisible until the first death, which is exactly
+/// when focus-fire matters most — hence the pin.
+#[test]
+fn the_dead_are_not_callable_and_do_not_consume_a_slot() {
+    // Team 2 is [Warlock (alive), Rogue (dead), Spider (pet)].
+    let mut probe = mock_data();
+    probe.show_calls = true;
+    assert!(!probe.team2[1].alive, "fixture expects a dead second frame");
+
+    // The dead frame itself answers to nothing.
+    let dead = column_frame_rects(&probe.team2, 2, screen_rect())[1].center();
+    assert!(
+        run_clicks(probe, Some(dead)).is_empty(),
+        "a dead combatant must not be callable"
+    );
+
+    // And it left the numbering alone: the living Warlock above it is still 0.
+    let mut data = mock_data();
+    data.show_calls = true;
+    let living = column_frame_rects(&data.team2, 2, screen_rect())[0].center();
+    assert_eq!(
+        run_clicks(data, Some(living)),
+        vec![CallClick {
+            clicked_team: 2,
+            slot: 0
+        }]
+    );
+}
+
+#[test]
+fn clicking_a_pet_sub_frame_is_a_no_op() {
+    let mut data = mock_data();
+    data.show_calls = true;
+    // Team 2's third frame is the Hunter's pet.
+    assert_is_pet(&data.team2, 2, true);
+    let target = column_frame_rects(&data.team2, 2, screen_rect())[2].center();
+
+    assert!(
+        run_clicks(data, Some(target)).is_empty(),
+        "a pet sub-frame must not be callable"
+    );
+}
+
+#[test]
+fn a_pet_does_not_shift_the_slot_of_the_primary_below_it() {
+    // The pet sits last in the mock, so re-order it above the Rogue and check
+    // the Rogue still answers to slot 1. The mock's Rogue is dead, and the
+    // dead are not callable, so revive it first — this test is about pets, and
+    // `the_dead_are_not_callable` below covers the other axis.
+    let mut data = mock_data();
+    data.show_calls = true;
+    data.team2[1].alive = true;
+    let pet = data.team2.remove(2);
+    data.team2.insert(1, pet);
+    let target = column_frame_rects(&data.team2, 2, screen_rect())[2].center();
+
+    assert_eq!(
+        run_clicks(data, Some(target)),
+        vec![CallClick {
+            clicked_team: 2,
+            slot: 1
+        }]
+    );
+}
+
+#[test]
+fn clicks_are_ignored_while_the_affordance_is_hidden() {
+    let mut data = mock_data();
+    data.show_calls = false;
+    data.team2_called_slot = Some(0);
+    let target = column_frame_rects(&data.team2, 2, screen_rect())[0].center();
+
+    let clicks = run_clicks(data, Some(target));
+    assert!(clicks.is_empty(), "a hidden affordance senses nothing");
+
+    // ...and the stored calls stay exactly as they were.
+    let mut config = MatchConfig::default();
+    config.team1_kill_target = Some(0);
+    config.team2_kill_target = Some(1);
+    for click in &clicks {
+        apply_call_click(&mut config, *click);
+    }
+    assert_eq!(config.team1_kill_target, Some(0));
+    assert_eq!(config.team2_kill_target, Some(1));
+}
+
 #[test]
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
 fn team_frames_2v2() {
@@ -148,11 +328,42 @@ fn team_frames_2v2() {
     let spell_icons = SpellIcons::default(); // no textures -> gold/red fallback blocks
 
     let mut harness = Harness::builder()
-        .with_size([1500.0, 820.0])
+        .with_size(SCREEN)
         .build(move |ctx| {
             draw_team_frames(ctx, &data, &class_icons, &spell_icons);
         });
 
     harness.run();
     harness.snapshot("team_frames");
+}
+
+/// The same scene with the call affordance on and a call marked in each column.
+///
+/// Team 2 calls the Team 1 Priest (slot 1) and Team 1 calls the Team 2 Warlock
+/// (slot 0), so both columns show the callable border and a reticle — one on a
+/// frame with a full aura row, one on a frame without.
+///
+/// The Team 2 call is deliberately slot 0, not slot 1: the dead consume no slot
+/// (`call_slots`), so slot 1 in that column would resolve to nothing and draw
+/// no marker at all. That behavior is pinned by
+/// `the_dead_are_not_callable_and_do_not_consume_a_slot`, which asserts it
+/// directly instead of asking a PNG to show an absence.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn team_frames_with_calls() {
+    let mut data = mock_data();
+    data.show_calls = true;
+    data.team1_called_slot = Some(1);
+    data.team2_called_slot = Some(0);
+    let class_icons = ClassIcons::default();
+    let spell_icons = SpellIcons::default();
+
+    let mut harness = Harness::builder()
+        .with_size(SCREEN)
+        .build(move |ctx| {
+            draw_team_frames(ctx, &data, &class_icons, &spell_icons);
+        });
+
+    harness.run();
+    harness.snapshot("team_frames_with_calls");
 }

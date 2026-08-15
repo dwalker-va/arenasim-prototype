@@ -6,7 +6,7 @@ use bevy::prelude::*;
 use bevy::window::{MonitorSelection, PresentMode, PrimaryWindow, WindowMode};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use crate::keybindings::Keybindings;
 
 /// User-configurable game settings
@@ -23,6 +23,17 @@ pub struct GameSettings {
     /// a diagnostic tool, not part of the default spectator presentation)
     #[serde(default = "default_show_combat_panel")]
     pub show_combat_panel: bool,
+    /// Whether the in-match kill-call markers are shown on the team frames
+    /// (default: true).
+    ///
+    /// Unlike the combat panel this follows in shape, the call display defaults
+    /// ON. It was briefly off, on the theory that it is an experimentation
+    /// affordance rather than part of the spectator view — but the markers show
+    /// what each team is focusing, which is match state a watcher wants, and a
+    /// control nobody can see is a control nobody uses. The toggle now exists
+    /// to get a clean view, not to opt in.
+    #[serde(default = "default_show_call_display")]
+    pub show_call_display: bool,
 }
 
 fn default_show_aura_icons() -> bool {
@@ -31,6 +42,10 @@ fn default_show_aura_icons() -> bool {
 
 fn default_show_combat_panel() -> bool {
     false
+}
+
+fn default_show_call_display() -> bool {
+    true
 }
 
 /// Tracks whether settings have changed and require application restart
@@ -74,6 +89,7 @@ impl Default for GameSettings {
             keybindings: Keybindings::default(),
             show_aura_icons: true,
             show_combat_panel: false,
+            show_call_display: true,
         }
     }
 }
@@ -81,9 +97,7 @@ impl Default for GameSettings {
 impl GameSettings {
     /// Get the path to the settings file
     fn settings_path() -> PathBuf {
-        // Store in the same directory as the executable for now
-        // In production, you'd use directories::ProjectDirs for proper cross-platform support
-        PathBuf::from("settings.ron")
+        crate::paths::settings_path()
     }
 
     /// Load settings from file, or return default if file doesn't exist
@@ -116,9 +130,21 @@ impl GameSettings {
 
     /// Save settings to file
     pub fn save(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let path = Self::settings_path();
+        self.save_to(&Self::settings_path())
+    }
+
+    /// Save settings to an explicit path, creating its parent directory first —
+    /// an installed build's per-user data directory does not exist yet.
+    fn save_to(&self, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+        if let Some(parent) = path.parent() {
+            // Empty in a checkout, where the path is the bare `settings.ron`.
+            if !parent.as_os_str().is_empty() {
+                fs::create_dir_all(parent)?;
+            }
+        }
+
         let contents = ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default())?;
-        fs::write(&path, contents)?;
+        fs::write(path, contents)?;
         info!("Saved settings to {:?}", path);
         Ok(())
     }
@@ -252,6 +278,76 @@ fn apply_runtime_settings(
             
             info!("Applied VSync: {}", settings.vsync);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn call_display_flag_round_trips() {
+        let mut settings = GameSettings::default();
+        assert!(settings.show_call_display, "call display defaults to on");
+        settings.show_call_display = false;
+
+        let serialized = ron::ser::to_string_pretty(&settings, ron::ser::PrettyConfig::default())
+            .expect("settings serialize");
+        let loaded: GameSettings = ron::from_str(&serialized).expect("settings deserialize");
+
+        assert!(!loaded.show_call_display);
+    }
+
+    /// An installed build's per-user data directory does not exist before the
+    /// first save, so the save has to create it rather than failing.
+    #[test]
+    fn saving_creates_the_parent_directory() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("ArenaSim/settings.ron");
+
+        GameSettings::default().save_to(&path).expect("save settings");
+
+        let contents = fs::read_to_string(&path).expect("read settings back");
+        ron::from_str::<GameSettings>(&contents).expect("settings deserialize");
+    }
+
+    /// A save that cannot be written must surface an error rather than panic —
+    /// `save_settings_on_change` logs it and the game carries on.
+    #[test]
+    fn saving_to_an_unwritable_location_reports_an_error() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        // A regular file where a directory would have to be: nothing below it
+        // can be created or written.
+        let blocker = dir.path().join("not-a-directory");
+        fs::write(&blocker, "").expect("write blocker");
+
+        assert!(
+            GameSettings::default().save_to(&blocker.join("settings.ron")).is_err(),
+            "an unwritable destination should report an error"
+        );
+    }
+
+    /// A settings file written before the field existed must still load — the
+    /// `#[serde(default)]` path. Emulated by stripping the field back out of a
+    /// freshly serialized payload.
+    #[test]
+    fn settings_written_before_the_field_existed_still_load() {
+        let settings = GameSettings::default();
+        let serialized = ron::ser::to_string_pretty(&settings, ron::ser::PrettyConfig::default())
+            .expect("settings serialize");
+
+        let legacy: String = serialized
+            .lines()
+            .filter(|line| !line.contains("show_call_display"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !legacy.contains("show_call_display"),
+            "legacy payload should not mention the new field"
+        );
+
+        let loaded: GameSettings = ron::from_str(&legacy).expect("legacy settings deserialize");
+        assert!(loaded.show_call_display, "missing field falls back to the default");
     }
 }
 

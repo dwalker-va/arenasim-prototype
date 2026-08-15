@@ -76,7 +76,7 @@ commands.spawn((
 
 ### Step 3: Add Three Visual Systems
 
-**File:** `src/states/play_match/rendering/effects.rs`
+**File:** a new per-effect submodule `src/states/play_match/rendering/effects/<your_effect>.rs`, wired in by adding `mod <your_effect>; pub use <your_effect>::*;` to `rendering/effects/mod.rs` (the file was split from a single `effects.rs` into per-effect submodules — see `byte-identical-module-split.md`).
 
 ```rust
 // Color helper (private)
@@ -189,7 +189,7 @@ In the spawn system, the entity might be despawned between the query iteration a
 
 ### 4. Use `Res<Time>`, Not `Res<Time<Real>>`
 
-All visual systems in `effects.rs` use `Res<Time>`. Using `Time<Real>` would cause the animation to ignore simulation speed changes, creating visual inconsistency.
+All visual systems in the `rendering/effects/` submodules use `Res<Time>`. Using `Time<Real>` would cause the animation to ignore simulation speed changes, creating visual inconsistency.
 
 ### 5. Always Include `PlayMatchEntity` Marker
 
@@ -232,7 +232,7 @@ When adding a new visual effect, touch these files:
 
 - [ ] `components/visual.rs` — New component struct
 - [ ] Combat system file — Spawn the component (e.g., a file under `combat_core/`, `effects/dispels.rs`)
-- [ ] `rendering/effects.rs` — Three systems + color helper
+- [ ] `rendering/effects/<your_effect>.rs` — New submodule: three systems + color helper (wire it in `rendering/effects/mod.rs`)
 - [ ] `states/mod.rs` — System registration (new `.add_systems()` group)
 - [ ] Verify build: `cargo build --release`
 - [ ] Headless test: `cargo run --release -- --headless /tmp/test.json`

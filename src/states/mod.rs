@@ -7,6 +7,7 @@ use bevy_egui::{egui, EguiContexts};
 
 pub mod match_config;
 pub mod main_menu;
+pub mod animation_sandbox;
 pub mod arena_layout_debug;
 pub mod configure_match_ui;
 pub mod play_match;
@@ -36,9 +37,35 @@ pub enum GameState {
     Results,
     /// Armory - browse all equipment in the game
     Armory,
+    /// Animation sandbox - play combat animations on demand on an inert caster
+    AnimationSandbox,
 }
 
-use play_match::systems::{CombatSystemPhase, configure_combat_system_ordering, add_core_combat_systems};
+use play_match::systems::{
+    CombatSystemPhase, configure_combat_system_ordering, add_core_combat_systems,
+};
+
+/// Run condition for the shared combat VISUAL layer.
+///
+/// The world-space visual-effect systems in this file are not specific to a
+/// match — they render whatever the combat resolution systems produce. Both
+/// [`GameState::PlayMatch`] and [`GameState::AnimationSandbox`] produce that,
+/// so both need the effect layer, and gating them from one definition keeps the
+/// two states from drifting apart the way headless and graphical registration
+/// historically did (see `tests/registration_audit.rs`).
+///
+/// This deliberately does NOT cover match chrome — HUD, team frames, the combat
+/// panel, speech-bubble rendering, banter, gate bars, selection, countdown, or
+/// `update_play_match`. Those stay on the narrow `PlayMatch` gate because the
+/// sandbox is required to render none of them (plan R13, R14).
+/// Written as a plain `-> bool` system rather than a combinator expression so
+/// it is a `Copy` fn item usable directly at every `run_if` site.
+fn in_combat_scene(state: Res<State<GameState>>) -> bool {
+    matches!(
+        state.get(),
+        GameState::PlayMatch | GameState::AnimationSandbox
+    )
+}
 
 /// Plugin for managing game states and transitions
 pub struct StatesPlugin;
@@ -64,6 +91,14 @@ impl Plugin for StatesPlugin {
             .init_resource::<armory_ui::ArmoryFilters>()
             // Player selection (click-to-select) — graphical-only
             .init_resource::<play_match::Selection>()
+            // Kill-target call watcher (banter) — graphical-only. Owned for the
+            // app lifetime and reset at the PlayMatch state boundary, the same
+            // lifecycle `Selection` uses, so `play_match/mod.rs` needs no
+            // per-match insert/remove pair for it.
+            .init_resource::<play_match::CallWatcher>()
+            // Banter beat queues (graphical-only), same app-lifetime-plus-
+            // state-boundary-reset lifecycle as the watcher above.
+            .init_resource::<play_match::BanterScheduler>()
             // Main menu systems (defined in main_menu module): ambient 3D
             // arena backdrop (setup/orbit/cleanup) + the egui menu overlay
             .add_systems(OnEnter(GameState::MainMenu), main_menu::setup_menu_scene)
@@ -122,13 +157,70 @@ impl Plugin for StatesPlugin {
                     .chain()
                     .run_if(in_state(GameState::Armory)),
             )
+            // Animation sandbox systems (defined in animation_sandbox module).
+            // Graphical-only: no headless registration, and it reaches no
+            // simulation registration of its own — see add_sandbox_combat_systems.
+            // Spell icons are normally inserted by `setup_play_match`, which
+            // never runs in the sandbox. `init_resource` only fills a gap, so
+            // the per-match `insert_resource` still wins and match behaviour is
+            // unchanged — this just stops the sandbox reading a resource that
+            // does not exist yet.
+            .init_resource::<play_match::SpellIcons>()
+            .init_resource::<play_match::SpellIconHandles>()
+            .init_resource::<animation_sandbox::SandboxConfig>()
+            .init_resource::<animation_sandbox::SandboxStage>()
+            .init_resource::<animation_sandbox::playback::SandboxPlayback>()
+            .init_resource::<animation_sandbox::ui::PendingCameraPreset>()
+            .add_systems(
+                OnEnter(GameState::AnimationSandbox),
+                animation_sandbox::setup_sandbox,
+            )
+            .add_systems(
+                OnExit(GameState::AnimationSandbox),
+                (
+                    animation_sandbox::cleanup_sandbox,
+                    animation_sandbox::ui::reset_time_on_exit,
+                ),
+            )
+            .add_systems(
+                Update,
+                (
+                    // Both loaders self-guard on an internal `loaded` flag, so
+                    // registering them here as well as in their own states is
+                    // idempotent — the same trick the Armory uses for item icons.
+                    play_match::load_spell_icons,
+                    configure_match_ui::load_class_icons,
+                    animation_sandbox::restage_on_config_change,
+                    animation_sandbox::playback::sustain_staged_units,
+                    animation_sandbox::playback::drive_playback,
+                    animation_sandbox::playback::position_caster,
+                    animation_sandbox::ui::sandbox_ui,
+                    animation_sandbox::ui::apply_camera_preset,
+                )
+                    .chain()
+                    .run_if(in_state(GameState::AnimationSandbox)),
+            )
+            // Single-stepping injects a virtual-time delta, so it MUST land in
+            // `First` (after `TimeSystem` overwrites delta, before
+            // `RunFixedMainLoop` spends it on the fixed accumulator). In
+            // `Update` it was both too late for this frame's fixed loop and
+            // overwritten before the next one — a Step that advanced nothing.
+            .add_systems(
+                First,
+                animation_sandbox::ui::apply_step_request
+                    .after(bevy::time::TimeSystem)
+                    .run_if(in_state(GameState::AnimationSandbox)),
+            )
             // Play match systems (defined in play_match module)
             .add_systems(OnEnter(GameState::PlayMatch), play_match::setup_play_match);
 
         // Configure combat system phase ordering and add core combat systems
         // These are shared between graphical and headless modes
         configure_combat_system_ordering(app);
-        add_core_combat_systems(app, in_state(GameState::PlayMatch));
+        // Resolution runs in both combat scenes; the AI and match clock only in
+        // a real match. One registration, so no system's `SystemTypeSet` becomes
+        // ambiguous and the `spawn_projectile_visuals` ordering below stays legal.
+        add_core_combat_systems(app, in_combat_scene, in_state(GameState::PlayMatch));
 
         // SCHEDULES: the sim runs in `FixedUpdate`, visuals in `Update`.
         //
@@ -153,22 +245,35 @@ impl Plugin for StatesPlugin {
         // The rule: anything that affects the SIMULATION belongs in
         // `FixedUpdate` with a real phase constraint. `Update` is for systems
         // that should run once per rendered frame.
+        // Camera drag/zoom/pan is split out of the match-chrome block below and
+        // widened, so the Animation Sandbox gets real camera control rather than
+        // only its framing presets — you cannot judge an animation from four
+        // fixed angles. One registration, widened, so no `SystemTypeSet` becomes
+        // ambiguous (see `add_core_combat_systems`).
         app.add_systems(
                 Update,
                 (
-                    play_match::handle_time_controls,
                     play_match::handle_camera_input,
+                    play_match::update_camera_position,
+                )
+                    .chain()
+                    .run_if(in_combat_scene),
+            )
+            .add_systems(
+                Update,
+                (
+                    play_match::handle_time_controls,
                     // pick_selected_combatant consumes the pending_pick flag set
                     // by handle_camera_input on click-release; must run after it.
                     play_match::pick_selected_combatant,
                     // sync_selection_ring spawns/despawns the ring when the
                     // Selection resource changes — runs after picking.
                     play_match::sync_selection_ring,
-                    play_match::update_camera_position,
                     play_match::animate_gate_bars,
                     play_match::update_play_match,
                 )
                     .chain()
+                    .after(play_match::handle_camera_input)
                     .run_if(in_state(GameState::PlayMatch)),
             )
             // Graphical-only, but it must run IN the sim schedule: it attaches
@@ -184,7 +289,7 @@ impl Plugin for StatesPlugin {
                     .in_set(CombatSystemPhase::CombatAndMovement)
                     .after(play_match::process_channeling)
                     .before(play_match::move_projectiles)
-                    .run_if(in_state(GameState::PlayMatch)),
+                    .run_if(in_combat_scene),
             )
             // Match end is a SIM decision, so it belongs on the sim clock. In
             // `Update` it was evaluated once per rendered frame — coarser than a
@@ -208,7 +313,7 @@ impl Plugin for StatesPlugin {
                 FixedUpdate,
                 play_match::consume_swing_signals
                     .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_state(GameState::PlayMatch)),
+                    .run_if(in_combat_scene),
             )
             // Weapon swing animation + cosmetic arrows: per-rendered-frame
             // cosmetic transforms, ordinary Update visual group.
@@ -220,7 +325,7 @@ impl Plugin for StatesPlugin {
                     play_match::update_weapon_stealth_fade,
                 )
                     .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_state(GameState::PlayMatch)),
+                    .run_if(in_combat_scene),
             )
             // Cast-ending signal consumption: same rationale as
             // `consume_swing_signals` above — FixedUpdate can tick several
@@ -232,7 +337,7 @@ impl Plugin for StatesPlugin {
                 FixedUpdate,
                 play_match::consume_cast_ending_signals
                     .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_state(GameState::PlayMatch)),
+                    .run_if(in_combat_scene),
             )
             // Casting orb (gathering-orb cast animation): spawn/animate/motes/
             // cleanup — separate group to avoid tuple size limits. `.chain()`
@@ -251,7 +356,7 @@ impl Plugin for StatesPlugin {
                 )
                     .chain()
                     .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_state(GameState::PlayMatch)),
+                    .run_if(in_combat_scene),
             )
             // Combat resolution, death, and visual effects (after core combat)
             .add_systems(
@@ -271,19 +376,43 @@ impl Plugin for StatesPlugin {
                     play_match::animate_orb_consumption,    // Orb pickup shrink/move animation
                     play_match::update_shield_bubbles,      // Spawn/despawn shield bubbles
                     play_match::follow_shield_bubbles,      // Update bubble positions
-                    play_match::update_polymorph_visuals,   // Cuboid mesh when polymorphed
+                    // Polymorph BEFORE Fear, chained so a sync point flushes
+                    // PolymorphedVisual before Fear evaluates its
+                    // `Without<PolymorphedVisual>` filter. A unit hit by both on the
+                    // same frame would otherwise get BOTH markers (each insert is a
+                    // deferred Command the other can't see that frame) and then
+                    // deadlock — both treatments exclude a double-marked unit, so
+                    // neither could ever restore. Chaining keeps at most one marker
+                    // set (sheep wins the tie). See
+                    // tests/fear_visual_probes.rs::simultaneous_fear_and_polymorph_do_not_deadlock.
+                    (
+                        play_match::update_polymorph_visuals, // Sheep body swap when polymorphed
+                        play_match::update_fear_visuals,      // Shadow-husk tint when feared
+                    )
+                        .chain(),
+                    // Fear sub-effects nested to keep the outer tuple within Bevy's 20-limit.
+                    (
+                        play_match::update_fear_shroud,        // Breathing fear shroud pulse
+                        play_match::update_fear_mote_emitters, // Spawn rising fear motes per feared unit
+                        play_match::update_fear_motes,         // Float/fade fear motes
+                        play_match::cleanup_fear_motes,        // Despawn expired fear motes
+                        play_match::update_fear_flashes,       // Grow/fade apply flash
+                        play_match::cleanup_fear_flashes,      // Despawn expired fear flashes
+                        play_match::update_fear_shards,        // Fall/tumble/fade shroud shatter shards
+                        play_match::cleanup_fear_shards,       // Despawn expired shatter shards
+                    ),
                     play_match::spawn_flame_visuals,        // Visual meshes for flame particles
                     play_match::update_flame_particles,     // Move/fade flame particles
                 )
                     .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_state(GameState::PlayMatch)),
+                    .run_if(in_combat_scene),
             )
             // Pet mesh tilt must run after movement sets Y-facing rotation
             .add_systems(
                 Update,
                 play_match::apply_pet_mesh_tilt
                     .after(CombatSystemPhase::CombatAndMovement)
-                    .run_if(in_state(GameState::PlayMatch)),
+                    .run_if(in_combat_scene),
             )
             // Healing light column visual effects (separate group to avoid tuple size limits)
             .add_systems(
@@ -294,7 +423,7 @@ impl Plugin for StatesPlugin {
                     play_match::cleanup_expired_healing_lights, // Remove expired columns
                 )
                     .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_state(GameState::PlayMatch)),
+                    .run_if(in_combat_scene),
             )
             // Dispel burst visual effects (separate group to avoid tuple size limits)
             // Still used by Concussive Shot impact and Master's Call — NOT the dispel.
@@ -306,7 +435,19 @@ impl Plugin for StatesPlugin {
                     play_match::cleanup_expired_dispel_bursts, // Remove expired bursts
                 )
                     .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_state(GameState::PlayMatch)),
+                    .run_if(in_combat_scene),
+            )
+            // Transform puff visual effects (separate group to avoid tuple size limits)
+            // The cloud pop at both ends of a polymorph — graphical only.
+            .add_systems(
+                Update,
+                (
+                    play_match::spawn_transform_puff_visuals, // Attach cloud lobes to new puffs
+                    play_match::update_transform_puffs,       // Expand, rise and fade
+                    play_match::cleanup_expired_transform_puffs, // Remove expired puffs
+                )
+                    .after(CombatSystemPhase::CombatResolution)
+                    .run_if(in_combat_scene),
             )
             // Dispel ribbon visual effects (separate group to avoid tuple size limits)
             // The spiraling "you got cleansed" indicator — graphical only.
@@ -318,7 +459,7 @@ impl Plugin for StatesPlugin {
                     play_match::cleanup_expired_dispel_ribbons, // Remove expired ribbons
                 )
                     .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_state(GameState::PlayMatch)),
+                    .run_if(in_combat_scene),
             )
             // Psychic Scream burst visuals (separate group to avoid tuple size limits)
             .add_systems(
@@ -329,7 +470,7 @@ impl Plugin for StatesPlugin {
                     play_match::cleanup_expired_scream_bursts, // Remove expired bursts
                 )
                     .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_state(GameState::PlayMatch)),
+                    .run_if(in_combat_scene),
             )
             // Death Coil impact burst (separate group to avoid tuple size limits)
             .add_systems(
@@ -340,7 +481,7 @@ impl Plugin for StatesPlugin {
                     play_match::cleanup_expired_death_coil_bursts, // Remove expired bursts
                 )
                     .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_state(GameState::PlayMatch)),
+                    .run_if(in_combat_scene),
             )
             // Berserker Rage activation visuals (separate group to avoid tuple size limits)
             // The TBC-style black angry mask + red glow at the Warrior's head.
@@ -352,7 +493,7 @@ impl Plugin for StatesPlugin {
                     play_match::cleanup_expired_berserk_masks,  // Remove expired masks and glows
                 )
                     .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_state(GameState::PlayMatch)),
+                    .run_if(in_combat_scene),
             )
             // Unstable Affliction visuals: DoT glow, backlash burst, silenced text
             // (graphical only — never registered in headless systems.rs).
@@ -370,7 +511,7 @@ impl Plugin for StatesPlugin {
                     // plus the HUD aura icon — no bespoke floating text.
                 )
                     .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_state(GameState::PlayMatch)),
+                    .run_if(in_combat_scene),
             )
             // DoT drip indicators: green poison / red bleed drops on afflicted
             // targets (graphical only — never registered in headless systems.rs).
@@ -383,7 +524,7 @@ impl Plugin for StatesPlugin {
                     play_match::update_drips,                      // Fall, shrink, despawn
                 )
                     .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_state(GameState::PlayMatch)),
+                    .run_if(in_combat_scene),
             )
             // Windfury Totem proc effect: a spinning wind funnel around the melee
             // ally that just landed a bonus swing (graphical only — the marker is
@@ -396,7 +537,7 @@ impl Plugin for StatesPlugin {
                     play_match::cleanup_expired_windfury_tornados, // Despawn when expired
                 )
                     .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_state(GameState::PlayMatch)),
+                    .run_if(in_combat_scene),
             )
             // Drain Life beam visual effects (separate group to avoid tuple size limits)
             .add_systems(
@@ -409,7 +550,7 @@ impl Plugin for StatesPlugin {
                     play_match::cleanup_drain_life_beams,   // Remove beam when channel ends
                 )
                     .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_state(GameState::PlayMatch)),
+                    .run_if(in_combat_scene),
             )
             // Trap visual effects (ground circles + trigger bursts)
             .add_systems(
@@ -422,7 +563,7 @@ impl Plugin for StatesPlugin {
                     play_match::spawn_trap_launch_visuals,       // Glowing sphere on launched traps
                 )
                     .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_state(GameState::PlayMatch)),
+                    .run_if(in_combat_scene),
             )
             // Ice block + slow zone visual effects
             .add_systems(
@@ -437,7 +578,7 @@ impl Plugin for StatesPlugin {
                     play_match::update_totem_visuals,        // Pulse + fade out
                 )
                     .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_state(GameState::PlayMatch)),
+                    .run_if(in_combat_scene),
             )
             // Disengage trail + charge trail visual effects
             .add_systems(
@@ -449,14 +590,44 @@ impl Plugin for StatesPlugin {
                     play_match::update_and_cleanup_charge_trails,      // Fade + despawn
                 )
                     .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_state(GameState::PlayMatch)),
+                    .run_if(in_combat_scene),
             )
-            // Walking animation: vertical bob on moving combatants/pets.
-            // Must run after movement has settled so the post-movement XZ is read.
+            // Walking animation: vertical bob on moving combatants/pets, and
+            // the hop that replaces it while a unit is polymorphed. Must run
+            // after movement has settled so the post-movement XZ is read.
             .add_systems(
                 Update,
-                play_match::update_walk_animation
+                (
+                    play_match::update_walk_animation,
+                    play_match::update_sheep_hop,
+                    play_match::update_fear_run,
+                )
                     .after(CombatSystemPhase::CombatResolution)
+                    .run_if(in_combat_scene),
+            )
+            // Kill-target call watcher (banter, graphical-only). An explicit
+            // per-team diff of `MatchConfig`, NOT Bevy change detection —
+            // `ResMut` deref marks the whole resource changed whether or not a
+            // field moved, and `is_changed()` fires on the first run after
+            // insert (KTD4). Ordinary `Update`: it reads the config and the
+            // countdown's gate flag, touches no sim state, and only needs to
+            // run before the beat scheduler that consumes its queue.
+            .add_systems(
+                Update,
+                play_match::watch_kill_target_calls.run_if(in_state(GameState::PlayMatch)),
+            )
+            // Banter beat scheduler (graphical-only). Drains the watcher's
+            // queue, resolves an exchange per change, and spawns each beat's
+            // speech bubble as it falls due. Ordered `.after` the watcher so a
+            // call change is picked up on the frame it is detected — both
+            // systems take `ResMut<CallWatcher>`, so Bevy would otherwise
+            // serialise them in an arbitrary order and the opening exchange
+            // would sometimes start a frame late. It writes nothing but
+            // `SpeechBubble` entities, which no sim system reads.
+            .add_systems(
+                Update,
+                play_match::play_banter_beats
+                    .after(play_match::watch_kill_target_calls)
                     .run_if(in_state(GameState::PlayMatch)),
             )
             // UI rendering systems
@@ -468,6 +639,7 @@ impl Plugin for StatesPlugin {
                 // already shown this frame.
                 (
                     play_match::load_spell_icons,
+                    play_match::load_emoji_icons,
                     play_match::render_time_controls,
                     play_match::render_camera_controls,
                     play_match::render_combat_panel,
@@ -493,6 +665,19 @@ impl Plugin for StatesPlugin {
             .add_systems(
                 OnExit(GameState::PlayMatch),
                 play_match::reset_selection_on_exit,
+            )
+            // Back to the "never observed" sentinel so the next match reports
+            // its own opening call change, and so an unconsumed change cannot
+            // leak into the next match's queue.
+            .add_systems(
+                OnExit(GameState::PlayMatch),
+                play_match::reset_call_watcher_on_exit,
+            )
+            // Drop every queued beat, the scheduler clock, and the occurrence
+            // counters, so nothing carries into the next match.
+            .add_systems(
+                OnExit(GameState::PlayMatch),
+                play_match::reset_banter_scheduler_on_exit,
             )
             .add_systems(OnExit(GameState::PlayMatch), play_match::cleanup_play_match)
             // Results systems (defined in results_ui module)
