@@ -504,7 +504,7 @@ fn try_spell_lock(
     false
 }
 
-fn execute_spell_lock(
+pub(crate) fn execute_spell_lock(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     abilities: &AbilityDefinitions,

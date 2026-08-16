@@ -33,7 +33,7 @@ use super::super::play_match::components::{
 };
 use super::super::play_match::class_ai::hunter::spawn_trap;
 use super::super::play_match::class_ai::pet_ai::{
-    execute_boar_charge, execute_masters_call, execute_spider_web,
+    execute_boar_charge, execute_masters_call, execute_spell_lock, execute_spider_web,
 };
 use super::super::play_match::class_ai::shaman::{totem_spec, totem_spacing_offset};
 use super::super::play_match::spawn_pet;
@@ -203,10 +203,11 @@ fn mechanism_for(ability: AbilityType, config: &AbilityConfig) -> EntryFamily {
         // M3 — bespoke `*Pending` (resolvers run in the sandbox) and the two
         // movement instants (sandbox-owned dash driver, KTD6).
         DivineShield | BerserkerRage | HolyShock | DispelMagic | PaladinCleanse | Purge
-        | DevourMagic | Charge | Disengage => EntryFamily::Component,
-        // M4 — world-entity drops and pet-command dispatch.
+        | Charge | Disengage => EntryFamily::Component,
+        // M4 — world-entity drops and pet-dispatched abilities (Hunter pets +
+        // the Warlock's Felhunter), all driven by drive_sandbox_pet.
         AirTotem | WaterTotem | EarthTotem | FireTotem | FreezingTrap | FrostTrap | SpiderWeb
-        | BoarCharge | MastersCall => EntryFamily::Entity,
+        | BoarCharge | MastersCall | SpellLock | DevourMagic => EntryFamily::Entity,
         // M1 aura + a directly-spawned caster cosmetic.
         PsychicScream => EntryFamily::Residue,
         // Data-only (no application code) / no distinct visual beyond the swing.
@@ -248,6 +249,11 @@ pub fn entries_for_class(class: CharacterClass, defs: &AbilityDefinitions) -> Ve
             AbilityType::BoarCharge,
             AbilityType::MastersCall,
         ]);
+    }
+    // The Warlock's Felhunter has two abilities (Spell Lock, Devour Magic),
+    // likewise not in the shared class list — appended for the same reason.
+    if class == CharacterClass::Warlock {
+        abilities.extend([AbilityType::SpellLock, AbilityType::DevourMagic]);
     }
     let mut listings: Vec<EntryListing> = abilities
         .into_iter()
@@ -575,10 +581,7 @@ fn start_component_entry(
                 ));
             }
         }
-        AbilityType::DispelMagic
-        | AbilityType::PaladinCleanse
-        | AbilityType::Purge
-        | AbilityType::DevourMagic => {
+        AbilityType::DispelMagic | AbilityType::PaladinCleanse | AbilityType::Purge => {
             let target = dummy.unwrap_or(caster);
             let (log_prefix, removes_poison, heal_on_success): (
                 &'static str,
@@ -587,7 +590,6 @@ fn start_component_entry(
             ) = match ability {
                 AbilityType::PaladinCleanse => ("[CLEANSE]", true, None),
                 AbilityType::Purge => ("[PURGE]", false, None),
-                AbilityType::DevourMagic => ("[DEVOUR]", false, Some((caster, 20.0))),
                 _ => ("[DISPEL]", false, None),
             };
             commands.spawn((
@@ -682,7 +684,7 @@ fn start_entity_entry(
     // transport plays and that system takes over.
     if matches!(
         ability,
-        SpiderWeb | BoarCharge | MastersCall
+        SpiderWeb | BoarCharge | MastersCall | SpellLock | DevourMagic
     ) {
         return true;
     }
@@ -1128,6 +1130,10 @@ pub fn drive_sandbox_pet(
             }
             // Master's Call cleanses the owner (freedom), so it targets the caster.
             SandboxEntry::Ability(a @ AbilityType::MastersCall) => Some((PetType::Bird, a, caster)),
+            // The Warlock's Felhunter interrupts / devours the enemy.
+            SandboxEntry::Ability(a @ (AbilityType::SpellLock | AbilityType::DevourMagic)) => {
+                stage.dummy.map(|d| (PetType::Felhunter, a, d))
+            }
             _ => None,
         });
 
@@ -1167,6 +1173,31 @@ pub fn drive_sandbox_pet(
                 }
                 AbilityType::MastersCall => {
                     execute_masters_call(&mut commands, &mut combat_log, def, pet, &mut pet_combatant, target)
+                }
+                AbilityType::SpellLock => execute_spell_lock(
+                    &mut commands,
+                    &mut combat_log,
+                    &defs,
+                    pet,
+                    &mut pet_combatant,
+                    target,
+                    &def.name,
+                ),
+                // Devour Magic has no extracted executor (its logic is embedded
+                // in the AI's try_devour_magic), but its effect is a DispelPending
+                // with the Felhunter as dispeller — the same contract the other
+                // dispels spawn. The dummy's dispellable aura is staged in
+                // drive_playback (shared with the Warlock/Priest/Paladin dispels).
+                AbilityType::DevourMagic => {
+                    commands.spawn(DispelPending {
+                        target,
+                        dispeller: pet,
+                        log_prefix: "[DEVOUR]",
+                        caster_class: pet_combatant.class,
+                        heal_on_success: Some((pet, 20.0)),
+                        aura_type_filter: None,
+                        removes_poison: false,
+                    });
                 }
                 _ => {}
             }
@@ -1278,22 +1309,34 @@ mod tests {
     }
 
     #[test]
-    fn hunter_entries_include_the_pet_commands() {
+    fn pet_owning_classes_list_their_pet_abilities() {
         // Pet abilities aren't in get_class_abilities (they're the pet's), but
-        // the sandbox appends them so they're selectable and preview via the pet.
+        // the sandbox appends them so they're selectable and preview via a
+        // staged pet (drive_sandbox_pet).
         let defs = AbilityDefinitions::default();
-        let hunter = entries_for_class(CharacterClass::Hunter, &defs);
-        for ab in [
-            AbilityType::SpiderWeb,
-            AbilityType::BoarCharge,
-            AbilityType::MastersCall,
-        ] {
-            assert!(
-                hunter
-                    .iter()
-                    .any(|l| l.entry == SandboxEntry::Ability(ab) && l.family == EntryFamily::Entity),
-                "Hunter entries missing playable {ab:?}"
-            );
+        let cases = [
+            (
+                CharacterClass::Hunter,
+                &[
+                    AbilityType::SpiderWeb,
+                    AbilityType::BoarCharge,
+                    AbilityType::MastersCall,
+                ][..],
+            ),
+            (
+                CharacterClass::Warlock,
+                &[AbilityType::SpellLock, AbilityType::DevourMagic][..],
+            ),
+        ];
+        for (class, pet_abilities) in cases {
+            let entries = entries_for_class(class, &defs);
+            for &ab in pet_abilities {
+                assert!(
+                    entries.iter().any(|l| l.entry == SandboxEntry::Ability(ab)
+                        && l.family == EntryFamily::Entity),
+                    "{class:?} entries missing playable {ab:?}"
+                );
+            }
         }
     }
 
