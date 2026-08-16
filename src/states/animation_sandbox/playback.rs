@@ -28,9 +28,10 @@ use super::super::play_match::components::{
     ActiveAuras, AuraPending, AuraType, BerserkerRagePending, Celebrating, CastingState, ChannelingState,
     ChargingState, Combatant, DRTracker, DeathAnimation, DisengagingState, DispelPending,
     DivineShieldPending, HolyShockDamagePending, HolyShockHealPending, MatchResults,
-    PlayMatchEntity, ScreamBurst, VictoryCelebration, VisualBody,
+    PlayMatchEntity, ScreamBurst, Totem, TotemElement, VictoryCelebration, VisualBody,
 };
-use super::super::play_match::{DISENGAGE_SPEED, MELEE_RANGE};
+use super::super::play_match::class_ai::shaman::{totem_spec, totem_spacing_offset};
+use super::super::play_match::{DISENGAGE_SPEED, MELEE_RANGE, TOTEM_DURATION, TOTEM_RADIUS};
 use super::{SandboxEntity, SandboxStage};
 
 /// Seconds the match's victory clock is seeded with when the sandbox plays the
@@ -143,6 +144,7 @@ impl EntryFamily {
             EntryFamily::Cast
                 | EntryFamily::Channel
                 | EntryFamily::Component
+                | EntryFamily::Entity
                 | EntryFamily::Residue
                 | EntryFamily::Body
         )
@@ -378,7 +380,7 @@ pub fn drive_playback(
             spell_power: c.spell_power,
             crit_chance: c.crit_chance,
         });
-        if start_entry(&mut commands, &playback, caster, stage.dummy, &defs, caster_info) {
+        if start_entry(&mut commands, &playback, caster, stage.caster_home, stage.dummy, &defs, caster_info) {
             playback.playing = true;
             playback.elapsed = 0.0;
             playback.duration = entry_duration(&playback, &defs);
@@ -459,7 +461,9 @@ fn entry_duration(playback: &SandboxPlayback, defs: &AbilityDefinitions) -> f32 
             let holds = config.applies_aura.is_some()
                 || matches!(
                     playback.family,
-                    Some(EntryFamily::Component) | Some(EntryFamily::Residue)
+                    Some(EntryFamily::Component)
+                        | Some(EntryFamily::Residue)
+                        | Some(EntryFamily::Entity)
                 );
             if let Some(channel) = config.channel_duration {
                 channel
@@ -598,12 +602,58 @@ fn start_component_entry(
     true
 }
 
+/// Starts an M4 (entity-spawn) entry. Totems (and traps, U5b) are world-entity
+/// drops whose existing resolvers / visual systems run in the sandbox; they are
+/// tagged `PlayMatchEntity` so `clear_body_state`'s leftover sweep reclaims them
+/// between passes. Spawned from the SAME data gameplay uses (`shaman::totem_spec`)
+/// so the preview can never drift from the real totem.
+fn start_entity_entry(
+    commands: &mut Commands,
+    ability: AbilityType,
+    caster: Entity,
+    caster_home: Vec3,
+    caster_info: Option<CasterInfo>,
+) -> bool {
+    let Some(info) = caster_info else {
+        return false;
+    };
+    use AbilityType::*;
+    let element = match ability {
+        AirTotem => Some(TotemElement::Air),
+        WaterTotem => Some(TotemElement::Water),
+        EarthTotem => Some(TotemElement::Earth),
+        FireTotem => Some(TotemElement::Fire),
+        _ => None,
+    };
+    if let Some(element) = element {
+        let (_, aura_type, magnitude, spell_school) = totem_spec(element);
+        let drop = caster_home + totem_spacing_offset(element);
+        commands.spawn((
+            Transform::from_translation(Vec3::new(drop.x, 0.0, drop.z)),
+            Totem {
+                owner_team: info.team,
+                owner: caster,
+                element,
+                radius: TOTEM_RADIUS,
+                duration_remaining: TOTEM_DURATION,
+                aura_type,
+                magnitude,
+                spell_school,
+            },
+            PlayMatchEntity,
+        ));
+        return true;
+    }
+    false
+}
+
 /// Starts the entry. Returns false when it could not start (no target for an
 /// ability that needs one, or a mechanism whose start path is not wired yet).
 fn start_entry(
     commands: &mut Commands,
     playback: &SandboxPlayback,
     caster: Entity,
+    caster_home: Vec3,
     dummy: Option<Entity>,
     defs: &AbilityDefinitions,
     caster_info: Option<CasterInfo>,
@@ -648,6 +698,10 @@ fn start_entry(
                 // M3 — bespoke `*Pending` / movement components.
                 Some(EntryFamily::Component) => {
                     start_component_entry(commands, ability, caster, dummy, caster_info)
+                }
+                // M4 — world-entity drops (totems, traps) and pet commands.
+                Some(EntryFamily::Entity) => {
+                    start_entity_entry(commands, ability, caster, caster_home, caster_info)
                 }
                 // Residue (Psychic Scream): M1 applies the fear aura to the
                 // dummy, but the caster-centered burst is spawned inline in the
