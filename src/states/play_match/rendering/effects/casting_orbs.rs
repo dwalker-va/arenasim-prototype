@@ -118,6 +118,19 @@ pub fn spawn_casting_orbs(
             None => def.cast_time,
         };
 
+        // A casting orb represents cast-time WINDUP (it grows with progress), so
+        // an instant (0 cast time) must not show one. This matters in two places:
+        // the Animation Sandbox routes instants through a synthetic 0-cast
+        // `CastingState` for effect application (a physical instant like Mortal
+        // Strike getting a magical cast flash is exactly wrong), and in real
+        // matches Frost Shock is the one ability coded as a 0-cast `CastingState`
+        // — it should not blip a windup orb either. Skip the 0-total Growing case
+        // everywhere; hard casts (orb) and channels (Holding phase) are untouched.
+        // Graphical-only, so headless byte-identity is unaffected.
+        if matches!(phase, CastingOrbPhase::Growing) && cast_total <= 0.0 {
+            continue;
+        }
+
         // Real initial translation (not the world origin) so a mote spawned
         // before the first `update_casting_orbs` tick still streams toward
         // the caster instead of Vec3::ZERO.

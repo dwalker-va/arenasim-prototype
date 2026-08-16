@@ -194,6 +194,7 @@ impl Plugin for StatesPlugin {
                     animation_sandbox::playback::sustain_staged_units,
                     animation_sandbox::playback::drive_playback,
                     animation_sandbox::playback::position_caster,
+                    animation_sandbox::playback::drive_sandbox_dash,
                     animation_sandbox::ui::sandbox_ui,
                     animation_sandbox::ui::apply_camera_preset,
                 )
@@ -647,11 +648,21 @@ impl Plugin for StatesPlugin {
                     play_match::render_victory_celebration,
                     play_match::render_health_bars,
                     play_match::render_team_frames,
-                    play_match::render_floating_combat_text,
                     play_match::render_speech_bubbles,
                 )
                     .chain()
                     .run_if(in_state(GameState::PlayMatch)),
+            )
+            // Floating combat text renders in the sandbox too (not just matches):
+            // it is world-space damage/heal feedback, not HUD chrome, and for
+            // FCT-only abilities (Holy Shock, the melee strikes) it is the only
+            // visible confirmation that the hit landed. R13 excludes the HUD /
+            // team frames / combat log / speech bubbles from the sandbox — not
+            // this. `update_floating_combat_text` already runs under
+            // `in_combat_scene`; this widens the egui draw to match.
+            .add_systems(
+                Update,
+                play_match::render_floating_combat_text.run_if(in_combat_scene),
             )
             // Selection ring follow & cleanup — runs after combat resolution
             // so the ring tracks post-movement positions on the same frame
