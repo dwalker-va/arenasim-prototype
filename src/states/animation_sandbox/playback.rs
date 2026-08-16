@@ -237,7 +237,19 @@ pub struct EntryListing {
 /// loaded [`AbilityDefinitions`], so the list tracks the config data rather
 /// than a hand-maintained copy of it.
 pub fn entries_for_class(class: CharacterClass, defs: &AbilityDefinitions) -> Vec<EntryListing> {
-    let mut listings: Vec<EntryListing> = super::super::view_combatant_ui::get_class_abilities(class)
+    let mut abilities = super::super::view_combatant_ui::get_class_abilities(class);
+    // The Hunter's three pet-command abilities are the PET's, so they are not in
+    // `get_class_abilities` (the View Combatant screen lists the Hunter's own
+    // abilities). The sandbox previews them via the staged pet, so append them
+    // here — sandbox-only, without touching the shared class-ability list.
+    if class == CharacterClass::Hunter {
+        abilities.extend([
+            AbilityType::SpiderWeb,
+            AbilityType::BoarCharge,
+            AbilityType::MastersCall,
+        ]);
+    }
+    let mut listings: Vec<EntryListing> = abilities
         .into_iter()
         .filter_map(|ability| {
             let config = defs.get(&ability)?;
@@ -1263,6 +1275,26 @@ mod tests {
         assert_eq!(unsupported.len(), 2, "unexpected Unsupported set: {unsupported:?}");
         assert!(unsupported.contains(&AbilityType::WindShear));
         assert!(unsupported.contains(&AbilityType::HeroicStrike));
+    }
+
+    #[test]
+    fn hunter_entries_include_the_pet_commands() {
+        // Pet abilities aren't in get_class_abilities (they're the pet's), but
+        // the sandbox appends them so they're selectable and preview via the pet.
+        let defs = AbilityDefinitions::default();
+        let hunter = entries_for_class(CharacterClass::Hunter, &defs);
+        for ab in [
+            AbilityType::SpiderWeb,
+            AbilityType::BoarCharge,
+            AbilityType::MastersCall,
+        ] {
+            assert!(
+                hunter
+                    .iter()
+                    .any(|l| l.entry == SandboxEntry::Ability(ab) && l.family == EntryFamily::Entity),
+                "Hunter entries missing playable {ab:?}"
+            );
+        }
     }
 
     #[test]
