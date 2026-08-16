@@ -28,8 +28,9 @@ use super::super::play_match::components::{
     ActiveAuras, AuraPending, AuraType, BerserkerRagePending, Celebrating, CastingState, ChannelingState,
     ChargingState, Combatant, DRTracker, DeathAnimation, DisengagingState, DispelPending,
     DivineShieldPending, HolyShockDamagePending, HolyShockHealPending, MatchResults,
-    PlayMatchEntity, ScreamBurst, Totem, TotemElement, VictoryCelebration, VisualBody,
+    PlayMatchEntity, ScreamBurst, Totem, TotemElement, TrapType, VictoryCelebration, VisualBody,
 };
+use super::super::play_match::class_ai::hunter::spawn_trap;
 use super::super::play_match::class_ai::shaman::{totem_spec, totem_spacing_offset};
 use super::super::play_match::{DISENGAGE_SPEED, MELEE_RANGE, TOTEM_DURATION, TOTEM_RADIUS};
 use super::{SandboxEntity, SandboxStage};
@@ -644,6 +645,20 @@ fn start_entity_entry(
         ));
         return true;
     }
+
+    // Traps — thrown toward the dummy's staged spot (mirror across origin), so
+    // the launch arc reads. Reuses hunter::spawn_trap (same code gameplay uses).
+    let trap_type = match ability {
+        FreezingTrap => Some(TrapType::Freezing),
+        FrostTrap => Some(TrapType::Frost),
+        _ => None,
+    };
+    if let Some(trap_type) = trap_type {
+        let landing = Vec3::new(-caster_home.x, 0.0, 0.0);
+        spawn_trap(commands, caster, info.team, caster_home, landing, trap_type);
+        return true;
+    }
+
     false
 }
 
