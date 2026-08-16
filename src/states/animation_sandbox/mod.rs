@@ -103,6 +103,10 @@ impl Default for SandboxConfig {
 pub struct SandboxStage {
     pub caster: Option<Entity>,
     pub dummy: Option<Entity>,
+    /// The Hunter pet spawned on demand for a pet-command entry (Spider Web /
+    /// Boar Charge / Master's Call). Bound once the spawn resolves, then driven
+    /// and torn down by `drive_sandbox_pet`. `None` outside a pet-command entry.
+    pub pet: Option<Entity>,
     /// Where the caster was staged. The walk-bob entry drives the caster around
     /// the floor (the bob keys off real movement), so its position has to be
     /// restorable — otherwise the next entry plays off-centre and the camera
@@ -307,7 +311,15 @@ pub fn restage_on_config_change(
         return;
     }
 
-    for entity in stage.caster.take().into_iter().chain(stage.dummy.take()) {
+    // Despawn the caster, dummy, and any on-demand pet before restaging the new
+    // class (a pet outlives its Hunter owner otherwise).
+    for entity in stage
+        .caster
+        .take()
+        .into_iter()
+        .chain(stage.dummy.take())
+        .chain(stage.pet.take())
+    {
         if let Ok(mut e) = commands.get_entity(entity) {
             e.despawn();
         }

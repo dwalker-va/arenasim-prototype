@@ -27,12 +27,18 @@ use super::super::play_match::ability_config::{AbilityConfig, AbilityDefinitions
 use super::super::play_match::components::{
     ActiveAuras, AuraPending, AuraType, BerserkerRagePending, Celebrating, CastingState, ChannelingState,
     ChargingState, Combatant, DRTracker, DeathAnimation, DisengagingState, DispelPending,
-    DivineShieldPending, HolyShockDamagePending, HolyShockHealPending, MatchResults,
-    PlayMatchEntity, ScreamBurst, Totem, TotemElement, TrapType, VictoryCelebration, VisualBody,
+    DivineShieldPending, HolyShockDamagePending, HolyShockHealPending, MatchResults, Pet,
+    PetType, PlayMatchEntity, ScreamBurst, Totem, TotemElement, TrapType, VictoryCelebration,
+    VisualBody,
 };
 use super::super::play_match::class_ai::hunter::spawn_trap;
+use super::super::play_match::class_ai::pet_ai::{
+    execute_boar_charge, execute_masters_call, execute_spider_web,
+};
 use super::super::play_match::class_ai::shaman::{totem_spec, totem_spacing_offset};
+use super::super::play_match::spawn_pet;
 use super::super::play_match::{DISENGAGE_SPEED, MELEE_RANGE, TOTEM_DURATION, TOTEM_RADIUS};
+use crate::combat::log::CombatLog;
 use super::{SandboxEntity, SandboxStage};
 
 /// Seconds the match's victory clock is seeded with when the sandbox plays the
@@ -659,6 +665,16 @@ fn start_entity_entry(
         return true;
     }
 
+    // Pet commands are driven by `drive_sandbox_pet` (it needs `CombatLog` + the
+    // spawned pet, unavailable here) — just mark the entry started so the
+    // transport plays and that system takes over.
+    if matches!(
+        ability,
+        SpiderWeb | BoarCharge | MastersCall
+    ) {
+        return true;
+    }
+
     false
 }
 
@@ -1005,51 +1021,158 @@ pub fn drive_sandbox_dash(
         Option<&DisengagingState>,
     )>,
 ) {
-    let Some(caster) = stage.caster else { return };
-    // Copy the charge target's position out before the mutable borrow below.
+    // Copy the charge target's position out before the mutable borrows below.
     let charge_target_pos = stage
         .dummy
         .and_then(|d| movers.get(d).ok())
         .map(|(t, ..)| t.translation);
-
     let dt = time.delta_secs();
-    let Ok((mut transform, combatant, charging, disengaging)) = movers.get_mut(caster) else {
+
+    // Both the caster (Charge / Disengage) and the Hunter pet (Boar Charge) can
+    // carry a dash component whose real driver (`move_to_target`) is gated off
+    // here, so this drives whichever of the two has one this frame.
+    for who in [stage.caster, stage.pet].into_iter().flatten() {
+        let Ok((mut transform, combatant, charging, disengaging)) = movers.get_mut(who) else {
+            continue;
+        };
+
+        if charging.is_some() {
+            let Some(target_pos) = charge_target_pos else {
+                commands.entity(who).remove::<ChargingState>();
+                continue;
+            };
+            let from = transform.translation;
+            let flat = Vec3::new(target_pos.x - from.x, 0.0, target_pos.z - from.z);
+            if flat.length() <= MELEE_RANGE {
+                commands.entity(who).remove::<ChargingState>();
+                continue;
+            }
+            let dir = flat.normalize_or_zero();
+            if dir != Vec3::ZERO {
+                let speed = combatant.base_movement_speed * 4.0; // CHARGE_SPEED_MULTIPLIER
+                transform.translation = from + dir * speed * dt;
+                transform.rotation = Quat::from_rotation_y(dir.x.atan2(dir.z));
+            }
+        } else if let Some(dis) = disengaging {
+            if dis.distance_remaining > 0.0 {
+                let amount = DISENGAGE_SPEED * dt;
+                transform.translation += dis.direction * amount;
+                let remaining = dis.distance_remaining - amount;
+                if remaining <= 0.0 {
+                    commands.entity(who).remove::<DisengagingState>();
+                } else {
+                    commands.entity(who).try_insert(DisengagingState {
+                        direction: dis.direction,
+                        distance_remaining: remaining,
+                    });
+                }
+            } else {
+                commands.entity(who).remove::<DisengagingState>();
+            }
+        }
+    }
+}
+
+/// Sandbox-owned pet driver for the three pet-command abilities (KTD6): Spider
+/// Web, Boar Charge, Master's Call. Their consumer `pet_ai_system` is
+/// AI-decision-gated off here, so this spawns the matching pet on demand, fires
+/// the SAME `execute_*` helper gameplay uses (single source of truth), and lets
+/// `drive_sandbox_dash` drive Boar Charge's dash. The pet is tagged
+/// `PlayMatchEntity`, so `clear_body_state`'s leftover sweep reclaims it between
+/// passes; this rebinds/respawns it each pass.
+#[allow(clippy::too_many_arguments)]
+pub fn drive_sandbox_pet(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut combat_log: ResMut<CombatLog>,
+    playback: Res<SandboxPlayback>,
+    mut stage: ResMut<SandboxStage>,
+    defs: Res<AbilityDefinitions>,
+    mut combatants: Query<&mut Combatant>,
+    positions: Query<&Transform>,
+    pets: Query<(Entity, &Pet)>,
+) {
+    let Some(caster) = stage.caster else { return };
+
+    // A bound pet may have been swept between passes — drop the stale handle.
+    if let Some(pet) = stage.pet {
+        if pets.get(pet).is_err() {
+            stage.pet = None;
+        }
+    }
+
+    // Which pet-command ability is playing, and the pet type + target it needs.
+    let desired: Option<(PetType, AbilityType, Entity)> = playback
+        .playing
+        .then_some(playback.selected)
+        .flatten()
+        .and_then(|entry| match entry {
+            SandboxEntry::Ability(a @ AbilityType::SpiderWeb) => {
+                stage.dummy.map(|d| (PetType::Spider, a, d))
+            }
+            SandboxEntry::Ability(a @ AbilityType::BoarCharge) => {
+                stage.dummy.map(|d| (PetType::Boar, a, d))
+            }
+            // Master's Call cleanses the owner (freedom), so it targets the caster.
+            SandboxEntry::Ability(a @ AbilityType::MastersCall) => Some((PetType::Bird, a, caster)),
+            _ => None,
+        });
+
+    let Some((pet_type, ability, target)) = desired else {
+        // Not a pet-command entry — tear down any lingering pet.
+        if let Some(pet) = stage.pet.take() {
+            if let Ok(mut e) = commands.get_entity(pet) {
+                e.despawn();
+            }
+        }
         return;
     };
 
-    if charging.is_some() {
-        let Some(target_pos) = charge_target_pos else {
-            commands.entity(caster).remove::<ChargingState>();
-            return;
-        };
-        let from = transform.translation;
-        let flat = Vec3::new(target_pos.x - from.x, 0.0, target_pos.z - from.z);
-        if flat.length() <= MELEE_RANGE {
-            commands.entity(caster).remove::<ChargingState>();
-            return;
-        }
-        let dir = flat.normalize_or_zero();
-        if dir != Vec3::ZERO {
-            let speed = combatant.base_movement_speed * 4.0; // CHARGE_SPEED_MULTIPLIER
-            transform.translation = from + dir * speed * dt;
-            transform.rotation = Quat::from_rotation_y(dir.x.atan2(dir.z));
-        }
-    } else if let Some(dis) = disengaging {
-        if dis.distance_remaining > 0.0 {
-            let amount = DISENGAGE_SPEED * dt;
-            transform.translation += dis.direction * amount;
-            let remaining = dis.distance_remaining - amount;
-            if remaining <= 0.0 {
-                commands.entity(caster).remove::<DisengagingState>();
-            } else {
-                commands.entity(caster).try_insert(DisengagingState {
-                    direction: dis.direction,
-                    distance_remaining: remaining,
-                });
+    // Already spawned + fired; drive_sandbox_dash owns any Boar Charge dash.
+    if stage.pet.is_some() {
+        return;
+    }
+
+    if let Some((pet, _)) = pets.iter().find(|(_, p)| p.owner == caster) {
+        // The spawn resolved — bind it and fire the ability ONCE from the same
+        // code gameplay uses.
+        let Some(def) = defs.get(&ability) else { return };
+        let pet_pos = positions.get(pet).map(|t| t.translation).unwrap_or(stage.caster_home);
+        if let Ok(mut pet_combatant) = combatants.get_mut(pet) {
+            match ability {
+                AbilityType::SpiderWeb => execute_spider_web(
+                    &mut commands,
+                    &mut combat_log,
+                    def,
+                    pet,
+                    &mut pet_combatant,
+                    pet_pos,
+                    target,
+                ),
+                AbilityType::BoarCharge => {
+                    execute_boar_charge(&mut commands, &mut combat_log, def, pet, &mut pet_combatant, target)
+                }
+                AbilityType::MastersCall => {
+                    execute_masters_call(&mut commands, &mut combat_log, def, pet, &mut pet_combatant, target)
+                }
+                _ => {}
             }
-        } else {
-            commands.entity(caster).remove::<DisengagingState>();
+            stage.pet = Some(pet);
         }
+    } else if let Ok(caster_combatant) = combatants.get(caster) {
+        // Spawn the matching pet at the caster; bound + fired next frame (the
+        // spawn is not queryable this frame).
+        spawn_pet(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            &mut combat_log,
+            caster,
+            caster_combatant,
+            stage.caster_home,
+            pet_type,
+        );
     }
 }
 
