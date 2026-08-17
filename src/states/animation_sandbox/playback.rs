@@ -1309,6 +1309,31 @@ mod tests {
     }
 
     #[test]
+    fn every_ability_is_a_sandbox_entry_in_some_class() {
+        // Guard against the silent-drop gap: `get_class_abilities` is
+        // hand-maintained and the sandbox iterates it (plus the pet appends),
+        // NOT the AbilityType enum — so a new variant that is not wired into
+        // some class's list is un-previewable with no compile error. This test
+        // is that missing check (the pattern tests/registration_audit.rs uses
+        // for system wiring). If it fails, add the ability to the right class in
+        // `view_combatant_ui::get_class_abilities`, or — for a pet ability — to
+        // the pet appends in `entries_for_class`.
+        let defs = AbilityDefinitions::default();
+        for (&ability, _) in defs.iter() {
+            let listed = CharacterClass::all().iter().any(|&class| {
+                entries_for_class(class, &defs)
+                    .iter()
+                    .any(|l| l.entry == SandboxEntry::Ability(ability))
+            });
+            assert!(
+                listed,
+                "{ability:?} is not a sandbox entry for any class — wire it into \
+                 get_class_abilities or the entries_for_class pet appends"
+            );
+        }
+    }
+
+    #[test]
     fn pet_owning_classes_list_their_pet_abilities() {
         // Pet abilities aren't in get_class_abilities (they're the pet's), but
         // the sandbox appends them so they're selectable and preview via a
