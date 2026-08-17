@@ -54,3 +54,5 @@ mod weapon_swing;
 pub use weapon_swing::*;
 mod casting_orbs;
 pub use casting_orbs::*;
+mod lightning_bolt;
+pub use lightning_bolt::*;

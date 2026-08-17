@@ -1143,7 +1143,13 @@
             damage_base_max: 24.0,
             damage_coefficient: 0.6,
             damage_scales_with: SpellPower,
-            projectile_speed: Some(40.0),
+            // Instant-strike delivery (no projectile). projectile_speed: None routes
+            // Lightning Bolt through the instant-effect completion path in
+            // combat_core/casting.rs, so damage lands the moment the cast completes
+            // (alive + line-of-sight completion gates and mana-at-completion preserved),
+            // with no in-flight travel. projectile_visuals is retained ONLY to tint the
+            // in-hand cast orb via cast_color(); no projectile is spawned from it.
+            projectile_speed: None,
             projectile_visuals: Some((
                 color: (0.4, 0.7, 1.0),
                 emissive: (0.7, 0.9, 1.6),
