@@ -456,6 +456,59 @@ fn concussive_target(
 }
 
 /// Attempt to place a trap at a specific position (or at the Hunter's feet).
+/// Spawn a trap at `landing` from `my_pos`: a thrown `TrapLaunchProjectile` when
+/// far enough (`> TRAP_LAUNCH_MIN_RANGE`), else a placed `Trap`. Extracted from
+/// `try_place_trap_at` (pure spawn, behavior-preserving) and made `pub(crate)`
+/// so the Animation Sandbox drops a faithful trap from the SAME code gameplay
+/// uses. The caller owns gating, clamping, logging, and resource costs.
+pub(crate) fn spawn_trap(
+    commands: &mut Commands,
+    owner: Entity,
+    owner_team: u8,
+    my_pos: Vec3,
+    landing: Vec3,
+    trap_type: TrapType,
+) {
+    let landing = Vec3::new(landing.x, 0.0, landing.z);
+    let distance = Vec3::new(my_pos.x, 0.0, my_pos.z).distance(landing);
+
+    if distance > TRAP_LAUNCH_MIN_RANGE {
+        let origin = Vec3::new(my_pos.x, 1.5, my_pos.z);
+        let direction = (landing - origin).normalize_or_zero();
+        let rotation = if direction != Vec3::ZERO {
+            Quat::from_rotation_y(direction.x.atan2(direction.z))
+        } else {
+            Quat::IDENTITY
+        };
+        commands.spawn((
+            Transform::from_translation(origin).with_rotation(rotation),
+            TrapLaunchProjectile {
+                trap_type,
+                owner_team,
+                owner,
+                origin,
+                landing_position: landing,
+                total_distance: distance,
+                distance_traveled: 0.0,
+            },
+            PlayMatchEntity,
+        ));
+    } else {
+        commands.spawn((
+            Transform::from_translation(landing),
+            Trap {
+                trap_type,
+                owner_team,
+                owner,
+                arm_timer: TRAP_ARM_DELAY,
+                trigger_radius: TRAP_TRIGGER_RADIUS,
+                triggered: false,
+            },
+            PlayMatchEntity,
+        ));
+    }
+}
+
 fn try_place_trap_at(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -493,50 +546,8 @@ fn try_place_trap_at(
 
     // Clamp to octagonal arena bounds (midpoint can land outside corners)
     let position = crate::states::play_match::combat_core::clamp_to_arena(bounds, position);
-
-    let trap_name = trap_type.name();
-
-    let distance = Vec3::new(my_pos.x, 0.0, my_pos.z)
-        .distance(Vec3::new(position.x, 0.0, position.z));
-
-    if distance > TRAP_LAUNCH_MIN_RANGE {
-        let origin = Vec3::new(my_pos.x, 1.5, my_pos.z);
-        let landing = Vec3::new(position.x, 0.0, position.z);
-        let direction = (landing - origin).normalize_or_zero();
-        let rotation = if direction != Vec3::ZERO {
-            Quat::from_rotation_y(direction.x.atan2(direction.z))
-        } else {
-            Quat::IDENTITY
-        };
-        commands.spawn((
-            Transform::from_translation(origin).with_rotation(rotation),
-            TrapLaunchProjectile {
-                trap_type,
-                owner_team: combatant.team,
-                owner: entity,
-                origin,
-                landing_position: landing,
-                total_distance: distance,
-                distance_traveled: 0.0,
-            },
-            PlayMatchEntity,
-        ));
-        log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, trap_name, None, "uses");
-    } else {
-        commands.spawn((
-            Transform::from_translation(Vec3::new(position.x, 0.0, position.z)),
-            Trap {
-                trap_type,
-                owner_team: combatant.team,
-                owner: entity,
-                arm_timer: TRAP_ARM_DELAY,
-                trigger_radius: TRAP_TRIGGER_RADIUS,
-                triggered: false,
-            },
-            PlayMatchEntity,
-        ));
-        log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, trap_name, None, "uses");
-    }
+    spawn_trap(commands, entity, combatant.team, my_pos, position, trap_type);
+    log_ability_use(combat_log, combatant.team, combatant.slot, combatant.class, trap_type.name(), None, "uses");
 
     combatant.current_mana -= def.mana_cost;
     combatant.ability_cooldowns.insert(ability, def.cooldown);

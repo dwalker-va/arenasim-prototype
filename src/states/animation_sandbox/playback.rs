@@ -27,10 +27,18 @@ use super::super::play_match::ability_config::{AbilityConfig, AbilityDefinitions
 use super::super::play_match::components::{
     ActiveAuras, AuraPending, AuraType, BerserkerRagePending, Celebrating, CastingState, ChannelingState,
     ChargingState, Combatant, DRTracker, DeathAnimation, DisengagingState, DispelPending,
-    DivineShieldPending, HolyShockDamagePending, HolyShockHealPending, MatchResults,
-    PlayMatchEntity, ScreamBurst, VictoryCelebration, VisualBody,
+    DivineShieldPending, HolyShockDamagePending, HolyShockHealPending, MatchResults, Pet,
+    PetType, PlayMatchEntity, ScreamBurst, Totem, TotemElement, TrapType, VictoryCelebration,
+    VisualBody,
 };
-use super::super::play_match::{DISENGAGE_SPEED, MELEE_RANGE};
+use super::super::play_match::class_ai::hunter::spawn_trap;
+use super::super::play_match::class_ai::pet_ai::{
+    execute_boar_charge, execute_masters_call, execute_spell_lock, execute_spider_web,
+};
+use super::super::play_match::class_ai::shaman::{totem_spec, totem_spacing_offset};
+use super::super::play_match::spawn_pet;
+use super::super::play_match::{DISENGAGE_SPEED, MELEE_RANGE, TOTEM_DURATION, TOTEM_RADIUS};
+use crate::combat::log::CombatLog;
 use super::{SandboxEntity, SandboxStage};
 
 /// Seconds the match's victory clock is seeded with when the sandbox plays the
@@ -143,6 +151,7 @@ impl EntryFamily {
             EntryFamily::Cast
                 | EntryFamily::Channel
                 | EntryFamily::Component
+                | EntryFamily::Entity
                 | EntryFamily::Residue
                 | EntryFamily::Body
         )
@@ -194,10 +203,11 @@ fn mechanism_for(ability: AbilityType, config: &AbilityConfig) -> EntryFamily {
         // M3 — bespoke `*Pending` (resolvers run in the sandbox) and the two
         // movement instants (sandbox-owned dash driver, KTD6).
         DivineShield | BerserkerRage | HolyShock | DispelMagic | PaladinCleanse | Purge
-        | DevourMagic | Charge | Disengage => EntryFamily::Component,
-        // M4 — world-entity drops and pet-command dispatch.
+        | Charge | Disengage => EntryFamily::Component,
+        // M4 — world-entity drops and pet-dispatched abilities (Hunter pets +
+        // the Warlock's Felhunter), all driven by drive_sandbox_pet.
         AirTotem | WaterTotem | EarthTotem | FireTotem | FreezingTrap | FrostTrap | SpiderWeb
-        | BoarCharge | MastersCall => EntryFamily::Entity,
+        | BoarCharge | MastersCall | SpellLock | DevourMagic => EntryFamily::Entity,
         // M1 aura + a directly-spawned caster cosmetic.
         PsychicScream => EntryFamily::Residue,
         // Data-only (no application code) / no distinct visual beyond the swing.
@@ -228,7 +238,24 @@ pub struct EntryListing {
 /// loaded [`AbilityDefinitions`], so the list tracks the config data rather
 /// than a hand-maintained copy of it.
 pub fn entries_for_class(class: CharacterClass, defs: &AbilityDefinitions) -> Vec<EntryListing> {
-    let mut listings: Vec<EntryListing> = super::super::view_combatant_ui::get_class_abilities(class)
+    let mut abilities = super::super::view_combatant_ui::get_class_abilities(class);
+    // The Hunter's three pet-command abilities are the PET's, so they are not in
+    // `get_class_abilities` (the View Combatant screen lists the Hunter's own
+    // abilities). The sandbox previews them via the staged pet, so append them
+    // here — sandbox-only, without touching the shared class-ability list.
+    if class == CharacterClass::Hunter {
+        abilities.extend([
+            AbilityType::SpiderWeb,
+            AbilityType::BoarCharge,
+            AbilityType::MastersCall,
+        ]);
+    }
+    // The Warlock's Felhunter has two abilities (Spell Lock, Devour Magic),
+    // likewise not in the shared class list — appended for the same reason.
+    if class == CharacterClass::Warlock {
+        abilities.extend([AbilityType::SpellLock, AbilityType::DevourMagic]);
+    }
+    let mut listings: Vec<EntryListing> = abilities
         .into_iter()
         .filter_map(|ability| {
             let config = defs.get(&ability)?;
@@ -378,7 +405,7 @@ pub fn drive_playback(
             spell_power: c.spell_power,
             crit_chance: c.crit_chance,
         });
-        if start_entry(&mut commands, &playback, caster, stage.dummy, &defs, caster_info) {
+        if start_entry(&mut commands, &playback, caster, stage.caster_home, stage.dummy, &defs, caster_info) {
             playback.playing = true;
             playback.elapsed = 0.0;
             playback.duration = entry_duration(&playback, &defs);
@@ -459,7 +486,9 @@ fn entry_duration(playback: &SandboxPlayback, defs: &AbilityDefinitions) -> f32 
             let holds = config.applies_aura.is_some()
                 || matches!(
                     playback.family,
-                    Some(EntryFamily::Component) | Some(EntryFamily::Residue)
+                    Some(EntryFamily::Component)
+                        | Some(EntryFamily::Residue)
+                        | Some(EntryFamily::Entity)
                 );
             if let Some(channel) = config.channel_duration {
                 channel
@@ -552,10 +581,7 @@ fn start_component_entry(
                 ));
             }
         }
-        AbilityType::DispelMagic
-        | AbilityType::PaladinCleanse
-        | AbilityType::Purge
-        | AbilityType::DevourMagic => {
+        AbilityType::DispelMagic | AbilityType::PaladinCleanse | AbilityType::Purge => {
             let target = dummy.unwrap_or(caster);
             let (log_prefix, removes_poison, heal_on_success): (
                 &'static str,
@@ -564,7 +590,6 @@ fn start_component_entry(
             ) = match ability {
                 AbilityType::PaladinCleanse => ("[CLEANSE]", true, None),
                 AbilityType::Purge => ("[PURGE]", false, None),
-                AbilityType::DevourMagic => ("[DEVOUR]", false, Some((caster, 20.0))),
                 _ => ("[DISPEL]", false, None),
             };
             commands.spawn((
@@ -598,12 +623,82 @@ fn start_component_entry(
     true
 }
 
+/// Starts an M4 (entity-spawn) entry. Totems (and traps, U5b) are world-entity
+/// drops whose existing resolvers / visual systems run in the sandbox; they are
+/// tagged `PlayMatchEntity` so `clear_body_state`'s leftover sweep reclaims them
+/// between passes. Spawned from the SAME data gameplay uses (`shaman::totem_spec`)
+/// so the preview can never drift from the real totem.
+fn start_entity_entry(
+    commands: &mut Commands,
+    ability: AbilityType,
+    caster: Entity,
+    caster_home: Vec3,
+    caster_info: Option<CasterInfo>,
+) -> bool {
+    let Some(info) = caster_info else {
+        return false;
+    };
+    use AbilityType::*;
+    let element = match ability {
+        AirTotem => Some(TotemElement::Air),
+        WaterTotem => Some(TotemElement::Water),
+        EarthTotem => Some(TotemElement::Earth),
+        FireTotem => Some(TotemElement::Fire),
+        _ => None,
+    };
+    if let Some(element) = element {
+        let (_, aura_type, magnitude, spell_school) = totem_spec(element);
+        let drop = caster_home + totem_spacing_offset(element);
+        commands.spawn((
+            Transform::from_translation(Vec3::new(drop.x, 0.0, drop.z)),
+            Totem {
+                owner_team: info.team,
+                owner: caster,
+                element,
+                radius: TOTEM_RADIUS,
+                duration_remaining: TOTEM_DURATION,
+                aura_type,
+                magnitude,
+                spell_school,
+            },
+            PlayMatchEntity,
+        ));
+        return true;
+    }
+
+    // Traps — thrown toward the dummy's staged spot (mirror across origin), so
+    // the launch arc reads. Reuses hunter::spawn_trap (same code gameplay uses).
+    let trap_type = match ability {
+        FreezingTrap => Some(TrapType::Freezing),
+        FrostTrap => Some(TrapType::Frost),
+        _ => None,
+    };
+    if let Some(trap_type) = trap_type {
+        let landing = Vec3::new(-caster_home.x, 0.0, 0.0);
+        spawn_trap(commands, caster, info.team, caster_home, landing, trap_type);
+        return true;
+    }
+
+    // Pet commands are driven by `drive_sandbox_pet` (it needs `CombatLog` + the
+    // spawned pet, unavailable here) — just mark the entry started so the
+    // transport plays and that system takes over.
+    if matches!(
+        ability,
+        SpiderWeb | BoarCharge | MastersCall | SpellLock | DevourMagic
+    ) {
+        return true;
+    }
+
+    false
+}
+
 /// Starts the entry. Returns false when it could not start (no target for an
 /// ability that needs one, or a mechanism whose start path is not wired yet).
 fn start_entry(
     commands: &mut Commands,
     playback: &SandboxPlayback,
     caster: Entity,
+    caster_home: Vec3,
     dummy: Option<Entity>,
     defs: &AbilityDefinitions,
     caster_info: Option<CasterInfo>,
@@ -614,9 +709,12 @@ fn start_entry(
                 return false;
             };
             // Target rule (KTD5): offensive/relational entries aim at the dummy
-            // (self is the honest fallback when none is staged, and the UI
-            // separately disables relational entries dummy-off); self/friendly
+            // (self is the honest fallback when none is staged); self/friendly
             // buffs aim at the caster, so the buff visual lands on the right unit.
+            // NOTE: relational entries are NOT yet greyed out when the dummy is
+            // off — that gate (AE3) is deferred. A Cast relational entry then
+            // self-targets and still renders; a pet-command entry (Entity) has
+            // no target and no-ops until a dummy is staged.
             let target = if entry_targets_dummy(config) {
                 dummy.unwrap_or(caster)
             } else {
@@ -648,6 +746,10 @@ fn start_entry(
                 // M3 — bespoke `*Pending` / movement components.
                 Some(EntryFamily::Component) => {
                     start_component_entry(commands, ability, caster, dummy, caster_info)
+                }
+                // M4 — world-entity drops (totems, traps) and pet commands.
+                Some(EntryFamily::Entity) => {
+                    start_entity_entry(commands, ability, caster, caster_home, caster_info)
                 }
                 // Residue (Psychic Scream): M1 applies the fear aura to the
                 // dummy, but the caster-centered burst is spawned inline in the
@@ -936,51 +1038,189 @@ pub fn drive_sandbox_dash(
         Option<&DisengagingState>,
     )>,
 ) {
-    let Some(caster) = stage.caster else { return };
-    // Copy the charge target's position out before the mutable borrow below.
+    // Copy the charge target's position out before the mutable borrows below.
     let charge_target_pos = stage
         .dummy
         .and_then(|d| movers.get(d).ok())
         .map(|(t, ..)| t.translation);
-
     let dt = time.delta_secs();
-    let Ok((mut transform, combatant, charging, disengaging)) = movers.get_mut(caster) else {
+
+    // Both the caster (Charge / Disengage) and the Hunter pet (Boar Charge) can
+    // carry a dash component whose real driver (`move_to_target`) is gated off
+    // here, so this drives whichever of the two has one this frame.
+    for who in [stage.caster, stage.pet].into_iter().flatten() {
+        let Ok((mut transform, combatant, charging, disengaging)) = movers.get_mut(who) else {
+            continue;
+        };
+
+        if charging.is_some() {
+            let Some(target_pos) = charge_target_pos else {
+                commands.entity(who).remove::<ChargingState>();
+                continue;
+            };
+            let from = transform.translation;
+            let flat = Vec3::new(target_pos.x - from.x, 0.0, target_pos.z - from.z);
+            if flat.length() <= MELEE_RANGE {
+                commands.entity(who).remove::<ChargingState>();
+                continue;
+            }
+            let dir = flat.normalize_or_zero();
+            if dir != Vec3::ZERO {
+                let speed = combatant.base_movement_speed * 4.0; // CHARGE_SPEED_MULTIPLIER
+                transform.translation = from + dir * speed * dt;
+                transform.rotation = Quat::from_rotation_y(dir.x.atan2(dir.z));
+            }
+        } else if let Some(dis) = disengaging {
+            if dis.distance_remaining > 0.0 {
+                let amount = DISENGAGE_SPEED * dt;
+                transform.translation += dis.direction * amount;
+                let remaining = dis.distance_remaining - amount;
+                if remaining <= 0.0 {
+                    commands.entity(who).remove::<DisengagingState>();
+                } else {
+                    commands.entity(who).try_insert(DisengagingState {
+                        direction: dis.direction,
+                        distance_remaining: remaining,
+                    });
+                }
+            } else {
+                commands.entity(who).remove::<DisengagingState>();
+            }
+        }
+    }
+}
+
+/// Sandbox-owned pet driver for the three pet-command abilities (KTD6): Spider
+/// Web, Boar Charge, Master's Call. Their consumer `pet_ai_system` is
+/// AI-decision-gated off here, so this spawns the matching pet on demand, fires
+/// the SAME `execute_*` helper gameplay uses (single source of truth), and lets
+/// `drive_sandbox_dash` drive Boar Charge's dash. The pet is tagged
+/// `PlayMatchEntity`, so `clear_body_state`'s leftover sweep reclaims it between
+/// passes; this rebinds/respawns it each pass.
+#[allow(clippy::too_many_arguments)]
+pub fn drive_sandbox_pet(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut combat_log: ResMut<CombatLog>,
+    playback: Res<SandboxPlayback>,
+    mut stage: ResMut<SandboxStage>,
+    defs: Res<AbilityDefinitions>,
+    mut combatants: Query<&mut Combatant>,
+    positions: Query<&Transform>,
+    pets: Query<(Entity, &Pet)>,
+) {
+    let Some(caster) = stage.caster else { return };
+
+    // A bound pet may have been swept between passes — drop the stale handle.
+    if let Some(pet) = stage.pet {
+        if pets.get(pet).is_err() {
+            stage.pet = None;
+        }
+    }
+
+    // Which pet-command ability is playing, and the pet type + target it needs.
+    let desired: Option<(PetType, AbilityType, Entity)> = playback
+        .playing
+        .then_some(playback.selected)
+        .flatten()
+        .and_then(|entry| match entry {
+            SandboxEntry::Ability(a @ AbilityType::SpiderWeb) => {
+                stage.dummy.map(|d| (PetType::Spider, a, d))
+            }
+            SandboxEntry::Ability(a @ AbilityType::BoarCharge) => {
+                stage.dummy.map(|d| (PetType::Boar, a, d))
+            }
+            // Master's Call cleanses the owner (freedom), so it targets the caster.
+            SandboxEntry::Ability(a @ AbilityType::MastersCall) => Some((PetType::Bird, a, caster)),
+            // The Warlock's Felhunter interrupts / devours the enemy.
+            SandboxEntry::Ability(a @ (AbilityType::SpellLock | AbilityType::DevourMagic)) => {
+                stage.dummy.map(|d| (PetType::Felhunter, a, d))
+            }
+            _ => None,
+        });
+
+    let Some((pet_type, ability, target)) = desired else {
+        // Not a pet-command entry — just drop the handle. clear_body_state's
+        // leftover sweep (and restage_on_config_change) already owns the pet
+        // despawn on every transition that ends a pet entry — select, stop,
+        // completion, loop restart, and class change all run one of them — so
+        // despawning here too would double-despawn the just-swept entity and log
+        // a spurious "entity does not exist" warning. The top-of-system staleness
+        // check keeps stage.pet consistent if a sweep already fired.
+        stage.pet = None;
         return;
     };
 
-    if charging.is_some() {
-        let Some(target_pos) = charge_target_pos else {
-            commands.entity(caster).remove::<ChargingState>();
-            return;
-        };
-        let from = transform.translation;
-        let flat = Vec3::new(target_pos.x - from.x, 0.0, target_pos.z - from.z);
-        if flat.length() <= MELEE_RANGE {
-            commands.entity(caster).remove::<ChargingState>();
-            return;
-        }
-        let dir = flat.normalize_or_zero();
-        if dir != Vec3::ZERO {
-            let speed = combatant.base_movement_speed * 4.0; // CHARGE_SPEED_MULTIPLIER
-            transform.translation = from + dir * speed * dt;
-            transform.rotation = Quat::from_rotation_y(dir.x.atan2(dir.z));
-        }
-    } else if let Some(dis) = disengaging {
-        if dis.distance_remaining > 0.0 {
-            let amount = DISENGAGE_SPEED * dt;
-            transform.translation += dis.direction * amount;
-            let remaining = dis.distance_remaining - amount;
-            if remaining <= 0.0 {
-                commands.entity(caster).remove::<DisengagingState>();
-            } else {
-                commands.entity(caster).try_insert(DisengagingState {
-                    direction: dis.direction,
-                    distance_remaining: remaining,
-                });
+    // Already spawned + fired; drive_sandbox_dash owns any Boar Charge dash.
+    if stage.pet.is_some() {
+        return;
+    }
+
+    if let Some((pet, _)) = pets.iter().find(|(_, p)| p.owner == caster) {
+        // The spawn resolved — bind it and fire the ability ONCE from the same
+        // code gameplay uses.
+        let Some(def) = defs.get(&ability) else { return };
+        let pet_pos = positions.get(pet).map(|t| t.translation).unwrap_or(stage.caster_home);
+        if let Ok(mut pet_combatant) = combatants.get_mut(pet) {
+            match ability {
+                AbilityType::SpiderWeb => execute_spider_web(
+                    &mut commands,
+                    &mut combat_log,
+                    def,
+                    pet,
+                    &mut pet_combatant,
+                    pet_pos,
+                    target,
+                ),
+                AbilityType::BoarCharge => {
+                    execute_boar_charge(&mut commands, &mut combat_log, def, pet, &mut pet_combatant, target)
+                }
+                AbilityType::MastersCall => {
+                    execute_masters_call(&mut commands, &mut combat_log, def, pet, &mut pet_combatant, target)
+                }
+                AbilityType::SpellLock => execute_spell_lock(
+                    &mut commands,
+                    &mut combat_log,
+                    &defs,
+                    pet,
+                    &mut pet_combatant,
+                    target,
+                    &def.name,
+                ),
+                // Devour Magic has no extracted executor (its logic is embedded
+                // in the AI's try_devour_magic), but its effect is a DispelPending
+                // with the Felhunter as dispeller — the same contract the other
+                // dispels spawn. The dummy's dispellable aura is staged in
+                // drive_playback (shared with the Warlock/Priest/Paladin dispels).
+                AbilityType::DevourMagic => {
+                    commands.spawn(DispelPending {
+                        target,
+                        dispeller: pet,
+                        log_prefix: "[DEVOUR]",
+                        caster_class: pet_combatant.class,
+                        heal_on_success: Some((pet, 20.0)),
+                        aura_type_filter: None,
+                        removes_poison: false,
+                    });
+                }
+                _ => {}
             }
-        } else {
-            commands.entity(caster).remove::<DisengagingState>();
+            stage.pet = Some(pet);
         }
+    } else if let Ok(caster_combatant) = combatants.get(caster) {
+        // Spawn the matching pet at the caster; bound + fired next frame (the
+        // spawn is not queryable this frame).
+        spawn_pet(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            &mut combat_log,
+            caster,
+            caster_combatant,
+            stage.caster_home,
+            pet_type,
+        );
     }
 }
 
@@ -1071,6 +1311,63 @@ mod tests {
         assert_eq!(unsupported.len(), 2, "unexpected Unsupported set: {unsupported:?}");
         assert!(unsupported.contains(&AbilityType::WindShear));
         assert!(unsupported.contains(&AbilityType::HeroicStrike));
+    }
+
+    #[test]
+    fn every_ability_is_a_sandbox_entry_in_some_class() {
+        // Guard against the silent-drop gap: `get_class_abilities` is
+        // hand-maintained and the sandbox iterates it (plus the pet appends),
+        // NOT the AbilityType enum — so a new variant that is not wired into
+        // some class's list is un-previewable with no compile error. This test
+        // is that missing check (the pattern tests/registration_audit.rs uses
+        // for system wiring). If it fails, add the ability to the right class in
+        // `view_combatant_ui::get_class_abilities`, or — for a pet ability — to
+        // the pet appends in `entries_for_class`.
+        let defs = AbilityDefinitions::default();
+        for (&ability, _) in defs.iter() {
+            let listed = CharacterClass::all().iter().any(|&class| {
+                entries_for_class(class, &defs)
+                    .iter()
+                    .any(|l| l.entry == SandboxEntry::Ability(ability))
+            });
+            assert!(
+                listed,
+                "{ability:?} is not a sandbox entry for any class — wire it into \
+                 get_class_abilities or the entries_for_class pet appends"
+            );
+        }
+    }
+
+    #[test]
+    fn pet_owning_classes_list_their_pet_abilities() {
+        // Pet abilities aren't in get_class_abilities (they're the pet's), but
+        // the sandbox appends them so they're selectable and preview via a
+        // staged pet (drive_sandbox_pet).
+        let defs = AbilityDefinitions::default();
+        let cases = [
+            (
+                CharacterClass::Hunter,
+                &[
+                    AbilityType::SpiderWeb,
+                    AbilityType::BoarCharge,
+                    AbilityType::MastersCall,
+                ][..],
+            ),
+            (
+                CharacterClass::Warlock,
+                &[AbilityType::SpellLock, AbilityType::DevourMagic][..],
+            ),
+        ];
+        for (class, pet_abilities) in cases {
+            let entries = entries_for_class(class, &defs);
+            for &ab in pet_abilities {
+                assert!(
+                    entries.iter().any(|l| l.entry == SandboxEntry::Ability(ab)
+                        && l.family == EntryFamily::Entity),
+                    "{class:?} entries missing playable {ab:?}"
+                );
+            }
+        }
     }
 
     #[test]

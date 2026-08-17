@@ -1255,7 +1255,7 @@ pub(crate) fn spawn_combatant(
 }
 
 /// Helper function to spawn a pet entity for a Warlock combatant.
-fn spawn_pet(
+pub(crate) fn spawn_pet(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,

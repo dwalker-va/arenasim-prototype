@@ -465,7 +465,10 @@ pub fn totem_buff_spec(ability: AbilityType) -> Option<(AuraType, f32)> {
     Some((aura_type, magnitude))
 }
 
-fn totem_spec(element: TotemElement) -> (AbilityType, AuraType, f32, SpellSchool) {
+/// Per-element totem spec. `pub(crate)` so the Animation Sandbox can spawn a
+/// faithful totem from the SAME data gameplay uses (single source of truth — the
+/// preview can never drift from the real totem). Pure; no behavior change.
+pub(crate) fn totem_spec(element: TotemElement) -> (AbilityType, AuraType, f32, SpellSchool) {
     match element {
         // Windfury Totem — empowers melee allies' auto-attacks (proc chance 0..1).
         TotemElement::Air => (AbilityType::AirTotem, AuraType::WindfuryBuff, 0.12, SpellSchool::Nature),
@@ -483,7 +486,7 @@ fn totem_spec(element: TotemElement) -> (AbilityType, AuraType, f32, SpellSchool
 /// Deterministic per-element horizontal offset so the four totems fan out
 /// around the Shaman's feet (compass directions at 0/90/180/270 degrees by
 /// element index). No RNG — required for seeded-replay determinism.
-fn totem_spacing_offset(element: TotemElement) -> Vec3 {
+pub(crate) fn totem_spacing_offset(element: TotemElement) -> Vec3 {
     let angle = element.index() as f32 * std::f32::consts::FRAC_PI_2;
     Vec3::new(angle.cos(), 0.0, angle.sin()) * TOTEM_SPACING_OFFSET
 }

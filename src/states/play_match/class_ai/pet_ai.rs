@@ -504,7 +504,7 @@ fn try_spell_lock(
     false
 }
 
-fn execute_spell_lock(
+pub(crate) fn execute_spell_lock(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     abilities: &AbilityDefinitions,
@@ -623,7 +623,7 @@ fn try_devour_magic(
 
 /// Spawn the Spider Web projectile at the spider, set CD/GCD, log the cast.
 /// Called from `pet_ai_system` after authoritative pre-execution checks pass.
-fn execute_spider_web(
+pub(crate) fn execute_spider_web(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     def: &crate::states::play_match::ability_config::AbilityConfig,
@@ -665,7 +665,7 @@ fn execute_spider_web(
 
 /// Apply Boar Charge to a target: ChargingState marker + delayed Stun aura,
 /// set CD/GCD, log the cast.
-fn execute_boar_charge(
+pub(crate) fn execute_boar_charge(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     def: &crate::states::play_match::ability_config::AbilityConfig,
@@ -697,7 +697,7 @@ fn execute_boar_charge(
 /// Apply Master's Call to a target: spawn DispelPending + DispelBurst, set
 /// CD/GCD, log the cast. Caller is responsible for verifying the target has
 /// at least one dispellable Root/MovementSpeedSlow aura.
-fn execute_masters_call(
+pub(crate) fn execute_masters_call(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     def: &crate::states::play_match::ability_config::AbilityConfig,
