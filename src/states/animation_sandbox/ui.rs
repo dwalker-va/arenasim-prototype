@@ -100,6 +100,8 @@ pub struct EntryRow {
     pub label: String,
     /// `None` in the snapshot harness, which has no Bevy textures.
     pub icon: Option<egui::TextureId>,
+    /// Relational entry that needs a staged dummy — disabled dummy-off (AE3).
+    pub needs_dummy: bool,
 }
 
 /// Everything the panel draws from. No Bevy types, so the snapshot harness can
@@ -469,13 +471,23 @@ pub fn draw_sandbox_ui(ctx: &egui::Context, view: &SandboxView) -> Vec<SandboxAc
                 section(ui, "ABILITIES");
                 for row in view.rows.iter().filter(|r| r.family != EntryFamily::Body) {
                     let selected = view.selected == Some(row.entry);
-                    let playable = row.family.is_playable();
-                    let tag = (!playable).then_some(match row.family {
-                        EntryFamily::Unsupported => "n/a",
-                        _ => "soon",
-                    });
-                    let response = icon_row(ui, row.icon, &row.label, tag, selected, playable);
-                    if !playable {
+                    let mechanism_playable = row.family.is_playable();
+                    // AE3: a relational entry can't play a complete visual without
+                    // a second unit — disable it while the dummy is off.
+                    let dummy_off = row.needs_dummy && !view.dummy_enabled;
+                    let enabled = mechanism_playable && !dummy_off;
+                    let tag = if !mechanism_playable {
+                        Some(match row.family {
+                            EntryFamily::Unsupported => "n/a",
+                            _ => "soon",
+                        })
+                    } else if dummy_off {
+                        Some("needs dummy")
+                    } else {
+                        None
+                    };
+                    let response = icon_row(ui, row.icon, &row.label, tag, selected, enabled);
+                    if !mechanism_playable {
                         response.on_hover_text(match row.family {
                             EntryFamily::Unsupported => {
                                 "Not previewable: defined as data but with no application code \
@@ -483,6 +495,10 @@ pub fn draw_sandbox_ui(ctx: &egui::Context, view: &SandboxView) -> Vec<SandboxAc
                             }
                             _ => "This ability's preview mechanism is not wired yet.",
                         });
+                    } else if dummy_off {
+                        response.on_hover_text(
+                            "This ability needs a target — turn on Target Dummy to preview it.",
+                        );
                     } else if response.clicked() {
                         actions.push(SandboxAction::Select(row.entry, row.family));
                     }
@@ -660,6 +676,7 @@ pub fn sandbox_ui(
         .into_iter()
         .map(|listing| EntryRow {
             icon: spell_icons.textures.get(&listing.label).copied(),
+            needs_dummy: super::playback::entry_needs_dummy(listing.entry, &defs),
             entry: listing.entry,
             family: listing.family,
             label: listing.label,

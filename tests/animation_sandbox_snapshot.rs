@@ -40,12 +40,14 @@ fn mage_rows() -> Vec<EntryRow> {
         family,
         label: label.to_string(),
         icon: None,
+        needs_dummy: false,
     };
     let body = |b: BodyAnimation| EntryRow {
         entry: SandboxEntry::Body(b),
         family: EntryFamily::Body,
         label: b.label().to_string(),
         icon: None,
+        needs_dummy: false,
     };
 
     vec![

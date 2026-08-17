@@ -194,6 +194,26 @@ fn entry_targets_dummy(config: &AbilityConfig) -> bool {
     }
 }
 
+/// Whether an entry's visual REQUIRES a staged dummy — a relational entry that
+/// would otherwise play an empty or self-targeted pass. Drives the UI's
+/// dummy-off disable (AE3). Totems / traps (a fixed ground drop), self-buffs,
+/// and Master's Call (cleanses the caster) do NOT need one; the four
+/// dummy-targeting pet commands have no self fallback (no dummy → no pet), and
+/// every other offensive/relational entry aims at the dummy.
+pub(crate) fn entry_needs_dummy(entry: SandboxEntry, defs: &AbilityDefinitions) -> bool {
+    let SandboxEntry::Ability(ability) = entry else {
+        return false;
+    };
+    use AbilityType::*;
+    match ability {
+        SpiderWeb | BoarCharge | SpellLock | DevourMagic => true,
+        AirTotem | WaterTotem | EarthTotem | FireTotem | FreezingTrap | FrostTrap | MastersCall => {
+            false
+        }
+        _ => defs.get(&ability).map(entry_targets_dummy).unwrap_or(false),
+    }
+}
+
 /// Classifies an ability by its application mechanism (KTD1). Config fields
 /// resolve channels and the Cast default; a small explicit table handles the
 /// component/entity/residue/unsupported cases config alone can't distinguish.
@@ -1368,6 +1388,29 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn relational_entries_need_a_dummy_but_self_and_drops_do_not() {
+        // AE3: only entries whose visual requires a second unit are gated
+        // dummy-off. Pet commands that target the enemy + offensive casts need
+        // one; drops, self-buffs, and Master's Call (self-cleanse) do not.
+        let defs = AbilityDefinitions::default();
+        let needs = |a: AbilityType| entry_needs_dummy(SandboxEntry::Ability(a), &defs);
+        assert!(needs(AbilityType::SpiderWeb)); // pet command -> dummy
+        assert!(needs(AbilityType::DevourMagic)); // Felhunter -> dummy
+        assert!(needs(AbilityType::Frostbolt)); // projectile at enemy
+        assert!(needs(AbilityType::DrainLife)); // beam at enemy
+        assert!(needs(AbilityType::Corruption)); // DoT on enemy
+        assert!(!needs(AbilityType::EarthTotem)); // ground drop
+        assert!(!needs(AbilityType::FreezingTrap)); // ground drop
+        assert!(!needs(AbilityType::MastersCall)); // cleanses the caster
+        assert!(!needs(AbilityType::IceBarrier)); // self buff
+        assert!(!needs(AbilityType::DivineShield)); // self component
+        assert!(!entry_needs_dummy(
+            SandboxEntry::Body(BodyAnimation::WalkBob),
+            &defs
+        ));
     }
 
     #[test]

@@ -23,7 +23,21 @@ execution: code
 
 ---
 
-## Implementation status — 2026-08-15 (branch `feat/instant-animation-preview`)
+## Implementation status — COMPLETE (2026-08-17)
+
+Every implementation unit has shipped across three PRs; all 70 abilities preview in the sandbox. Only the optional observed-run integration harness is left un-built (unit tests + live graphical verification stood in for it).
+
+- **PR #108** — U1, U2, U3, U4, U6, U7 part 1, and the stat-buff-accumulation fix.
+- **PR #109** — U5 (totems, traps, Hunter pet commands, Warlock Felhunter abilities), all via `pub(crate)` single-source-of-truth reuse; plus a CI guard test that every ability is a sandbox entry.
+- **AE3 PR** — relational dummy-off gating (`entry_needs_dummy` + panel disable).
+
+All graphical-only; `determinism_pin` (byte-identity) and `registration_audit` green throughout.
+
+**Not built (optional, non-blocking):** the observed-run integration harness (`tests/animation_sandbox_playback.rs`) — the shipped units are covered by unit tests + live graphical checks.
+
+---
+
+### Original phased status (2026-08-15, historical)
 
 **Shipped** (tested, committed; graphical-only, no `class_ai`/`combat_core` changes, byte-identity held):
 - **U1 + U3** — mechanism classifier (Cast/Channel/Component/Entity/Residue/Body/Unsupported) and the `Cast` path: every hard cast + single-target damage/aura/projectile instant plays via a zero-duration `CastingState`, with the KTD5 target rule and generalized hold. Fixes the Drain Life / Frost Shock misclassification. (`only Wind Shear` refined to `Wind Shear + Heroic Strike` — the latter has no distinct cast visual; classifier test updated accordingly.)
