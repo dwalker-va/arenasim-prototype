@@ -709,9 +709,12 @@ fn start_entry(
                 return false;
             };
             // Target rule (KTD5): offensive/relational entries aim at the dummy
-            // (self is the honest fallback when none is staged, and the UI
-            // separately disables relational entries dummy-off); self/friendly
+            // (self is the honest fallback when none is staged); self/friendly
             // buffs aim at the caster, so the buff visual lands on the right unit.
+            // NOTE: relational entries are NOT yet greyed out when the dummy is
+            // off — that gate (AE3) is deferred. A Cast relational entry then
+            // self-targets and still renders; a pet-command entry (Entity) has
+            // no target and no-ops until a dummy is staged.
             let target = if entry_targets_dummy(config) {
                 dummy.unwrap_or(caster)
             } else {
@@ -1138,12 +1141,14 @@ pub fn drive_sandbox_pet(
         });
 
     let Some((pet_type, ability, target)) = desired else {
-        // Not a pet-command entry — tear down any lingering pet.
-        if let Some(pet) = stage.pet.take() {
-            if let Ok(mut e) = commands.get_entity(pet) {
-                e.despawn();
-            }
-        }
+        // Not a pet-command entry — just drop the handle. clear_body_state's
+        // leftover sweep (and restage_on_config_change) already owns the pet
+        // despawn on every transition that ends a pet entry — select, stop,
+        // completion, loop restart, and class change all run one of them — so
+        // despawning here too would double-despawn the just-swept entity and log
+        // a spurious "entity does not exist" warning. The top-of-system staleness
+        // check keeps stage.pet consistent if a sweep already fired.
+        stage.pet = None;
         return;
     };
 
