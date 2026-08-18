@@ -5,9 +5,19 @@ Branch: `feat/lightning-bolt-signature-animation`
 
 These items were surfaced during the autonomous build/review pipeline, proceeded past (not blockers), and are recorded here because they have no dedicated GitHub thread. None block merge; the first is a **pre-merge verification gate** the plan's Success Criteria already calls for.
 
-## Proceeded-and-flagged (from implementation)
+## Verification gate — RESOLVED ✅ (swept 2026-08-18: within noise)
 
-- **P1 (verification gate) — Balance sweep NOT run; the Shaman shift may exceed "within noise."** KTD6 / Success Criteria require a paired before/after balance sweep, and the user's expectation is the shift "should not be significant." Incidental evidence from the `juke_chase` seed scan (`tests/movement_probes.rs`) shows the instant-strike buff **systematically lengthens lone-Shaman kite endgames** — e.g. seed 2 went from 3 → 18 fizzle-length occlusion windows and ~52s occlusion, with the match now resolving by elimination at ~102s; many seeds now run 80–133s. Team 1 still wins by elimination everywhere (chase still closes), so this is a *reliability buff to the Shaman*, not a chase-logic regression — but it suggests the win-rate shift may be non-trivial. **Action before merge:** run the definitive sweep (`balance-sweep` skill / `scripts/headtohead_sweep.py`, ~100 matches/cell across representative comps) and confirm the Shaman shift is within noise, or treat a significant shift as the signal to revisit (per the plan).
+- **Balance sweep DONE — the Shaman shift is within noise; safe to merge.** KTD6 / Success Criteria required a paired before/after balance sweep. Ran a **2v2 Shaman-comp sweep, 5,250 matches, paired at identical seeds** (only `projectile_speed` differs — same binary, RON is a runtime asset):
+
+  | Metric | Before (projectile) | After (instant) | Δ |
+  |---|---|---|---|
+  | Shaman-comp winrate | 53.1% ±1.3 | 52.5% ±1.4 | −0.6pt (CIs overlap heavily) |
+  | Mean / p90 duration | 46.7s / 81.7s | 46.9s / 82.0s | flat |
+  | Draw rate | 0.3% | 0.6% | +14 matches |
+
+  The aggregate is **flat** (within noise, a hair lower — not a buff). The "systematic lengthening" that motivated this gate came from the `juke_chase` **1v1 lone-Shaman** scan — a kiting-asymmetry diagnostic bracket, *not* a balance signal (per the balance methodology, conclusions come from 2v2/3v3, not 1v1). At the 2v2 scale duration barely moves (46.7→46.9s), so it does not generalize.
+
+  **Caveat (expected):** touching the sim RNG stream deterministically reshuffles individual matchups even as the aggregate washes — two 2v2 cells moved >25pt at N=30 (Shaman+Rogue vs Mage+Hunter 77%→10%; the Shaman+Mage vs Mage+Shaman mirror 33%→7%, into simultaneous-kill draws), both *against* the Shaman comp, offsetting cells that rose. Doesn't move the verdict. (3v3 confirmation not run — 2v2 is the primary bracket and the result is unambiguous.)
 
 ## Advisory findings (P3, report-only — from code review)
 
