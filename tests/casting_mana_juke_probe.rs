@@ -9,8 +9,16 @@
 //! BEFORE the fix, every juked Frostbolt still cost full mana at completion, so
 //! the Mage bankrupted itself — its mana collapsed to ~0 (measured min mana_pct
 //! after the Warrior died: 0.004) and it fell back to wand-only chip. AFTER the
-//! fix, juked casts cost nothing, so the Mage keeps its mana and keeps casting
-//! (measured min mana_pct in the same window: 0.130).
+//! fix, juked casts cost nothing, so the Mage keeps its mana and keeps casting.
+//!
+//! RE-BASELINE (Lightning Bolt instant-strike change): team2's Shaman now casts
+//! Lightning Bolt as an instant strike instead of a traveling projectile, so
+//! seed 1's lone-Shaman 2v1 unfolds differently and the Mage's window mana floor
+//! moved from 0.130 to 0.063. That is still ~16x the 0.004 bug floor; the
+//! fizzle-drain fix itself is unchanged and independently proven by
+//! casting_mana_charge.rs (juked Frostbolts still charge no mana). The window
+//! guard was re-baselined from 0.08 to 0.04 to track the new deterministic
+//! value while preserving its original guard-to-observed ratio.
 //!
 //! NOTE ON DURATION: this 2v1 endgame is DAMPENING-gated, not mana-gated — the
 //! lone Shaman survives on healing until arena dampening ramps its healing to
@@ -102,13 +110,18 @@ fn mage_mana_survives_juked_frostbolts_seed1() {
     );
 
     // Load-bearing assertion: the Mage's mana never collapses to near-zero during
-    // the 2v1. Buggy build hit 0.004 here; fixed build floors at ~0.130.
+    // the 2v1. Buggy build hit 0.004 here. After Lightning Bolt became an instant
+    // strike (Shaman is team2 here), seed 1's 2v1 unfolds differently and the
+    // Mage's window floor moved from ~0.130 to ~0.063 — still an order of
+    // magnitude above the 0.004 bug floor. The fizzle-drain fix is intact (juked
+    // Frostbolts still charge no mana — see casting_mana_charge.rs); the lower
+    // floor is the harder fight, not the bug. Guard re-baselined to 0.04.
     let min_window_mana = window
         .iter()
         .filter_map(|f| f.mage_mana_pct)
         .fold(f32::INFINITY, f32::min);
     assert!(
-        min_window_mana > 0.08,
+        min_window_mana > 0.04,
         "Mage mana collapsed during the 2v1 (min mana_pct = {:.3}); the fizzle-drain \
          bug is back — juked Frostbolts are charging mana again",
         min_window_mana

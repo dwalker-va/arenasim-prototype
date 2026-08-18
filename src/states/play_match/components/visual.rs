@@ -41,6 +41,23 @@ pub struct SpellImpactEffect {
     pub final_scale: f32,
 }
 
+/// Signature Lightning Bolt strike: an instant forked "flash-crack" arc drawn
+/// from caster to target at the moment the cast lands.
+///
+/// Spawned deterministically in the shared casting-completion path (no `game_rng`
+/// draw, unlike Immolate's particles), so it is byte-neutral in headless. The
+/// graphical-only systems in `rendering/effects/lightning_bolt.rs` consume it,
+/// generate the jagged geometry with a visual-only RNG, and animate the flash
+/// plus impact burst. `start`/`end` are snapshots taken at cast completion (the
+/// strike is instant, so the endpoint is fixed).
+#[derive(Component)]
+pub struct LightningBoltStrike {
+    /// Caster position (bolt start) at cast completion.
+    pub start: Vec3,
+    /// Target position (bolt end) at cast completion.
+    pub end: Vec3,
+}
+
 /// Component for tracking death fall animation.
 /// When a combatant dies, this component is added to animate them falling over.
 #[derive(Component)]

@@ -405,6 +405,15 @@ impl Plugin for StatesPlugin {
                     ),
                     play_match::spawn_flame_visuals,        // Visual meshes for flame particles
                     play_match::update_flame_particles,     // Move/fade flame particles
+                    // Lightning Bolt signature flash-crack, nested to keep the
+                    // outer tuple within Bevy's 20-item .add_systems limit.
+                    // Graphical-only (never registered in systems.rs) — headless
+                    // stays byte-identical.
+                    (
+                        play_match::spawn_lightning_bolt,
+                        play_match::update_lightning_bolt,
+                        play_match::cleanup_lightning_bolt,
+                    ),
                 )
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_combat_scene),

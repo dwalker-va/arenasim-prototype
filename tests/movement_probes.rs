@@ -5492,8 +5492,18 @@ mod juke_chase {
 
     #[test]
     fn juke_bounded_seed_b() {
-        // seed 2 proxy is 3 fizzle-windows (was 2 pre-mana-fix); bound 6 leaves headroom.
-        assert_juke_bounded(JUKE_SEED_B, 6);
+        // Re-baselined 2026-08-17 (was proxy 3, bound 6): making Lightning Bolt an
+        // instant strike (team2's Shaman) lengthens the lone-Shaman kite endgame at
+        // seed 2 — the Shaman lands reliable ranged damage and survives longer, so
+        // the geometric occlusion proxy rose to 18 windows / ~52s occlusion. The
+        // load-bearing assertions still hold: team 1 wins by ELIMINATION at ~102s,
+        // well under the 200s cap, so the leaky-bucket chase is still closing — the
+        // dance is just longer. Bound raised to 24 (headroom above 18); the
+        // elimination-win and duration guards remain the primary signal. This
+        // systematic lengthening of lone-Shaman endgames is the expected balance
+        // consequence of the instant-strike buff (flagged for the U5 sweep), not a
+        // chase-logic regression.
+        assert_juke_bounded(JUKE_SEED_B, 24);
     }
 
     // Pinned by `scan_seeds` (run with `--ignored`): seeds where the enemy
