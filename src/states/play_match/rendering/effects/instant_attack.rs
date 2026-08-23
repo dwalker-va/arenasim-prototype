@@ -1,7 +1,7 @@
 //! Landed instant-melee router (graphical-only).
 //!
-//! Mortal Strike, Ambush, Sinister Strike and Eviscerate are true instants:
-//! they are applied inline in their class AI, queued as `QueuedInstantAttack`,
+//! Mortal Strike, Ambush and Sinister Strike are true instants: they are
+//! applied inline in their class AI, queued as `QueuedInstantAttack`,
 //! and resolved in `combat_ai.rs`. None of them ever enters `CastingState`, so
 //! the cast-completion hook the earlier signatures used (Polymorph, Fear,
 //! Lightning Bolt) does not exist for them.

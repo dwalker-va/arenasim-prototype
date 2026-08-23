@@ -137,17 +137,15 @@ pub enum EntryFamily {
     /// M1 for the aura plus a directly-spawned caster cosmetic (Psychic Scream).
     Residue,
     /// True instants applied inline in a class AI and resolved through
-    /// `combat_ai.rs`'s `QueuedInstantAttack` drain — Mortal Strike today;
-    /// Ambush, Sinister Strike and Eviscerate belong here too (see the note on
-    /// the `mechanism_for` table). These NEVER touch `CastingState`, so routing
-    /// them through `process_casting` would preview a mechanism the real match
-    /// does not use: the cosmetic marker their flourish keys on is spawned in
-    /// `combat_ai.rs`, which the sandbox does not run.
+    /// `combat_ai.rs`'s `QueuedInstantAttack` drain: Mortal Strike, Ambush and
+    /// Sinister Strike. The drain site spawns an `InstantAttackLanded` marker
+    /// that signature flourishes key on, and the sandbox does not run it — so
+    /// these cannot be left on the `Cast` default, or a flourish would be
+    /// invisible here the day the ability gets one.
     ///
-    /// The start path therefore reproduces the two things the real drain loop
-    /// produces — the `InstantAttackLanded` marker and the ability's own
-    /// `AuraPending` — directly, the same way `Residue` spawns Psychic Scream's
-    /// burst (KTD3).
+    /// Same shape as [`Self::Residue`]: M1 for the outcome (real
+    /// `process_casting` damage, floating text and aura) plus a directly
+    /// spawned cosmetic marker for the part that path cannot produce (KTD3).
     InstantMelee,
     /// Body motion started by inserting the driving component.
     Body,
@@ -245,16 +243,13 @@ fn mechanism_for(ability: AbilityType, config: &AbilityConfig) -> EntryFamily {
         | BoarCharge | MastersCall | SpellLock | DevourMagic => EntryFamily::Entity,
         // M1 aura + a directly-spawned caster cosmetic.
         PsychicScream => EntryFamily::Residue,
-        // Applied inline in class AI, resolved via `QueuedInstantAttack` in
-        // `combat_ai.rs` — never through `process_casting`.
-        //
-        // NOTE for whoever ships the next melee-instant signature: Ambush,
-        // SinisterStrike and Eviscerate use this SAME mechanism and are still
-        // falling through to the `Cast` default below, so they preview through
-        // a code path the real match never runs for them. Moving them here is
-        // a one-line fix each, deliberately left out of the Mortal Strike
-        // change because no probe covers the Rogue's flourishes yet.
-        MortalStrike => EntryFamily::InstantMelee,
+        // Applied inline in class AI and resolved via `QueuedInstantAttack` in
+        // `combat_ai.rs`, never through `process_casting`. Every ability whose
+        // class AI pushes onto `instant_attacks` belongs here, signature or
+        // not: the family is about the application MECHANISM (KTD1), and one
+        // classified as `Cast` would silently fail to fire a flourish the day
+        // it gets one.
+        MortalStrike | Ambush | SinisterStrike => EntryFamily::InstantMelee,
         // Data-only (no application code) / no distinct visual beyond the swing.
         WindShear | HeroicStrike => EntryFamily::Unsupported,
         // Config-derived default: channels, else Cast (hard casts and every
@@ -790,10 +785,21 @@ fn start_entry(
                     true
                 }
                 // Instants resolved through `combat_ai.rs`'s instant-attack
-                // drain, which the sandbox does not run. Reproduce that site's
-                // two outputs directly: the cosmetic marker the flourish keys
-                // on, and the ability's own aura.
+                // drain, which the sandbox does not run. Exactly the `Residue`
+                // shape: let the real code produce the outcome (M1 — a
+                // zero-duration `CastingState`, so `process_casting` applies
+                // damage, floating text and the ability's aura from the same
+                // functions a match uses), then spawn the one thing that path
+                // cannot — the cosmetic marker the drain site would have
+                // emitted, which the flourish keys on.
+                //
+                // Spawning the marker ALONE is not enough: an instant with no
+                // signature yet has nothing listening for it, so the preview
+                // would lose its damage number and show nothing at all.
                 Some(EntryFamily::InstantMelee) => {
+                    commands
+                        .entity(caster)
+                        .insert(CastingState::new(ability, target, config.cast_time));
                     commands.spawn((
                         InstantAttackLanded {
                             attacker: caster,
@@ -803,9 +809,6 @@ fn start_entry(
                         },
                         PlayMatchEntity,
                     ));
-                    if let Some(pending) = AuraPending::from_ability(target, caster, config) {
-                        commands.spawn((pending, PlayMatchEntity));
-                    }
                     true
                 }
                 // M3 — bespoke `*Pending` / movement components.
@@ -1360,6 +1363,18 @@ mod tests {
         assert_eq!(mech(Charge), EntryFamily::Component); // movement
         assert_eq!(mech(PsychicScream), EntryFamily::Residue);
         assert_eq!(mech(WindShear), EntryFamily::Unsupported);
+        // Every ability whose class AI pushes a `QueuedInstantAttack` — the
+        // mechanism `process_casting` never sees. Classifying one of these as
+        // `Cast` fails silently: the preview still shows damage, so it looks
+        // fine, right up until the ability gets a signature that never fires.
+        for instant in [MortalStrike, Ambush, SinisterStrike] {
+            assert_eq!(
+                mech(instant),
+                EntryFamily::InstantMelee,
+                "{instant:?} resolves through the instant-attack drain"
+            );
+            assert!(mech(instant).is_playable());
+        }
     }
 
     #[test]

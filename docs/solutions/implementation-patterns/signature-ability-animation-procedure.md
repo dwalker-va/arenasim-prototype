@@ -28,6 +28,7 @@ The tiered per-ability animation plan gives a couple of signature abilities per 
 
 - **Step 1's "the caster side already has generic coverage" is false for instants.** Mortal Strike is applied inline in `class_ai/warrior.rs` and resolved in `combat_ai.rs`'s `QueuedInstantAttack` drain — it never enters `CastingState`, so neither the casting orb nor the `CastEnding` marker exists for it, and the weapon socket keeps running its auto-attack cycle straight through the ability. An instant's caster side has NO coverage; the stroke is the work.
 - **A signature stroke needs a different arc PLANE, not a bigger one.** The first attempt scaled the auto-attack's pitch by a depth multiplier, which produces the same chop, louder. `SwingProfile` now carries a `SwingArc`, and `SwingStyle::Auto` reproduces the shipped constants and the sagittal pose exactly (pinned by `the_auto_style_reproduces_the_shipped_constants` and `the_auto_arc_is_the_untouched_sagittal_pose`), so auto-attacks are provably unchanged.
+- **But build that plane by TILTING one rotation axis, never by composing several.** The second attempt added yaw and roll on top of pitch and read as the axe being turned rather than swung — see [swing-is-one-rotation-one-axis.md](swing-is-one-rotation-one-axis.md) for why, and for the cheap assertion that catches it. Both wrong turns cost a round trip through the graphical client, which is the only place either was visible.
 
 Two further lessons worth carrying forward:
 
@@ -59,7 +60,7 @@ The standing prerequisite has shipped: `effects.rs` (~4.6k lines after the pilot
 
 - Any new signature-ability animation, onward through the tier walk
 - Any aura-driven body treatment (CC states: stun slump, root ice, frozen tint)
-- Instant-ability flourishes hang off `InstantAttackLanded`, spawned ability-agnostically at the `QueuedInstantAttack` drain in `combat_ai.rs` and dispatched by `rendering/effects/instant_attack.rs`. The next melee-instant signature (Ambush, Kidney Shot, Execute) costs one `SwingStyle` variant, one arm in `swing_style_for_ability`, and one arm in the flourish match — no combat-code change. It must also move its ability into the sandbox's `EntryFamily::InstantMelee`; Ambush, Sinister Strike and Eviscerate are still misclassified as `Cast` there, previewing through a path the real match never runs for them
+- Instant-ability flourishes hang off `InstantAttackLanded`, spawned ability-agnostically at the `QueuedInstantAttack` drain in `combat_ai.rs` and dispatched by `rendering/effects/instant_attack.rs`. The next melee-instant signature (Ambush, Kidney Shot, Execute) costs one `SwingStyle` variant, one arm in `swing_style_for_ability`, and one arm in the flourish match — no combat-code change. Its ability must also sit in the sandbox's `EntryFamily::InstantMelee` — Mortal Strike, Ambush and Sinister Strike all do — or the flourish is invisible in the sandbox, because the marker is spawned in `combat_ai.rs` and the sandbox does not run it
 
 ## Examples
 
