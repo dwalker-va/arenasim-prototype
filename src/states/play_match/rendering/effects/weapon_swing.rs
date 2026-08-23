@@ -31,6 +31,107 @@ const SWING_WINDUP_MAX_SECS: f32 = 0.60;
 const COSMETIC_ARROW_SPEED: f32 = 45.0;
 const COSMETIC_ARROW_TTL: f32 = 1.5;
 
+// ------------------------------------------------------------------------
+// Named swing styles
+// ------------------------------------------------------------------------
+//
+// A signature ability's stroke differs from an auto-attack in two ways that
+// have to be modelled separately: how LONG each phase takes (`SwingProfile`)
+// and what SHAPE the blade traces (`SwingArc`). An earlier design carried only
+// a depth multiplier, which cannot express a different arc plane — scaling the
+// auto-attack's pitch just makes the same chop bigger.
+
+/// Per-phase timing for one stroke. Stands in for the bare `SWING_*` consts so
+/// a bespoke stroke can reuse the same windup -> release -> hold -> follow
+/// state machine at different speeds. [`SwingStyle::Auto`]'s profile
+/// reproduces those consts exactly, so ordinary auto-attacks are unchanged.
+#[derive(Clone, Copy)]
+pub(crate) struct SwingProfile {
+    release_secs: f32,
+    impact_hold_secs: f32,
+    follow_secs: f32,
+    arc: SwingArc,
+}
+
+impl SwingProfile {
+    /// Total stroke duration — release sweep, impact hold, follow-through.
+    fn total(&self) -> f32 {
+        self.release_secs + self.impact_hold_secs + self.follow_secs
+    }
+}
+
+/// The shape a stroke traces, as a function of the swing parameter `s`.
+#[derive(Clone, Copy)]
+pub(crate) enum SwingArc {
+    /// The shipped auto-attack: pitch only, in the sagittal plane. Raised back
+    /// past vertical on windup (`s < 0`), chopped forward-down through the
+    /// target on release (`s > 0`). Per-weapon-kind, via [`swing_pose`].
+    Sagittal,
+    /// A rising diagonal: the blade drops low and behind on windup, then rips
+    /// up and ACROSS the body to finish high. Composes pitch with yaw and roll
+    /// so the blade leaves the sagittal plane entirely — that oblique plane is
+    /// what distinguishes it from an auto-attack at a glance, not its size.
+    ///
+    /// All four angles are radians. Continuous at `s == 0`: both halves pass
+    /// through the rest pose, so the blade sweeps low -> rest -> high without a
+    /// discontinuity when the release crosses zero.
+    RisingDiagonal {
+        /// Windup pitch — how far the blade drops below rest.
+        drop: f32,
+        /// Release pitch — how high the blade finishes.
+        rise: f32,
+        /// Total yaw swept across the body, split windup/release.
+        cross: f32,
+        /// Blade roll through the stroke. Does not move the tip; it orients
+        /// the blade's face, and with it the trail ribbon's span.
+        roll: f32,
+    },
+}
+
+impl SwingStyle {
+    /// Total duration of this style's release stroke, for effects that must
+    /// run exactly as long as the blade is moving (the Mortal Strike trail).
+    pub fn stroke_secs(self) -> f32 {
+        self.profile().total()
+    }
+
+    pub(crate) fn profile(self) -> SwingProfile {
+        match self {
+            SwingStyle::Auto => SwingProfile {
+                release_secs: SWING_RELEASE_SECS,
+                impact_hold_secs: SWING_IMPACT_HOLD_SECS,
+                follow_secs: SWING_FOLLOW_SECS,
+                arc: SwingArc::Sagittal,
+            },
+            // Tuned in the pre-implementation animation bench. Slower into the
+            // hit and a longer hold than an auto, so the beat registers.
+            SwingStyle::MortalStrike => SwingProfile {
+                release_secs: SWING_RELEASE_SECS * MORTAL_STRIKE_RELEASE_MUL,
+                impact_hold_secs: SWING_IMPACT_HOLD_SECS * MORTAL_STRIKE_HOLD_MUL,
+                follow_secs: SWING_FOLLOW_SECS * MORTAL_STRIKE_FOLLOW_MUL,
+                arc: SwingArc::RisingDiagonal {
+                    drop: MORTAL_STRIKE_DROP,
+                    rise: MORTAL_STRIKE_RISE,
+                    cross: MORTAL_STRIKE_CROSS,
+                    roll: MORTAL_STRIKE_ROLL,
+                },
+            },
+        }
+    }
+}
+
+/// Mortal Strike stroke tuning. Timing multipliers are relative to the
+/// auto-attack consts above; the arc angles are radians.
+const MORTAL_STRIKE_RELEASE_MUL: f32 = 2.4;
+const MORTAL_STRIKE_HOLD_MUL: f32 = 2.0;
+const MORTAL_STRIKE_FOLLOW_MUL: f32 = 1.6;
+const MORTAL_STRIKE_DROP: f32 = 0.85;
+const MORTAL_STRIKE_RISE: f32 = 1.05;
+const MORTAL_STRIKE_CROSS: f32 = 1.5;
+const MORTAL_STRIKE_ROLL: f32 = 0.8;
+/// Share of `cross`/`roll` spent on the windup; the rest is swept on release.
+const RISING_WINDUP_SHARE: f32 = 0.45;
+
 /// Normalized swing parameter in `[-1, 1]`.
 ///
 /// * `s < 0` — windup: eases 0 -> -1 over the anticipation window as
@@ -53,18 +154,39 @@ fn swing_param(
     release_t: Option<f32>,
     release_from: f32,
 ) -> f32 {
+    swing_param_timed(
+        timer,
+        interval,
+        windup_window,
+        release_t,
+        release_from,
+        SwingStyle::Auto.profile(),
+    )
+}
+
+/// [`swing_param`] with the phase durations supplied by a [`SwingProfile`]
+/// instead of the bare consts. The windup branch is unaffected — it is driven
+/// by the sim's attack timer, which a styled stroke does not change.
+fn swing_param_timed(
+    timer: f32,
+    interval: f32,
+    windup_window: f32,
+    release_t: Option<f32>,
+    release_from: f32,
+    profile: SwingProfile,
+) -> f32 {
     if let Some(t) = release_t {
         let from = release_from.clamp(-1.0, 0.0);
-        if t < SWING_RELEASE_SECS {
-            let p = (t / SWING_RELEASE_SECS).clamp(0.0, 1.0);
+        if t < profile.release_secs {
+            let p = (t / profile.release_secs).clamp(0.0, 1.0);
             // Ease-in: the stroke accelerates into the hit.
             let p = p * p;
             return from + (1.0 - from) * p;
         }
-        if t < SWING_RELEASE_SECS + SWING_IMPACT_HOLD_SECS {
+        if t < profile.release_secs + profile.impact_hold_secs {
             return 1.0;
         }
-        let f = (t - SWING_RELEASE_SECS - SWING_IMPACT_HOLD_SECS) / SWING_FOLLOW_SECS;
+        let f = (t - profile.release_secs - profile.impact_hold_secs) / profile.follow_secs;
         return (1.0 - f).clamp(0.0, 1.0);
     }
     if !(interval > 0.0) || !(windup_window > 0.0) {
@@ -121,6 +243,42 @@ fn swing_pose(kind: WeaponKind, s: f32) -> Transform {
     Transform::from_rotation(Quat::from_rotation_x(pitch))
 }
 
+/// Pose for one swing parameter under a named [`SwingArc`].
+///
+/// `Sagittal` delegates to [`swing_pose`] unchanged, so every auto-attack — and
+/// every weapon kind's bespoke pose within it — is byte-identical to before.
+/// `RisingDiagonal` ignores `WeaponKind` on purpose: it is a whole-body arc
+/// belonging to the ability, not to whatever the caster happens to be holding.
+fn swing_pose_arc(kind: WeaponKind, s: f32, arc: SwingArc) -> Transform {
+    match arc {
+        SwingArc::Sagittal => swing_pose(kind, s),
+        SwingArc::RisingDiagonal { drop, rise, cross, roll } => {
+            // Continuous at s == 0: both halves scale from the rest pose, so
+            // the release sweeps low -> rest -> high without a jump.
+            let (pitch, yaw, blade_roll) = if s < 0.0 {
+                let k = -s; // windup: drop the blade low and behind
+                (
+                    drop * k,
+                    cross * RISING_WINDUP_SHARE * k,
+                    roll * RISING_WINDUP_SHARE * k,
+                )
+            } else {
+                let k = s; // release: rip up and across
+                let share = 1.0 - RISING_WINDUP_SHARE;
+                (-rise * k, -cross * share * k, -roll * share * k)
+            };
+            // Yaw carries the blade across the body, pitch lifts it, roll turns
+            // the edge into the cut. Composed in the socket frame, left of the
+            // mount, for the same reason the sagittal chop is (see the caller).
+            Transform::from_rotation(
+                Quat::from_rotation_y(yaw)
+                    * Quat::from_rotation_x(pitch)
+                    * Quat::from_rotation_z(blade_roll),
+            )
+        }
+    }
+}
+
 /// FixedUpdate (graphical-only): consume the sim's landed-attack markers.
 /// Main-hand sockets of the attacker begin their release stroke aimed at the
 /// hit target; a Bow main hand additionally looses a cosmetic arrow. Attackers
@@ -157,6 +315,10 @@ pub fn consume_swing_signals(
                 continue;
             }
             socket.release_t = Some(0.0);
+            // An ordinary auto is never a styled stroke. Clears any signature
+            // style still set from a stroke that has not expired yet, so a
+            // Mortal Strike's timing can never bleed into the next swing.
+            socket.swing_style = SwingStyle::Auto;
             if has_off_dagger && socket.kind == WeaponKind::Dagger {
                 socket.winds_up_next = false; // twin takes over
             }
@@ -241,14 +403,21 @@ pub fn animate_weapon_swings(
             *visibility = wanted;
         }
 
+        // The active stroke's timing and arc. `Auto` reproduces the original
+        // consts and the sagittal chop exactly.
+        let profile = socket.swing_style.profile();
+
         // Advance / expire the release stroke. `windup_s` is frozen during
         // the stroke — it is the sweep's starting pose — and zeroed at expiry
         // so the next windup ramps fresh.
         if let Some(t) = socket.release_t {
             let t = t + dt;
-            if t >= SWING_RELEASE_SECS + SWING_IMPACT_HOLD_SECS + SWING_FOLLOW_SECS {
+            if t >= profile.total() {
                 socket.release_t = None;
                 socket.windup_s = 0.0;
+                // One-shot: the next stroke is an ordinary auto unless another
+                // signature claims it.
+                socket.swing_style = SwingStyle::Auto;
             } else {
                 socket.release_t = Some(t);
             }
@@ -302,12 +471,13 @@ pub fn animate_weapon_swings(
         // both units move), and rendering it raw strobes the pose. The
         // release stroke stays raw — its sharpness IS the hit — and sweeps
         // from the frozen windup depth through to full extension.
-        let s_raw = swing_param(
+        let s_raw = swing_param_timed(
             combatant.attack_timer,
             interval,
             windup_window,
             socket.release_t,
             socket.windup_s,
+            profile,
         );
         let s = if socket.release_t.is_some() {
             s_raw
@@ -367,7 +537,7 @@ pub fn animate_weapon_swings(
         // Composed model-side, the axe's chop became a flat-faced sideways
         // slap and the dagger's lunge became a sideways drag.
         *transform = Transform::from_rotation(Quat::from_rotation_y(socket.yaw_local))
-            * swing_pose(socket.kind, s)
+            * swing_pose_arc(socket.kind, s, profile.arc)
             * socket.rest;
     }
 }

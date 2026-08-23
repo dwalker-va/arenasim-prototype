@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy_egui::egui;
-use super::super::abilities::SpellSchool;
+use super::super::abilities::{AbilityType, SpellSchool};
 use super::super::match_config::CharacterClass;
 
 // ============================================================================
@@ -541,6 +541,12 @@ pub struct WeaponSocket {
     /// leaves, which strobes the pose every few frames during pursuit.
     /// Easing at a bounded rate turns that into a deliberate raise/lower.
     pub windup_s: f32,
+    /// Which named stroke the current release is playing. `Auto` between
+    /// strokes and for every ordinary auto-attack; set alongside `release_t`
+    /// by `consume_instant_attack_signals` for a signature ability, and reset
+    /// to `Auto` when that stroke expires. Selects both the timing profile and
+    /// the arc SHAPE in `animate_weapon_swings`.
+    pub swing_style: SwingStyle,
 }
 
 /// One landed auto-attack, spawned in core at the damage-APPLY site (mirrors
@@ -557,6 +563,71 @@ pub struct AutoAttackSwing {
     /// consumer additionally gates the cosmetic arrow on the attacker holding a
     /// Bow-kind main hand, so wand shots and socketless attackers no-op.
     pub ranged: bool,
+}
+
+/// Which named stroke a [`WeaponSocket`]'s current release is playing.
+///
+/// `Auto` is the ordinary auto-attack. A signature ability adds one variant
+/// here plus one arm in `swing_style_for_ability` / [`SwingStyle::profile`]
+/// (`rendering/effects/weapon_swing.rs`), instead of scattering new consts
+/// through that file or widening `swing_param`'s call sites again.
+///
+/// One-shot: `animate_weapon_swings` resets the socket to `Auto` the frame its
+/// release stroke expires, and `consume_swing_signals` clears it on any
+/// ordinary auto — so a styled stroke can never leak into the next swing.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum SwingStyle {
+    #[default]
+    Auto,
+    /// Warrior Mortal Strike: a rising diagonal that reverses the auto-attack's
+    /// raise-and-chop — the blade drops low and behind, then rips up and across
+    /// the body. Matches the ability's WoW animation ("bottom left to top
+    /// right") and is a different arc PLANE, not a heavier version of the same
+    /// swing.
+    MortalStrike,
+}
+
+/// One landed instant melee attack, spawned in core at the
+/// `QueuedInstantAttack` drain site (`combat_ai.rs`) — the mechanism Mortal
+/// Strike, Ambush and Sinister Strike all resolve through, none of which ever
+/// enters `CastingState`/`process_casting`. Mirrors [`AutoAttackSwing`] and
+/// [`CastEnding`]: a bare marker entity, spawned unconditionally in BOTH modes
+/// (headless spawns it and never reads it), consumed and despawned by
+/// `consume_instant_attack_signals` (`rendering/effects/instant_attack.rs`,
+/// registered only in `states/mod.rs`).
+///
+/// Deliberately ability-AGNOSTIC: core never learns which instants have a
+/// signature. The graphical router decides, so a new melee-instant signature
+/// costs one match arm there and touches no combat code. Spawned only after
+/// the hit's `is_alive` gate, like `AutoAttackSwing`, so a same-frame death
+/// never telegraphs a phantom strike.
+#[derive(Component)]
+pub struct InstantAttackLanded {
+    pub attacker: Entity,
+    pub target: Entity,
+    pub ability: AbilityType,
+    /// Cosmetic only — scales the flourish. Never read by sim code.
+    pub is_crit: bool,
+}
+
+/// One heal that a [`AuraType::HealingReduction`] debuff cut down, spawned in
+/// core at each of the three sites that already apply the reduction: healing
+/// another target and the self-heal path (`combat_core/casting.rs`) and Holy
+/// Shock (`effects/holy_shock.rs`). Consumed by the graphical
+/// `spawn_heal_fracture` (`rendering/effects/mortal_wounds.rs`).
+///
+/// This is how Mortal Wounds is shown: the debuff has no body treatment at
+/// rest, and states itself at the moment it costs someone something — the
+/// incoming heal column visibly sheds the share it refused. Keyed on the aura
+/// TYPE at the reduction site, so Hunter's Aimed Shot (identical 10s/0.65
+/// debuff) gets the same treatment with no Hunter-side code.
+#[derive(Component)]
+pub struct HealingRefused {
+    /// Who was being healed.
+    pub target: Entity,
+    /// Fraction of the heal the debuff refused, in `0..1` (0.35 for a single
+    /// Mortal Strike). Scales the ash so a bigger cut sheds more.
+    pub refused_fraction: f32,
 }
 
 /// How a hard cast or channel ended, for the casting-orb ending animation.

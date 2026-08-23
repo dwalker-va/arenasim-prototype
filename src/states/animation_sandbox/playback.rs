@@ -27,7 +27,8 @@ use super::super::play_match::ability_config::{AbilityConfig, AbilityDefinitions
 use super::super::play_match::components::{
     ActiveAuras, AuraPending, AuraType, BerserkerRagePending, Celebrating, CastingState, ChannelingState,
     ChargingState, Combatant, DRTracker, DeathAnimation, DisengagingState, DispelPending,
-    DivineShieldPending, HolyShockDamagePending, HolyShockHealPending, MatchResults, Pet,
+    DivineShieldPending, HolyShockDamagePending, HolyShockHealPending, InstantAttackLanded,
+    MatchResults, Pet,
     PetType, PlayMatchEntity, ScreamBurst, Totem, TotemElement, TrapType, VictoryCelebration,
     VisualBody,
 };
@@ -135,6 +136,19 @@ pub enum EntryFamily {
     Entity,
     /// M1 for the aura plus a directly-spawned caster cosmetic (Psychic Scream).
     Residue,
+    /// True instants applied inline in a class AI and resolved through
+    /// `combat_ai.rs`'s `QueuedInstantAttack` drain — Mortal Strike today;
+    /// Ambush, Sinister Strike and Eviscerate belong here too (see the note on
+    /// the `mechanism_for` table). These NEVER touch `CastingState`, so routing
+    /// them through `process_casting` would preview a mechanism the real match
+    /// does not use: the cosmetic marker their flourish keys on is spawned in
+    /// `combat_ai.rs`, which the sandbox does not run.
+    ///
+    /// The start path therefore reproduces the two things the real drain loop
+    /// produces — the `InstantAttackLanded` marker and the ability's own
+    /// `AuraPending` — directly, the same way `Residue` spawns Psychic Scream's
+    /// burst (KTD3).
+    InstantMelee,
     /// Body motion started by inserting the driving component.
     Body,
     /// Defined as data (`abilities.ron`) but with no application code, so it has
@@ -153,6 +167,7 @@ impl EntryFamily {
                 | EntryFamily::Component
                 | EntryFamily::Entity
                 | EntryFamily::Residue
+                | EntryFamily::InstantMelee
                 | EntryFamily::Body
         )
     }
@@ -230,6 +245,16 @@ fn mechanism_for(ability: AbilityType, config: &AbilityConfig) -> EntryFamily {
         | BoarCharge | MastersCall | SpellLock | DevourMagic => EntryFamily::Entity,
         // M1 aura + a directly-spawned caster cosmetic.
         PsychicScream => EntryFamily::Residue,
+        // Applied inline in class AI, resolved via `QueuedInstantAttack` in
+        // `combat_ai.rs` — never through `process_casting`.
+        //
+        // NOTE for whoever ships the next melee-instant signature: Ambush,
+        // SinisterStrike and Eviscerate use this SAME mechanism and are still
+        // falling through to the `Cast` default below, so they preview through
+        // a code path the real match never runs for them. Moving them here is
+        // a one-line fix each, deliberately left out of the Mortal Strike
+        // change because no probe covers the Rogue's flourishes yet.
+        MortalStrike => EntryFamily::InstantMelee,
         // Data-only (no application code) / no distinct visual beyond the swing.
         WindShear | HeroicStrike => EntryFamily::Unsupported,
         // Config-derived default: channels, else Cast (hard casts and every
@@ -509,6 +534,7 @@ fn entry_duration(playback: &SandboxPlayback, defs: &AbilityDefinitions) -> f32 
                     Some(EntryFamily::Component)
                         | Some(EntryFamily::Residue)
                         | Some(EntryFamily::Entity)
+                        | Some(EntryFamily::InstantMelee)
                 );
             if let Some(channel) = config.channel_duration {
                 channel
@@ -761,6 +787,25 @@ fn start_entry(
                         interrupted_display_time: 0.0,
                         ticks_applied: 0,
                     });
+                    true
+                }
+                // Instants resolved through `combat_ai.rs`'s instant-attack
+                // drain, which the sandbox does not run. Reproduce that site's
+                // two outputs directly: the cosmetic marker the flourish keys
+                // on, and the ability's own aura.
+                Some(EntryFamily::InstantMelee) => {
+                    commands.spawn((
+                        InstantAttackLanded {
+                            attacker: caster,
+                            target,
+                            ability,
+                            is_crit: false,
+                        },
+                        PlayMatchEntity,
+                    ));
+                    if let Some(pending) = AuraPending::from_ability(target, caster, config) {
+                        commands.spawn((pending, PlayMatchEntity));
+                    }
                     true
                 }
                 // M3 — bespoke `*Pending` / movement components.

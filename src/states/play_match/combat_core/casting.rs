@@ -112,6 +112,24 @@ pub fn update_stealth_visuals(
 /// Log a cast that fizzled because the target left line of sight during the
 /// cast. Shared by the projectile and instant-effect LoS re-check sites in
 /// `process_casting`, which build the identical `MatchEvent` message.
+/// Fraction of a heal that a [`AuraType::HealingReduction`] debuff refused, or
+/// `None` when nothing was cut.
+///
+/// Called at each of the three sites that apply the reduction, to decide
+/// whether to spawn a [`HealingRefused`] cosmetic marker. Returns `None` for a
+/// zero or negative heal (nothing to refuse) and for a reduction too small to
+/// see, so an unafflicted target never spawns a marker and headless never
+/// accumulates them for ordinary healing. Pure — no RNG, no side effects.
+pub fn refused_fraction(before: f32, after: f32) -> Option<f32> {
+    /// Below this the ash would be a handful of invisible motes.
+    const MIN_VISIBLE_REFUSAL: f32 = 0.01;
+    if before <= 0.0 {
+        return None;
+    }
+    let refused = ((before - after) / before).clamp(0.0, 1.0);
+    (refused > MIN_VISIBLE_REFUSAL).then_some(refused)
+}
+
 fn log_los_fizzle(
     combat_log: &mut CombatLog,
     team: u8,
@@ -607,6 +625,7 @@ pub fn process_casting(
             let mut healing = ability_healing;
 
             // Check for healing reduction auras
+            let pre_reduction_healing = healing;
             if let Some(auras) = target_auras {
                 for aura in &auras.auras {
                     if aura.effect_type == AuraType::HealingReduction {
@@ -614,6 +633,16 @@ pub fn process_casting(
                         healing *= aura.magnitude;
                     }
                 }
+            }
+            // Mortal Wounds tell: the debuff has no body treatment, it states
+            // itself by visibly breaking the heal. Byte-neutral cosmetic marker
+            // (no `game_rng`), spawned in both modes, read only by the
+            // graphical `rendering/effects/mortal_wounds.rs`.
+            if let Some(refused) = refused_fraction(pre_reduction_healing, healing) {
+                commands.spawn((
+                    HealingRefused { target: target_entity, refused_fraction: refused },
+                    PlayMatchEntity,
+                ));
             }
 
             // Arena dampening: time-ramped reduction of all healing
@@ -1125,12 +1154,21 @@ pub fn process_channeling(
             let mut actual_healing = healing;
 
             // Check for healing reduction auras
+            let pre_reduction_healing = actual_healing;
             if let Some(auras) = caster_auras {
                 for aura in &auras.auras {
                     if aura.effect_type == AuraType::HealingReduction {
                         actual_healing *= aura.magnitude;
                     }
                 }
+            }
+            // Mortal Wounds tell — see the sibling spawn on the heal-a-target
+            // path above.
+            if let Some(refused) = refused_fraction(pre_reduction_healing, actual_healing) {
+                commands.spawn((
+                    HealingRefused { target: caster_entity, refused_fraction: refused },
+                    PlayMatchEntity,
+                ));
             }
 
             // Arena dampening: time-ramped reduction of all healing

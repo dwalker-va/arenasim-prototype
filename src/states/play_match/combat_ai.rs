@@ -1134,6 +1134,23 @@ pub fn decide_abilities(
                     attacker_id, ability_name, target_id, actual_damage
                 );
 
+                // Cosmetic outcome marker for the graphical signature-animation
+                // router (`rendering/effects/instant_attack.rs`). Spawned here,
+                // inside the landed-hit gate, so a same-frame death never
+                // telegraphs a phantom strike — the same rule `AutoAttackSwing`
+                // follows. Ability-agnostic and byte-neutral: no `game_rng`
+                // draw, and headless spawns it and never reads it (see
+                // `cosmetic-marker-cross-mode-spawn-parity.md`).
+                commands.spawn((
+                    InstantAttackLanded {
+                        attacker: attacker_entity,
+                        target: target_entity,
+                        ability,
+                        is_crit,
+                    },
+                    PlayMatchEntity,
+                ));
+
                 // Spawn floating combat text (yellow for abilities)
                 let text_position = target_transform.translation + Vec3::new(0.0, super::FCT_HEIGHT, 0.0);
                 // Get deterministic offset based on pattern state
