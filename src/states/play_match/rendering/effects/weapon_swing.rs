@@ -67,24 +67,24 @@ pub(crate) enum SwingArc {
     /// past vertical on windup (`s < 0`), chopped forward-down through the
     /// target on release (`s > 0`). Per-weapon-kind, via [`swing_pose`].
     Sagittal,
-    /// A rising diagonal: the blade drops low and behind on windup, then rips
-    /// up and ACROSS the body to finish high. Composes pitch with yaw and roll
-    /// so the blade leaves the sagittal plane entirely — that oblique plane is
-    /// what distinguishes it from an auto-attack at a glance, not its size.
+    /// A swing through a plane TILTED off vertical — the shape of a diagonal
+    /// slash. Still one rotation about one axis, exactly like [`Self::Sagittal`]
+    /// (which is this with `tilt == 0`); the tilt is what carries the blade
+    /// low-on-one-side to high-on-the-other, so no second axis is needed and
+    /// none may be added (see `swing_pose_arc` for what stacking one costs).
     ///
-    /// All four angles are radians. Continuous at `s == 0`: both halves pass
-    /// through the rest pose, so the blade sweeps low -> rest -> high without a
-    /// discontinuity when the release crosses zero.
-    RisingDiagonal {
-        /// Windup pitch — how far the blade drops below rest.
-        drop: f32,
-        /// Release pitch — how high the blade finishes.
-        rise: f32,
-        /// Total yaw swept across the body, split windup/release.
-        cross: f32,
-        /// Blade roll through the stroke. Does not move the tip; it orients
-        /// the blade's face, and with it the trail ribbon's span.
-        roll: f32,
+    /// Angles in radians. Continuous at `s == 0`, where both halves are rest.
+    TiltedPlane {
+        /// How far the swing plane leans off vertical. `0.0` is the sagittal
+        /// chop; larger values read as more diagonal, and past ~1.0 the swing
+        /// flattens toward a horizontal sweep.
+        tilt: f32,
+        /// Windup travel, signed like the sagittal chop's pitch: POSITIVE
+        /// carries the blade forward and DOWN, so a rising slash winds up low.
+        windup: f32,
+        /// Release travel. Positive here means the blade finishes HIGH (the
+        /// value is negated at use), reversing the auto-attack's chop.
+        release: f32,
     },
 }
 
@@ -109,11 +109,10 @@ impl SwingStyle {
                 release_secs: SWING_RELEASE_SECS * MORTAL_STRIKE_RELEASE_MUL,
                 impact_hold_secs: SWING_IMPACT_HOLD_SECS * MORTAL_STRIKE_HOLD_MUL,
                 follow_secs: SWING_FOLLOW_SECS * MORTAL_STRIKE_FOLLOW_MUL,
-                arc: SwingArc::RisingDiagonal {
-                    drop: MORTAL_STRIKE_DROP,
-                    rise: MORTAL_STRIKE_RISE,
-                    cross: MORTAL_STRIKE_CROSS,
-                    roll: MORTAL_STRIKE_ROLL,
+                arc: SwingArc::TiltedPlane {
+                    tilt: MORTAL_STRIKE_TILT,
+                    windup: MORTAL_STRIKE_WINDUP,
+                    release: MORTAL_STRIKE_RELEASE,
                 },
             },
         }
@@ -125,12 +124,15 @@ impl SwingStyle {
 const MORTAL_STRIKE_RELEASE_MUL: f32 = 2.4;
 const MORTAL_STRIKE_HOLD_MUL: f32 = 2.0;
 const MORTAL_STRIKE_FOLLOW_MUL: f32 = 1.6;
-const MORTAL_STRIKE_DROP: f32 = 0.85;
-const MORTAL_STRIKE_RISE: f32 = 1.05;
-const MORTAL_STRIKE_CROSS: f32 = 1.5;
-const MORTAL_STRIKE_ROLL: f32 = 0.8;
-/// Share of `cross`/`roll` spent on the windup; the rest is swept on release.
-const RISING_WINDUP_SHARE: f32 = 0.45;
+/// Lean of the swing plane off vertical (~34°): clearly diagonal, still
+/// unmistakably a downward-to-upward swing rather than a horizontal sweep.
+const MORTAL_STRIKE_TILT: f32 = 0.60;
+/// Windup carries the blade forward and down past horizontal — the mount's own
+/// 0.75 forward lean adds to this — so the stroke visibly loads from low.
+const MORTAL_STRIKE_WINDUP: f32 = 1.15;
+/// Release finishes just past vertical, blade high. Total travel (~2.2 rad)
+/// matches the auto-attack's sweep in size, and reverses it in direction.
+const MORTAL_STRIKE_RELEASE: f32 = 1.05;
 
 /// Normalized swing parameter in `[-1, 1]`.
 ///
@@ -259,29 +261,29 @@ fn swing_pose(kind: WeaponKind, s: f32) -> Transform {
 fn swing_pose_arc(kind: WeaponKind, s: f32, arc: SwingArc) -> Transform {
     match arc {
         SwingArc::Sagittal => swing_pose(kind, s),
-        SwingArc::RisingDiagonal { drop, rise, cross, roll } => {
-            // Continuous at s == 0: both halves scale from the rest pose, so
-            // the release sweeps low -> rest -> high without a jump.
-            let (pitch, yaw, blade_roll) = if s < 0.0 {
-                let k = -s; // windup: drop the blade low and behind
-                (
-                    drop * k,
-                    cross * RISING_WINDUP_SHARE * k,
-                    roll * RISING_WINDUP_SHARE * k,
-                )
-            } else {
-                let k = s; // release: rip up and across
-                let share = 1.0 - RISING_WINDUP_SHARE;
-                (-rise * k, -cross * share * k, -roll * share * k)
-            };
-            // Yaw carries the blade across the body, pitch lifts it, roll turns
-            // the edge into the cut. Composed in the socket frame, left of the
-            // mount, for the same reason the sagittal chop is (see the caller).
-            Transform::from_rotation(
-                Quat::from_rotation_y(yaw)
-                    * Quat::from_rotation_x(pitch)
-                    * Quat::from_rotation_z(blade_roll),
-            )
+        SwingArc::TiltedPlane { tilt, windup, release } => {
+            // ONE rotation about ONE axis — the weapon sweeps through a plane,
+            // the way a swing does. The diagonal comes from TILTING that plane
+            // off vertical, not from adding a second rotation on another axis.
+            //
+            // Composing yaw or roll on top instead (the first attempt) reads as
+            // the axe being turned rather than swung, and is wrong twice over:
+            // a socket-frame Z rotation cartwheels the weapon sideways rather
+            // than rolling it about its haft, and a socket-frame Y rotation
+            // stacks on the aim yaw the caller already applies, so the blade
+            // points away from the target at the exact moment of impact.
+            //
+            // Angle is signed in the same sense as the sagittal chop: POSITIVE
+            // pitches the blade forward and down, negative raises it. A rising
+            // slash is therefore the auto-attack's signs reversed — down and
+            // back on the windup, up and through on the release. Continuous at
+            // `s == 0`, where both halves are the rest pose.
+            let angle = if s < 0.0 { windup * -s } else { -release * s };
+            // The swing axis, tilted within the frontal plane. `tilt == 0` is
+            // the pure sagittal chop; increasing it rotates the whole swing
+            // plane so the blade travels low-on-one-side to high-on-the-other.
+            let axis = Quat::from_rotation_z(tilt) * Vec3::X;
+            Transform::from_rotation(Quat::from_axis_angle(axis, angle))
         }
     }
 }
@@ -749,20 +751,66 @@ mod swing_tests {
     }
 
     #[test]
-    fn mortal_strike_leaves_the_sagittal_plane() {
-        // A different SHAPE, not a bigger version of the same swing: the auto
-        // is pitch-only, so any yaw at all is the distinguishing feature.
+    fn mortal_strike_swings_in_a_tilted_plane() {
+        // A different SHAPE, not a bigger version of the same swing. The auto
+        // rotates about the socket's X axis exactly; the signature rotates
+        // about an axis leaned off it, which is what makes the sweep diagonal.
         let arc = SwingStyle::MortalStrike.profile().arc;
         let (axis, angle) = swing_pose_arc(WeaponKind::TwoHandAxe, 1.0, arc)
             .rotation
             .to_axis_angle();
         assert!(angle.abs() > 1e-3, "the release actually rotates");
+        // Signed axis direction is irrelevant (axis, angle) vs (-axis, -angle),
+        // so compare the lean of the axis itself.
+        let lean = axis.y.abs().atan2(axis.x.abs());
         assert!(
-            axis.y.abs() * angle.abs() > 1e-2,
-            "the arc carries the blade across the body, not just up and down"
+            (lean - MORTAL_STRIKE_TILT).abs() < 0.05,
+            "the swing plane must be leaned by the configured tilt, got {lean}"
         );
-        let auto = swing_pose(WeaponKind::TwoHandAxe, 1.0).rotation.to_axis_angle();
-        assert!(auto.0.y.abs() * auto.1 < 1e-4, "the auto stays in one plane");
+        assert!(axis.z.abs() < 1e-3, "the tilt stays within the frontal plane");
+    }
+
+    #[test]
+    fn the_signature_never_stacks_a_second_rotation_axis() {
+        // The regression that produced "it's turning the axe, not swinging it".
+        // A swing is ONE rotation about ONE axis; composing yaw or roll on top
+        // both cartwheels the weapon and fights the aim yaw the caller applies.
+        // A single-axis rotation has a constant axis across the whole stroke —
+        // a composed one does not.
+        let arc = SwingStyle::MortalStrike.profile().arc;
+        let reference = swing_pose_arc(WeaponKind::TwoHandAxe, 1.0, arc)
+            .rotation
+            .to_axis_angle()
+            .0;
+        for s in [-1.0, -0.6, 0.25, 0.7, 1.0] {
+            let (axis, angle) = swing_pose_arc(WeaponKind::TwoHandAxe, s, arc)
+                .rotation
+                .to_axis_angle();
+            if angle.abs() < 1e-4 {
+                continue; // at rest the axis is arbitrary
+            }
+            // Either parallel or antiparallel — the sign flips with the angle.
+            let alignment = axis.dot(reference).abs();
+            assert!(
+                alignment > 0.999,
+                "the swing axis must not move through the stroke; at s={s} alignment was {alignment}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_sagittal_chop_is_the_zero_tilt_case() {
+        // `Sagittal` and `TiltedPlane` are the same idea; the auto is simply
+        // untilted. Pins that so the two cannot drift into different shapes.
+        let axis = swing_pose_arc(
+            WeaponKind::TwoHandAxe,
+            1.0,
+            SwingArc::TiltedPlane { tilt: 0.0, windup: 1.0, release: 1.0 },
+        )
+        .rotation
+        .to_axis_angle()
+        .0;
+        assert!(axis.y.abs() < 1e-3 && axis.z.abs() < 1e-3, "untilted swings about X alone");
     }
 
     #[test]
