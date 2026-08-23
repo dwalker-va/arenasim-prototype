@@ -51,15 +51,36 @@ const TRAIL_MIN_SAMPLES: usize = 2;
 const TRAIL_MAX_SAMPLES: usize = 96;
 
 /// Impact flash radius (yards) and lifetime (seconds).
-const FLASH_RADIUS: f32 = 0.9;
-const FLASH_LIFETIME: f32 = 0.18;
+///
+/// Deliberately SMALLER and SHORTER than the sparks' reach and life. The flash
+/// is additive, so anything inside it is washed out rather than lit — at a
+/// radius comparable to how far a spark travels in the flash's lifetime, the
+/// debris spends its whole visible phase submerged and the hit reads as a plain
+/// glowing ball. Keep `FLASH_RADIUS` well under `SPARK_SPEED * FLASH_LIFETIME`
+/// so the sparks are clear of it almost immediately.
+const FLASH_RADIUS: f32 = 0.38;
+const FLASH_LIFETIME: f32 = 0.11;
+/// Fraction of the flash's life spent snapping open. It pops to full and then
+/// collapses, rather than expanding as it fades — an expanding bubble covers
+/// the most screen area exactly when the sparks need to be seen.
+const FLASH_SNAP: f32 = 0.2;
+/// The flash's own emissive, dimmer than the trail's. It is a struck-metal
+/// core, not the brightest thing on screen; the sparks carry the impact.
+const FLASH_EMISSIVE: (f32, f32, f32) = (1.7, 0.28, 0.17);
 
-/// Struck-metal sparks — debris on the physics-lite recipe, not gore.
-const SPARK_COUNT: u32 = 10;
-const SPARK_SPEED: f32 = 5.0;
+/// Struck-metal sparks — debris on the physics-lite recipe, not gore. These
+/// carry the impact, so they outlive and outrun the flash (see `FLASH_RADIUS`).
+const SPARK_COUNT: u32 = 14;
+const SPARK_SPEED: f32 = 7.5;
 const SPARK_GRAVITY: f32 = 15.0;
-const SPARK_LIFETIME: f32 = 0.28;
-const SPARK_LENGTH: f32 = 0.11;
+const SPARK_LIFETIME: f32 = 0.34;
+const SPARK_LENGTH: f32 = 0.13;
+/// Per-spark speed varies in `SPARK_SPEED * [MIN, MIN + SPAN]`. The floor is
+/// deliberately well above zero: a near-stationary spark would sit inside the
+/// flash for its whole life, which is the artifact these bounds exist to
+/// prevent (see `flash_cannot_swallow_the_sparks`).
+const SPARK_SPEED_MIN: f32 = 0.7;
+const SPARK_SPEED_SPAN: f32 = 0.6;
 /// Crits get a visibly bigger flourish. Cosmetic only — this scale is never
 /// read by sim code and carries no balance meaning.
 const CRIT_SCALE: f32 = 1.35;
@@ -162,9 +183,10 @@ pub fn spawn_mortal_strike_flourish(
     ));
 
     // --- impact flash ------------------------------------------------------
+    let (fer, feg, feb) = FLASH_EMISSIVE;
     let flash_material = materials.add(StandardMaterial {
         base_color: Color::srgb(br, bg, bb),
-        emissive: LinearRgba::new(er, eg, eb, 1.0),
+        emissive: LinearRgba::new(fer, feg, feb, 1.0),
         alpha_mode: AlphaMode::Add,
         unlit: true,
         ..default()
@@ -200,7 +222,7 @@ pub fn spawn_mortal_strike_flourish(
         // A cone biased up and outward, following the rising cut.
         let yaw = j1 * std::f32::consts::TAU;
         let pitch = 0.25 + 0.9 * j2;
-        let speed = SPARK_SPEED * (0.5 + 0.8 * j3) * scale;
+        let speed = SPARK_SPEED * (SPARK_SPEED_MIN + SPARK_SPEED_SPAN * j3) * scale;
         let velocity = Vec3::new(
             yaw.cos() * pitch.cos() * speed,
             pitch.sin() * speed,
@@ -368,12 +390,19 @@ pub fn update_mortal_strike_flash(
     for (mut flash, mut transform) in flashes.iter_mut() {
         flash.lifetime -= dt;
         let k = (flash.lifetime / flash.initial_lifetime).clamp(0.0, 1.0);
-        // Snap open, then ease out — a struck flash, not a bloom.
-        let grow = 1.0 - k * k;
-        transform.scale = Vec3::splat((0.25 + 0.75 * grow) * flash.radius);
+        // Pop open, then COLLAPSE. An envelope that expands while it fades
+        // covers its own debris at exactly the wrong moment; this one is
+        // largest while brightest and shrinks out of the sparks' way.
+        let elapsed = 1.0 - k;
+        let pop = if elapsed < FLASH_SNAP {
+            elapsed / FLASH_SNAP
+        } else {
+            k / (1.0 - FLASH_SNAP)
+        };
+        transform.scale = Vec3::splat((0.3 + 0.7 * pop.clamp(0.0, 1.0)) * flash.radius);
         if let Some(material) = materials.get_mut(&flash.material) {
             material.base_color = material.base_color.with_alpha(k);
-            let (er, eg, eb) = TRAIL_EMISSIVE;
+            let (er, eg, eb) = FLASH_EMISSIVE;
             material.emissive = LinearRgba::new(er * k, eg * k, eb * k, 1.0);
         }
     }
@@ -473,6 +502,48 @@ mod tests {
             colors[colors.len() - 2][3] > colors[0][3],
             "leading edge is brighter than the tail"
         );
+    }
+
+    #[test]
+    fn flash_cannot_swallow_the_sparks() {
+        // The flash is additive, so debris inside it is washed out, not lit.
+        // Even the SLOWEST spark must be clear of the flash before the flash
+        // is gone, or the hit reads as a plain glowing ball with no debris —
+        // the artifact this bound exists to prevent. Fail-first against the
+        // original numbers (0.9yd flash over 0.18s vs 5.0 yd/s sparks, where
+        // the slowest travelled 0.45yd inside a 0.9yd sphere).
+        let slowest_reach = SPARK_SPEED * SPARK_SPEED_MIN * FLASH_LIFETIME;
+        assert!(
+            slowest_reach > FLASH_RADIUS,
+            "slowest spark reaches {slowest_reach:.3}yd during a {FLASH_LIFETIME}s flash of \
+             radius {FLASH_RADIUS}yd — it never escapes the glow"
+        );
+    }
+
+    #[test]
+    fn sparks_outlive_the_flash() {
+        // The debris must still be on screen after the flash collapses, so the
+        // last thing the eye reads is the spray, not the glow.
+        assert!(SPARK_LIFETIME > FLASH_LIFETIME * 2.0);
+    }
+
+    #[test]
+    fn the_flash_collapses_rather_than_expanding_as_it_fades() {
+        // Scale must peak early and shrink; an envelope that grows while it
+        // fades covers its own debris exactly when the debris needs to read.
+        let scale_at = |elapsed_fraction: f32| {
+            let k = 1.0 - elapsed_fraction;
+            let pop = if elapsed_fraction < FLASH_SNAP {
+                elapsed_fraction / FLASH_SNAP
+            } else {
+                k / (1.0 - FLASH_SNAP)
+            };
+            (0.3 + 0.7 * pop.clamp(0.0, 1.0)) * FLASH_RADIUS
+        };
+        let peak = scale_at(FLASH_SNAP);
+        assert!(peak > scale_at(0.0), "the flash snaps open");
+        assert!(peak > scale_at(0.6), "and is already collapsing by mid-life");
+        assert!(scale_at(1.0) < scale_at(0.6), "and keeps shrinking to the end");
     }
 
     #[test]
