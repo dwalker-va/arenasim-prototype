@@ -147,6 +147,13 @@ const RISING_WINDUP_SHARE: f32 = 0.45;
 /// Pure so the timing behavior is unit-testable without Bevy (see tests at the
 /// bottom of this file). A live `release_t` always wins over windup: the hit
 /// already landed, so the stroke plays regardless of what the timer says.
+/// Test-only shim: [`swing_param_timed`] at the auto-attack profile.
+///
+/// Production code always goes through `swing_param_timed` with the socket's
+/// live profile. This keeps the original auto-attack timing tests calling the
+/// exact signature they were written against, so they remain untouched evidence
+/// that the styled-stroke refactor did not move the auto-attack curve.
+#[cfg(test)]
 fn swing_param(
     timer: f32,
     interval: f32,
@@ -678,6 +685,104 @@ mod swing_tests {
         assert!(release.translation.z > 0.6, "release lunges the dagger forward");
         let (_, angle) = release.rotation.to_axis_angle();
         assert!(angle.abs() < 0.3, "a stab barely rotates");
+    }
+
+    // -- styled strokes -----------------------------------------------------
+    //
+    // The whole styled-stroke refactor rests on one claim: `SwingStyle::Auto`
+    // is the shipped auto-attack, exactly. Everything above tests the curve via
+    // the auto profile; these pin the claim itself.
+
+    #[test]
+    fn the_auto_style_reproduces_the_shipped_constants() {
+        let auto = SwingStyle::Auto.profile();
+        assert_eq!(auto.release_secs, SWING_RELEASE_SECS);
+        assert_eq!(auto.impact_hold_secs, SWING_IMPACT_HOLD_SECS);
+        assert_eq!(auto.follow_secs, SWING_FOLLOW_SECS);
+        assert!(matches!(auto.arc, SwingArc::Sagittal));
+    }
+
+    #[test]
+    fn the_auto_arc_is_the_untouched_sagittal_pose() {
+        // Fail-first guard: if `swing_pose_arc` ever stops delegating for
+        // `Sagittal`, every auto-attack silently changes shape.
+        for kind in [
+            WeaponKind::TwoHandAxe,
+            WeaponKind::Dagger,
+            WeaponKind::Bow,
+            WeaponKind::Mace,
+            WeaponKind::Shield,
+        ] {
+            for s in [-1.0, -0.4, 0.0, 0.35, 1.0] {
+                let direct = swing_pose(kind, s);
+                let via_arc = swing_pose_arc(kind, s, SwingArc::Sagittal);
+                assert_eq!(direct.rotation, via_arc.rotation, "{kind:?} at s={s}");
+                assert_eq!(direct.translation, via_arc.translation, "{kind:?} at s={s}");
+            }
+        }
+    }
+
+    #[test]
+    fn mortal_strike_is_slower_and_holds_longer_than_an_auto() {
+        let auto = SwingStyle::Auto.profile();
+        let ms = SwingStyle::MortalStrike.profile();
+        assert!(ms.release_secs > auto.release_secs, "the stroke is slower into the hit");
+        assert!(ms.impact_hold_secs > auto.impact_hold_secs, "the beat registers longer");
+        assert!(ms.total() > auto.total());
+        assert_eq!(SwingStyle::MortalStrike.stroke_secs(), ms.total());
+    }
+
+    #[test]
+    fn mortal_strike_reverses_the_auto_attacks_direction() {
+        // The point of the signature: the auto RAISES on windup and chops DOWN
+        // on release; Mortal Strike drops LOW and rips UP. Pitch is the sign
+        // that distinguishes them (positive pitches forward/down), so the two
+        // arcs must disagree in sign on both halves of the stroke.
+        let arc = SwingStyle::MortalStrike.profile().arc;
+        let ms_windup = pitch_of(swing_pose_arc(WeaponKind::TwoHandAxe, -1.0, arc));
+        let ms_release = pitch_of(swing_pose_arc(WeaponKind::TwoHandAxe, 1.0, arc));
+        let auto_windup = pitch_of(swing_pose(WeaponKind::TwoHandAxe, -1.0));
+        let auto_release = pitch_of(swing_pose(WeaponKind::TwoHandAxe, 1.0));
+
+        assert!(auto_windup < 0.0 && auto_release > 0.0, "auto: raise then chop down");
+        assert!(ms_windup > 0.0 && ms_release < 0.0, "mortal strike: drop then rip up");
+    }
+
+    #[test]
+    fn mortal_strike_leaves_the_sagittal_plane() {
+        // A different SHAPE, not a bigger version of the same swing: the auto
+        // is pitch-only, so any yaw at all is the distinguishing feature.
+        let arc = SwingStyle::MortalStrike.profile().arc;
+        let (axis, angle) = swing_pose_arc(WeaponKind::TwoHandAxe, 1.0, arc)
+            .rotation
+            .to_axis_angle();
+        assert!(angle.abs() > 1e-3, "the release actually rotates");
+        assert!(
+            axis.y.abs() * angle.abs() > 1e-2,
+            "the arc carries the blade across the body, not just up and down"
+        );
+        let auto = swing_pose(WeaponKind::TwoHandAxe, 1.0).rotation.to_axis_angle();
+        assert!(auto.0.y.abs() * auto.1 < 1e-4, "the auto stays in one plane");
+    }
+
+    #[test]
+    fn the_rising_arc_passes_through_rest_without_a_jump() {
+        // Windup and release are separate branches; they must meet at s == 0 or
+        // the blade teleports the frame the release crosses zero.
+        let arc = SwingStyle::MortalStrike.profile().arc;
+        let just_below = swing_pose_arc(WeaponKind::TwoHandAxe, -1e-4, arc).rotation;
+        let just_above = swing_pose_arc(WeaponKind::TwoHandAxe, 1e-4, arc).rotation;
+        assert!(
+            just_below.angle_between(just_above) < 1e-2,
+            "the two halves must be continuous at rest"
+        );
+    }
+
+    /// Signed pitch (rotation about local X) of a pose, for the direction
+    /// assertions above.
+    fn pitch_of(t: Transform) -> f32 {
+        let (x, _, _) = t.rotation.to_euler(EulerRot::XYZ);
+        x
     }
 }
 

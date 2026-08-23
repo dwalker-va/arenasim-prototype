@@ -330,6 +330,18 @@ impl Plugin for StatesPlugin {
                     .after(play_match::consume_swing_signals)
                     .run_if(in_combat_scene),
             )
+            // Mortal Wounds heal fracture: also a core-spawned marker consumer,
+            // so it takes the same FixedUpdate slot as its siblings above
+            // rather than Update. Several heals can resolve in one rendered
+            // frame, and the ash burst reads the target's LIVE transform — a
+            // consumer running at render rate would site every burst in that
+            // frame at one position instead of each at its own.
+            .add_systems(
+                FixedUpdate,
+                play_match::spawn_heal_fracture
+                    .after(CombatSystemPhase::CombatResolution)
+                    .run_if(in_combat_scene),
+            )
             // Weapon swing animation + cosmetic arrows: per-rendered-frame
             // cosmetic transforms, ordinary Update visual group.
             .add_systems(
@@ -439,8 +451,11 @@ impl Plugin for StatesPlugin {
                             play_match::update_mortal_strike_sparks,
                             play_match::cleanup_mortal_strike,
                         ),
+                        // `spawn_heal_fracture` is NOT here — it consumes a
+                        // core-spawned marker and belongs in FixedUpdate with
+                        // the other marker consumers (see below). These two are
+                        // ordinary per-frame particle motion.
                         (
-                            play_match::spawn_heal_fracture,
                             play_match::update_heal_fracture,
                             play_match::cleanup_heal_fracture,
                         ),

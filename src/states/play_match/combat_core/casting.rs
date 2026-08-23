@@ -109,9 +109,6 @@ pub fn update_stealth_visuals(
     }
 }
 
-/// Log a cast that fizzled because the target left line of sight during the
-/// cast. Shared by the projectile and instant-effect LoS re-check sites in
-/// `process_casting`, which build the identical `MatchEvent` message.
 /// Fraction of a heal that a [`AuraType::HealingReduction`] debuff refused, or
 /// `None` when nothing was cut.
 ///
@@ -130,6 +127,34 @@ pub fn refused_fraction(before: f32, after: f32) -> Option<f32> {
     (refused > MIN_VISIBLE_REFUSAL).then_some(refused)
 }
 
+/// Spawn the Mortal Wounds tell for a heal a `HealingReduction` debuff cut.
+///
+/// **Call this from every healing application site**, immediately after the
+/// reduction loop and BEFORE `ArenaDampening::apply` — the tell belongs to the
+/// debuff, not to dampening, so `before`/`after` must bracket only the aura's
+/// cut. A site that skips it simply shows no tell, which is silent, so this
+/// sits beside the dampening rule in `CLAUDE.md`'s combat-flow notes: a new
+/// heal mechanic needs both.
+///
+/// Byte-neutral: no `game_rng`, spawned in both modes, read only by the
+/// graphical `rendering/effects/mortal_wounds.rs`.
+pub fn spawn_healing_refused_tell(
+    commands: &mut Commands,
+    target: Entity,
+    before: f32,
+    after: f32,
+) {
+    if let Some(refused) = refused_fraction(before, after) {
+        commands.spawn((
+            HealingRefused { target, refused_fraction: refused },
+            PlayMatchEntity,
+        ));
+    }
+}
+
+/// Log a cast that fizzled because the target left line of sight during the
+/// cast. Shared by the projectile and instant-effect LoS re-check sites in
+/// `process_casting`, which build the identical `MatchEvent` message.
 fn log_los_fizzle(
     combat_log: &mut CombatLog,
     team: u8,
@@ -635,15 +660,9 @@ pub fn process_casting(
                 }
             }
             // Mortal Wounds tell: the debuff has no body treatment, it states
-            // itself by visibly breaking the heal. Byte-neutral cosmetic marker
-            // (no `game_rng`), spawned in both modes, read only by the
-            // graphical `rendering/effects/mortal_wounds.rs`.
-            if let Some(refused) = refused_fraction(pre_reduction_healing, healing) {
-                commands.spawn((
-                    HealingRefused { target: target_entity, refused_fraction: refused },
-                    PlayMatchEntity,
-                ));
-            }
+            // itself by visibly breaking the heal. Before dampening, so the
+            // tell reflects the debuff's cut only.
+            spawn_healing_refused_tell(&mut commands, target_entity, pre_reduction_healing, healing);
 
             // Arena dampening: time-ramped reduction of all healing
             healing = dampening.apply(healing);
@@ -1162,14 +1181,13 @@ pub fn process_channeling(
                     }
                 }
             }
-            // Mortal Wounds tell — see the sibling spawn on the heal-a-target
-            // path above.
-            if let Some(refused) = refused_fraction(pre_reduction_healing, actual_healing) {
-                commands.spawn((
-                    HealingRefused { target: caster_entity, refused_fraction: refused },
-                    PlayMatchEntity,
-                ));
-            }
+            // Mortal Wounds tell — see the heal-a-target path above.
+            spawn_healing_refused_tell(
+                &mut commands,
+                caster_entity,
+                pre_reduction_healing,
+                actual_healing,
+            );
 
             // Arena dampening: time-ramped reduction of all healing
             actual_healing = dampening.apply(actual_healing);

@@ -103,8 +103,8 @@ flash reads as an animation *starting then abandoning*; debris that arcs out and
 reads as a consequence. Because the recipe is a self-contained primitive with no source
 coupling, reusing it is a **parameter swap** — fragment count, mesh shape (thin panes for
 glass, cubes for rubble, slivers for sparks), gravity, launch speed, color, lifetime — not
-a re-derivation. Named reuse targets: **Frost Nova cracking / breaking on damage**,
-weapon-impact debris, and death poofs.
+a re-derivation. Named reuse targets: **Frost Nova cracking / breaking on damage** and
+death poofs. Weapon-impact debris has since shipped (see Examples).
 
 ## When to Apply
 
@@ -122,6 +122,23 @@ in `src/states/play_match/rendering/effects/fear.rs`, the `FearShard` component 
 `tests/fear_visual_probes.rs` asserts the burst spawns a ring of shards, they fall under
 gravity (min Y drops), and they drain to zero — the testable contract for any debris preset
 (count, falls, self-expires; appearance stays a sandbox-review concern).
+
+**Weapon-impact debris** (the second preset, and the reuse target this doc named):
+`MortalStrikeSpark` in `src/states/play_match/rendering/effects/mortal_strike.rs`, spawned
+by `spawn_mortal_strike_flourish` at the contact point of a landed Mortal Strike. A pure
+parameter swap off the shroud-shatter preset — slivers instead of panes, a tighter
+up-and-outward cone instead of a ring, `AlphaMode::Add` instead of `Blend` because struck
+metal glows where falling glass does not, and each spark oriented along its own velocity
+rather than tumbling. Confirms the doc's claim: no new machinery, only constants and a
+mesh shape.
+
+A third variant in the same commit shows where the recipe's edge is.
+`RefusedHealMote` (`rendering/effects/mortal_wounds.rs`) is debris-shaped — outward
+velocity, downward acceleration, self-expiring — but deliberately opaque and unlit rather
+than additive, because it represents healing being REFUSED and additive blending can only
+add light. Momentum was the right primitive; the blend mode had to invert to carry the
+meaning. When borrowing this preset, re-derive the material from what the effect means,
+not from the preset it came from.
 
 ## Related
 
