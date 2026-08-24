@@ -547,6 +547,14 @@ pub struct WeaponSocket {
     /// to `Auto` when that stroke expires. Selects both the timing profile and
     /// the arc SHAPE in `animate_weapon_swings`.
     pub swing_style: SwingStyle,
+    /// The swing parameter this socket last rendered at, published by
+    /// `animate_weapon_swings` for `animate_body_lean` to consume.
+    ///
+    /// The body lean must be driven by the SAME value as the weapon or the two
+    /// desync, and recomputing it would mean duplicating the windup
+    /// eligibility gates, the easing and the release timing. Written once per
+    /// frame by the swing animation; read-only everywhere else.
+    pub last_s: f32,
 }
 
 /// One landed auto-attack, spawned in core at the damage-APPLY site (mirrors

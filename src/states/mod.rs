@@ -354,6 +354,19 @@ impl Plugin for StatesPlugin {
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_combat_scene),
             )
+            // Body lean into the swing. Its own registration rather than a
+            // nested tuple: the ordering constraint is a real dependency (it
+            // consumes the `last_s` the swing publishes, and would trail the
+            // weapon by a frame otherwise), so it reads better stated than
+            // implied by position — and `registration_audit`'s scanner cannot
+            // see through a nested `.chain()` sub-tuple.
+            .add_systems(
+                Update,
+                play_match::animate_body_lean
+                    .after(play_match::animate_weapon_swings)
+                    .after(CombatSystemPhase::CombatResolution)
+                    .run_if(in_combat_scene),
+            )
             // Cast-ending signal consumption: same rationale as
             // `consume_swing_signals` above — FixedUpdate can tick several
             // times per rendered frame, and a CastEnding marker consumed one

@@ -21,11 +21,11 @@ use bevy::time::TimeUpdateStrategy;
 use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::combat_core::refused_fraction;
 use arenasim::states::play_match::components::{
-    Combatant, HealingRefused, InstantAttackLanded, SwingStyle, WeaponHand, WeaponKind,
-    WeaponSocket,
+    Combatant, DeathAnimation, HealingRefused, InstantAttackLanded, SwingStyle, VisualBody,
+    WeaponHand, WeaponKind, WeaponSocket,
 };
 use arenasim::states::play_match::{
-    cleanup_heal_fracture, cleanup_mortal_strike, consume_instant_attack_signals,
+    animate_body_lean, cleanup_heal_fracture, cleanup_mortal_strike, consume_instant_attack_signals,
     consume_swing_signals, spawn_heal_fracture, update_heal_fracture,
     update_mortal_strike_flash, update_mortal_strike_impacts, update_mortal_strike_sparks,
     update_mortal_strike_trail, MortalStrikePendingImpact, MortalStrikeSpark, RefusedHealMote,
@@ -44,8 +44,9 @@ fn harness() -> App {
     app
 }
 
-/// A combatant carrying one main-hand two-hand axe socket, as
-/// `spawn_combatant` builds for a Warrior.
+/// A combatant carrying one main-hand two-hand axe socket, in the same
+/// hierarchy `spawn_combatant` builds for a Warrior: the sim entity owns a
+/// `VisualBody` child, and the socket hangs off that body.
 fn spawn_warrior(app: &mut App) -> (Entity, Entity) {
     let attacker = app
         .world_mut()
@@ -54,6 +55,11 @@ fn spawn_warrior(app: &mut App) -> (Entity, Entity) {
             Combatant::new(0, 0, CharacterClass::Warrior),
         ))
         .id();
+    let body = app
+        .world_mut()
+        .spawn((VisualBody { rest_y: 1.0 }, Transform::from_xyz(0.0, 1.0, 0.0)))
+        .id();
+    app.world_mut().entity_mut(attacker).add_child(body);
     let socket = app
         .world_mut()
         .spawn((
@@ -69,13 +75,25 @@ fn spawn_warrior(app: &mut App) -> (Entity, Entity) {
                 prev_owner_yaw: 0.0,
                 windup_s: 0.0,
                 swing_style: SwingStyle::Auto,
+                last_s: 0.0,
             },
             Transform::IDENTITY,
             GlobalTransform::default(),
             Visibility::default(),
         ))
         .id();
+    app.world_mut().entity_mut(body).add_child(socket);
     (attacker, socket)
+}
+
+/// The `VisualBody` child of a combatant built by [`spawn_warrior`].
+fn body_of(app: &mut App, attacker: Entity) -> Entity {
+    let children = app.world().entity(attacker).get::<Children>().unwrap();
+    let candidates: Vec<Entity> = children.iter().collect();
+    candidates
+        .into_iter()
+        .find(|e| app.world().entity(*e).get::<VisualBody>().is_some())
+        .expect("the warrior has a VisualBody child")
 }
 
 fn spawn_target(app: &mut App, x: f32) -> Entity {
@@ -311,6 +329,84 @@ fn the_flourish_expires_without_leaking_entities() {
         .iter(app.world())
         .count();
     assert_eq!((trails, flashes, sparks), (0, 0, 0), "the flourish must fully clean up");
+}
+
+// ---------------------------------------------------------------------------
+// Body lean
+// ---------------------------------------------------------------------------
+
+#[test]
+fn the_body_stands_upright_between_swings() {
+    // The lean writes every frame, so a unit that is not swinging must be
+    // written back to upright — otherwise the first swing of a match leaves
+    // every combatant permanently tilted.
+    let mut app = harness();
+    app.add_systems(Update, animate_body_lean);
+    let (attacker, _socket) = spawn_warrior(&mut app);
+    let body = body_of(&mut app, attacker);
+
+    app.update();
+
+    let t = app.world().entity(body).get::<Transform>().unwrap();
+    assert!(t.rotation.angle_between(Quat::IDENTITY) < 1e-5, "upright at rest");
+    assert!(t.translation.z.abs() < 1e-5, "no step at rest");
+}
+
+#[test]
+fn the_body_leans_while_the_weapon_swings() {
+    let mut app = harness();
+    app.add_systems(Update, animate_body_lean);
+    let (attacker, socket) = spawn_warrior(&mut app);
+    let body = body_of(&mut app, attacker);
+
+    // Mid-release of a signature stroke.
+    {
+        let mut s = app.world_mut().entity_mut(socket);
+        let mut socket_state = s.get_mut::<WeaponSocket>().unwrap();
+        socket_state.swing_style = SwingStyle::MortalStrike;
+        socket_state.last_s = 1.0;
+    }
+    app.update();
+
+    let t = app.world().entity(body).get::<Transform>().unwrap();
+    assert!(
+        t.rotation.angle_between(Quat::IDENTITY) > 0.1,
+        "the torso must visibly turn into a signature swing"
+    );
+    assert!(t.translation.z > 0.05, "and step forward into it");
+}
+
+#[test]
+fn a_dying_unit_cedes_rotation_and_loses_its_step() {
+    // The death fall owns the body's rotation. The lean must not fight it —
+    // and must clear the horizontal step, which nothing else writes, or a unit
+    // killed mid-swing keeps the offset on its corpse for the rest of the match.
+    let mut app = harness();
+    app.add_systems(Update, animate_body_lean);
+    let (attacker, socket) = spawn_warrior(&mut app);
+    let body = body_of(&mut app, attacker);
+
+    {
+        let mut s = app.world_mut().entity_mut(socket);
+        let mut socket_state = s.get_mut::<WeaponSocket>().unwrap();
+        socket_state.swing_style = SwingStyle::MortalStrike;
+        socket_state.last_s = 1.0;
+    }
+    app.update();
+    assert!(app.world().entity(body).get::<Transform>().unwrap().translation.z > 0.05);
+
+    // The unit dies mid-swing; the death fall sets its own rotation.
+    let death_rotation = Quat::from_rotation_x(1.0);
+    app.world_mut().entity_mut(attacker).insert(DeathAnimation::new(Vec3::X));
+    app.world_mut().entity_mut(body).get_mut::<Transform>().unwrap().rotation = death_rotation;
+    app.update();
+
+    let t = app.world().entity(body).get::<Transform>().unwrap();
+    assert!(
+        t.rotation.angle_between(death_rotation) < 1e-5,
+        "the death fall keeps the rotation it set"
+    );
+    assert!(t.translation.z.abs() < 1e-5, "the step is cleared on death");
 }
 
 // ---------------------------------------------------------------------------
