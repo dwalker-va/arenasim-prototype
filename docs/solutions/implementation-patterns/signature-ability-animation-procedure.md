@@ -22,7 +22,22 @@ tags:
 
 ## Context
 
-The tiered per-ability animation plan gives a couple of signature abilities per class a bespoke, recognizable-at-a-glance animation, with lower tiers sharing a cheaper vocabulary. The pilot was Polymorph (PR dwalker-va/arenasim-prototype#103, plan at `docs/plans/2026-08-10-001-feat-polymorph-signature-animation-plan.md`): sheep body swap, hop gait, transform puffs. It shipped in roughly one session, which is the cost signal the pilot existed to measure. Fear and Mortal Strike are the named next candidates.
+The tiered per-ability animation plan gives a couple of signature abilities per class a bespoke, recognizable-at-a-glance animation, with lower tiers sharing a cheaper vocabulary. The pilot was Polymorph (PR dwalker-va/arenasim-prototype#103, plan at `docs/plans/2026-08-10-001-feat-polymorph-signature-animation-plan.md`): sheep body swap, hop gait, transform puffs. It shipped in roughly one session, which is the cost signal the pilot existed to measure. Fear (#107), Lightning Bolt (#111) and Mortal Strike have since shipped on this procedure; the remaining tier walk is the next candidate list.
+
+**Amendment, Mortal Strike (2026-08-22).** The first signature for a TRUE INSTANT, and it broke two of the procedure's assumptions:
+
+- **Step 1's "the caster side already has generic coverage" is false for instants.** Mortal Strike is applied inline in `class_ai/warrior.rs` and resolved in `combat_ai.rs`'s `QueuedInstantAttack` drain — it never enters `CastingState`, so neither the casting orb nor the `CastEnding` marker exists for it, and the weapon socket keeps running its auto-attack cycle straight through the ability. An instant's caster side has NO coverage; the stroke is the work.
+- **A signature stroke needs a different arc PLANE, not a bigger one.** The first attempt scaled the auto-attack's pitch by a depth multiplier, which produces the same chop, louder. `SwingProfile` now carries a `SwingArc`, and `SwingStyle::Auto` reproduces the shipped constants and the sagittal pose exactly (pinned by `the_auto_style_reproduces_the_shipped_constants` and `the_auto_arc_is_the_untouched_sagittal_pose`), so auto-attacks are provably unchanged.
+- **But build that plane by TILTING one rotation axis, never by composing several.** The second attempt added yaw and roll on top of pitch and read as the axe being turned rather than swung — see [swing-is-one-rotation-one-axis.md](swing-is-one-rotation-one-axis.md) for why, and for the cheap assertion that catches it. Both wrong turns cost a round trip through the graphical client, which is the only place either was visible.
+
+Two further lessons worth carrying forward:
+
+- **Ground the look in the real ability before designing.** Mortal Strike's WoW animation is a rising diagonal ("bottom left to top right") and Classic-era warrior ability visuals are carried by a weapon trail, not by target-side gore. Both facts came from a fifteen-minute look at source material and both reversed a design that had already been agreed.
+- **A pre-implementation visual bench pays for itself.** The arc, timing and colour were settled in an interactive HTML bench that ported `swing_param`/`swing_pose` verbatim, before any Rust existed. Every tuning value shipped as a named const straight out of it.
+
+**Known ceiling, deferred (user-agreed 2026-08-23): nothing animates the combatant's BODY.** For a melee signature the weapon is the only signal there is, and that caps how much any stroke can read regardless of how it is shaped. Mortal Strike's arc was pushed to ~2.8 rad on a plane leaned 49° — larger than the auto-attack's and unmistakably diagonal — and the remaining gap is not fixable by exaggerating further. Leaning the torso into the swing is the next real lever for the whole melee tier, and it would lift every melee signature at once rather than one ability. Worth doing before the tier walk spends several more sessions on strokes that share the same ceiling.
+
+**The receiver side does not have to be a body treatment.** Mortal Wounds — a 10s `HealingReduction` debuff — gets no visual on the victim at all. It states itself by breaking incoming heals: a heal landing on an afflicted target sheds the refused share as ash (`rendering/effects/mortal_wounds.rs`), keyed at the three sites that already apply the reduction. This is cheaper than a body treatment AND more legible, because it fires exactly when the debuff costs someone something — and it sidesteps the whole `OriginalBodyMaterial` contention family (see `shared-restore-slot-mutual-exclusion.md`) by never touching the body. Prefer it whenever a debuff's meaning is "some other mechanic is now worse."
 
 ## Guidance
 
@@ -45,9 +60,9 @@ The standing prerequisite has shipped: `effects.rs` (~4.6k lines after the pilot
 
 ## When to Apply
 
-- Any new signature-ability animation (Fear, Mortal Strike, and onward through the tier walk)
+- Any new signature-ability animation, onward through the tier walk
 - Any aura-driven body treatment (CC states: stun slump, root ice, frozen tint)
-- Instant-ability flourishes additionally need core-side cosmetic markers (`CastEnding` pattern) and sandbox Phase B — neither existed as of the pilot
+- Instant-ability flourishes hang off `InstantAttackLanded`, spawned ability-agnostically at the `QueuedInstantAttack` drain in `combat_ai.rs` and dispatched by `rendering/effects/instant_attack.rs`. The next melee-instant signature (Ambush, Kidney Shot, Execute) costs one `SwingStyle` variant, one arm in `swing_style_for_ability`, and one arm in the flourish match — no combat-code change. Its ability must also sit in the sandbox's `EntryFamily::InstantMelee` — Mortal Strike, Ambush and Sinister Strike all do — or the flourish is invisible in the sandbox, because the marker is spawned in `combat_ai.rs` and the sandbox does not run it
 
 ## Examples
 
