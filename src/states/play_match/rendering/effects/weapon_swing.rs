@@ -95,6 +95,19 @@ impl SwingStyle {
         self.profile().total()
     }
 
+    /// Seconds from the start of the stroke to the frame the blade reaches full
+    /// extension — where the impact hold begins, and the only moment an impact
+    /// effect should fire.
+    ///
+    /// The sim resolves an instant's damage BEFORE the animation plays, so the
+    /// stroke begins at the hit rather than ending on it. An impact burst
+    /// spawned when the marker is consumed therefore goes off with the weapon
+    /// still wound up, and on a slow signature stroke it is over before the
+    /// blade has travelled halfway.
+    pub fn impact_at(self) -> f32 {
+        self.profile().release_secs
+    }
+
     pub(crate) fn profile(self) -> SwingProfile {
         match self {
             SwingStyle::Auto => SwingProfile {
@@ -121,18 +134,27 @@ impl SwingStyle {
 
 /// Mortal Strike stroke tuning. Timing multipliers are relative to the
 /// auto-attack consts above; the arc angles are radians.
-const MORTAL_STRIKE_RELEASE_MUL: f32 = 2.4;
+///
+/// These are deliberately LARGE. Nothing animates the combatant's body, so the
+/// weapon is the only thing carrying the ability — an arc merely different from
+/// the auto-attack does not register, it has to be visibly bigger as well as
+/// differently shaped. The total sweep here (~2.8 rad) clearly exceeds the
+/// auto-attack's (~2.3 rad), on a plane leaned nearly 50 degrees off it.
+const MORTAL_STRIKE_RELEASE_MUL: f32 = 2.8;
 const MORTAL_STRIKE_HOLD_MUL: f32 = 2.0;
 const MORTAL_STRIKE_FOLLOW_MUL: f32 = 1.6;
-/// Lean of the swing plane off vertical (~34°): clearly diagonal, still
-/// unmistakably a downward-to-upward swing rather than a horizontal sweep.
-const MORTAL_STRIKE_TILT: f32 = 0.60;
-/// Windup carries the blade forward and down past horizontal — the mount's own
-/// 0.75 forward lean adds to this — so the stroke visibly loads from low.
-const MORTAL_STRIKE_WINDUP: f32 = 1.15;
-/// Release finishes just past vertical, blade high. Total travel (~2.2 rad)
-/// matches the auto-attack's sweep in size, and reverses it in direction.
-const MORTAL_STRIKE_RELEASE: f32 = 1.05;
+/// Lean of the swing plane off vertical (~49°): unmistakably diagonal at arena
+/// camera distance, while still reading as a low-to-high swing. Past ~1.0 rad
+/// it flattens toward a horizontal sweep and loses the rising quality.
+const MORTAL_STRIKE_TILT: f32 = 0.85;
+/// Windup carries the blade well forward and DOWN past horizontal — the mount's
+/// own 0.75 forward lean adds to this — so the stroke loads from unmistakably
+/// low rather than from somewhere near rest.
+const MORTAL_STRIKE_WINDUP: f32 = 1.45;
+/// Release carries it up and back past vertical, finishing high and behind the
+/// shoulder. Combined travel is ~2.8 rad, visibly larger than the
+/// auto-attack's ~2.3 and in the opposite direction.
+const MORTAL_STRIKE_RELEASE: f32 = 1.35;
 
 /// Normalized swing parameter in `[-1, 1]`.
 ///

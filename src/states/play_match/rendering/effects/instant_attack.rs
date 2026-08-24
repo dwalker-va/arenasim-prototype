@@ -87,6 +87,7 @@ pub fn consume_instant_attack_signals(
                         impact,
                         signal.is_crit,
                         style.stroke_secs(),
+                        style.impact_at(),
                     ),
                     _ => {}
                 }

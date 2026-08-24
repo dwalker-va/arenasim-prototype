@@ -447,10 +447,15 @@ impl Plugin for StatesPlugin {
                     (
                         (
                             play_match::update_mortal_strike_trail,
+                            // Fires the held flash/sparks when the blade
+                            // arrives. Chained ahead of the updaters so a burst
+                            // spawned this frame is not aged before it renders.
+                            play_match::update_mortal_strike_impacts,
                             play_match::update_mortal_strike_flash,
                             play_match::update_mortal_strike_sparks,
                             play_match::cleanup_mortal_strike,
-                        ),
+                        )
+                            .chain(),
                         // `spawn_heal_fracture` is NOT here — it consumes a
                         // core-spawned marker and belongs in FixedUpdate with
                         // the other marker consumers (see below). These two are

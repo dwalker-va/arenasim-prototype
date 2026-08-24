@@ -28,7 +28,11 @@ use crate::states::play_match::components::*;
 /// How long a trail sample survives after it is laid down (seconds). The whole
 /// streak is this much of the blade's recent path, so it doubles as the trail's
 /// apparent length.
-const TRAIL_LIFETIME: f32 = 0.22;
+///
+/// Long enough that most of the release sweep is on screen AT ONCE — with no
+/// body animation, the drawn arc is the clearest statement of the stroke's
+/// shape, and a short trail shows only a moving smear instead of a diagonal.
+const TRAIL_LIFETIME: f32 = 0.32;
 /// How far down the blade from the tip the ribbon's inner edge sits (model
 /// units along the weapon's local +Y, its haft axis). The ribbon spans tip to
 /// this point, so a larger value is a wider streak.
@@ -126,6 +130,24 @@ pub struct MortalStrikeSpark {
     initial_lifetime: f32,
 }
 
+/// An impact waiting for the blade to arrive.
+///
+/// The sim resolves an instant's damage before the animation plays, so the
+/// stroke STARTS at the hit. Spawning the flash and sparks there puts them on
+/// screen while the weapon is still wound up and down — and since the flash is
+/// far shorter than the stroke, it is gone before the blade travels. This holds
+/// them until [`SwingStyle::impact_at`], the frame the blade reaches full
+/// extension.
+#[derive(Component)]
+pub struct MortalStrikePendingImpact {
+    /// Seconds remaining until the blade arrives.
+    delay: f32,
+    /// Contact point, snapshotted at the hit — the sim already resolved
+    /// against this position, so it must not track a target that has moved on.
+    impact: Vec3,
+    is_crit: bool,
+}
+
 // --- Visual-only jitter (never game_rng) ------------------------------------
 
 /// Cheap deterministic jitter in `[0, 1)` from a seed. Mirrors
@@ -143,7 +165,9 @@ fn spark_jitter(seed: u32) -> f32 {
 /// the attacker's socket.
 ///
 /// `stroke_secs` is the styled stroke's total duration, so the trail samples
-/// for exactly as long as the blade is moving.
+/// for exactly as long as the blade is moving. `impact_at` is how far into that
+/// stroke the blade actually reaches the target — the flash and sparks are held
+/// until then rather than fired here (see [`MortalStrikePendingImpact`]).
 pub fn spawn_mortal_strike_flourish(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -152,10 +176,16 @@ pub fn spawn_mortal_strike_flourish(
     impact: Vec3,
     is_crit: bool,
     stroke_secs: f32,
+    impact_at: f32,
 ) {
-    let scale = if is_crit { CRIT_SCALE } else { 1.0 };
     let (br, bg, bb) = TRAIL_BASE_COLOR;
     let (er, eg, eb) = TRAIL_EMISSIVE;
+
+    // The impact waits for the blade; only the trail starts now.
+    commands.spawn((
+        MortalStrikePendingImpact { delay: impact_at, impact, is_crit },
+        PlayMatchEntity,
+    ));
 
     // --- trail -------------------------------------------------------------
     // An empty placeholder mesh; `update_mortal_strike_trail` rewrites its
@@ -181,6 +211,49 @@ pub fn spawn_mortal_strike_flourish(
         Transform::IDENTITY,
         PlayMatchEntity,
     ));
+
+}
+
+/// Update (graphical-only): fire each held impact once the blade arrives.
+pub fn update_mortal_strike_impacts(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut pending: Query<(Entity, &mut MortalStrikePendingImpact)>,
+) {
+    let dt = time.delta_secs();
+    for (entity, mut impact) in pending.iter_mut() {
+        impact.delay -= dt;
+        if impact.delay > 0.0 {
+            continue;
+        }
+        spawn_impact_burst(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            entity,
+            impact.impact,
+            impact.is_crit,
+        );
+        commands.entity(entity).despawn();
+    }
+}
+
+/// The contact beat: a tight flash plus struck-metal sparks. `seed_source` only
+/// varies the spark jitter, so two simultaneous strikes do not throw identical
+/// debris.
+fn spawn_impact_burst(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    seed_source: Entity,
+    impact: Vec3,
+    is_crit: bool,
+) {
+    let scale = if is_crit { CRIT_SCALE } else { 1.0 };
+    let (br, bg, bb) = TRAIL_BASE_COLOR;
+    let (er, eg, eb) = TRAIL_EMISSIVE;
 
     // --- impact flash ------------------------------------------------------
     let (fer, feg, feb) = FLASH_EMISSIVE;
@@ -215,7 +288,10 @@ pub fn spawn_mortal_strike_flourish(
     });
     let count = ((SPARK_COUNT as f32) * scale).round() as u32;
     for i in 0..count {
-        let seed = attacker.index().wrapping_mul(31).wrapping_add(i.wrapping_mul(2_654_435_761));
+        let seed = seed_source
+            .index()
+            .wrapping_mul(31)
+            .wrapping_add(i.wrapping_mul(2_654_435_761));
         let j1 = spark_jitter(seed);
         let j2 = spark_jitter(seed.wrapping_add(7));
         let j3 = spark_jitter(seed.wrapping_add(19));

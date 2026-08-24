@@ -27,8 +27,8 @@ use arenasim::states::play_match::components::{
 use arenasim::states::play_match::{
     cleanup_heal_fracture, cleanup_mortal_strike, consume_instant_attack_signals,
     consume_swing_signals, spawn_heal_fracture, update_heal_fracture,
-    update_mortal_strike_flash, update_mortal_strike_sparks, update_mortal_strike_trail,
-    RefusedHealMote,
+    update_mortal_strike_flash, update_mortal_strike_impacts, update_mortal_strike_sparks,
+    update_mortal_strike_trail, MortalStrikePendingImpact, MortalStrikeSpark, RefusedHealMote,
 };
 use arenasim::states::play_match::components::AutoAttackSwing;
 use arenasim::CharacterClass;
@@ -211,6 +211,53 @@ fn a_same_tick_auto_does_not_downgrade_the_signature() {
 }
 
 #[test]
+fn the_impact_waits_for_the_blade_to_arrive() {
+    // The sim resolves an instant BEFORE the animation plays, so the stroke
+    // starts at the hit. Spawning the burst there puts it on screen with the
+    // weapon still wound up, and it expires before the blade travels.
+    let mut app = harness();
+    app.add_systems(
+        Update,
+        (consume_instant_attack_signals, update_mortal_strike_impacts).chain(),
+    );
+    let (attacker, _socket) = spawn_warrior(&mut app);
+    let target = spawn_target(&mut app, 2.0);
+
+    app.world_mut().spawn(InstantAttackLanded {
+        attacker,
+        target,
+        ability: AbilityType::MortalStrike,
+        is_crit: false,
+    });
+
+    let sparks = |app: &mut App| {
+        app.world_mut().query::<&MortalStrikeSpark>().iter(app.world()).count()
+    };
+
+    app.update();
+    assert_eq!(sparks(&mut app), 0, "no burst while the blade is still wound up");
+
+    // The stroke's contact frame is `SwingStyle::MortalStrike.impact_at()`;
+    // step past it and the burst must appear exactly once.
+    let contact_ticks = (SwingStyle::MortalStrike.impact_at() / TICK.as_secs_f32()).ceil() as u32;
+    for _ in 0..=contact_ticks {
+        app.update();
+    }
+    let fired = sparks(&mut app);
+    assert!(fired > 0, "the burst must fire when the blade arrives");
+
+    app.update();
+    assert!(
+        app.world_mut()
+            .query::<&MortalStrikePendingImpact>()
+            .iter(app.world())
+            .next()
+            .is_none(),
+        "the pending impact must be consumed, not left to re-fire"
+    );
+}
+
+#[test]
 fn the_flourish_expires_without_leaking_entities() {
     let mut app = harness();
     app.add_systems(
@@ -218,6 +265,7 @@ fn the_flourish_expires_without_leaking_entities() {
         (
             consume_instant_attack_signals,
             update_mortal_strike_trail,
+            update_mortal_strike_impacts,
             update_mortal_strike_flash,
             update_mortal_strike_sparks,
             cleanup_mortal_strike,
@@ -234,10 +282,14 @@ fn the_flourish_expires_without_leaking_entities() {
         is_crit: true,
     });
 
-    // One tick to consume and spawn, then run well past the longest lifetime.
-    app.update();
-    let spawned = app.world_mut().query::<&Transform>().iter(app.world()).count();
-    assert!(spawned > 2, "the flourish spawned trail/flash/spark entities");
+    // Run past the contact frame so the burst actually exists, then well past
+    // every lifetime. Checking only the first tick would miss the delayed
+    // entities entirely.
+    for _ in 0..12 {
+        app.update();
+    }
+    let mid = app.world_mut().query::<&MortalStrikeSpark>().iter(app.world()).count();
+    assert!(mid > 0, "the burst fired before the sweep to cleanup");
 
     for _ in 0..60 {
         app.update();
