@@ -1242,6 +1242,7 @@ pub(crate) fn spawn_combatant(
                     prev_owner_yaw: 0.0,
                     windup_s: 0.0,
                     swing_style: SwingStyle::Auto,
+                    last_s: 0.0,
                 },
                 rest,
             ))

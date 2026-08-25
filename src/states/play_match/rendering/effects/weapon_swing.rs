@@ -51,6 +51,11 @@ pub(crate) struct SwingProfile {
     impact_hold_secs: f32,
     follow_secs: f32,
     arc: SwingArc,
+    /// Fraction of the swing's own rotation the BODY turns through
+    /// (`animate_body_lean`). Nothing animates the combatant's body otherwise,
+    /// so this is what separates a routine swing from a committed one — an
+    /// auto-attack gets a slight weight shift, a signature a real turn.
+    lean: f32,
 }
 
 impl SwingProfile {
@@ -115,6 +120,7 @@ impl SwingStyle {
                 impact_hold_secs: SWING_IMPACT_HOLD_SECS,
                 follow_secs: SWING_FOLLOW_SECS,
                 arc: SwingArc::Sagittal,
+                lean: AUTO_LEAN,
             },
             // Tuned in the pre-implementation animation bench. Slower into the
             // hit and a longer hold than an auto, so the beat registers.
@@ -127,6 +133,7 @@ impl SwingStyle {
                     windup: MORTAL_STRIKE_WINDUP,
                     release: MORTAL_STRIKE_RELEASE,
                 },
+                lean: MORTAL_STRIKE_LEAN,
             },
         }
     }
@@ -143,6 +150,27 @@ impl SwingStyle {
 const MORTAL_STRIKE_RELEASE_MUL: f32 = 2.8;
 const MORTAL_STRIKE_HOLD_MUL: f32 = 2.0;
 const MORTAL_STRIKE_FOLLOW_MUL: f32 = 1.6;
+
+// --- body lean (see `animate_body_lean`) ---------------------------------
+//
+// Fractions of the swing's own rotation, so the body always turns the way the
+// weapon does. Values from the pre-implementation bench.
+
+/// A routine swing: a slight commitment, ~8° at full extension. Deliberately
+/// an order of magnitude below the signature — an auto-attack should gain
+/// weight without gaining ceremony.
+const AUTO_LEAN: f32 = 0.10;
+/// A signature swing: the torso genuinely turns into it, ~22° at full
+/// extension.
+const MORTAL_STRIKE_LEAN: f32 = 0.28;
+/// Horizontal step into the blow, in yards at full extension — back through the
+/// windup, forward through the release.
+///
+/// HORIZONTAL ONLY, and small. The body's vertical offset belongs to the gaits
+/// (walk bob / sheep hop / panic run), so a vertical crouch here would fight
+/// them; X/Z is unowned. Small because health bars and floating text anchor to
+/// the SIM position, and a large offset visibly detaches the body from them.
+const SWING_WEIGHT_SHIFT: f32 = 0.18;
 /// Lean of the swing plane off vertical (~49°): unmistakably diagonal at arena
 /// camera distance, while still reading as a low-to-high swing. Past ~1.0 rad
 /// it flattens toward a horizontal sweep and loses the rising quality.
@@ -280,10 +308,32 @@ fn swing_pose(kind: WeaponKind, s: f32) -> Transform {
 /// every weapon kind's bespoke pose within it — is byte-identical to before.
 /// `RisingDiagonal` ignores `WeaponKind` on purpose: it is a whole-body arc
 /// belonging to the ability, not to whatever the caster happens to be holding.
+/// The rotation an arc turns through at swing parameter `s`: its axis, and the
+/// angle about that axis.
+///
+/// This is what the BODY lean rides — the torso turns about the same axis as
+/// the weapon, at a fraction of the angle, so one input drives both and they
+/// can never disagree about which way the swing goes.
+///
+/// The `Sagittal` branch reports the two-hand arc for every weapon kind. The
+/// per-kind poses ([`swing_pose`]) differ in how they express that swing — a
+/// dagger thrusts rather than arcs — but the BODY's commitment into the blow is
+/// the same motion regardless of what is held, so the lean uses one reference
+/// curve rather than five.
+fn arc_rotation(s: f32, arc: SwingArc) -> (Vec3, f32) {
+    match arc {
+        SwingArc::Sagittal => (Vec3::X, if s < 0.0 { 0.9 * s } else { 1.4 * s }),
+        SwingArc::TiltedPlane { tilt, windup, release } => {
+            let angle = if s < 0.0 { windup * -s } else { -release * s };
+            (Quat::from_rotation_z(tilt) * Vec3::X, angle)
+        }
+    }
+}
+
 fn swing_pose_arc(kind: WeaponKind, s: f32, arc: SwingArc) -> Transform {
     match arc {
         SwingArc::Sagittal => swing_pose(kind, s),
-        SwingArc::TiltedPlane { tilt, windup, release } => {
+        SwingArc::TiltedPlane { .. } => {
             // ONE rotation about ONE axis — the weapon sweeps through a plane,
             // the way a swing does. The diagonal comes from TILTING that plane
             // off vertical, not from adding a second rotation on another axis.
@@ -299,12 +349,11 @@ fn swing_pose_arc(kind: WeaponKind, s: f32, arc: SwingArc) -> Transform {
             // pitches the blade forward and down, negative raises it. A rising
             // slash is therefore the auto-attack's signs reversed — down and
             // back on the windup, up and through on the release. Continuous at
-            // `s == 0`, where both halves are the rest pose.
-            let angle = if s < 0.0 { windup * -s } else { -release * s };
-            // The swing axis, tilted within the frontal plane. `tilt == 0` is
-            // the pure sagittal chop; increasing it rotates the whole swing
-            // plane so the blade travels low-on-one-side to high-on-the-other.
-            let axis = Quat::from_rotation_z(tilt) * Vec3::X;
+            // `s == 0`, where both halves are the rest pose. The axis is tilted
+            // within the frontal plane: `tilt == 0` is the pure sagittal chop,
+            // and increasing it rotates the whole swing plane so the blade
+            // travels low-on-one-side to high-on-the-other.
+            let (axis, angle) = arc_rotation(s, arc);
             Transform::from_rotation(Quat::from_axis_angle(axis, angle))
         }
     }
@@ -570,6 +619,70 @@ pub fn animate_weapon_swings(
         *transform = Transform::from_rotation(Quat::from_rotation_y(socket.yaw_local))
             * swing_pose_arc(socket.kind, s, profile.arc)
             * socket.rest;
+
+        // Publish for `animate_body_lean`, which must turn the body on exactly
+        // this value rather than recomputing it.
+        socket.last_s = s;
+    }
+}
+
+/// Update (graphical-only): turn the swinging combatant's BODY into the blow.
+///
+/// Nothing else animates a combatant's torso, so for a melee ability the weapon
+/// was the only signal there was — which capped how much any stroke could read
+/// no matter how it was shaped. The body turns about the swing's OWN axis
+/// ([`arc_rotation`]) by [`SwingProfile::lean`] of its angle, driven by the same
+/// `s` the weapon used, so wind-back and drive-through fall out of one input
+/// with no second curve to keep in sync.
+///
+/// Because a [`WeaponSocket`] is a CHILD of the [`VisualBody`], this composes
+/// onto the weapon's own arc rather than sitting beside it — the lean makes the
+/// blade's world-space sweep bigger as well as adding a second signal.
+///
+/// **Channel ownership.** Writes the body's `rotation` and its HORIZONTAL
+/// translation only. `translation.y` belongs to the gaits (walk bob, sheep hop,
+/// panic run) and the victory bounce; rotation is otherwise written only by the
+/// death fall, which this cedes to via the `dying` branch. Pets are never
+/// touched — they carry no sockets — so `apply_pet_mesh_tilt` keeps their
+/// rotation uncontested.
+pub fn animate_body_lean(
+    sockets: Query<&WeaponSocket>,
+    owners: Query<(&Children, Option<&DeathAnimation>), With<Combatant>>,
+    mut bodies: Query<&mut Transform, With<VisualBody>>,
+) {
+    for socket in sockets.iter() {
+        // One body, one lean: the main hand owns it. An off-hand dagger would
+        // otherwise fight its twin for the same transform.
+        if socket.hand != WeaponHand::Main {
+            continue;
+        }
+        let Ok((children, dying)) = owners.get(socket.owner) else {
+            continue;
+        };
+
+        let (axis, angle) = arc_rotation(socket.last_s, socket.swing_style.profile().arc);
+        let lean = socket.swing_style.profile().lean;
+
+        for child in children.iter() {
+            let Ok(mut body) = bodies.get_mut(child) else {
+                continue;
+            };
+            if dying.is_some() {
+                // The death fall owns rotation from here. Clear the horizontal
+                // step, though — nothing else writes it, so a unit killed
+                // mid-swing would keep the offset on its corpse forever.
+                body.translation.x = 0.0;
+                body.translation.z = 0.0;
+                continue;
+            }
+            body.rotation = Quat::from_axis_angle(axis, angle * lean);
+            // Step into the blow: back through the windup, forward through the
+            // release. Local +Z is forward (the same axis the mount leans
+            // along), and `s` already carries the sign.
+            let step = socket.last_s * SWING_WEIGHT_SHIFT;
+            body.translation.x = 0.0;
+            body.translation.z = step;
+        }
     }
 }
 
@@ -846,6 +959,65 @@ mod swing_tests {
             just_below.angle_between(just_above) < 1e-2,
             "the two halves must be continuous at rest"
         );
+    }
+
+    // -- body lean ----------------------------------------------------------
+
+    #[test]
+    fn the_body_leans_about_the_same_axis_the_weapon_swings_on() {
+        // If the two ever disagreed the torso would turn one way while the
+        // blade went another. One source of truth is what prevents that.
+        for style in [SwingStyle::Auto, SwingStyle::MortalStrike] {
+            let arc = style.profile().arc;
+            let (weapon_axis, _) = arc_rotation(0.8, arc);
+            let (lean_axis, _) = arc_rotation(0.8, arc);
+            assert_eq!(weapon_axis, lean_axis, "{style:?}");
+        }
+    }
+
+    #[test]
+    fn a_standing_unit_is_upright() {
+        // At rest the lean must be exactly identity, or every idle combatant in
+        // the arena stands permanently tilted.
+        for style in [SwingStyle::Auto, SwingStyle::MortalStrike] {
+            let (_, angle) = arc_rotation(0.0, style.profile().arc);
+            assert_eq!(angle, 0.0, "{style:?} leans while standing still");
+        }
+    }
+
+    #[test]
+    fn the_body_winds_back_before_it_drives_through() {
+        // One input drives both halves: the lean angle must reverse sign across
+        // rest, exactly as the swing does, with no second curve to keep synced.
+        for style in [SwingStyle::Auto, SwingStyle::MortalStrike] {
+            let arc = style.profile().arc;
+            let (_, windup) = arc_rotation(-1.0, arc);
+            let (_, release) = arc_rotation(1.0, arc);
+            assert!(
+                windup * release < 0.0,
+                "{style:?}: windup and release must lean opposite ways"
+            );
+        }
+    }
+
+    #[test]
+    fn a_signature_commits_the_body_far_harder_than_a_routine_swing() {
+        // The whole point of a per-style lean: an auto gains weight, a
+        // signature gains ceremony. Compares the ACTUAL turn, not the raw
+        // fraction, since the two styles swing through different angles.
+        let turn = |style: SwingStyle| {
+            let p = style.profile();
+            let (_, angle) = arc_rotation(1.0, p.arc);
+            (angle * p.lean).abs()
+        };
+        let auto = turn(SwingStyle::Auto);
+        let signature = turn(SwingStyle::MortalStrike);
+        assert!(
+            signature > auto * 2.0,
+            "signature lean {signature:.3} rad should dwarf the auto's {auto:.3}"
+        );
+        // And neither may become a pirouette.
+        assert!(signature < 0.7, "a lean, not a spin: {signature:.3} rad");
     }
 
     /// Signed pitch (rotation about local X) of a pose, for the direction
