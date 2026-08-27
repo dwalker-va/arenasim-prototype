@@ -62,3 +62,5 @@ mod mortal_strike;
 pub use mortal_strike::*;
 mod mortal_wounds;
 pub use mortal_wounds::*;
+mod hard_cc;
+pub use hard_cc::*;

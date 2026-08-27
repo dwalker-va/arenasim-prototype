@@ -766,3 +766,85 @@ pub struct WindfuryTornado {
     /// Spin accumulator (seconds) driving the fast Y-axis rotation.
     pub spin: f32,
 }
+
+/// Which restraint object a rooted unit wears. Selected from the aura's
+/// `spell_school` (Frost Nova is `Frost`, Spider Web is `Nature`), so a future
+/// root inherits a treatment with no code change.
+#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RootStyle {
+    /// Faceted ice crystals stabbing up around the feet.
+    Ice,
+    /// A webbed sheet over the shins — spokes out to a hem pinned on the floor,
+    /// crossed by concentric rings.
+    Web,
+}
+
+/// Marker: this unit is rooted and wearing the feet treatment.
+///
+/// The SINGLE source of truth for every visual keyed on `AuraType::Root` — the
+/// rig's lifetime and its retract arm both key off this marker, never off a
+/// second system re-deriving state from `ActiveAuras` (predicates that each
+/// re-derive drift apart; see `aura-driven-visual-exit-paths.md`). Carrying the
+/// style makes a style CHANGE — a Web root replaced by a Frost Nova within one
+/// tick — a detectable rebuild rather than silent drift.
+///
+/// Composes with [`StunnedVisual`]: Root and Stun are separate DR categories
+/// occupying disjoint space, and both must show at once.
+#[derive(Component)]
+pub struct RootedVisual {
+    pub style: RootStyle,
+}
+
+/// Marker: this unit is stunned and wearing the overhead whirl. See
+/// [`RootedVisual`] for the ownership rule.
+#[derive(Component)]
+pub struct StunnedVisual;
+
+/// Which hard-CC treatment a [`CcRig`] carries.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CcKind {
+    Root,
+    Stun,
+}
+
+/// One crowd-control rig: a WORLD-SPACE hub that follows its owner, with every
+/// primitive of the treatment as its own child.
+///
+/// Deliberately NOT a child of the `VisualBody` (whose local y belongs to the
+/// gaits and the victory bounce, which would lift a ground piece off the floor)
+/// and deliberately NOT a child of the sim entity (whose yaw is sim-written,
+/// which would make the whirl's spin fight the unit's facing snaps).
+///
+/// `owner` is the SIM entity and `kind` disambiguates, mirroring
+/// `FearShroud { owner }`: the retract arm filters on BOTH, so two
+/// simultaneously rooted units never strip each other's rig and a root and a
+/// stun on one unit never strip each other's. Children are UNMARKED — `despawn`
+/// is recursive, the same reason `SheepPart`'s siblings are untagged.
+#[derive(Component)]
+pub struct CcRig {
+    pub owner: Entity,
+    pub kind: CcKind,
+    /// Seconds since spawn. Drives the grow ease, the spin and the bob — all off
+    /// `Res<Time>`, never off sim displacement (`fixed-timestep-visual-strobe`).
+    pub age: f32,
+    /// `Some` once the exit was armed: the rig plays out its retract, then
+    /// despawns. A retracting rig is not "held", so a re-application spawns a
+    /// fresh one rather than reviving it.
+    pub retract: Option<f32>,
+    /// Vertical offset from the owner's SIM y to this rig's anchor, resolved
+    /// once at spawn from the owner's `VisualBody::rest_y` (which is the
+    /// sim-to-render correction, and is large and negative for pets). Used by
+    /// the Stun whirl; the Root rig ignores it and pins to the floor instead.
+    pub lift: f32,
+}
+
+/// The one-shot ring marking the instant a hard CC lands. Per VICTIM, so a Frost
+/// Nova catching three enemies pops three rings and the AoE reads as an AoE with
+/// no caster-side hook.
+#[derive(Component)]
+pub struct CcFlare {
+    /// Seconds remaining before despawn.
+    pub lifetime: f32,
+    /// Scale the ring expands to — wider on the ground than overhead.
+    pub end_scale: f32,
+}

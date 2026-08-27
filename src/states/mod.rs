@@ -482,6 +482,30 @@ impl Plugin for StatesPlugin {
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_combat_scene),
             )
+            // Hard-CC receiver treatment: ice crystals / web sheet at a rooted
+            // unit's feet, and the whirl over a stunned unit's head. Its own
+            // group because the block above is AT Bevy's 20-item .add_systems
+            // tuple limit, so a 21st sibling there does not compile.
+            //
+            // Graphical-only — never registered in `add_core_combat_systems`.
+            // Keyed purely on the VICTIM's aura, which is what makes it faithful
+            // in the animation sandbox too: Frost Nova, Cheap Shot, Kidney Shot
+            // and Hammer of Justice are all applied inline in class AI and never
+            // enter `process_casting`, but every path converges on `AuraPending`
+            // -> `apply_pending_auras`, which does run under `in_combat_scene`.
+            .add_systems(
+                Update,
+                (
+                    play_match::update_hard_cc_visuals,
+                    play_match::update_cc_rigs,
+                    play_match::update_cc_flares,
+                    play_match::cleanup_cc_rigs,
+                    play_match::cleanup_cc_flares,
+                )
+                    .chain()
+                    .after(CombatSystemPhase::CombatResolution)
+                    .run_if(in_combat_scene),
+            )
             // Pet mesh tilt must run after movement sets Y-facing rotation
             .add_systems(
                 Update,
