@@ -11,9 +11,8 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 
 use super::super::banter_config::BanterConfig;
-use super::super::components::{Combatant, GameRng, MatchCountdown, Pet, SpeechBubble};
+use super::super::components::{Combatant, GameRng, Pet, SpeechBubble};
 use super::super::match_config::CharacterClass;
-use super::super::rendering::effects::bubble_visible;
 use super::super::utils::spawn_speech_line;
 use super::resolver::{resolve_exchange, BanterCall, BanterCombatant, BanterLineup, ResolvedExchange};
 use super::watcher::CallWatcher;
@@ -143,27 +142,21 @@ impl BanterScheduler {
         }));
     }
 
-    /// Record every currently-VISIBLE bubble as speaker occupancy.
+    /// Record every live bubble as speaker occupancy.
     ///
     /// Occupancy exists because two bubbles on one speaker DRAW on top of each
-    /// other, so only a bubble the renderer actually shows can collide. Pre-gate
-    /// ability bubbles are suppressed by `bubble_visible`, and the countdown is
-    /// exactly when combatants spam buffs — counting those invisible bubbles
-    /// would defer the opening exchange by up to their lifetime for a collision
-    /// nobody could have seen.
+    /// other. Every bubble is a banter line and every banter line renders, so
+    /// every one of them can collide.
     ///
-    /// Takes the max against whatever is already recorded so a banter bubble's
-    /// own booking is never shortened by this, and so a speaker holding two
-    /// bubbles is busy until the later one clears.
+    /// Takes the max against whatever is already recorded so a booking is never
+    /// shortened by this, and so a speaker holding two bubbles is busy until
+    /// the later one clears.
     ///
     /// Split from [`take_due`](Self::take_due) rather than folded into it
     /// because the queue mechanics stay pure and testable over plain values;
     /// this is the one step that needs the World.
-    fn observe_live_bubbles(&mut self, bubbles: &Query<&SpeechBubble>, gates_opened: bool) {
+    fn observe_live_bubbles(&mut self, bubbles: &Query<&SpeechBubble>) {
         for bubble in bubbles.iter() {
-            if !bubble_visible(bubble.kind, gates_opened) {
-                continue;
-            }
             let free_at = self.clock + bubble.lifetime;
             self.speaking_until
                 .entry(bubble.owner)
@@ -292,14 +285,12 @@ fn class_at(roster: &[BanterCombatant], slot: Option<usize>) -> Option<Character
 /// (9.0s) bounds a beat's offset within an exchange, but a correction made at
 /// t=9.5 in the 10s countdown schedules its first beat at ~11.5s — a second or
 /// so into the fight. Suppressing it would silently swallow a call the operator
-/// just made; a beat landing just after the gates open reads fine, and banter
-/// bubbles render in both gate states by design (`bubble_visible`).
+/// just made, and a beat landing just after the gates open reads fine.
 pub fn play_banter_beats(
     mut commands: Commands,
     time: Res<Time>,
     banter_config: Option<Res<BanterConfig>>,
     rng: Option<Res<GameRng>>,
-    countdown: Option<Res<MatchCountdown>>,
     mut watcher: ResMut<CallWatcher>,
     mut scheduler: ResMut<BanterScheduler>,
     combatants: Query<(Entity, &Combatant), Without<Pet>>,
@@ -366,19 +357,14 @@ pub fn play_banter_beats(
         }
     }
 
-    // Fold every live VISIBLE bubble into the occupancy map before deciding
-    // what is due, not just the banter ones the scheduler emitted itself.
+    // Fold every live bubble into the occupancy map before deciding what is
+    // due, not just the ones this scheduler emitted itself.
     //
     // Bubbles carry no per-owner offset, so two live on one speaker draw on top
-    // of each other. Post-gate that is reachable: ability bubbles render again
-    // once the gates open, so a mid-fight shout landing while its speaker is
-    // mid-"Mortal Strike!" would overlap it. The scheduler only knew about its
-    // own emissions, which made the one-bubble-per-speaker rule true within
-    // banter and false against the rest of the UI. Pre-gate ability bubbles are
-    // NOT drawn, so they are not folded in — see `observe_live_bubbles`. No
-    // countdown resource means the gates cannot have opened yet.
-    let gates_opened = countdown.map(|c| c.gates_opened).unwrap_or(false);
-    scheduler.observe_live_bubbles(&bubbles, gates_opened);
+    // of each other. Reading the World rather than trusting the scheduler's own
+    // bookkeeping keeps the one-bubble-per-speaker rule true against anything
+    // else that ever spawns a bubble, not only against banter.
+    scheduler.observe_live_bubbles(&bubbles);
 
     // A despawned entity fails the `get` and reads as dead, which is the right
     // answer for a beat whose speaker is gone.
@@ -683,7 +669,7 @@ mod tests {
     // combatants `play_banter_beats` reads, as U4's watcher tests do.
     // -------------------------------------------------------------------
 
-    use crate::states::play_match::components::{BubbleKind, PlayMatchEntity};
+    use crate::states::play_match::components::PlayMatchEntity;
 
     /// A pool with a two-beat `Opening` and a one-beat `Switch`, on fast
     /// timings so a test can walk a whole exchange in a few frames.
@@ -858,15 +844,14 @@ mod tests {
         assert_eq!(world.resource::<BanterScheduler>().occurrence[0], 1);
     }
 
-    /// A bubble the renderer suppresses cannot collide with anything, so it
-    /// must not defer a beat.
+    /// `observe_live_bubbles` reads the WORLD, not just the scheduler's own
+    /// emissions, so a bubble it never queued still books its owner's mouth.
     ///
-    /// Pre-gate ability bubbles are hidden (`bubble_visible`), and the
-    /// countdown is precisely when combatants spam buffs — counting them as
-    /// occupancy would push the opening exchange back by up to a buff bubble's
-    /// lifetime for an overlap nobody could have seen.
+    /// The pure-value tests above cover deferral within the scheduler's
+    /// bookkeeping; this is the half that needs a World, and the only thing
+    /// that would notice if the fold were dropped.
     #[test]
-    fn a_hidden_pre_gate_ability_bubble_does_not_defer_a_beat() {
+    fn a_live_bubble_the_scheduler_did_not_emit_still_defers_a_beat() {
         let mut world = banter_world(
             &[CharacterClass::Warrior, CharacterClass::Priest],
             &[CharacterClass::Mage, CharacterClass::Warlock],
@@ -878,26 +863,41 @@ mod tests {
             .find(|(_, c)| c.team == 1 && c.slot == 0)
             .map(|(e, _)| e)
             .expect("team 1 slot 0 exists");
-        world.spawn(SpeechBubble {
-            owner: caller,
-            text: "Frost Armor!".to_string(),
-            lifetime: 2.0,
-            kind: BubbleKind::Ability,
-        });
+        let blocker = world
+            .spawn(SpeechBubble {
+                owner: caller,
+                text: "already talking".to_string(),
+                lifetime: 2.0,
+            })
+            .id();
         push_change(
             &mut world,
             change(1, Some(0), LastSeenCall::NeverObserved, false),
         );
 
-        // opening_start is 1.0; without the visibility filter the hidden 2.0s
-        // ability bubble would push beat 0 out to t=2.0.
+        // opening_start is 1.0, so beat 0 is due here — and must wait, because
+        // drawing it now would stack two bubbles on one head.
         run_scheduler(&mut world, 0.1);
         run_scheduler(&mut world, 1.0);
+        assert!(
+            !bubbles(&mut world)
+                .iter()
+                .any(|(owner, text)| *owner == caller && text.contains("{class:")),
+            "beat 0 must not draw over a live bubble, got {:?}",
+            bubbles(&mut world)
+        );
+
+        // Deferred, not dropped: the line speaks once the mouth is free. The
+        // step clears the booking the blocker made on its last observed frame
+        // (`clock + 2.0`), which outlives the entity by design — occupancy is
+        // recorded when a bubble is seen, not tracked as it expires.
+        world.despawn(blocker);
+        run_scheduler(&mut world, 2.5);
         assert!(
             bubbles(&mut world)
                 .iter()
                 .any(|(owner, text)| *owner == caller && text.contains("{class:")),
-            "beat 0 should speak on time behind an invisible bubble, got {:?}",
+            "beat 0 should speak once the blocking bubble is gone, got {:?}",
             bubbles(&mut world)
         );
     }

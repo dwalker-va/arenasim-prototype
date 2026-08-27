@@ -60,25 +60,12 @@ pub struct GateBar {
     pub initial_height: f32,
 }
 
-/// What a speech bubble is saying, which decides when the renderer shows it.
+/// Component for speech bubbles carrying a line of banter.
 ///
-/// The sim never reads this — it exists so `render_speech_bubbles` (graphical
-/// only) can suppress the pre-gate buff shouting without any spawn site being
-/// gated by mode. Keeping the field on the shared component preserves
-/// cross-mode spawn parity: headless spawns identical bubbles and still never
-/// reads them (see
-/// `docs/solutions/implementation-patterns/cosmetic-marker-cross-mode-spawn-parity.md`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum BubbleKind {
-    /// An ability name announced by its caster (`spawn_speech_bubble`).
-    /// Hidden while the gates are closed — the starting room is for dialogue.
-    #[default]
-    Ability,
-    /// A banter line (`spawn_speech_line`). Always rendered.
-    Banter,
-}
-
-/// Component for speech bubbles that appear when abilities are used
+/// Only banter speaks. Abilities announced themselves in bubbles too until
+/// combatants gained real ability animations — a bubble parked over the
+/// caster's head is exactly where the animation plays, so the announcements
+/// were removed rather than repositioned.
 #[derive(Component)]
 pub struct SpeechBubble {
     /// Entity this speech bubble is attached to
@@ -87,8 +74,6 @@ pub struct SpeechBubble {
     pub text: String,
     /// Time until this bubble disappears (in seconds)
     pub lifetime: f32,
-    /// What kind of line this is — decides pre-gate visibility
-    pub kind: BubbleKind,
 }
 
 /// Component marking a Shadow Sight orb entity.

@@ -123,9 +123,6 @@ pub const ARENA_CORNER_SUM: f32 = 48.88;
 /// Should be high enough to avoid overlapping with status effect labels.
 pub const FCT_HEIGHT: f32 = 4.0;
 
-/// Speech bubble display duration in seconds.
-pub const SPEECH_BUBBLE_DURATION: f32 = 2.0;
-
 // ============================================================================
 // Critical Strike
 // ============================================================================

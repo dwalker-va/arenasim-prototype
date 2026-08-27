@@ -30,7 +30,7 @@ use crate::states::play_match::constants::{CRIT_DAMAGE_MULTIPLIER, GCD, MELEE_RA
 use crate::states::play_match::decision_trace::{
     DecisionEventBuilder, DecisionTrace, NoActionReason, RejectionReason,
 };
-use crate::states::play_match::utils::{combatant_id, log_ability_use, spawn_speech_bubble};
+use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
 use super::CombatContext;
 use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
@@ -471,7 +471,6 @@ fn try_cheap_shot(
 
     builder.choose(ability, Some(target_entity), true);
 
-    spawn_speech_bubble(commands, entity, "Cheap Shot");
     combatant.current_mana -= def.mana_cost;
     combatant.stealthed = false;
     combatant.global_cooldown = GCD;
@@ -546,7 +545,6 @@ fn try_kidney_shot(
 
     builder.choose(kidney_shot, Some(target_entity), true);
 
-    spawn_speech_bubble(commands, entity, "Kidney Shot");
     combatant.current_mana -= def.mana_cost;
     combatant.ability_cooldowns.insert(kidney_shot, def.cooldown);
     combatant.global_cooldown = GCD;

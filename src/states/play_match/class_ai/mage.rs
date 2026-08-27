@@ -24,7 +24,7 @@ use crate::states::play_match::combat_core::{calculate_cast_time, roll_crit, get
 use crate::states::play_match::decision_trace::{
     DecisionEventBuilder, DecisionTrace, RejectionReason,
 };
-use crate::states::play_match::utils::{combatant_id, log_ability_use, spawn_speech_bubble};
+use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
 use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
 
@@ -195,7 +195,6 @@ fn try_ice_barrier(
 
     builder.choose(ice_barrier, Some(entity), true);
 
-    spawn_speech_bubble(commands, entity, "Ice Barrier");
     combatant.current_mana -= barrier_def.mana_cost;
     combatant.ability_cooldowns.insert(ice_barrier, barrier_def.cooldown);
     combatant.global_cooldown = GCD;
@@ -257,7 +256,6 @@ fn try_mage_armor(
 
     builder.choose(ability, Some(entity), true);
 
-    spawn_speech_bubble(commands, entity, &def.name);
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
 
@@ -411,7 +409,6 @@ fn try_frost_nova(
 
     builder.choose(frost_nova, None, true);
 
-    spawn_speech_bubble(commands, entity, "Frost Nova");
     combatant.current_mana -= nova_def.mana_cost;
     combatant.ability_cooldowns.insert(frost_nova, nova_def.cooldown);
     combatant.global_cooldown = GCD;

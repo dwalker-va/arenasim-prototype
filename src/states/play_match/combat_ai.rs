@@ -16,9 +16,6 @@ use super::ability_config::AbilityDefinitions;
 use super::utils::{combatant_id, combat_log_id_for, get_next_fct_offset, log_ability_use};
 use super::class_ai;
 
-// Re-export spawn_speech_bubble for backward compatibility (used by other modules)
-pub use super::utils::spawn_speech_bubble;
-
 /// Bundled extra params for `decide_abilities`, keeping it within Bevy's
 /// 16-argument system-function limit. Holds the victory-celebration guard and
 /// the live `Totem` query (so the Shaman AI knows which of its element totems
@@ -1545,9 +1542,6 @@ pub fn check_interrupts(
             distance,
             distance
         );
-
-        // Spawn speech bubble for interrupt
-        spawn_speech_bubble(&mut commands, entity, &ability_def.name);
 
         // Consume resources
         combatant.current_mana -= ability_def.mana_cost;
