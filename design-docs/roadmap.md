@@ -203,10 +203,90 @@ fixed in `0a4a93f`; these are the lower-priority remainder.
 
 ---
 
+## Animation tier walk: the next candidates (2026-08-26)
+
+The tiered animation walk has shipped its pilot and three more signatures —
+Polymorph (#103), Fear (#107), Lightning Bolt (#111), Mortal Strike (#112) —
+plus `animate_body_lean` (#113), which lifted the melee ceiling for the whole
+tier at once. Procedure and its amendments:
+`docs/solutions/implementation-patterns/signature-ability-animation-procedure.md`.
+
+This candidate list came out of **removing the in-combat ability speech
+bubbles**. Those bubbles announced their caster's ability in text above its
+head, which is exactly where an animation plays; deleting them was the right
+call, but it also removed the only cue several abilities had. An audit of all
+13 removed bubble sites against `rendering/` produced the gaps below.
+
+**The structural finding, which should drive the ordering.** There are exactly
+two generic caster-side hooks: `CastingState` drives the casting orb, and
+`QueuedInstantAttack` drives `InstantAttackLanded`. An ability that is
+**instant AND aura-only** has neither, so it falls through both and renders
+nothing whatsoever. Compounding it, the receiver side has treatments for
+`Fear`, `Polymorph`, `DamageOverTime`, `Absorb`, `DamageImmunity` and
+`Incapacitate` — but **none for `Root`, `Stun` or `MovementSpeedSlow`**, which
+is precisely what the silent abilities apply. One receiver-side treatment
+therefore lights up four abilities at once, which is why it leads.
+
+### A. Root/Stun receiver treatment (highest leverage)
+
+- [ ] **A shared ground treatment for `Root` and `Stun`.** Covers **Frost Nova**,
+      **Cheap Shot**, **Kidney Shot** and **Spider Web** in one piece of work —
+      all four currently render *nothing at all*, on either side.
+      `traps.rs` already proves the shape: a flat `Cylinder::new(2.0, 0.05)`
+      disc laid on the ground with a per-type colour from `trap_type_rgb`.
+      Anchored to each afflicted target rather than a world position, that is a
+      frost ring under a rooted unit for very little new machinery.
+- Follows procedure step 1 (receiver side first) and step 2 (one marker
+  component owns every visual keyed on the aura). Note that Cheap Shot and
+  Kidney Shot are aura-only — they never push a `QueuedInstantAttack`, so
+  there is no `InstantAttackLanded` marker and no stroke to hang anything on;
+  the receiver side is the *only* side available for them.
+- Distinguish Root from Stun within the treatment. They differ mechanically
+  (Root permits acting, Stun does not) and the HUD already labels them apart.
+
+### B. Interrupts — an actor-side gesture
+
+- [ ] **Give the interrupter something to play.** **Pummel**, **Kick**,
+      **Counterspell**, **Wind Shear** and the Felhunter's **Spell Lock** all
+      fire with no animation on the actor. The *victim* is well served — its
+      casting orb sputters — so this is a one-sided gap, not an invisible
+      ability.
+- The melee two (Pummel, Kick) are the cheap half:
+  `swing_style_for_ability` returns `None` for everything but Mortal Strike,
+  and since #113 every new `SwingStyle` inherits body lean for free. A short,
+  shallow, fast jab on its own arc plane would read as an interrupt without
+  competing with Mortal Strike's ceremony.
+- Counterspell / Wind Shear / Spell Lock are casts or pet abilities and want a
+  different answer — likely a brief effect at the *victim*, timed to the orb's
+  sputter, rather than an actor stroke.
+
+### C. Leftovers
+
+- [ ] **Devour Magic** (Felhunter) — the dispelled target gets a `DispelRibbon`;
+      the pet itself plays nothing. Lower value than B: the outcome is legible
+      even though the actor is not.
+- [ ] **Frost / Mage / Molten Armor** (Mage) — self-buff auras
+      (`FrostArmorBuff`, `ManaRegenIncrease`, `CritChanceIncrease`), none keyed
+      in rendering. Lowest value on the list: they fire once during the
+      pre-match buff rotation, where nothing is competing for attention and the
+      banter is the intended focus.
+
+**Already covered — the bubble was pure occlusion, nothing owed.** Ice Barrier
+(`ShieldBubble`), Psychic Scream (`ScreamBurst`), Fear (receiver husk in
+`fear.rs`, plus the caster's orb — it is a hardcast), Boar Charge (charge trail
+in `movement_trails.rs`), Master's Call (`DispelBurst` + `DispelRibbon`).
+
+- [ ] **Nit: `rendering/effects/slow_zone.rs` is misnamed** — it contains the
+      Disengage trail, not a slow zone, and there is no slow-zone visual at
+      all. Fallout from the effects.rs split (#106). Rename when next touched.
+
+---
+
 ## Milestone 2: Visual Polish
 
 - [ ] Procedural character meshes (distinct silhouettes per class)
-- [ ] Ability visual effects (AoE indicators, ground effects)
+- [ ] Ability visual effects (AoE indicators, ground effects) — the live list is
+      *Animation tier walk: the next candidates* above
 - [ ] Death animations
 - [ ] Arena environment details (pillars, decorations)
 - [x] ~~Victory celebration animations~~ (basic version done)

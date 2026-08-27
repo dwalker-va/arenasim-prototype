@@ -13,7 +13,6 @@ use crate::states::play_match::components::*;
 use crate::states::play_match::decision_trace::{
     ActorView, DecisionEventBuilder, DecisionTrace, RejectionReason, TargetView,
 };
-use crate::states::play_match::utils::spawn_speech_bubble;
 use crate::states::match_config::CharacterClass;
 use super::CombatContext;
 use super::super::utils::pet_combatant_id;
@@ -526,8 +525,6 @@ pub(crate) fn execute_spell_lock(
         format!("{} uses {}", caster_id, ability_name),
     );
 
-    spawn_speech_bubble(commands, entity, ability_name);
-
     commands.spawn(InterruptPending {
         caster: entity,
         target: target_entity,
@@ -600,8 +597,6 @@ fn try_devour_magic(
         format!("{} uses {}", caster_id, def.name),
     );
 
-    spawn_speech_bubble(commands, entity, &def.name);
-
     let heal_amount = combatant.max_health * 0.10;
 
     commands.spawn(DispelPending {
@@ -659,8 +654,6 @@ pub(crate) fn execute_spider_web(
         None,
         format!("{} uses {}", caster_id, def.name),
     );
-
-    spawn_speech_bubble(commands, entity, &def.name);
 }
 
 /// Apply Boar Charge to a target: ChargingState marker + delayed Stun aura,
@@ -690,8 +683,6 @@ pub(crate) fn execute_boar_charge(
         None,
         format!("{} uses {}", caster_id, def.name),
     );
-
-    spawn_speech_bubble(commands, entity, &def.name);
 }
 
 /// Apply Master's Call to a target: spawn DispelPending + DispelBurst, set
@@ -736,8 +727,6 @@ pub(crate) fn execute_masters_call(
         None,
         format!("{} uses {}", caster_id, def.name),
     );
-
-    spawn_speech_bubble(commands, entity, &def.name);
 }
 
 // ==============================================================================

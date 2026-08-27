@@ -28,7 +28,7 @@ use crate::states::play_match::decision_trace::{
     Posture as TracePosture, RejectionReason,
 };
 use crate::states::play_match::movement_config::{MovementConfig, SharedMovementConfig};
-use crate::states::play_match::utils::{combatant_id, log_ability_use, spawn_speech_bubble};
+use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
 use super::cast_guard::{classify_pre_cast_failure, pre_cast_ok, PreCastOpts};
 use super::healer_postures::{
@@ -363,10 +363,9 @@ fn fire_psychic_scream(
 ) {
     builder.choose(AbilityType::PsychicScream, None, true);
 
-    spawn_speech_bubble(commands, entity, "Psychic Scream");
     // Self-centered AoE burst visual. The marker is spawned in both modes (like
-    // DispelBurst / speech bubbles); the mesh + animation are attached only by
-    // the graphical-only systems in states/mod.rs, so headless is unaffected.
+    // DispelBurst); the mesh + animation are attached only by the
+    // graphical-only systems in states/mod.rs, so headless is unaffected.
     commands.spawn((
         ScreamBurst {
             caster: entity,

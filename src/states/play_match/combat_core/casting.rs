@@ -11,7 +11,7 @@ use super::super::ability_config::AbilityDefinitions;
 use super::super::map_config::ActiveMapGeometry;
 use super::super::map_geometry::has_line_of_sight;
 use super::super::constants::{CRIT_DAMAGE_MULTIPLIER, CRIT_HEALING_MULTIPLIER};
-use super::super::utils::{spawn_speech_bubble, get_next_fct_offset, combatant_id, combat_log_id_for};
+use super::super::utils::{get_next_fct_offset, combatant_id, combat_log_id_for};
 use super::super::FCT_HEIGHT;
 use super::damage::{roll_crit, apply_damage_with_absorb, get_physical_damage_reduction, get_divine_shield_damage_penalty};
 
@@ -753,7 +753,6 @@ pub fn process_casting(
             // Log CC application for all crowd control types
             match aura.aura_type {
                 AuraType::Fear => {
-                    spawn_speech_bubble(&mut commands, caster_entity, "Fear");
                     let message = format!("{}'s {} lands on {} ({:.1}s)", caster_id, def.name, target_id, aura.duration);
                     combat_log.log_crowd_control(
                         caster_id.clone(),
