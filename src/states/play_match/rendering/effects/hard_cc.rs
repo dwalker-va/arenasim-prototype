@@ -296,6 +296,7 @@ fn spawn_rig<B: Bundle>(
     kind: CcKind,
     origin: Vec3,
     lift: f32,
+    delay: f32,
 ) {
     let hub = commands
         .spawn((
@@ -307,6 +308,7 @@ fn spawn_rig<B: Bundle>(
                 age: 0.0,
                 retract: None,
                 lift,
+                delay,
             },
             PlayMatchEntity,
         ))
@@ -613,11 +615,12 @@ pub fn update_hard_cc_visuals(
         Option<&StunnedVisual>,
         Option<&Pet>,
         Option<&Children>,
+        Option<&NovaFreezeDelay>,
     )>,
     bodies: Query<&VisualBody>,
     mut rigs: Query<(&mut CcRig,)>,
 ) {
-    for (entity, combatant, transform, auras, rooted, stunned_marker, pet, children) in
+    for (entity, combatant, transform, auras, rooted, stunned_marker, pet, children, nova_delay) in
         combatants.iter()
     {
         let alive = combatant.is_alive();
@@ -693,7 +696,15 @@ pub fn update_hard_cc_visuals(
                 };
                 let origin =
                     Vec3::new(transform.translation.x, CC_GROUND_Y, transform.translation.z);
-                spawn_rig(&mut commands, parts, entity, CcKind::Root, origin, 0.0);
+                // A Frost Nova victim waits for the wavefront to reach it, so
+                // the freeze propagates outward instead of happening everywhere
+                // at once. Consumed here and removed; absent for a root from any
+                // other source, which grows immediately as before.
+                let delay = nova_delay.map(|d| d.secs).unwrap_or(0.0);
+                if nova_delay.is_some() {
+                    commands.entity(entity).remove::<NovaFreezeDelay>();
+                }
+                spawn_rig(&mut commands, parts, entity, CcKind::Root, origin, 0.0, delay);
                 commands.entity(entity).try_insert(RootedVisual { style });
                 // Only on a genuine appearance or a style swap. A silent
                 // reconcile must not pop a second flare.
@@ -720,7 +731,7 @@ pub fn update_hard_cc_visuals(
                     .clone();
                 let parts = build_stun_whirl(&mut meshes, &mut materials, tex);
                 let origin = transform.translation + Vec3::Y * stun_lift;
-                spawn_rig(&mut commands, parts, entity, CcKind::Stun, origin, stun_lift);
+                spawn_rig(&mut commands, parts, entity, CcKind::Stun, origin, stun_lift, 0.0);
                 commands.entity(entity).try_insert(StunnedVisual);
                 if stunned_marker.is_none() {
                     spawn_cc_flare(
@@ -768,7 +779,12 @@ pub fn update_cc_rigs(
 
         match rig.kind {
             CcKind::Root => {
-                let e = cc_envelope(rig.age, rig.retract, ROOT_GROW_SECS, ROOT_RETRACT_SECS);
+                let e = cc_envelope(
+                    (rig.age - rig.delay).max(0.0),
+                    rig.retract,
+                    ROOT_GROW_SECS,
+                    ROOT_RETRACT_SECS,
+                );
                 transform.translation = Vec3::new(
                     owner_transform.translation.x,
                     CC_GROUND_Y,
@@ -777,7 +793,12 @@ pub fn update_cc_rigs(
                 transform.scale = Vec3::splat(stature * e);
             }
             CcKind::Stun => {
-                let e = cc_envelope(rig.age, rig.retract, STUN_GROW_SECS, STUN_RETRACT_SECS);
+                let e = cc_envelope(
+                    (rig.age - rig.delay).max(0.0),
+                    rig.retract,
+                    STUN_GROW_SECS,
+                    STUN_RETRACT_SECS,
+                );
                 let bob = STUN_BOB_AMP * (rig.age * TAU / STUN_BOB_PERIOD).sin();
                 transform.translation = Vec3::new(
                     owner_transform.translation.x,

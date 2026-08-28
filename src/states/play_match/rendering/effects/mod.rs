@@ -68,3 +68,5 @@ mod rogue_crescents;
 pub use rogue_crescents::*;
 mod holy_justice;
 pub use holy_justice::*;
+mod frost_nova;
+pub use frost_nova::*;

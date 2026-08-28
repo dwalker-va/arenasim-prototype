@@ -506,6 +506,13 @@ impl Plugin for StatesPlugin {
                     play_match::update_holy_streaks,
                     play_match::update_justice_runes,
                     play_match::cleanup_holy_justice,
+                    // Frost Nova's wavefront. Chained AHEAD of the hard-CC
+                    // treatment below so a victim's `NovaFreezeDelay` is in
+                    // place before its Root rig is built — otherwise the rig
+                    // grows immediately and the propagation is lost.
+                    play_match::update_nova_rings,
+                    play_match::update_nova_shards,
+                    play_match::cleanup_frost_nova,
                     play_match::update_hard_cc_visuals,
                     play_match::update_cc_rigs,
                     // After `update_cc_rigs`, which writes the hub rotation the

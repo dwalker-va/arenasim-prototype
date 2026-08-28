@@ -881,6 +881,10 @@ pub struct CcRig {
     /// despawns. A retracting rig is not "held", so a re-application spawns a
     /// fresh one rather than reviving it.
     pub retract: Option<f32>,
+    /// Seconds to wait before the rig starts growing. Non-zero only for a
+    /// Frost Nova victim, so its crystals rise as the wavefront reaches it
+    /// rather than the instant the aura lands (see `NovaFreezeDelay`).
+    pub delay: f32,
     /// Vertical offset from the owner's SIM y to this rig's anchor, resolved
     /// once at spawn from the owner's `VisualBody::rest_y` (which is the
     /// sim-to-render correction, and is large and negative for pets). Used by
@@ -953,4 +957,40 @@ pub struct HolyStreak {
 #[derive(Component)]
 pub struct JusticeRune {
     pub age: f32,
+}
+
+/// One of Frost Nova's three expanding ground rings.
+///
+/// The geometry is a ragged unit-radius annulus built once at spawn; only the
+/// uniform scale changes, because the wobble is fixed and the radius is not.
+/// See `rendering/effects/frost_nova.rs`.
+#[derive(Component)]
+pub struct NovaRing {
+    /// 0, 1 or 2 — decides the radius, the stagger and the wobble's phase.
+    pub ring: u32,
+    pub age: f32,
+}
+
+/// One ice crystal thrown up along Frost Nova's outer wavefront.
+#[derive(Component)]
+pub struct NovaShard {
+    /// Nova-age at which the wave reaches this crystal's radius.
+    pub born_at: f32,
+    pub age: f32,
+    /// Full height, jittered per crystal.
+    pub height: f32,
+}
+
+/// How long a freshly-rooted unit should wait before its root crystals grow,
+/// so the freeze propagates outward with Frost Nova's wavefront instead of
+/// happening everywhere at once.
+///
+/// Inserted by the nova's graphical flourish on every enemy the wave will
+/// reach, and CONSUMED (removed) by `update_hard_cc_visuals` when it builds the
+/// Root rig. Purely cosmetic: if it is missing — a root from any other source,
+/// or a race where the rig is built first — the rig simply grows immediately,
+/// which is the pre-existing behaviour.
+#[derive(Component)]
+pub struct NovaFreezeDelay {
+    pub secs: f32,
 }

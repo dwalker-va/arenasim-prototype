@@ -28,11 +28,17 @@ use bevy::prelude::*;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::components::*;
 use super::mortal_strike::spawn_mortal_strike_flourish;
+use super::frost_nova::spawn_frost_nova;
 use super::holy_justice::spawn_holy_justice;
 use super::rogue_crescents::{spawn_crescent_fan, CHEAP_SHOT_CRESCENTS, KIDNEY_SHOT_CRESCENTS};
 
 /// Height above the target's origin at which a melee hit registers.
 const IMPACT_HEIGHT: f32 = 1.45;
+
+/// Frost Nova's point-blank radius, matching `abilities.ron`. Only used to pick
+/// which enemies the wavefront tells to freeze — the sim has already decided who
+/// is actually rooted.
+const FROST_NOVA_RADIUS: f32 = 10.0;
 
 /// The bespoke stroke an instant ability swings, if it has one.
 ///
@@ -70,6 +76,7 @@ pub fn consume_instant_ability_signals(
     signals: Query<(Entity, &InstantAbilityFired)>,
     mut sockets: Query<&mut WeaponSocket>,
     positions: Query<&Transform, With<Combatant>>,
+    teams: Query<(Entity, &Transform, &Combatant)>,
 ) {
     for (signal_entity, signal) in signals.iter() {
         let caster_pos = positions.get(signal.caster).map(|t| t.translation).ok();
@@ -77,6 +84,7 @@ pub fn consume_instant_ability_signals(
             .target
             .and_then(|t| positions.get(t).map(|tf| tf.translation).ok());
         let style = swing_style_for_ability(signal.ability);
+        let caster_team = teams.get(signal.caster).map(|(_, _, c)| c.team).unwrap_or(0);
 
         // ---- Weapon stroke (only for abilities that swing something) --------
         //
@@ -156,6 +164,33 @@ pub fn consume_instant_ability_signals(
                         &mut rune_tex,
                         caster_pos,
                         target_pos,
+                    );
+                }
+            }
+            // Caster-centred: `target` is `None` by construction, so this arm
+            // is unreachable under the router's old nesting.
+            AbilityType::FrostNova => {
+                if let Some(caster_pos) = caster_pos {
+                    // Everyone the wave will reach, so each can be told when to
+                    // freeze. Read from live positions rather than passed through
+                    // the marker: the AoE's victim list is a sim concern, and the
+                    // marker stays ability-agnostic.
+                    let victims: Vec<(Entity, Vec3)> = teams
+                        .iter()
+                        .filter(|(e, _, c)| *e != signal.caster && c.team != caster_team)
+                        .filter(|(_, t, _)| {
+                            t.translation.with_y(0.0).distance(caster_pos.with_y(0.0))
+                                <= FROST_NOVA_RADIUS
+                        })
+                        .map(|(e, t, _)| (e, t.translation))
+                        .collect();
+                    spawn_frost_nova(
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        signal.caster,
+                        caster_pos,
+                        &victims,
                     );
                 }
             }
