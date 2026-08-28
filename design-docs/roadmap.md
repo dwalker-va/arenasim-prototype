@@ -265,21 +265,62 @@ it is now the largest remaining receiver-side hole.
   Root and Stun). Byte-identity holds by construction; `determinism_pin` is
   unchanged. 25 probes in `tests/hard_cc_visual_probes.rs`.
 
-### A2. The applier side of the four silent instants (new — the gap A exposed)
+### A2. The applier side of the four silent instants — SHIPPED
 
-- [ ] **Frost Nova, Cheap Shot, Kidney Shot and Hammer of Justice still have no
-      actor-side animation.** A above is entirely receiver-side, which was the
-      only side available: all four are instant AND aura-only, spawning an
-      `AuraPending` and entering neither generic caster hook, so there is no
-      `InstantAttackLanded` marker to dispatch a `SwingStyle` from. (Spider Web
-      has a projectile and Boar Charge a charge trail, so those two are covered.)
-- The path is `cosmetic-marker-cross-mode-spawn-parity.md`: spawn a cosmetic
-  marker at each `AuraPending` site — headless spawns it and never reads it, so
-  byte-identity still holds — and consume it with the existing weapon-swing
-  machinery. Four one-line spawns plus one consumer system.
-- This is NOT section B, which is only about interrupts. Note the procedure doc
-  previously listed Kidney Shot as a cheap `swing_style_for_ability` addition;
-  that was wrong and has been corrected.
+- [x] ~~**Frost Nova, Cheap Shot, Kidney Shot and Hammer of Justice have no
+      actor-side animation.**~~ All four now do. A was entirely receiver-side
+      because that was the only side available; this opened the other one.
+- **`InstantAttackLanded` generalised to `InstantAbilityFired`** — `caster` plus
+  `target: Option<Entity>` (`None` for a caster-centred effect), with
+  `is_spawned_for()` as the single list both combat code and the sandbox derive
+  from, so the two cannot drift. `EntryFamily::InstantMelee` was deleted, folded
+  into `Residue`: the same mechanism under a name that had stopped being true.
+- **The router had a real bug**, found independently by two reviewers. Its
+  flourish dispatch was nested inside BOTH `Some(style)` and `Some(target_pos)`,
+  so an ability with no weapon stroke or no single target could never reach it —
+  which is exactly Hammer of Justice and Frost Nova. Swing and flourish dispatch
+  are now independent.
+
+**Researching the source reversed the design for three of the four.** The
+Classic client data (DB2 tables plus the parsed M2 models) said:
+
+| Ability | What it actually is |
+|---|---|
+| Cheap Shot | Plain `Attack1H`, 634ms. Four **untinted white** crescents at head height, two quick pairs. Shares its visual with Sap — it does not even own one. |
+| Kidney Shot | `Attack1HPierce` — a **lunging thrust, not a kick**, 1233ms. Three crescents at torso height, magenta → white flash → deep crimson. Its own model, used by nothing else. |
+| Hammer of Justice | **No hammer, no projectile** (`HasMissile = 0`). Internally *FistOfJustice*: a flat gold ground streak racing toward the target, plus a rune at its chest. |
+| Frost Nova | Three flat rings expanding at **different rates** over 867ms. |
+
+Consequences worth remembering: the two rogue stuns are byte-identical on the
+receiver side and differ ENTIRELY on the caster side, so collapsing them would
+discard the only thing separating them. And the Paladin's mace deliberately does
+not swing — `swing_style_for_ability` returns `None` for HoJ on purpose.
+
+**New machinery.** `SwingArc::Lunge` (translation-dominant — the "one rotation,
+one axis" rule governs swings and a thrust traces no plane), procedural crescent
+and rune and streak textures, and Frost Nova's ragged procedural ring meshes with
+vertex-coloured alpha.
+
+**Frost Nova went beyond the source, deliberately:** a ragged wavefront, crystals
+erupting along it, and a **propagated freeze** — each victim's root crystals grow
+as the wave reaches them, so the wave visibly causes the freeze. That last one is
+the only part of A2 that reaches into shipped code (`CcRig` gained a `delay`) and
+carries an ordering dependency: the nova systems must stay chained ahead of the
+hard-CC treatment, or the delay lands too late and propagation silently
+degrades to an instant freeze.
+
+**Deliberate divergences from the source**, all for legibility at this camera:
+HoJ's streak scales to the real caster-target distance (the source uses a fixed
+~4 units, which at 10yd range reads as a misfire); Frost Nova's rings reach the
+spell's real 10yd rather than the source's ~6.7; and the nova's edge tint is
+`SpellSchool::Frost` rather than the measured `#2650C9`, which is dark enough to
+read as grey for most of the ring's travel.
+
+**Left undone:** the source puts a red glow on both the Rogue's hands during
+Kidney Shot. We have weapon sockets but no hand attachment points, so placing it
+would be inventing anatomy. And Kidney Shot's magenta is the one colour the
+research could not corroborate from a second source — it is one const if it
+looks wrong in the client.
 
 ### B. Interrupts — an actor-side gesture
 

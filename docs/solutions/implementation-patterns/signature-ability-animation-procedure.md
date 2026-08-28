@@ -22,7 +22,7 @@ tags:
 
 ## Context
 
-The tiered per-ability animation plan gives a couple of signature abilities per class a bespoke, recognizable-at-a-glance animation, with lower tiers sharing a cheaper vocabulary. The pilot was Polymorph (PR dwalker-va/arenasim-prototype#103, plan at `docs/plans/2026-08-10-001-feat-polymorph-signature-animation-plan.md`): sheep body swap, hop gait, transform puffs. It shipped in roughly one session, which is the cost signal the pilot existed to measure. Fear (#107), Lightning Bolt (#111) and Mortal Strike have since shipped on this procedure. **The next candidate list lives in `design-docs/roadmap.md` under *Animation tier walk: the next candidates*** — it came out of removing the in-combat ability speech bubbles, which had been standing in as the only cue for several abilities, and it is ordered by a structural finding rather than by ability: an ability that is instant AND aura-only has neither generic caster-side hook (`CastingState` → casting orb, `QueuedInstantAttack` → `InstantAttackLanded`), and the receiver side has no treatment for `Root`, `Stun` or `MovementSpeedSlow`, so one receiver-side piece of work covers four abilities at once.
+The tiered per-ability animation plan gives a couple of signature abilities per class a bespoke, recognizable-at-a-glance animation, with lower tiers sharing a cheaper vocabulary. The pilot was Polymorph (PR dwalker-va/arenasim-prototype#103, plan at `docs/plans/2026-08-10-001-feat-polymorph-signature-animation-plan.md`): sheep body swap, hop gait, transform puffs. It shipped in roughly one session, which is the cost signal the pilot existed to measure. Fear (#107), Lightning Bolt (#111) and Mortal Strike have since shipped on this procedure, then the Root/Stun receiver treatment (A) and the four caster-side gestures of A2. **The next candidate list lives in `design-docs/roadmap.md` under *Animation tier walk: the next candidates*** — it came out of removing the in-combat ability speech bubbles, which had been standing in as the only cue for several abilities, and it is ordered by a structural finding rather than by ability: an ability that is instant AND aura-only has neither generic caster-side hook (`CastingState` → casting orb, `QueuedInstantAttack` → `InstantAbilityFired`), and the receiver side has no treatment for `Root`, `Stun` or `MovementSpeedSlow`, so one receiver-side piece of work covers four abilities at once.
 
 **Amendment, Mortal Strike (2026-08-22).** The first signature for a TRUE INSTANT, and it broke two of the procedure's assumptions:
 
@@ -42,6 +42,14 @@ Two further lessons worth carrying forward:
 - **The hierarchy does half the job.** A `WeaponSocket` is a CHILD of the `VisualBody`, so the lean composes onto the weapon's arc instead of sitting beside it: the blade's world sweep grows as well as the body moving. Most of the improvement comes from this, not from the torso being separately visible.
 - **Per-style amplitude is what preserves the distinction.** An auto-attack leans ~8°, a signature ~22°. A routine swing gains weight without gaining ceremony, and every future signature inherits body motion for free rather than being another stroke against the same ceiling.
 - **Channel ownership decided the design.** `translation.y` belongs to the gaits and the victory bounce, so the weight shift is HORIZONTAL only, where nothing was writing; rotation was unclaimed except by the death fall, which the lean cedes to — clearing the horizontal step on the way out, since nothing else writes it and a unit killed mid-swing would keep the offset on its corpse. Before adding a body treatment, work out which Transform channels are already spoken for; the free one shapes what the treatment can be.
+
+**Amendment, A2 (2026-08-28) — research the source for EVERY ability, not just the one you feel unsure about.** Four caster-side gestures shipped together, and reading the actual Classic client data (DB2 tables, then the parsed M2 models and BLP textures) reversed the design for three of them. Kidney Shot is a lunging `Attack1HPierce`, **not** the kick everyone remembers — the kick is the Rogue's *Kick*. Cheap Shot is so generic it shares its visual with Sap and has zero colour tracks. Hammer of Justice has **no hammer at all**: `HasMissile = 0`, and it is internally named *FistOfJustice* — a flat gold ground streak, not a thrown weapon. Every one of those was something the model had asserted confidently from memory first.
+
+Three durable lessons:
+
+- **Prose sources are nearly useless for this; client data is excellent.** Wowhead comments are JS-loaded and unfetchable, and the one promising prose hit turned out to be an April Fools joke. The DB2 → `SpellVisualKit` → M2 chain gives exact animation names, geometry bounds, colour keyframes and timings.
+- **Ask what the ability is, not how to draw what you already pictured.** The two rogue stuns are byte-identical on the receiver side and differ ENTIRELY on the caster side (pierce vs swing, magenta vs untinted white, torso vs head, 1233ms vs 634ms). Collapsing them into one shared stroke — which was the cheaper design, and the one initially recommended — would have discarded the only thing separating them.
+- **A negative finding is a design constraint.** "No hammer" meant `swing_style_for_ability` must return `None` for Hammer of Justice, which in turn exposed that the router could not give a flourish to an ability with no stroke. The research found a code bug.
 
 **The receiver side does not have to be a body treatment.** Mortal Wounds — a 10s `HealingReduction` debuff — gets no visual on the victim at all. It states itself by breaking incoming heals: a heal landing on an afflicted target sheds the refused share as ash (`rendering/effects/mortal_wounds.rs`), keyed at the three sites that already apply the reduction. This is cheaper than a body treatment AND more legible, because it fires exactly when the debuff costs someone something — and it sidesteps the whole `OriginalBodyMaterial` contention family (see `shared-restore-slot-mutual-exclusion.md`) by never touching the body. Prefer it whenever a debuff's meaning is "some other mechanic is now worse."
 
@@ -68,7 +76,31 @@ The standing prerequisite has shipped: `effects.rs` (~4.6k lines after the pilot
 
 - Any new signature-ability animation, onward through the tier walk
 - Any aura-driven body treatment (CC states: stun slump, root ice, frozen tint)
-- Instant-ability flourishes hang off `InstantAttackLanded`, spawned ability-agnostically at the `QueuedInstantAttack` drain in `combat_ai.rs` and dispatched by `rendering/effects/instant_attack.rs`. The next melee-instant signature costs one `SwingStyle` variant, one arm in `swing_style_for_ability`, and one arm in the flourish match — no combat-code change — but **only for an ability that actually enters the drain**. In `class_ai/rogue.rs` the only two `instant_attacks.push` sites are **Ambush** and **Sinister Strike**; those are the cheap ones. **Kidney Shot and Cheap Shot are NOT** — they are instant AND aura-only, spawning an `AuraPending` and nothing else (`rogue.rs:484`, `:558`), so no `InstantAttackLanded` marker exists to dispatch from. (An earlier revision of this doc listed Kidney Shot here; that was wrong.) The same is true of Frost Nova (`mage.rs:453`) and Hammer of Justice (`paladin.rs:945`). Giving any of those four an actor-side stroke needs a cosmetic marker spawned at its `AuraPending` site — see `cosmetic-marker-cross-mode-spawn-parity.md` — which is a combat-file edit, cheap but not free. Its ability must also sit in the sandbox's `EntryFamily::InstantMelee` — Mortal Strike, Ambush and Sinister Strike all do — or the flourish is invisible in the sandbox, because the marker is spawned in `combat_ai.rs` and the sandbox does not run it
+- Instant-ability flourishes hang off `InstantAbilityFired` (renamed from
+  `InstantAttackLanded` in A2), spawned by combat code at each ability's own
+  resolution site and dispatched by `rendering/effects/instant_ability.rs`. The
+  marker carries `caster` and `target: Option<Entity>` — `None` for a
+  caster-centred effect — and `InstantAbilityFired::is_spawned_for` is the single
+  list both combat code and the animation sandbox derive from, so they cannot
+  drift.
+- **Swing dispatch and flourish dispatch are INDEPENDENT, and must stay so.** They
+  were nested once, with the flourish reachable only through a `Some(style)` and a
+  `Some(target_pos)`. That silently excluded two whole shapes of ability: one with
+  a flourish and no weapon stroke (Hammer of Justice — the source spawns no
+  hammer), and one that is caster-centred with no target at all (Frost Nova).
+  Both would have spawned a marker, been consumed, and drawn nothing.
+- Adding a signature to an ability that ALREADY reaches the drain (Mortal Strike,
+  Ambush, Sinister Strike) costs one arm in `swing_style_for_ability` and one in
+  the flourish match. An ability that does NOT — anything instant AND aura-only —
+  needs a marker spawned at its own application site first, which is a
+  combat-file edit (see `cosmetic-marker-cross-mode-spawn-parity.md`), plus an
+  arm in the sandbox's `Residue` family or it will never preview.
+- **`SwingArc` is not only for swings.** The "build a signature plane by tilting
+  ONE rotation axis, never composing several" rule governs how to shape a SWING.
+  A thrust traces no plane at all, so it needs its own arc kind — `SwingArc::Lunge`
+  is translation-dominant along the aim axis, added for Kidney Shot's
+  `Attack1HPierce`. Expressing a pierce as a rotation reads as a slash however it
+  is tuned.
 
 ## Examples
 
