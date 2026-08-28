@@ -135,6 +135,21 @@ impl SwingStyle {
                 },
                 lean: MORTAL_STRIKE_LEAN,
             },
+            // Fast and shallow. The source's Cheap Shot is 634ms of plain
+            // `Attack1H` — roughly half Kidney Shot's 1233ms lunge — so the
+            // contrast between the two rogue stuns is carried by SPEED as much
+            // as by shape.
+            SwingStyle::CheapShot => SwingProfile {
+                release_secs: SWING_RELEASE_SECS * CHEAP_SHOT_RELEASE_MUL,
+                impact_hold_secs: SWING_IMPACT_HOLD_SECS * CHEAP_SHOT_HOLD_MUL,
+                follow_secs: SWING_FOLLOW_SECS * CHEAP_SHOT_FOLLOW_MUL,
+                arc: SwingArc::TiltedPlane {
+                    tilt: CHEAP_SHOT_TILT,
+                    windup: CHEAP_SHOT_WINDUP,
+                    release: CHEAP_SHOT_RELEASE,
+                },
+                lean: CHEAP_SHOT_LEAN,
+            },
         }
     }
 }
@@ -183,6 +198,27 @@ const MORTAL_STRIKE_WINDUP: f32 = 1.45;
 /// shoulder. Combined travel is ~2.8 rad, visibly larger than the
 /// auto-attack's ~2.3 and in the opposite direction.
 const MORTAL_STRIKE_RELEASE: f32 = 1.35;
+
+// --- Cheap Shot -----------------------------------------------------------
+//
+// The source is 634ms of plain `Attack1H`, so this stroke is deliberately
+// UNSPECTACULAR: barely off the sagittal plane, small travel, and fast. It has
+// to read as a quick jab, because everything distinctive about Cheap Shot lives
+// in the crescent flare rather than in the swing. Total here is ~0.63s against
+// the auto's 0.42s and Mortal Strike's ~0.84s.
+const CHEAP_SHOT_RELEASE_MUL: f32 = 1.25;
+const CHEAP_SHOT_HOLD_MUL: f32 = 1.6;
+const CHEAP_SHOT_FOLLOW_MUL: f32 = 1.6;
+/// Only ~14° off vertical. Enough that it is not literally the auto-attack, far
+/// short of Mortal Strike's 49° diagonal — this is a jab, not a signature.
+const CHEAP_SHOT_TILT: f32 = 0.25;
+/// A short load. The Rogue is coming out of stealth, so a big telegraphed
+/// windup would contradict the ability.
+const CHEAP_SHOT_WINDUP: f32 = 0.85;
+const CHEAP_SHOT_RELEASE: f32 = 1.10;
+/// Between the auto's ~8° and Mortal Strike's ~22°: the body commits, but the
+/// stroke is over before it becomes ceremony.
+const CHEAP_SHOT_LEAN: f32 = 0.16;
 
 /// Normalized swing parameter in `[-1, 1]`.
 ///

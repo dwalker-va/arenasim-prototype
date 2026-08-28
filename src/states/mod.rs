@@ -496,6 +496,11 @@ impl Plugin for StatesPlugin {
             .add_systems(
                 Update,
                 (
+                    // Rogue stun crescents, consumed from the same
+                    // `InstantAbilityFired` marker the hard-CC treatment's
+                    // victims key on.
+                    play_match::update_crescent_flares,
+                    play_match::cleanup_crescent_flares,
                     play_match::update_hard_cc_visuals,
                     play_match::update_cc_rigs,
                     // After `update_cc_rigs`, which writes the hub rotation the

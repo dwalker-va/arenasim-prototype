@@ -40,6 +40,9 @@ fn harness() -> App {
     app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()));
     app.init_asset::<Mesh>();
     app.init_asset::<StandardMaterial>();
+    // The gesture router builds the rogue crescent texture on demand, so it
+    // needs an `Assets<Image>` even for abilities that never spawn one.
+    app.init_asset::<Image>();
     app.insert_resource(TimeUpdateStrategy::ManualDuration(TICK));
     app
 }

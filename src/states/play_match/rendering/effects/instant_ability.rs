@@ -28,6 +28,7 @@ use bevy::prelude::*;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::components::*;
 use super::mortal_strike::spawn_mortal_strike_flourish;
+use super::rogue_crescents::{spawn_crescent_fan, CHEAP_SHOT_CRESCENTS};
 
 /// Height above the target's origin at which a melee hit registers.
 const IMPACT_HEIGHT: f32 = 1.45;
@@ -40,6 +41,11 @@ const IMPACT_HEIGHT: f32 = 1.45;
 pub fn swing_style_for_ability(ability: AbilityType) -> Option<SwingStyle> {
     match ability {
         AbilityType::MortalStrike => Some(SwingStyle::MortalStrike),
+        AbilityType::CheapShot => Some(SwingStyle::CheapShot),
+        // Hammer of Justice deliberately has NO stroke: the source spawns no
+        // hammer and no projectile, only a ground decal and a `SpecialUnarmed`
+        // gesture. Swinging the Paladin's mace would be inventing a weapon
+        // attack the ability does not have.
         _ => None,
     }
 }
@@ -53,6 +59,10 @@ pub fn consume_instant_ability_signals(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    // Built once and reused, like the stun whirl's sparkle — the crescent is
+    // identical for every slash of every rogue stun.
+    mut crescent_tex: Local<Option<Handle<Image>>>,
     signals: Query<(Entity, &InstantAbilityFired)>,
     mut sockets: Query<&mut WeaponSocket>,
     positions: Query<&Transform, With<Combatant>>,
@@ -110,13 +120,22 @@ pub fn consume_instant_ability_signals(
                     );
                 }
             }
+            AbilityType::CheapShot => {
+                if let Some(caster_pos) = caster_pos {
+                    spawn_crescent_fan(
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        &mut images,
+                        &mut crescent_tex,
+                        CHEAP_SHOT_CRESCENTS,
+                        caster_pos,
+                        target_pos,
+                    );
+                }
+            }
             _ => {}
         }
-
-        // `caster_pos` is read by the arms added in the A2 commits that follow
-        // (Hammer of Justice's ground streak, Frost Nova's rings); silence the
-        // unused warning until then without weakening the binding above.
-        let _ = caster_pos;
 
         commands.entity(signal_entity).despawn();
     }

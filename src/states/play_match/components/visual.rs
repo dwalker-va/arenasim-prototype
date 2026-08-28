@@ -593,6 +593,11 @@ pub enum SwingStyle {
     /// right") and is a different arc PLANE, not a heavier version of the same
     /// swing.
     MortalStrike,
+    /// Rogue Cheap Shot: a fast, shallow swing. The source plays plain
+    /// `Attack1H` over 634ms — genuinely generic, and half the length of Kidney
+    /// Shot's lunge. Its job is to be QUICK, which is the whole contrast with
+    /// the finisher.
+    CheapShot,
 }
 
 /// One instant ability performed by a caster, spawned by combat code at that
@@ -897,3 +902,27 @@ pub struct CcFlare {
 /// the hub's own rotation rather than simply copying the camera's.
 #[derive(Component)]
 pub struct CcBead;
+
+/// One crescent slash in a rogue stun's caster-side flare.
+///
+/// A camera-facing quad carrying the procedural arc texture from
+/// `rendering/effects/rogue_crescents.rs`. `delay` staggers it within its fan —
+/// the source pops Cheap Shot's four in two quick pairs and spreads Kidney
+/// Shot's three much wider — so the whole fan spawns in one loop and each
+/// crescent holds itself invisible until its turn.
+#[derive(Component)]
+pub struct CrescentFlare {
+    /// Seconds before this crescent appears.
+    pub delay: f32,
+    /// Seconds since spawn, including the delay.
+    pub age: f32,
+    /// Seconds this crescent lives once it has appeared.
+    pub lifetime: f32,
+    /// Roll about the view axis, so a fan spreads across the screen rather than
+    /// around the world.
+    pub roll: f32,
+    pub size: f32,
+    pub color: Color,
+    pub color_end: Color,
+    pub emissive: LinearRgba,
+}
