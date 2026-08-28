@@ -513,6 +513,7 @@ impl Plugin for StatesPlugin {
                     play_match::update_nova_rings,
                     play_match::update_nova_shards,
                     play_match::cleanup_frost_nova,
+                    play_match::expire_nova_freeze_delays,
                     play_match::update_hard_cc_visuals,
                     play_match::update_cc_rigs,
                     // After `update_cc_rigs`, which writes the hub rotation the

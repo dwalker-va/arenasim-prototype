@@ -270,7 +270,10 @@ pub fn spawn_frost_nova(
         let frac = (distance / NOVA_RADII[2]).clamp(0.0, 1.0);
         commands
             .entity(*victim)
-            .try_insert(NovaFreezeDelay { secs: frac * frac * NOVA_SECS });
+            .try_insert(NovaFreezeDelay {
+                secs: frac * frac * NOVA_SECS,
+                age: 0.0,
+            });
     }
 
     let _ = caster;
@@ -342,6 +345,28 @@ pub fn update_nova_shards(
             1.0
         };
         transform.scale = Vec3::new(1.0, (shard.height / NOVA_CRYSTAL_H) * rise.max(0.0), 1.0);
+    }
+}
+
+/// Drops any freeze delay the wave left on a unit that never got rooted.
+///
+/// The flourish marks everyone in RADIUS, because the graphical side cannot know
+/// who the sim actually rooted — an immune or already-dead target gets no aura
+/// and so no rig, and nothing else would ever consume its delay. Left in place
+/// it would silently postpone that unit's next root from ANY source.
+pub fn expire_nova_freeze_delays(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut delays: Query<(Entity, &mut NovaFreezeDelay)>,
+) {
+    let dt = time.delta_secs();
+    for (entity, mut delay) in delays.iter_mut() {
+        delay.age += dt;
+        // Generously past the wavefront: by now the rig either consumed it or
+        // never will.
+        if delay.age > NOVA_SECS * 2.0 {
+            commands.entity(entity).remove::<NovaFreezeDelay>();
+        }
     }
 }
 
@@ -454,6 +479,39 @@ mod tests {
         assert!(
             spread > 0.25,
             "only {spread}s between the nearest and furthest freeze"
+        );
+    }
+
+    #[test]
+    fn a_stranded_freeze_delay_expires() {
+        // The flourish marks everyone in RADIUS, but the sim decides who is
+        // actually rooted. An immune target (Divine Shield) gets no aura, so no
+        // rig, so nothing consumes its delay — and a delay left behind would
+        // silently postpone that unit's NEXT root from any source.
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin);
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_millis(100),
+        ));
+        app.add_systems(Update, expire_nova_freeze_delays);
+        let unit = app
+            .world_mut()
+            .spawn(NovaFreezeDelay { secs: 0.4, age: 0.0 })
+            .id();
+
+        app.update();
+        assert!(
+            app.world().get::<NovaFreezeDelay>(unit).is_some(),
+            "it must survive long enough for the rig to claim it"
+        );
+
+        // Past twice the wavefront: by now it was either used or never will be.
+        for _ in 0..25 {
+            app.update();
+        }
+        assert!(
+            app.world().get::<NovaFreezeDelay>(unit).is_none(),
+            "a delay nothing consumed must not persist"
         );
     }
 

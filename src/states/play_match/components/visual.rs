@@ -990,7 +990,17 @@ pub struct NovaShard {
 /// Root rig. Purely cosmetic: if it is missing — a root from any other source,
 /// or a race where the rig is built first — the rig simply grows immediately,
 /// which is the pre-existing behaviour.
+///
+/// It carries its own expiry because it is inserted on everyone in RADIUS, and
+/// the graphical side cannot know who the sim actually rooted. A target that is
+/// immune (Divine Shield) or already dead gets no aura and therefore no rig, so
+/// nothing would ever consume its delay — and it would then silently postpone
+/// that unit's NEXT root, from any source, by up to a full wavefront. Expiring
+/// it after the wave has passed keeps the stranding harmless.
 #[derive(Component)]
 pub struct NovaFreezeDelay {
     pub secs: f32,
+    /// Seconds since insertion; the component is dropped once this passes the
+    /// wavefront's own life, whether or not it was ever used.
+    pub age: f32,
 }
