@@ -409,6 +409,27 @@ fn try_frost_nova(
 
     builder.choose(frost_nova, None, true);
 
+    // Caster-side gesture marker (A2) — see the note in `cast_hammer_of_justice`
+    // for the spawn contract.
+    //
+    // Spawned EXACTLY ONCE, here, outside the per-target loop below, and with
+    // `target: None`. Frost Nova is a point-blank AoE whose geometry is anchored
+    // on the caster's own feet: one marker per victim would stack N copies of a
+    // single caster-centred effect at the same origin, N-times bright, with a
+    // footprint that changed depending on how many enemies happened to be in
+    // range. There is also no honest value for `target` — picking one victim out
+    // of the list would be arbitrary, and the geometry would then be anchored on
+    // it.
+    commands.spawn((
+        InstantAbilityFired {
+            caster: entity,
+            target: None,
+            ability: frost_nova,
+            is_crit: false,
+        },
+        PlayMatchEntity,
+    ));
+
     combatant.current_mana -= nova_def.mana_cost;
     combatant.ability_cooldowns.insert(frost_nova, nova_def.cooldown);
     combatant.global_cooldown = GCD;

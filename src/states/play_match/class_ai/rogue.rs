@@ -471,6 +471,19 @@ fn try_cheap_shot(
 
     builder.choose(ability, Some(target_entity), true);
 
+    // Caster-side gesture marker (A2) — see the note in `cast_hammer_of_justice`
+    // for the spawn contract. Cheap Shot is instant AND aura-only, so without
+    // this the Rogue plays nothing at all while stunning someone.
+    commands.spawn((
+        InstantAbilityFired {
+            caster: entity,
+            target: Some(target_entity),
+            ability,
+            is_crit: false,
+        },
+        PlayMatchEntity,
+    ));
+
     combatant.current_mana -= def.mana_cost;
     combatant.stealthed = false;
     combatant.global_cooldown = GCD;
@@ -544,6 +557,18 @@ fn try_kidney_shot(
     }
 
     builder.choose(kidney_shot, Some(target_entity), true);
+
+    // Caster-side gesture marker (A2) — see the note in `cast_hammer_of_justice`
+    // for the spawn contract.
+    commands.spawn((
+        InstantAbilityFired {
+            caster: entity,
+            target: Some(target_entity),
+            ability: kidney_shot,
+            is_crit: false,
+        },
+        PlayMatchEntity,
+    ));
 
     combatant.current_mana -= def.mana_cost;
     combatant.ability_cooldowns.insert(kidney_shot, def.cooldown);

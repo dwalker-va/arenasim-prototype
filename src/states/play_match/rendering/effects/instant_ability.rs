@@ -1,0 +1,123 @@
+//! Instant-ability gesture router (graphical-only).
+//!
+//! A hard cast telegraphs itself through `CastingState` and the casting orb. An
+//! instant does not — it is applied inline in its class AI or resolved through
+//! `combat_ai.rs`'s `QueuedInstantAttack` drain, and never enters
+//! `CastingState`/`process_casting` at all. So an instant that wants an
+//! actor-side animation states it by spawning an ability-AGNOSTIC
+//! [`InstantAbilityFired`] marker, and this module is the single place that
+//! decides which abilities have a signature and what each looks like.
+//!
+//! Adding the next one costs one arm in [`swing_style_for_ability`] (if it
+//! wants a bespoke weapon stroke) and one arm in the flourish match (if it
+//! wants particles or geometry) — no combat-code change at all.
+//!
+//! **The two dispatches are INDEPENDENT and must stay that way.** They were
+//! nested once, with the flourish reachable only through a `Some(style)` and a
+//! `Some(target_pos)`, which silently excluded two whole shapes of ability:
+//! Hammer of Justice has a flourish but deliberately NO stroke (the source has
+//! no hammer — see A2 in the roadmap), and Frost Nova is caster-centred with no
+//! target at all. Either would have spawned its marker, been consumed, and
+//! rendered nothing.
+//!
+//! Registered only in `states/mod.rs`, in `FixedUpdate` after
+//! `CombatSystemPhase::CombatResolution`: `FixedUpdate` can tick several times
+//! per rendered frame, and a marker consumed a tick late desyncs from its hit.
+
+use bevy::prelude::*;
+use crate::states::play_match::abilities::AbilityType;
+use crate::states::play_match::components::*;
+use super::mortal_strike::spawn_mortal_strike_flourish;
+
+/// Height above the target's origin at which a melee hit registers.
+const IMPACT_HEIGHT: f32 = 1.45;
+
+/// The bespoke stroke an instant ability swings, if it has one.
+///
+/// `None` means the ability keeps whatever the auto-attack machinery was doing
+/// — the correct answer for instants with no signature yet, which is most of
+/// them.
+pub fn swing_style_for_ability(ability: AbilityType) -> Option<SwingStyle> {
+    match ability {
+        AbilityType::MortalStrike => Some(SwingStyle::MortalStrike),
+        _ => None,
+    }
+}
+
+/// FixedUpdate (graphical-only): consume instant-ability markers, start the
+/// styled stroke on the caster's weapon, and fire the ability's flourish.
+///
+/// Every marker is despawned as it is read, signature or not, so an ability
+/// with no visual never leaks marker entities.
+pub fn consume_instant_ability_signals(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    signals: Query<(Entity, &InstantAbilityFired)>,
+    mut sockets: Query<&mut WeaponSocket>,
+    positions: Query<&Transform, With<Combatant>>,
+) {
+    for (signal_entity, signal) in signals.iter() {
+        let caster_pos = positions.get(signal.caster).map(|t| t.translation).ok();
+        let target_pos = signal
+            .target
+            .and_then(|t| positions.get(t).map(|tf| tf.translation).ok());
+        let style = swing_style_for_ability(signal.ability);
+
+        // ---- Weapon stroke (only for abilities that swing something) --------
+        //
+        // Main hand only. A styled ability stroke is a whole-body arc, so an
+        // off-hand twin swinging along with it would read as two weapons doing
+        // the same special. A caster with no sockets (Mage, Priest, Warlock,
+        // Shaman) simply never matches — a silent no-op, never a panic.
+        if let Some(style) = style {
+            for mut socket in sockets.iter_mut() {
+                if socket.owner != signal.caster || socket.hand != WeaponHand::Main {
+                    continue;
+                }
+                if let Some(pos) = target_pos {
+                    socket.aim = pos;
+                }
+                socket.release_t = Some(0.0);
+                socket.swing_style = style;
+                // Start the stroke from a full windup rather than wherever the
+                // auto-attack timer happened to sit. A signature arc that began
+                // from a random partial depth would play at a different size
+                // every cast, which reads as a broken animation rather than a
+                // varied one — and this stroke REVERSES the auto's direction,
+                // so a partial start can leave it beginning halfway up.
+                socket.windup_s = -1.0;
+            }
+        }
+
+        // ---- Flourish (independent of the stroke) ---------------------------
+        //
+        // NOT nested inside the stroke: Hammer of Justice has a flourish and no
+        // stroke, and Frost Nova has neither a stroke nor a target. Each arm
+        // states which of `caster_pos` / `target_pos` it needs.
+        match signal.ability {
+            AbilityType::MortalStrike => {
+                if let (Some(style), Some(target_pos)) = (style, target_pos) {
+                    spawn_mortal_strike_flourish(
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        signal.caster,
+                        target_pos + Vec3::Y * IMPACT_HEIGHT,
+                        signal.is_crit,
+                        style.stroke_secs(),
+                        style.impact_at(),
+                    );
+                }
+            }
+            _ => {}
+        }
+
+        // `caster_pos` is read by the arms added in the A2 commits that follow
+        // (Hammer of Justice's ground streak, Frost Nova's rings); silence the
+        // unused warning until then without weakening the binding above.
+        let _ = caster_pos;
+
+        commands.entity(signal_entity).despawn();
+    }
+}

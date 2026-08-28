@@ -543,7 +543,7 @@ pub struct WeaponSocket {
     pub windup_s: f32,
     /// Which named stroke the current release is playing. `Auto` between
     /// strokes and for every ordinary auto-attack; set alongside `release_t`
-    /// by `consume_instant_attack_signals` for a signature ability, and reset
+    /// by `consume_instant_ability_signals` for a signature ability, and reset
     /// to `Auto` when that stroke expires. Selects both the timing profile and
     /// the arc SHAPE in `animate_weapon_swings`.
     pub swing_style: SwingStyle,
@@ -595,27 +595,66 @@ pub enum SwingStyle {
     MortalStrike,
 }
 
-/// One landed instant melee attack, spawned in core at the
-/// `QueuedInstantAttack` drain site (`combat_ai.rs`) — the mechanism Mortal
-/// Strike, Ambush and Sinister Strike all resolve through, none of which ever
-/// enters `CastingState`/`process_casting`. Mirrors [`AutoAttackSwing`] and
-/// [`CastEnding`]: a bare marker entity, spawned unconditionally in BOTH modes
-/// (headless spawns it and never reads it), consumed and despawned by
-/// `consume_instant_attack_signals` (`rendering/effects/instant_attack.rs`,
+/// One instant ability performed by a caster, spawned by combat code at that
+/// ability's own resolution site and consumed by the graphical gesture router
+/// (`consume_instant_ability_signals`, `rendering/effects/instant_ability.rs`,
 /// registered only in `states/mod.rs`).
 ///
+/// This is the caster-side counterpart to `CastingState` -> casting orb: a hard
+/// cast telegraphs itself for its whole duration, an instant does not, so an
+/// instant that wants an actor-side animation states it here. Mirrors
+/// [`AutoAttackSwing`] and [`CastEnding`]: a bare marker entity, spawned
+/// unconditionally in BOTH modes (headless spawns it and never reads it) per
+/// `cosmetic-marker-cross-mode-spawn-parity.md`.
+///
 /// Deliberately ability-AGNOSTIC: core never learns which instants have a
-/// signature. The graphical router decides, so a new melee-instant signature
-/// costs one match arm there and touches no combat code. Spawned only after
-/// the hit's `is_alive` gate, like `AutoAttackSwing`, so a same-frame death
-/// never telegraphs a phantom strike.
+/// signature. The graphical router decides, so a new signature costs one match
+/// arm there and touches no combat code.
+///
+/// **Each spawn site owns its own gate and documents it.** The
+/// `QueuedInstantAttack` drain spawns only inside the landed-hit `is_alive`
+/// gate, like `AutoAttackSwing`, so a same-frame death never telegraphs a
+/// phantom strike. The class-AI sites spawn on the committed-use branch,
+/// because the caster performed the gesture whether or not every aura stuck.
 #[derive(Component)]
-pub struct InstantAttackLanded {
-    pub attacker: Entity,
-    pub target: Entity,
+pub struct InstantAbilityFired {
+    pub caster: Entity,
+    /// The single unit the gesture is aimed at, or `None` for a caster-centred
+    /// effect. An AoE has no one target, and picking one out of the victim list
+    /// would be an arbitrary lie that the geometry would then be anchored on.
+    pub target: Option<Entity>,
     pub ability: AbilityType,
-    /// Cosmetic only — scales the flourish. Never read by sim code.
+    /// Cosmetic only — scales the flourish. Never read by sim code. `false` for
+    /// aura-only abilities, which roll no crit.
     pub is_crit: bool,
+}
+
+impl InstantAbilityFired {
+    /// Every ability whose combat path spawns this marker — the single list.
+    ///
+    /// The animation sandbox runs neither the class AIs nor the
+    /// `QueuedInstantAttack` drain, so it must spawn the marker itself for
+    /// exactly this set. Deriving the sandbox's behaviour from this one
+    /// predicate is what stops the two drifting: an ability added to a spawn
+    /// site but forgotten here previews as nothing, and the audit test in
+    /// `animation_sandbox/playback.rs` fails rather than shipping silently.
+    pub fn is_spawned_for(ability: AbilityType) -> bool {
+        use AbilityType::*;
+        matches!(
+            ability,
+            // Resolved through the `QueuedInstantAttack` drain in combat_ai.rs.
+            MortalStrike | Ambush | SinisterStrike
+            // Instant AND aura-only: applied inline in class AI, entering
+            // neither generic caster hook (A2).
+            | CheapShot | KidneyShot | HammerOfJustice | FrostNova
+        )
+    }
+
+    /// Whether this ability's gesture is anchored on the caster rather than a
+    /// victim — the `target: None` cases.
+    pub fn is_caster_centred(ability: AbilityType) -> bool {
+        matches!(ability, AbilityType::FrostNova)
+    }
 }
 
 /// One heal that a [`AuraType::HealingReduction`] debuff cut down, spawned in

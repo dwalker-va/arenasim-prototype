@@ -325,7 +325,7 @@ impl Plugin for StatesPlugin {
             // and silently downgrade the special to a normal swing.
             .add_systems(
                 FixedUpdate,
-                play_match::consume_instant_attack_signals
+                play_match::consume_instant_ability_signals
                     .after(CombatSystemPhase::CombatResolution)
                     .after(play_match::consume_swing_signals)
                     .run_if(in_combat_scene),

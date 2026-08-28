@@ -14,7 +14,7 @@ use crate::states::play_match::components::*;
 // left six abilities rendering nothing at all: Frost Nova and Spider Web (Root),
 // and Cheap Shot, Kidney Shot, Hammer of Justice and Boar Charge (Stun). All six
 // are instant AND aura-only, so they enter neither generic caster-side hook
-// (`CastingState` -> casting orb, `QueuedInstantAttack` -> `InstantAttackLanded`)
+// (`CastingState` -> casting orb, `QueuedInstantAttack` -> `InstantAbilityFired`)
 // — the receiver side is the only side available for four of them, and this
 // module is entirely receiver-side.
 //
