@@ -646,9 +646,15 @@ impl InstantAbilityFired {
     /// The animation sandbox runs neither the class AIs nor the
     /// `QueuedInstantAttack` drain, so it must spawn the marker itself for
     /// exactly this set. Deriving the sandbox's behaviour from this one
-    /// predicate is what stops the two drifting: an ability added to a spawn
-    /// site but forgotten here previews as nothing, and the audit test in
-    /// `animation_sandbox/playback.rs` fails rather than shipping silently.
+    /// predicate is what stops the two drifting.
+    ///
+    /// TWO audits guard it, because they catch different mistakes.
+    /// `animation_sandbox/playback.rs` asserts every ability listed here
+    /// classifies as `EntryFamily::Residue`, so a LISTED ability always
+    /// previews. `tests/instant_ability_audit.rs` scans the source for real
+    /// spawn sites and checks the list against them, so an ability given a
+    /// spawn site but forgotten HERE fails too — which the family check alone
+    /// cannot see, because a `commands.spawn` in class AI is invisible to it.
     pub fn is_spawned_for(ability: AbilityType) -> bool {
         use AbilityType::*;
         matches!(
@@ -951,6 +957,12 @@ pub struct HolyStreak {
     /// Full reach in yards, resolved at spawn from the real caster-target
     /// distance.
     pub length: f32,
+    /// Unit aim direction on the ground plane. Kept because the quad is CENTRED
+    /// on its origin, so growing it forward means walking its centre out by half
+    /// the current reach rather than only scaling.
+    pub direction: Vec3,
+    /// The caster's feet — the streak's fixed tail.
+    pub origin: Vec3,
 }
 
 /// The golden seal that blooms on a Hammer of Justice victim's chest.

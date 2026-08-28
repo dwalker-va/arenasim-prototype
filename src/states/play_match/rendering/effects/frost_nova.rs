@@ -83,11 +83,6 @@ const NOVA_CRYSTAL_R: f32 = 0.11;
 const NOVA_CRYSTAL_LIFE: f32 = 0.55;
 const NOVA_CRYSTAL_SIDES: u32 = 5;
 
-/// How long a victim's root crystals take to grow once the wave reaches them.
-/// Matches `hard_cc.rs`'s own `ROOT_GROW_SECS`, so a propagated freeze looks
-/// like an ordinary one that simply started later.
-const NOVA_ROOT_GROW: f32 = 0.18;
-
 /// Deterministic per-piece variation. Same hash as `cc_jitter` — visual only,
 /// never `game_rng`.
 fn nova_jitter(seed: u32) -> f32 {
@@ -253,9 +248,7 @@ pub fn spawn_frost_nova(
             )
             .with_scale(Vec3::ZERO),
             NovaShard {
-                // Invert the ring's sqrt easing: a crystal at `frac` of the full
-                // radius is reached at `frac^2` of the travel.
-                born_at: frac * frac * NOVA_SECS,
+                born_at: nova_arrival_time(frac),
                 age: 0.0,
                 height,
             },
@@ -267,13 +260,10 @@ pub fn spawn_frost_nova(
     // root crystals start growing, so the wave visibly causes the freeze.
     for (victim, pos) in victims {
         let distance = (pos.with_y(0.0) - caster_pos.with_y(0.0)).length();
-        let frac = (distance / NOVA_RADII[2]).clamp(0.0, 1.0);
-        commands
-            .entity(*victim)
-            .try_insert(NovaFreezeDelay {
-                secs: frac * frac * NOVA_SECS,
-                age: 0.0,
-            });
+        commands.entity(*victim).try_insert(NovaFreezeDelay {
+            secs: nova_freeze_delay(distance),
+            age: 0.0,
+        });
     }
 
     let _ = caster;
@@ -388,13 +378,43 @@ pub fn cleanup_frost_nova(
     }
 }
 
+/// When the wavefront first reaches a point `distance` yards from the caster.
+///
+/// The FIRST ring to arrive, not a fixed one. Each ring inverts its own `sqrt`
+/// easing — a point at `f` of a ring's radius is passed at `f^2` of that ring's
+/// travel — and each carries its own start offset, so a ring held back two
+/// stagger steps genuinely arrives later. Keying everything on the outer ring
+/// alone got both halves wrong: it fired early by ignoring the offset, and once
+/// that was added it imposed a two-stagger floor on victims standing at
+/// the Mage's feet, which for a point-blank AoE is the common case.
+///
+/// The single source for both things that key on the wave's arrival: the
+/// crystals it throws up, and the freeze it propagates.
+pub fn nova_arrival_time_at(distance: f32) -> f32 {
+    let d = distance.max(0.0);
+    (0..3u32)
+        .filter(|&i| d <= NOVA_RADII[i as usize])
+        .map(|i| {
+            let delay = i as f32 * NOVA_RING_STAGGER;
+            let span = if i == 0 { NOVA_RING1_FULL } else { NOVA_SECS };
+            let f = d / NOVA_RADII[i as usize];
+            delay + f * f * (span - delay)
+        })
+        .fold(f32::INFINITY, f32::min)
+        .min(NOVA_SECS)
+}
+
+/// As [`nova_arrival_time_at`], but in units of the outer ring's radius — the
+/// form the crystal layout works in, since it places crystals by fraction.
+pub fn nova_arrival_time(frac: f32) -> f32 {
+    nova_arrival_time_at(frac.clamp(0.0, 1.0) * NOVA_RADII[2])
+}
+
 /// How long a freshly-rooted unit should wait before its crystals grow.
 ///
 /// Consumed (and removed) by `update_hard_cc_visuals` when it builds the rig.
-/// Separated out so the propagation rule is testable without an `App`.
 pub fn nova_freeze_delay(distance: f32) -> f32 {
-    let frac = (distance / NOVA_RADII[2]).clamp(0.0, 1.0);
-    frac * frac * NOVA_SECS
+    nova_arrival_time_at(distance)
 }
 
 #[cfg(test)]
@@ -455,6 +475,41 @@ mod tests {
         let a = 0.7;
         assert_ne!(nova_wobble(0, a), nova_wobble(1, a));
         assert_ne!(nova_wobble(1, a), nova_wobble(2, a));
+    }
+
+    #[test]
+    fn the_wave_arrives_after_the_outer_ring_starts_moving() {
+        // The outer ring is held back two stagger steps. Timing anything to
+        // "when the wave arrives" without adding that back fires early — by up
+        // to 0.2s on a wavefront that only lasts 0.867s, which is a fifth of the
+        // whole effect. Crystals erupting before the wave reaches them, and
+        // victims freezing before it touches them, both looked like the effect
+        // was simply desynced.
+        // At the caster's feet the innermost ring is already there, so a
+        // point-blank victim freezes at once — Frost Nova is point-blank, so
+        // that is the COMMON case, not an edge one.
+        assert_eq!(nova_arrival_time_at(0.0), 0.0);
+        // At the rim only the outer ring reaches, and it arrives at the very end.
+        assert!((nova_arrival_time_at(NOVA_RADII[2]) - NOVA_SECS).abs() < 1e-4);
+        // Monotone: further is never sooner.
+        let mut previous = -1.0;
+        for i in 0..=40 {
+            let d = i as f32 / 40.0 * NOVA_RADII[2];
+            let t = nova_arrival_time_at(d);
+            assert!(t >= previous - 1e-6, "arrival dipped at {d}yd: {t}");
+            previous = t;
+        }
+        // Whichever ring claims a distance really is there at that moment.
+        for d in [1.0f32, 3.0, 5.0, 7.0, 9.5] {
+            let t = nova_arrival_time_at(d);
+            let reached = (0..3u32)
+                .map(|i| NOVA_RADII[i as usize] * nova_ring_progress(i, t).sqrt())
+                .fold(0.0f32, f32::max);
+            assert!(
+                reached >= d - 0.05,
+                "at {t}s the furthest ring is only at {reached}yd, not {d}yd"
+            );
+        }
     }
 
     #[test]

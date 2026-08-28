@@ -165,7 +165,10 @@ fn rune_texture() -> Image {
             // Radial ticks living only in the gap between the two rings.
             let between = r > INNER_R && r < OUTER_R;
             let ticks = if between {
-                let phase = (theta * TICKS / TAU * TAU).sin().abs();
+                // `.abs()` doubles a sine's frequency, so the half-angle is what
+                // makes TICKS mean TICKS rather than twice as many. Without it
+                // the rune drew 16 ticks while its constant said 8.
+                let phase = (theta * TICKS * 0.5).sin().abs();
                 if phase > 1.0 - TICK_W {
                     (phase - (1.0 - TICK_W)) / TICK_W
                 } else {
@@ -230,9 +233,15 @@ pub fn spawn_holy_justice(
         double_sided: true,
         ..default()
     });
-    // The quad's +X runs along its length (matching the texture's `u`), so it is
-    // laid flat and then yawed to point at the victim.
-    let yaw = (-direction.x).atan2(-direction.z);
+    // The quad's +X runs along its length (matching the texture's `u`, which
+    // ramps 0 at the tail to 1 at the head), so the yaw must align local +X with
+    // the aim — `atan2(-dz, dx)`, the same convention `spawn_arena_walls`
+    // documents for its length-along-+X cuboids (`play_match/mod.rs:459`).
+    //
+    // NOT the `atan2(dx, dz)` used for facing a UNIT toward something: that
+    // aligns local +Z, which here is the quad's normal after the flat rotation,
+    // and would lay the streak exactly ACROSS the line of fire.
+    let yaw = (-direction.z).atan2(direction.x);
     commands.spawn((
         Mesh3d(meshes.add(Rectangle::new(1.0, 1.0))),
         MeshMaterial3d(material),
@@ -241,6 +250,8 @@ pub fn spawn_holy_justice(
         HolyStreak {
             age: 0.0,
             length: distance,
+            direction,
+            origin: caster_pos.with_y(HOJ_GROUND_Y),
         },
         PlayMatchEntity,
     ));
@@ -289,8 +300,14 @@ pub fn update_holy_streaks(
         // the victim rather than snapping to full length.
         let travel = ((k - HOJ_STREAK_GROW_FROM) / (HOJ_STREAK_GROW_TO - HOJ_STREAK_GROW_FROM))
             .clamp(0.0, 1.0);
-        let reach = streak.length * travel.sqrt();
-        transform.scale = Vec3::new(reach.max(0.01), HOJ_STREAK_WIDTH, 1.0);
+        let reach = (streak.length * travel.sqrt()).max(0.01);
+        transform.scale = Vec3::new(reach, HOJ_STREAK_WIDTH, 1.0);
+        // A Bevy `Rectangle` is CENTRED on its origin, so scaling local X alone
+        // would span -reach/2..+reach/2 about the caster: the head would stop
+        // halfway to the victim and the tail would run back through the
+        // Paladin's own body. Walking the centre out by half the current reach
+        // anchors the quad at its tail, so it grows forward only.
+        transform.translation = streak.origin + streak.direction * (reach * 0.5);
 
         if let Some(material) = materials.get_mut(&handle.0) {
             // Orange, flashing near-white very early, then back to orange.

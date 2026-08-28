@@ -208,6 +208,78 @@ fn the_streak_reaches_the_victim() {
 }
 
 #[test]
+fn the_streak_actually_points_at_the_victim() {
+    // Both of this module's real bugs slipped past the original probes because
+    // they asserted on the `length` FIELD and on `scale.x` — bookkeeping, not
+    // geometry. The quad's length axis is its local +X, so the only honest test
+    // is where that axis ends up in the world.
+    for (dx, dz) in [(0.0, 8.0), (8.0, 0.0), (0.0, -8.0), (-5.0, 5.0), (4.0, -6.0)] {
+        let mut h = Harness::new();
+        let paladin = h.spawn_paladin();
+        let victim = h
+            .app
+            .world_mut()
+            .spawn((
+                Transform::from_xyz(dx, 1.0, dz),
+                Combatant::new(1, 0, CharacterClass::Priest),
+            ))
+            .id();
+        h.fire(paladin, victim);
+        h.tick(1);
+
+        let (rot, _) = {
+            let mut q = h.app.world_mut().query::<(&HolyStreak, &Transform)>();
+            let (_, t) = q.iter(h.app.world()).next().unwrap();
+            (t.rotation, t.translation)
+        };
+        let aim = Vec3::new(dx, 0.0, dz).normalize();
+        let length_axis = rot * Vec3::X;
+        let dot = length_axis.dot(aim);
+        assert!(
+            dot > 0.99,
+            "streak's length axis {length_axis:?} should follow the aim {aim:?} \
+             toward ({dx}, {dz}); dot = {dot}"
+        );
+        // The flat rotation must still leave the decal lying on the ground.
+        let normal = rot * Vec3::Z;
+        assert!(
+            normal.y.abs() > 0.99,
+            "the streak should lie flat, normal {normal:?}"
+        );
+    }
+}
+
+#[test]
+fn the_streak_grows_forward_from_the_caster() {
+    // A Bevy Rectangle is centred on its origin, so scaling alone would put half
+    // the streak BEHIND the Paladin and stop its head halfway to the victim.
+    let mut h = Harness::new();
+    let paladin = h.spawn_paladin();
+    let victim = h.spawn_victim(8.0);
+    h.fire(paladin, victim);
+    // Far enough in for the streak to have reached full extension.
+    h.tick(14);
+
+    let (rot, pos, len) = {
+        let mut q = h.app.world_mut().query::<(&HolyStreak, &Transform)>();
+        let (s, t) = q.iter(h.app.world()).next().unwrap();
+        (t.rotation, t.translation, t.scale.x)
+    };
+    let axis = rot * Vec3::X;
+    let head = pos + axis * (len * 0.5);
+    let tail = pos - axis * (len * 0.5);
+
+    assert!(
+        tail.distance(Vec3::new(0.0, tail.y, 0.0)) < 0.3,
+        "the tail should stay at the Paladin's feet, got {tail:?}"
+    );
+    assert!(
+        head.z > 7.0,
+        "the head should arrive at the victim ~8yd out, got {head:?}"
+    );
+}
+
+#[test]
 fn the_streak_extends_over_time() {
     // It races outward rather than appearing at full length — that travel is
     // how a projectile-less 10yd ability covers its range.
