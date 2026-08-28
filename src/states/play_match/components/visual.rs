@@ -848,3 +848,13 @@ pub struct CcFlare {
     /// Scale the ring expands to — wider on the ground than overhead.
     pub end_scale: f32,
 }
+
+/// One sparkle in a stunned unit's overhead whirl.
+///
+/// The beads are camera-facing quads, not spheres — geometry cannot produce a
+/// soft-edged glow, so the falloff lives in a procedural sparkle texture's
+/// alpha. This marker exists so the billboard system can find them, and because
+/// they are children of a hub that SPINS, the billboard must counter-rotate by
+/// the hub's own rotation rather than simply copying the camera's.
+#[derive(Component)]
+pub struct CcBead;

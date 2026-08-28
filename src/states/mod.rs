@@ -498,6 +498,9 @@ impl Plugin for StatesPlugin {
                 (
                     play_match::update_hard_cc_visuals,
                     play_match::update_cc_rigs,
+                    // After `update_cc_rigs`, which writes the hub rotation the
+                    // billboard has to cancel.
+                    play_match::billboard_cc_beads,
                     play_match::update_cc_flares,
                     play_match::cleanup_cc_rigs,
                     play_match::cleanup_cc_flares,

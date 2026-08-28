@@ -25,7 +25,8 @@ use arenasim::states::play_match::components::{
     RootedVisual, StunnedVisual, VisualBody, WalkAnim,
 };
 use arenasim::states::play_match::{
-    cc_envelope, cleanup_cc_flares, cleanup_cc_rigs, root_style, update_cc_flares, update_cc_rigs,
+    billboard_cc_beads, cc_envelope, cleanup_cc_flares, cleanup_cc_rigs, root_style, update_cc_flares,
+    update_cc_rigs,
     update_hard_cc_visuals,
 };
 use arenasim::CharacterClass;
@@ -80,13 +81,19 @@ impl Harness {
         app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()));
         app.init_asset::<Mesh>();
         app.init_asset::<StandardMaterial>();
+        // The stun beads are textured quads, so the sparkle generator needs an
+        // `Assets<Image>` to live in.
+        app.init_asset::<Image>();
         app.insert_resource(TimeUpdateStrategy::ManualDuration(TICK));
-        // Same order as the real registration in `states/mod.rs`.
+        // Same order as the real registration in `states/mod.rs`. There is no
+        // camera in this harness, so `billboard_cc_beads` early-returns — it is
+        // registered anyway to keep the two orders identical.
         app.add_systems(
             Update,
             (
                 update_hard_cc_visuals,
                 update_cc_rigs,
+                billboard_cc_beads,
                 update_cc_flares,
                 cleanup_cc_rigs,
                 cleanup_cc_flares,
@@ -307,8 +314,8 @@ fn stun_spawns_the_whirl_and_one_flare() {
     assert!(h.has_stun(unit));
     let rigs = h.rigs_of(unit, CcKind::Stun);
     assert_eq!(rigs.len(), 1);
-    // STUN_ARMS * STUN_BEADS_PER_ARM.
-    assert_eq!(h.rig_children(rigs[0].0), 10, "ten beads");
+    // STUN_ARMS * STUN_BEADS_PER_ARM, each a glowing core plus its halo shell.
+    assert_eq!(h.rig_children(rigs[0].0), 10, "ten sparkles");
     assert_eq!(h.flares(), 1);
 }
 
@@ -609,6 +616,68 @@ fn reconcile_does_not_pop_a_second_flare() {
         0,
         "a silent reconcile must not re-announce the landing"
     );
+}
+
+#[test]
+fn the_whirl_and_flare_actually_emit() {
+    // Bevy's `pbr.wgsl` unlit branch is `out.color = material.base_color`, which
+    // DISCARDS emissive — it is only added inside `apply_pbr_lighting`. An unlit
+    // bead is LDR white with nothing for `Bloom::NATURAL` to bloom, so the whirl
+    // renders as a flat ring of dots instead of a shining one. This shipped
+    // once; it must not ship again.
+    let mut h = Harness::new();
+    let unit = h.spawn_unit(0, 0);
+    h.apply(unit, stun_aura());
+    h.tick(2);
+
+    let rig = h.rigs_of(unit, CcKind::Stun)[0].0;
+    let children: Vec<Entity> = h.app.world().get::<Children>(rig).unwrap().iter().collect();
+    assert_eq!(children.len(), 10);
+
+    let mut emitting = 0;
+    for child in &children {
+        let handle = h
+            .app
+            .world()
+            .get::<MeshMaterial3d<StandardMaterial>>(*child)
+            .expect("every bead has a material")
+            .0
+            .clone();
+        let materials = h.app.world().resource::<Assets<StandardMaterial>>();
+        let m = materials.get(&handle).unwrap();
+        assert!(!m.unlit, "an unlit bead silently loses its emissive");
+        assert_eq!(m.alpha_mode, AlphaMode::Add, "beads composite additively");
+        // The soft edge lives in the texture's alpha — geometry cannot make
+        // one, and an untextured additive quad is a hard-edged square.
+        assert!(
+            m.base_color_texture.is_some() && m.emissive_texture.is_some(),
+            "a sparkle needs its texture on BOTH channels"
+        );
+        if m.emissive.red + m.emissive.green + m.emissive.blue > 1.0 {
+            emitting += 1;
+        }
+    }
+    assert_eq!(emitting, 10, "every sparkle must emit above LDR");
+
+    // The flare is the brightest single moment in the treatment.
+    let flare = h
+        .app
+        .world_mut()
+        .query_filtered::<Entity, With<CcFlare>>()
+        .iter(h.app.world())
+        .next()
+        .expect("apply flare");
+    let handle = h
+        .app
+        .world()
+        .get::<MeshMaterial3d<StandardMaterial>>(flare)
+        .unwrap()
+        .0
+        .clone();
+    let materials = h.app.world().resource::<Assets<StandardMaterial>>();
+    let m = materials.get(&handle).unwrap();
+    assert!(!m.unlit, "an unlit flare silently loses its emissive");
+    assert!(m.emissive.blue > 1.0, "the flare must be HDR-overbright");
 }
 
 // ==============================================================================

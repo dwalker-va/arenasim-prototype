@@ -180,8 +180,46 @@ const STUN_BOB_PERIOD: f32 = 1.6;
 /// Hueless on purpose: one look for Cheap Shot, Kidney Shot, Hammer of Justice
 /// and Boar Charge alike. Spends nothing from the hue budget and matches the
 /// HUD's already-white stun label.
+///
+/// NOT `unlit`. The unlit branch of `pbr.wgsl` is
+/// `out.color = material.base_color` — it discards emissive outright, since
+/// emissive is only added inside `apply_pbr_lighting`. An unlit bead is
+/// therefore LDR white with nothing for `Bloom::NATURAL` to bloom, which is
+/// exactly the flat, un-shining look this treatment must not have. Every
+/// glowing effect in this codebase (trap discs, the fear shroud) uses emissive
+/// + `AlphaMode::Add` with no `unlit`; `unlit: true` is for things wanting a
+/// FLAT colour regardless of arena lighting, like the berserk mask.
 const STUN_BEAD_COLOR: Color = Color::srgba(0.95, 0.97, 1.00, 0.90);
-const STUN_BEAD_EMISSIVE: LinearRgba = LinearRgba::new(2.2, 2.4, 3.0, 1.0);
+const STUN_BEAD_EMISSIVE: LinearRgba = LinearRgba::new(3.0, 3.3, 4.2, 1.0);
+
+/// Each bead carries a larger, dimmer shell so the glow has an explicit
+/// falloff instead of a hard-edged additive disc. This is what the design bench
+/// drew as a radial gradient out to 2.4x the bead radius, and it is what makes
+/// the whirl read as SHINING rather than as a ring of dots. Bloom widens it
+/// further; the shell means the look does not depend on bloom being on.
+/// Each bead is a camera-facing QUAD carrying a procedural sparkle texture, not
+/// a sphere.
+///
+/// Geometry cannot produce a glow. Any solid mesh — sphere, or a bigger sphere
+/// behind it — has a hard silhouette edge, so an additive sphere renders as a
+/// flat disc and a stack of them reads as soap bubbles rather than light. The
+/// falloff has to live in the texture's alpha, which is what the design bench
+/// drew as a radial gradient. The rays are what make it a STAR rather than a
+/// dot: a plain round glow still reads as a bubble at this size.
+///
+/// Billboarded via `rotation = camera.rotation`, the idiom the Berserker Rage
+/// glyph already uses. Because the beads are children of a hub that SPINS, the
+/// billboard has to counter-rotate by the hub's own rotation — see
+/// [`billboard_cc_beads`].
+const STUN_SPARKLE_PX: u32 = 128;
+/// Half-width of a ray as a fraction of the sprite radius. Narrow: a fat ray
+/// reads as a cross, not a glint.
+const STUN_RAY_WIDTH: f32 = 0.13;
+/// How far the ray reaches relative to the core.
+const STUN_RAY_REACH: f32 = 0.55;
+/// The quad spans this multiple of the bead's core size, because most of the
+/// sprite is the transparent falloff around the core.
+const STUN_SPARKLE_SPAN: f32 = 5.0;
 
 // ==============================================================================
 // Pure seams
@@ -251,9 +289,9 @@ pub fn retract_secs(kind: CcKind) -> f32 {
 
 /// Spawns the hub for one rig with its children already in place, positioned
 /// correctly at spawn so nothing is ever seen at the origin for a frame.
-fn spawn_rig(
+fn spawn_rig<B: Bundle>(
     commands: &mut Commands,
-    children: Vec<(Mesh3d, MeshMaterial3d<StandardMaterial>, Transform)>,
+    children: Vec<B>,
     owner: Entity,
     kind: CcKind,
     origin: Vec3,
@@ -400,18 +438,83 @@ fn build_web_sheet(
     parts
 }
 
+/// A four-point sparkle: a soft radial core with narrow rays along both axes,
+/// white with the shape carried entirely in the alpha channel.
+///
+/// Generated rather than shipped as an asset for the same reason
+/// `create_surface_texture` is (`play_match/mod.rs:151`) — it is a handful of
+/// arithmetic and stays tunable by named constants instead of by reopening an
+/// image editor.
+fn sparkle_texture() -> Image {
+    use bevy::image::Image;
+    use bevy::render::render_asset::RenderAssetUsages;
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+
+    let size = STUN_SPARKLE_PX;
+    let mut data = vec![0u8; (size * size * 4) as usize];
+    let centre = (size as f32 - 1.0) / 2.0;
+
+    for y in 0..size {
+        for x in 0..size {
+            // -1..1 across the sprite.
+            let dx = (x as f32 - centre) / centre;
+            let dy = (y as f32 - centre) / centre;
+            let r = (dx * dx + dy * dy).sqrt();
+
+            // Core: smooth falloff to nothing at the rim. The exponent is what
+            // keeps it a tight point of light rather than a fog ball.
+            let core = (1.0 - r).clamp(0.0, 1.0).powf(2.8);
+
+            // Rays: bright along one axis, pinched hard on the other, fading
+            // out along their length.
+            let ray = |across: f32, along: f32| {
+                let width = (1.0 - across.abs() / STUN_RAY_WIDTH).clamp(0.0, 1.0);
+                let reach = (1.0 - along.abs()).clamp(0.0, 1.0).powf(1.8);
+                width * width * reach * STUN_RAY_REACH
+            };
+
+            let a = (core + ray(dy, dx) + ray(dx, dy)).clamp(0.0, 1.0);
+            let i = ((y * size + x) * 4) as usize;
+            data[i] = 255;
+            data[i + 1] = 255;
+            data[i + 2] = 255;
+            data[i + 3] = (a * 255.0) as u8;
+        }
+    }
+
+    Image::new(
+        Extent3d {
+            width: size,
+            height: size,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        data,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::RENDER_WORLD,
+    )
+}
+
 fn build_stun_whirl(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
-) -> Vec<(Mesh3d, MeshMaterial3d<StandardMaterial>, Transform)> {
+    sparkle: Handle<Image>,
+) -> Vec<(Mesh3d, MeshMaterial3d<StandardMaterial>, Transform, CcBead)> {
+    // The sparkle drives BOTH channels: base_color_texture supplies the alpha
+    // that shapes the sprite, and emissive_texture keeps the rays from emitting
+    // where the sprite is transparent. `unlit` stays false or the emissive is
+    // discarded entirely (see `STUN_BEAD_COLOR`).
     let material = materials.add(StandardMaterial {
         base_color: STUN_BEAD_COLOR,
+        base_color_texture: Some(sparkle.clone()),
         emissive: STUN_BEAD_EMISSIVE,
+        emissive_texture: Some(sparkle),
         alpha_mode: AlphaMode::Add,
-        unlit: true,
+        cull_mode: None,
+        double_sided: true,
         ..default()
     });
-    let mesh = meshes.add(Sphere::new(1.0));
+    let mesh = meshes.add(Rectangle::new(1.0, 1.0));
 
     let mut parts = Vec::new();
     for arm in 0..STUN_ARMS {
@@ -426,11 +529,13 @@ fn build_stun_whirl(
             // glowing streak instead of reading as five separate dots.
             let s = STUN_BEAD_MIN + (STUN_BEAD_MAX - STUN_BEAD_MIN) * t;
 
+            let at = Vec3::new(theta.cos() * r, y, theta.sin() * r);
             parts.push((
                 Mesh3d(mesh.clone()),
                 MeshMaterial3d(material.clone()),
-                Transform::from_xyz(theta.cos() * r, y, theta.sin() * r)
-                    .with_scale(Vec3::splat(s)),
+                Transform::from_translation(at)
+                    .with_scale(Vec3::splat(s * STUN_SPARKLE_SPAN)),
+                CcBead,
             ));
         }
     }
@@ -445,11 +550,12 @@ fn spawn_cc_flare(
     end_scale: f32,
 ) {
     let mesh = meshes.add(Annulus::new(CC_FLARE_INNER_RATIO, 1.0).mesh().resolution(56));
+    // Emissive, NOT unlit — see `STUN_BEAD_COLOR` for why the two are
+    // mutually exclusive in Bevy's PBR shader.
     let material = materials.add(StandardMaterial {
         base_color: CC_FLARE_COLOR,
         emissive: CC_FLARE_EMISSIVE,
         alpha_mode: AlphaMode::Add,
-        unlit: true,
         cull_mode: None,
         ..default()
     });
@@ -494,6 +600,10 @@ pub fn update_hard_cc_visuals(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    // The sparkle is identical for every bead of every stun, so it is built
+    // once and the handle reused rather than regenerating 64KB per application.
+    mut sparkle: Local<Option<Handle<Image>>>,
     combatants: Query<(
         Entity,
         &Combatant,
@@ -605,7 +715,10 @@ pub fn update_hard_cc_visuals(
         // ---- Stun ----
         if is_stunned {
             if !stun_held {
-                let parts = build_stun_whirl(&mut meshes, &mut materials);
+                let tex = sparkle
+                    .get_or_insert_with(|| images.add(sparkle_texture()))
+                    .clone();
+                let parts = build_stun_whirl(&mut meshes, &mut materials, tex);
                 let origin = transform.translation + Vec3::Y * stun_lift;
                 spawn_rig(&mut commands, parts, entity, CcKind::Stun, origin, stun_lift);
                 commands.entity(entity).try_insert(StunnedVisual);
@@ -676,6 +789,37 @@ pub fn update_cc_rigs(
                 // `fixed-timestep-visual-strobe.md`.
                 transform.rotation = Quat::from_rotation_y(-rig.age * TAU * STUN_SPIN_HZ);
                 transform.scale = Vec3::splat(stature * e);
+            }
+        }
+    }
+}
+
+/// Turns every sparkle to face the camera.
+///
+/// A quad is only a glowing point of light while it is face-on; edge-on it
+/// vanishes. The beads are children of a hub that spins about Y, so copying the
+/// camera's rotation directly is not enough — the parent's rotation composes on
+/// top of it and the sprites would counter-spin visibly. Pre-multiplying by the
+/// hub's inverse cancels it, leaving each bead world-aligned to the camera while
+/// the hub goes on carrying them around the orbit.
+///
+/// The hub is a root entity, so its local rotation IS its world rotation.
+pub fn billboard_cc_beads(
+    camera: Query<&Transform, (With<Camera3d>, Without<CcRig>, Without<CcBead>)>,
+    rigs: Query<(&CcRig, &Transform, &Children), Without<CcBead>>,
+    mut beads: Query<&mut Transform, With<CcBead>>,
+) {
+    let Some(cam) = camera.iter().next() else {
+        return;
+    };
+    for (rig, hub, children) in rigs.iter() {
+        if rig.kind != CcKind::Stun {
+            continue;
+        }
+        let facing = hub.rotation.inverse() * cam.rotation;
+        for child in children.iter() {
+            if let Ok(mut bead) = beads.get_mut(child) {
+                bead.rotation = facing;
             }
         }
     }
