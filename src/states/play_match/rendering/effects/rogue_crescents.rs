@@ -67,12 +67,21 @@ pub struct CrescentSpec {
     pub roll_step: f32,
     /// Tint at birth.
     pub color: Color,
-    /// Tint at death. Cheap Shot passes the same value twice (the source has
-    /// ZERO colour tracks — it is untinted white); Kidney Shot travels from
-    /// magenta to crimson.
+    /// Tint at [`CRESCENT_FLASH_AT`] through the crescent's life. The source's
+    /// Kidney Shot spikes to a white-pink at 200ms of a 1233ms model before
+    /// settling to crimson, so a two-stop lerp cannot describe it.
+    pub color_mid: Color,
+    /// Tint at death. Cheap Shot passes the same value for all three (the
+    /// source has ZERO colour tracks on its model — it is untinted white);
+    /// Kidney Shot travels magenta -> flash -> deep crimson.
     pub color_end: Color,
     pub emissive: LinearRgba,
 }
+
+/// Where in a crescent's life the mid tint peaks. The source flashes early —
+/// 200ms into a 1233ms model — so the spike belongs near the front of the
+/// stroke, not the middle.
+const CRESCENT_FLASH_AT: f32 = 0.22;
 
 /// Cheap Shot: four untinted white crescents at head height in two quick
 /// strokes. Fast and colourless, which is exactly what the source is.
@@ -87,8 +96,33 @@ pub const CHEAP_SHOT_CRESCENTS: CrescentSpec = CrescentSpec {
     size: 1.10,
     roll_step: 0.55,
     color: Color::srgba(0.97, 0.98, 1.00, 0.85),
+    color_mid: Color::srgba(0.97, 0.98, 1.00, 0.85),
     color_end: Color::srgba(0.97, 0.98, 1.00, 0.85),
     emissive: LinearRgba::new(2.6, 2.7, 3.0, 1.0),
+};
+
+/// Kidney Shot: three crescents at TORSO height, spread much wider than Cheap
+/// Shot's pairs, travelling magenta -> white-pink flash -> deep crimson.
+///
+/// The colours are the source's measured keyframes: `#F53BB1` -> `#FFD1FF` at
+/// 200ms -> `#F00764` at 566ms. They were the one surprise in the research and
+/// are uncorroborated by any second source, so they are worth a spot-check in a
+/// real client — but hot pink sits well clear of Mortal Strike's dark crimson
+/// trail, and the silhouettes differ anyway (torso crescents against a weapon
+/// ribbon).
+pub const KIDNEY_SHOT_CRESCENTS: CrescentSpec = CrescentSpec {
+    count: 3,
+    height: 0.10,
+    reach: 0.95,
+    // Source alpha peaks at 466 / 633 / 800ms — ~167ms apart.
+    stagger: 0.167,
+    lifetime: 0.45,
+    size: 1.35,
+    roll_step: 0.75,
+    color: Color::srgba(0.96, 0.23, 0.69, 0.90),
+    color_mid: Color::srgba(1.00, 0.82, 1.00, 0.95),
+    color_end: Color::srgba(0.94, 0.03, 0.39, 0.90),
+    emissive: LinearRgba::new(3.0, 0.8, 2.0, 1.0),
 };
 
 /// The procedural arc: a gaussian band along a circular spine, tapering to
@@ -199,6 +233,7 @@ pub fn spawn_crescent_fan(
                 roll,
                 size: spec.size,
                 color: spec.color,
+                color_mid: spec.color_mid,
                 color_end: spec.color_end,
                 emissive: spec.emissive,
             },
@@ -252,13 +287,26 @@ pub fn update_crescent_flares(
         if let Some(material) = materials.get_mut(&handle.0) {
             // Squared fade so the stroke thins early rather than lingering.
             let fade = (1.0 - k) * (1.0 - k);
-            let from = flare.color.to_srgba();
-            let to = flare.color_end.to_srgba();
+            // Three-stop travel: birth -> an early flash -> death. A two-stop
+            // lerp cannot describe the source's spike to white-pink at 200ms of
+            // a 1233ms model, and dropping the flash loses the one thing that
+            // makes Kidney Shot's colour read as a strike rather than a tint.
+            let (from, to, t) = if k < CRESCENT_FLASH_AT {
+                (flare.color, flare.color_mid, k / CRESCENT_FLASH_AT)
+            } else {
+                (
+                    flare.color_mid,
+                    flare.color_end,
+                    (k - CRESCENT_FLASH_AT) / (1.0 - CRESCENT_FLASH_AT),
+                )
+            };
+            let from = from.to_srgba();
+            let to = to.to_srgba();
             material.base_color = Color::srgba(
-                from.red + (to.red - from.red) * k,
-                from.green + (to.green - from.green) * k,
-                from.blue + (to.blue - from.blue) * k,
-                from.alpha * fade,
+                from.red + (to.red - from.red) * t,
+                from.green + (to.green - from.green) * t,
+                from.blue + (to.blue - from.blue) * t,
+                (from.alpha + (to.alpha - from.alpha) * t) * fade,
             );
             material.emissive = LinearRgba::new(
                 flare.emissive.red * fade,

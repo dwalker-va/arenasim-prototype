@@ -28,7 +28,7 @@ use bevy::prelude::*;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::components::*;
 use super::mortal_strike::spawn_mortal_strike_flourish;
-use super::rogue_crescents::{spawn_crescent_fan, CHEAP_SHOT_CRESCENTS};
+use super::rogue_crescents::{spawn_crescent_fan, CHEAP_SHOT_CRESCENTS, KIDNEY_SHOT_CRESCENTS};
 
 /// Height above the target's origin at which a melee hit registers.
 const IMPACT_HEIGHT: f32 = 1.45;
@@ -42,6 +42,7 @@ pub fn swing_style_for_ability(ability: AbilityType) -> Option<SwingStyle> {
     match ability {
         AbilityType::MortalStrike => Some(SwingStyle::MortalStrike),
         AbilityType::CheapShot => Some(SwingStyle::CheapShot),
+        AbilityType::KidneyShot => Some(SwingStyle::KidneyShot),
         // Hammer of Justice deliberately has NO stroke: the source spawns no
         // hammer and no projectile, only a ground decal and a `SpecialUnarmed`
         // gesture. Swinging the Paladin's mace would be inventing a weapon
@@ -120,15 +121,20 @@ pub fn consume_instant_ability_signals(
                     );
                 }
             }
-            AbilityType::CheapShot => {
+            AbilityType::CheapShot | AbilityType::KidneyShot => {
                 if let Some(caster_pos) = caster_pos {
+                    let spec = if signal.ability == AbilityType::CheapShot {
+                        CHEAP_SHOT_CRESCENTS
+                    } else {
+                        KIDNEY_SHOT_CRESCENTS
+                    };
                     spawn_crescent_fan(
                         &mut commands,
                         &mut meshes,
                         &mut materials,
                         &mut images,
                         &mut crescent_tex,
-                        CHEAP_SHOT_CRESCENTS,
+                        spec,
                         caster_pos,
                         target_pos,
                     );

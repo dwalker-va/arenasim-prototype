@@ -91,6 +91,27 @@ pub(crate) enum SwingArc {
         /// value is negated at use), reversing the auto-attack's chop.
         release: f32,
     },
+    /// A LUNGE: pulled back along the aim axis, then driven straight through the
+    /// target. Translation-dominant, so unlike [`Self::TiltedPlane`] it traces
+    /// no plane at all — the "one rotation, one axis" rule governs how to build
+    /// a swing and simply does not apply to a thrust. Kidney Shot's source
+    /// animation is `Attack1HPierce`, and expressing that as a rotation would
+    /// read as a slash however it were tuned.
+    ///
+    /// Ignores `WeaponKind` for the same reason `TiltedPlane` does: a signature
+    /// belongs to the ability, not to whatever is being held. The dagger's own
+    /// auto-attack pose is already a stab, with fixed depths; this exists so a
+    /// signature can be a DEEPER, longer one.
+    Lunge {
+        /// Draw-back distance on windup, in socket-local yards.
+        pull: f32,
+        /// Drive-through distance on release. The dagger auto's is 0.85, so a
+        /// signature lunge wants visibly more.
+        thrust: f32,
+        /// Forward pitch carried through the stroke, in radians. Small — the
+        /// motion is the translation; this only stops the weapon looking rigid.
+        pitch: f32,
+    },
 }
 
 impl SwingStyle {
@@ -149,6 +170,21 @@ impl SwingStyle {
                     release: CHEAP_SHOT_RELEASE,
                 },
                 lean: CHEAP_SHOT_LEAN,
+            },
+            // A pierce, not a swing — the one stroke in the game that is
+            // translation-dominant. Twice Cheap Shot's length (the source is
+            // 1233ms against its 634ms), so the finisher lands with weight the
+            // opener does not have.
+            SwingStyle::KidneyShot => SwingProfile {
+                release_secs: SWING_RELEASE_SECS * KIDNEY_SHOT_RELEASE_MUL,
+                impact_hold_secs: SWING_IMPACT_HOLD_SECS * KIDNEY_SHOT_HOLD_MUL,
+                follow_secs: SWING_FOLLOW_SECS * KIDNEY_SHOT_FOLLOW_MUL,
+                arc: SwingArc::Lunge {
+                    pull: KIDNEY_SHOT_PULL,
+                    thrust: KIDNEY_SHOT_THRUST,
+                    pitch: KIDNEY_SHOT_PITCH,
+                },
+                lean: KIDNEY_SHOT_LEAN,
             },
         }
     }
@@ -219,6 +255,24 @@ const CHEAP_SHOT_RELEASE: f32 = 1.10;
 /// Between the auto's ~8° and Mortal Strike's ~22°: the body commits, but the
 /// stroke is over before it becomes ceremony.
 const CHEAP_SHOT_LEAN: f32 = 0.16;
+
+// --- Kidney Shot ----------------------------------------------------------
+//
+// The finisher. Source is 1233ms of `Attack1HPierce` — twice Cheap Shot, and a
+// LUNGE rather than a swing. Total here is ~1.22s.
+const KIDNEY_SHOT_RELEASE_MUL: f32 = 2.5;
+const KIDNEY_SHOT_HOLD_MUL: f32 = 2.4;
+const KIDNEY_SHOT_FOLLOW_MUL: f32 = 3.2;
+/// Draws back further than the dagger auto's 0.4, so the lunge visibly loads.
+const KIDNEY_SHOT_PULL: f32 = 0.70;
+/// Drives through well past the dagger auto's 0.85 — this is the whole stroke,
+/// so it has to be the part that reads.
+const KIDNEY_SHOT_THRUST: f32 = 1.55;
+/// A whisper of pitch. Any more and the thrust starts to look like a chop.
+const KIDNEY_SHOT_PITCH: f32 = 0.90;
+/// ~18° of forward drive — heavier than Cheap Shot's, just under Mortal
+/// Strike's, which is where a finisher belongs.
+const KIDNEY_SHOT_LEAN: f32 = 0.35;
 
 /// Normalized swing parameter in `[-1, 1]`.
 ///
@@ -363,12 +417,24 @@ fn arc_rotation(s: f32, arc: SwingArc) -> (Vec3, f32) {
             let angle = if s < 0.0 { windup * -s } else { -release * s };
             (Quat::from_rotation_z(tilt) * Vec3::X, angle)
         }
+        // A lunge's body commitment is a forward pitch about X: the torso drives
+        // after the point. The same axis the sagittal chop uses, so the body and
+        // the weapon still agree on direction.
+        SwingArc::Lunge { pitch, .. } => (Vec3::X, pitch * s),
     }
 }
 
 fn swing_pose_arc(kind: WeaponKind, s: f32, arc: SwingArc) -> Transform {
     match arc {
         SwingArc::Sagittal => swing_pose(kind, s),
+        SwingArc::Lunge { pull, thrust, pitch } => {
+            // Socket-local -Z is back toward the wielder and +Z out along the
+            // aim, matching the dagger's own stab in `swing_pose`.
+            let draw = if s < 0.0 { -s } else { 0.0 };
+            let drive = if s > 0.0 { s } else { 0.0 };
+            Transform::from_translation(Vec3::new(0.0, 0.0, -pull * draw + thrust * drive))
+                .with_rotation(Quat::from_rotation_x(pitch * s))
+        }
         SwingArc::TiltedPlane { .. } => {
             // ONE rotation about ONE axis — the weapon sweeps through a plane,
             // the way a swing does. The diagonal comes from TILTING that plane

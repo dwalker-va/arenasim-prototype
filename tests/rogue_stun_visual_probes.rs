@@ -202,6 +202,87 @@ fn the_fan_spreads_across_the_screen() {
 }
 
 #[test]
+fn kidney_shot_starts_its_own_stroke_and_fan() {
+    let mut h = Harness::new();
+    let rogue = h.spawn_rogue();
+    let victim = h.spawn_victim();
+    h.fire(rogue, victim, AbilityType::KidneyShot);
+    h.tick(1);
+
+    assert_eq!(h.style(), SwingStyle::KidneyShot);
+    // KIDNEY_SHOT_CRESCENTS.count — three, against Cheap Shot's four.
+    assert_eq!(h.crescents(), 3, "three crescents");
+}
+
+#[test]
+fn the_two_rogue_stuns_are_visually_distinct() {
+    // This is the whole feature. The two apply the same Stun and are
+    // byte-identical on the receiver side, so if their caster-side gestures
+    // ever converge, nothing else in the codebase would notice.
+    let mut a = Harness::new();
+    let ra = a.spawn_rogue();
+    let va = a.spawn_victim();
+    a.fire(ra, va, AbilityType::CheapShot);
+    a.tick(1);
+    let cheap_count = a.crescents();
+    let cheap_style = a.style();
+    let cheap: Vec<(f32, f32, f32)> = {
+        let mut q = a.app.world_mut().query::<&CrescentFlare>();
+        q.iter(a.app.world())
+            .map(|c| {
+                let s = c.color.to_srgba();
+                (s.red, s.green, s.blue)
+            })
+            .collect()
+    };
+
+    let mut b = Harness::new();
+    let rb = b.spawn_rogue();
+    let vb = b.spawn_victim();
+    b.fire(rb, vb, AbilityType::KidneyShot);
+    b.tick(1);
+    let kidney_count = b.crescents();
+    let kidney_style = b.style();
+    let kidney: Vec<(f32, f32, f32)> = {
+        let mut q = b.app.world_mut().query::<&CrescentFlare>();
+        q.iter(b.app.world())
+            .map(|c| {
+                let s = c.color.to_srgba();
+                (s.red, s.green, s.blue)
+            })
+            .collect()
+    };
+
+    assert_ne!(cheap_style, kidney_style, "different strokes");
+    assert_ne!(cheap_count, kidney_count, "different crescent counts");
+    assert_ne!(cheap[0], kidney[0], "different tints");
+    // Cheap Shot is white (the source has no colour track); Kidney Shot is
+    // magenta. Prove the difference is a real hue, not a rounding wobble.
+    let (cr, cg, cb) = cheap[0];
+    assert!(
+        (cr - cg).abs() < 0.1 && (cg - cb).abs() < 0.1,
+        "Cheap Shot's crescents should be untinted, got {cheap:?}"
+    );
+    let (kr, kg, kb) = kidney[0];
+    assert!(
+        kr > kg + 0.4 && kb > kg + 0.3,
+        "Kidney Shot's should be magenta, got {kidney:?}"
+    );
+}
+
+#[test]
+fn kidney_shot_is_the_longer_stroke() {
+    // The source is 1233ms against Cheap Shot's 634ms. The finisher must stay
+    // the heavier of the two; swapping them would invert the reading.
+    let cheap = SwingStyle::CheapShot.stroke_secs();
+    let kidney = SwingStyle::KidneyShot.stroke_secs();
+    assert!(
+        kidney > cheap * 1.5,
+        "kidney {kidney}s should be well past cheap {cheap}s"
+    );
+}
+
+#[test]
 fn crescents_expire_without_leaking() {
     let mut h = Harness::new();
     let rogue = h.spawn_rogue();

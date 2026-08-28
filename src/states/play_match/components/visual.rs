@@ -598,6 +598,12 @@ pub enum SwingStyle {
     /// Shot's lunge. Its job is to be QUICK, which is the whole contrast with
     /// the finisher.
     CheapShot,
+    /// Rogue Kidney Shot: a deep lunging thrust. The source plays
+    /// `Attack1HPierce` over 1233ms — twice Cheap Shot's length, and a PIERCE
+    /// rather than a swing. That shape difference, plus its unique magenta cast
+    /// model, is the whole of what separates the two rogue stuns; they are
+    /// byte-identical on the receiver side.
+    KidneyShot,
 }
 
 /// One instant ability performed by a caster, spawned by combat code at that
@@ -923,6 +929,8 @@ pub struct CrescentFlare {
     pub roll: f32,
     pub size: f32,
     pub color: Color,
+    /// Mid-travel tint, for the source's early white-pink flash.
+    pub color_mid: Color,
     pub color_end: Color,
     pub emissive: LinearRgba,
 }
