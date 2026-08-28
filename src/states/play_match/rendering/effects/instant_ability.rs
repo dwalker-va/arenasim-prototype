@@ -28,6 +28,7 @@ use bevy::prelude::*;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::components::*;
 use super::mortal_strike::spawn_mortal_strike_flourish;
+use super::holy_justice::spawn_holy_justice;
 use super::rogue_crescents::{spawn_crescent_fan, CHEAP_SHOT_CRESCENTS, KIDNEY_SHOT_CRESCENTS};
 
 /// Height above the target's origin at which a melee hit registers.
@@ -64,6 +65,8 @@ pub fn consume_instant_ability_signals(
     // Built once and reused, like the stun whirl's sparkle — the crescent is
     // identical for every slash of every rogue stun.
     mut crescent_tex: Local<Option<Handle<Image>>>,
+    mut streak_tex: Local<Option<Handle<Image>>>,
+    mut rune_tex: Local<Option<Handle<Image>>>,
     signals: Query<(Entity, &InstantAbilityFired)>,
     mut sockets: Query<&mut WeaponSocket>,
     positions: Query<&Transform, With<Combatant>>,
@@ -135,6 +138,22 @@ pub fn consume_instant_ability_signals(
                         &mut images,
                         &mut crescent_tex,
                         spec,
+                        caster_pos,
+                        target_pos,
+                    );
+                }
+            }
+            // No stroke — see `swing_style_for_ability`. This arm exists ONLY
+            // because the flourish dispatch is independent of it.
+            AbilityType::HammerOfJustice => {
+                if let (Some(caster_pos), Some(target_pos)) = (caster_pos, target_pos) {
+                    spawn_holy_justice(
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        &mut images,
+                        &mut streak_tex,
+                        &mut rune_tex,
                         caster_pos,
                         target_pos,
                     );

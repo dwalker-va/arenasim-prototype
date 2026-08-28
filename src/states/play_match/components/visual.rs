@@ -934,3 +934,23 @@ pub struct CrescentFlare {
     pub color_end: Color,
     pub emissive: LinearRgba,
 }
+
+/// Hammer of Justice's ground streak: a flat gold decal racing from the Paladin
+/// toward its victim.
+///
+/// The source spawns no hammer and no projectile — `HasMissile = 0` — so this
+/// travel along the ground is the whole of how a 10yd instant covers its range.
+/// See `rendering/effects/holy_justice.rs`.
+#[derive(Component)]
+pub struct HolyStreak {
+    pub age: f32,
+    /// Full reach in yards, resolved at spawn from the real caster-target
+    /// distance.
+    pub length: f32,
+}
+
+/// The golden seal that blooms on a Hammer of Justice victim's chest.
+#[derive(Component)]
+pub struct JusticeRune {
+    pub age: f32,
+}

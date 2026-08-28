@@ -501,6 +501,11 @@ impl Plugin for StatesPlugin {
                     // victims key on.
                     play_match::update_crescent_flares,
                     play_match::cleanup_crescent_flares,
+                    // Hammer of Justice's ground streak and victim rune. No
+                    // weapon stroke — the source has no hammer.
+                    play_match::update_holy_streaks,
+                    play_match::update_justice_runes,
+                    play_match::cleanup_holy_justice,
                     play_match::update_hard_cc_visuals,
                     play_match::update_cc_rigs,
                     // After `update_cc_rigs`, which writes the hub rotation the

@@ -66,3 +66,5 @@ mod hard_cc;
 pub use hard_cc::*;
 mod rogue_crescents;
 pub use rogue_crescents::*;
+mod holy_justice;
+pub use holy_justice::*;
