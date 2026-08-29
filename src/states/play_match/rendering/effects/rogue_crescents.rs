@@ -352,7 +352,8 @@ pub fn spawn_crescent_fan(
             MeshMaterial3d(material),
             Transform::from_translation(origin).with_scale(Vec3::splat(spec.size)),
             CrescentFlare {
-                aim: forward,
+                // The slash travels ACROSS the body, not along the aim.
+                sweep: across,
                 delay: spec.stagger * i as f32,
                 age: 0.0,
                 lifetime: spec.lifetime,
@@ -370,17 +371,16 @@ pub fn spawn_crescent_fan(
 
 /// Billboards, pops and fades every live crescent.
 ///
-/// The quad faces the camera, is turned so its LONG AXIS runs along the attack
-/// line as seen on screen, and is then rolled about the view axis by its own
+/// The quad faces the camera, is turned so its LONG AXIS runs along the slash's
+/// SWEEP as seen on screen, and is then rolled about the view axis by its own
 /// `roll` to fan the strokes apart.
 ///
-/// That middle step is the one that makes it read as a cut. The streak's long
-/// axis is its local +X, and without aligning that to the aim the whole burst
-/// stands PERPENDICULAR to the direction the rogue is striking — the shape is
-/// right and it is pointing the wrong way. Projecting the world aim into the
-/// camera's own plane (rather than assuming screen-horizontal) keeps it correct
-/// when the caster faces toward or away from the camera, where the aim
-/// foreshortens toward vertical.
+/// That middle step is what makes it read as a cut, and which axis it uses
+/// matters more than it looks. A blade sweeps ACROSS a body, right to left —
+/// not along the line to the target. Aligning to the aim instead put the
+/// streaks vertical: for the usual camera, looking down the line of attack from
+/// behind and above, the aim projects to almost exactly screen-UP, so the
+/// slashes ran head to toe down the victim.
 pub fn update_crescent_flares(
     time: Res<Time>,
     camera: Query<&Transform, (With<Camera3d>, Without<CrescentFlare>)>,
@@ -414,17 +414,25 @@ pub fn update_crescent_flares(
         transform.scale = Vec3::splat(flare.size * scale);
 
         if let Some(rot) = cam_rot {
-            // The aim, expressed in the camera's frame: x is screen-right and y
-            // is screen-up, so `atan2(y, x)` is the angle the attack line makes
-            // on screen. Degenerate only when the caster aims straight at or
-            // away from the camera, where any angle is as good as another.
-            let local = rot.inverse() * flare.aim;
-            let along = if local.x.abs() + local.y.abs() > 1.0e-4 {
-                local.y.atan2(local.x)
-            } else {
-                0.0
-            };
-            transform.rotation = rot * Quat::from_rotation_z(along + flare.roll);
+            // SCREEN-HORIZONTAL, plus the fan's own roll. The quad's local +X is
+            // screen-right once billboarded, so this needs no extra term at all.
+            //
+            // Two world axes were tried first and both fail from some bearings,
+            // because projecting a horizontal world vector onto the screen goes
+            // degenerate whenever that vector points near the view axis. Aiming
+            // along the AIM put the slashes head-to-toe for the usual
+            // over-the-shoulder camera (the aim projects to almost exactly
+            // screen-up). Aiming along the across-body SWEEP fixed that case and
+            // broke the side-on one, where the sweep points into the screen
+            // instead. There is no world axis that reads from every angle.
+            //
+            // The sprite is already billboarded — it faces the camera whatever
+            // the world is doing — so orienting it in screen space is consistent
+            // with what it fundamentally is, and it reads as a slash from every
+            // bearing. `sweep` is kept on the component because it still records
+            // which way the blade travelled, and a future non-billboarded
+            // treatment would want it.
+            transform.rotation = rot * Quat::from_rotation_z(flare.roll);
         }
 
         if let Some(material) = materials.get_mut(&handle.0) {

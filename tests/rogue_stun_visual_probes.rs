@@ -357,15 +357,22 @@ fn the_fan_follows_the_aim_not_the_world_axes() {
 }
 
 #[test]
-fn the_streak_runs_along_the_attack_line() {
-    // The WoW reference is a burst of slashes running ALONG the strike, toward
-    // the victim. The first three versions had the right shape pointing 90 deg
-    // the wrong way, and no probe noticed because none of them asked which way
-    // the streak lay — only how big or how bright it was.
+fn the_streak_reads_horizontally_from_every_bearing() {
+    // The slash must cut ACROSS the victim — right to left on screen — whichever
+    // way the caster happens to be facing.
     //
-    // The streak's long axis is its local +X. Project both it and the aim into
-    // the camera's plane and require them to line up.
-    for (dx, dz) in [(0.0, 6.0), (6.0, 0.0), (-4.0, 4.0), (3.0, -5.0)] {
+    // Two world axes were tried and both fail somewhere, because projecting a
+    // horizontal world vector to the screen degenerates when it points near the
+    // view axis: the AIM goes vertical for the usual over-the-shoulder camera,
+    // and the across-body SWEEP goes vertical when the caster faces sideways.
+    // This asserts the property that actually matters — the on-screen result —
+    // rather than any particular means of getting there, and it sweeps the
+    // caster through a full circle of bearings so a fix that only works from one
+    // angle cannot pass.
+    for i in 0..8 {
+        let a = i as f32 / 8.0 * std::f32::consts::TAU;
+        let (dx, dz) = (a.cos() * 6.0, a.sin() * 6.0);
+
         let mut h = Harness::new();
         let rogue = h.spawn_rogue();
         let victim = h
@@ -376,8 +383,6 @@ fn the_streak_runs_along_the_attack_line() {
                 Combatant::new(1, 0, CharacterClass::Priest),
             ))
             .id();
-        // A camera looking down the arena from above and behind, as the sandbox
-        // and match cameras both do.
         let cam = h
             .app
             .world_mut()
@@ -387,42 +392,27 @@ fn the_streak_runs_along_the_attack_line() {
             ))
             .id();
         h.fire(rogue, victim, AbilityType::KidneyShot);
-        // Far enough in that every crescent has passed its stagger delay. A
-        // crescent still waiting its turn holds `scale = ZERO` and returns
-        // early, so its billboard rotation has not been written yet — sampling
-        // at tick 2 sees only the first of the fan.
         h.tick(8);
 
         let cam_rot = h.app.world().get::<Transform>(cam).unwrap().rotation;
-        let aim = Vec3::new(dx, 0.0, dz).normalize();
-        let aim_screen = cam_rot.inverse() * aim;
-        let aim_angle = aim_screen.y.atan2(aim_screen.x);
-
         let rots: Vec<Quat> = {
             let mut q = h.app.world_mut().query::<(&CrescentFlare, &Transform)>();
             q.iter(h.app.world()).map(|(_, t)| t.rotation).collect()
         };
         assert!(!rots.is_empty(), "no crescents to check");
 
-        // The middle crescent of the fan carries no roll offset, so it should
-        // sit closest to the aim; check the whole fan brackets it.
-        let mut best = f32::MAX;
         for rot in &rots {
-            let long_axis = cam_rot.inverse() * (*rot * Vec3::X);
-            let angle = long_axis.y.atan2(long_axis.x);
-            let mut delta = (angle - aim_angle).abs();
-            while delta > std::f32::consts::PI {
-                delta = (delta - std::f32::consts::TAU).abs();
-            }
-            // A streak and its mirror read the same, so fold onto [0, PI/2].
-            let folded = delta.min((std::f32::consts::PI - delta).abs());
-            best = best.min(folded);
+            // The streak's long axis, in the camera's own frame.
+            let axis = cam_rot.inverse() * (*rot * Vec3::X);
+            let mut off = axis.y.atan2(axis.x).abs();
+            // A streak and its 180-degree twin read the same.
+            off = off.min(std::f32::consts::PI - off);
+            assert!(
+                off < 1.0,
+                "at bearing {a:.2} a streak sits {off} rad off horizontal — \
+                 that is the head-to-toe orientation, not a cut across the body"
+            );
         }
-        assert!(
-            best < 0.35,
-            "toward ({dx}, {dz}) the closest streak is {best} rad off the attack \
-             line — the burst is standing across the strike, not along it"
-        );
     }
 }
 

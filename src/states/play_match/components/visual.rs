@@ -928,13 +928,16 @@ pub struct CcBead;
 /// crescent holds itself invisible until its turn.
 #[derive(Component)]
 pub struct CrescentFlare {
-    /// World-space unit vector from the caster toward its victim.
+    /// World-space unit vector the slash SWEEPS along — across the caster's
+    /// body, from its right to its left, perpendicular to the line of attack.
     ///
     /// The streak's long axis is turned to follow this once projected into the
-    /// camera's plane, so the cut runs ALONG the attack line. Without it the
-    /// burst stands perpendicular to the strike — the right shape pointing the
-    /// wrong way.
-    pub aim: Vec3,
+    /// camera's plane. It is deliberately NOT the aim: a blade sweeps across a
+    /// target rather than stabbing along the line to it, and the aim is close to
+    /// the view axis for the usual over-the-shoulder camera, so projecting IT
+    /// yields a near-vertical screen direction — the streaks then run head to
+    /// toe down the body, which is what shipped before this was corrected.
+    pub sweep: Vec3,
     /// Seconds before this crescent appears.
     pub delay: f32,
     /// Seconds since spawn, including the delay.
