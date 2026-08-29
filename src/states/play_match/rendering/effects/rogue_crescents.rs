@@ -148,13 +148,22 @@ pub const CHEAP_SHOT_CRESCENTS: CrescentSpec = CrescentSpec {
     // half-to-one head-height gap in the reference.
     height: 1.55,
     // Radius of the halo ring, not a forward reach. The reference ring is
-    // 2.5-2.8x head width — wider than the 1.0yd body.
-    reach: 0.72,
+    // 2.5-2.8x head width; this sits above that on purpose. At the reference
+    // proportion the halo was geometrically faithful and still easy to miss
+    // under the stun whirl that follows it — and the whirl runs 4-6s against
+    // this flash's fraction of a second, so the flash has to win its moment or
+    // it may as well not fire.
+    reach: 1.05,
     // Source: bone 0 pops at 0-100ms, bone 1 follows at 100-200ms. Two pairs,
     // 100ms apart — the stagger is per crescent, so pairs fall out of 0.05.
     stagger: 0.05,
-    lifetime: 0.30,
-    size: 1.10,
+    // Long enough to register before the whirl takes over. The source's own
+    // 634ms is the whole cast; this is one crescent's dwell within it.
+    lifetime: 0.42,
+    // Each crescent's world length. Must keep pace with `reach` — see
+    // `the_halo_crescents_close_the_ring`: four bands too short for the
+    // circumference read as disconnected dashes rather than a ring.
+    size: 1.75,
     roll_step: 0.40,
     // Slightly wider than the 1.0yd body, so the pair-and-pair strokes cross it
     // rather than sitting on one shoulder.
@@ -547,6 +556,31 @@ mod tests {
         let bow = crescent_bow();
         assert!(bow > 0.05, "{bow} is a straight laser beam");
         assert!(bow < 0.45, "{bow} bows so far it reads as a crescent again");
+    }
+
+    #[test]
+    fn the_halo_crescents_close_the_ring() {
+        // `reach` and `size` have to move together. The crescents are placed
+        // around a ring of radius `reach`, and each is `size` long, so if their
+        // combined length falls short of the circumference the halo breaks into
+        // disconnected dashes — which is not a ring, and nothing else in the
+        // suite would notice. The reference shows them overlapping, with
+        // hot-white blowouts where they cross.
+        let spec = CHEAP_SHOT_CRESCENTS;
+        let circumference = TAU * spec.reach;
+        let covered = spec.count as f32 * spec.size;
+        assert!(
+            covered >= circumference,
+            "{} crescents of {} only cover {covered:.2} of a {circumference:.2} \
+             ring — the halo will read as dashes",
+            spec.count,
+            spec.size
+        );
+        // But not so long they wrap over each other into a solid disc.
+        assert!(
+            covered < circumference * 1.6,
+            "the crescents overlap so far the ring fills in"
+        );
     }
 
     #[test]
