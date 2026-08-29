@@ -283,6 +283,72 @@ fn kidney_shot_is_the_longer_stroke() {
 }
 
 #[test]
+fn the_fan_sweeps_across_the_casters_breadth() {
+    // The first version spawned every crescent at ONE point and fanned only
+    // their roll, so the flare read as a rosette clumped beside the body rather
+    // than a slash through it. The old probe never caught that because it only
+    // compared rolls — it never looked at where the crescents actually were.
+    //
+    // A combatant capsule is 1.0yd across, so the fan has to span at least that
+    // to read as body-wide.
+    for ability in [AbilityType::CheapShot, AbilityType::KidneyShot] {
+        let mut h = Harness::new();
+        let rogue = h.spawn_rogue();
+        // Victim straight ahead on +Z, so "across" is the world X axis.
+        let victim = h.spawn_victim();
+        h.fire(rogue, victim, ability);
+        h.tick(1);
+
+        let xs: Vec<f32> = {
+            let mut q = h.app.world_mut().query::<(&CrescentFlare, &Transform)>();
+            q.iter(h.app.world()).map(|(_, t)| t.translation.x).collect()
+        };
+        let lo = xs.iter().cloned().fold(f32::INFINITY, f32::min);
+        let hi = xs.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        let span = hi - lo;
+        assert!(
+            span > 1.0,
+            "{ability:?}'s fan spans only {span}yd across a 1.0yd body — it will \
+             read as a clump beside the caster, not a slash through it"
+        );
+        // And it must stay a slash rather than becoming two separate effects
+        // either side of the unit.
+        assert!(span < 3.0, "{ability:?}'s fan spans {span}yd — too scattered");
+    }
+}
+
+#[test]
+fn the_fan_follows_the_aim_not_the_world_axes() {
+    // The sweep is across the caster's OWN facing, so a target off to the side
+    // must rotate the whole fan with it. Spreading along a fixed world axis
+    // would collapse the fan to a point for half the possible target bearings.
+    let mut h = Harness::new();
+    let rogue = h.spawn_rogue();
+    // Victim on +X this time, so "across" becomes the world Z axis.
+    let victim = h
+        .app
+        .world_mut()
+        .spawn((
+            Transform::from_xyz(6.0, 1.0, 0.0),
+            Combatant::new(1, 0, CharacterClass::Priest),
+        ))
+        .id();
+    h.fire(rogue, victim, AbilityType::KidneyShot);
+    h.tick(1);
+
+    let zs: Vec<f32> = {
+        let mut q = h.app.world_mut().query::<(&CrescentFlare, &Transform)>();
+        q.iter(h.app.world()).map(|(_, t)| t.translation.z).collect()
+    };
+    let span = zs.iter().cloned().fold(f32::NEG_INFINITY, f32::max)
+        - zs.iter().cloned().fold(f32::INFINITY, f32::min);
+    assert!(
+        span > 1.0,
+        "with the target on +X the fan should spread along Z, got {span}yd"
+    );
+}
+
+#[test]
 fn crescents_expire_without_leaking() {
     let mut h = Harness::new();
     let rogue = h.spawn_rogue();

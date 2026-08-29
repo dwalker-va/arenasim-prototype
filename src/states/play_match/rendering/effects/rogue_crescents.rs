@@ -83,6 +83,13 @@ pub struct CrescentSpec {
     /// Roll applied to crescent `i`, so the fan is not a stack of parallel
     /// copies. Radians, multiplied by the index.
     pub roll_step: f32,
+    /// Total lateral width the fan is swept across, in yards, centred on the
+    /// caster's line of aim.
+    ///
+    /// A combatant capsule is 1.0yd across, so anything under that reads as a
+    /// clump beside the body rather than a slash through it — which is what the
+    /// first version did by spawning every crescent at one point.
+    pub spread: f32,
     /// Tint at birth.
     pub color: Color,
     /// Tint at [`CRESCENT_FLASH_AT`] through the crescent's life. The source's
@@ -112,7 +119,10 @@ pub const CHEAP_SHOT_CRESCENTS: CrescentSpec = CrescentSpec {
     stagger: 0.05,
     lifetime: 0.30,
     size: 1.10,
-    roll_step: 0.55,
+    roll_step: 0.40,
+    // Slightly wider than the 1.0yd body, so the pair-and-pair strokes cross it
+    // rather than sitting on one shoulder.
+    spread: 1.45,
     color: Color::srgba(0.97, 0.98, 1.00, 0.85),
     color_mid: Color::srgba(0.97, 0.98, 1.00, 0.85),
     color_end: Color::srgba(0.97, 0.98, 1.00, 0.85),
@@ -136,7 +146,9 @@ pub const KIDNEY_SHOT_CRESCENTS: CrescentSpec = CrescentSpec {
     stagger: 0.167,
     lifetime: 0.45,
     size: 1.35,
-    roll_step: 0.75,
+    roll_step: 0.55,
+    // Wider than Cheap Shot's: the finisher's slashes carry further across.
+    spread: 1.80,
     color: Color::srgba(0.96, 0.23, 0.69, 0.90),
     color_mid: Color::srgba(1.00, 0.82, 1.00, 0.95),
     color_end: Color::srgba(0.94, 0.03, 0.39, 0.90),
@@ -236,10 +248,27 @@ pub fn spawn_crescent_fan(
         .map(|v| v.normalize())
         .unwrap_or(Vec3::Z);
 
+    // Lateral axis across the caster's front. The crescents are SWEPT across
+    // this, which is what the source does ("crescent quads swept across the
+    // front of the caster") and what makes the flare read as a body-wide arc.
+    // Spawning them all at one point and fanning only their ROLL — the first
+    // version — produced a rosette clumped to one side of the body instead.
+    let across = Vec3::Y.cross(forward).normalize_or_zero();
+
     for i in 0..spec.count {
-        let origin = caster_pos + Vec3::Y * spec.height + forward * spec.reach;
-        // Fan the crescents apart so they read as successive slashes rather
-        // than one thick smear.
+        // -0.5 .. +0.5 over the fan, or 0 for a single crescent.
+        let t = if spec.count > 1 {
+            i as f32 / (spec.count - 1) as f32 - 0.5
+        } else {
+            0.0
+        };
+        let origin = caster_pos
+            + Vec3::Y * spec.height
+            + forward * spec.reach
+            + across * (t * spec.spread);
+        // Each crescent is also rolled, so successive slashes are angled rather
+        // than a picket fence of parallel copies. The spread does the work of
+        // covering the body; the roll only keeps them from looking stamped.
         let roll = (i as f32 - (spec.count as f32 - 1.0) * 0.5) * spec.roll_step;
         let material = materials.add(StandardMaterial {
             base_color: spec.color,
