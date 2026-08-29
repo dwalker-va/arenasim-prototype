@@ -35,15 +35,33 @@ use crate::states::play_match::components::*;
 /// Resolution of the procedural crescent texture.
 const CRESCENT_PX: u32 = 128;
 /// Radius of the arc's spine, as a fraction of the sprite half-width.
-const CRESCENT_ARC_R: f32 = 0.66;
-/// Thickness of the stroke, as a fraction of the sprite half-width. The
-/// gaussian falloff around the spine is what makes the edge soft.
-const CRESCENT_THICKNESS: f32 = 0.15;
-/// Half-angle the arc spans, in radians. Beyond ~1.4 it closes toward a full
+const CRESCENT_ARC_R: f32 = 0.60;
+/// PEAK thickness of the stroke at the middle of its span, as a fraction of the
+/// sprite half-width. The gaussian falloff around the spine is what makes the
+/// edge soft.
+///
+/// The band reaches roughly `CRESCENT_ARC_R ± this`, so it is easy to make it
+/// swallow the whole sprite: 0.30 spanned r 0.30..0.90 and read as a blob,
+/// especially head-on where the fan's three crescents stack additively. 0.15
+/// was the original and read as a wire. This is the midpoint.
+const CRESCENT_THICKNESS: f32 = 0.21;
+/// Fraction of that thickness still present at the very tips. A crescent is fat
+/// in the middle and fine at the points — a constant-width band reads as a
+/// bent wire rather than a slash.
+const CRESCENT_TIP: f32 = 0.12;
+/// Half-angle the arc spans, in radians. Beyond ~1.5 it closes toward a full
 /// ring and stops reading as a slash.
-const CRESCENT_SPAN: f32 = 1.15;
-/// How sharply the stroke tapers to nothing at the two ends of the arc.
-const CRESCENT_TAPER: f32 = 2.2;
+const CRESCENT_SPAN: f32 = 1.25;
+/// How sharply brightness falls off toward the two ends of the arc, applied to
+/// the elliptical width profile.
+///
+/// Low values HOLD brightness along the length; high ones concentrate it at the
+/// belly. The original `(1-t)^2.2` was down to a fifth of full by the halfway
+/// point, so four-fifths of the shape was not actually drawn and it read as a
+/// thin comma. Pushing all the way to 0.85 overcorrected into a solid blade.
+/// This keeps real weight to about three-quarters of the way out and then lets
+/// go.
+const CRESCENT_TAPER: f32 = 1.35;
 
 /// Per-ability deployment of the shared crescent.
 #[derive(Clone, Copy)]
@@ -150,12 +168,23 @@ fn crescent_texture() -> Image {
             // rather than the bottom.
             let theta = dx.atan2(-dy);
 
-            // Distance from the arc's spine, as a fraction of its thickness.
-            let d = (r - CRESCENT_ARC_R) / CRESCENT_THICKNESS;
-            let band = (-(d * d)).exp();
-            // Taper to nothing at both ends of the span.
+            // How far along the span this pixel sits: 0 at the crescent's belly,
+            // 1 at either tip.
             let t = (theta.abs() / CRESCENT_SPAN).min(1.0);
-            let along = (1.0 - t).powf(CRESCENT_TAPER).clamp(0.0, 1.0);
+
+            // Elliptical width profile — full thickness at the belly, easing to
+            // `CRESCENT_TIP` at the points. This is what gives the stroke the
+            // shape of a blade rather than a bent wire, and it is why the arc
+            // now looks filled rather than drawn.
+            let bulge = (1.0 - t * t).max(0.0).sqrt();
+            let half_width = CRESCENT_THICKNESS * (CRESCENT_TIP + (1.0 - CRESCENT_TIP) * bulge);
+
+            // Distance from the arc's spine, in units of the LOCAL half-width.
+            let d = (r - CRESCENT_ARC_R) / half_width.max(1.0e-4);
+            let band = (-(d * d)).exp();
+
+            // Brightness holds along the length and gives way near the tips.
+            let along = bulge.powf(CRESCENT_TAPER).clamp(0.0, 1.0);
 
             let a = (band * along).clamp(0.0, 1.0);
             let i = ((y * size + x) * 4) as usize;
@@ -381,10 +410,93 @@ mod tests {
 
     #[test]
     fn the_arc_span_stays_a_slash() {
-        // Past ~1.4 rad the taper windows overlap and the arc closes toward a
-        // full ring, which reads as a halo rather than a stroke.
-        assert!(CRESCENT_SPAN < 1.4, "span has closed into a ring");
+        // A crescent has to stay visibly OPEN or it reads as a halo. Stated as
+        // the fraction of the circle it leaves alone rather than as a bare
+        // number: the arc subtends `2 * CRESCENT_SPAN`, and at least a third of
+        // the circle must remain empty.
+        //
+        // The previous bound here was an arbitrary `< 1.4` chosen when the
+        // brightness taper was steep enough that the ends faded out anyway. Now
+        // that the stroke holds its weight along its length the span genuinely
+        // matters, so it is worth a real criterion.
+        use std::f32::consts::TAU;
+        let open = TAU - 2.0 * CRESCENT_SPAN;
+        assert!(
+            open > TAU / 3.0,
+            "the arc leaves only {open} rad open — it is closing into a ring"
+        );
         assert!(CRESCENT_SPAN > 0.5, "span has collapsed to a dot");
+    }
+
+    #[test]
+    fn the_crescent_stays_bright_along_its_length() {
+        // The original taper was `(1-t)^2.2`, which is a fifth of full
+        // brightness by the halfway point — so only the belly rendered and the
+        // whole thing read as a thin comma rather than a slash. The old tests
+        // all passed, because they only sampled the spine at theta = 0.
+        //
+        // Sample along the ARC and require the stroke to still be carrying real
+        // weight most of the way out.
+        let img = crescent_texture();
+        let size = CRESCENT_PX as usize;
+        let c = (size as f32 - 1.0) / 2.0;
+        let sample_at = |frac: f32| -> u8 {
+            // `frac` of the way from the belly to a tip, along the spine.
+            let theta = frac * CRESCENT_SPAN;
+            let x = c + theta.sin() * CRESCENT_ARC_R * c;
+            let y = c - theta.cos() * CRESCENT_ARC_R * c;
+            img.data.as_ref().unwrap()
+                [((y.round() as usize) * size + (x.round() as usize)) * 4 + 3]
+        };
+
+        let belly = sample_at(0.0);
+        assert!(belly > 200, "the belly should be near-opaque, got {belly}");
+        let mid = sample_at(0.5);
+        assert!(
+            mid > 150,
+            "halfway along the arc is only {mid}/255 — the stroke dies before it \
+             is drawn and reads as a comma, not a crescent"
+        );
+        let outer = sample_at(0.8);
+        assert!(
+            outer > 60,
+            "four-fifths along is only {outer}/255 — the arc has no reach"
+        );
+        // But it must still come to a point, or it is a ring segment.
+        let tip = sample_at(1.0);
+        assert!(tip < 90, "the tip should thin out, got {tip}");
+    }
+
+    #[test]
+    fn the_crescent_is_fattest_at_its_belly() {
+        // A constant-width band reads as a bent wire. The blade shape comes from
+        // the stroke being thick in the middle and fine at the points.
+        let img = crescent_texture();
+        let size = CRESCENT_PX as usize;
+        let c = (size as f32 - 1.0) / 2.0;
+        // Count opaque-ish pixels crossing the band, radially, at two angles.
+        let width_at = |frac: f32| -> usize {
+            let theta = frac * CRESCENT_SPAN;
+            (0..size)
+                .filter(|&i| {
+                    let rr = i as f32 / size as f32 * 1.2;
+                    let x = c + theta.sin() * rr * c;
+                    let y = c - theta.cos() * rr * c;
+                    if x < 0.0 || y < 0.0 || x >= size as f32 || y >= size as f32 {
+                        return false;
+                    }
+                    img.data.as_ref().unwrap()
+                        [((y as usize) * size + (x as usize)) * 4 + 3]
+                        > 40
+                })
+                .count()
+        };
+        let belly = width_at(0.0);
+        let near_tip = width_at(0.9);
+        assert!(
+            belly > near_tip,
+            "belly {belly}px is not fatter than the tip {near_tip}px"
+        );
     }
 
     #[test]
