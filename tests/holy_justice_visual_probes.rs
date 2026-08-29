@@ -187,33 +187,14 @@ fn hammer_of_justice_has_a_flourish_but_no_stroke() {
 }
 
 #[test]
-fn the_streak_reaches_the_victim() {
-    // Our deliberate divergence from the source, which uses a fixed ~4 units.
-    // At a 10yd range a streak that stops short reads as a misfire, and it is
-    // the only thing connecting the two units.
-    let mut h = Harness::new();
-    let paladin = h.spawn_paladin();
-    let victim = h.spawn_victim(8.0);
-    h.fire(paladin, victim);
-    h.tick(1);
-
-    let length = {
-        let mut q = h.app.world_mut().query::<&HolyStreak>();
-        q.iter(h.app.world()).next().unwrap().length
-    };
-    assert!(
-        (length - 8.0).abs() < 0.1,
-        "streak should span the real 8yd gap, got {length}"
-    );
-}
-
-#[test]
-fn the_streak_actually_points_at_the_victim() {
-    // Both of this module's real bugs slipped past the original probes because
-    // they asserted on the `length` FIELD and on `scale.x` — bookkeeping, not
-    // geometry. The quad's length axis is its local +X, so the only honest test
-    // is where that axis ends up in the world.
-    for (dx, dz) in [(0.0, 8.0), (8.0, 0.0), (0.0, -8.0), (-5.0, 5.0), (4.0, -6.0)] {
+fn the_caster_ring_stays_centred_on_the_paladin() {
+    // The reference sweeps a flat ring out around the paladin's OWN feet. An
+    // earlier version aimed a streak at the victim, which implies a projectile
+    // this spell does not have (`HasMissile = 0`) — and that streak had to be
+    // yawed and re-anchored every frame, both of which it got wrong.
+    //
+    // A ring needs neither: it is radially symmetric and it does not move.
+    for (dx, dz) in [(0.0, 8.0), (7.0, 0.0), (-5.0, 5.0)] {
         let mut h = Harness::new();
         let paladin = h.spawn_paladin();
         let victim = h
@@ -225,67 +206,32 @@ fn the_streak_actually_points_at_the_victim() {
             ))
             .id();
         h.fire(paladin, victim);
-        h.tick(1);
+        h.tick(8);
 
-        let (rot, _) = {
+        let (pos, scale) = {
             let mut q = h.app.world_mut().query::<(&HolyStreak, &Transform)>();
             let (_, t) = q.iter(h.app.world()).next().unwrap();
-            (t.rotation, t.translation)
+            (t.translation, t.scale)
         };
-        let aim = Vec3::new(dx, 0.0, dz).normalize();
-        let length_axis = rot * Vec3::X;
-        let dot = length_axis.dot(aim);
         assert!(
-            dot > 0.99,
-            "streak's length axis {length_axis:?} should follow the aim {aim:?} \
-             toward ({dx}, {dz}); dot = {dot}"
+            pos.x.abs() < 0.01 && pos.z.abs() < 0.01,
+            "toward ({dx}, {dz}) the ring drifted to {pos:?} — it should stay on \
+             the caster wherever the victim is"
         );
-        // The flat rotation must still leave the decal lying on the ground.
-        let normal = rot * Vec3::Z;
         assert!(
-            normal.y.abs() > 0.99,
-            "the streak should lie flat, normal {normal:?}"
+            (scale.x - scale.y).abs() < 0.01,
+            "the ring is being stretched rather than scaled: {scale:?}"
         );
     }
 }
 
 #[test]
-fn the_streak_grows_forward_from_the_caster() {
-    // A Bevy Rectangle is centred on its origin, so scaling alone would put half
-    // the streak BEHIND the Paladin and stop its head halfway to the victim.
+fn the_caster_ring_sweeps_outward() {
+    // It expands rather than appearing at full size — that sweep is the whole
+    // of the caster-side tell.
     let mut h = Harness::new();
     let paladin = h.spawn_paladin();
-    let victim = h.spawn_victim(8.0);
-    h.fire(paladin, victim);
-    // Far enough in for the streak to have reached full extension.
-    h.tick(14);
-
-    let (rot, pos, len) = {
-        let mut q = h.app.world_mut().query::<(&HolyStreak, &Transform)>();
-        let (s, t) = q.iter(h.app.world()).next().unwrap();
-        (t.rotation, t.translation, t.scale.x)
-    };
-    let axis = rot * Vec3::X;
-    let head = pos + axis * (len * 0.5);
-    let tail = pos - axis * (len * 0.5);
-
-    assert!(
-        tail.distance(Vec3::new(0.0, tail.y, 0.0)) < 0.3,
-        "the tail should stay at the Paladin's feet, got {tail:?}"
-    );
-    assert!(
-        head.z > 7.0,
-        "the head should arrive at the victim ~8yd out, got {head:?}"
-    );
-}
-
-#[test]
-fn the_streak_extends_over_time() {
-    // It races outward rather than appearing at full length — that travel is
-    // how a projectile-less 10yd ability covers its range.
-    let mut h = Harness::new();
-    let paladin = h.spawn_paladin();
-    let victim = h.spawn_victim(8.0);
+    let victim = h.spawn_victim(6.0);
     h.fire(paladin, victim);
     h.tick(2);
 
@@ -299,8 +245,8 @@ fn the_streak_extends_over_time() {
         q.iter(h.app.world()).next().unwrap().1.scale.x
     };
     assert!(
-        later > early + 0.5,
-        "streak should be racing outward: {early} -> {later}"
+        later > early + 0.4,
+        "the ring should be sweeping out: {early} -> {later}"
     );
 }
 

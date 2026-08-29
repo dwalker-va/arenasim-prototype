@@ -1,6 +1,8 @@
 use bevy::color::LinearRgba;
 use bevy::prelude::*;
 
+use std::f32::consts::TAU;
+
 use crate::states::play_match::components::*;
 
 // ==============================================================================
@@ -34,54 +36,62 @@ use crate::states::play_match::components::*;
 
 /// Resolution of the procedural crescent texture.
 const CRESCENT_PX: u32 = 128;
-/// Radius of the arc's spine, as a fraction of the sprite half-width.
-const CRESCENT_ARC_R: f32 = 0.78;
-/// PEAK thickness of the stroke at the middle of its span, as a fraction of the
-/// sprite half-width. The gaussian falloff around the spine is what makes the
-/// edge soft.
+/// Half-thickness of the streak at its middle, as a fraction of the sprite
+/// half-width. The gaussian falloff around the spine is what softens the edge.
+/// At 0.075 the stroke is about 6.7:1 — a slash. See `crescent_aspect`.
 ///
-/// The band reaches roughly `CRESCENT_ARC_R ± this`, so it is easy to make it
-/// swallow the whole sprite: 0.30 spanned r 0.30..0.90 and read as a blob,
-/// especially head-on where the fan's three crescents stack additively. 0.15
-/// was the original and read as a wire. This is the midpoint.
-const CRESCENT_THICKNESS: f32 = 0.17;
-/// Fraction of that thickness still present at the very tips. A crescent is fat
-/// in the middle and fine at the points — a constant-width band reads as a
-/// bent wire rather than a slash.
-const CRESCENT_TIP: f32 = 0.12;
-/// Half-angle the arc spans, in radians.
+/// The streak runs the FULL width of the sprite (2.0 units), so this also sets
+/// the aspect ratio: at 0.09 the stroke is roughly 11:1, which is a slash. The
+/// earlier circular-arc parametrisation could not get past about 2:1 no matter
+/// how it was tuned — see the module note above — and rendered as a pill.
+const CRESCENT_THICKNESS: f32 = 0.075;
+/// Fraction of that thickness still present at the very tips. A slash is fat in
+/// the middle and fine at the points; a constant-width band is a bar.
+const CRESCENT_TIP: f32 = 0.10;
+/// How far the streak bows off straight, as a fraction of the sprite half-width.
+/// The WoW reference is very nearly a straight cut with just enough curve to
+/// read as a sweep rather than a laser.
+const CRESCENT_BOW: f32 = 0.20;
+/// How sharply brightness falls off toward the two ends.
 ///
-/// SHALLOW. The WoW reference is a burst of long, near-straight slash streaks
-/// with only a slight bow — at r=0.60 this gives a chord of ~0.65 against a sag
-/// of ~0.09. The first version used 1.25, whose 0.41 sag is a deep crescent
-/// moon: a different shape entirely, and one that reads as a "C" standing beside
-/// the caster rather than a cut running along the attack line.
-const CRESCENT_SPAN: f32 = 0.58;
-/// How sharply brightness falls off toward the two ends of the arc, applied to
-/// the elliptical width profile.
-///
-/// Low values HOLD brightness along the length; high ones concentrate it at the
-/// belly. The original `(1-t)^2.2` was down to a fifth of full by the halfway
-/// point, so four-fifths of the shape was not actually drawn and it read as a
-/// thin comma. Pushing all the way to 0.85 overcorrected into a solid blade.
-/// This keeps real weight to about three-quarters of the way out and then lets
-/// go.
+/// Applied to the same elliptical profile that shapes the width, so the stroke
+/// holds its weight along most of its length and gives way near the tips.
 const CRESCENT_TAPER: f32 = 1.35;
 
-/// The arc's half-span, exposed so a probe can assert the SHAPE — a slash's
-/// chord has to dominate its sag, or it is a crescent moon.
-pub fn crescent_span() -> f32 {
-    CRESCENT_SPAN
+/// The streak's length-to-thickness ratio, exposed so a probe can assert the
+/// SHAPE. A slash is long and fine; anything approaching square is a pill.
+pub fn crescent_aspect() -> f32 {
+    // The stroke spans the sprite's full 2.0 width; the visible band is roughly
+    // two sigma either side of the spine.
+    2.0 / (CRESCENT_THICKNESS * 4.0)
 }
 
-/// The arc's spine radius, the other half of that shape check.
-pub fn crescent_arc_radius() -> f32 {
-    CRESCENT_ARC_R
+/// How far the streak bows off straight, for the "a cut, not a laser" check.
+pub fn crescent_bow() -> f32 {
+    CRESCENT_BOW
+}
+
+/// Where an ability's crescents are arranged.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CrescentLayout {
+    /// Swept across the front of the CASTER, along its line of aim — Kidney
+    /// Shot's spray of slashes.
+    CasterSweep,
+    /// A flat ring hovering above the VICTIM's head, tilted off horizontal, its
+    /// crescents overlapping around the ellipse.
+    ///
+    /// Cheap Shot shares SpellVisualKit 411 with Sap, and the reference for that
+    /// kit is unmistakable: a magenta-and-white ring floating over the target's
+    /// skull, not anything at the caster. Gouge — the other rogue incapacitate —
+    /// shows the same ring, so this is the incapacitate family's own mark.
+    VictimHalo,
 }
 
 /// Per-ability deployment of the shared crescent.
 #[derive(Clone, Copy)]
 pub struct CrescentSpec {
+    /// Where the fan is arranged, and around whom.
+    pub layout: CrescentLayout,
     /// How many crescents the flare spawns.
     pub count: u32,
     /// Height above the caster's SIM origin. A combatant's body centre is its
@@ -119,6 +129,11 @@ pub struct CrescentSpec {
     pub emissive: LinearRgba,
 }
 
+/// How far the victim halo tilts off horizontal, as a fraction of its radius.
+/// The reference ring is tipped ~20-30 degrees, which is what makes it read as
+/// a ring rather than a flat line when seen from the game camera.
+const HALO_TILT: f32 = 0.42;
+
 /// Where in a crescent's life the mid tint peaks. The source flashes early —
 /// 200ms into a 1233ms model — so the spike belongs near the front of the
 /// stroke, not the middle.
@@ -127,9 +142,14 @@ const CRESCENT_FLASH_AT: f32 = 0.22;
 /// Cheap Shot: four untinted white crescents at head height in two quick
 /// strokes. Fast and colourless, which is exactly what the source is.
 pub const CHEAP_SHOT_CRESCENTS: CrescentSpec = CrescentSpec {
+    layout: CrescentLayout::VictimHalo,
     count: 4,
-    height: 0.90,
-    reach: 0.85,
+    // Above the victim's crown (2.25) with a little clear air, matching the
+    // half-to-one head-height gap in the reference.
+    height: 1.55,
+    // Radius of the halo ring, not a forward reach. The reference ring is
+    // 2.5-2.8x head width — wider than the 1.0yd body.
+    reach: 0.72,
     // Source: bone 0 pops at 0-100ms, bone 1 follows at 100-200ms. Two pairs,
     // 100ms apart — the stagger is per crescent, so pairs fall out of 0.05.
     stagger: 0.05,
@@ -139,10 +159,14 @@ pub const CHEAP_SHOT_CRESCENTS: CrescentSpec = CrescentSpec {
     // Slightly wider than the 1.0yd body, so the pair-and-pair strokes cross it
     // rather than sitting on one shoulder.
     spread: 1.45,
-    color: Color::srgba(0.97, 0.98, 1.00, 0.85),
-    color_mid: Color::srgba(0.97, 0.98, 1.00, 0.85),
-    color_end: Color::srgba(0.97, 0.98, 1.00, 0.85),
-    emissive: LinearRgba::new(2.6, 2.7, 3.0, 1.0),
+    // NOT untinted white. The DB2 read said "zero colour tracks", which means
+    // no ANIMATED tint — the base texture itself is white-and-magenta, and the
+    // sampled reference is #F8C8F8 fringing to #F0A0E8 against three different
+    // ambients, so the magenta is intrinsic rather than borrowed from the scene.
+    color: Color::srgba(0.97, 0.80, 0.97, 0.88),
+    color_mid: Color::srgba(1.00, 0.95, 1.00, 0.92),
+    color_end: Color::srgba(0.94, 0.63, 0.91, 0.85),
+    emissive: LinearRgba::new(3.0, 1.9, 2.9, 1.0),
 };
 
 /// Kidney Shot: three crescents at TORSO height, spread much wider than Cheap
@@ -155,6 +179,7 @@ pub const CHEAP_SHOT_CRESCENTS: CrescentSpec = CrescentSpec {
 /// trail, and the silhouettes differ anyway (torso crescents against a weapon
 /// ribbon).
 pub const KIDNEY_SHOT_CRESCENTS: CrescentSpec = CrescentSpec {
+    layout: CrescentLayout::CasterSweep,
     count: 3,
     height: 0.10,
     reach: 0.95,
@@ -188,31 +213,26 @@ fn crescent_texture() -> Image {
 
     for y in 0..size {
         for x in 0..size {
+            // Sprite space: both axes -1..1. The streak runs along X, which is
+            // also the axis `update_crescent_flares` turns to follow the aim.
             let dx = (x as f32 - centre) / centre;
             let dy = (y as f32 - centre) / centre;
-            let r = (dx * dx + dy * dy).sqrt();
-            // Angle from straight UP, signed. Image y grows downward, so the
-            // negation is what puts the arc's crown at the top of the sprite
-            // rather than the bottom.
-            let theta = dx.atan2(-dy);
 
-            // How far along the span this pixel sits: 0 at the crescent's belly,
-            // 1 at either tip.
-            let t = (theta.abs() / CRESCENT_SPAN).min(1.0);
+            // Distance from the middle toward either tip.
+            let t = dx.abs().min(1.0);
+            // Elliptical profile: full at the belly, easing to nothing at the
+            // tips. Shapes BOTH the width and the brightness, so the stroke
+            // narrows and fades together the way a real slash does.
+            let profile = (1.0 - t * t).max(0.0).sqrt();
 
-            // Elliptical width profile — full thickness at the belly, easing to
-            // `CRESCENT_TIP` at the points. This is what gives the stroke the
-            // shape of a blade rather than a bent wire, and it is why the arc
-            // now looks filled rather than drawn.
-            let bulge = (1.0 - t * t).max(0.0).sqrt();
-            let half_width = CRESCENT_THICKNESS * (CRESCENT_TIP + (1.0 - CRESCENT_TIP) * bulge);
+            // The spine bows off the straight line, deepest at the middle.
+            let spine = CRESCENT_BOW * profile;
+            let half_width =
+                CRESCENT_THICKNESS * (CRESCENT_TIP + (1.0 - CRESCENT_TIP) * profile);
 
-            // Distance from the arc's spine, in units of the LOCAL half-width.
-            let d = (r - CRESCENT_ARC_R) / half_width.max(1.0e-4);
+            let d = (dy - spine) / half_width.max(1.0e-4);
             let band = (-(d * d)).exp();
-
-            // Brightness holds along the length and gives way near the tips.
-            let along = bulge.powf(CRESCENT_TAPER).clamp(0.0, 1.0);
+            let along = profile.powf(CRESCENT_TAPER);
 
             let a = (band * along).clamp(0.0, 1.0);
             let i = ((y * size + x) * 4) as usize;
@@ -264,6 +284,15 @@ pub fn spawn_crescent_fan(
         .map(|v| v.normalize())
         .unwrap_or(Vec3::Z);
 
+    // A halo belongs to the VICTIM; a sweep belongs to the caster. Without a
+    // target the halo has nobody to sit above, so it falls back to the caster
+    // rather than being dropped — a stun with no visual at all is worse than one
+    // in the wrong place.
+    let anchor = match spec.layout {
+        CrescentLayout::VictimHalo => aim.unwrap_or(caster_pos),
+        CrescentLayout::CasterSweep => caster_pos,
+    };
+
     // Lateral axis across the caster's front. The crescents are SWEPT across
     // this, which is what the source does ("crescent quads swept across the
     // front of the caster") and what makes the flare read as a body-wide arc.
@@ -278,14 +307,36 @@ pub fn spawn_crescent_fan(
         } else {
             0.0
         };
-        let origin = caster_pos
-            + Vec3::Y * spec.height
-            + forward * spec.reach
-            + across * (t * spec.spread);
+        let origin = match spec.layout {
+            // Around the ring, at `reach` radius, tilted off horizontal so it
+            // reads as an ellipse from the game camera rather than a line.
+            CrescentLayout::VictimHalo => {
+                let a = i as f32 / spec.count as f32 * TAU;
+                anchor
+                    + Vec3::Y * spec.height
+                    + Vec3::new(a.cos(), 0.0, a.sin()) * spec.reach
+                    + Vec3::Y * (a.sin() * HALO_TILT * spec.reach)
+            }
+            CrescentLayout::CasterSweep => {
+                anchor
+                    + Vec3::Y * spec.height
+                    + forward * spec.reach
+                    + across * (t * spec.spread)
+            }
+        };
         // Each crescent is also rolled, so successive slashes are angled rather
         // than a picket fence of parallel copies. The spread does the work of
         // covering the body; the roll only keeps them from looking stamped.
-        let roll = (i as f32 - (spec.count as f32 - 1.0) * 0.5) * spec.roll_step;
+        let roll = match spec.layout {
+            // Each crescent lies tangent to the ring, so together they trace the
+            // ellipse instead of pointing every which way.
+            CrescentLayout::VictimHalo => {
+                i as f32 / spec.count as f32 * TAU + spec.roll_step
+            }
+            CrescentLayout::CasterSweep => {
+                (i as f32 - (spec.count as f32 - 1.0) * 0.5) * spec.roll_step
+            }
+        };
         let material = materials.add(StandardMaterial {
             base_color: spec.color,
             base_color_texture: Some(tex.clone()),
@@ -423,38 +474,93 @@ pub fn cleanup_crescent_flares(mut commands: Commands, flares: Query<(Entity, &C
 mod tests {
     use super::*;
 
-    #[test]
-    fn the_crescent_texture_is_a_hollow_arc() {
-        let img = crescent_texture();
+    /// Alpha at a point in sprite space, both axes -1..1.
+    fn alpha_at(img: &Image, sx: f32, sy: f32) -> u8 {
         let size = CRESCENT_PX as usize;
-        let alpha_at = |x: usize, y: usize| img.data.as_ref().unwrap()[(y * size + x) * 4 + 3];
-        let c = size / 2;
-
-        // Hollow: the centre of the sprite is empty, because the stroke lives
-        // out on a circular spine.
-        assert_eq!(alpha_at(c, c), 0, "a crescent must not be a filled blob");
-        // The spine is bright directly above centre (theta = 0).
-        let spine_y = c - (CRESCENT_ARC_R * (c as f32)) as usize;
-        assert!(
-            alpha_at(c, spine_y) > 200,
-            "the arc's spine should be near-opaque"
-        );
-        // And nothing survives at the opposite side, past the span.
-        let opposite_y = c + (CRESCENT_ARC_R * (c as f32)) as usize;
-        assert_eq!(
-            alpha_at(c, opposite_y),
-            0,
-            "the arc must taper out, not close into a ring"
-        );
+        let c = (size as f32 - 1.0) / 2.0;
+        let x = (c + sx * c).round().clamp(0.0, (size - 1) as f32) as usize;
+        let y = (c + sy * c).round().clamp(0.0, (size - 1) as f32) as usize;
+        img.data.as_ref().unwrap()[(y * size + x) * 4 + 3]
     }
 
     #[test]
-    fn cheap_shots_crescents_are_untinted() {
-        // The source has ZERO colour tracks on Cheap Shot's model — it is white
-        // throughout, which is the sharpest contrast with Kidney Shot's magenta.
-        assert_eq!(
-            CHEAP_SHOT_CRESCENTS.color, CHEAP_SHOT_CRESCENTS.color_end,
-            "Cheap Shot's crescents must not travel through a tint"
+    fn the_streak_is_long_and_fine_not_a_pill() {
+        // The defect this replaced: a circular arc cannot be both shallow and
+        // long inside a square sprite, so flattening it to stop it reading as a
+        // crescent moon also shortened it, and it rendered as a fat pink pill.
+        // Length against thickness is the property that actually distinguishes a
+        // slash, so assert it directly.
+        let aspect = crescent_aspect();
+        assert!(
+            aspect > 6.0,
+            "the stroke is {aspect}:1 — anything under about 6 reads as a blob"
+        );
+        assert!(aspect < 30.0, "{aspect}:1 is a hairline, not a slash");
+    }
+
+    #[test]
+    fn the_streak_runs_the_length_of_the_sprite() {
+        // It must actually reach toward both tips. The pill version occupied
+        // barely half the sprite.
+        let img = crescent_texture();
+        // On the spine, which bows away from y = 0 at the middle.
+        assert!(alpha_at(&img, 0.0, CRESCENT_BOW) > 200, "the belly is missing");
+        assert!(
+            alpha_at(&img, 0.7, CRESCENT_BOW * 0.51) > 60,
+            "the stroke does not carry out toward its tips"
+        );
+        // And it comes to a point rather than ending square.
+        assert!(alpha_at(&img, 0.99, 0.0) < 60, "the tip should fade out");
+    }
+
+    #[test]
+    fn the_streak_is_fattest_at_its_belly() {
+        // A constant-width band is a bar. Count the lit pixels down a column at
+        // the middle and near a tip.
+        let img = crescent_texture();
+        let size = CRESCENT_PX as usize;
+        let column = |sx: f32| -> usize {
+            (0..size)
+                .filter(|&i| {
+                    let sy = i as f32 / (size - 1) as f32 * 2.0 - 1.0;
+                    alpha_at(&img, sx, sy) > 40
+                })
+                .count()
+        };
+        let belly = column(0.0);
+        let tip = column(0.85);
+        assert!(belly > 0, "nothing lit at the belly at all");
+        assert!(belly > tip, "belly {belly}px is not fatter than tip {tip}px");
+    }
+
+    #[test]
+    fn the_streak_bows_but_stays_a_cut() {
+        // Enough curve to read as a sweep, not so much that it becomes a moon.
+        let bow = crescent_bow();
+        assert!(bow > 0.05, "{bow} is a straight laser beam");
+        assert!(bow < 0.45, "{bow} bows so far it reads as a crescent again");
+    }
+
+    #[test]
+    fn cheap_shots_halo_is_magenta_not_white() {
+        // The DB2 read said Cheap Shot's model has ZERO COLOUR TRACKS, and this
+        // test originally asserted the crescents were untinted white as a
+        // result. That was a misreading: no colour track means no ANIMATED
+        // tint. The base texture is white-and-magenta, and the reference
+        // screenshots sample #F8C8F8 fringing to #F0A0E8 against a purple, a
+        // green and an orange ambient — so the magenta is intrinsic, not
+        // borrowed from the scene.
+        let c = CHEAP_SHOT_CRESCENTS.color.to_srgba();
+        assert!(
+            c.red > c.green + 0.1 && c.blue > c.green + 0.1,
+            "Cheap Shot's halo should be magenta, got {c:?}"
+        );
+        // And it still passes through a white-hot flash, which is what the
+        // overlapping crescents blow out to where they cross.
+        let mid = CHEAP_SHOT_CRESCENTS.color_mid.to_srgba();
+        assert!(
+            mid.green > c.green,
+            "the flash should be whiter than the body of the stroke"
         );
     }
 
@@ -471,105 +577,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn the_arc_span_stays_a_slash() {
-        // A crescent has to stay visibly OPEN or it reads as a halo. Stated as
-        // the fraction of the circle it leaves alone rather than as a bare
-        // number: the arc subtends `2 * CRESCENT_SPAN`, and at least a third of
-        // the circle must remain empty.
-        //
-        // The previous bound here was an arbitrary `< 1.4` chosen when the
-        // brightness taper was steep enough that the ends faded out anyway. Now
-        // that the stroke holds its weight along its length the span genuinely
-        // matters, so it is worth a real criterion.
-        use std::f32::consts::TAU;
-        let open = TAU - 2.0 * CRESCENT_SPAN;
-        assert!(
-            open > TAU / 3.0,
-            "the arc leaves only {open} rad open — it is closing into a ring"
-        );
-        assert!(CRESCENT_SPAN > 0.5, "span has collapsed to a dot");
-    }
-
-    #[test]
-    fn the_crescent_stays_bright_along_its_length() {
-        // The original taper was `(1-t)^2.2`, which is a fifth of full
-        // brightness by the halfway point — so only the belly rendered and the
-        // whole thing read as a thin comma rather than a slash. The old tests
-        // all passed, because they only sampled the spine at theta = 0.
-        //
-        // Sample along the ARC and require the stroke to still be carrying real
-        // weight most of the way out.
-        let img = crescent_texture();
-        let size = CRESCENT_PX as usize;
-        let c = (size as f32 - 1.0) / 2.0;
-        let sample_at = |frac: f32| -> u8 {
-            // `frac` of the way from the belly to a tip, along the spine.
-            let theta = frac * CRESCENT_SPAN;
-            let x = c + theta.sin() * CRESCENT_ARC_R * c;
-            let y = c - theta.cos() * CRESCENT_ARC_R * c;
-            img.data.as_ref().unwrap()
-                [((y.round() as usize) * size + (x.round() as usize)) * 4 + 3]
-        };
-
-        let belly = sample_at(0.0);
-        assert!(belly > 200, "the belly should be near-opaque, got {belly}");
-        let mid = sample_at(0.5);
-        assert!(
-            mid > 150,
-            "halfway along the arc is only {mid}/255 — the stroke dies before it \
-             is drawn and reads as a comma, not a crescent"
-        );
-        let outer = sample_at(0.8);
-        assert!(
-            outer > 60,
-            "four-fifths along is only {outer}/255 — the arc has no reach"
-        );
-        // But it must still come to a point, or it is a ring segment.
-        let tip = sample_at(1.0);
-        assert!(tip < 90, "the tip should thin out, got {tip}");
-    }
-
-    #[test]
-    fn the_crescent_is_fattest_at_its_belly() {
-        // A constant-width band reads as a bent wire. The blade shape comes from
-        // the stroke being thick in the middle and fine at the points.
-        let img = crescent_texture();
-        let size = CRESCENT_PX as usize;
-        let c = (size as f32 - 1.0) / 2.0;
-        // Count opaque-ish pixels crossing the band, radially, at two angles.
-        let width_at = |frac: f32| -> usize {
-            let theta = frac * CRESCENT_SPAN;
-            (0..size)
-                .filter(|&i| {
-                    let rr = i as f32 / size as f32 * 1.2;
-                    let x = c + theta.sin() * rr * c;
-                    let y = c - theta.cos() * rr * c;
-                    if x < 0.0 || y < 0.0 || x >= size as f32 || y >= size as f32 {
-                        return false;
-                    }
-                    img.data.as_ref().unwrap()
-                        [((y as usize) * size + (x as usize)) * 4 + 3]
-                        > 40
-                })
-                .count()
-        };
-        let belly = width_at(0.0);
-        let near_tip = width_at(0.9);
-        assert!(
-            belly > near_tip,
-            "belly {belly}px is not fatter than the tip {near_tip}px"
-        );
-    }
-
-    #[test]
-    fn a_crescent_is_wider_than_it_is_thick() {
-        // The arc length at the spine must exceed the stroke thickness, or the
-        // "crescent" is really just a smudge.
-        let arc_len = 2.0 * CRESCENT_SPAN * CRESCENT_ARC_R;
-        assert!(
-            arc_len > CRESCENT_THICKNESS * 3.0,
-            "arc {arc_len} is not meaningfully longer than its {CRESCENT_THICKNESS} thickness"
-        );
-    }
 }

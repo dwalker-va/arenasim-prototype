@@ -71,7 +71,6 @@ pub fn consume_instant_ability_signals(
     // Built once and reused, like the stun whirl's sparkle — the crescent is
     // identical for every slash of every rogue stun.
     mut crescent_tex: Local<Option<Handle<Image>>>,
-    mut streak_tex: Local<Option<Handle<Image>>>,
     mut rune_tex: Local<Option<Handle<Image>>>,
     signals: Query<(Entity, &InstantAbilityFired)>,
     mut sockets: Query<&mut WeaponSocket>,
@@ -160,7 +159,6 @@ pub fn consume_instant_ability_signals(
                         &mut meshes,
                         &mut materials,
                         &mut images,
-                        &mut streak_tex,
                         &mut rune_tex,
                         caster_pos,
                         target_pos,

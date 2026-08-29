@@ -48,15 +48,26 @@ const HOJ_STREAK_SECS: f32 = 0.667;
 /// start moving instantly and it settles before it fades.
 const HOJ_STREAK_GROW_FROM: f32 = 0.15;
 const HOJ_STREAK_GROW_TO: f32 = 0.90;
-/// Width of the streak on the ground, in yards.
-const HOJ_STREAK_WIDTH: f32 = 1.5;
+/// Radius the caster's ground ring expands to, in yards.
+///
+/// The reference shows a flat golden ring sweeping out around the PALADIN'S OWN
+/// FEET — not a streak travelling toward the victim. A directional streak
+/// implies a projectile, and this spell has none (`HasMissile = 0`); the ring is
+/// what the source's "elements translate outward while scaling 7.2x" actually
+/// draws.
+const HOJ_RING_RADIUS: f32 = 2.6;
+const HOJ_RING_THICKNESS: f32 = 0.55;
+/// Rays blasting out of the rune at the victim's chest. The reference shows
+/// long, thin, straight tapering spokes reaching well past the ring — they are
+/// most of what the effect reads as, and the first version drew none.
+const HOJ_RAY_COUNT: u32 = 7;
+/// How far a ray reaches, as a multiple of the rune's own radius.
+const HOJ_RAY_REACH: f32 = 2.4;
+const HOJ_RAY_WIDTH: f32 = 0.055;
 /// Height above the floor. Same reasoning as the hard-CC ground pieces: the
 /// arena floor is at y=0 with an identity transform, so this is a fixed world
 /// height rather than a `rest_y`-derived offset.
 const HOJ_GROUND_Y: f32 = 0.055;
-/// Longest streak we will draw, in yards. Hammer of Justice's range is 10, and
-/// a target beyond that cannot be hit — this only guards a stale position.
-const HOJ_STREAK_MAX: f32 = 12.0;
 
 /// The source's measured keyframes: orange, flashing to near-white yellow very
 /// early (67ms of 667 = 0.10 of its life), then settling back to orange.
@@ -81,58 +92,6 @@ const HOJ_RUNE_EMISSIVE: LinearRgba = LinearRgba::new(3.4, 3.6, 0.9, 1.0);
 const HOJ_RUNE_SPIN: f32 = 0.35;
 
 const HOJ_TEX_PX: u32 = 128;
-
-/// The streak's texture: bright at the LEADING edge, trailing off to nothing
-/// behind, and soft across its width.
-///
-/// `u` runs 0 at the trailing end to 1 at the leading end. The asymmetry is the
-/// whole point — a symmetric strip reads as a static bar, whereas a bright head
-/// dragging a dimming tail reads as something travelling.
-fn streak_texture() -> Image {
-    use bevy::image::Image;
-    use bevy::render::render_asset::RenderAssetUsages;
-    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-
-    let size = HOJ_TEX_PX;
-    let mut data = vec![0u8; (size * size * 4) as usize];
-
-    for y in 0..size {
-        for x in 0..size {
-            let u = x as f32 / (size - 1) as f32;
-            let v = y as f32 / (size - 1) as f32;
-
-            // Along: ramps toward the head, with a hard spike in the last fifth.
-            let ramp = u.powf(1.6);
-            let head = (-(((u - 1.0) / 0.12).powi(2))).exp();
-            let along = (ramp * 0.75 + head).clamp(0.0, 1.0);
-
-            // Across: gaussian, narrowing toward the tail so the streak comes to
-            // a point behind rather than ending in a blunt edge.
-            let half_width = 0.16 + 0.20 * u;
-            let d = (v - 0.5) / half_width;
-            let across = (-(d * d)).exp();
-
-            let a = (along * across).clamp(0.0, 1.0);
-            let i = ((y * size + x) * 4) as usize;
-            data[i] = 255;
-            data[i + 1] = 255;
-            data[i + 2] = 255;
-            data[i + 3] = (a * 255.0) as u8;
-        }
-    }
-
-    Image::new(
-        Extent3d {
-            width: size,
-            height: size,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        data,
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::RENDER_WORLD,
-    )
-}
 
 /// The rune's texture: a circular seal — two concentric rings with radial ticks
 /// between them. Reads as a judgement mark rather than a generic glow, which is
@@ -178,7 +137,30 @@ fn rune_texture() -> Image {
                 0.0
             };
 
-            let a = (rings + ticks * 0.8).clamp(0.0, 1.0);
+            // Starburst: long straight tapering spokes reaching well past the
+            // ring. In the reference these are most of what the effect reads
+            // as, and the first version drew none — the rune alone is a quiet
+            // disc where the real thing detonates.
+            let mut rays: f32 = 0.0;
+            if r > INNER_R * 0.35 {
+                for k in 0..HOJ_RAY_COUNT {
+                    let spoke = k as f32 / HOJ_RAY_COUNT as f32 * TAU + 0.21;
+                    let mut off = (theta - spoke).abs();
+                    if off > std::f32::consts::PI {
+                        off = TAU - off;
+                    }
+                    // Narrow in angle, and narrowing further as it reaches out.
+                    let width = HOJ_RAY_WIDTH * (1.0 + 1.6 / (r + 0.25));
+                    let across = (-((off / width).powi(2))).exp();
+                    // Fade along the spoke, out to HOJ_RAY_REACH ring-radii.
+                    let reach = (1.0 - r / (OUTER_R * HOJ_RAY_REACH)).clamp(0.0, 1.0);
+                    rays = rays.max(across * reach.powf(0.8));
+                }
+            }
+            // A white-hot core where the rays converge.
+            let core = (-((r / 0.16).powi(2))).exp();
+
+            let a = (rings + ticks * 0.8 + rays * 0.95 + core).clamp(0.0, 1.0);
             let i = ((y * size + x) * 4) as usize;
             data[i] = 255;
             data[i + 1] = 255;
@@ -208,48 +190,43 @@ pub fn spawn_holy_justice(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
     images: &mut Assets<Image>,
-    streak_tex: &mut Option<Handle<Image>>,
     rune_tex: &mut Option<Handle<Image>>,
     caster_pos: Vec3,
     target_pos: Vec3,
 ) {
-    let to_target = (target_pos - caster_pos).with_y(0.0);
-    let distance = to_target.length().clamp(0.5, HOJ_STREAK_MAX);
-    let Some(direction) = to_target.try_normalize() else {
+    // Kept only so the ring's component can record which way the strike went;
+    // the ring itself is radially symmetric.
+    let Some(direction) = (target_pos - caster_pos).with_y(0.0).try_normalize() else {
         return;
     };
 
-    // ---- The ground streak ----
-    let tex = streak_tex
-        .get_or_insert_with(|| images.add(streak_texture()))
-        .clone();
+    // ---- The caster's ground ring ----
+    //
+    // A flat annulus sweeping out around the paladin's own feet. The first
+    // version was a streak aimed at the victim, which implies a projectile this
+    // spell does not have (`HasMissile = 0`) — the reference shows a ring.
     let material = materials.add(StandardMaterial {
         base_color: HOJ_ORANGE,
-        base_color_texture: Some(tex.clone()),
         emissive: HOJ_STREAK_EMISSIVE,
-        emissive_texture: Some(tex),
         alpha_mode: AlphaMode::Add,
+        unlit: false,
         cull_mode: None,
         double_sided: true,
         ..default()
     });
-    // The quad's +X runs along its length (matching the texture's `u`, which
-    // ramps 0 at the tail to 1 at the head), so the yaw must align local +X with
-    // the aim — `atan2(-dz, dx)`, the same convention `spawn_arena_walls`
-    // documents for its length-along-+X cuboids (`play_match/mod.rs:459`).
-    //
-    // NOT the `atan2(dx, dz)` used for facing a UNIT toward something: that
-    // aligns local +Z, which here is the quad's normal after the flat rotation,
-    // and would lay the streak exactly ACROSS the line of fire.
-    let yaw = (-direction.z).atan2(direction.x);
     commands.spawn((
-        Mesh3d(meshes.add(Rectangle::new(1.0, 1.0))),
+        Mesh3d(meshes.add(
+            Annulus::new(1.0 - HOJ_RING_THICKNESS / HOJ_RING_RADIUS, 1.0)
+                .mesh()
+                .resolution(64),
+        )),
         MeshMaterial3d(material),
         Transform::from_translation(caster_pos.with_y(HOJ_GROUND_Y))
-            .with_rotation(Quat::from_rotation_y(yaw) * Quat::from_rotation_x(-FRAC_PI_2)),
+            .with_rotation(Quat::from_rotation_x(-FRAC_PI_2))
+            .with_scale(Vec3::ZERO),
         HolyStreak {
             age: 0.0,
-            length: distance,
+            length: HOJ_RING_RADIUS,
             direction,
             origin: caster_pos.with_y(HOJ_GROUND_Y),
         },
@@ -296,18 +273,16 @@ pub fn update_holy_streaks(
         streak.age += dt;
         let k = (streak.age / HOJ_STREAK_SECS).clamp(0.0, 1.0);
 
-        // Extend over the middle of the life, easing out so it decelerates into
-        // the victim rather than snapping to full length.
+        // Sweep outward over the middle of the life, easing out so the ring
+        // decelerates rather than snapping to full size.
         let travel = ((k - HOJ_STREAK_GROW_FROM) / (HOJ_STREAK_GROW_TO - HOJ_STREAK_GROW_FROM))
             .clamp(0.0, 1.0);
-        let reach = (streak.length * travel.sqrt()).max(0.01);
-        transform.scale = Vec3::new(reach, HOJ_STREAK_WIDTH, 1.0);
-        // A Bevy `Rectangle` is CENTRED on its origin, so scaling local X alone
-        // would span -reach/2..+reach/2 about the caster: the head would stop
-        // halfway to the victim and the tail would run back through the
-        // Paladin's own body. Walking the centre out by half the current reach
-        // anchors the quad at its tail, so it grows forward only.
-        transform.translation = streak.origin + streak.direction * (reach * 0.5);
+        let radius = (streak.length * travel.sqrt()).max(0.01);
+        // Uniform: the ring is a unit annulus, so one scale grows it in place.
+        // It stays centred on the caster, which is why nothing has to walk its
+        // origin the way the old aimed quad did.
+        transform.scale = Vec3::splat(radius);
+        transform.translation = streak.origin;
 
         if let Some(material) = materials.get_mut(&handle.0) {
             // Orange, flashing near-white very early, then back to orange.
@@ -413,45 +388,86 @@ mod tests {
     }
 
     #[test]
-    fn the_streak_is_brightest_at_its_leading_edge() {
-        // A symmetric strip reads as a static bar. The whole reason this decal
-        // says "travelling" is that its head is bright and its tail is not.
-        let img = streak_texture();
-        let size = HOJ_TEX_PX as usize;
-        let mid = size / 2;
-        let head = alpha_of(&img, size - 3, mid, size);
-        let tail = alpha_of(&img, 2, mid, size);
-        assert!(
-            head > tail + 100,
-            "head {head} should dominate tail {tail}"
-        );
-    }
-
-    #[test]
-    fn the_streak_tapers_across_its_width() {
-        let img = streak_texture();
-        let size = HOJ_TEX_PX as usize;
-        let spine = alpha_of(&img, size - 3, size / 2, size);
-        let edge = alpha_of(&img, size - 3, 2, size);
-        assert!(spine > edge + 100, "the streak must have soft sides");
-    }
-
-    #[test]
-    fn the_rune_is_a_ring_not_a_disc() {
-        // A filled blob is every other gold burst in the game. The rune has to
-        // read as a mark.
+    fn the_rune_throws_a_starburst() {
+        // The reference detonates: long thin rays reaching well past the rune's
+        // own ring. The first version drew only the ring and read as a quiet
+        // disc. Sample straight out along a spoke, past the ring, and require
+        // something to be there.
         let img = rune_texture();
         let size = HOJ_TEX_PX as usize;
-        let c = size / 2;
+        let c = (size as f32 - 1.0) / 2.0;
+        let alpha_at = |sx: f32, sy: f32| -> u8 {
+            let x = (c + sx * c).round().clamp(0.0, (size - 1) as f32) as usize;
+            let y = (c + sy * c).round().clamp(0.0, (size - 1) as f32) as usize;
+            img.data.as_ref().unwrap()[(y * size + x) * 4 + 3]
+        };
+
+        // Walk each spoke's own angle out past the ring and take the best.
+        let mut best_far: u8 = 0;
+        for k in 0..HOJ_RAY_COUNT {
+            let a = k as f32 / HOJ_RAY_COUNT as f32 * TAU + 0.21;
+            // Beyond the outer ring at 0.86, where only a ray can reach.
+            let (sx, sy) = (a.sin() * 0.95, -a.cos() * 0.95);
+            best_far = best_far.max(alpha_at(sx, sy));
+        }
         assert!(
-            alpha_of(&img, c, c, size) < 40,
-            "the rune's centre must be open"
+            best_far > 50,
+            "nothing reaches past the ring — the burst has no rays"
         );
-        // The outer ring, straight up from centre.
-        let ring_y = c - (0.86 * c as f32) as usize + 1;
+
+        // And a hot core where they converge.
+        assert!(alpha_at(0.0, 0.0) > 180, "the core should be near-opaque");
+    }
+
+    #[test]
+    fn the_rays_are_spokes_not_a_disc() {
+        // If the rays were wide enough to merge they would fill the sprite and
+        // the shape would be a blob. Between two spokes, out past the ring,
+        // there must be a genuine gap.
+        let img = rune_texture();
+        let size = HOJ_TEX_PX as usize;
+        let c = (size as f32 - 1.0) / 2.0;
+        let alpha_at = |sx: f32, sy: f32| -> u8 {
+            let x = (c + sx * c).round().clamp(0.0, (size - 1) as f32) as usize;
+            let y = (c + sy * c).round().clamp(0.0, (size - 1) as f32) as usize;
+            img.data.as_ref().unwrap()[(y * size + x) * 4 + 3]
+        };
+        let step = TAU / HOJ_RAY_COUNT as f32;
+        // Halfway between spoke 0 and spoke 1.
+        let a = 0.21 + step * 0.5;
+        let (sx, sy) = (a.sin() * 0.95, -a.cos() * 0.95);
         assert!(
-            alpha_of(&img, c, ring_y, size) > 150,
-            "the outer ring should be solid"
+            alpha_at(sx, sy) < 40,
+            "the gap between spokes is lit — the rays have merged into a disc"
+        );
+    }
+
+    #[test]
+    fn the_rune_is_a_seal_not_a_filled_disc() {
+        // The reference has a white-hot core AND a ring of glyphs, with dark
+        // between them — that gap is what makes it read as a seal rather than a
+        // blob of light. (An earlier version of this test demanded an EMPTY
+        // centre, which the reference contradicts: the core is one of the
+        // brightest things in the frame.)
+        let img = rune_texture();
+        let size = HOJ_TEX_PX as usize;
+        let c = (size as f32 - 1.0) / 2.0;
+        let alpha_at = |sx: f32, sy: f32| -> u8 {
+            let x = (c + sx * c).round().clamp(0.0, (size - 1) as f32) as usize;
+            let y = (c + sy * c).round().clamp(0.0, (size - 1) as f32) as usize;
+            img.data.as_ref().unwrap()[(y * size + x) * 4 + 3]
+        };
+
+        // The outer ring, straight up from centre, is solid.
+        assert!(alpha_at(0.0, -0.86) > 150, "the outer ring should be solid");
+
+        // Between the core and the inner ring, off any spoke, it must go dark.
+        let step = TAU / HOJ_RAY_COUNT as f32;
+        let a = 0.21 + step * 0.5;
+        let (sx, sy) = (a.sin() * 0.40, -a.cos() * 0.40);
+        assert!(
+            alpha_at(sx, sy) < 60,
+            "no gap between the core and the ring — the rune is a filled disc"
         );
     }
 

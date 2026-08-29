@@ -256,17 +256,23 @@ fn the_two_rogue_stuns_are_visually_distinct() {
     assert_ne!(cheap_style, kidney_style, "different strokes");
     assert_ne!(cheap_count, kidney_count, "different crescent counts");
     assert_ne!(cheap[0], kidney[0], "different tints");
-    // Cheap Shot is white (the source has no colour track); Kidney Shot is
-    // magenta. Prove the difference is a real hue, not a rounding wobble.
+    // Both are magenta-family — the reference is unambiguous on that — so the
+    // hue is NOT what separates them. Kidney Shot is the hotter, more saturated
+    // pink; Cheap Shot's halo is paler, closer to white with a fringe.
     let (cr, cg, cb) = cheap[0];
-    assert!(
-        (cr - cg).abs() < 0.1 && (cg - cb).abs() < 0.1,
-        "Cheap Shot's crescents should be untinted, got {cheap:?}"
-    );
     let (kr, kg, kb) = kidney[0];
     assert!(
+        cr > cg && cb > cg,
+        "Cheap Shot's halo should be magenta-family, got {cheap:?}"
+    );
+    assert!(
         kr > kg + 0.4 && kb > kg + 0.3,
-        "Kidney Shot's should be magenta, got {kidney:?}"
+        "Kidney Shot's should be strongly magenta, got {kidney:?}"
+    );
+    assert!(
+        cg > kg + 0.2,
+        "Cheap Shot's halo should be visibly paler than Kidney Shot's: \
+         {cheap:?} vs {kidney:?}"
     );
 }
 
@@ -291,7 +297,9 @@ fn the_fan_sweeps_across_the_casters_breadth() {
     //
     // A combatant capsule is 1.0yd across, so the fan has to span at least that
     // to read as body-wide.
-    for ability in [AbilityType::CheapShot, AbilityType::KidneyShot] {
+    // Kidney Shot only — Cheap Shot is a halo on the VICTIM, not a sweep across
+    // the caster, and has its own probe below.
+    for ability in [AbilityType::KidneyShot] {
         let mut h = Harness::new();
         let rogue = h.spawn_rogue();
         // Victim straight ahead on +Z, so "across" is the world X axis.
@@ -419,20 +427,70 @@ fn the_streak_runs_along_the_attack_line() {
 }
 
 #[test]
-fn the_streak_is_a_slash_not_a_crescent_moon() {
-    // Shape, stated as geometry rather than by eye: the arc's chord must be
-    // several times its sag, or it is a deep "C" standing beside the caster
-    // rather than a cut running through the strike. The reference is
-    // near-straight with a slight bow.
-    let span = arenasim::states::play_match::crescent_span();
-    let radius = arenasim::states::play_match::crescent_arc_radius();
-    let chord = 2.0 * radius * span.sin();
-    let sag = radius * (1.0 - span.cos());
+fn kidney_shots_streak_is_a_slash_not_a_pill() {
+    // Shape stated as geometry rather than left to the eye. The circular-arc
+    // parametrisation this replaced could not exceed about 2:1 however it was
+    // tuned, and rendered as a fat pill.
+    let aspect = arenasim::states::play_match::crescent_aspect();
+    assert!(aspect > 6.0, "the stroke is {aspect}:1 — that is a blob");
+    let bow = arenasim::states::play_match::crescent_bow();
+    assert!(bow > 0.05 && bow < 0.45, "bow {bow} is not a cut");
+}
+
+#[test]
+fn cheap_shots_halo_sits_above_the_victim_not_the_caster() {
+    // The whole placement finding. Cheap Shot shares Sap's visual kit, and the
+    // reference for that kit is a ring floating over the TARGET's head — the
+    // rogue's own side of it is just the weapon flash. The first version put
+    // four slashes in front of the caster, which is a different ability's
+    // grammar entirely.
+    let mut h = Harness::new();
+    let rogue = h.spawn_rogue();
+    let victim = h.spawn_victim(); // 3yd along +Z
+    h.fire(rogue, victim, AbilityType::CheapShot);
+    h.tick(1);
+
+    let ps: Vec<Vec3> = {
+        let mut q = h.app.world_mut().query::<(&CrescentFlare, &Transform)>();
+        q.iter(h.app.world()).map(|(_, t)| t.translation).collect()
+    };
+    let centre = ps.iter().fold(Vec3::ZERO, |a, b| a + *b) / ps.len() as f32;
+
     assert!(
-        chord > sag * 5.0,
-        "chord {chord} against sag {sag} — that is a crescent moon, not a slash"
+        centre.z > 2.0,
+        "the halo centred at {centre:?} — it belongs over the victim at z=3, \
+         not beside the rogue at z=0"
     );
-    assert!(sag > 0.02, "a slash wants some bow, got {sag}");
+    // And above the victim's crown (sim y 1.0, crown 2.25).
+    assert!(
+        centre.y > 2.3,
+        "the halo should float clear of the victim's head, got y={}",
+        centre.y
+    );
+}
+
+#[test]
+fn cheap_shots_halo_is_a_ring_not_a_line() {
+    // Four crescents arranged around an ellipse, so the fan must have real
+    // extent on BOTH ground axes. A row of slashes would collapse to one.
+    let mut h = Harness::new();
+    let rogue = h.spawn_rogue();
+    let victim = h.spawn_victim();
+    h.fire(rogue, victim, AbilityType::CheapShot);
+    h.tick(1);
+
+    let ps: Vec<Vec3> = {
+        let mut q = h.app.world_mut().query::<(&CrescentFlare, &Transform)>();
+        q.iter(h.app.world()).map(|(_, t)| t.translation).collect()
+    };
+    let span = |f: fn(&Vec3) -> f32| {
+        ps.iter().map(f).fold(f32::NEG_INFINITY, f32::max)
+            - ps.iter().map(f).fold(f32::INFINITY, f32::min)
+    };
+    assert!(span(|p| p.x) > 1.0, "no width: {ps:?}");
+    assert!(span(|p| p.z) > 1.0, "no depth — the halo is a flat line: {ps:?}");
+    // Tilted, so it reads as a ring rather than a flat disc from the camera.
+    assert!(span(|p| p.y) > 0.3, "the halo is not tilted: {ps:?}");
 }
 
 #[test]
