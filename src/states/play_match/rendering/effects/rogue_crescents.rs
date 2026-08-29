@@ -35,7 +35,7 @@ use crate::states::play_match::components::*;
 /// Resolution of the procedural crescent texture.
 const CRESCENT_PX: u32 = 128;
 /// Radius of the arc's spine, as a fraction of the sprite half-width.
-const CRESCENT_ARC_R: f32 = 0.60;
+const CRESCENT_ARC_R: f32 = 0.78;
 /// PEAK thickness of the stroke at the middle of its span, as a fraction of the
 /// sprite half-width. The gaussian falloff around the spine is what makes the
 /// edge soft.
@@ -44,14 +44,19 @@ const CRESCENT_ARC_R: f32 = 0.60;
 /// swallow the whole sprite: 0.30 spanned r 0.30..0.90 and read as a blob,
 /// especially head-on where the fan's three crescents stack additively. 0.15
 /// was the original and read as a wire. This is the midpoint.
-const CRESCENT_THICKNESS: f32 = 0.21;
+const CRESCENT_THICKNESS: f32 = 0.17;
 /// Fraction of that thickness still present at the very tips. A crescent is fat
 /// in the middle and fine at the points — a constant-width band reads as a
 /// bent wire rather than a slash.
 const CRESCENT_TIP: f32 = 0.12;
-/// Half-angle the arc spans, in radians. Beyond ~1.5 it closes toward a full
-/// ring and stops reading as a slash.
-const CRESCENT_SPAN: f32 = 1.25;
+/// Half-angle the arc spans, in radians.
+///
+/// SHALLOW. The WoW reference is a burst of long, near-straight slash streaks
+/// with only a slight bow — at r=0.60 this gives a chord of ~0.65 against a sag
+/// of ~0.09. The first version used 1.25, whose 0.41 sag is a deep crescent
+/// moon: a different shape entirely, and one that reads as a "C" standing beside
+/// the caster rather than a cut running along the attack line.
+const CRESCENT_SPAN: f32 = 0.58;
 /// How sharply brightness falls off toward the two ends of the arc, applied to
 /// the elliptical width profile.
 ///
@@ -62,6 +67,17 @@ const CRESCENT_SPAN: f32 = 1.25;
 /// This keeps real weight to about three-quarters of the way out and then lets
 /// go.
 const CRESCENT_TAPER: f32 = 1.35;
+
+/// The arc's half-span, exposed so a probe can assert the SHAPE — a slash's
+/// chord has to dominate its sag, or it is a crescent moon.
+pub fn crescent_span() -> f32 {
+    CRESCENT_SPAN
+}
+
+/// The arc's spine radius, the other half of that shape check.
+pub fn crescent_arc_radius() -> f32 {
+    CRESCENT_ARC_R
+}
 
 /// Per-ability deployment of the shared crescent.
 #[derive(Clone, Copy)]
@@ -285,6 +301,7 @@ pub fn spawn_crescent_fan(
             MeshMaterial3d(material),
             Transform::from_translation(origin).with_scale(Vec3::splat(spec.size)),
             CrescentFlare {
+                aim: forward,
                 delay: spec.stagger * i as f32,
                 age: 0.0,
                 lifetime: spec.lifetime,
@@ -302,10 +319,17 @@ pub fn spawn_crescent_fan(
 
 /// Billboards, pops and fades every live crescent.
 ///
-/// The quad faces the camera and is then rolled about the view axis by its own
-/// `roll`, so the fan spreads across the screen rather than around the world —
-/// a slash reads by its screen-space direction, and a world-space fan would
-/// collapse to a line from the wrong angle.
+/// The quad faces the camera, is turned so its LONG AXIS runs along the attack
+/// line as seen on screen, and is then rolled about the view axis by its own
+/// `roll` to fan the strokes apart.
+///
+/// That middle step is the one that makes it read as a cut. The streak's long
+/// axis is its local +X, and without aligning that to the aim the whole burst
+/// stands PERPENDICULAR to the direction the rogue is striking — the shape is
+/// right and it is pointing the wrong way. Projecting the world aim into the
+/// camera's own plane (rather than assuming screen-horizontal) keeps it correct
+/// when the caster faces toward or away from the camera, where the aim
+/// foreshortens toward vertical.
 pub fn update_crescent_flares(
     time: Res<Time>,
     camera: Query<&Transform, (With<Camera3d>, Without<CrescentFlare>)>,
@@ -339,7 +363,17 @@ pub fn update_crescent_flares(
         transform.scale = Vec3::splat(flare.size * scale);
 
         if let Some(rot) = cam_rot {
-            transform.rotation = rot * Quat::from_rotation_z(flare.roll);
+            // The aim, expressed in the camera's frame: x is screen-right and y
+            // is screen-up, so `atan2(y, x)` is the angle the attack line makes
+            // on screen. Degenerate only when the caster aims straight at or
+            // away from the camera, where any angle is as good as another.
+            let local = rot.inverse() * flare.aim;
+            let along = if local.x.abs() + local.y.abs() > 1.0e-4 {
+                local.y.atan2(local.x)
+            } else {
+                0.0
+            };
+            transform.rotation = rot * Quat::from_rotation_z(along + flare.roll);
         }
 
         if let Some(material) = materials.get_mut(&handle.0) {

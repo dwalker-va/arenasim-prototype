@@ -349,6 +349,93 @@ fn the_fan_follows_the_aim_not_the_world_axes() {
 }
 
 #[test]
+fn the_streak_runs_along_the_attack_line() {
+    // The WoW reference is a burst of slashes running ALONG the strike, toward
+    // the victim. The first three versions had the right shape pointing 90 deg
+    // the wrong way, and no probe noticed because none of them asked which way
+    // the streak lay — only how big or how bright it was.
+    //
+    // The streak's long axis is its local +X. Project both it and the aim into
+    // the camera's plane and require them to line up.
+    for (dx, dz) in [(0.0, 6.0), (6.0, 0.0), (-4.0, 4.0), (3.0, -5.0)] {
+        let mut h = Harness::new();
+        let rogue = h.spawn_rogue();
+        let victim = h
+            .app
+            .world_mut()
+            .spawn((
+                Transform::from_xyz(dx, 1.0, dz),
+                Combatant::new(1, 0, CharacterClass::Priest),
+            ))
+            .id();
+        // A camera looking down the arena from above and behind, as the sandbox
+        // and match cameras both do.
+        let cam = h
+            .app
+            .world_mut()
+            .spawn((
+                Camera3d::default(),
+                Transform::from_xyz(0.0, 9.0, 24.0).looking_at(Vec3::ZERO, Vec3::Y),
+            ))
+            .id();
+        h.fire(rogue, victim, AbilityType::KidneyShot);
+        // Far enough in that every crescent has passed its stagger delay. A
+        // crescent still waiting its turn holds `scale = ZERO` and returns
+        // early, so its billboard rotation has not been written yet — sampling
+        // at tick 2 sees only the first of the fan.
+        h.tick(8);
+
+        let cam_rot = h.app.world().get::<Transform>(cam).unwrap().rotation;
+        let aim = Vec3::new(dx, 0.0, dz).normalize();
+        let aim_screen = cam_rot.inverse() * aim;
+        let aim_angle = aim_screen.y.atan2(aim_screen.x);
+
+        let rots: Vec<Quat> = {
+            let mut q = h.app.world_mut().query::<(&CrescentFlare, &Transform)>();
+            q.iter(h.app.world()).map(|(_, t)| t.rotation).collect()
+        };
+        assert!(!rots.is_empty(), "no crescents to check");
+
+        // The middle crescent of the fan carries no roll offset, so it should
+        // sit closest to the aim; check the whole fan brackets it.
+        let mut best = f32::MAX;
+        for rot in &rots {
+            let long_axis = cam_rot.inverse() * (*rot * Vec3::X);
+            let angle = long_axis.y.atan2(long_axis.x);
+            let mut delta = (angle - aim_angle).abs();
+            while delta > std::f32::consts::PI {
+                delta = (delta - std::f32::consts::TAU).abs();
+            }
+            // A streak and its mirror read the same, so fold onto [0, PI/2].
+            let folded = delta.min((std::f32::consts::PI - delta).abs());
+            best = best.min(folded);
+        }
+        assert!(
+            best < 0.35,
+            "toward ({dx}, {dz}) the closest streak is {best} rad off the attack \
+             line — the burst is standing across the strike, not along it"
+        );
+    }
+}
+
+#[test]
+fn the_streak_is_a_slash_not_a_crescent_moon() {
+    // Shape, stated as geometry rather than by eye: the arc's chord must be
+    // several times its sag, or it is a deep "C" standing beside the caster
+    // rather than a cut running through the strike. The reference is
+    // near-straight with a slight bow.
+    let span = arenasim::states::play_match::crescent_span();
+    let radius = arenasim::states::play_match::crescent_arc_radius();
+    let chord = 2.0 * radius * span.sin();
+    let sag = radius * (1.0 - span.cos());
+    assert!(
+        chord > sag * 5.0,
+        "chord {chord} against sag {sag} — that is a crescent moon, not a slash"
+    );
+    assert!(sag > 0.02, "a slash wants some bow, got {sag}");
+}
+
+#[test]
 fn crescents_expire_without_leaking() {
     let mut h = Harness::new();
     let rogue = h.spawn_rogue();

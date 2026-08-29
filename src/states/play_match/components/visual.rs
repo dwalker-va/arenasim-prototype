@@ -928,6 +928,13 @@ pub struct CcBead;
 /// crescent holds itself invisible until its turn.
 #[derive(Component)]
 pub struct CrescentFlare {
+    /// World-space unit vector from the caster toward its victim.
+    ///
+    /// The streak's long axis is turned to follow this once projected into the
+    /// camera's plane, so the cut runs ALONG the attack line. Without it the
+    /// burst stands perpendicular to the strike — the right shape pointing the
+    /// wrong way.
+    pub aim: Vec3,
     /// Seconds before this crescent appears.
     pub delay: f32,
     /// Seconds since spawn, including the delay.
