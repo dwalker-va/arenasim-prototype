@@ -58,7 +58,7 @@ Key fields:
 
 ### Step 2: Spawn the Component in Combat Logic
 
-**File:** Wherever the triggering event occurs (e.g., `combat_core.rs`, `effects/dispels.rs`)
+**File:** Wherever the triggering event occurs (e.g., `combat_core.rs`, `src/states/play_match/effects/dispels.rs`)
 
 ```rust
 commands.spawn((
@@ -76,7 +76,7 @@ commands.spawn((
 
 ### Step 3: Add Three Visual Systems
 
-**File:** a new per-effect submodule `src/states/play_match/rendering/effects/<your_effect>.rs`, wired in by adding `mod <your_effect>; pub use <your_effect>::*;` to `rendering/effects/mod.rs` (the file was split from a single `effects.rs` into per-effect submodules — see `byte-identical-module-split.md`).
+**File:** a new per-effect submodule `src/states/play_match/rendering/effects/<your_effect>.rs`, wired in by adding `mod <your_effect>; pub use <your_effect>::*;` to `src/states/play_match/rendering/effects/mod.rs` (the file was split from a single `effects.rs` into per-effect submodules — see `byte-identical-module-split.md`).
 
 ```rust
 // Color helper (private)
@@ -157,11 +157,11 @@ pub fn cleanup_expired_my_effects(
 )
 ```
 
-**Critical:** Register in `states/mod.rs` (graphical only), NOT in `systems.rs` (shared with headless).
+**Critical:** Register in `src/states/mod.rs` (graphical only), NOT in `systems.rs` (shared with headless).
 
 ### Step 5: Verify Re-exports
 
-The `pub use rendering::*` chain in `play_match/mod.rs` should automatically re-export new `pub fn` systems. Verify by building. If it fails, add explicit re-exports.
+The `pub use rendering::*` chain in `src/states/play_match/mod.rs` should automatically re-export new `pub fn` systems. Verify by building. If it fails, add explicit re-exports.
 
 ## Gotchas and Lessons Learned
 
@@ -189,7 +189,7 @@ In the spawn system, the entity might be despawned between the query iteration a
 
 ### 4. Use `Res<Time>`, Not `Res<Time<Real>>`
 
-All visual systems in the `rendering/effects/` submodules use `Res<Time>`. Using `Time<Real>` would cause the animation to ignore simulation speed changes, creating visual inconsistency.
+All visual systems in the `src/states/play_match/rendering/effects/` submodules use `Res<Time>`. Using `Time<Real>` would cause the animation to ignore simulation speed changes, creating visual inconsistency.
 
 ### 5. Always Include `PlayMatchEntity` Marker
 
@@ -197,7 +197,7 @@ Without it, the effect entity persists after the match ends. The `cleanup_play_m
 
 ### 6. Headless Mode: Components Spawn, Visuals Don't Run
 
-Combat systems (in `systems.rs`) run in both modes. Visual systems (in `states/mod.rs`) only run in graphical mode. This means marker component entities spawn in headless mode but never get meshes/materials attached and never get cleaned up (they leak until the process exits). This is a known, accepted trade-off — the entity count is bounded by match duration.
+Combat systems (in `systems.rs`) run in both modes. Visual systems (in `src/states/mod.rs`) only run in graphical mode. This means marker component entities spawn in headless mode but never get meshes/materials attached and never get cleaned up (they leak until the process exits). This is a known, accepted trade-off — the entity count is bounded by match duration.
 
 ### 7. Name Components After Their Visual Shape
 
@@ -230,16 +230,20 @@ Bevy has a compile-time tuple size limit for system groups. Each visual effect t
 
 When adding a new visual effect, touch these files:
 
-- [ ] `components/visual.rs` — New component struct
-- [ ] Combat system file — Spawn the component (e.g., a file under `combat_core/`, `effects/dispels.rs`)
-- [ ] `rendering/effects/<your_effect>.rs` — New submodule: three systems + color helper (wire it in `rendering/effects/mod.rs`)
-- [ ] `states/mod.rs` — System registration (new `.add_systems()` group)
+- [ ] `src/states/play_match/components/visual.rs` — New component struct
+- [ ] Combat system file — Spawn the component (e.g., a file under `src/states/play_match/combat_core/`, `src/states/play_match/effects/dispels.rs`)
+- [ ] `rendering/effects/<your_effect>.rs` — New submodule: three systems + color helper (wire it in `src/states/play_match/rendering/effects/mod.rs`)
+- [ ] `src/states/mod.rs` — System registration (new `.add_systems()` group)
 - [ ] Verify build: `cargo build --release`
 - [ ] Headless test: `cargo run --release -- --headless /tmp/test.json`
+- [ ] Visual probe — if the effect is aimed, spans two points, or spawns as a
+      group, assert the RENDERED world geometry, not the fields you stored
+      (see `visual-probes-assert-rendered-geometry.md`)
 
 ## Cross-References
 
+- [visual-probes-assert-rendered-geometry.md](visual-probes-assert-rendered-geometry.md) — what a probe for one of these effects must assert to be worth writing
 - [Adding a New Class: Paladin](adding-new-class-paladin.md) — Documents the dispel system and pending component pattern
-- [CLAUDE.md: Adding a New Ability](../../CLAUDE.md) — Full ability addition checklist
+- [CLAUDE.md: Adding a New Ability](../../../CLAUDE.md) — Full ability addition checklist
 - Commit `56860b1` — HealingLightColumn implementation (the original pattern)
 - Commit `070891c` — DispelBurst implementation (second application of the pattern)

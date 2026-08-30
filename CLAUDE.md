@@ -165,6 +165,9 @@ For deeper context, see these focused references:
   Background on the camp: **[the camp handoff](design-docs/2026-08-01-nagrand-camp-handoff.md)**.
 - **[Stat Scaling](design-docs/stat-scaling-system.md)** - Damage/healing formulas and coefficients
 - **[Game Design](design-docs/game-design-doc.md)** - High-level game vision
+- **[Concepts](CONCEPTS.md)** - Vocabulary substrate: the words that mean something
+  specific in this codebase, defined once so other docs can cite rather than
+  redefine them. Currently seeded for the animation/visual-effects area.
 - **[Documented Solutions](docs/solutions/)** - Documented solutions to past problems (bugs, implementation patterns, workflows) organized by category, with YAML frontmatter (`module`, `tags`, `category`). Relevant when implementing or debugging in documented areas.
 
 ## Key Concepts

@@ -66,3 +66,4 @@ Both traps fail silently and permanently — no panic, no log line, just a unit 
 
 - `signature-ability-animation-procedure.md` — the full procedure this trap list belongs to
 - `adding-visual-effect-bevy.md` — the general visual-effect lifecycle
+- `visual-probes-assert-rendered-geometry.md` — the GEOMETRY half of visual-probe coverage; this doc is the LIFECYCLE half

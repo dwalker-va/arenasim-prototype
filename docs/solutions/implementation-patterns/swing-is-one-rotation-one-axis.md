@@ -138,3 +138,4 @@ travel that the yaw was wrongly added for.
   Mortal Strike amendment records the same lesson from the design side
 - `fixed-timestep-visual-strobe.md` — the other class of animation defect that
   passes every mechanical check and is visible only to a human watching
+- `visual-probes-assert-rendered-geometry.md` — the general statement of this doc's `How to Check It`: assert the rendered world geometry, not the parameters the code stored
