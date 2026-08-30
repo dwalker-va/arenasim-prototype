@@ -974,6 +974,19 @@ fn clear_body_state(
 /// hair out of range.
 const MELEE_STANDOFF: f32 = 2.0;
 
+/// How far from the caster the dummy stands to preview Frost Nova, in yards.
+///
+/// The staged separation puts the pair 16yd apart, but Frost Nova is
+/// caster-centred with a 10yd wavefront — so at home the dummy sits OUTSIDE the
+/// nova entirely. The sandbox's zero-duration `CastingState` re-checks only
+/// alive and line-of-sight, never range, so the dummy still took the Root and
+/// froze INSTANTLY while the rings visibly stopped 6yd short of it: a preview
+/// showing a wave that never reaches a unit it just froze, which is precisely
+/// the propagation this ability exists to display. Inside the radius, and far
+/// enough out that the arrival delay is a visible fraction of the wave's
+/// 0.867s travel.
+const NOVA_PREVIEW_DISTANCE: f32 = 7.5;
+
 /// Radius and angular speed of the circle a staged unit walks for the
 /// position-driven entries. The radius is deliberately small: at 3yd the unit
 /// walked clean out of the camera presets' shot, which made the entries whose
@@ -1087,6 +1100,13 @@ pub fn position_caster(
                 _ => (WALK_RADIUS, WALK_ANGULAR_SPEED),
             };
             circle_walk(dummy_home, walk_elapsed, radius, speed)
+        }
+        // Keyed on SELECTION rather than on `entry` (which is gated on
+        // `playing`): the wave spawns on the same tick playback starts, and a
+        // dummy still walking in from home would be outside the radius at the
+        // instant the victim list is taken.
+        _ if playback.selected == Some(SandboxEntry::Ability(AbilityType::FrostNova)) => {
+            stage.caster_home + Vec3::X * NOVA_PREVIEW_DISTANCE
         }
         _ => dummy_home,
     };

@@ -19,14 +19,15 @@ use std::time::Duration;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
 
-use arenasim::states::play_match::abilities::SpellSchool;
+use arenasim::states::play_match::abilities::{AbilityType, SpellSchool};
+use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::components::{
-    ActiveAuras, Aura, AuraType, CcFlare, CcKind, CcRig, Combatant, OriginalMesh, Pet, PetType, RootStyle,
-    RootedVisual, StunnedVisual, VisualBody, WalkAnim,
+    ActiveAuras, Aura, AuraType, CcFlare, CcKind, CcRig, Combatant, NovaFreezeDelay, OriginalMesh,
+    Pet, PetType, RootStyle, RootedVisual, StunnedVisual, VisualBody, WalkAnim,
 };
 use arenasim::states::play_match::{
-    billboard_cc_beads, cc_envelope, cleanup_cc_flares, cleanup_cc_rigs, root_style, update_cc_flares,
-    update_cc_rigs,
+    billboard_cc_beads, cc_envelope, cleanup_cc_flares, cleanup_cc_rigs, nova_outer_radius, root_style,
+    update_cc_flares, update_cc_rigs,
     update_hard_cc_visuals,
 };
 use arenasim::CharacterClass;
@@ -874,4 +875,77 @@ fn cc_envelope_is_monotone_and_bounded() {
         0.0
     );
     assert_eq!(cc_envelope(10.0, Some(retract * 2.0), grow, retract), 0.0);
+}
+
+// ==============================================================================
+// Frost Nova propagation
+// ==============================================================================
+
+/// The apply flare must wait for the wavefront, like the rig it announces.
+///
+/// Regression: the flare took no delay at all, so a nova catching victims at
+/// different distances popped every "landing" ring at t=0 and then raised their
+/// crystals seconds apart — the flare contradicting the propagation it exists to
+/// announce. Asserts the RENDERED scale, not the stored field.
+#[test]
+fn a_delayed_root_flare_stays_invisible_until_the_wave_arrives() {
+    let mut h = Harness::new();
+    let unit = h.spawn_unit(0, 0);
+
+    // A victim at the far edge of the nova: the wave takes most of its life to
+    // get there.
+    h.app
+        .world_mut()
+        .entity_mut(unit)
+        .insert(NovaFreezeDelay { secs: 0.5, age: 0.0 });
+    h.apply(unit, frost_root());
+    h.tick(1);
+
+    let flare = h
+        .app
+        .world_mut()
+        .query_filtered::<Entity, With<CcFlare>>()
+        .iter(h.app.world())
+        .next()
+        .expect("a root still spawns its flare immediately");
+    assert!(
+        (h.app.world().get::<CcFlare>(flare).unwrap().delay - 0.5).abs() < 1e-3,
+        "the flare must inherit the rig's wavefront delay"
+    );
+
+    // Mid-delay: spawned, but drawing nothing.
+    h.tick(4);
+    let scale = h.app.world().get::<Transform>(flare).unwrap().scale;
+    assert_eq!(
+        scale,
+        Vec3::ZERO,
+        "the flare rendered before the wavefront reached the victim"
+    );
+
+    // Past the delay it expands normally, and gets its FULL span — the delay
+    // holds the clock rather than eating into the flare's life.
+    h.tick(8);
+    let scale = h.app.world().get::<Transform>(flare).unwrap().scale;
+    assert!(
+        scale.x > 0.0,
+        "the flare never started after its delay elapsed"
+    );
+}
+
+/// The outer ring is a promise about where the freeze reaches, so it must land
+/// on the gameplay radius rather than a constant that can drift from it.
+#[test]
+fn the_wavefront_lands_on_the_gameplay_radius() {
+    let defs = AbilityDefinitions::default();
+    let range = defs
+        .get(&AbilityType::FrostNova)
+        .expect("FrostNova is defined in abilities.ron")
+        .range;
+    assert!(
+        (nova_outer_radius() - range).abs() < 1e-3,
+        "the wavefront stops at {}yd but Frost Nova roots out to {}yd — victims \
+         between the two freeze instantly, outside a wave that never arrives",
+        nova_outer_radius(),
+        range
+    );
 }

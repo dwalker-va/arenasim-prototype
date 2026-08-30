@@ -54,8 +54,15 @@ const NOVA_RING1_FULL: f32 = 0.667;
 /// Seconds each successive ring is held back, so the three separate.
 const NOVA_RING_STAGGER: f32 = 0.10;
 /// Full radii in yards. Frost Nova's gameplay radius is 10, so the outer ring
-/// lands on it.
+/// lands on it. That coincidence is load-bearing, not decorative — the
+/// wavefront is a promise about where the freeze reaches — so it is pinned
+/// against `abilities.ron` by `the_wavefront_lands_on_the_gameplay_radius`.
 const NOVA_RADII: [f32; 3] = [5.2, 8.5, 10.0];
+
+/// Where the outer ring stops, for the test that pins it to the RON's range.
+pub fn nova_outer_radius() -> f32 {
+    NOVA_RADII[2]
+}
 /// Width of each ring's band.
 const NOVA_RING_THICKNESS: f32 = 0.55;
 /// Fixed world height, for the same reason the hard-CC ground pieces use one:

@@ -550,6 +550,7 @@ fn spawn_cc_flare(
     materials: &mut Assets<StandardMaterial>,
     origin: Vec3,
     end_scale: f32,
+    delay: f32,
 ) {
     let mesh = meshes.add(Annulus::new(CC_FLARE_INNER_RATIO, 1.0).mesh().resolution(56));
     // Emissive, NOT unlit — see `STUN_BEAD_COLOR` for why the two are
@@ -572,6 +573,7 @@ fn spawn_cc_flare(
         CcFlare {
             lifetime: CC_FLARE_SECS,
             end_scale,
+            delay,
         },
         PlayMatchEntity,
     ));
@@ -715,6 +717,7 @@ pub fn update_hard_cc_visuals(
                         &mut materials,
                         origin + Vec3::Y * 0.01,
                         CC_FLARE_END_GROUND * stature,
+                        delay,
                     );
                 }
             }
@@ -740,6 +743,7 @@ pub fn update_hard_cc_visuals(
                         &mut materials,
                         origin,
                         CC_FLARE_END_HEAD * stature,
+                        0.0,
                     );
                 }
             }
@@ -859,6 +863,14 @@ pub fn update_cc_flares(
     let dt = time.delta_secs();
 
     for (mut flare, mut transform, material_handle) in flares.iter_mut() {
+        // Held for the wavefront. A zero scale renders nothing, so the material
+        // is left alone until the ring actually starts — and `lifetime` is not
+        // ticked, so a delayed flare gets its full span once it does.
+        if flare.delay > 0.0 {
+            flare.delay -= dt;
+            transform.scale = Vec3::ZERO;
+            continue;
+        }
         flare.lifetime -= dt;
         let progress = (flare.lifetime / CC_FLARE_SECS).clamp(0.0, 1.0);
         let elapsed = 1.0 - progress;

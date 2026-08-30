@@ -36,11 +36,11 @@ use crate::states::play_match::components::*;
 // white flash at the mace. There is still no hammer of light and nothing
 // travels between the two units; the stroke is the caster's own arm.
 //
-// ONE DELIBERATE DIVERGENCE. The source's streak is a fixed ~4 units regardless
-// of where the victim stands; ours is scaled to the real caster-target distance
-// so it arrives at the unit being stunned. At a 10yd range and this camera, a
-// streak that stops a third of the way there reads as a misfire rather than a
-// reach, and the streak is the only thing connecting the two units.
+// The wave is caster-centred and a FIXED radius, like the source's. An earlier
+// version scaled it to the caster-target distance so it would arrive at the
+// victim, which only made sense while it was a streak standing in for a
+// projectile. Nothing connects the two units now: the victim's own rune is what
+// marks the landing.
 //
 // Graphical-only, keyed on the `InstantAbilityFired` marker. No `game_rng` draw,
 // no sim write — headless stays byte-identical.
@@ -52,14 +52,12 @@ const HOJ_STREAK_SECS: f32 = 0.667;
 /// start moving instantly and it settles before it fades.
 const HOJ_STREAK_GROW_FROM: f32 = 0.15;
 const HOJ_STREAK_GROW_TO: f32 = 0.90;
-/// Radius the caster's ground ring expands to, in yards.
+/// How far the wavefront rolls out around the caster's feet, in yards.
 ///
-/// The reference shows a flat golden ring sweeping out around the PALADIN'S OWN
-/// FEET — not a streak travelling toward the victim. A directional streak
-/// implies a projectile, and this spell has none (`HasMissile = 0`); the ring is
-/// what the source's "elements translate outward while scaling 7.2x" actually
-/// draws.
-/// How far the wavefront rolls out, in yards.
+/// The reference shows a flat golden sweep around the PALADIN'S OWN FEET, not
+/// something travelling toward the victim. A directional streak implies a
+/// projectile, and this spell has none (`HasMissile = 0`); this is what the
+/// source's "elements translate outward while scaling 7.2x" actually draws.
 const HOJ_RING_RADIUS: f32 = 2.6;
 /// Half-angle of the wave's sweep about the aim, in radians.
 ///
@@ -275,8 +273,8 @@ fn rune_texture() -> Image {
     )
 }
 
-/// Spawns both halves of a Hammer of Justice: the ground streak from the
-/// Paladin toward its victim, and the rune that blooms on the victim's chest.
+/// Spawns both halves of a Hammer of Justice: the ground wave sweeping out from
+/// the Paladin's feet, and the rune that blooms on the victim's chest.
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_holy_justice(
     commands: &mut Commands,
@@ -321,7 +319,6 @@ pub fn spawn_holy_justice(
         HolyStreak {
             age: 0.0,
             length: HOJ_RING_RADIUS,
-            direction,
             origin: caster_pos.with_y(HOJ_GROUND_Y),
         },
         PlayMatchEntity,

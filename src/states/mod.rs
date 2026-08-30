@@ -501,15 +501,24 @@ impl Plugin for StatesPlugin {
                     // victims key on.
                     play_match::update_crescent_flares,
                     play_match::cleanup_crescent_flares,
-                    // Hammer of Justice's ground streak and victim rune. No
-                    // weapon stroke — the source has no hammer.
+                    // Hammer of Justice's caster-centred ground wave and victim
+                    // rune. The uppercut stroke is dispatched separately, in
+                    // `consume_instant_ability_signals`.
                     play_match::update_holy_streaks,
                     play_match::update_justice_runes,
                     play_match::cleanup_holy_justice,
-                    // Frost Nova's wavefront. Chained AHEAD of the hard-CC
-                    // treatment below so a victim's `NovaFreezeDelay` is in
-                    // place before its Root rig is built — otherwise the rig
-                    // grows immediately and the propagation is lost.
+                    // Frost Nova's wavefront.
+                    //
+                    // These four are order-INDEPENDENT of the hard-CC treatment
+                    // below; none of them writes `NovaFreezeDelay`. The real
+                    // invariant is a schedule apart: the delay is inserted by
+                    // `spawn_frost_nova`, called from
+                    // `consume_instant_ability_signals` in FIXED_UPDATE, which
+                    // therefore runs before any Update-schedule system can build
+                    // the victim's Root rig. Move that consumer out of
+                    // FixedUpdate and the rig grows immediately with the
+                    // propagation lost — reordering anything here will not save
+                    // it.
                     play_match::update_nova_rings,
                     play_match::update_nova_shards,
                     play_match::cleanup_frost_nova,

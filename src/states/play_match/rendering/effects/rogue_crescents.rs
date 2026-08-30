@@ -94,9 +94,10 @@ pub struct CrescentSpec {
     pub layout: CrescentLayout,
     /// How many crescents the flare spawns.
     pub count: u32,
-    /// Height above the caster's SIM origin. A combatant's body centre is its
-    /// sim y, its crown +1.25 and its feet -1.25, so head height is ~+0.9 and
-    /// torso ~+0.15.
+    /// Height above the ANCHOR unit's SIM origin — the caster for a
+    /// `CasterSweep`, the victim for a `VictimHalo`. A combatant's body centre
+    /// is its sim y, its crown +1.25 and its feet -1.25, so head height is
+    /// ~+0.9 and torso ~+0.15.
     pub height: f32,
     /// Distance in front of the caster, along the line to the target.
     pub reach: f32,

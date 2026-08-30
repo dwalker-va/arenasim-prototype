@@ -13,6 +13,7 @@ use std::time::Duration;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
 
+use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::components::{
     Combatant, HolyStreak, InstantAbilityFired, JusticeRune, SwingStyle, VisualBody, WeaponHand,
@@ -38,6 +39,9 @@ impl Harness {
         app.init_asset::<StandardMaterial>();
         app.init_asset::<Image>();
         app.insert_resource(TimeUpdateStrategy::ManualDuration(TICK));
+        // `consume_instant_ability_signals` reads Frost Nova's radius from
+        // the real ability data rather than restating it as a constant.
+        app.insert_resource(AbilityDefinitions::default());
         app.add_systems(
             Update,
             (

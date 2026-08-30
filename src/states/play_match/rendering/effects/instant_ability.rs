@@ -18,7 +18,9 @@
 //! a flourish and no weapon stroke, and one that is caster-centred with no
 //! target at all. Frost Nova is still exactly that second case — no stroke, no
 //! target — and would spawn its marker, be consumed, and render nothing if the
-//! two were ever renested.
+//! two were ever renested. (Hammer of Justice used to be the first case too,
+//! until it gained its uppercut; Frost Nova is now the only ability holding
+//! that guard open, so do not "simplify" it away on the strength of one arm.)
 //!
 //! Registered only in `states/mod.rs`, in `FixedUpdate` after
 //! `CombatSystemPhase::CombatResolution`: `FixedUpdate` can tick several times
@@ -26,6 +28,7 @@
 
 use bevy::prelude::*;
 use crate::states::play_match::abilities::AbilityType;
+use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
 use super::mortal_strike::spawn_mortal_strike_flourish;
 use super::frost_nova::spawn_frost_nova;
@@ -34,11 +37,6 @@ use super::rogue_crescents::{spawn_crescent_fan, CHEAP_SHOT_CRESCENTS, KIDNEY_SH
 
 /// Height above the target's origin at which a melee hit registers.
 const IMPACT_HEIGHT: f32 = 1.45;
-
-/// Frost Nova's point-blank radius, matching `abilities.ron`. Only used to pick
-/// which enemies the wavefront tells to freeze — the sim has already decided who
-/// is actually rooted.
-const FROST_NOVA_RADIUS: f32 = 10.0;
 
 /// The bespoke stroke an instant ability swings, if it has one.
 ///
@@ -78,6 +76,11 @@ pub fn consume_instant_ability_signals(
     mut sockets: Query<&mut WeaponSocket>,
     positions: Query<&Transform, With<Combatant>>,
     teams: Query<(Entity, &Transform, &Combatant)>,
+    // Frost Nova's radius is GAMEPLAY data. Read it rather than restating it:
+    // a hardcoded copy that drifts from `abilities.ron` denies `NovaFreezeDelay`
+    // to a victim the sim did root, which freezes it instantly outside a wave
+    // that never arrives — with nothing failing.
+    ability_defs: Res<AbilityDefinitions>,
 ) {
     for (signal_entity, signal) in signals.iter() {
         let caster_pos = positions.get(signal.caster).map(|t| t.translation).ok();
@@ -173,12 +176,15 @@ pub fn consume_instant_ability_signals(
                     // freeze. Read from live positions rather than passed through
                     // the marker: the AoE's victim list is a sim concern, and the
                     // marker stays ability-agnostic.
+                    let radius = ability_defs
+                        .get(&AbilityType::FrostNova)
+                        .map(|c| c.range)
+                        .unwrap_or_default();
                     let victims: Vec<(Entity, Vec3)> = teams
                         .iter()
                         .filter(|(e, _, c)| *e != signal.caster && c.team != caster_team)
                         .filter(|(_, t, _)| {
-                            t.translation.with_y(0.0).distance(caster_pos.with_y(0.0))
-                                <= FROST_NOVA_RADIUS
+                            t.translation.with_y(0.0).distance(caster_pos.with_y(0.0)) <= radius
                         })
                         .map(|(e, t, _)| (e, t.translation))
                         .collect();

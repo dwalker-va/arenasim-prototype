@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
+use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::combat_core::refused_fraction;
 use arenasim::states::play_match::components::{
@@ -44,6 +45,9 @@ fn harness() -> App {
     // needs an `Assets<Image>` even for abilities that never spawn one.
     app.init_asset::<Image>();
     app.insert_resource(TimeUpdateStrategy::ManualDuration(TICK));
+    // `consume_instant_ability_signals` reads Frost Nova's radius from the
+    // real ability data rather than restating it as a constant.
+    app.insert_resource(AbilityDefinitions::default());
     app
 }
 

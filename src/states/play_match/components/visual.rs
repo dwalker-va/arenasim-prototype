@@ -914,6 +914,16 @@ pub struct CcFlare {
     pub lifetime: f32,
     /// Scale the ring expands to — wider on the ground than overhead.
     pub end_scale: f32,
+    /// Seconds to hold invisible before the ring starts, mirroring the
+    /// [`CcRig::delay`] of the rig it accompanies.
+    ///
+    /// A Frost Nova catching victims at different distances gives each a
+    /// different delay, so the freeze propagates outward with the wavefront.
+    /// Without the same delay here, every victim's "landing" ring pops at once
+    /// and then their crystals rise seconds apart — the flare contradicting the
+    /// propagation it is supposed to announce. Zero for a root from any other
+    /// source, which lands everywhere at once.
+    pub delay: f32,
 }
 
 /// One sparkle in a stunned unit's overhead whirl.
@@ -962,23 +972,22 @@ pub struct CrescentFlare {
     pub emissive: LinearRgba,
 }
 
-/// Hammer of Justice's ground streak: a flat gold decal racing from the Paladin
-/// toward its victim.
+/// Hammer of Justice's ground wave: a flat gold arc sweeping outward from the
+/// Paladin's own feet.
 ///
-/// The source spawns no hammer and no projectile — `HasMissile = 0` — so this
-/// travel along the ground is the whole of how a 10yd instant covers its range.
-/// See `rendering/effects/holy_justice.rs`.
+/// The NAME is historical. This began as a streak racing toward the victim, on
+/// a reading of `HasMissile = 0` and a `SpecialUnarmed` animation name as "no
+/// weapon motion at all". Reference imagery reversed that: nothing travels
+/// between the two units, and the source draws a wavefront rolling out around
+/// the caster. See `src/states/play_match/rendering/effects/holy_justice.rs`.
 #[derive(Component)]
 pub struct HolyStreak {
     pub age: f32,
-    /// Full reach in yards, resolved at spawn from the real caster-target
-    /// distance.
+    /// How far the wave rolls out, in yards. A FIXED radius — the wave is
+    /// caster-centred, so unlike the streak it replaced it does not scale to
+    /// the caster-target distance.
     pub length: f32,
-    /// Unit aim direction on the ground plane. Kept because the quad is CENTRED
-    /// on its origin, so growing it forward means walking its centre out by half
-    /// the current reach rather than only scaling.
-    pub direction: Vec3,
-    /// The caster's feet — the streak's fixed tail.
+    /// The caster's feet — the wave's fixed centre.
     pub origin: Vec3,
 }
 
