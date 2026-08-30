@@ -161,7 +161,7 @@ fn spark_jitter(seed: u32) -> f32 {
 // --- Spawn ------------------------------------------------------------------
 
 /// Spawn the full Mortal Strike flourish. Called from the instant-attack router
-/// (`instant_attack.rs`) at the landed hit, with the stroke already started on
+/// (`instant_ability.rs`) at the landed hit, with the stroke already started on
 /// the attacker's socket.
 ///
 /// `stroke_secs` is the styled stroke's total duration, so the trail samples

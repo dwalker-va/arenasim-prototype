@@ -191,7 +191,7 @@ pub fn decide_paladin_action(
     // kill target happens naturally via FREE's legacy melee pursuit.
     if let HojPlan::DipCast { target, completed_state } = &plan.hoj {
         if try_dip_hammer_of_justice(
-            commands, combat_log, abilities, combatant, my_pos, auras, ctx,
+            commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
             *target, same_frame_cc_queue, &mut builder,
         ) {
             // `builder` exclusively borrows the trace; finish it before
@@ -237,7 +237,7 @@ pub fn decide_paladin_action(
     // the Paladin's own attacker is never starved.
     if matches!(plan.hoj, HojPlan::Rotation) {
         if try_hammer_of_justice(
-            commands, combat_log, abilities, combatant, my_pos, auras, ctx,
+            commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
             same_frame_cc_queue, &mut builder,
         ) {
             builder.finish();
@@ -818,6 +818,7 @@ fn try_hammer_of_justice(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     abilities: &AbilityDefinitions,
+    entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
@@ -864,7 +865,7 @@ fn try_hammer_of_justice(
     };
 
     cast_hammer_of_justice(
-        commands, combat_log, def, combatant, *target_entity, target_id,
+        commands, combat_log, entity, def, combatant, *target_entity, target_id,
         same_frame_cc_queue, builder,
     );
 
@@ -880,6 +881,7 @@ fn try_dip_hammer_of_justice(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     abilities: &AbilityDefinitions,
+    entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
@@ -912,7 +914,7 @@ fn try_dip_hammer_of_justice(
     }
 
     cast_hammer_of_justice(
-        commands, combat_log, def, combatant, target, info.log_id(),
+        commands, combat_log, entity, def, combatant, target, info.log_id(),
         same_frame_cc_queue, builder,
     );
 
@@ -926,6 +928,7 @@ fn try_dip_hammer_of_justice(
 fn cast_hammer_of_justice(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
+    entity: Entity,
     def: &AbilityConfig,
     combatant: &mut Combatant,
     target_entity: Entity,
@@ -934,6 +937,27 @@ fn cast_hammer_of_justice(
     builder: &mut DecisionEventBuilder<'_>,
 ) {
     builder.choose(AbilityType::HammerOfJustice, Some(target_entity), true);
+
+    // Caster-side gesture marker (A2). Hammer of Justice is instant AND
+    // aura-only, so it enters neither generic caster hook and would otherwise
+    // render nothing on the Paladin's side. Spawned on the committed-use branch
+    // — the caster performed the gesture whether or not the stun stuck — and
+    // unconditionally in BOTH modes, per
+    // `cosmetic-marker-cross-mode-spawn-parity.md`; headless spawns it, never
+    // reads it, and the match-exit `PlayMatchEntity` sweep reclaims it.
+    //
+    // Placed in the SHARED cast helper rather than in the two callers, so the
+    // rotation HoJ and the dip HoJ both get it from one site and a future third
+    // caller cannot forget it.
+    commands.spawn((
+        InstantAbilityFired {
+            caster: entity,
+            target: Some(target_entity),
+            ability: AbilityType::HammerOfJustice,
+            is_crit: false,
+        },
+        PlayMatchEntity,
+    ));
 
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;

@@ -543,7 +543,7 @@ pub struct WeaponSocket {
     pub windup_s: f32,
     /// Which named stroke the current release is playing. `Auto` between
     /// strokes and for every ordinary auto-attack; set alongside `release_t`
-    /// by `consume_instant_attack_signals` for a signature ability, and reset
+    /// by `consume_instant_ability_signals` for a signature ability, and reset
     /// to `Auto` when that stroke expires. Selects both the timing profile and
     /// the arc SHAPE in `animate_weapon_swings`.
     pub swing_style: SwingStyle,
@@ -593,29 +593,92 @@ pub enum SwingStyle {
     /// right") and is a different arc PLANE, not a heavier version of the same
     /// swing.
     MortalStrike,
+    /// Rogue Cheap Shot: a fast, shallow swing. The source plays plain
+    /// `Attack1H` over 634ms — genuinely generic, and half the length of Kidney
+    /// Shot's lunge. Its job is to be QUICK, which is the whole contrast with
+    /// the finisher.
+    CheapShot,
+    /// Rogue Kidney Shot: a deep lunging thrust. The source plays
+    /// `Attack1HPierce` over 1233ms — twice Cheap Shot's length, and a PIERCE
+    /// rather than a swing. That shape difference, plus its unique magenta cast
+    /// model, is the whole of what separates the two rogue stuns; they are
+    /// byte-identical on the receiver side.
+    KidneyShot,
+    /// Paladin Hammer of Justice: an UPPERCUT. The mace drops low, then drives
+    /// vertically up as the seal lands on the victim.
+    ///
+    /// Nearly sagittal, where Mortal Strike's signature is a 49-degree diagonal
+    /// — the two must not be mistaken for each other, and a rise is the natural
+    /// reading of a hammer of judgement being brought up.
+    HammerOfJustice,
 }
 
-/// One landed instant melee attack, spawned in core at the
-/// `QueuedInstantAttack` drain site (`combat_ai.rs`) — the mechanism Mortal
-/// Strike, Ambush and Sinister Strike all resolve through, none of which ever
-/// enters `CastingState`/`process_casting`. Mirrors [`AutoAttackSwing`] and
-/// [`CastEnding`]: a bare marker entity, spawned unconditionally in BOTH modes
-/// (headless spawns it and never reads it), consumed and despawned by
-/// `consume_instant_attack_signals` (`rendering/effects/instant_attack.rs`,
+/// One instant ability performed by a caster, spawned by combat code at that
+/// ability's own resolution site and consumed by the graphical gesture router
+/// (`consume_instant_ability_signals`, `rendering/effects/instant_ability.rs`,
 /// registered only in `states/mod.rs`).
 ///
+/// This is the caster-side counterpart to `CastingState` -> casting orb: a hard
+/// cast telegraphs itself for its whole duration, an instant does not, so an
+/// instant that wants an actor-side animation states it here. Mirrors
+/// [`AutoAttackSwing`] and [`CastEnding`]: a bare marker entity, spawned
+/// unconditionally in BOTH modes (headless spawns it and never reads it) per
+/// `cosmetic-marker-cross-mode-spawn-parity.md`.
+///
 /// Deliberately ability-AGNOSTIC: core never learns which instants have a
-/// signature. The graphical router decides, so a new melee-instant signature
-/// costs one match arm there and touches no combat code. Spawned only after
-/// the hit's `is_alive` gate, like `AutoAttackSwing`, so a same-frame death
-/// never telegraphs a phantom strike.
+/// signature. The graphical router decides, so a new signature costs one match
+/// arm there and touches no combat code.
+///
+/// **Each spawn site owns its own gate and documents it.** The
+/// `QueuedInstantAttack` drain spawns only inside the landed-hit `is_alive`
+/// gate, like `AutoAttackSwing`, so a same-frame death never telegraphs a
+/// phantom strike. The class-AI sites spawn on the committed-use branch,
+/// because the caster performed the gesture whether or not every aura stuck.
 #[derive(Component)]
-pub struct InstantAttackLanded {
-    pub attacker: Entity,
-    pub target: Entity,
+pub struct InstantAbilityFired {
+    pub caster: Entity,
+    /// The single unit the gesture is aimed at, or `None` for a caster-centred
+    /// effect. An AoE has no one target, and picking one out of the victim list
+    /// would be an arbitrary lie that the geometry would then be anchored on.
+    pub target: Option<Entity>,
     pub ability: AbilityType,
-    /// Cosmetic only — scales the flourish. Never read by sim code.
+    /// Cosmetic only — scales the flourish. Never read by sim code. `false` for
+    /// aura-only abilities, which roll no crit.
     pub is_crit: bool,
+}
+
+impl InstantAbilityFired {
+    /// Every ability whose combat path spawns this marker — the single list.
+    ///
+    /// The animation sandbox runs neither the class AIs nor the
+    /// `QueuedInstantAttack` drain, so it must spawn the marker itself for
+    /// exactly this set. Deriving the sandbox's behaviour from this one
+    /// predicate is what stops the two drifting.
+    ///
+    /// TWO audits guard it, because they catch different mistakes.
+    /// `animation_sandbox/playback.rs` asserts every ability listed here
+    /// classifies as `EntryFamily::Residue`, so a LISTED ability always
+    /// previews. `tests/instant_ability_audit.rs` scans the source for real
+    /// spawn sites and checks the list against them, so an ability given a
+    /// spawn site but forgotten HERE fails too — which the family check alone
+    /// cannot see, because a `commands.spawn` in class AI is invisible to it.
+    pub fn is_spawned_for(ability: AbilityType) -> bool {
+        use AbilityType::*;
+        matches!(
+            ability,
+            // Resolved through the `QueuedInstantAttack` drain in combat_ai.rs.
+            MortalStrike | Ambush | SinisterStrike
+            // Instant AND aura-only: applied inline in class AI, entering
+            // neither generic caster hook (A2).
+            | CheapShot | KidneyShot | HammerOfJustice | FrostNova
+        )
+    }
+
+    /// Whether this ability's gesture is anchored on the caster rather than a
+    /// victim — the `target: None` cases.
+    pub fn is_caster_centred(ability: AbilityType) -> bool {
+        matches!(ability, AbilityType::FrostNova)
+    }
 }
 
 /// One heal that a [`AuraType::HealingReduction`] debuff cut down, spawned in
@@ -765,4 +828,217 @@ pub struct WindfuryTornado {
     pub initial_lifetime: f32,
     /// Spin accumulator (seconds) driving the fast Y-axis rotation.
     pub spin: f32,
+}
+
+/// Which restraint object a rooted unit wears. Selected from the aura's
+/// `spell_school` (Frost Nova is `Frost`, Spider Web is `Nature`), so a future
+/// root inherits a treatment with no code change.
+#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RootStyle {
+    /// Faceted ice crystals stabbing up around the feet.
+    Ice,
+    /// A webbed sheet over the shins — spokes out to a hem pinned on the floor,
+    /// crossed by concentric rings.
+    Web,
+}
+
+/// Marker: this unit is rooted and wearing the feet treatment.
+///
+/// The SINGLE source of truth for every visual keyed on `AuraType::Root` — the
+/// rig's lifetime and its retract arm both key off this marker, never off a
+/// second system re-deriving state from `ActiveAuras` (predicates that each
+/// re-derive drift apart; see `aura-driven-visual-exit-paths.md`). Carrying the
+/// style makes a style CHANGE — a Web root replaced by a Frost Nova within one
+/// tick — a detectable rebuild rather than silent drift.
+///
+/// Composes with [`StunnedVisual`]: Root and Stun are separate DR categories
+/// occupying disjoint space, and both must show at once.
+#[derive(Component)]
+pub struct RootedVisual {
+    pub style: RootStyle,
+}
+
+/// Marker: this unit is stunned and wearing the overhead whirl. See
+/// [`RootedVisual`] for the ownership rule.
+#[derive(Component)]
+pub struct StunnedVisual;
+
+/// Which hard-CC treatment a [`CcRig`] carries.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CcKind {
+    Root,
+    Stun,
+}
+
+/// One crowd-control rig: a WORLD-SPACE hub that follows its owner, with every
+/// primitive of the treatment as its own child.
+///
+/// Deliberately NOT a child of the `VisualBody` (whose local y belongs to the
+/// gaits and the victory bounce, which would lift a ground piece off the floor)
+/// and deliberately NOT a child of the sim entity (whose yaw is sim-written,
+/// which would make the whirl's spin fight the unit's facing snaps).
+///
+/// `owner` is the SIM entity and `kind` disambiguates, mirroring
+/// `FearShroud { owner }`: the retract arm filters on BOTH, so two
+/// simultaneously rooted units never strip each other's rig and a root and a
+/// stun on one unit never strip each other's. Children are UNMARKED — `despawn`
+/// is recursive, the same reason `SheepPart`'s siblings are untagged.
+#[derive(Component)]
+pub struct CcRig {
+    pub owner: Entity,
+    pub kind: CcKind,
+    /// Seconds since spawn. Drives the grow ease, the spin and the bob — all off
+    /// `Res<Time>`, never off sim displacement (`fixed-timestep-visual-strobe`).
+    pub age: f32,
+    /// `Some` once the exit was armed: the rig plays out its retract, then
+    /// despawns. A retracting rig is not "held", so a re-application spawns a
+    /// fresh one rather than reviving it.
+    pub retract: Option<f32>,
+    /// Seconds to wait before the rig starts growing. Non-zero only for a
+    /// Frost Nova victim, so its crystals rise as the wavefront reaches it
+    /// rather than the instant the aura lands (see `NovaFreezeDelay`).
+    pub delay: f32,
+    /// Vertical offset from the owner's SIM y to this rig's anchor, resolved
+    /// once at spawn from the owner's `VisualBody::rest_y` (which is the
+    /// sim-to-render correction, and is large and negative for pets). Used by
+    /// the Stun whirl; the Root rig ignores it and pins to the floor instead.
+    pub lift: f32,
+}
+
+/// The one-shot ring marking the instant a hard CC lands. Per VICTIM, so a Frost
+/// Nova catching three enemies pops three rings and the AoE reads as an AoE with
+/// no caster-side hook.
+#[derive(Component)]
+pub struct CcFlare {
+    /// Seconds remaining before despawn.
+    pub lifetime: f32,
+    /// Scale the ring expands to — wider on the ground than overhead.
+    pub end_scale: f32,
+    /// Seconds to hold invisible before the ring starts, mirroring the
+    /// [`CcRig::delay`] of the rig it accompanies.
+    ///
+    /// A Frost Nova catching victims at different distances gives each a
+    /// different delay, so the freeze propagates outward with the wavefront.
+    /// Without the same delay here, every victim's "landing" ring pops at once
+    /// and then their crystals rise seconds apart — the flare contradicting the
+    /// propagation it is supposed to announce. Zero for a root from any other
+    /// source, which lands everywhere at once.
+    pub delay: f32,
+}
+
+/// One sparkle in a stunned unit's overhead whirl.
+///
+/// The beads are camera-facing quads, not spheres — geometry cannot produce a
+/// soft-edged glow, so the falloff lives in a procedural sparkle texture's
+/// alpha. This marker exists so the billboard system can find them, and because
+/// they are children of a hub that SPINS, the billboard must counter-rotate by
+/// the hub's own rotation rather than simply copying the camera's.
+#[derive(Component)]
+pub struct CcBead;
+
+/// One crescent slash in a rogue stun's caster-side flare.
+///
+/// A camera-facing quad carrying the procedural arc texture from
+/// `rendering/effects/rogue_crescents.rs`. `delay` staggers it within its fan —
+/// the source pops Cheap Shot's four in two quick pairs and spreads Kidney
+/// Shot's three much wider — so the whole fan spawns in one loop and each
+/// crescent holds itself invisible until its turn.
+#[derive(Component)]
+pub struct CrescentFlare {
+    /// World-space unit vector the slash SWEEPS along — across the caster's
+    /// body, from its right to its left, perpendicular to the line of attack.
+    ///
+    /// The streak's long axis is turned to follow this once projected into the
+    /// camera's plane. It is deliberately NOT the aim: a blade sweeps across a
+    /// target rather than stabbing along the line to it, and the aim is close to
+    /// the view axis for the usual over-the-shoulder camera, so projecting IT
+    /// yields a near-vertical screen direction — the streaks then run head to
+    /// toe down the body, which is what shipped before this was corrected.
+    pub sweep: Vec3,
+    /// Seconds before this crescent appears.
+    pub delay: f32,
+    /// Seconds since spawn, including the delay.
+    pub age: f32,
+    /// Seconds this crescent lives once it has appeared.
+    pub lifetime: f32,
+    /// Roll about the view axis, so a fan spreads across the screen rather than
+    /// around the world.
+    pub roll: f32,
+    pub size: f32,
+    pub color: Color,
+    /// Mid-travel tint, for the source's early white-pink flash.
+    pub color_mid: Color,
+    pub color_end: Color,
+    pub emissive: LinearRgba,
+}
+
+/// Hammer of Justice's ground wave: a flat gold arc sweeping outward from the
+/// Paladin's own feet.
+///
+/// The NAME is historical. This began as a streak racing toward the victim, on
+/// a reading of `HasMissile = 0` and a `SpecialUnarmed` animation name as "no
+/// weapon motion at all". Reference imagery reversed that: nothing travels
+/// between the two units, and the source draws a wavefront rolling out around
+/// the caster. See `src/states/play_match/rendering/effects/holy_justice.rs`.
+#[derive(Component)]
+pub struct JusticeWave {
+    pub age: f32,
+    /// How far the wave rolls out, in yards. A FIXED radius — the wave is
+    /// caster-centred, so unlike the streak it replaced it does not scale to
+    /// the caster-target distance.
+    pub length: f32,
+    /// The caster's feet — the wave's fixed centre.
+    pub origin: Vec3,
+}
+
+/// The golden seal that blooms on a Hammer of Justice victim's chest.
+#[derive(Component)]
+pub struct JusticeRune {
+    pub age: f32,
+}
+
+/// One of Frost Nova's three expanding ground rings.
+///
+/// The geometry is a ragged unit-radius annulus built once at spawn; only the
+/// uniform scale changes, because the wobble is fixed and the radius is not.
+/// See `rendering/effects/frost_nova.rs`.
+#[derive(Component)]
+pub struct NovaRing {
+    /// 0, 1 or 2 — decides the radius, the stagger and the wobble's phase.
+    pub ring: u32,
+    pub age: f32,
+}
+
+/// One ice crystal thrown up along Frost Nova's outer wavefront.
+#[derive(Component)]
+pub struct NovaShard {
+    /// Nova-age at which the wave reaches this crystal's radius.
+    pub born_at: f32,
+    pub age: f32,
+    /// Full height, jittered per crystal.
+    pub height: f32,
+}
+
+/// How long a freshly-rooted unit should wait before its root crystals grow,
+/// so the freeze propagates outward with Frost Nova's wavefront instead of
+/// happening everywhere at once.
+///
+/// Inserted by the nova's graphical flourish on every enemy the wave will
+/// reach, and CONSUMED (removed) by `update_hard_cc_visuals` when it builds the
+/// Root rig. Purely cosmetic: if it is missing — a root from any other source,
+/// or a race where the rig is built first — the rig simply grows immediately,
+/// which is the pre-existing behaviour.
+///
+/// It carries its own expiry because it is inserted on everyone in RADIUS, and
+/// the graphical side cannot know who the sim actually rooted. A target that is
+/// immune (Divine Shield) or already dead gets no aura and therefore no rig, so
+/// nothing would ever consume its delay — and it would then silently postpone
+/// that unit's NEXT root, from any source, by up to a full wavefront. Expiring
+/// it after the wave has passed keeps the stranding harmless.
+#[derive(Component)]
+pub struct NovaFreezeDelay {
+    pub secs: f32,
+    /// Seconds since insertion; the component is dropped once this passes the
+    /// wavefront's own life, whether or not it was ever used.
+    pub age: f32,
 }

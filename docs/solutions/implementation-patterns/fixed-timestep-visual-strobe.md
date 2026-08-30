@@ -64,3 +64,4 @@ orb_transform.translation = casting_orb_anchor(   // position recomputed every f
 
 - `docs/solutions/implementation-patterns/adding-visual-effect-bevy.md` — the base pattern (`Res<Time>`, spawn/update/cleanup) this rule extends
 - `docs/solutions/implementation-patterns/cosmetic-marker-cross-mode-spawn-parity.md` — the companion pattern for *triggering* visuals from sim events
+- `docs/solutions/implementation-patterns/visual-probes-assert-rendered-geometry.md` — a sibling defect class: like the strobe, it survives every mechanical check and is visible only to a human watching

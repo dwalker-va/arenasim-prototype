@@ -1132,16 +1132,16 @@ pub fn decide_abilities(
                 );
 
                 // Cosmetic outcome marker for the graphical signature-animation
-                // router (`rendering/effects/instant_attack.rs`). Spawned here,
+                // router (`rendering/effects/instant_ability.rs`). Spawned here,
                 // inside the landed-hit gate, so a same-frame death never
                 // telegraphs a phantom strike — the same rule `AutoAttackSwing`
                 // follows. Ability-agnostic and byte-neutral: no `game_rng`
                 // draw, and headless spawns it and never reads it (see
                 // `cosmetic-marker-cross-mode-spawn-parity.md`).
                 commands.spawn((
-                    InstantAttackLanded {
-                        attacker: attacker_entity,
-                        target: target_entity,
+                    InstantAbilityFired {
+                        caster: attacker_entity,
+                        target: Some(target_entity),
                         ability,
                         is_crit,
                     },

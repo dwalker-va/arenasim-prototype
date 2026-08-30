@@ -133,7 +133,7 @@ rather than tumbling. Confirms the doc's claim: no new machinery, only constants
 mesh shape.
 
 A third variant in the same commit shows where the recipe's edge is.
-`RefusedHealMote` (`rendering/effects/mortal_wounds.rs`) is debris-shaped — outward
+`RefusedHealMote` (`src/states/play_match/rendering/effects/mortal_wounds.rs`) is debris-shaped — outward
 velocity, downward acceleration, self-expiring — but deliberately opaque and unlit rather
 than additive, because it represents healing being REFUSED and additive blending can only
 add light. Momentum was the right primitive; the blend mode had to invert to carry the
@@ -145,3 +145,4 @@ not from the preset it came from.
 - [adding-visual-effect-bevy.md](adding-visual-effect-bevy.md) — the base spawn/update/cleanup three-system lifecycle every transient effect uses; debris is that lifecycle plus acceleration and spin.
 - [fixed-timestep-visual-strobe.md](fixed-timestep-visual-strobe.md) — why the integrator is time-driven, never gated on sim movement.
 - [signature-ability-animation-procedure.md](signature-ability-animation-procedure.md) — signature animations spawn transition effects like this from the marker-owning system's transition branches.
+- [visual-probes-assert-rendered-geometry.md](visual-probes-assert-rendered-geometry.md) — this doc's shard probe is the prior art it generalises: assert the shards' world Y under gravity, never a stored velocity field.

@@ -1,4 +1,4 @@
-//! Probes for the Mortal Strike signature (`instant_attack.rs`,
+//! Probes for the Mortal Strike signature (`instant_ability.rs`,
 //! `mortal_strike.rs`, `mortal_wounds.rs`).
 //!
 //! Appearance is not testable here. What is — and what would fail silently —
@@ -18,14 +18,15 @@ use std::time::Duration;
 
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
+use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::combat_core::refused_fraction;
 use arenasim::states::play_match::components::{
-    Combatant, DeathAnimation, HealingRefused, InstantAttackLanded, SwingStyle, VisualBody,
+    Combatant, DeathAnimation, HealingRefused, InstantAbilityFired, SwingStyle, VisualBody,
     WeaponHand, WeaponKind, WeaponSocket,
 };
 use arenasim::states::play_match::{
-    animate_body_lean, cleanup_heal_fracture, cleanup_mortal_strike, consume_instant_attack_signals,
+    animate_body_lean, cleanup_heal_fracture, cleanup_mortal_strike, consume_instant_ability_signals,
     consume_swing_signals, spawn_heal_fracture, update_heal_fracture,
     update_mortal_strike_flash, update_mortal_strike_impacts, update_mortal_strike_sparks,
     update_mortal_strike_trail, MortalStrikePendingImpact, MortalStrikeSpark, RefusedHealMote,
@@ -40,7 +41,13 @@ fn harness() -> App {
     app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()));
     app.init_asset::<Mesh>();
     app.init_asset::<StandardMaterial>();
+    // The gesture router builds the rogue crescent texture on demand, so it
+    // needs an `Assets<Image>` even for abilities that never spawn one.
+    app.init_asset::<Image>();
     app.insert_resource(TimeUpdateStrategy::ManualDuration(TICK));
+    // `consume_instant_ability_signals` reads Frost Nova's radius from the
+    // real ability data rather than restating it as a constant.
+    app.insert_resource(AbilityDefinitions::default());
     app
 }
 
@@ -112,15 +119,15 @@ fn spawn_target(app: &mut App, x: f32) -> Entity {
 #[test]
 fn mortal_strike_starts_the_styled_stroke_on_the_main_hand() {
     let mut app = harness();
-    app.add_systems(Update, consume_instant_attack_signals);
+    app.add_systems(Update, consume_instant_ability_signals);
     let (attacker, socket) = spawn_warrior(&mut app);
     let target = spawn_target(&mut app, 2.0);
 
     let marker = app
         .world_mut()
-        .spawn(InstantAttackLanded {
-            attacker,
-            target,
+        .spawn(InstantAbilityFired {
+            caster: attacker,
+            target: Some(target),
             ability: AbilityType::MortalStrike,
             is_crit: false,
         })
@@ -144,7 +151,7 @@ fn mortal_strike_starts_the_styled_stroke_on_the_main_hand() {
 #[test]
 fn an_instant_without_a_signature_leaves_the_socket_alone_but_still_consumes_its_marker() {
     let mut app = harness();
-    app.add_systems(Update, consume_instant_attack_signals);
+    app.add_systems(Update, consume_instant_ability_signals);
     let (attacker, socket) = spawn_warrior(&mut app);
     let target = spawn_target(&mut app, 2.0);
 
@@ -152,9 +159,9 @@ fn an_instant_without_a_signature_leaves_the_socket_alone_but_still_consumes_its
     // simply have no signature yet.
     let marker = app
         .world_mut()
-        .spawn(InstantAttackLanded {
-            attacker,
-            target,
+        .spawn(InstantAbilityFired {
+            caster: attacker,
+            target: Some(target),
             ability: AbilityType::SinisterStrike,
             is_crit: false,
         })
@@ -177,13 +184,13 @@ fn an_ordinary_auto_clears_a_signature_style() {
     // without it, an auto landing while a Mortal Strike stroke is still
     // playing inherits the signature's slower timing and deeper arc.
     let mut app = harness();
-    app.add_systems(Update, (consume_swing_signals, consume_instant_attack_signals).chain());
+    app.add_systems(Update, (consume_swing_signals, consume_instant_ability_signals).chain());
     let (attacker, socket) = spawn_warrior(&mut app);
     let target = spawn_target(&mut app, 2.0);
 
-    app.world_mut().spawn(InstantAttackLanded {
-        attacker,
-        target,
+    app.world_mut().spawn(InstantAbilityFired {
+        caster: attacker,
+        target: Some(target),
         ability: AbilityType::MortalStrike,
         is_crit: false,
     });
@@ -208,14 +215,14 @@ fn a_same_tick_auto_does_not_downgrade_the_signature() {
     // Both land on one tick. The registration orders the instant consumer AFTER
     // the auto consumer precisely so the special wins the socket.
     let mut app = harness();
-    app.add_systems(Update, (consume_swing_signals, consume_instant_attack_signals).chain());
+    app.add_systems(Update, (consume_swing_signals, consume_instant_ability_signals).chain());
     let (attacker, socket) = spawn_warrior(&mut app);
     let target = spawn_target(&mut app, 2.0);
 
     app.world_mut().spawn(AutoAttackSwing { attacker, target, ranged: false });
-    app.world_mut().spawn(InstantAttackLanded {
-        attacker,
-        target,
+    app.world_mut().spawn(InstantAbilityFired {
+        caster: attacker,
+        target: Some(target),
         ability: AbilityType::MortalStrike,
         is_crit: false,
     });
@@ -236,14 +243,14 @@ fn the_impact_waits_for_the_blade_to_arrive() {
     let mut app = harness();
     app.add_systems(
         Update,
-        (consume_instant_attack_signals, update_mortal_strike_impacts).chain(),
+        (consume_instant_ability_signals, update_mortal_strike_impacts).chain(),
     );
     let (attacker, _socket) = spawn_warrior(&mut app);
     let target = spawn_target(&mut app, 2.0);
 
-    app.world_mut().spawn(InstantAttackLanded {
-        attacker,
-        target,
+    app.world_mut().spawn(InstantAbilityFired {
+        caster: attacker,
+        target: Some(target),
         ability: AbilityType::MortalStrike,
         is_crit: false,
     });
@@ -281,7 +288,7 @@ fn the_flourish_expires_without_leaking_entities() {
     app.add_systems(
         Update,
         (
-            consume_instant_attack_signals,
+            consume_instant_ability_signals,
             update_mortal_strike_trail,
             update_mortal_strike_impacts,
             update_mortal_strike_flash,
@@ -293,9 +300,9 @@ fn the_flourish_expires_without_leaking_entities() {
     let (attacker, _socket) = spawn_warrior(&mut app);
     let target = spawn_target(&mut app, 2.0);
 
-    app.world_mut().spawn(InstantAttackLanded {
-        attacker,
-        target,
+    app.world_mut().spawn(InstantAbilityFired {
+        caster: attacker,
+        target: Some(target),
         ability: AbilityType::MortalStrike,
         is_crit: true,
     });

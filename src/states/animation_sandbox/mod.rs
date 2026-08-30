@@ -26,6 +26,8 @@
 pub mod playback;
 pub mod ui;
 
+use bevy::core_pipeline::bloom::Bloom;
+use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
 use std::collections::HashMap;
 
@@ -199,8 +201,22 @@ pub fn setup_sandbox(
         manual_target: stage_focus(&config),
         ..Default::default()
     });
+    // HDR + tonemapping + bloom, matching the match camera exactly
+    // (`play_match/mod.rs:662`). Without them every effect in this codebase is
+    // reviewed here WITHOUT the bloom it was authored for: emissive is
+    // pre-scaled at 2-4x precisely so bloom turns it into a glow, and an LDR
+    // camera clamps all of that to flat white. The sandbox is the review loop
+    // for exactly these effects, so it has to render them the way the match
+    // does — otherwise a treatment tuned to look right here is wrong in play,
+    // and one that looks flat here may be fine.
     commands.spawn((
         Camera3d::default(),
+        Camera {
+            hdr: true,
+            ..default()
+        },
+        Tonemapping::TonyMcMapface,
+        Bloom::NATURAL,
         ArenaCamera,
         Transform::from_xyz(0.0, 9.0, 24.0).looking_at(stage_focus(&config), Vec3::Y),
         SandboxEntity,

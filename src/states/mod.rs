@@ -325,7 +325,7 @@ impl Plugin for StatesPlugin {
             // and silently downgrade the special to a normal swing.
             .add_systems(
                 FixedUpdate,
-                play_match::consume_instant_attack_signals
+                play_match::consume_instant_ability_signals
                     .after(CombatSystemPhase::CombatResolution)
                     .after(play_match::consume_swing_signals)
                     .run_if(in_combat_scene),
@@ -479,6 +479,60 @@ impl Plugin for StatesPlugin {
                         ),
                     ),
                 )
+                    .after(CombatSystemPhase::CombatResolution)
+                    .run_if(in_combat_scene),
+            )
+            // Hard-CC receiver treatment: ice crystals / web sheet at a rooted
+            // unit's feet, and the whirl over a stunned unit's head. Its own
+            // group because the block above is AT Bevy's 20-item .add_systems
+            // tuple limit, so a 21st sibling there does not compile.
+            //
+            // Graphical-only — never registered in `add_core_combat_systems`.
+            // Keyed purely on the VICTIM's aura, which is what makes it faithful
+            // in the animation sandbox too: Frost Nova, Cheap Shot, Kidney Shot
+            // and Hammer of Justice are all applied inline in class AI and never
+            // enter `process_casting`, but every path converges on `AuraPending`
+            // -> `apply_pending_auras`, which does run under `in_combat_scene`.
+            .add_systems(
+                Update,
+                (
+                    // Rogue stun crescents, consumed from the same
+                    // `InstantAbilityFired` marker the hard-CC treatment's
+                    // victims key on.
+                    play_match::update_crescent_flares,
+                    play_match::cleanup_crescent_flares,
+                    // Hammer of Justice's caster-centred ground wave and victim
+                    // rune. The uppercut stroke is dispatched separately, in
+                    // `consume_instant_ability_signals`.
+                    play_match::update_justice_waves,
+                    play_match::update_justice_runes,
+                    play_match::cleanup_holy_justice,
+                    // Frost Nova's wavefront.
+                    //
+                    // These four are order-INDEPENDENT of the hard-CC treatment
+                    // below; none of them writes `NovaFreezeDelay`. The real
+                    // invariant is a schedule apart: the delay is inserted by
+                    // `spawn_frost_nova`, called from
+                    // `consume_instant_ability_signals` in FIXED_UPDATE, which
+                    // therefore runs before any Update-schedule system can build
+                    // the victim's Root rig. Move that consumer out of
+                    // FixedUpdate and the rig grows immediately with the
+                    // propagation lost — reordering anything here will not save
+                    // it.
+                    play_match::update_nova_rings,
+                    play_match::update_nova_shards,
+                    play_match::cleanup_frost_nova,
+                    play_match::expire_nova_freeze_delays,
+                    play_match::update_hard_cc_visuals,
+                    play_match::update_cc_rigs,
+                    // After `update_cc_rigs`, which writes the hub rotation the
+                    // billboard has to cancel.
+                    play_match::billboard_cc_beads,
+                    play_match::update_cc_flares,
+                    play_match::cleanup_cc_rigs,
+                    play_match::cleanup_cc_flares,
+                )
+                    .chain()
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_combat_scene),
             )

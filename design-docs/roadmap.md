@@ -225,24 +225,102 @@ nothing whatsoever. Compounding it, the receiver side has treatments for
 `Fear`, `Polymorph`, `DamageOverTime`, `Absorb`, `DamageImmunity` and
 `Incapacitate` — but **none for `Root`, `Stun` or `MovementSpeedSlow`**, which
 is precisely what the silent abilities apply. One receiver-side treatment
-therefore lights up four abilities at once, which is why it leads.
+therefore lights up six abilities at once, which is why it led.
 
-### A. Root/Stun receiver treatment (highest leverage)
+Section A has since shipped and closed the `Root`/`Stun` half of that gap.
+**`MovementSpeedSlow` remains untreated** — Frostbolt, Kick, Crippling Poison,
+Arcane Shot, Concussive Shot, Lightning Bolt and Frost Shock all apply it and
+none of them shows it on the victim. It is a softer effect than hard CC and did
+not belong in the same treatment (a slowed unit is still moving and acting), but
+it is now the largest remaining receiver-side hole.
 
-- [ ] **A shared ground treatment for `Root` and `Stun`.** Covers **Frost Nova**,
-      **Cheap Shot**, **Kidney Shot** and **Spider Web** in one piece of work —
-      all four currently render *nothing at all*, on either side.
-      `traps.rs` already proves the shape: a flat `Cylinder::new(2.0, 0.05)`
-      disc laid on the ground with a per-type colour from `trap_type_rgb`.
-      Anchored to each afflicted target rather than a world position, that is a
-      frost ring under a rooted unit for very little new machinery.
-- Follows procedure step 1 (receiver side first) and step 2 (one marker
-  component owns every visual keyed on the aura). Note that Cheap Shot and
-  Kidney Shot are aura-only — they never push a `QueuedInstantAttack`, so
-  there is no `InstantAttackLanded` marker and no stroke to hang anything on;
-  the receiver side is the *only* side available for them.
-- Distinguish Root from Stun within the treatment. They differ mechanically
-  (Root permits acting, Stun does not) and the HUD already labels them apart.
+### A. Root/Stun receiver treatment (highest leverage) — SHIPPED
+
+- [x] ~~**A shared treatment for `Root` and `Stun`.**~~ Shipped in
+      `rendering/effects/hard_cc.rs`. It covers **six** abilities, not the four
+      listed here originally: the audit missed **Hammer of Justice** (Paladin,
+      6s Stun) and **Boar Charge** (Hunter pet, 1.5s Stun), both equally silent.
+- **What it looks like.** A spatial grammar carries the Root/Stun distinction:
+  **feet for Root, head for Stun**. Root grows ice crystals (Frost school) or a
+  webbed sheet (Nature — Spider Web) and then holds completely still; Stun turns
+  a hueless bead whirl overhead at exactly 1 Hz, converting a stunned unit's
+  provable inertness into a visible presence. One per-victim apply flare marks
+  the landing, which gives Frost Nova's AoE an AoE read with no caster hook.
+- **Two design calls that departed from the plan**, both worth keeping:
+  - *No ground ring.* A dark disc bitten out of the floor was argued in on
+    legibility grounds, but it is not in the source material and a dark ground
+    ring already means "AoE landing here" in this genre. The apply flare covers
+    the wide-footprint job instead.
+  - *The body is never touched.* No tint, mesh swap, pose or gait suppression —
+    which sidesteps the `OriginalBodyMaterial` contention family entirely and
+    keeps Cheap-Shot-on-a-stealthed-Rogue a non-event. A planned stun "sag" on
+    `Transform.scale` was cut: Bevy scales about the child's origin (the capsule
+    centre), so it lifted the feet off the floor, and the compensating
+    `translation.y` belongs to the gaits.
+- The web deliberately stops at the shins. Enclosing the whole unit is this
+  game's **Incapacitate** language (Freezing Trap's `IceBlockVisual` cuboid),
+  while Root leaves the torso free to act.
+- No combat-code change, no `game_rng` draw, no sandbox edit (`AURA_HOLD_SECS`
+  already generalises to every aura entry, and `is_hostile_aura` already lists
+  Root and Stun). Byte-identity holds by construction; `determinism_pin` is
+  unchanged. 25 probes in `tests/hard_cc_visual_probes.rs`.
+
+### A2. The applier side of the four silent instants — SHIPPED
+
+- [x] ~~**Frost Nova, Cheap Shot, Kidney Shot and Hammer of Justice have no
+      actor-side animation.**~~ All four now do. A was entirely receiver-side
+      because that was the only side available; this opened the other one.
+- **`InstantAttackLanded` generalised to `InstantAbilityFired`** — `caster` plus
+  `target: Option<Entity>` (`None` for a caster-centred effect), with
+  `is_spawned_for()` as the single list both combat code and the sandbox derive
+  from, so the two cannot drift. `EntryFamily::InstantMelee` was deleted, folded
+  into `Residue`: the same mechanism under a name that had stopped being true.
+- **The router had a real bug**, found independently by two reviewers. Its
+  flourish dispatch was nested inside BOTH `Some(style)` and `Some(target_pos)`,
+  so an ability with no weapon stroke or no single target could never reach it —
+  which is exactly Hammer of Justice and Frost Nova. Swing and flourish dispatch
+  are now independent.
+
+**Researching the source reversed the design for three of the four.** The
+Classic client data (DB2 tables plus the parsed M2 models) said:
+
+| Ability | What it actually is |
+|---|---|
+| Cheap Shot | Plain `Attack1H`, 634ms. Four **untinted white** crescents at head height, two quick pairs. Shares its visual with Sap — it does not even own one. |
+| Kidney Shot | `Attack1HPierce` — a **lunging thrust, not a kick**, 1233ms. Three crescents at torso height, magenta → white flash → deep crimson. Its own model, used by nothing else. |
+| Hammer of Justice | **No hammer, no projectile** (`HasMissile = 0`). Internally *FistOfJustice*: a flat gold ground streak racing toward the target, plus a rune at its chest. |
+| Frost Nova | Three flat rings expanding at **different rates** over 867ms. |
+
+Consequences worth remembering: the two rogue stuns are byte-identical on the
+receiver side and differ ENTIRELY on the caster side, so collapsing them would
+discard the only thing separating them. And the Paladin's mace deliberately does
+not swing — `swing_style_for_ability` returns `None` for HoJ on purpose.
+
+**New machinery.** `SwingArc::Lunge` (translation-dominant — the "one rotation,
+one axis" rule governs swings and a thrust traces no plane), procedural crescent
+and rune and streak textures, and Frost Nova's ragged procedural ring meshes with
+vertex-coloured alpha.
+
+**Frost Nova went beyond the source, deliberately:** a ragged wavefront, crystals
+erupting along it, and a **propagated freeze** — each victim's root crystals grow
+as the wave reaches them, so the wave visibly causes the freeze. That last one is
+the only part of A2 that reaches into shipped code (`CcRig` gained a `delay`) and
+carries an ordering dependency: the nova systems must stay chained ahead of the
+hard-CC treatment, or the delay lands too late and propagation silently
+degrades to an instant freeze.
+
+**Deliberate divergences from the source**, all for legibility at this camera:
+HoJ's streak scales to the real caster-target distance (the source uses a fixed
+~4 units, which at 10yd range reads as a misfire); Frost Nova's rings reach the
+spell's real 10yd rather than the source's ~6.7; and the nova's edge tint is
+`SpellSchool::Frost` rather than the measured `#2650C9`, which is dark enough to
+read as grey for most of the ring's travel.
+
+**Left undone:** the source puts a red glow on both the Rogue's hands during
+Kidney Shot. We have weapon sockets but no hand attachment points, so placing it
+would be inventing anatomy. And Kidney Shot's magenta is the one colour the
+research could not corroborate from a second source — it is one const if it
+looks wrong in the client.
 
 ### B. Interrupts — an actor-side gesture
 

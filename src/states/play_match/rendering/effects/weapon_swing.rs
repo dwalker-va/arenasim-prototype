@@ -91,6 +91,48 @@ pub(crate) enum SwingArc {
         /// value is negated at use), reversing the auto-attack's chop.
         release: f32,
     },
+    /// A LUNGE: pulled back along the aim axis, then driven straight through the
+    /// target. Translation-dominant, so unlike [`Self::TiltedPlane`] it traces
+    /// no plane at all — the "one rotation, one axis" rule governs how to build
+    /// a swing and simply does not apply to a thrust. Kidney Shot's source
+    /// animation is `Attack1HPierce`, and expressing that as a rotation would
+    /// read as a slash however it were tuned.
+    ///
+    /// Ignores `WeaponKind` for the same reason `TiltedPlane` does: a signature
+    /// belongs to the ability, not to whatever is being held. The dagger's own
+    /// auto-attack pose is already a stab, with fixed depths; this exists so a
+    /// signature can be a DEEPER, longer one.
+    Lunge {
+        /// Draw-back distance on windup, in socket-local yards.
+        pull: f32,
+        /// Drive-through distance on release. The dagger auto's is 0.85, so a
+        /// signature lunge wants visibly more.
+        thrust: f32,
+        /// Weapon pitch, in radians. SMALL, and applied the dagger's way — the
+        /// tip rises on the draw and levels into the drive, rather than sweeping
+        /// through neutral. The motion of a thrust is the translation; this only
+        /// stops the weapon looking rigid, and anything large reads as the blade
+        /// turning over mid-stroke.
+        pitch: f32,
+        /// How far the TORSO drives, in radians at full extension.
+        ///
+        /// Separate from `pitch` because the two want opposite magnitudes: the
+        /// weapon barely turns in a thrust, while the body genuinely commits
+        /// behind it. Sharing one value forces a choice between a flipping blade
+        /// and a finisher with less body than an auto-attack.
+        body_drive: f32,
+    },
+}
+
+/// How far a style's swing PLANE leans off vertical, or `None` for a stroke that
+/// traces no plane at all. Exposed so a probe can assert two signatures stay
+/// visually distinct rather than converging on the same diagonal.
+pub fn swing_plane_tilt(style: SwingStyle) -> Option<f32> {
+    match style.profile().arc {
+        SwingArc::TiltedPlane { tilt, .. } => Some(tilt),
+        SwingArc::Sagittal => Some(0.0),
+        SwingArc::Lunge { .. } => None,
+    }
 }
 
 impl SwingStyle {
@@ -134,6 +176,50 @@ impl SwingStyle {
                     release: MORTAL_STRIKE_RELEASE,
                 },
                 lean: MORTAL_STRIKE_LEAN,
+            },
+            // Fast and shallow. The source's Cheap Shot is 634ms of plain
+            // `Attack1H` — roughly half Kidney Shot's 1233ms lunge — so the
+            // contrast between the two rogue stuns is carried by SPEED as much
+            // as by shape.
+            SwingStyle::CheapShot => SwingProfile {
+                release_secs: SWING_RELEASE_SECS * CHEAP_SHOT_RELEASE_MUL,
+                impact_hold_secs: SWING_IMPACT_HOLD_SECS * CHEAP_SHOT_HOLD_MUL,
+                follow_secs: SWING_FOLLOW_SECS * CHEAP_SHOT_FOLLOW_MUL,
+                arc: SwingArc::TiltedPlane {
+                    tilt: CHEAP_SHOT_TILT,
+                    windup: CHEAP_SHOT_WINDUP,
+                    release: CHEAP_SHOT_RELEASE,
+                },
+                lean: CHEAP_SHOT_LEAN,
+            },
+            // A pierce, not a swing — the one stroke in the game that is
+            // translation-dominant. Twice Cheap Shot's length (the source is
+            // 1233ms against its 634ms), so the finisher lands with weight the
+            // opener does not have.
+            SwingStyle::KidneyShot => SwingProfile {
+                release_secs: SWING_RELEASE_SECS * KIDNEY_SHOT_RELEASE_MUL,
+                impact_hold_secs: SWING_IMPACT_HOLD_SECS * KIDNEY_SHOT_HOLD_MUL,
+                follow_secs: SWING_FOLLOW_SECS * KIDNEY_SHOT_FOLLOW_MUL,
+                arc: SwingArc::Lunge {
+                    pull: KIDNEY_SHOT_PULL,
+                    thrust: KIDNEY_SHOT_THRUST,
+                    pitch: KIDNEY_SHOT_PITCH,
+                    body_drive: KIDNEY_SHOT_BODY_DRIVE,
+                },
+                lean: KIDNEY_SHOT_LEAN,
+            },
+            // An uppercut: loaded low and driven straight up. Held long at the
+            // top, because the hammer arriving IS the beat the stun lands on.
+            SwingStyle::HammerOfJustice => SwingProfile {
+                release_secs: SWING_RELEASE_SECS * HOJ_RELEASE_MUL,
+                impact_hold_secs: SWING_IMPACT_HOLD_SECS * HOJ_HOLD_MUL,
+                follow_secs: SWING_FOLLOW_SECS * HOJ_FOLLOW_MUL,
+                arc: SwingArc::TiltedPlane {
+                    tilt: HOJ_TILT,
+                    windup: HOJ_WINDUP,
+                    release: HOJ_RELEASE,
+                },
+                lean: HOJ_LEAN,
             },
         }
     }
@@ -183,6 +269,79 @@ const MORTAL_STRIKE_WINDUP: f32 = 1.45;
 /// shoulder. Combined travel is ~2.8 rad, visibly larger than the
 /// auto-attack's ~2.3 and in the opposite direction.
 const MORTAL_STRIKE_RELEASE: f32 = 1.35;
+
+// --- Cheap Shot -----------------------------------------------------------
+//
+// The source is 634ms of plain `Attack1H`, so this stroke is deliberately
+// UNSPECTACULAR: barely off the sagittal plane, small travel, and fast. It has
+// to read as a quick jab, because everything distinctive about Cheap Shot lives
+// in the crescent flare rather than in the swing. Total here is ~0.63s against
+// the auto's 0.42s and Mortal Strike's ~0.84s.
+const CHEAP_SHOT_RELEASE_MUL: f32 = 1.25;
+const CHEAP_SHOT_HOLD_MUL: f32 = 1.6;
+const CHEAP_SHOT_FOLLOW_MUL: f32 = 1.6;
+/// Only ~14° off vertical. Enough that it is not literally the auto-attack, far
+/// short of Mortal Strike's 49° diagonal — this is a jab, not a signature.
+const CHEAP_SHOT_TILT: f32 = 0.25;
+/// A short load. The Rogue is coming out of stealth, so a big telegraphed
+/// windup would contradict the ability.
+const CHEAP_SHOT_WINDUP: f32 = 0.85;
+const CHEAP_SHOT_RELEASE: f32 = 1.10;
+/// Between the auto's ~8° and Mortal Strike's ~22°: the body commits, but the
+/// stroke is over before it becomes ceremony.
+const CHEAP_SHOT_LEAN: f32 = 0.16;
+
+// --- Kidney Shot ----------------------------------------------------------
+//
+// The finisher. Source is 1233ms of `Attack1HPierce` — twice Cheap Shot, and a
+// LUNGE rather than a swing. Total here is ~1.22s.
+const KIDNEY_SHOT_RELEASE_MUL: f32 = 2.5;
+const KIDNEY_SHOT_HOLD_MUL: f32 = 2.4;
+const KIDNEY_SHOT_FOLLOW_MUL: f32 = 3.2;
+/// Draws back further than the dagger auto's 0.4, so the lunge visibly loads.
+const KIDNEY_SHOT_PULL: f32 = 0.70;
+/// Drives through well past the dagger auto's 0.85 — this is the whole stroke,
+/// so it has to be the part that reads. Raised from 1.55 after the first pass
+/// read as too small in the client: the travel IS the animation, and a lunge
+/// that barely outreaches a routine stab is not a finisher.
+const KIDNEY_SHOT_THRUST: f32 = 2.05;
+/// A whisper of pitch, just over the dagger auto's own 0.2. Any more and the
+/// thrust starts to look like a chop — and applied as a single `pitch * s` it
+/// looked like the blade flipping over, which is what 0.90 did here.
+const KIDNEY_SHOT_PITCH: f32 = 0.24;
+/// The torso drive, in radians at full extension. Carries the weight the weapon
+/// pitch deliberately does not: at `KIDNEY_SHOT_LEAN` this is ~18 degrees of
+/// body, against an auto-attack's ~8.
+const KIDNEY_SHOT_BODY_DRIVE: f32 = 0.90;
+/// ~18° of forward drive — heavier than Cheap Shot's, just under Mortal
+/// Strike's, which is where a finisher belongs.
+const KIDNEY_SHOT_LEAN: f32 = 0.35;
+
+// --- Hammer of Justice ------------------------------------------------------
+//
+// An UPPERCUT. The mace loads low and drives vertically up, arriving as the
+// seal lands on the victim.
+//
+// Deliberately NEARLY SAGITTAL where Mortal Strike's signature is a 49-degree
+// diagonal: those are the only two big two-beat strokes in the game and they
+// must not be mistaken for each other. A rise is also the natural reading of a
+// hammer of judgement being brought UP rather than swung across.
+const HOJ_RELEASE_MUL: f32 = 2.2;
+/// Held long at full extension — the hammer at the top of its rise IS the beat
+/// the stun lands on, so it wants to sit there a moment.
+const HOJ_HOLD_MUL: f32 = 2.6;
+const HOJ_FOLLOW_MUL: f32 = 2.0;
+/// Barely off vertical: enough that the mace does not look like it is on rails,
+/// far short of Mortal Strike's 0.85 diagonal.
+const HOJ_TILT: f32 = 0.16;
+/// Loads LOW — positive windup carries the head forward and down.
+const HOJ_WINDUP: f32 = 1.15;
+/// Drives high, and further than it loaded: the rise is the whole stroke.
+const HOJ_RELEASE: f32 = 1.70;
+/// The body rises into it. Just past Mortal Strike's, because an uppercut
+/// commits the whole frame upward rather than turning it.
+const HOJ_LEAN: f32 = 0.30;
+
 
 /// Normalized swing parameter in `[-1, 1]`.
 ///
@@ -327,12 +486,38 @@ fn arc_rotation(s: f32, arc: SwingArc) -> (Vec3, f32) {
             let angle = if s < 0.0 { windup * -s } else { -release * s };
             (Quat::from_rotation_z(tilt) * Vec3::X, angle)
         }
+        // A lunge's body commitment is a forward pitch about X: the torso drives
+        // after the point. The same axis the sagittal chop uses, so the body and
+        // the weapon still agree on direction.
+        //
+        // Rides `body_drive`, NOT the weapon's `pitch`. The two are deliberately
+        // an order apart — the blade barely turns in a thrust while the body
+        // commits behind it — so reading the lean off `pitch` gives a finisher
+        // less body than a routine auto-attack.
+        SwingArc::Lunge { body_drive, .. } => (Vec3::X, body_drive * s),
     }
 }
 
 fn swing_pose_arc(kind: WeaponKind, s: f32, arc: SwingArc) -> Transform {
     match arc {
         SwingArc::Sagittal => swing_pose(kind, s),
+        SwingArc::Lunge { pull, thrust, pitch, .. } => {
+            // Socket-local -Z is back toward the wielder and +Z out along the
+            // aim, matching the dagger's own stab in `swing_pose`.
+            let draw = if s < 0.0 { -s } else { 0.0 };
+            let drive = if s > 0.0 { s } else { 0.0 };
+            // The tip rises on the draw and LEVELS into the drive — windup and
+            // release pitched separately, the same shape as the dagger's own
+            // stab (`0.2 * pull - 0.1 * thrust`).
+            //
+            // A single `pitch * s` instead sweeps the blade from `-pitch`
+            // through neutral to `+pitch`, so at 0.9 rad it turned through 103
+            // degrees and read as the weapon FLIPPING OVER halfway through the
+            // stroke rather than thrusting. A thrust barely rotates; that is
+            // what makes it a thrust.
+            Transform::from_translation(Vec3::new(0.0, 0.0, -pull * draw + thrust * drive))
+                .with_rotation(Quat::from_rotation_x(pitch * draw - pitch * 0.5 * drive))
+        }
         SwingArc::TiltedPlane { .. } => {
             // ONE rotation about ONE axis — the weapon sweeps through a plane,
             // the way a swing does. The diagonal comes from TILTING that plane
@@ -829,6 +1014,75 @@ mod swing_tests {
     // The whole styled-stroke refactor rests on one claim: `SwingStyle::Auto`
     // is the shipped auto-attack, exactly. Everything above tests the curve via
     // the auto profile; these pin the claim itself.
+
+    #[test]
+    fn a_lunge_never_turns_the_blade_over() {
+        // Kidney Shot shipped with `pitch * s`, which swept the weapon from
+        // -pitch through neutral to +pitch — at 0.9 rad, 103 degrees of
+        // rotation. In the client it read as the blade FLIPPING OVER halfway
+        // through the stroke instead of thrusting.
+        //
+        // A thrust is translation; the pitch is a garnish. What made the old
+        // version read as a flip was MAGNITUDE, not the sign change — the
+        // shipped dagger stab also crosses neutral (+0.2 on the draw to -0.1 on
+        // the drive) and looks right, because that is only 17 degrees in total.
+        // So the invariant is that a lunge's blade stays within a small angle of
+        // rest for the whole stroke, and never approaches the auto-attack's
+        // sweep.
+        let SwingArc::Lunge { pitch, .. } = SwingStyle::KidneyShot.profile().arc else {
+            panic!("Kidney Shot must be a Lunge");
+        };
+        assert!(
+            pitch < 0.35,
+            "{pitch} rad is a chop, not the whisper a thrust wants"
+        );
+
+        let mut max_turn: f32 = 0.0;
+        for i in -20..=20 {
+            let s = i as f32 / 20.0;
+            let pose =
+                swing_pose_arc(WeaponKind::Dagger, s, SwingStyle::KidneyShot.profile().arc);
+            let angle = pose.rotation.to_euler(EulerRot::XYZ).0;
+            max_turn = max_turn.max(angle.abs());
+        }
+        assert!(
+            max_turn < 0.35,
+            "the blade turns {max_turn} rad — a thrust barely rotates, and at \
+             0.9 this read as the weapon flipping over mid-stroke"
+        );
+        // And comfortably under the auto-attack's own sweep, which is a SWING.
+        let (_, auto_sweep) = arc_rotation(1.0, SwingArc::Sagittal);
+        assert!(
+            max_turn < auto_sweep.abs() * 0.5,
+            "a thrust turning {max_turn} rad is competing with the {auto_sweep} \
+             rad chop it is supposed to contrast with"
+        );
+    }
+
+    #[test]
+    fn a_lunge_travels_further_than_the_dagger_it_borrows_from() {
+        // The stroke IS the translation, so a finisher that barely outreaches a
+        // routine stab has no finisher in it. The dagger auto drives 0.85.
+        let SwingArc::Lunge { thrust, pull, .. } = SwingStyle::KidneyShot.profile().arc else {
+            panic!("Kidney Shot must be a Lunge");
+        };
+        assert!(thrust > 0.85 * 2.0, "only {thrust} of drive-through");
+        assert!(pull > 0.4, "only {pull} of draw-back to load from");
+    }
+
+    #[test]
+    fn a_lunge_body_drives_harder_than_an_auto_attack() {
+        // The weapon pitch is deliberately tiny, so the body carries the weight.
+        // Reading both off one value would force a choice between a flipping
+        // blade and a finisher with less commitment than a routine swing.
+        let profile = SwingStyle::KidneyShot.profile();
+        let (_, kidney) = arc_rotation(1.0, profile.arc);
+        let (_, auto) = arc_rotation(1.0, SwingStyle::Auto.profile().arc);
+        assert!(
+            (kidney * profile.lean).abs() > (auto * SwingStyle::Auto.profile().lean).abs(),
+            "the finisher's body must commit harder than an auto-attack's"
+        );
+    }
 
     #[test]
     fn the_auto_style_reproduces_the_shipped_constants() {
