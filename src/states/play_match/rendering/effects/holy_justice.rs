@@ -55,7 +55,22 @@ const HOJ_STREAK_GROW_TO: f32 = 0.90;
 /// implies a projectile, and this spell has none (`HasMissile = 0`); the ring is
 /// what the source's "elements translate outward while scaling 7.2x" actually
 /// draws.
+/// How far the wavefront rolls out, in yards.
 const HOJ_RING_RADIUS: f32 = 2.6;
+/// Half-angle of the wave's sweep about the aim, in radians.
+///
+/// NOT a full ring. The source model's bounding box runs -1.33 to +3.97 along
+/// the aim — three times further FORWARD than back — and a closed ring would be
+/// symmetric. An arc of +/-110 degrees reproduces that bbox exactly: a broad
+/// wavefront rolling toward the victim that curls partway around the caster and
+/// leaves ~140 degrees open behind. A symmetric ring read as a static disc
+/// sitting under the paladin rather than as something travelling.
+const HOJ_WAVE_SPAN: f32 = 1.92;
+/// Fraction of the span at each end over which the wave fades out, so it thins
+/// into nothing rather than stopping at a hard edge.
+const HOJ_WAVE_FEATHER: f32 = 0.38;
+/// Segments across the arc. Enough that the curve is smooth at 2.6yd.
+const HOJ_WAVE_SEGMENTS: u32 = 72;
 /// Band width in yards. Kept SLIM — at 0.55 it was a fifth of its own radius
 /// and read as a heavy static disc rather than a wave passing outward, which
 /// also put it uncomfortably close to the selection ring's vocabulary (a
@@ -105,6 +120,59 @@ const HOJ_TEX_PX: u32 = 128;
 /// The rune ring's outer radius as a fraction of its sprite's half-width.
 /// Named at module scope so the starburst-clipping invariant can assert on it.
 const OUTER_R_FOR_TEST: f32 = 0.30;
+
+/// A unit-radius arc band with vertex-coloured alpha: opaque along its middle,
+/// fading to nothing at both ends and at both rims.
+///
+/// Built once at unit radius and scaled, the same as Frost Nova's rings — the
+/// shape is fixed and only the radius changes. The alpha ramp is what lets the
+/// wave thin out at its edges without a texture.
+fn wave_mesh() -> Mesh {
+    use bevy::render::mesh::{Indices, PrimitiveTopology};
+    use bevy::render::render_asset::RenderAssetUsages;
+
+    let seg = HOJ_WAVE_SEGMENTS;
+    let half = HOJ_RING_THICKNESS / HOJ_RING_RADIUS * 0.5;
+    let mut positions: Vec<[f32; 3]> = Vec::new();
+    let mut normals: Vec<[f32; 3]> = Vec::new();
+    let mut uvs: Vec<[f32; 2]> = Vec::new();
+    let mut colors: Vec<[f32; 4]> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+
+    for i in 0..=seg {
+        let t = i as f32 / seg as f32; // 0..1 across the sweep
+        // Centred on +Z, which the spawn site yaws toward the victim.
+        let a = (t - 0.5) * 2.0 * HOJ_WAVE_SPAN;
+        let (sa, ca) = (a.sin(), a.cos());
+        // Feather both ends so the wave tapers off instead of being cut.
+        let edge = (t.min(1.0 - t) / HOJ_WAVE_FEATHER).clamp(0.0, 1.0);
+
+        positions.push([sa * (1.0 + half), 0.0, ca * (1.0 + half)]);
+        positions.push([sa * (1.0 - half), 0.0, ca * (1.0 - half)]);
+        normals.push([0.0, 1.0, 0.0]);
+        normals.push([0.0, 1.0, 0.0]);
+        uvs.push([t, 0.0]);
+        uvs.push([t, 1.0]);
+        colors.push([1.0, 1.0, 1.0, edge]);
+        colors.push([1.0, 1.0, 1.0, edge]);
+    }
+    for i in 0..seg {
+        let (o0, i0) = (i * 2, i * 2 + 1);
+        let (o1, i1) = ((i + 1) * 2, (i + 1) * 2 + 1);
+        indices.extend_from_slice(&[o0, i0, o1, o1, i0, i1]);
+    }
+
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+    mesh.insert_indices(Indices::U32(indices));
+    mesh
+}
 
 /// The rune's texture: a circular seal — two concentric rings with radial ticks
 /// between them. Reads as a judgement mark rather than a generic glow, which is
@@ -235,15 +303,16 @@ pub fn spawn_holy_justice(
         double_sided: true,
         ..default()
     });
+    // The arc is built centred on +Z, so one yaw turns the whole wavefront to
+    // roll toward the victim. `atan2(x, z)` is the face-along-+Z convention
+    // (`combat_core/movement.rs`) — the right one here, unlike the length-along-+X
+    // case the old streak needed.
+    let yaw = direction.x.atan2(direction.z);
     commands.spawn((
-        Mesh3d(meshes.add(
-            Annulus::new(1.0 - HOJ_RING_THICKNESS / HOJ_RING_RADIUS, 1.0)
-                .mesh()
-                .resolution(64),
-        )),
+        Mesh3d(meshes.add(wave_mesh())),
         MeshMaterial3d(material),
         Transform::from_translation(caster_pos.with_y(HOJ_GROUND_Y))
-            .with_rotation(Quat::from_rotation_x(-FRAC_PI_2))
+            .with_rotation(Quat::from_rotation_y(yaw))
             .with_scale(Vec3::ZERO),
         HolyStreak {
             age: 0.0,
@@ -406,6 +475,58 @@ mod tests {
 
     fn alpha_of(img: &Image, x: usize, y: usize, size: usize) -> u8 {
         img.data.as_ref().unwrap()[(y * size + x) * 4 + 3]
+    }
+
+    #[test]
+    fn the_wave_rolls_forward_rather_than_closing_a_ring() {
+        // The question this settles: ring or wave? The source model's bbox runs
+        // -1.33 to +3.97 along the aim, three times further forward than back,
+        // and a closed ring would be symmetric. So it is a wave.
+        //
+        // Asserted on the built mesh: its forward reach must dominate its
+        // backward reach by roughly the source's ratio, and it must leave real
+        // open space behind the caster.
+        use bevy::render::mesh::VertexAttributeValues;
+        let mesh = wave_mesh();
+        let Some(VertexAttributeValues::Float32x3(ps)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("the wave needs positions");
+        };
+        let fwd = ps.iter().map(|p| p[2]).fold(f32::NEG_INFINITY, f32::max);
+        let back = ps.iter().map(|p| p[2]).fold(f32::INFINITY, f32::min);
+        assert!(fwd > 0.9, "the wave barely reaches forward: {fwd}");
+        assert!(
+            back > -0.75,
+            "the wave closes behind the caster at {back} — that is a ring, not a \
+             wavefront rolling toward the victim"
+        );
+        assert!(
+            fwd > back.abs() * 1.8,
+            "forward {fwd} does not dominate backward {back} the way the source \
+             bbox does"
+        );
+    }
+
+    #[test]
+    fn the_wave_fades_at_both_ends() {
+        // It must thin into nothing rather than stopping at a hard edge, which
+        // would read as a cut-off band.
+        use bevy::render::mesh::VertexAttributeValues;
+        let mesh = wave_mesh();
+        let Some(VertexAttributeValues::Float32x4(cs)) =
+            mesh.attribute(Mesh::ATTRIBUTE_COLOR)
+        else {
+            panic!("the wave needs vertex colours");
+        };
+        assert_eq!(cs[0][3], 0.0, "the leading end should start transparent");
+        assert_eq!(
+            cs[cs.len() - 1][3],
+            0.0,
+            "the trailing end should finish transparent"
+        );
+        let mid = cs[cs.len() / 2][3];
+        assert!(mid > 0.9, "the middle of the wave should be solid, got {mid}");
     }
 
     #[test]
