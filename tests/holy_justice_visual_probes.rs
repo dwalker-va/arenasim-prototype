@@ -158,13 +158,14 @@ impl Harness {
 }
 
 #[test]
-fn hammer_of_justice_has_a_flourish_but_no_stroke() {
-    // The whole shape of this ability. Until the router separated its two
-    // dispatches, an ability with no stroke could not reach a flourish at all.
+fn hammer_of_justice_swings_an_uppercut() {
+    // This ability shipped for a while with NO stroke, on the reasoning that
+    // `HasMissile = 0` and a `SpecialUnarmed` animation name meant no weapon
+    // motion. Those rule out a projectile -- nothing is thrown -- and say
+    // nothing about the arm; the reference shows a raised-weapon pose.
     assert_eq!(
         swing_style_for_ability(AbilityType::HammerOfJustice),
-        None,
-        "the source spawns no hammer — the mace must not swing"
+        Some(SwingStyle::HammerOfJustice),
     );
 
     let mut h = Harness::new();
@@ -173,16 +174,28 @@ fn hammer_of_justice_has_a_flourish_but_no_stroke() {
     h.fire(paladin, victim);
     h.tick(1);
 
-    assert_eq!(h.streaks(), 1, "the ground streak must still fire");
+    assert_eq!(h.streaks(), 1, "the ground wave must still fire");
     assert_eq!(h.runes(), 1, "and so must the victim's rune");
     assert_eq!(
         h.socket_style(),
-        SwingStyle::Auto,
-        "the Paladin's mace must be left alone"
+        SwingStyle::HammerOfJustice,
+        "the mace should be swinging its own stroke"
     );
+    assert!(h.socket_released(), "the stroke should have started");
+}
+
+#[test]
+fn the_uppercut_is_not_mortal_strikes_diagonal() {
+    // The only two big two-beat strokes in the game. An uppercut is
+    // near-vertical and Mortal Strike is a 49-degree diagonal; if they converge
+    // the Paladin looks like it is casting the Warrior's ability.
+    use arenasim::states::play_match::swing_plane_tilt;
+    let hoj = swing_plane_tilt(SwingStyle::HammerOfJustice).expect("HoJ is a plane");
+    let ms = swing_plane_tilt(SwingStyle::MortalStrike).expect("MS is a plane");
+    assert!(hoj < 0.35, "the uppercut leans {hoj} rad -- that is a slash");
     assert!(
-        !h.socket_released(),
-        "no stroke may be started on the socket"
+        ms - hoj > 0.5,
+        "the uppercut {hoj} and Mortal Strike {ms} are too close to tell apart"
     );
 }
 

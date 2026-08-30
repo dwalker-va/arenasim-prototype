@@ -124,6 +124,17 @@ pub(crate) enum SwingArc {
     },
 }
 
+/// How far a style's swing PLANE leans off vertical, or `None` for a stroke that
+/// traces no plane at all. Exposed so a probe can assert two signatures stay
+/// visually distinct rather than converging on the same diagonal.
+pub fn swing_plane_tilt(style: SwingStyle) -> Option<f32> {
+    match style.profile().arc {
+        SwingArc::TiltedPlane { tilt, .. } => Some(tilt),
+        SwingArc::Sagittal => Some(0.0),
+        SwingArc::Lunge { .. } => None,
+    }
+}
+
 impl SwingStyle {
     /// Total duration of this style's release stroke, for effects that must
     /// run exactly as long as the blade is moving (the Mortal Strike trail).
@@ -196,6 +207,19 @@ impl SwingStyle {
                     body_drive: KIDNEY_SHOT_BODY_DRIVE,
                 },
                 lean: KIDNEY_SHOT_LEAN,
+            },
+            // An uppercut: loaded low and driven straight up. Held long at the
+            // top, because the hammer arriving IS the beat the stun lands on.
+            SwingStyle::HammerOfJustice => SwingProfile {
+                release_secs: SWING_RELEASE_SECS * HOJ_RELEASE_MUL,
+                impact_hold_secs: SWING_IMPACT_HOLD_SECS * HOJ_HOLD_MUL,
+                follow_secs: SWING_FOLLOW_SECS * HOJ_FOLLOW_MUL,
+                arc: SwingArc::TiltedPlane {
+                    tilt: HOJ_TILT,
+                    windup: HOJ_WINDUP,
+                    release: HOJ_RELEASE,
+                },
+                lean: HOJ_LEAN,
             },
         }
     }
@@ -292,6 +316,32 @@ const KIDNEY_SHOT_BODY_DRIVE: f32 = 0.90;
 /// ~18° of forward drive — heavier than Cheap Shot's, just under Mortal
 /// Strike's, which is where a finisher belongs.
 const KIDNEY_SHOT_LEAN: f32 = 0.35;
+
+// --- Hammer of Justice ------------------------------------------------------
+//
+// An UPPERCUT. The mace loads low and drives vertically up, arriving as the
+// seal lands on the victim.
+//
+// Deliberately NEARLY SAGITTAL where Mortal Strike's signature is a 49-degree
+// diagonal: those are the only two big two-beat strokes in the game and they
+// must not be mistaken for each other. A rise is also the natural reading of a
+// hammer of judgement being brought UP rather than swung across.
+const HOJ_RELEASE_MUL: f32 = 2.2;
+/// Held long at full extension — the hammer at the top of its rise IS the beat
+/// the stun lands on, so it wants to sit there a moment.
+const HOJ_HOLD_MUL: f32 = 2.6;
+const HOJ_FOLLOW_MUL: f32 = 2.0;
+/// Barely off vertical: enough that the mace does not look like it is on rails,
+/// far short of Mortal Strike's 0.85 diagonal.
+const HOJ_TILT: f32 = 0.16;
+/// Loads LOW — positive windup carries the head forward and down.
+const HOJ_WINDUP: f32 = 1.15;
+/// Drives high, and further than it loaded: the rise is the whole stroke.
+const HOJ_RELEASE: f32 = 1.70;
+/// The body rises into it. Just past Mortal Strike's, because an uppercut
+/// commits the whole frame upward rather than turning it.
+const HOJ_LEAN: f32 = 0.30;
+
 
 /// Normalized swing parameter in `[-1, 1]`.
 ///

@@ -1,6 +1,6 @@
 use bevy::color::LinearRgba;
 use bevy::prelude::*;
-use std::f32::consts::{FRAC_PI_2, TAU};
+use std::f32::consts::TAU;
 
 use crate::states::play_match::components::*;
 
@@ -26,11 +26,15 @@ use crate::states::play_match::components::*;
 //                back to orange.
 //   Target side  A golden rune (#F1F950) and a yellow starburst at the chest.
 //
-// So the Paladin's mace deliberately does NOT swing — `swing_style_for_ability`
-// returns `None` for this ability on purpose. Swinging it would invent a weapon
-// attack the spell does not have, and the source's own body animation is
-// `SpecialUnarmed`, which our rig cannot express and which is not a weapon
-// stroke either.
+// The Paladin DOES swing: `SwingStyle::HammerOfJustice` is an uppercut, the
+// mace loading low and driving vertically up as the seal lands.
+//
+// That reverses an earlier call. `HasMissile = 0` and a `SpecialUnarmed`
+// animation name were read as "no weapon motion", but they rule out a
+// PROJECTILE — nothing is thrown — and say nothing about whether the arm moves.
+// The reference screenshot shows the paladin in a raised-weapon pose with a
+// white flash at the mace. There is still no hammer of light and nothing
+// travels between the two units; the stroke is the caster's own arm.
 //
 // ONE DELIBERATE DIVERGENCE. The source's streak is a fixed ~4 units regardless
 // of where the victim stands; ours is scaled to the real caster-target distance

@@ -14,11 +14,11 @@
 //!
 //! **The two dispatches are INDEPENDENT and must stay that way.** They were
 //! nested once, with the flourish reachable only through a `Some(style)` and a
-//! `Some(target_pos)`, which silently excluded two whole shapes of ability:
-//! Hammer of Justice has a flourish but deliberately NO stroke (the source has
-//! no hammer — see A2 in the roadmap), and Frost Nova is caster-centred with no
-//! target at all. Either would have spawned its marker, been consumed, and
-//! rendered nothing.
+//! `Some(target_pos)`, which silently excluded whole shapes of ability: one with
+//! a flourish and no weapon stroke, and one that is caster-centred with no
+//! target at all. Frost Nova is still exactly that second case — no stroke, no
+//! target — and would spawn its marker, be consumed, and render nothing if the
+//! two were ever renested.
 //!
 //! Registered only in `states/mod.rs`, in `FixedUpdate` after
 //! `CombatSystemPhase::CombatResolution`: `FixedUpdate` can tick several times
@@ -50,10 +50,12 @@ pub fn swing_style_for_ability(ability: AbilityType) -> Option<SwingStyle> {
         AbilityType::MortalStrike => Some(SwingStyle::MortalStrike),
         AbilityType::CheapShot => Some(SwingStyle::CheapShot),
         AbilityType::KidneyShot => Some(SwingStyle::KidneyShot),
-        // Hammer of Justice deliberately has NO stroke: the source spawns no
-        // hammer and no projectile, only a ground decal and a `SpecialUnarmed`
-        // gesture. Swinging the Paladin's mace would be inventing a weapon
-        // attack the ability does not have.
+        // An uppercut. This ability HAD no stroke for a while, on the reasoning
+        // that `HasMissile = 0` and a `SpecialUnarmed` animation name meant no
+        // weapon motion — but those rule out a PROJECTILE, not a swing, and the
+        // reference screenshot plainly shows the paladin in a raised-weapon pose
+        // with a flash at the mace. The evidence was over-read.
+        AbilityType::HammerOfJustice => Some(SwingStyle::HammerOfJustice),
         _ => None,
     }
 }
@@ -150,8 +152,6 @@ pub fn consume_instant_ability_signals(
                     );
                 }
             }
-            // No stroke — see `swing_style_for_ability`. This arm exists ONLY
-            // because the flourish dispatch is independent of it.
             AbilityType::HammerOfJustice => {
                 if let (Some(caster_pos), Some(target_pos)) = (caster_pos, target_pos) {
                     spawn_holy_justice(

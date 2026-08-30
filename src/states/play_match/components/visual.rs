@@ -604,6 +604,13 @@ pub enum SwingStyle {
     /// model, is the whole of what separates the two rogue stuns; they are
     /// byte-identical on the receiver side.
     KidneyShot,
+    /// Paladin Hammer of Justice: an UPPERCUT. The mace drops low, then drives
+    /// vertically up as the seal lands on the victim.
+    ///
+    /// Nearly sagittal, where Mortal Strike's signature is a 49-degree diagonal
+    /// — the two must not be mistaken for each other, and a rise is the natural
+    /// reading of a hammer of judgement being brought up.
+    HammerOfJustice,
 }
 
 /// One instant ability performed by a caster, spawned by combat code at that
