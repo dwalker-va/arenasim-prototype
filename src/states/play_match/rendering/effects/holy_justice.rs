@@ -56,14 +56,19 @@ const HOJ_STREAK_GROW_TO: f32 = 0.90;
 /// what the source's "elements translate outward while scaling 7.2x" actually
 /// draws.
 const HOJ_RING_RADIUS: f32 = 2.6;
-const HOJ_RING_THICKNESS: f32 = 0.55;
+/// Band width in yards. Kept SLIM — at 0.55 it was a fifth of its own radius
+/// and read as a heavy static disc rather than a wave passing outward, which
+/// also put it uncomfortably close to the selection ring's vocabulary (a
+/// translucent torus at a unit's feet, `selection.rs`). The two are told apart
+/// by this one being a brief bright sweep that expands and goes.
+const HOJ_RING_THICKNESS: f32 = 0.26;
 /// Rays blasting out of the rune at the victim's chest. The reference shows
 /// long, thin, straight tapering spokes reaching well past the ring — they are
 /// most of what the effect reads as, and the first version drew none.
 const HOJ_RAY_COUNT: u32 = 7;
 /// How far a ray reaches, as a multiple of the rune's own radius.
-const HOJ_RAY_REACH: f32 = 2.4;
-const HOJ_RAY_WIDTH: f32 = 0.055;
+const HOJ_RAY_REACH: f32 = 3.1;
+const HOJ_RAY_WIDTH: f32 = 0.030;
 /// Height above the floor. Same reasoning as the hard-CC ground pieces: the
 /// arena floor is at y=0 with an identity transform, so this is a fixed world
 /// height rather than a `rest_y`-derived offset.
@@ -83,7 +88,11 @@ const HOJ_RUNE_SECS: f32 = 1.05;
 /// Height above the victim's SIM origin. A combatant's body centre is its sim
 /// y, so the chest sits a little above it.
 const HOJ_RUNE_HEIGHT: f32 = 0.35;
-const HOJ_RUNE_SIZE: f32 = 1.25;
+/// World size of the whole rune SPRITE, most of which is starburst. The ring
+/// itself is `OUTER_R` of the half-width, so at 4.6 the ring lands ~1.4yd across
+/// — about 1.5x the target's body, matching the reference — while the rays reach
+/// well past it.
+const HOJ_RUNE_SIZE: f32 = 4.6;
 /// Measured `#F1F950`.
 const HOJ_RUNE_COLOR: Color = Color::srgba(0.945, 0.976, 0.314, 0.90);
 const HOJ_RUNE_EMISSIVE: LinearRgba = LinearRgba::new(3.4, 3.6, 0.9, 1.0);
@@ -93,6 +102,10 @@ const HOJ_RUNE_SPIN: f32 = 0.35;
 
 const HOJ_TEX_PX: u32 = 128;
 
+/// The rune ring's outer radius as a fraction of its sprite's half-width.
+/// Named at module scope so the starburst-clipping invariant can assert on it.
+const OUTER_R_FOR_TEST: f32 = 0.30;
+
 /// The rune's texture: a circular seal — two concentric rings with radial ticks
 /// between them. Reads as a judgement mark rather than a generic glow, which is
 /// what separates it from every other gold burst in the game.
@@ -101,9 +114,16 @@ fn rune_texture() -> Image {
     use bevy::render::render_asset::RenderAssetUsages;
     use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
-    const OUTER_R: f32 = 0.86;
-    const INNER_R: f32 = 0.52;
-    const RING_W: f32 = 0.045;
+    // The ring occupies only the middle THIRD of the sprite. That is not an
+    // aesthetic choice: the rays reach `HOJ_RAY_REACH` times the ring's radius,
+    // and a sprite only extends to 1.0 along its axes, so a ring at 0.86 left
+    // the rays clipped to 48% of their length and entirely inside the ring's own
+    // footprint — which is why the first version rendered as a small orange gear
+    // with no starburst at all. The world size grows to compensate, so the RING
+    // stays the same size on screen while the rays gain room.
+    const OUTER_R: f32 = OUTER_R_FOR_TEST;
+    const INNER_R: f32 = 0.18;
+    const RING_W: f32 = 0.022;
     const TICKS: f32 = 8.0;
     const TICK_W: f32 = 0.20;
 
@@ -149,16 +169,17 @@ fn rune_texture() -> Image {
                     if off > std::f32::consts::PI {
                         off = TAU - off;
                     }
-                    // Narrow in angle, and narrowing further as it reaches out.
-                    let width = HOJ_RAY_WIDTH * (1.0 + 1.6 / (r + 0.25));
+                    // Narrow in angle, and narrowing further as it reaches out,
+                    // so a spoke is a needle rather than a wedge.
+                    let width = HOJ_RAY_WIDTH * (1.0 + 0.5 / (r + 0.35));
                     let across = (-((off / width).powi(2))).exp();
                     // Fade along the spoke, out to HOJ_RAY_REACH ring-radii.
                     let reach = (1.0 - r / (OUTER_R * HOJ_RAY_REACH)).clamp(0.0, 1.0);
-                    rays = rays.max(across * reach.powf(0.8));
+                    rays = rays.max(across * reach.powf(0.7));
                 }
             }
             // A white-hot core where the rays converge.
-            let core = (-((r / 0.16).powi(2))).exp();
+            let core = (-((r / 0.07).powi(2))).exp();
 
             let a = (rings + ticks * 0.8 + rays * 0.95 + core).clamp(0.0, 1.0);
             let i = ((y * size + x) * 4) as usize;
@@ -388,6 +409,25 @@ mod tests {
     }
 
     #[test]
+    fn the_starburst_reaches_past_the_ring() {
+        // The bug this pins: the rays reach HOJ_RAY_REACH times the ring's
+        // radius, but a sprite only extends to 1.0 along its axes. With the ring
+        // at 0.86 the rays were clipped to under half their length and fell
+        // entirely INSIDE the ring's own footprint — the rune rendered as a
+        // small gear with no starburst whatsoever, and every existing test
+        // passed because none of them looked outside the ring.
+        assert!(
+            OUTER_R_FOR_TEST * HOJ_RAY_REACH > 0.9,
+            "the rays cannot even reach the sprite edge"
+        );
+        // And the ring must leave most of the sprite to the rays.
+        assert!(
+            OUTER_R_FOR_TEST < 0.45,
+            "the ring fills the sprite, leaving the starburst nowhere to go"
+        );
+    }
+
+    #[test]
     fn the_rune_throws_a_starburst() {
         // The reference detonates: long thin rays reaching well past the rune's
         // own ring. The first version drew only the ring and read as a quiet
@@ -406,8 +446,9 @@ mod tests {
         let mut best_far: u8 = 0;
         for k in 0..HOJ_RAY_COUNT {
             let a = k as f32 / HOJ_RAY_COUNT as f32 * TAU + 0.21;
-            // Beyond the outer ring at 0.86, where only a ray can reach.
-            let (sx, sy) = (a.sin() * 0.95, -a.cos() * 0.95);
+            // Well beyond the ring, where only a ray can reach.
+            let out = OUTER_R_FOR_TEST * 2.0;
+            let (sx, sy) = (a.sin() * out, -a.cos() * out);
             best_far = best_far.max(alpha_at(sx, sy));
         }
         assert!(
@@ -433,9 +474,10 @@ mod tests {
             img.data.as_ref().unwrap()[(y * size + x) * 4 + 3]
         };
         let step = TAU / HOJ_RAY_COUNT as f32;
-        // Halfway between spoke 0 and spoke 1.
+        // Halfway between spoke 0 and spoke 1, out past the ring.
         let a = 0.21 + step * 0.5;
-        let (sx, sy) = (a.sin() * 0.95, -a.cos() * 0.95);
+        let out = OUTER_R_FOR_TEST * 2.0;
+        let (sx, sy) = (a.sin() * out, -a.cos() * out);
         assert!(
             alpha_at(sx, sy) < 40,
             "the gap between spokes is lit — the rays have merged into a disc"
@@ -458,13 +500,20 @@ mod tests {
             img.data.as_ref().unwrap()[(y * size + x) * 4 + 3]
         };
 
-        // The outer ring, straight up from centre, is solid.
-        assert!(alpha_at(0.0, -0.86) > 150, "the outer ring should be solid");
+        // The outer ring, straight up from centre, is solid. Sampled at the
+        // ring's ACTUAL radius rather than a baked-in number — this assertion
+        // silently moved off the ring when the proportions changed.
+        assert!(
+            alpha_at(0.0, -OUTER_R_FOR_TEST) > 150,
+            "the outer ring should be solid"
+        );
 
         // Between the core and the inner ring, off any spoke, it must go dark.
         let step = TAU / HOJ_RAY_COUNT as f32;
         let a = 0.21 + step * 0.5;
-        let (sx, sy) = (a.sin() * 0.40, -a.cos() * 0.40);
+        // Between the core and the inner ring, off any spoke.
+        let mid = OUTER_R_FOR_TEST * 0.45;
+        let (sx, sy) = (a.sin() * mid, -a.cos() * mid);
         assert!(
             alpha_at(sx, sy) < 60,
             "no gap between the core and the ring — the rune is a filled disc"
