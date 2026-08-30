@@ -16,12 +16,12 @@ use bevy::time::TimeUpdateStrategy;
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::components::{
-    Combatant, HolyStreak, InstantAbilityFired, JusticeRune, SwingStyle, VisualBody, WeaponHand,
+    Combatant, JusticeWave, InstantAbilityFired, JusticeRune, SwingStyle, VisualBody, WeaponHand,
     WeaponKind, WeaponSocket,
 };
 use arenasim::states::play_match::{
     cleanup_holy_justice, consume_instant_ability_signals, swing_style_for_ability,
-    update_holy_streaks, update_justice_runes,
+    update_justice_waves, update_justice_runes,
 };
 use arenasim::CharacterClass;
 
@@ -46,7 +46,7 @@ impl Harness {
             Update,
             (
                 consume_instant_ability_signals,
-                update_holy_streaks,
+                update_justice_waves,
                 update_justice_runes,
                 cleanup_holy_justice,
             )
@@ -123,10 +123,10 @@ impl Harness {
         }
     }
 
-    fn streaks(&mut self) -> usize {
+    fn waves(&mut self) -> usize {
         self.app
             .world_mut()
-            .query::<&HolyStreak>()
+            .query::<&JusticeWave>()
             .iter(self.app.world())
             .count()
     }
@@ -178,7 +178,7 @@ fn hammer_of_justice_swings_an_uppercut() {
     h.fire(paladin, victim);
     h.tick(1);
 
-    assert_eq!(h.streaks(), 1, "the ground wave must still fire");
+    assert_eq!(h.waves(), 1, "the ground wave must still fire");
     assert_eq!(h.runes(), 1, "and so must the victim's rune");
     assert_eq!(
         h.socket_style(),
@@ -226,7 +226,7 @@ fn the_caster_ring_stays_centred_on_the_paladin() {
         h.tick(8);
 
         let (pos, scale) = {
-            let mut q = h.app.world_mut().query::<(&HolyStreak, &Transform)>();
+            let mut q = h.app.world_mut().query::<(&JusticeWave, &Transform)>();
             let (_, t) = q.iter(h.app.world()).next().unwrap();
             (t.translation, t.scale)
         };
@@ -253,12 +253,12 @@ fn the_caster_ring_sweeps_outward() {
     h.tick(2);
 
     let early = {
-        let mut q = h.app.world_mut().query::<(&HolyStreak, &Transform)>();
+        let mut q = h.app.world_mut().query::<(&JusticeWave, &Transform)>();
         q.iter(h.app.world()).next().unwrap().1.scale.x
     };
     h.tick(6);
     let later = {
-        let mut q = h.app.world_mut().query::<(&HolyStreak, &Transform)>();
+        let mut q = h.app.world_mut().query::<(&JusticeWave, &Transform)>();
         q.iter(h.app.world()).next().unwrap().1.scale.x
     };
     assert!(
@@ -274,17 +274,17 @@ fn both_halves_expire_without_leaking() {
     let victim = h.spawn_victim(6.0);
     h.fire(paladin, victim);
     h.tick(1);
-    assert!(h.streaks() > 0 && h.runes() > 0, "guard against a vacuous drain");
+    assert!(h.waves() > 0 && h.runes() > 0, "guard against a vacuous drain");
 
     // Past the rune's life, which is the longer of the two.
     h.tick(40);
-    assert_eq!(h.streaks(), 0, "streak leaked");
+    assert_eq!(h.waves(), 0, "wave leaked");
     assert_eq!(h.runes(), 0, "rune leaked");
 }
 
 #[test]
-fn the_rune_outlives_the_streak_in_practice() {
-    // Cause then consequence: the streak arrives and goes, the rune holds on
+fn the_rune_outlives_the_wave_in_practice() {
+    // Cause then consequence: the wave arrives and goes, the rune holds on
     // the victim after it. Asserted on real timings, not just the constants.
     let mut h = Harness::new();
     let paladin = h.spawn_paladin();
@@ -292,8 +292,8 @@ fn the_rune_outlives_the_streak_in_practice() {
     h.fire(paladin, victim);
     h.tick(1);
 
-    // 15 ticks = 0.75s: past the streak's 0.667s, inside the rune's 1.05s.
+    // 15 ticks = 0.75s: past the wave's 0.667s, inside the rune's 1.05s.
     h.tick(15);
-    assert_eq!(h.streaks(), 0, "the streak should have landed and gone");
+    assert_eq!(h.waves(), 0, "the wave should have landed and gone");
     assert_eq!(h.runes(), 1, "the rune should still be marking the victim");
 }

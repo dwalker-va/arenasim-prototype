@@ -195,7 +195,8 @@ rather than reading a stored velocity field — see
 [physics-lite-debris-particles.md](physics-lite-debris-particles.md).
 
 Historical note: the aimed-streak defects above were on a Hammer of Justice
-ground streak that **no longer exists** — it was replaced by a caster-centred
+ground streak that **no longer exists** (its component was `HolyStreak`, since
+renamed `JusticeWave` to match what it draws) — it was replaced by a caster-centred
 expanding wave once reference imagery showed the source has no projectile. The
 fixed aimed-effect assertions now live on Kidney Shot's slash.
 

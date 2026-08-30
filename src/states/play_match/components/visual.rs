@@ -981,7 +981,7 @@ pub struct CrescentFlare {
 /// between the two units, and the source draws a wavefront rolling out around
 /// the caster. See `src/states/play_match/rendering/effects/holy_justice.rs`.
 #[derive(Component)]
-pub struct HolyStreak {
+pub struct JusticeWave {
     pub age: f32,
     /// How far the wave rolls out, in yards. A FIXED radius — the wave is
     /// caster-centred, so unlike the streak it replaced it does not scale to

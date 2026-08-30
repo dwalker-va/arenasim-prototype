@@ -504,7 +504,7 @@ impl Plugin for StatesPlugin {
                     // Hammer of Justice's caster-centred ground wave and victim
                     // rune. The uppercut stroke is dispatched separately, in
                     // `consume_instant_ability_signals`.
-                    play_match::update_holy_streaks,
+                    play_match::update_justice_waves,
                     play_match::update_justice_runes,
                     play_match::cleanup_holy_justice,
                     // Frost Nova's wavefront.

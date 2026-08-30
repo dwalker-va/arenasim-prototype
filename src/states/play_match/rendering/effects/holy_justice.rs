@@ -5,7 +5,7 @@ use std::f32::consts::TAU;
 use crate::states::play_match::components::*;
 
 // ==============================================================================
-// Hammer of Justice — the streak and the rune
+// Hammer of Justice — the wave and the rune
 // ==============================================================================
 //
 // There is no hammer. The Classic client data is unambiguous: `HasMissile = 0`
@@ -19,9 +19,10 @@ use crate::states::play_match::components::*;
 //   Caster side  A FLAT GROUND DECAL, 667ms. Every one of its 28 vertices sits
 //                at z = 0.00-0.03. It is asymmetric, reaching ~4 units FORWARD
 //                from the Paladin toward the target, and its elements translate
-//                outward 2.84 units while scaling 7.2x between 100 and 600ms —
-//                a gold streak racing along the ground. That travel is how a
-//                10yd ability covers its range without a projectile.
+//                outward 2.84 units while scaling 7.2x between 100 and 600ms.
+//                Read at first as a gold streak racing at the victim; the
+//                reference imagery says otherwise — see the divergence note
+//                below. Nothing travels between the two units.
 //                Colour: #FF7E0C orange -> #FFFF0C yellow flash at 67ms ->
 //                back to orange.
 //   Target side  A golden rune (#F1F950) and a yellow starburst at the chest.
@@ -45,13 +46,13 @@ use crate::states::play_match::components::*;
 // Graphical-only, keyed on the `InstantAbilityFired` marker. No `game_rng` draw,
 // no sim write — headless stays byte-identical.
 
-/// Total life of the ground streak. Source: 667ms.
-const HOJ_STREAK_SECS: f32 = 0.667;
-/// Fraction of that life over which the streak extends. Source: it travels
+/// Total life of the ground wave. Source: 667ms.
+const HOJ_WAVE_SECS: f32 = 0.667;
+/// Fraction of that life over which the wave extends. Source: it travels
 /// between 100ms and 600ms of 667, i.e. the middle three-quarters — it does not
 /// start moving instantly and it settles before it fades.
-const HOJ_STREAK_GROW_FROM: f32 = 0.15;
-const HOJ_STREAK_GROW_TO: f32 = 0.90;
+const HOJ_WAVE_GROW_FROM: f32 = 0.15;
+const HOJ_WAVE_GROW_TO: f32 = 0.90;
 /// How far the wavefront rolls out around the caster's feet, in yards.
 ///
 /// The reference shows a flat golden sweep around the PALADIN'S OWN FEET, not
@@ -96,7 +97,7 @@ const HOJ_GROUND_Y: f32 = 0.055;
 const HOJ_ORANGE: Color = Color::srgba(1.00, 0.49, 0.05, 0.85);
 const HOJ_FLASH: Color = Color::srgba(1.00, 1.00, 0.32, 0.95);
 const HOJ_FLASH_AT: f32 = 0.10;
-const HOJ_STREAK_EMISSIVE: LinearRgba = LinearRgba::new(3.2, 1.9, 0.4, 1.0);
+const HOJ_WAVE_EMISSIVE: LinearRgba = LinearRgba::new(3.2, 1.9, 0.4, 1.0);
 
 /// The rune at the victim's chest. Source is 1734ms, shortened here: the stun
 /// it announces lasts 6s, and a rune hanging for most of two seconds competes
@@ -298,7 +299,7 @@ pub fn spawn_holy_justice(
     // spell does not have (`HasMissile = 0`) — the reference shows a ring.
     let material = materials.add(StandardMaterial {
         base_color: HOJ_ORANGE,
-        emissive: HOJ_STREAK_EMISSIVE,
+        emissive: HOJ_WAVE_EMISSIVE,
         alpha_mode: AlphaMode::Add,
         unlit: false,
         cull_mode: None,
@@ -316,7 +317,7 @@ pub fn spawn_holy_justice(
         Transform::from_translation(caster_pos.with_y(HOJ_GROUND_Y))
             .with_rotation(Quat::from_rotation_y(yaw))
             .with_scale(Vec3::ZERO),
-        HolyStreak {
+        JusticeWave {
             age: 0.0,
             length: HOJ_RING_RADIUS,
             origin: caster_pos.with_y(HOJ_GROUND_Y),
@@ -348,11 +349,11 @@ pub fn spawn_holy_justice(
     ));
 }
 
-/// Races the streak out along the ground and fades it.
-pub fn update_holy_streaks(
+/// Sweeps the wave out along the ground and fades it.
+pub fn update_justice_waves(
     time: Res<Time>,
-    mut streaks: Query<(
-        &mut HolyStreak,
+    mut waves: Query<(
+        &mut JusticeWave,
         &mut Transform,
         &MeshMaterial3d<StandardMaterial>,
     )>,
@@ -360,20 +361,20 @@ pub fn update_holy_streaks(
 ) {
     let dt = time.delta_secs();
 
-    for (mut streak, mut transform, handle) in streaks.iter_mut() {
-        streak.age += dt;
-        let k = (streak.age / HOJ_STREAK_SECS).clamp(0.0, 1.0);
+    for (mut wave, mut transform, handle) in waves.iter_mut() {
+        wave.age += dt;
+        let k = (wave.age / HOJ_WAVE_SECS).clamp(0.0, 1.0);
 
         // Sweep outward over the middle of the life, easing out so the ring
         // decelerates rather than snapping to full size.
-        let travel = ((k - HOJ_STREAK_GROW_FROM) / (HOJ_STREAK_GROW_TO - HOJ_STREAK_GROW_FROM))
+        let travel = ((k - HOJ_WAVE_GROW_FROM) / (HOJ_WAVE_GROW_TO - HOJ_WAVE_GROW_FROM))
             .clamp(0.0, 1.0);
-        let radius = (streak.length * travel.sqrt()).max(0.01);
+        let radius = (wave.length * travel.sqrt()).max(0.01);
         // Uniform: the ring is a unit annulus, so one scale grows it in place.
         // It stays centred on the caster, which is why nothing has to walk its
         // origin the way the old aimed quad did.
         transform.scale = Vec3::splat(radius);
-        transform.translation = streak.origin;
+        transform.translation = wave.origin;
 
         if let Some(material) = materials.get_mut(&handle.0) {
             // Orange, flashing near-white very early, then back to orange.
@@ -385,10 +386,10 @@ pub fn update_holy_streaks(
             let a = from.to_srgba();
             let b = to.to_srgba();
             // Hold full brightness while it travels, then fade once it lands.
-            let fade = if k < HOJ_STREAK_GROW_TO {
+            let fade = if k < HOJ_WAVE_GROW_TO {
                 1.0
             } else {
-                let out = (k - HOJ_STREAK_GROW_TO) / (1.0 - HOJ_STREAK_GROW_TO);
+                let out = (k - HOJ_WAVE_GROW_TO) / (1.0 - HOJ_WAVE_GROW_TO);
                 (1.0 - out) * (1.0 - out)
             };
             material.base_color = Color::srgba(
@@ -398,9 +399,9 @@ pub fn update_holy_streaks(
                 (a.alpha + (b.alpha - a.alpha) * t) * fade,
             );
             material.emissive = LinearRgba::new(
-                HOJ_STREAK_EMISSIVE.red * fade,
-                HOJ_STREAK_EMISSIVE.green * fade,
-                HOJ_STREAK_EMISSIVE.blue * fade,
+                HOJ_WAVE_EMISSIVE.red * fade,
+                HOJ_WAVE_EMISSIVE.green * fade,
+                HOJ_WAVE_EMISSIVE.blue * fade,
                 1.0,
             );
         }
@@ -455,11 +456,11 @@ pub fn update_justice_runes(
 /// Despawns both halves once they have played out.
 pub fn cleanup_holy_justice(
     mut commands: Commands,
-    streaks: Query<(Entity, &HolyStreak)>,
+    waves: Query<(Entity, &JusticeWave)>,
     runes: Query<(Entity, &JusticeRune)>,
 ) {
-    for (entity, streak) in streaks.iter() {
-        if streak.age >= HOJ_STREAK_SECS {
+    for (entity, wave) in waves.iter() {
+        if wave.age >= HOJ_WAVE_SECS {
             commands.entity(entity).despawn();
         }
     }
@@ -643,22 +644,22 @@ mod tests {
     }
 
     #[test]
-    fn the_streak_settles_before_it_fades() {
+    fn the_wave_settles_before_it_fades() {
         // It must reach full length while still bright, or the connection to
         // the victim is never actually drawn.
         assert!(
-            HOJ_STREAK_GROW_TO < 1.0,
-            "the streak has no time to land before it dies"
+            HOJ_WAVE_GROW_TO < 1.0,
+            "the wave has no time to land before it dies"
         );
-        assert!(HOJ_STREAK_GROW_FROM < HOJ_STREAK_GROW_TO);
+        assert!(HOJ_WAVE_GROW_FROM < HOJ_WAVE_GROW_TO);
     }
 
     #[test]
-    fn the_rune_outlasts_the_streak() {
-        // Cause then consequence: the streak arrives, the rune holds after it.
+    fn the_rune_outlasts_the_wave() {
+        // Cause then consequence: the wave arrives, the rune holds after it.
         assert!(
-            HOJ_RUNE_SECS > HOJ_STREAK_SECS,
-            "the rune should still be there once the streak has gone"
+            HOJ_RUNE_SECS > HOJ_WAVE_SECS,
+            "the rune should still be there once the wave has gone"
         );
     }
 }
