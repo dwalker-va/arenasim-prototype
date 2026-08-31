@@ -70,3 +70,5 @@ mod holy_justice;
 pub use holy_justice::*;
 mod frost_nova;
 pub use frost_nova::*;
+mod spell_bolts;
+pub use spell_bolts::*;

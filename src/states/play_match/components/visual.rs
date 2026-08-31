@@ -1042,3 +1042,147 @@ pub struct NovaFreezeDelay {
     /// wavefront's own life, whether or not it was ever used.
     pub age: f32,
 }
+
+/// Which bespoke missile a projectile carries.
+///
+/// The two are one shared vocabulary — faceted body, twin helical ribbons, shed
+/// sprites — parameterised into opposite silhouettes, which is the relationship
+/// the Classic models themselves have. See `rendering/effects/spell_bolts.rs`.
+#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BoltKind {
+    Frost,
+    Shadow,
+}
+
+/// The emitter state a bespoke bolt carries while it flies.
+///
+/// Lives on the `Projectile` entity itself, so the whole rig — shard, sprites,
+/// and the accumulators below — dies with the projectile on impact. Trail
+/// segments and motes are deliberately NOT children: they are left behind in
+/// world space and fade on their own clock.
+#[derive(Component)]
+pub struct BoltRig {
+    pub kind: BoltKind,
+    pub age: f32,
+    /// Distance travelled since the last ribbon segment, in yards.
+    pub ribbon_carry: f32,
+    /// Fractional shed sprites owed since the last one was spawned.
+    pub shed_carry: f32,
+    /// How many sprites this bolt has shed, seeding their scatter.
+    pub shed_count: u32,
+    /// Where the bolt was last frame, so ribbon spacing can be measured along
+    /// the step rather than sampled at frame boundaries.
+    pub last_pos: Vec3,
+    /// Per-bolt scatter seed. Visual only — never `game_rng`.
+    pub seed: u32,
+}
+
+/// The rolling hub carrying Frostbolt's two shard cones.
+#[derive(Component)]
+pub struct BoltShard;
+
+/// Shadow Bolt's opaque core — the one part of either bolt that is not a light.
+#[derive(Component)]
+pub struct BoltCore;
+
+/// What a billboarded bolt sprite is for.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BoltSpriteRole {
+    /// Frostbolt's wide head flare.
+    Flare,
+    /// Frostbolt's tight additive core, just ahead of the shard's shoulder.
+    TipGlow,
+    /// Shadow Bolt's breathing glow.
+    Halo,
+    /// Shadow Bolt's churn layers, on the source's 200ms and 433ms loops.
+    ChurnA,
+    ChurnB,
+}
+
+/// A billboarded quad parented to a bolt.
+#[derive(Component)]
+pub struct BoltSprite {
+    pub role: BoltSpriteRole,
+    /// Radius in yards at full size; the pulses scale around it.
+    pub radius: f32,
+}
+
+/// One segment of a bolt's ribbon trail, left behind in world space.
+///
+/// A STRETCHED band, not a dot: it spans `length` along `dir` so consecutive
+/// segments overlap into a continuous ribbon. Round sprites cannot do this —
+/// their alpha falls off radially, so however tightly they are spaced the
+/// bright cores stay separate and the trail reads as a dotted line.
+#[derive(Component)]
+pub struct BoltTrail {
+    pub age: f32,
+    pub life: f32,
+    /// Half-width of the band, in yards. This is what the fade shrinks.
+    pub half_width: f32,
+    /// Length along `dir`, in yards. Held CONSTANT as the segment fades —
+    /// shrinking it would open gaps at the tail as the ribbon died.
+    pub length: f32,
+    /// Direction of travel when this segment was laid down.
+    pub dir: Vec3,
+}
+
+/// One shed snowflake or shadow mote, drifting off the bolt's head.
+#[derive(Component)]
+pub struct BoltMote {
+    pub age: f32,
+    pub life: f32,
+    pub radius: f32,
+    pub velocity: Vec3,
+}
+
+/// A landed bolt, playing its burst on the victim.
+///
+/// Spawned by `process_projectile_hits` (so it exists in both modes, like
+/// `DeathCoilBurst`) and rendered only in graphical mode. Purely cosmetic: it
+/// reads combat state, writes none, and draws no `game_rng`.
+#[derive(Component)]
+pub struct BoltImpact {
+    pub kind: BoltKind,
+    /// The victim. The burst TRACKS it — the client attaches both impacts to
+    /// chest attachment 34, so a target that keeps running carries its hit.
+    pub target: Entity,
+    /// Unit vector from the victim back toward where the bolt came from.
+    ///
+    /// Shadow Bolt's burst is bilateral — its two arcs straddle this axis — so
+    /// without it the pair would spread along a fixed world axis and collapse
+    /// to a line for half of all bearings.
+    pub from: Vec3,
+    pub age: f32,
+}
+
+/// What a billboarded piece of an impact is for.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BoltImpactRole {
+    /// Frostbolt's cyan star flash.
+    Flash,
+    /// Frostbolt's expanding shockwave ring.
+    Ring,
+    /// Shadow Bolt's brief additive core flash.
+    Core,
+    /// Shadow Bolt's dark blot — the source's Opaque batch, taken literally.
+    /// The only piece of either burst that DARKENS rather than brightens.
+    Blot,
+    /// One of Shadow Bolt's two arcs.
+    Arc,
+}
+
+#[derive(Component)]
+pub struct BoltImpactSprite {
+    pub role: BoltImpactRole,
+    /// Full-size radius in yards; the growth curves scale around it.
+    pub radius: f32,
+    /// `+1` / `-1` for the two arcs, `0` for everything else.
+    pub side: f32,
+}
+
+/// One ice chip thrown out by a Frostbolt impact, in the rig's own frame.
+#[derive(Component)]
+pub struct BoltImpactShard {
+    pub velocity: Vec3,
+    pub spin: f32,
+}

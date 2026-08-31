@@ -536,6 +536,35 @@ impl Plugin for StatesPlugin {
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_combat_scene),
             )
+            // Frostbolt and Shadow Bolt: the bespoke missiles and the bursts
+            // they leave on their victims.
+            //
+            // Its OWN `.add_systems` group rather than more entries on the one
+            // above, which had reached Bevy's 20-tuple limit — the same reason
+            // the effect groups upstream are split.
+            //
+            // Order within the group is load-bearing twice over: `animate_*`
+            // must follow `spawn_*` or a bolt's first frame drives a rig that
+            // does not exist yet, and each `billboard_*` must follow BOTH,
+            // because it cancels the rig's own aim out of every flat child and
+            // therefore has to see the poses those two just wrote. `.chain()`
+            // guarantees all of it.
+            .add_systems(
+                Update,
+                (
+                    play_match::spawn_bolt_visuals,
+                    play_match::animate_bolts,
+                    play_match::billboard_bolt_sprites,
+                    play_match::update_bolt_trails,
+                    play_match::update_bolt_motes,
+                    play_match::spawn_bolt_impacts,
+                    play_match::animate_bolt_impacts,
+                    play_match::billboard_bolt_impacts,
+                )
+                    .chain()
+                    .after(CombatSystemPhase::CombatResolution)
+                    .run_if(in_combat_scene),
+            )
             // Pet mesh tilt must run after movement sets Y-facing rotation
             .add_systems(
                 Update,
