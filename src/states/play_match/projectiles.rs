@@ -40,6 +40,15 @@ pub fn spawn_projectile_visuals(
     ability_defs: Res<AbilityDefinitions>,
 ) {
     for (projectile_entity, projectile) in new_projectiles.iter() {
+        // Frostbolt and Shadow Bolt build a bespoke rig instead — a faceted
+        // shard or an opaque core, twin helical ribbons and shed sprites, all
+        // matched to their Classic missile models. `spawn_bolt_visuals`
+        // (`rendering/effects/spell_bolts.rs`) owns them; giving them a sphere
+        // here too would leave an orb buried inside the real effect.
+        if super::rendering::bolt_kind_for(projectile.ability).is_some() {
+            continue;
+        }
+
         // Choose mesh shape based on ability type
         let mesh = if is_arrow_projectile(projectile.ability) {
             // Arrow: elongated cuboid, long axis on Z (matches rotation_arc(Z, direction))
@@ -412,6 +421,23 @@ pub fn process_projectile_hits(
         }
 
         // Spawn the flashy Death Coil impact burst on the struck target. Death
+        // Bespoke chest burst for the two signature bolts. Cosmetic only: it
+        // reads the hit, writes nothing, and draws no `game_rng` — the same
+        // shape as the Death Coil and Concussive Shot markers below. `from`
+        // points back down the incoming line, which is what lets Shadow Bolt's
+        // arcs straddle it instead of a fixed world axis.
+        if let Some(kind) = super::rendering::bolt_kind_for(ability) {
+            commands.spawn((
+                BoltImpact {
+                    kind,
+                    target: target_entity,
+                    from: (caster_pos - target_pos).normalize_or_zero(),
+                    age: 0.0,
+                },
+                PlayMatchEntity,
+            ));
+        }
+
         // Coil is often a point-blank self-peel (near-zero travel), so the
         // traveling sphere is easy to miss — this green flash pops on the victim.
         if ability == AbilityType::DeathCoil {

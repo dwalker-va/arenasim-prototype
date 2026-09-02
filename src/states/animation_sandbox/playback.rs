@@ -514,6 +514,11 @@ pub fn drive_playback(
 /// to every aura entry (KTD5); non-aura casts (pure damage) need no hold.
 const AURA_HOLD_SECS: f32 = 4.0;
 
+/// Slack left after a projectile lands, so its impact burst plays out inside
+/// the preview window rather than being cut off at the moment of contact.
+/// Comfortably longer than the longest bolt burst.
+const IMPACT_TAIL_SECS: f32 = 0.8;
+
 /// Length of one pass of the selected entry.
 fn entry_duration(playback: &SandboxPlayback, defs: &AbilityDefinitions) -> f32 {
     match playback.selected {
@@ -532,12 +537,27 @@ fn entry_duration(playback: &SandboxPlayback, defs: &AbilityDefinitions) -> f32 
                         | Some(EntryFamily::Residue)
                         | Some(EntryFamily::Entity)
                 );
+            // A projectile is not finished when its CAST is. The missile still
+            // has to cross the stage and land, and both of those are most of
+            // what a projectile animation is.
+            //
+            // Without this the window closed at `cast_time` for any projectile
+            // carrying no aura, so Shadow Bolt got 2.0s — its cast and nothing
+            // else — while Frostbolt got 5.5s purely because its slow aura
+            // bought it the hold below. Two abilities that are the same shape
+            // read as completely different lengths, and the newer half of the
+            // animation (flight, then impact) was never on screen at all.
+            let travel = config
+                .projectile_speed
+                .map(|speed| super::STAGE_SEPARATION * 2.0 / speed.max(0.1) + IMPACT_TAIL_SECS)
+                .unwrap_or(0.0);
+
             if let Some(channel) = config.channel_duration {
                 channel
             } else if holds {
-                config.cast_time + AURA_HOLD_SECS
+                config.cast_time + AURA_HOLD_SECS + travel
             } else {
-                config.cast_time
+                config.cast_time + travel
             }
         }
         Some(SandboxEntry::Body(body)) => body.duration(),
@@ -1363,6 +1383,50 @@ pub fn sustain_staged_units(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A projectile's preview window has to cover its FLIGHT and its impact,
+    /// not just its cast.
+    ///
+    /// This was wrong for every projectile that applies no aura. `holds` keyed
+    /// only on `applies_aura`, so Frostbolt's slow bought it `cast_time + 4s`
+    /// while Shadow Bolt — the same shape of ability — got its bare 2.0s
+    /// `cast_time` and stopped at the instant of release. The missile crossed
+    /// the stage and burst after the preview had already ended.
+    #[test]
+    fn a_projectile_preview_outlasts_its_own_cast() {
+        let defs = AbilityDefinitions::default();
+        let window = |ability: AbilityType| {
+            let mut playback = SandboxPlayback::default();
+            playback.selected = Some(SandboxEntry::Ability(ability));
+            playback.family = defs.get(&ability).map(|c| mechanism_for(ability, c));
+            entry_duration(&playback, &defs)
+        };
+
+        for ability in [AbilityType::Frostbolt, AbilityType::Shadowbolt] {
+            let config = defs.get(&ability).expect("configured");
+            let speed = config.projectile_speed.expect("both bolts fly");
+            let flight = super::super::STAGE_SEPARATION * 2.0 / speed;
+            assert!(
+                window(ability) >= config.cast_time + flight,
+                "{ability:?}'s window ({:.2}s) ends before its missile lands \
+                 (cast {:.2}s + {:.2}s of flight)",
+                window(ability),
+                config.cast_time,
+                flight,
+            );
+        }
+
+        // And the two must not differ wildly, since they are the same shape of
+        // ability. The remaining gap is Frostbolt's slow aura, which genuinely
+        // has something extra to show.
+        let frost = window(AbilityType::Frostbolt);
+        let shadow = window(AbilityType::Shadowbolt);
+        assert!(
+            shadow > frost - AURA_HOLD_SECS - 0.5,
+            "Shadow Bolt ({shadow:.2}s) is far shorter than Frostbolt ({frost:.2}s) \
+             for reasons beyond Frostbolt's aura hold"
+        );
+    }
 
     #[test]
     fn wired_mechanisms_are_playable_and_unsupported_never_is() {
