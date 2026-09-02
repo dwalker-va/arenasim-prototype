@@ -208,7 +208,8 @@ fixed in `0a4a93f`; these are the lower-priority remainder.
 The tiered animation walk has shipped its pilot and three more signatures —
 Polymorph (#103), Fear (#107), Lightning Bolt (#111), Mortal Strike (#112) —
 plus `animate_body_lean` (#113), which lifted the melee ceiling for the whole
-tier at once. Procedure and its amendments:
+tier at once, and the Frostbolt / Shadow Bolt missiles and impacts (#116).
+Procedure and its amendments:
 `docs/solutions/implementation-patterns/signature-ability-animation-procedure.md`.
 
 This candidate list came out of **removing the in-combat ability speech
@@ -227,6 +228,11 @@ nothing whatsoever. Compounding it, the receiver side has treatments for
 is precisely what the silent abilities apply. One receiver-side treatment
 therefore lights up six abilities at once, which is why it led.
 
+**A third hook has since surfaced, and the framing above missed it.** Those two
+are both CASTER-side; a projectile's *landing* is a hook of its own, and it is
+barely implemented. Section D has the detail — it is the highest-value remaining
+item on this list.
+
 Section A has since shipped and closed the `Root`/`Stun` half of that gap.
 **`MovementSpeedSlow` remains untreated** — Frostbolt, Kick, Crippling Poison,
 Arcane Shot, Concussive Shot, Lightning Bolt and Frost Shock all apply it and
@@ -234,93 +240,46 @@ none of them shows it on the victim. It is a softer effect than hard CC and did
 not belong in the same treatment (a slowed unit is still moving and acting), but
 it is now the largest remaining receiver-side hole.
 
-### A. Root/Stun receiver treatment (highest leverage) — SHIPPED
+### A. Root/Stun receiver treatment — SHIPPED (#115)
 
-- [x] ~~**A shared treatment for `Root` and `Stun`.**~~ Shipped in
-      `rendering/effects/hard_cc.rs`. It covers **six** abilities, not the four
-      listed here originally: the audit missed **Hammer of Justice** (Paladin,
-      6s Stun) and **Boar Charge** (Hunter pet, 1.5s Stun), both equally silent.
-- **What it looks like.** A spatial grammar carries the Root/Stun distinction:
-  **feet for Root, head for Stun**. Root grows ice crystals (Frost school) or a
-  webbed sheet (Nature — Spider Web) and then holds completely still; Stun turns
-  a hueless bead whirl overhead at exactly 1 Hz, converting a stunned unit's
-  provable inertness into a visible presence. One per-victim apply flare marks
-  the landing, which gives Frost Nova's AoE an AoE read with no caster hook.
-- **Two design calls that departed from the plan**, both worth keeping:
-  - *No ground ring.* A dark disc bitten out of the floor was argued in on
-    legibility grounds, but it is not in the source material and a dark ground
-    ring already means "AoE landing here" in this genre. The apply flare covers
-    the wide-footprint job instead.
-  - *The body is never touched.* No tint, mesh swap, pose or gait suppression —
-    which sidesteps the `OriginalBodyMaterial` contention family entirely and
-    keeps Cheap-Shot-on-a-stealthed-Rogue a non-event. A planned stun "sag" on
-    `Transform.scale` was cut: Bevy scales about the child's origin (the capsule
-    centre), so it lifted the feet off the floor, and the compensating
-    `translation.y` belongs to the gaits.
-- The web deliberately stops at the shins. Enclosing the whole unit is this
-  game's **Incapacitate** language (Freezing Trap's `IceBlockVisual` cuboid),
-  while Root leaves the torso free to act.
-- No combat-code change, no `game_rng` draw, no sandbox edit (`AURA_HOLD_SECS`
-  already generalises to every aura entry, and `is_hostile_aura` already lists
-  Root and Stun). Byte-identity holds by construction; `determinism_pin` is
-  unchanged. 25 probes in `tests/hard_cc_visual_probes.rs`.
+- [x] ~~**A shared treatment for `Root` and `Stun`.**~~ `rendering/effects/hard_cc.rs`,
+      25 probes. It covers **six** abilities, not the four originally listed here:
+      the audit missed Hammer of Justice and Boar Charge, both equally silent.
+- **The grammar is spatial** — feet for Root, head for Stun. Root grows ice
+  crystals (Frost) or a webbed sheet (Nature), then holds completely still; Stun
+  turns a hueless bead whirl overhead at exactly 1 Hz. A per-victim apply flare
+  marks the landing, which is what gives Frost Nova's AoE an AoE read with no
+  caster hook of its own.
+- **Three calls that are easy to undo by accident.** There is no ground ring — a
+  dark disc already means "AoE landing here" in this genre, and the apply flare
+  does that job. The body is never touched (no tint, mesh swap, pose or gait
+  suppression), which sidesteps the `OriginalBodyMaterial` contention family and
+  keeps Cheap-Shot-on-a-stealthed-Rogue a non-event. And the web stops at the
+  shins deliberately: enclosing the whole unit is this game's **Incapacitate**
+  language (Freezing Trap's `IceBlockVisual`), while Root leaves the torso free
+  to act.
 
 ### A2. The applier side of the four silent instants — SHIPPED
 
 - [x] ~~**Frost Nova, Cheap Shot, Kidney Shot and Hammer of Justice have no
-      actor-side animation.**~~ All four now do. A was entirely receiver-side
-      because that was the only side available; this opened the other one.
-- **`InstantAttackLanded` generalised to `InstantAbilityFired`** — `caster` plus
-  `target: Option<Entity>` (`None` for a caster-centred effect), with
-  `is_spawned_for()` as the single list both combat code and the sandbox derive
-  from, so the two cannot drift. `EntryFamily::InstantMelee` was deleted, folded
-  into `Residue`: the same mechanism under a name that had stopped being true.
-- **The router had a real bug**, found independently by two reviewers. Its
-  flourish dispatch was nested inside BOTH `Some(style)` and `Some(target_pos)`,
-  so an ability with no weapon stroke or no single target could never reach it —
-  which is exactly Hammer of Justice and Frost Nova. Swing and flourish dispatch
-  are now independent.
-
-**Researching the source reversed the design for three of the four.** The
-Classic client data (DB2 tables plus the parsed M2 models) said:
-
-| Ability | What it actually is |
-|---|---|
-| Cheap Shot | Plain `Attack1H`, 634ms. Four **untinted white** crescents at head height, two quick pairs. Shares its visual with Sap — it does not even own one. |
-| Kidney Shot | `Attack1HPierce` — a **lunging thrust, not a kick**, 1233ms. Three crescents at torso height, magenta → white flash → deep crimson. Its own model, used by nothing else. |
-| Hammer of Justice | **No hammer, no projectile** (`HasMissile = 0`). Internally *FistOfJustice*: a flat gold ground streak racing toward the target, plus a rune at its chest. |
-| Frost Nova | Three flat rings expanding at **different rates** over 867ms. |
-
-Consequences worth remembering: the two rogue stuns are byte-identical on the
-receiver side and differ ENTIRELY on the caster side, so collapsing them would
-discard the only thing separating them. And the Paladin's mace deliberately does
-not swing — `swing_style_for_ability` returns `None` for HoJ on purpose.
-
-**New machinery.** `SwingArc::Lunge` (translation-dominant — the "one rotation,
-one axis" rule governs swings and a thrust traces no plane), procedural crescent
-and rune and streak textures, and Frost Nova's ragged procedural ring meshes with
-vertex-coloured alpha.
-
-**Frost Nova went beyond the source, deliberately:** a ragged wavefront, crystals
-erupting along it, and a **propagated freeze** — each victim's root crystals grow
-as the wave reaches them, so the wave visibly causes the freeze. That last one is
-the only part of A2 that reaches into shipped code (`CcRig` gained a `delay`) and
-carries an ordering dependency: the nova systems must stay chained ahead of the
-hard-CC treatment, or the delay lands too late and propagation silently
-degrades to an instant freeze.
-
-**Deliberate divergences from the source**, all for legibility at this camera:
-HoJ's streak scales to the real caster-target distance (the source uses a fixed
-~4 units, which at 10yd range reads as a misfire); Frost Nova's rings reach the
-spell's real 10yd rather than the source's ~6.7; and the nova's edge tint is
-`SpellSchool::Frost` rather than the measured `#2650C9`, which is dark enough to
-read as grey for most of the ring's travel.
-
-**Left undone:** the source puts a red glow on both the Rogue's hands during
-Kidney Shot. We have weapon sockets but no hand attachment points, so placing it
-would be inventing anatomy. And Kidney Shot's magenta is the one colour the
-research could not corroborate from a second source — it is one const if it
-looks wrong in the client.
+      actor-side animation.**~~ All four now do. `InstantAttackLanded` was
+      generalised to `InstantAbilityFired` (`caster` plus `target: Option<Entity>`,
+      `None` for caster-centred), with `is_spawned_for()` as the single list both
+      combat code and the sandbox derive from so the two cannot drift.
+- **Researching the client data reversed three of the four designs.** The table
+  and its lessons live in the procedure doc; what matters here is the two
+  consequences a later change could quietly break. The Paladin's mace
+  deliberately does **not** swing — `swing_style_for_ability` returns `None` for
+  Hammer of Justice on purpose. And the two rogue stuns are byte-identical on
+  the receiver side and differ ENTIRELY on the caster side, so collapsing them
+  into one shared stroke would discard the only thing separating them.
+- **One ordering dependency to preserve.** Frost Nova's propagated freeze — each
+  victim's crystals grow as the wave reaches *them* — means the nova systems must
+  stay chained ahead of the hard-CC treatment, or the delay lands too late and
+  propagation degrades silently to an instant freeze.
+- **Left undone:** the source puts a red glow on both the Rogue's hands during
+  Kidney Shot. We have weapon sockets but no hand attachment points, so placing
+  it would be inventing anatomy.
 
 ### B. Interrupts — an actor-side gesture
 
@@ -353,6 +312,68 @@ looks wrong in the client.
 (`ShieldBubble`), Psychic Scream (`ScreamBurst`), Fear (receiver husk in
 `fear.rs`, plus the caster's orb — it is a hardcast), Boar Charge (charge trail
 in `movement_trails.rs`), Master's Call (`DispelBurst` + `DispelRibbon`).
+
+### D. Impact: the third hook (highest remaining leverage)
+
+- [ ] **A shared, school-coloured impact for projectiles.** **Aimed Shot**,
+      **Arcane Shot**, **Serpent Sting** and **Spider Web** all land in total
+      silence — the projectile reaches its target and simply stops existing.
+- **Why this is structural, not four one-offs.** The framing at the top of this
+  section names two generic hooks and both are caster-side. A projectile's
+  landing is a third, and of the eight abilities carrying `projectile_speed`
+  only four reach any visual at all: Lightning Bolt built its own burst,
+  Concussive Shot borrows `DispelBurst`, and Frostbolt and Shadow Bolt got
+  bespoke ones in #116. The other four fall through.
+- **There is a legacy piece to retire, not sit beside.** `SpellImpactEffect`
+  (`rendering/effects/spell_impact.rs`) is a hardcoded-purple expanding sphere
+  wired to exactly one ability, Mind Blast; `lightning_bolt.rs` documents
+  declining to reuse it precisely because it carries no per-instance colour.
+  A shared impact should absorb it.
+- **What it looks like.** Colour from `SpellSchool::color_rgb8` — the authority
+  Frost Nova already deferred to over its own measured endpoint — on the shape
+  grammar #116 settled: a flash at the victim's chest (attachment height, and
+  it must FOLLOW a moving victim), a soft-rimmed expanding band, and a short
+  spray whose character comes from the school. This is the recolour tier the
+  walk always intended underneath the bespoke signatures, and the two bolts
+  stay bespoke above it.
+- **Where it hangs.** `process_projectile_hits` already spawns per-ability
+  cosmetic markers (Death Coil, Concussive Shot, #116's `BoltImpact`); a generic
+  marker carrying school and damage belongs at that same site. #116 verified on
+  two seeds that spawning a marker there is headless-byte-identical, so the
+  pattern is already paid for.
+- **Two things it unlocks cheaply.** Damage magnitude is invisible in world
+  space today — `is_crit` drives floating text and nothing else — so an impact
+  scaled by damage fraction makes a crit read as a crit for *every* ability at
+  once. And the three arrows are Physical and Nature, schools with no effect
+  vocabulary at all yet.
+- **Settle the palette as part of this.** "Frost" has quietly drifted to five
+  values — root ice `(0.80, 0.86, 0.95)`, the nova's core `(0.84, 0.84, 1.00)`
+  and edge `(0.39, 0.71, 1.00)`, and #116's shard `(0.835, 0.961, 1.00)` and
+  ribbons `(0.42, 0.76, 1.00)`. Each was justified locally and nothing enforces
+  `color_rgb8`. A recolour tier built on a drifting palette inherits the drift
+  permanently.
+
+### E. Leftovers, second pass
+
+- [ ] **Nothing flinches when it takes a hit.** No reaction on the victim for
+      ordinary damage, so every attack in the game lands soundlessly on the
+      body. Potentially the highest leverage on this whole list — one
+      receiver-side system covering every damage source, the way
+      `animate_body_lean` lifted the entire melee tier — but it lands straight
+      in the Transform-channel contention documented in A: the gaits own
+      `translation.y`, the death fall owns rotation, the lean owns the
+      horizontal step. Answer the channel-ownership question *before* designing
+      it, not during.
+- [ ] **Shadow-caster hygiene is unaudited.** Before #116, `NotShadowCaster`
+      appeared nowhere in the repo — the omission only surfaced because a bolt
+      trail painted a dotted black line across the arena floor beside itself.
+      Nova crystals, stun beads, charge trails, totems and traps all spawn
+      meshes on open ground with the same exposure. Cheap sweep.
+- [ ] **The sandbox preview window is only verified for one family.** #116
+      fixed projectiles, whose window ended at `cast_time` and so cut off the
+      flight and the impact entirely. Whether a `Residue` or `Entity` entry's
+      window covers its full visual — a trap arming and later triggering, a
+      totem's life — is unchecked.
 
 - [ ] **Nit: `rendering/effects/slow_zone.rs` is misnamed** — it contains the
       Disengage trail, not a slow zone, and there is no slow-zone visual at
