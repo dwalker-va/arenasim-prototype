@@ -25,20 +25,116 @@ pub struct FloatingCombatText {
     pub is_crit: bool,
 }
 
-/// Visual effect for spell impacts (Mind Blast, etc.)
-/// Displays as an expanding sphere that fades out
+/// Where on the victim a shared impact plays.
+///
+/// The Classic client attaches the arrows' impact to chest attachment 34 and
+/// Mind Blast's to head attachment 20; the two heights are what separate a
+/// body hit from a mind hit at a glance. See `rendering/effects/school_impact.rs`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ImpactAnchor {
+    Chest,
+    Head,
+}
+
+/// A landed ability playing the shared, school-coloured impact on its victim.
+///
+/// The third generic hook — the receiver-side counterpart of the casting orb
+/// and `InstantAbilityFired`. Spawned by combat code at the site where the
+/// ability RESOLVES (`process_projectile_hits` for projectiles, the
+/// instant-effect landing in `process_casting` for Mind Blast), so it exists in
+/// both modes like `BoltImpact`; rendered only in graphical mode. Purely
+/// cosmetic: it reads combat state, writes none, and draws no `game_rng`.
 #[derive(Component)]
-pub struct SpellImpactEffect {
-    /// World position where the effect should appear
-    pub position: Vec3,
-    /// Time remaining before effect disappears (in seconds)
-    pub lifetime: f32,
-    /// Initial lifetime for calculating fade/scale
-    pub initial_lifetime: f32,
-    /// Initial scale of the sphere
-    pub initial_scale: f32,
-    /// Final scale of the sphere (expands to this)
-    pub final_scale: f32,
+pub struct SchoolImpact {
+    /// The victim. The burst TRACKS it, so a target that keeps running carries
+    /// its hit.
+    pub target: Entity,
+    /// What landed. The style is chosen by school, but an ability may
+    /// override its school's row (Mana Burn is Shadow without being Mind
+    /// Blast) — see `landing_style`.
+    pub ability: AbilityType,
+    pub school: SpellSchool,
+    pub anchor: ImpactAnchor,
+    /// Unit vector from the victim back toward where the hit came from.
+    /// Debris splashes back along it.
+    pub from: Vec3,
+    /// Damage dealt (health plus absorbed) as a fraction of the victim's max
+    /// health; `0.0` for an aura-only landing. Scales the burst, so a hard hit
+    /// reads as a hard hit for every ability at once.
+    pub magnitude: f32,
+    /// Cosmetic only — never read by sim code.
+    pub is_crit: bool,
+    pub age: f32,
+}
+
+impl SchoolImpact {
+    /// Which abilities land through the shared impact, and where — the single
+    /// list the two spawn sites and the projectile audit derive from.
+    ///
+    /// `None` for anything with a bespoke landing (the two bolts' `BoltImpact`,
+    /// Death Coil's `DeathCoilBurst`, Lightning Bolt's own burst), for Web —
+    /// whose source has no impact kit at all, only the root STATE that
+    /// `hard_cc.rs` already draws — and for everything that is not a landing.
+    /// Every projectile in `abilities.ron` must reach SOME impact;
+    /// `tests/school_impact_visual_probes.rs` checks that against the config.
+    pub fn anchor_for(ability: AbilityType) -> Option<ImpactAnchor> {
+        match ability {
+            AbilityType::AimedShot
+            | AbilityType::ArcaneShot
+            | AbilityType::ConcussiveShot
+            | AbilityType::SerpentSting
+            // `holysmite_low_chest.m2` on attachment 34, per the client data.
+            | AbilityType::HolyShock
+            // `manaburn_chest.m2` on attachment 34 — its own model, so it
+            // overrides the Shadow row (see `landing_style`).
+            | AbilityType::ManaBurn => Some(ImpactAnchor::Chest),
+            AbilityType::MindBlast => Some(ImpactAnchor::Head),
+            _ => None,
+        }
+    }
+}
+
+/// What a flat, per-landing piece of a shared impact is for.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ImpactRole {
+    /// The star flash at the point of contact.
+    Flash,
+    /// The expanding soft-rimmed band, for schools that have one.
+    Ring,
+    /// A dark blended mass behind the flash — the only piece that DARKENS.
+    Blot,
+}
+
+#[derive(Component)]
+pub struct ImpactSprite {
+    pub role: ImpactRole,
+    /// Full-size radius in yards; the growth curves scale around it.
+    pub radius: f32,
+}
+
+/// One piece of a landing's debris, in the rig's own frame.
+#[derive(Component)]
+pub struct ImpactMote {
+    pub kind: crate::states::play_match::rendering::SprayKind,
+    pub velocity: Vec3,
+    /// Downward acceleration; negative rises.
+    pub gravity: f32,
+    pub spin: f32,
+    pub age: f32,
+    pub life: f32,
+    pub radius: f32,
+}
+
+/// Graphical-only state a `SchoolImpact` rig carries while it plays.
+#[derive(Component)]
+pub struct ImpactRig {
+    pub mote_mesh: Handle<Mesh>,
+    /// Material for a smoulder's emitted motes, when the style has one.
+    pub smoulder_material: Option<Handle<StandardMaterial>>,
+    /// Fractional motes owed since the last one was emitted.
+    pub emit_carry: f32,
+    /// How many the smoulder has emitted, seeding their scatter.
+    pub emitted: u32,
 }
 
 /// Signature Lightning Bolt strike: an instant forked "flash-crack" arc drawn
@@ -269,7 +365,7 @@ pub struct DispelBurst {
 
 /// Visual effect for a successful dispel — a twisting ribbon that spirals up off
 /// the dispelled combatant's head and fades. Distinct from `DispelBurst` (the
-/// expanding sphere, still used by Concussive Shot and Master's Call): the ribbon's
+/// expanding sphere, still used by Master's Call): the ribbon's
 /// unique silhouette + upward rise make it unmistakable as a cleanse and draw the
 /// eye to *which* combatant lost a buff. Spawned only on a successful dispel.
 #[derive(Component)]
@@ -284,6 +380,29 @@ pub struct DispelRibbon {
     pub initial_lifetime: f32,
     /// Spin accumulator (seconds) driving the ribbon's slow Y-axis rotation
     pub spin: f32,
+}
+
+/// Graphical-only state a [`DispelRibbon`] carries while it plays: the spark
+/// sprite and this ribbon's own class-coloured spark material, plus the
+/// emitter accumulator for the play-out stream off the fixed top end.
+#[derive(Component)]
+pub struct DispelRibbonRig {
+    pub spark_mesh: Handle<Mesh>,
+    pub spark_material: Handle<StandardMaterial>,
+    /// Fractional sparks owed since the last one was emitted.
+    pub emit_carry: f32,
+    /// How many sparks this ribbon has emitted, seeding their scatter.
+    pub emitted: u32,
+}
+
+/// One spark streaming off a playing-out dispel ribbon's top end. A transient,
+/// unattached world particle: rises, shrinks, self-expires.
+#[derive(Component)]
+pub struct DispelSpark {
+    pub velocity: Vec3,
+    pub age: f32,
+    pub life: f32,
+    pub radius: f32,
 }
 
 /// Visual effect for a polymorph transition — a cluster of pale cloud lobes that

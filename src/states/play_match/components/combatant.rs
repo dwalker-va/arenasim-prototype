@@ -658,6 +658,9 @@ pub struct HolyShockDamagePending {
     pub caster_slot: u8,
     pub caster_class: match_config::CharacterClass,
     pub target: Entity,
+    /// Unit vector from the target back toward the caster at cast time, for
+    /// the shared impact's splash direction. Cosmetic only.
+    pub impact_from: Vec3,
 }
 
 /// Pending Divine Shield activation to be processed.
@@ -698,6 +701,9 @@ pub struct ManaBurnPending {
     pub caster_team: u8,
     pub caster_slot: u8,
     pub caster_class: match_config::CharacterClass,
+    /// Unit vector from the target back toward the caster at cast time, for
+    /// the shared impact's splash direction. Cosmetic only.
+    pub impact_from: Vec3,
 }
 
 /// Pending dispel to be processed by the aura system.

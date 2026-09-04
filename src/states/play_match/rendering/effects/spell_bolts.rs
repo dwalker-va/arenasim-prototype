@@ -4,7 +4,7 @@ use bevy::pbr::NotShadowCaster;
 use bevy::render::mesh::{ConeAnchor, Indices, PrimitiveTopology};
 use std::f32::consts::TAU;
 
-use crate::states::play_match::abilities::AbilityType;
+use crate::states::play_match::abilities::{AbilityType, SpellSchool};
 use crate::states::play_match::components::*;
 
 // ==============================================================================
@@ -297,7 +297,7 @@ fn bolt_jitter(seed: u32) -> f32 {
 /// `sparkle_texture` and `create_surface_texture` are. This is the ONLY way to
 /// get a soft edge: a glow built from bigger, dimmer geometry renders as a hard
 /// silhouette however faint it is.
-fn soft_dot_texture() -> Image {
+pub(crate) fn soft_dot_texture() -> Image {
     use bevy::image::Image;
     use bevy::render::render_asset::RenderAssetUsages;
     use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
@@ -1047,11 +1047,8 @@ pub fn bolt_billboard_rotation(parent: Quat, camera: Quat) -> Quat {
 //   3. **No dust.** `dust1_a.blp` is a ground-contact cue; these land on a
 //      chest in mid-air.
 
-/// Height of chest attachment 34 on this project's 2.5yd capsule.
-const IMPACT_CHEST_Y: f32 = 1.45;
-
 /// `SpellSchool::Frost` — this project's colour authority.
-const FROST_IMPACT_COLOR: Color = Color::srgb(0.392, 0.706, 1.000);
+const FROST_IMPACT_COLOR: Color = SpellSchool::Frost.color();
 const FROST_IMPACT_EMISSIVE: LinearRgba = LinearRgba::rgb(0.90, 2.00, 3.60);
 const FROST_IMPACT_FLASH_RADIUS: f32 = 0.85;
 const FROST_IMPACT_FLASH_SECS: f32 = 0.16;
@@ -1120,9 +1117,13 @@ pub fn bolt_impact_life(kind: BoltKind) -> f32 {
     }
 }
 
-/// Where a bolt's burst plays, given its victim's feet.
+/// Where a bolt's burst plays, given its victim's transform.
+///
+/// The chest anchor is shared with the recolour tier (`school_impact.rs`),
+/// which owns the measurement: the capsule is centred on the transform, and
+/// the value this module first shipped (+1.45) put the burst above the head.
 pub fn bolt_impact_origin(target: Vec3) -> Vec3 {
-    target + Vec3::Y * IMPACT_CHEST_Y
+    super::impact_origin(ImpactAnchor::Chest, target, false)
 }
 
 /// The two lateral anchors Shadow Bolt's arcs hang from, in the rig's frame.
@@ -1155,7 +1156,7 @@ pub fn frost_shard_direction(i: u32, n: u32) -> Vec3 {
 /// Stands in for `cyanstarflash.blp`. Same shape as the stun sparkle in
 /// `hard_cc.rs` and generated for the same reason, but kept local so the two
 /// can be tuned apart.
-fn star_flash_texture() -> Image {
+pub(crate) fn star_flash_texture() -> Image {
     use bevy::image::Image;
     use bevy::render::render_asset::RenderAssetUsages;
     use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};

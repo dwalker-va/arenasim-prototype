@@ -12,6 +12,8 @@
 use bevy::prelude::*;
 
 use crate::combat::log::{CombatLog, CombatLogEventType};
+use crate::states::play_match::abilities::AbilityType;
+use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
 use crate::states::play_match::utils::{combatant_id, combat_log_id_for};
 
@@ -27,7 +29,11 @@ pub fn process_mana_burn(
     pending_burns: Query<(Entity, &ManaBurnPending)>,
     mut combatants: Query<&mut Combatant>,
     pet_query: Query<&Pet>,
+    abilities: Res<AbilityDefinitions>,
 ) {
+    // The landing's school comes from the definition, as at every other
+    // `SchoolImpact` spawn site, so a RON retune moves the colour with it.
+    let school = abilities.get_unchecked(&AbilityType::ManaBurn).spell_school;
     for (pending_entity, pending) in pending_burns.iter() {
         if let Ok(mut target) = combatants.get_mut(pending.target) {
             if target.is_alive() && target.resource_type == ResourceType::Mana {
@@ -45,6 +51,29 @@ pub fn process_mana_burn(
                 );
                 combat_log.log(CombatLogEventType::Buff, msg.clone());
                 info!("{}", msg);
+
+                // The shared, school-coloured landing (`rendering/effects/
+                // school_impact.rs`), spawned only when mana actually burned —
+                // a Mana Burn on an empty pool is not a landing. Magnitude is
+                // the fraction of the POOL destroyed, since there is no damage.
+                // Deterministic, no `game_rng`; byte-neutral in headless.
+                if burned > 0.0 {
+                    if let Some(anchor) = SchoolImpact::anchor_for(AbilityType::ManaBurn) {
+                        commands.spawn((
+                            SchoolImpact {
+                                target: pending.target,
+                                ability: AbilityType::ManaBurn,
+                                school,
+                                anchor,
+                                from: pending.impact_from,
+                                magnitude: burned / target.max_mana.max(1.0),
+                                is_crit: false,
+                                age: 0.0,
+                            },
+                            PlayMatchEntity,
+                        ));
+                    }
+                }
             }
         }
         commands.entity(pending_entity).despawn();
@@ -60,6 +89,7 @@ mod tests {
     fn new_world() -> World {
         let mut world = World::new();
         world.insert_resource(CombatLog::default());
+        world.insert_resource(AbilityDefinitions::default());
         world
     }
 
@@ -71,6 +101,7 @@ mod tests {
                 caster_team: 1,
                 caster_slot: 0,
                 caster_class: CharacterClass::Priest,
+                impact_from: Vec3::X,
             })
             .id()
     }

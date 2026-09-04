@@ -28,7 +28,7 @@ use super::super::play_match::components::{
     ActiveAuras, AuraPending, AuraType, BerserkerRagePending, Celebrating, CastingState, ChannelingState,
     ChargingState, Combatant, DRTracker, DeathAnimation, DisengagingState, DispelPending,
     DivineShieldPending, HolyShockDamagePending, HolyShockHealPending, InstantAbilityFired,
-    MatchResults, Pet,
+    MatchResults, Pet, SchoolImpact,
     PetType, PlayMatchEntity, ScreamBurst, Totem, TotemElement, TrapType, VictoryCelebration,
     VisualBody,
 };
@@ -38,7 +38,7 @@ use super::super::play_match::class_ai::pet_ai::{
 };
 use super::super::play_match::class_ai::shaman::{totem_spec, totem_spacing_offset};
 use super::super::play_match::spawn_pet;
-use super::super::play_match::{DISENGAGE_SPEED, MELEE_RANGE, TOTEM_DURATION, TOTEM_RADIUS};
+use super::super::play_match::{landing_style, DISENGAGE_SPEED, MELEE_RANGE, TOTEM_DURATION, TOTEM_RADIUS};
 use crate::combat::log::CombatLog;
 use super::{SandboxEntity, SandboxStage};
 
@@ -463,10 +463,19 @@ pub fn drive_playback(
                 }
             }
             // A dispel needs a dispellable aura present BEFORE process_dispels
-            // runs, or no DispelBurst spawns. Stage a magic buff on the dummy
-            // directly into its ActiveAuras (immediate — an AuraPending would
-            // resolve AFTER process_dispels in the Phase-1 order and be missed).
-            // Cleared between passes by clear_body_state.
+            // runs, or nothing is stripped and no ribbon spawns. Stage it
+            // directly into the dummy's ActiveAuras (immediate — an AuraPending
+            // would resolve AFTER process_dispels in the Phase-1 order and be
+            // missed). Cleared between passes by clear_body_state.
+            //
+            // Two auras, because the two halves of the family strip different
+            // things and `Aura::can_be_dispelled` is strict about it: Dispel
+            // Magic, Cleanse and Devour Magic remove magic DEBUFFS (a slow, a
+            // root, a fear...), while Purge removes BUFFS through a pinned
+            // filter. The first build staged only Arcane Intellect, which
+            // `can_be_dispelled` rejects, so every dispel entry stripped
+            // nothing and previewed nothing — pinned by
+            // `every_dispel_entry_strips_something_in_the_sandbox`.
             if let (Some(SandboxEntry::Ability(ab)), Some(dummy)) =
                 (playback.selected, stage.dummy)
             {
@@ -477,12 +486,23 @@ pub fn drive_playback(
                         | AbilityType::Purge
                         | AbilityType::DevourMagic
                 ) {
-                    if let Some(def) = defs.get(&AbilityType::ArcaneIntellect) {
-                        if let Some(pending) = AuraPending::from_ability(dummy, caster, def) {
-                            if let Ok(mut active) = auras.get_mut(dummy) {
-                                active.auras.push(pending.aura);
-                            }
-                        }
+                    let staged: Vec<_> = [AbilityType::Frostbolt, AbilityType::ArcaneIntellect]
+                        .into_iter()
+                        .filter_map(|ability| defs.get(&ability))
+                        .filter_map(|def| AuraPending::from_ability(dummy, caster, def))
+                        .map(|pending| pending.aura)
+                        .collect();
+                    // `spawn_combatant` only gives a unit an `ActiveAuras` up
+                    // front for a Rogue's weapon poison; everyone else gets
+                    // one lazily when a first aura lands. The dummy has none,
+                    // so a push into a missing component was a silent no-op —
+                    // and `process_dispels` skips a target without one anyway.
+                    // The insert is deferred but lands before the next
+                    // FixedUpdate, which is when the pending resolves.
+                    if let Ok(mut active) = auras.get_mut(dummy) {
+                        active.auras.extend(staged);
+                    } else {
+                        commands.entity(dummy).insert(ActiveAuras { auras: staged });
                     }
                 }
             }
@@ -551,13 +571,25 @@ fn entry_duration(playback: &SandboxPlayback, defs: &AbilityDefinitions) -> f32 
                 .projectile_speed
                 .map(|speed| super::STAGE_SEPARATION * 2.0 / speed.max(0.1) + IMPACT_TAIL_SECS)
                 .unwrap_or(0.0);
+            // A direct-effect cast that lands through the shared school impact
+            // (Mind Blast) has its landing to show too, and it lingers longer
+            // than a bolt burst — without this its window closed at the
+            // moment of release, exactly the projectile bug in another shape.
+            let landing = if config.projectile_speed.is_none() {
+                match SchoolImpact::anchor_for(ability) {
+                    Some(_) => landing_style(ability, config.spell_school).life() + IMPACT_TAIL_SECS,
+                    None => 0.0,
+                }
+            } else {
+                0.0
+            };
 
             if let Some(channel) = config.channel_duration {
                 channel
             } else if holds {
-                config.cast_time + AURA_HOLD_SECS + travel
+                config.cast_time + AURA_HOLD_SECS + travel + landing
             } else {
-                config.cast_time + travel
+                config.cast_time + travel + landing
             }
         }
         Some(SandboxEntry::Body(body)) => body.duration(),
@@ -675,6 +707,8 @@ fn start_component_entry(
                         caster_slot: info.slot,
                         caster_class: info.class,
                         target: dummy,
+                        // The caster stands at -X and the dummy at +X.
+                        impact_from: Vec3::NEG_X,
                     },
                     PlayMatchEntity,
                 ));
@@ -694,14 +728,22 @@ fn start_component_entry(
         }
         AbilityType::DispelMagic | AbilityType::PaladinCleanse | AbilityType::Purge => {
             let target = dummy.unwrap_or(caster);
-            let (log_prefix, removes_poison, heal_on_success): (
+            // Purge strips BUFFS through a pinned filter, exactly as the Shaman
+            // AI spawns it (`class_ai/mod.rs`, `[PURGE]`) — the staged Arcane
+            // Intellect is a `MaxManaIncrease`. Unfiltered, `process_dispels`
+            // falls back to `can_be_dispelled`, which only matches debuffs, and
+            // a Purge previewed nothing.
+            let (log_prefix, removes_poison, heal_on_success, aura_type_filter): (
                 &'static str,
                 bool,
                 Option<(Entity, f32)>,
+                Option<Vec<AuraType>>,
             ) = match ability {
-                AbilityType::PaladinCleanse => ("[CLEANSE]", true, None),
-                AbilityType::Purge => ("[PURGE]", false, None),
-                _ => ("[DISPEL]", false, None),
+                AbilityType::PaladinCleanse => ("[CLEANSE]", true, None, None),
+                AbilityType::Purge => {
+                    ("[PURGE]", false, None, Some(vec![AuraType::MaxManaIncrease]))
+                }
+                _ => ("[DISPEL]", false, None, None),
             };
             commands.spawn((
                 DispelPending {
@@ -710,7 +752,7 @@ fn start_component_entry(
                     log_prefix,
                     caster_class: info.class,
                     heal_on_success,
-                    aura_type_filter: None,
+                    aura_type_filter,
                     removes_poison,
                 },
                 PlayMatchEntity,
@@ -1415,6 +1457,21 @@ mod tests {
                 flight,
             );
         }
+
+        // A direct-effect cast that lands through the shared school impact has
+        // the same problem in another shape: Mind Blast's head smoulder lasts
+        // well over a second after the cast resolves, and a window that ends at
+        // `cast_time` would never show it.
+        let mind_blast = defs.get(&AbilityType::MindBlast).expect("configured");
+        let smoulder = landing_style(AbilityType::MindBlast, mind_blast.spell_school).life();
+        assert!(
+            window(AbilityType::MindBlast) >= mind_blast.cast_time + smoulder,
+            "Mind Blast's window ({:.2}s) ends before its landing finishes \
+             (cast {:.2}s + {:.2}s of smoulder)",
+            window(AbilityType::MindBlast),
+            mind_blast.cast_time,
+            smoulder,
+        );
 
         // And the two must not differ wildly, since they are the same shape of
         // ability. The remaining gap is Frostbolt's slow aura, which genuinely

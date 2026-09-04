@@ -219,6 +219,26 @@ pub fn process_holy_shock_damage(
                 ));
             }
 
+            // The shared, school-coloured landing (`rendering/effects/
+            // school_impact.rs`) — Holy Shock's damage half lands with Holy
+            // Smite's chest model in the client. Deterministic spawn, no
+            // `game_rng` draw; byte-neutral in headless like the FCT above.
+            if let Some(anchor) = SchoolImpact::anchor_for(AbilityType::HolyShock) {
+                commands.spawn((
+                    SchoolImpact {
+                        target: pending.target,
+                        ability: AbilityType::HolyShock,
+                        school: ability_def.spell_school,
+                        anchor,
+                        from: pending.impact_from,
+                        magnitude: (actual_damage + absorbed) / target.max_health.max(1.0),
+                        is_crit,
+                        age: 0.0,
+                    },
+                    PlayMatchEntity,
+                ));
+            }
+
             // Log damage with caster attribution
             let caster_id = combatant_id(pending.caster_team, pending.caster_slot, pending.caster_class);
             let is_killing_blow = !target.is_alive();

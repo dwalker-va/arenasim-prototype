@@ -6,7 +6,6 @@ use bevy::prelude::*;
 use bevy::color::LinearRgba;
 use bevy_egui::egui;
 use crate::combat::log::CombatLog;
-use super::match_config;
 use super::components::*;
 use super::abilities::AbilityType;
 use super::ability_config::AbilityDefinitions;
@@ -246,14 +245,17 @@ pub fn process_projectile_hits(
         let def = abilities.get_unchecked(&ability);
         let text_position = target_pos + Vec3::new(0.0, super::FCT_HEIGHT, 0.0);
         let _ability_range = caster_pos.distance(target_pos);
-        
+        // Damage as a fraction of the victim's max health, for the shared
+        // impact's size. Stays 0.0 for an aura-only landing. Cosmetic only.
+        let mut impact_magnitude = 0.0f32;
+
         // Apply damage
         if def.is_damage() {
             // Use pre-calculated damage (already includes stat scaling)
             let damage = ability_damage;
 
             // Get target info and apply damage
-            let (actual_damage, absorbed, target_id, is_killing_blow, is_first_death) = {
+            let (actual_damage, absorbed, target_id, is_killing_blow, is_first_death, target_max_health) = {
                 let Ok((_, mut target, mut target_auras)) = combatants.get_mut(target_entity) else {
                     commands.entity(projectile_entity).despawn();
                     continue;
@@ -287,8 +289,10 @@ pub fn process_projectile_hits(
                 if is_first_death {
                     target.is_dead = true;
                 }
-                (actual_damage, absorbed, target_id, is_killing_blow, is_first_death)
+                (actual_damage, absorbed, target_id, is_killing_blow, is_first_death, target.max_health)
             }; // target borrow dropped here
+            // Cosmetic: how hard the hit was, for the shared impact below.
+            impact_magnitude = (actual_damage + absorbed) / target_max_health.max(1.0);
 
             // Update caster damage dealt (include absorbed damage - caster dealt it)
             {
@@ -451,14 +455,22 @@ pub fn process_projectile_hits(
             ));
         }
 
-        // Spawn visual impact burst for Concussive Shot (reuses DispelBurst with Hunter gold)
-        if ability == AbilityType::ConcussiveShot {
+        // The shared, school-coloured landing for every projectile without a
+        // bespoke one (the arrows and the sting). `anchor_for` is the single
+        // list; Web is deliberately absent from it — its landing is the root
+        // state `hard_cc.rs` already draws. Cosmetic: reads the hit, writes
+        // nothing, draws no `game_rng`. Same shape as the markers above.
+        if let Some(anchor) = SchoolImpact::anchor_for(ability) {
             commands.spawn((
-                DispelBurst {
+                SchoolImpact {
                     target: target_entity,
-                    caster_class: match_config::CharacterClass::Hunter,
-                    lifetime: 0.3,
-                    initial_lifetime: 0.3,
+                    ability,
+                    school: def.spell_school,
+                    anchor,
+                    from: (caster_pos - target_pos).normalize_or_zero(),
+                    magnitude: impact_magnitude,
+                    is_crit,
+                    age: 0.0,
                 },
                 PlayMatchEntity,
             ));

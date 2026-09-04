@@ -1,11 +1,11 @@
 //! Visual Effects Systems
 //!
-//! Floating combat text, spell impact effects, speech bubbles, shield bubbles, and dispel bursts.
+//! Floating combat text, the shared school impact, speech bubbles, shield bubbles, and dispel bursts.
 
 mod floating_text;
 pub use floating_text::*;
-mod spell_impact;
-pub use spell_impact::*;
+mod school_impact;
+pub use school_impact::*;
 mod speech_bubbles;
 pub use speech_bubbles::*;
 mod shield_bubbles;

@@ -21,7 +21,7 @@ pub(crate) fn dispel_burst_colors(class: CharacterClass) -> (Color, LinearRgba) 
             LinearRgba::new(2.5, 2.0, 1.0, 1.0),
         ),
         CharacterClass::Hunter => (
-            // Hunter gold (for Concussive Shot impact and Master's Call)
+            // Hunter gold (Master's Call)
             Color::srgba(1.0, 0.85, 0.3, 0.5),
             LinearRgba::new(2.0, 1.7, 0.6, 1.0),
         ),

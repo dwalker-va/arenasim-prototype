@@ -34,7 +34,7 @@ impl SpellSchool {
     /// by the View Combatant UI (as `egui::Color32`) and world-space casting
     /// visuals (as `bevy::Color`). WoW-canonical hues; exhaustive so a new
     /// school cannot ship without a color.
-    pub fn color_rgb8(self) -> (u8, u8, u8) {
+    pub const fn color_rgb8(self) -> (u8, u8, u8) {
         match self {
             SpellSchool::Physical => (199, 156, 110), // Brown/tan
             SpellSchool::Frost => (100, 180, 255),    // Ice blue
@@ -45,6 +45,14 @@ impl SpellSchool {
             SpellSchool::Nature => (76, 196, 30),     // Green
             SpellSchool::None => (220, 220, 220),     // Gray
         }
+    }
+
+    /// The same authority as a `bevy::Color`, for world-space effects. `const`
+    /// so an effect module can name it in a constant instead of copying the
+    /// bytes by hand — which is how "Frost" drifted to five values.
+    pub const fn color(self) -> Color {
+        let (r, g, b) = self.color_rgb8();
+        Color::srgb(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0)
     }
 
     /// Encode this school as the `magnitude` of a `SpellSchoolLockout` aura.

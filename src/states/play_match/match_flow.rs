@@ -205,7 +205,7 @@ pub fn check_match_end(
     celebration: Option<Res<VictoryCelebration>>,
     game_rng: Option<Res<GameRng>>,
     projectiles: Query<Entity, With<Projectile>>,
-    spell_effects: Query<Entity, With<SpellImpactEffect>>,
+    spell_effects: Query<Entity, With<SchoolImpact>>,
     traps: Query<Entity, With<Trap>>,
     trap_projectiles: Query<Entity, With<TrapLaunchProjectile>>,
     slow_zones: Query<Entity, With<SlowZone>>,
@@ -320,7 +320,7 @@ pub fn check_match_end(
             commands.entity(projectile_entity).despawn();
         }
         
-        // Despawn all active spell impact effects (e.g., Mind Blast shadow spheres)
+        // Despawn all shared school impacts still playing (e.g. a Mind Blast smoulder)
         for effect_entity in spell_effects.iter() {
             commands.entity(effect_entity).despawn();
         }
