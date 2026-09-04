@@ -362,8 +362,11 @@ in `movement_trails.rs`), Master's Call (`DispelBurst` + `DispelRibbon`).
   capsule (stealth), and Bevy sorts blended meshes by distance with no depth
   writes — so the capsule painted over the ribbon even where the ribbon was
   nearer the camera, and only the parts outside the body's silhouette showed.
-  It is now OPAQUE (fading by narrowing its band), coils at 0.92 (outside the
-  body), starts at the
+  It is now OPAQUE — and since an opaque strip cannot fade, it PLAYS OUT: at
+  `PLAYOUT_FRACTION` of its life the top end fixes in place and the bottom end
+  keeps rising, consuming the strip from below like a ribbon drawn through a
+  ring, while sparks stream off the fixed top until the bottom has caught up.
+  It coils at 0.92 (outside the body), starts at the
   FEET and climbs (the client anchors Dispel Magic, Cleanse and Devour Magic
   at BASE attachment 19) except Purge, which starts around the chest
   (`purge_new_impact_chest.m2`); a FOLD rolls along it from the held end (a

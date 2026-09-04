@@ -94,15 +94,18 @@ pub fn process_dispels(
                     target_id
                 );
 
-                // Spawn dispel visual effect — the spiraling ribbon above the
-                // dispelled combatant's head (distinct from the DispelBurst sphere,
-                // which Concussive Shot / Master's Call still use).
+                // Spawn dispel visual effect — the ribbon that coils around the
+                // dispelled combatant, climbs it and plays out (distinct from
+                // the DispelBurst sphere, which Master's Call still uses). The
+                // lifetime covers the climb AND the play-out; the split is
+                // `PLAYOUT_FRACTION` in `rendering/effects/dispel_ribbon.rs`.
+                // Cosmetic marker, both modes, never read by sim code.
                 commands.spawn((
                     DispelRibbon {
                         target: pending.target,
                         caster_class: pending.caster_class,
-                        lifetime: 1.2,
-                        initial_lifetime: 1.2,
+                        lifetime: 1.5,
+                        initial_lifetime: 1.5,
                         spin: 0.0,
                     },
                     PlayMatchEntity,

@@ -615,7 +615,8 @@ impl Plugin for StatesPlugin {
                 Update,
                 (
                     play_match::spawn_dispel_ribbon_visuals,    // Attach ribbon mesh when a dispel succeeds
-                    play_match::update_dispel_ribbons,          // Climb the body, ripple, ignite, spin, and fade
+                    play_match::update_dispel_ribbons,          // Climb the body, roll the fold, ignite, then play out
+                    play_match::update_dispel_sparks,           // Sparks off the fixed top end while it plays out
                     play_match::cleanup_expired_dispel_ribbons, // Remove expired ribbons
                 )
                     .after(CombatSystemPhase::CombatResolution)

@@ -4,7 +4,8 @@
 //! World-space geometry, as always: the coil must be OUTSIDE the body (the
 //! first build coiled at 0.35 inside a 0.5 capsule and could only be seen on
 //! Purge), on the unit for its whole life (an earlier build floated it 0.65yd
-//! above the head), rolling a fold, ignited at birth, and cleaned up.
+//! above the head), rolling a fold, ignited at birth, playing out from the
+//! bottom with sparks off the fixed top, and cleaned up.
 
 use std::time::Duration;
 
@@ -13,16 +14,18 @@ use bevy::prelude::*;
 use bevy::render::mesh::VertexAttributeValues;
 use bevy::time::TimeUpdateStrategy;
 
-use arenasim::states::play_match::components::{Combatant, DispelRibbon};
+use arenasim::states::play_match::components::{Combatant, DispelRibbon, DispelSpark};
 use arenasim::states::play_match::{
-    cleanup_expired_dispel_ribbons, ribbon_fold, ribbon_fold_amp, ribbon_fold_centre,
-    ribbon_height, ribbon_ignition, ribbon_origin, ribbon_positions, ribbon_radii,
-    ribbon_starts_at_base, ribbon_width, spawn_dispel_ribbon_visuals, update_dispel_ribbons,
+    cleanup_expired_dispel_ribbons, ribbon_climb, ribbon_consumed, ribbon_fold, ribbon_fold_amp,
+    ribbon_fold_centre, ribbon_height, ribbon_ignition, ribbon_origin, ribbon_positions,
+    ribbon_radii, ribbon_starts_at_base, ribbon_top_local, spawn_dispel_ribbon_visuals,
+    update_dispel_ribbons, update_dispel_sparks,
 };
 use arenasim::CharacterClass;
 
 const TICK: Duration = Duration::from_millis(16);
-const RIBBON_LIFE: f32 = 1.2;
+/// What `process_dispels` spawns the ribbon with.
+const RIBBON_LIFE: f32 = 1.5;
 /// The capsule spans this much either side of the transform.
 const HALF_HEIGHT: f32 = 1.25;
 
@@ -47,6 +50,7 @@ impl Harness {
             (
                 spawn_dispel_ribbon_visuals,
                 update_dispel_ribbons,
+                update_dispel_sparks,
                 cleanup_expired_dispel_ribbons,
             )
                 .chain(),
@@ -114,6 +118,26 @@ impl Harness {
         }
     }
 
+    /// World height of the strip's bottom and top rings (the rig spins about
+    /// Y, so local Y is world Y plus the rig's translation).
+    fn strip_span(&mut self) -> (f32, f32) {
+        let rig_y = self.ribbon_bottom();
+        let verts = self.ribbon_vertices();
+        let bottom = verts[0][1].min(verts[1][1]);
+        let top = verts[verts.len() - 1][1].max(verts[verts.len() - 2][1]);
+        (rig_y + bottom, rig_y + top)
+    }
+
+    fn sparks(&mut self) -> Vec<(Vec3, Vec3)> {
+        let mut q = self
+            .app
+            .world_mut()
+            .query::<(&DispelSpark, &GlobalTransform)>();
+        q.iter(self.app.world())
+            .map(|(s, g)| (g.translation(), s.velocity))
+            .collect()
+    }
+
     fn ribbon_emissive(&mut self) -> f32 {
         let handle = {
             let mut q = self
@@ -138,7 +162,7 @@ fn the_coil_wraps_outside_the_body() {
     let (radius, body) = ribbon_radii();
     assert!(radius > body, "coil radius {radius} must clear the body radius {body}");
     for age in [-1.0f32, 0.0, 0.1, 0.25, 0.4, 0.6, 0.9] {
-        let verts = ribbon_positions(2.5, ribbon_height(), ribbon_width(1.0), radius, 96, age);
+        let verts = ribbon_positions(2.5, ribbon_height(), 0.26, radius, 96, age, 0.0);
         let nearest = verts
             .iter()
             .map(|p| (p[0] * p[0] + p[2] * p[2]).sqrt())
@@ -304,7 +328,72 @@ fn the_ribbon_ignites_then_settles() {
 /// The ribbon must be OPAQUE. The body capsule is alpha-blended, and blended
 /// meshes are sorted by distance without depth writes, so a blended ribbon
 /// lost the draw-order fight and was painted over even where it was in front
-/// of the body. Its fade is a width taper instead.
+/// of the body. It cannot fade, so it plays out instead.
+
+/// The play-out: the climb completes, then the TOP end holds still in world
+/// space while the BOTTOM end rises through the strip until nothing is left —
+/// and sparks stream off the fixed top the whole time, and only then.
+#[test]
+fn the_ribbon_plays_out_from_the_bottom_while_sparks_leave_the_top() {
+    // The two curves hand over exactly once.
+    assert!(ribbon_climb(1.0) < 1e-6 && ribbon_consumed(1.0) < 1e-6);
+    let handover = (0..=100).rev()
+        .map(|i| i as f32 / 100.0)
+        .find(|p| ribbon_climb(*p) >= 1.0 - 1e-6)
+        .expect("the climb completes");
+    assert!(ribbon_consumed(handover + 0.02) < 1e-6, "nothing is consumed before the climb ends");
+    assert!(ribbon_consumed(handover - 0.05) > 0.0, "consumption starts as the climb ends");
+
+    let mut h = Harness::new();
+    let victim = h.spawn_victim(Vec3::ZERO);
+    h.dispel(victim, CharacterClass::Priest);
+    // Climb phase: no sparks, both ends rising.
+    h.tick(10);
+    let (b0, t0) = h.strip_span();
+    assert!(h.sparks().is_empty(), "no sparks while the ribbon is still climbing");
+    h.tick(20);
+    let (b1, t1) = h.strip_span();
+    assert!(b1 > b0 + 0.2 && t1 > t0 + 0.2, "the whole strip climbs first: {b0}->{b1}, {t0}->{t1}");
+
+    // Play-out: the top holds, the bottom keeps rising, the strip shortens.
+    let frames_to_fix = ((RIBBON_LIFE * (1.0 - handover)) / TICK.as_secs_f32()).ceil() as u32 + 2;
+    let mut h = Harness::new();
+    let victim = h.spawn_victim(Vec3::ZERO);
+    h.dispel(victim, CharacterClass::Priest);
+    h.tick(frames_to_fix);
+    let (bf, tf) = h.strip_span();
+    let top_world = h.global::<DispelRibbon>()[0].1.translation()
+        + h.global::<DispelRibbon>()[0].1.rotation() * ribbon_top_local();
+    h.tick(12);
+    let (bm, tm) = h.strip_span();
+    assert!((tm - tf).abs() < 0.03, "the top end must hold once fixed: {tf} -> {tm}");
+    assert!(bm > bf + 0.15, "the bottom end must keep rising: {bf} -> {bm}");
+    assert!(tm - bm < tf - bf - 0.15, "the strip must be shortening");
+
+    // Sparks come from the fixed top, and rise.
+    let sparks = h.sparks();
+    assert!(sparks.len() >= 5, "sparks should stream during the play-out, got {}", sparks.len());
+    for (at, v) in &sparks {
+        assert!(v.y > 0.5, "a spark must rise: {v:?}");
+        let horizontal = Vec2::new(at.x - top_world.x, at.z - top_world.z).length();
+        assert!(
+            horizontal < 0.6 && at.y > top_world.y - 0.1 && at.y < top_world.y + 1.2,
+            "a spark at {at:?} did not come from the top end {top_world:?}"
+        );
+    }
+
+    // Near the end the strip has almost nothing left, then it is gone — and
+    // the last sparks finish on their own.
+    let frames_to_end = (RIBBON_LIFE / TICK.as_secs_f32()).ceil() as u32;
+    h.tick(frames_to_end - frames_to_fix - 12 - 2);
+    let (be, te) = h.strip_span();
+    assert!(te - be < 0.2, "the strip should be nearly consumed: {be}..{te}");
+    h.tick(6);
+    assert!(h.global::<DispelRibbon>().is_empty(), "the ribbon should be gone");
+    h.tick(45);
+    assert!(h.sparks().is_empty(), "sparks should have finished after the ribbon");
+}
+
 #[test]
 fn the_ribbon_writes_depth() {
     let mut h = Harness::new();
@@ -321,10 +410,10 @@ fn the_ribbon_writes_depth() {
     let materials = h.app.world().resource::<Assets<StandardMaterial>>();
     let material = materials.get(&handle).expect("material");
     assert_eq!(material.alpha_mode, AlphaMode::Opaque);
-    // And the fade exists in another form: the band narrows to nothing.
-    assert!((ribbon_width(1.0) - ribbon_width(0.6)).abs() < 1e-6, "full width for most of the life");
-    assert!(ribbon_width(0.2) < ribbon_width(1.0) * 0.6);
-    assert!(ribbon_width(0.0) < 1e-6, "gone by the end");
+    // And the ending exists in another form: the strip is consumed, not faded.
+    assert!(ribbon_consumed(1.0) < 1e-6 && ribbon_consumed(0.6) < 1e-6, "whole while climbing");
+    assert!(ribbon_consumed(0.2) > 0.4 && ribbon_consumed(0.2) < 0.7);
+    assert!((ribbon_consumed(0.0) - 1.0).abs() < 1e-6, "gone by the end");
 }
 
 // ── hygiene ────────────────────────────────────────────────────────────────
@@ -358,6 +447,7 @@ fn the_ribbon_expires_and_survives_losing_its_victim() {
     h.tick(2);
     assert_eq!(h.global::<DispelRibbon>().len(), 1);
     h.app.world_mut().despawn(victim);
-    h.tick(90);
+    h.tick(150);
     assert!(h.global::<DispelRibbon>().is_empty(), "ribbon never expired");
+    assert!(h.global::<DispelSpark>().is_empty(), "sparks never expired");
 }

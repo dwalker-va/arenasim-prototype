@@ -7,6 +7,7 @@ use bevy::render::render_resource::PrimitiveTopology;
 use crate::states::play_match::components::*;
 use crate::states::match_config::CharacterClass;
 use super::dispel_burst::dispel_burst_colors;
+use super::spell_bolts::soft_dot_texture;
 
 // ==============================================================================
 // Dispel Ribbon Visual Effects
@@ -21,13 +22,19 @@ use super::dispel_burst::dispel_burst_colors;
 // instant is now marked in the ribbon's own vocabulary — it IGNITES (a bright
 // emissive spike that settles in a quarter second) and a fold rolls along it
 // from the held end — so there is one shape on screen and it is the right one.
+//
+// It ends by PLAYING OUT, not fading: partway up, the top end fixes in place
+// and the bottom end keeps rising, consuming the strip from below like a
+// ribbon drawn through a ring, while sparks stream off the fixed top until the
+// bottom has caught up and nothing is left. An opaque ribbon cannot fade by
+// alpha anyway, and a fade was the wrong shape: the aura LEAVES the unit.
 
 /// Number of turns the ribbon helix coils through over its baked length.
 const RIBBON_TURNS: f32 = 2.5;
 /// Baked vertical span (yards) of the helix geometry itself.
 const RIBBON_HEIGHT: f32 = 1.4;
 /// Ribbon band width (yards). Thin so it reads as a defined ribbon, not a blob.
-const RIBBON_WIDTH: f32 = 0.26;
+const RIBBON_WIDTH: f32 = 0.18;
 /// Radius of the combatant capsule (`Capsule3d::new(0.5, 1.5)`).
 const BODY_RADIUS: f32 = 0.5;
 /// Horizontal coil radius (yards). Must clear [`BODY_RADIUS`] by more than the
@@ -87,18 +94,29 @@ const FOLD_ECHO_SCALE: f32 = 0.55;
 /// out on both lobes), so the coil never swings toward the body.
 const FOLD_OUTWARD: f32 = 0.35;
 
-/// The ribbon is OPAQUE, so it cannot fade by alpha; over this last fraction
-/// of its life the band narrows to nothing instead, and the emissive dims.
-///
-/// Opaque is load-bearing, not a fade compromise. The body capsule is an
-/// alpha-blended material (for stealth), and Bevy draws blended meshes
-/// back-to-front by entity distance WITHOUT depth writes — so a blended ribbon
-/// sorted before the capsule was painted over by it everywhere, including the
-/// half of every coil that was nearer the camera. Only the parts outside the
-/// body's silhouette survived, which is what the first screenshots showed.
-/// An opaque ribbon writes depth and sits in front of the body where it is in
-/// front of the body. Pinned by `the_ribbon_writes_depth`.
-const FADE_TAPER: f32 = 0.4;
+/// The play-out: the last fraction of the life during which the top end is
+/// fixed and the bottom end rises through the strip, consuming it. Before it,
+/// the whole helix climbs; the climb is complete exactly when the play-out
+/// begins. `ribbon_climb` / `ribbon_consumed` are the two curves.
+const PLAYOUT_FRACTION: f32 = 0.45;
+
+/// Sparks stream off the fixed top end while the strip plays out — the aura
+/// leaving. Additive soft dots in the class colour, rising and shrinking.
+const SPARK_RATE: f32 = 48.0;
+const SPARK_RISE: f32 = 1.5;
+const SPARK_SCATTER: f32 = 0.45;
+const SPARK_LIFE: f32 = 0.55;
+const SPARK_RADIUS: f32 = 0.09;
+
+/// The ribbon is OPAQUE. This is load-bearing, not a style choice. The body
+/// capsule is an alpha-blended material (for stealth), and Bevy draws blended
+/// meshes back-to-front by entity distance WITHOUT depth writes — so a blended
+/// ribbon sorted before the capsule was painted over by it everywhere,
+/// including the half of every coil that was nearer the camera. Only the parts
+/// outside the body's silhouette survived, which is what the first screenshots
+/// showed. An opaque ribbon writes depth and sits in front of the body where it
+/// is in front of the body. Pinned by `the_ribbon_writes_depth`. It cannot
+/// fade by alpha, which is why it plays out instead.
 
 /// Ignition: the emissive spikes to `1 + IGNITE_BOOST` times its resting
 /// value at spawn and decays with this time constant. This is what marks the
@@ -126,16 +144,34 @@ pub fn ribbon_starts_at_base(class: CharacterClass) -> bool {
     class != CharacterClass::Shaman
 }
 
-/// World position of the helix's bottom for a given victim transform and
-/// lifetime progress (`1.0` = just spawned, `0.0` = expired). Pure, so the
-/// on-body claim can be asserted directly.
+/// How far the helix has climbed, 0..1, at a lifetime progress (`1.0` = just
+/// spawned). The climb completes when the play-out begins and holds there.
+pub fn ribbon_climb(progress: f32) -> f32 {
+    ((1.0 - progress.clamp(0.0, 1.0)) / (1.0 - PLAYOUT_FRACTION)).clamp(0.0, 1.0)
+}
+
+/// How much of the strip has been consumed from the bottom, 0..1, at a
+/// lifetime progress. Zero until the play-out begins; one at expiry.
+pub fn ribbon_consumed(progress: f32) -> f32 {
+    ((PLAYOUT_FRACTION - progress.clamp(0.0, 1.0)) / PLAYOUT_FRACTION).clamp(0.0, 1.0)
+}
+
+/// World position of the helix's base ring (parameter `t = 0`, whether or not
+/// that part of the strip still exists) for a given victim transform and
+/// lifetime progress. Pure, so the on-body claim can be asserted directly.
 pub fn ribbon_origin(class: CharacterClass, target: Vec3, progress: f32) -> Vec3 {
     let (start, rise) = if ribbon_starts_at_base(class) {
         (RIBBON_BASE_START, RIBBON_BASE_RISE)
     } else {
         (RIBBON_CHEST_START, RIBBON_CHEST_RISE)
     };
-    target + Vec3::Y * (start + (1.0 - progress.clamp(0.0, 1.0)) * rise)
+    target + Vec3::Y * (start + ribbon_climb(progress) * rise)
+}
+
+/// The top ring's centre in the rig's frame — where the sparks come from.
+pub fn ribbon_top_local() -> Vec3 {
+    let angle = RIBBON_TURNS * std::f32::consts::TAU;
+    Vec3::new(angle.cos() * RIBBON_RADIUS, RIBBON_HEIGHT, angle.sin() * RIBBON_RADIUS)
 }
 
 /// The helix's vertical extent, for probes.
@@ -193,20 +229,19 @@ pub fn ribbon_fold_amp() -> f32 {
     FOLD_AMP
 }
 
-/// Band width at a given lifetime progress: full, then tapering to nothing
-/// over the last [`FADE_TAPER`] of the life — the opaque ribbon's fade.
-pub fn ribbon_width(progress: f32) -> f32 {
-    RIBBON_WIDTH * (progress.clamp(0.0, 1.0) / FADE_TAPER).min(1.0)
-}
 
-/// Vertex positions of the helix with the fold rolled along it.
+/// Vertex positions of the helix with the fold rolled along it and the bottom
+/// `consumed` of it gone.
 ///
 /// The centerline orbits the vertical axis at `radius`; each ring is displaced
 /// by [`ribbon_fold`] along the band's normal — up, with an outward lean of
 /// `FOLD_OUTWARD` on the fold's magnitude. The band's width never changes:
 /// width flutter is what made the first ripple read as tessellation. `age`
-/// below zero gives the plain helix. Two vertices per ring, bottom to top,
-/// left then right — the layout the index buffer assumes.
+/// below zero gives the plain helix. `consumed` (0..1) is how much of the
+/// strip has played out from the bottom: the rings are respread over the part
+/// that remains, so the vertex count never changes and the strip shortens
+/// toward its top end. Two vertices per ring, bottom to top, left then right —
+/// the layout the index buffer assumes.
 pub fn ribbon_positions(
     turns: f32,
     height: f32,
@@ -214,11 +249,14 @@ pub fn ribbon_positions(
     radius: f32,
     segments: usize,
     age: f32,
+    consumed: f32,
 ) -> Vec<[f32; 3]> {
     use std::f32::consts::TAU;
+    let t0 = consumed.clamp(0.0, 1.0);
     let mut positions: Vec<[f32; 3]> = Vec::with_capacity(2 * (segments + 1));
     for i in 0..=segments {
-        let t = i as f32 / segments as f32; // 0..1 along the strip
+        let u = i as f32 / segments as f32;
+        let t = t0 + (1.0 - t0) * u; // where on the ORIGINAL strip this ring sits
         let angle = t * turns * TAU;
         let (sin_a, cos_a) = angle.sin_cos();
         let fold = if age >= 0.0 { ribbon_fold(t, age) } else { 0.0 };
@@ -254,7 +292,7 @@ fn build_dispel_ribbon_mesh(
     radius: f32,
     segments: usize,
 ) -> Mesh {
-    let positions = ribbon_positions(turns, height, width, radius, segments, -1.0);
+    let positions = ribbon_positions(turns, height, width, radius, segments, -1.0, 0.0);
     let mut normals: Vec<[f32; 3]> = Vec::with_capacity(2 * (segments + 1));
     let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(2 * (segments + 1));
     for i in 0..=segments {
@@ -289,6 +327,9 @@ pub fn spawn_dispel_ribbon_visuals(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    mut dot: Local<Option<Handle<Image>>>,
+    mut quad: Local<Option<Handle<Mesh>>>,
     new_ribbons: Query<(Entity, &DispelRibbon), (Added<DispelRibbon>, Without<Mesh3d>)>,
     transforms: Query<&Transform>,
 ) {
@@ -316,8 +357,9 @@ pub fn spawn_dispel_ribbon_visuals(
                 emissive.blue * ignite,
                 1.0,
             ),
-            // OPAQUE — see `FADE_TAPER`. A blended ribbon loses the draw-order
-            // fight with the blended body capsule and is painted over.
+            // OPAQUE — a blended ribbon loses the draw-order fight with the
+            // blended body capsule and is painted over. See the note above
+            // `PLAYOUT_FRACTION`.
             alpha_mode: AlphaMode::Opaque,
             // Thin ribbon: render both faces so it never vanishes from behind.
             cull_mode: None,
@@ -327,65 +369,110 @@ pub fn spawn_dispel_ribbon_visuals(
 
         let position = ribbon_origin(ribbon.caster_class, target_transform.translation, 1.0);
 
+        // The sparks' shared sprite and this ribbon's own spark material.
+        let dot = dot.get_or_insert_with(|| images.add(soft_dot_texture())).clone();
+        let quad = quad
+            .get_or_insert_with(|| meshes.add(Rectangle::new(1.0, 1.0)))
+            .clone();
+        let (spark_color, spark_emissive) = dispel_burst_colors(ribbon.caster_class);
+        let spark_material = materials.add(StandardMaterial {
+            base_color: spark_color.with_alpha(1.0),
+            base_color_texture: Some(dot.clone()),
+            emissive: LinearRgba::rgb(
+                spark_emissive.red * 1.3,
+                spark_emissive.green * 1.3,
+                spark_emissive.blue * 1.3,
+            ),
+            emissive_texture: Some(dot),
+            alpha_mode: AlphaMode::Add,
+            cull_mode: None,
+            double_sided: true,
+            ..default()
+        });
+
         commands.entity(ribbon_entity).try_insert((
             Mesh3d(mesh),
             MeshMaterial3d(material),
             Transform::from_translation(position),
             NotShadowCaster,
+            DispelRibbonRig {
+                spark_mesh: quad,
+                spark_material,
+                emit_carry: 0.0,
+                emitted: 0,
+            },
         ));
     }
 }
 
-/// Update dispel ribbons: follow the target, climb the body, spin, ripple,
-/// ignite and fade.
+/// Cheap deterministic jitter in [0, 1). Visual only.
+fn spark_jitter(seed: u32) -> f32 {
+    let s = seed
+        .wrapping_mul(747_796_405)
+        .wrapping_add(2_891_336_453);
+    let s = ((s >> ((s >> 28) + 4)) ^ s).wrapping_mul(277_803_737);
+    ((s >> 22) ^ s) as f32 / u32::MAX as f32
+}
+
+/// Update dispel ribbons: follow the target, climb the body, spin, roll the
+/// fold, ignite, then play out from the bottom while sparks leave the top.
 pub fn update_dispel_ribbons(
+    mut commands: Commands,
     time: Res<Time>,
     mut ribbons: Query<(
+        Entity,
         &mut DispelRibbon,
+        &mut DispelRibbonRig,
         &mut Transform,
         &Mesh3d,
         &MeshMaterial3d<StandardMaterial>,
     )>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    transforms: Query<&Transform, Without<DispelRibbon>>,
+    transforms: Query<&Transform, (Without<DispelRibbon>, Without<DispelSpark>)>,
 ) {
-    for (mut ribbon, mut ribbon_transform, mesh_handle, material_handle) in ribbons.iter_mut() {
-        ribbon.lifetime -= time.delta_secs();
-        ribbon.spin += time.delta_secs() * RIBBON_SPIN_RATE;
+    let dt = time.delta_secs();
+    for (entity, mut ribbon, mut rig, mut ribbon_transform, mesh_handle, material_handle) in
+        ribbons.iter_mut()
+    {
+        ribbon.lifetime -= dt;
+        ribbon.spin += dt * RIBBON_SPIN_RATE;
 
         // Progress: 1.0 (just spawned) → 0.0 (expired)
         let progress = (ribbon.lifetime / ribbon.initial_lifetime).max(0.0);
         let age = (ribbon.initial_lifetime - ribbon.lifetime).max(0.0);
+        let consumed = ribbon_consumed(progress);
 
-        // Follow the target and climb it. If the target is gone (died
-        // mid-ribbon), freeze at the last anchored position and keep fading —
-        // matches DispelBurst / HealingLightColumn.
+        // Follow the target and climb it; once the play-out begins the climb
+        // is complete and the base ring holds, so the top end is FIXED in the
+        // unit's frame. If the target is gone (died mid-ribbon), freeze at the
+        // last anchored position — matches DispelBurst / HealingLightColumn.
         if let Ok(target_transform) = transforms.get(ribbon.target) {
             ribbon_transform.translation =
                 ribbon_origin(ribbon.caster_class, target_transform.translation, progress);
         }
         ribbon_transform.rotation = Quat::from_rotation_y(ribbon.spin);
 
-        // The fold rolls up the strip: rewrite the vertex positions.
+        // The fold rolls up the strip and the bottom plays out: rewrite the
+        // vertex positions.
         if let Some(mesh) = meshes.get_mut(&mesh_handle.0) {
             mesh.insert_attribute(
                 Mesh::ATTRIBUTE_POSITION,
                 ribbon_positions(
                     RIBBON_TURNS,
                     RIBBON_HEIGHT,
-                    ribbon_width(progress),
+                    RIBBON_WIDTH,
                     RIBBON_RADIUS,
                     RIBBON_SEGMENTS,
                     age,
+                    consumed,
                 ),
             );
         }
 
-        // Ignite at birth, then fade with the life. The ribbon is opaque, so
-        // the fade is the band narrowing (above) plus the emissive dimming.
+        // Ignite at birth and settle; the strip stays lit until it is gone.
         let (_, emissive) = dispel_ribbon_colors(ribbon.caster_class);
-        let ignite = ribbon_ignition(age) * progress;
+        let ignite = ribbon_ignition(age);
         if let Some(material) = materials.get_mut(&material_handle.0) {
             material.emissive = LinearRgba::new(
                 emissive.red * ignite,
@@ -393,6 +480,61 @@ pub fn update_dispel_ribbons(
                 emissive.blue * ignite,
                 1.0,
             );
+        }
+
+        // While the strip plays out, sparks stream off the fixed top end.
+        if consumed > 0.0 && consumed < 1.0 {
+            rig.emit_carry += SPARK_RATE * dt;
+            let top = ribbon_transform.translation + ribbon_transform.rotation * ribbon_top_local();
+            while rig.emit_carry >= 1.0 {
+                rig.emit_carry -= 1.0;
+                let i = rig.emitted;
+                rig.emitted += 1;
+                let seed = entity.index().wrapping_add(i.wrapping_mul(0x85EB_CA6B));
+                let a = spark_jitter(seed) * std::f32::consts::TAU;
+                let m = SPARK_SCATTER * spark_jitter(seed ^ 0x51ED);
+                let rise = SPARK_RISE * (0.7 + 0.6 * spark_jitter(seed ^ 0x27D4));
+                commands.spawn((
+                    DispelSpark {
+                        velocity: Vec3::new(a.cos() * m, rise, a.sin() * m),
+                        age: 0.0,
+                        life: SPARK_LIFE,
+                        radius: SPARK_RADIUS,
+                    },
+                    Mesh3d(rig.spark_mesh.clone()),
+                    MeshMaterial3d(rig.spark_material.clone()),
+                    Transform::from_translation(top).with_scale(Vec3::splat(SPARK_RADIUS * 2.0)),
+                    NotShadowCaster,
+                    PlayMatchEntity,
+                ));
+            }
+        }
+    }
+}
+
+/// Drive the sparks: rise, shrink, face the camera, and retire. They are
+/// world-space particles, unattached, so a ribbon that ends mid-stream leaves
+/// its last sparks to finish on their own.
+pub fn update_dispel_sparks(
+    mut commands: Commands,
+    time: Res<Time>,
+    camera: Query<&Transform, (With<Camera3d>, Without<DispelSpark>)>,
+    mut sparks: Query<(Entity, &mut DispelSpark, &mut Transform)>,
+) {
+    let dt = time.delta_secs();
+    let facing = camera.iter().next().map(|t| t.rotation);
+    for (entity, mut spark, mut transform) in sparks.iter_mut() {
+        spark.age += dt;
+        if spark.age >= spark.life {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        let velocity = spark.velocity;
+        transform.translation += velocity * dt;
+        let k = 1.0 - spark.age / spark.life;
+        transform.scale = Vec3::splat((spark.radius * 2.0 * k.powf(0.6)).max(1e-4));
+        if let Some(rotation) = facing {
+            transform.rotation = rotation;
         }
     }
 }
@@ -523,8 +665,8 @@ mod dispel_ribbon_mesh_tests {
     /// index buffer built once stays valid for every frame's rewrite.
     #[test]
     fn the_fold_keeps_the_vertex_layout() {
-        let plain = ribbon_positions(2.5, 1.4, 0.26, 0.92, 96, -1.0);
-        let folded = ribbon_positions(2.5, 1.4, 0.26, 0.92, 96, 0.2);
+        let plain = ribbon_positions(2.5, 1.4, 0.26, 0.92, 96, -1.0, 0.0);
+        let folded = ribbon_positions(2.5, 1.4, 0.26, 0.92, 96, 0.2, 0.0);
         assert_eq!(plain.len(), folded.len());
         // Heights move by at most the fold's amplitude; the ends stay put.
         for (a, b) in plain.iter().zip(folded.iter()) {

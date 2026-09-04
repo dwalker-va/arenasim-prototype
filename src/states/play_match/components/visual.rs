@@ -382,6 +382,29 @@ pub struct DispelRibbon {
     pub spin: f32,
 }
 
+/// Graphical-only state a [`DispelRibbon`] carries while it plays: the spark
+/// sprite and this ribbon's own class-coloured spark material, plus the
+/// emitter accumulator for the play-out stream off the fixed top end.
+#[derive(Component)]
+pub struct DispelRibbonRig {
+    pub spark_mesh: Handle<Mesh>,
+    pub spark_material: Handle<StandardMaterial>,
+    /// Fractional sparks owed since the last one was emitted.
+    pub emit_carry: f32,
+    /// How many sparks this ribbon has emitted, seeding their scatter.
+    pub emitted: u32,
+}
+
+/// One spark streaming off a playing-out dispel ribbon's top end. A transient,
+/// unattached world particle: rises, shrinks, self-expires.
+#[derive(Component)]
+pub struct DispelSpark {
+    pub velocity: Vec3,
+    pub age: f32,
+    pub life: f32,
+    pub radius: f32,
+}
+
 /// Visual effect for a polymorph transition — a cluster of pale cloud lobes that
 /// puffs outward at the victim's torso. Spawned at BOTH the transform-in and the
 /// restore, in the same style: the sim cannot distinguish an expiry from a damage
