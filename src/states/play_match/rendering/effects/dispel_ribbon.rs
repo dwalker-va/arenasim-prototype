@@ -29,8 +29,10 @@ use super::spell_bolts::soft_dot_texture;
 // bottom has caught up and nothing is left. An opaque ribbon cannot fade by
 // alpha anyway, and a fade was the wrong shape: the aura LEAVES the unit.
 
-/// Number of turns the ribbon helix coils through over its baked length.
-const RIBBON_TURNS: f32 = 2.5;
+/// Number of turns the ribbon helix coils through over its baked length. Fewer
+/// turns over the same height is a steeper, shorter strip — less ribbon to
+/// consume, so the play-out finishes sooner with the same vertical endpoints.
+const RIBBON_TURNS: f32 = 1.5;
 /// Baked vertical span (yards) of the helix geometry itself.
 const RIBBON_HEIGHT: f32 = 1.4;
 /// Ribbon band width (yards). Thin so it reads as a defined ribbon, not a blob.

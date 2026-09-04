@@ -25,7 +25,7 @@ use arenasim::CharacterClass;
 
 const TICK: Duration = Duration::from_millis(16);
 /// What `process_dispels` spawns the ribbon with.
-const RIBBON_LIFE: f32 = 1.5;
+const RIBBON_LIFE: f32 = 1.15;
 /// The capsule spans this much either side of the transform.
 const HALF_HEIGHT: f32 = 1.25;
 

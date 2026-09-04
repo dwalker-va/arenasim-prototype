@@ -104,8 +104,8 @@ pub fn process_dispels(
                     DispelRibbon {
                         target: pending.target,
                         caster_class: pending.caster_class,
-                        lifetime: 1.5,
-                        initial_lifetime: 1.5,
+                        lifetime: 1.15,
+                        initial_lifetime: 1.15,
                         spin: 0.0,
                     },
                     PlayMatchEntity,
