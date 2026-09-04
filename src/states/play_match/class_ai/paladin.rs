@@ -807,6 +807,7 @@ fn try_holy_shock_damage(
         caster_slot: combatant.slot,
         caster_class: combatant.class,
         target: *target_entity,
+        impact_from: (my_pos - target_pos).normalize_or_zero(),
     });
 
     true

@@ -409,9 +409,6 @@ impl Plugin for StatesPlugin {
                     play_match::update_floating_combat_text,
                     play_match::update_speech_bubbles,
                     play_match::cleanup_expired_floating_text,
-                    play_match::spawn_spell_impact_visuals,
-                    play_match::update_spell_impact_effects,
-                    play_match::cleanup_expired_spell_impacts,
                     play_match::animate_shadow_sight_orbs,  // Pulsing orb animation
                     play_match::animate_orb_consumption,    // Orb pickup shrink/move animation
                     play_match::update_shield_bubbles,      // Spawn/despawn shield bubbles
@@ -560,6 +557,11 @@ impl Plugin for StatesPlugin {
                     play_match::spawn_bolt_impacts,
                     play_match::animate_bolt_impacts,
                     play_match::billboard_bolt_impacts,
+                    // The shared school impact, same spawn -> animate ->
+                    // billboard contract as the bespoke bolt bursts above.
+                    play_match::spawn_school_impacts,
+                    play_match::animate_school_impacts,
+                    play_match::billboard_school_impacts,
                 )
                     .chain()
                     .after(CombatSystemPhase::CombatResolution)
@@ -613,7 +615,7 @@ impl Plugin for StatesPlugin {
                 Update,
                 (
                     play_match::spawn_dispel_ribbon_visuals,    // Attach ribbon mesh when a dispel succeeds
-                    play_match::update_dispel_ribbons,          // Rise off the head, spin, and fade
+                    play_match::update_dispel_ribbons,          // Climb the body, ripple, ignite, spin, and fade
                     play_match::cleanup_expired_dispel_ribbons, // Remove expired ribbons
                 )
                     .after(CombatSystemPhase::CombatResolution)

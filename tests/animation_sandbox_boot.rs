@@ -153,3 +153,61 @@ fn leaving_the_sandbox_does_not_strand_the_rng() {
          opened this screen"
     );
 }
+
+/// Every dispel entry must actually STRIP something from the staged dummy, or
+/// it previews nothing at all — the ribbon and beat are spawned only on a
+/// successful dispel.
+///
+/// This was silently broken: the sandbox staged Arcane Intellect, which
+/// `Aura::can_be_dispelled` rejects (it matches magic DEBUFFS only), and fired
+/// Purge with no filter where the real Shaman pins one. Every dispel entry
+/// resolved, removed nothing, and drew nothing, and no test noticed because
+/// the boot test only asked whether the state could be entered. This drives
+/// each entry the way the panel does and asks for the ribbon.
+#[test]
+fn every_dispel_entry_strips_something_in_the_sandbox() {
+    use arenasim::states::animation_sandbox::playback::{EntryFamily, SandboxEntry, SandboxPlayback};
+    use arenasim::states::animation_sandbox::SandboxConfig;
+    use arenasim::states::match_config::CharacterClass;
+    use arenasim::states::play_match::abilities::AbilityType;
+    use arenasim::states::play_match::components::DispelRibbon;
+    use bevy::time::TimeUpdateStrategy;
+    use std::time::Duration;
+
+    for (ability, family, class) in [
+        (AbilityType::DispelMagic, EntryFamily::Component, CharacterClass::Priest),
+        (AbilityType::PaladinCleanse, EntryFamily::Component, CharacterClass::Paladin),
+        (AbilityType::Purge, EntryFamily::Component, CharacterClass::Shaman),
+        (AbilityType::DevourMagic, EntryFamily::Entity, CharacterClass::Warlock),
+    ] {
+        let mut app = boot_app();
+        // The resolution systems run in FixedUpdate; a tight test loop advances
+        // real time by microseconds, so drive the clock by hand.
+        app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(16)));
+        app.update();
+        app.insert_resource(SandboxConfig {
+            caster_class: class,
+            ..Default::default()
+        });
+        app.world_mut()
+            .resource_mut::<NextState<GameState>>()
+            .set(GameState::AnimationSandbox);
+        for _ in 0..4 {
+            app.update();
+        }
+        {
+            let mut playback = app.world_mut().resource_mut::<SandboxPlayback>();
+            playback.select(SandboxEntry::Ability(ability), family);
+            playback.restart_requested = true;
+        }
+        for _ in 0..40 {
+            app.update();
+        }
+        let mut ribbons = app.world_mut().query::<&DispelRibbon>();
+        assert!(
+            ribbons.iter(app.world()).count() >= 1,
+            "{ability:?} ({class:?}) stripped nothing from the staged dummy — \
+             nothing to preview"
+        );
+    }
+}

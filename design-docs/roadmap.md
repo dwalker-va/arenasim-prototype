@@ -313,45 +313,74 @@ it is now the largest remaining receiver-side hole.
 `fear.rs`, plus the caster's orb — it is a hardcast), Boar Charge (charge trail
 in `movement_trails.rs`), Master's Call (`DispelBurst` + `DispelRibbon`).
 
-### D. Impact: the third hook (highest remaining leverage)
+### D. Impact: the third hook — SHIPPED
 
-- [ ] **A shared, school-coloured impact for projectiles.** **Aimed Shot**,
-      **Arcane Shot**, **Serpent Sting** and **Spider Web** all land in total
-      silence — the projectile reaches its target and simply stops existing.
-- **Why this is structural, not four one-offs.** The framing at the top of this
-  section names two generic hooks and both are caster-side. A projectile's
-  landing is a third, and of the eight abilities carrying `projectile_speed`
-  only four reach any visual at all: Lightning Bolt built its own burst,
-  Concussive Shot borrows `DispelBurst`, and Frostbolt and Shadow Bolt got
-  bespoke ones in #116. The other four fall through.
-- **There is a legacy piece to retire, not sit beside.** `SpellImpactEffect`
-  (`rendering/effects/spell_impact.rs`) is a hardcoded-purple expanding sphere
-  wired to exactly one ability, Mind Blast; `lightning_bolt.rs` documents
-  declining to reuse it precisely because it carries no per-instance colour.
-  A shared impact should absorb it.
-- **What it looks like.** Colour from `SpellSchool::color_rgb8` — the authority
-  Frost Nova already deferred to over its own measured endpoint — on the shape
-  grammar #116 settled: a flash at the victim's chest (attachment height, and
-  it must FOLLOW a moving victim), a soft-rimmed expanding band, and a short
-  spray whose character comes from the school. This is the recolour tier the
-  walk always intended underneath the bespoke signatures, and the two bolts
-  stay bespoke above it.
-- **Where it hangs.** `process_projectile_hits` already spawns per-ability
-  cosmetic markers (Death Coil, Concussive Shot, #116's `BoltImpact`); a generic
-  marker carrying school and damage belongs at that same site. #116 verified on
-  two seeds that spawning a marker there is headless-byte-identical, so the
-  pattern is already paid for.
-- **Two things it unlocks cheaply.** Damage magnitude is invisible in world
-  space today — `is_crit` drives floating text and nothing else — so an impact
-  scaled by damage fraction makes a crit read as a crit for *every* ability at
-  once. And the three arrows are Physical and Nature, schools with no effect
-  vocabulary at all yet.
-- **Settle the palette as part of this.** "Frost" has quietly drifted to five
-  values — root ice `(0.80, 0.86, 0.95)`, the nova's core `(0.84, 0.84, 1.00)`
-  and edge `(0.39, 0.71, 1.00)`, and #116's shard `(0.835, 0.961, 1.00)` and
-  ribbons `(0.42, 0.76, 1.00)`. Each was justified locally and nothing enforces
-  `color_rgb8`. A recolour tier built on a drifting palette inherits the drift
-  permanently.
+- [x] ~~**A shared, school-coloured impact for projectiles.**~~
+      `rendering/effects/school_impact.rs`, 19 probes in
+      `tests/school_impact_visual_probes.rs`. One marker, `SchoolImpact`,
+      spawned at four resolution sites (`process_projectile_hits`; the
+      instant-effect landing in `process_casting` for Mind Blast;
+      `process_holy_shock_damage`; `process_mana_burn`, only when mana actually
+      burned); one per-school row in `impact_style`, with `landing_style` as
+      the per-ability override seam (Mana Burn is its only user: Shadow's
+      colour, a chest fan pulled upward, none of Mind Blast's smoulder — the
+      client gives it its own `manaburn_chest.m2`); `SchoolImpact::anchor_for`
+      is the single list of what lands through it, and the probe
+      `every_projectile_in_the_config_reaches_a_landing` fails the moment a new
+      `projectile_speed` reaches neither it nor a bespoke burst. The legacy
+      `SpellImpactEffect` is gone, and Concussive Shot no longer borrows
+      `DispelBurst`. Bench: the School Impact Bench artifact (ports the shipped
+      math; every slider is a constant).
+- **The client data changed the list.** Aimed Shot, Arcane Shot and Concussive
+  Shot share ONE impact model in the source, which is the shared-tier premise
+  confirmed. Mind Blast is not a burst at all but a two-second smoulder on the
+  HEAD (attachment 20), hence `ImpactAnchor::Head`. Web has NO impact kit —
+  only the root state `hard_cc.rs` already draws — so it is deliberately
+  absent from `anchor_for`; a generic burst on it would double the landing.
+- **Three calls a later change could quietly undo.** Physical is hueless
+  (bone-white splinters, no ring) rather than `SpellSchool::Physical`: that tan
+  is within 0.07 of the arena floor in RGB, so an additive tan burst is
+  invisible on sand — `colour_comes_from_the_school_authority` pins the
+  exception. Every live school carries a piece that can DARKEN (lit splinters,
+  alpha droplets, Shadow's blot), the Shadow Bolt lesson made structural. And a
+  ring is magic language only: Physical and Nature throw material, Arcane
+  expands a band, which is what tells an Arcane Shot from an Aimed Shot.
+- **Magnitude is now visible in world space.** `SchoolImpact::magnitude` is
+  damage over the victim's max health; the flash and spray scale from
+  `IMPACT_MAGNITUDE_FLOOR` (aura-only) to full at `IMPACT_MAGNITUDE_FULL`
+  (0.20), and a crit multiplies both and throws more debris.
+- **The anchor fixed a #116 defect.** The bolt bench drew the unit with its
+  feet at the transform; Bevy centres the capsule on it, so the bolt bursts
+  shipped at +1.45 — 0.2yd above the top of the head. Both tiers now share
+  `IMPACT_CHEST_Y` (+0.55, the upper torso), and `bolt_impact_origin`
+  delegates to it. When benching anything anchored to a unit, draw the capsule
+  centred. **The dispel ribbon had the same defect twice over:** anchored at
+  +1.9 it played entirely in the air above the head, and its coil radius
+  (0.35) was INSIDE the 0.5 body capsule, so even on the body it was hidden
+  until it cleared the crown — which is why only Purge, starting at chest
+  height, ever read. A third: the ribbon was alpha-BLENDED, like the body
+  capsule (stealth), and Bevy sorts blended meshes by distance with no depth
+  writes — so the capsule painted over the ribbon even where the ribbon was
+  nearer the camera, and only the parts outside the body's silhouette showed.
+  It is now OPAQUE (fading by narrowing its band), coils at 0.92 (outside the
+  body), starts at the
+  FEET and climbs (the client anchors Dispel Magic, Cleanse and Devour Magic
+  at BASE attachment 19) except Purge, which starts around the chest
+  (`purge_new_impact_chest.m2`); a FOLD rolls along it from the held end (a
+  derivative-of-Gaussian wavelet — lift then pull — launched at birth,
+  travelling to the top and attenuating, with a smaller echo behind it) and it
+  IGNITES (an emissive spike settling in ~0.3s) to mark the instant. **Not a
+  standing wave:** the first ripple was a sinusoid over the whole strip with
+  width flutter, and it read as tessellation; a flicked ribbon carries ONE
+  local fold, and the band's width never changes. **Do not give a dispel a flash-and-band beat:** one was
+  tried and it overpowered the ribbon — a dispel read as a hit with a strip
+  behind it. The instant belongs in the ribbon's own vocabulary.
+  Graphical-only; 7 probes in `tests/dispel_visual_probes.rs`.
+- **Palette, partly settled.** `SpellSchool::color()` is the authority as a
+  `const` Bevy colour; the new tier and `FROST_IMPACT_COLOR` read it. The
+  bespoke highlight tints (root ice, nova core, the shard and ribbons) are
+  deliberate pale cores, not drift, and stay. `NOVA_EDGE_COLOR` is the one
+  remaining hand-copy of the Frost authority.
 
 ### E. Leftovers, second pass
 
@@ -373,7 +402,17 @@ in `movement_trails.rs`), Master's Call (`DispelBurst` + `DispelRibbon`).
       fixed projectiles, whose window ended at `cast_time` and so cut off the
       flight and the impact entirely. Whether a `Residue` or `Entity` entry's
       window covers its full visual — a trap arming and later triggering, a
-      totem's life — is unchecked.
+      totem's life — is unchecked. **A worse cousin has since been found and
+      fixed:** every dispel entry previewed NOTHING, because the staged aura
+      was a buff `can_be_dispelled` rejects, the dummy had no `ActiveAuras`
+      container to push into (only a Rogue's weapon poison gets one at spawn),
+      and Purge fired unfiltered. No test noticed, because the boot test only
+      asked whether the state could be entered.
+      `every_dispel_entry_strips_something_in_the_sandbox` now drives each
+      entry the way the panel does and asks for the ribbon. **The general
+      hole remains:** an entry can be listed as playable and resolve to
+      nothing, and only a human at the panel sees it. A per-family "did the
+      visual it exists to show actually spawn" test is the right closure.
 
 - [ ] **Nit: `rendering/effects/slow_zone.rs` is misnamed** — it contains the
       Disengage trail, not a slow zone, and there is no slow-zone visual at

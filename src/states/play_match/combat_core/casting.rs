@@ -466,6 +466,7 @@ pub fn process_casting(
                 caster_team,
                 caster_slot,
                 caster_class,
+                impact_from: (caster_pos - target_pos).normalize_or_zero(),
             });
         }
 
@@ -545,15 +546,22 @@ pub fn process_casting(
                 ));
             }
 
-            // Spawn visual effect for Mind Blast (shadow impact)
-            if ability == AbilityType::MindBlast {
+            // The shared, school-coloured landing (`rendering/effects/
+            // school_impact.rs`) for direct-effect casts routed to it — Mind
+            // Blast, on the victim's head. Deterministic spawn, no `game_rng`
+            // draw, so it is byte-neutral in headless like the Lightning Bolt
+            // strike below. `anchor_for` is the single list of what lands here.
+            if let Some(anchor) = SchoolImpact::anchor_for(ability) {
                 commands.spawn((
-                    SpellImpactEffect {
-                        position: target_pos,
-                        lifetime: 0.5,
-                        initial_lifetime: 0.5,
-                        initial_scale: 0.5,
-                        final_scale: 2.0,
+                    SchoolImpact {
+                        target: target_entity,
+                        ability,
+                        school: def.spell_school,
+                        anchor,
+                        from: (caster_pos - target_pos).normalize_or_zero(),
+                        magnitude: (actual_damage + absorbed) / target.max_health.max(1.0),
+                        is_crit: is_crit_damage,
+                        age: 0.0,
                     },
                     PlayMatchEntity,
                 ));

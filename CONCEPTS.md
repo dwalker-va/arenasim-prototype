@@ -27,6 +27,18 @@ status share one treatment. That sharing is deliberate: the status is what the
 viewer needs to read, and duplicating it per ability would make identical states
 look different.
 
+### Impact
+The receiver-side half played at the moment an ability *lands* — a projectile
+arriving, a direct-effect cast resolving — as distinct from a treatment keyed on
+a status that persists afterwards. The third generic animation hook, beside the
+casting orb and the caster-side gesture; both of those are caster-side, and an
+ability with no impact reaches its victim in silence however well it is cast.
+
+An impact is anchored to a point on the victim (chest for the arrows, head for
+Mind Blast, per the Classic client's attachment ids) and follows it. The shared
+tier (`rendering/effects/school_impact.rs`) colours one burst by
+`SpellSchool`; signatures keep bespoke impacts above it.
+
 ### Signature ability animation
 A hand-authored, per-ability visual treatment, as opposed to the generic
 fallbacks every ability gets for free (a cast bar, a projectile, a damage

@@ -12,6 +12,7 @@
 use bevy::prelude::*;
 
 use crate::combat::log::{CombatLog, CombatLogEventType};
+use crate::states::play_match::abilities::{AbilityType, SpellSchool};
 use crate::states::play_match::components::*;
 use crate::states::play_match::utils::{combatant_id, combat_log_id_for};
 
@@ -45,6 +46,29 @@ pub fn process_mana_burn(
                 );
                 combat_log.log(CombatLogEventType::Buff, msg.clone());
                 info!("{}", msg);
+
+                // The shared, school-coloured landing (`rendering/effects/
+                // school_impact.rs`), spawned only when mana actually burned —
+                // a Mana Burn on an empty pool is not a landing. Magnitude is
+                // the fraction of the POOL destroyed, since there is no damage.
+                // Deterministic, no `game_rng`; byte-neutral in headless.
+                if burned > 0.0 {
+                    if let Some(anchor) = SchoolImpact::anchor_for(AbilityType::ManaBurn) {
+                        commands.spawn((
+                            SchoolImpact {
+                                target: pending.target,
+                                ability: AbilityType::ManaBurn,
+                                school: SpellSchool::Shadow,
+                                anchor,
+                                from: pending.impact_from,
+                                magnitude: burned / target.max_mana.max(1.0),
+                                is_crit: false,
+                                age: 0.0,
+                            },
+                            PlayMatchEntity,
+                        ));
+                    }
+                }
             }
         }
         commands.entity(pending_entity).despawn();
@@ -71,6 +95,7 @@ mod tests {
                 caster_team: 1,
                 caster_slot: 0,
                 caster_class: CharacterClass::Priest,
+                impact_from: Vec3::X,
             })
             .id()
     }
