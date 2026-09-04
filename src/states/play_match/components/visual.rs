@@ -365,7 +365,7 @@ pub struct DispelBurst {
 
 /// Visual effect for a successful dispel — a twisting ribbon that spirals up off
 /// the dispelled combatant's head and fades. Distinct from `DispelBurst` (the
-/// expanding sphere, still used by Concussive Shot and Master's Call): the ribbon's
+/// expanding sphere, still used by Master's Call): the ribbon's
 /// unique silhouette + upward rise make it unmistakable as a cleanse and draw the
 /// eye to *which* combatant lost a buff. Spawned only on a successful dispel.
 #[derive(Component)]

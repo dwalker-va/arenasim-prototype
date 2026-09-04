@@ -33,7 +33,7 @@ Every visual effect in the codebase follows a **three-system lifecycle**:
 2. **Update system** — Animates (fade, scale, follow target) each frame
 3. **Cleanup system** — Despawns when lifetime expires
 
-This pattern has been applied to: `SpellImpactEffect`, `ShieldBubble`, `FlameParticle`, `DrainLifeBeam`, `HealingLightColumn`, and `DispelBurst`.
+This pattern has been applied to: `SchoolImpact` (the shared school-coloured landing, which absorbed the old `SpellImpactEffect`), `ShieldBubble`, `FlameParticle`, `DrainLifeBeam`, `HealingLightColumn`, and `DispelBurst`.
 
 ## The Pattern (5 Steps)
 
@@ -224,7 +224,7 @@ Bevy has a compile-time tuple size limit for system groups. Each visual effect t
 | Priest (dispel) | `srgba(0.85, 0.85, 1.0, 0.5)` | `LinearRgba(2.0, 2.0, 2.8, 1.0)` | DispelBurst |
 | Paladin (dispel) | `srgba(1.0, 0.9, 0.6, 0.5)` | `LinearRgba(2.5, 2.0, 1.0, 1.0)` | DispelBurst |
 | Frost (shield) | `srgba(0.4, 0.7, 1.0, 0.25)` | varies | ShieldBubble |
-| Shadow (impact) | `srgba(0.5, 0.2, 0.8, 0.8)` | purple | SpellImpactEffect |
+| Any school (impact) | `SpellSchool::color()` (Physical: hueless — its tan is the floor colour) | `impact_style(school).emissive` × colour | SchoolImpact |
 
 ## File Checklist
 

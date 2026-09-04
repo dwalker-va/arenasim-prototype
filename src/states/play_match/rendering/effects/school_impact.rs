@@ -370,7 +370,7 @@ pub fn impact_style(school: SpellSchool) -> ImpactStyle {
 pub fn landing_style(ability: AbilityType, school: SpellSchool) -> ImpactStyle {
     match ability {
         AbilityType::ManaBurn => ImpactStyle {
-            color: SpellSchool::Shadow.color(),
+            color: school.color(),
             emissive: 3.0,
             flash_radius: 0.55,
             flash_secs: 0.14,

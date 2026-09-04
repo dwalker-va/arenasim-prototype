@@ -45,8 +45,9 @@ const BURST_FINAL_SCALE: f32 = 2.2;
 const BOLT_BASE_COLOR: (f32, f32, f32) = (0.60, 0.82, 1.0);
 /// Bolt emissive (high for bloom, blue-white).
 const BOLT_EMISSIVE: (f32, f32, f32) = (1.4, 2.2, 4.0);
-/// Impact-burst emissive (brighter white-blue — NOT the shared purple
-/// SpellImpactEffect, which has no per-instance color).
+/// Impact-burst emissive (brighter white-blue). Lightning Bolt keeps a
+/// bespoke burst rather than the shared `SchoolImpact`: its school is Nature,
+/// whose shared row is Serpent Sting's green droplet spray.
 const BURST_EMISSIVE: (f32, f32, f32) = (2.5, 3.0, 4.5);
 /// Impact-burst base color (white-blue).
 const BURST_BASE_COLOR: (f32, f32, f32) = (0.8, 0.9, 1.0);
@@ -226,8 +227,8 @@ pub fn spawn_lightning_bolt(
             });
 
         // Impact burst at the strike endpoint — bespoke white-blue, expands and
-        // fades. NOT SpellImpactEffect (which is hardcoded purple, shared with
-        // Mind Blast, with no per-instance color).
+        // fades. Not the shared `SchoolImpact`: Nature's row is a poison read
+        // (Serpent Sting's droplets), and lightning is a signature.
         let burst_material = materials.add(StandardMaterial {
             base_color: Color::srgba(BURST_BASE_COLOR.0, BURST_BASE_COLOR.1, BURST_BASE_COLOR.2, 1.0),
             emissive: LinearRgba::rgb(BURST_EMISSIVE.0, BURST_EMISSIVE.1, BURST_EMISSIVE.2),
