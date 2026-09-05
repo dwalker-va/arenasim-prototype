@@ -730,6 +730,19 @@ pub enum SwingStyle {
     /// — the two must not be mistaken for each other, and a rise is the natural
     /// reading of a hammer of judgement being brought up.
     HammerOfJustice,
+    /// Warrior Pummel: a POMMEL STRIKE — the weapon flips tip-back about its
+    /// grip while thrusting, so the haft's butt end slams into the target. The
+    /// source is `SpecialUnarmed` (anim 118, a punch, no weapon motion), but a
+    /// limbless capsule has no punch to throw, so the gesture deliberately
+    /// moves onto the prop the caster holds — a bench-reviewed design call.
+    Pummel,
+    /// Rogue Kick: the literal `Kick` animation (anim 95) — a leg strike, kept
+    /// source-faithful as body-only motion: the torso loads forward, then
+    /// ROCKS BACK at full extension as the leg extends (the front-kick
+    /// silhouette) while the weapon rides rigidly, never swinging. The
+    /// backward body direction — opposite Pummel's forward drive — is what
+    /// separates the two interrupts at a glance.
+    Kick,
 }
 
 /// One instant ability performed by a caster, spawned by combat code at that
@@ -790,6 +803,11 @@ impl InstantAbilityFired {
             // Instant AND aura-only: applied inline in class AI, entering
             // neither generic caster hook (A2).
             | CheapShot | KidneyShot | HammerOfJustice | FrostNova
+            // The melee interrupts: spawned at the committed-use site in
+            // combat_ai.rs's interrupt system (roadmap B). Wind Shear is
+            // deliberately absent — the Shaman has no weapon sockets and its
+            // answer is a victim-side effect, not an actor stroke.
+            | Pummel | Kick
         )
     }
 

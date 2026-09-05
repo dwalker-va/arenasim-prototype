@@ -1562,5 +1562,23 @@ pub fn check_interrupts(
             ability: interrupt_ability,
             lockout_duration: ability_def.lockout_duration,
         });
+
+        // Actor-side gesture marker (committed-use site: the caster performs
+        // the strike whether or not the victim's cast survives to be locked
+        // out). Melee interrupts only — Wind Shear's caster has no weapon
+        // sockets, and its answer is a victim-side effect (roadmap B), so
+        // spawning for it would list an ability the router never draws.
+        // Spawned in BOTH modes per cosmetic-marker-cross-mode-spawn-parity.
+        if matches!(interrupt_ability, AbilityType::Pummel | AbilityType::Kick) {
+            commands.spawn((
+                InstantAbilityFired {
+                    caster: entity,
+                    target: Some(target_entity),
+                    ability: interrupt_ability,
+                    is_crit: false,
+                },
+                PlayMatchEntity,
+            ));
+        }
     }
 }
