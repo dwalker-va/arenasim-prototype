@@ -234,9 +234,11 @@ barely implemented. Section D has the detail — it is the highest-value remaini
 item on this list.
 
 Section A has since shipped and closed the `Root`/`Stun` half of that gap.
-**`MovementSpeedSlow` remains untreated** — Frostbolt, Kick, Crippling Poison,
-Arcane Shot, Concussive Shot, Lightning Bolt and Frost Shock all apply it and
-none of them shows it on the victim. It is a softer effect than hard CC and did
+**`MovementSpeedSlow` remains untreated** — Frostbolt, Crippling Poison,
+Concussive Shot, Frost Shock and Frost Armor's chill all apply it and
+none of them shows it on the victim. (An earlier revision of this list also
+named Kick, Arcane Shot and Lightning Bolt — fact-checked against
+`abilities.ron` 2026-09-04: none of the three applies a slow.) It is a softer effect than hard CC and did
 not belong in the same treatment (a slowed unit is still moving and acting), but
 it is now the largest remaining receiver-side hole.
 
@@ -281,21 +283,30 @@ it is now the largest remaining receiver-side hole.
   Kidney Shot. We have weapon sockets but no hand attachment points, so placing
   it would be inventing anatomy.
 
-### B. Interrupts — an actor-side gesture
+### B. Interrupts — an actor-side gesture (melee half SHIPPED)
 
-- [ ] **Give the interrupter something to play.** **Pummel**, **Kick**,
-      **Counterspell**, **Wind Shear** and the Felhunter's **Spell Lock** all
-      fire with no animation on the actor. The *victim* is well served — its
-      casting orb sputters — so this is a one-sided gap, not an invisible
-      ability.
-- The melee two (Pummel, Kick) are the cheap half:
-  `swing_style_for_ability` returns `None` for everything but Mortal Strike,
-  and since #113 every new `SwingStyle` inherits body lean for free. A short,
-  shallow, fast jab on its own arc plane would read as an interrupt without
-  competing with Mortal Strike's ceremony.
-- Counterspell / Wind Shear / Spell Lock are casts or pet abilities and want a
-  different answer — likely a brief effect at the *victim*, timed to the orb's
-  sputter, rather than an actor stroke.
+- [x] ~~**Pummel and Kick actor gestures.**~~ Shipped 2026-09-04. The client
+      data reversed the "shallow weapon jab" sketch above: Kick's caster anim
+      is the literal `Kick` (95) and Pummel's is `SpecialUnarmed` (118) — both
+      `HasMissile = 0`, no caster effect model, **the weapon does not swing in
+      the source**. Kick ships source-faithful as `SwingArc::Unarmed`
+      (body-only: torso loads forward, ROCKS BACK at extension, weapon rides
+      rigidly). Pummel deliberately deviates — a limbless capsule has no punch
+      — as `SwingArc::PommelStrike`: the weapon flips tip-back over the grip
+      while thrusting, the haft's BUTT slamming into the target (a
+      bench-reviewed call, not an over-read). Both are faster than Cheap
+      Shot's 0.63s; the opposite body directions are the glance-level
+      distinction — pinned by `the_two_interrupts_disagree_on_body_direction`.
+      Markers spawn at the interrupt system's committed-use site in
+      `combat_ai.rs` (runtime `interrupt_ability`, invisible to the literal
+      audit scan — covered by `VIA_INTERRUPT` +
+      `the_interrupt_gestures_are_spawned_and_gated`). Bench: the Interrupt
+      Gesture Bench artifact (sliders emit the consts).
+- [ ] **Counterspell / Wind Shear / Spell Lock** are casts or pet abilities and
+      want a different answer — likely a brief effect at the *victim*, timed to
+      the orb's sputter, rather than an actor stroke. Wind Shear is
+      deliberately excluded from the gesture guard (no weapon sockets); a test
+      pins the exclusion.
 
 ### C. Leftovers
 

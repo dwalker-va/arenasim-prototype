@@ -251,7 +251,11 @@ fn mechanism_for(ability: AbilityType, config: &AbilityConfig) -> EntryFamily {
         // `InstantAbilityFired::is_spawned_for` — see the audit test below.
         PsychicScream
         | MortalStrike | Ambush | SinisterStrike
-        | CheapShot | KidneyShot | HammerOfJustice | FrostNova => EntryFamily::Residue,
+        | CheapShot | KidneyShot | HammerOfJustice | FrostNova
+        // The melee interrupts: markers spawned at combat_ai.rs's committed-use
+        // site. On the sandbox dummy the interrupt itself is a no-op (nothing
+        // is casting), so the gesture IS the preview.
+        | Pummel | Kick => EntryFamily::Residue,
         // Data-only (no application code) / no distinct visual beyond the swing.
         WindShear | HeroicStrike => EntryFamily::Unsupported,
         // Config-derived default: channels, else Cast (hard casts and every
@@ -1539,7 +1543,7 @@ mod tests {
         }
         // Guard against the predicate silently emptying and the loop above
         // passing vacuously.
-        assert_eq!(checked, 7, "expected the seven marker-spawning abilities");
+        assert_eq!(checked, 9, "expected the nine marker-spawning abilities");
     }
 
     #[test]

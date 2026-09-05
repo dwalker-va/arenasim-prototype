@@ -122,6 +122,50 @@ pub(crate) enum SwingArc {
         /// and a finisher with less body than an auto-attack.
         body_drive: f32,
     },
+    /// An UNARMED strike: the body carries the entire gesture and the held
+    /// weapon rides it rigidly, never leaving its rest pose. Kick's source is
+    /// the literal `Kick` animation (anim 95), `HasMissile = 0`, no caster-side
+    /// effect model — the character kicks WHILE HOLDING its weapons, and none
+    /// of them moves. That stillness is deliberately kept: a body that pops
+    /// while the weapon conspicuously does not swing is part of what tells an
+    /// interrupt from a swing.
+    ///
+    /// Like [`Self::Lunge`] it traces no plane and ignores `WeaponKind`.
+    Unarmed {
+        /// Torso pitch at full extension, in radians, SIGNED like the sagittal
+        /// chop (positive pitches forward). Kick's is NEGATIVE: the torso
+        /// loads forward, then ROCKS BACK at extension as the leg extends —
+        /// the front-kick silhouette. Rides `arc_rotation` directly, so
+        /// `SwingProfile::lean` should be 1.0 and this value IS the body angle.
+        drive: f32,
+    },
+    /// A POMMEL STRIKE: the weapon flips tip-back about its grip while driving
+    /// forward, so the haft's BUTT END leads into the target. Pummel's shape —
+    /// the source plays `SpecialUnarmed` (a punch, no weapon motion), but on a
+    /// limbless capsule a punch has nothing to carry it, so the gesture moves
+    /// onto the prop the caster actually holds: the butt of the weapon slammed
+    /// into the target's face.
+    ///
+    /// One rotation about one axis (X, like the sagittal chop) plus the aim-axis
+    /// translation — the flip IS the strike, swept monotonically through the
+    /// release rather than posed during the windup, so the stroke never
+    /// double-flips through rest.
+    PommelStrike {
+        /// Draw-back distance on windup, in socket-local yards.
+        pull: f32,
+        /// Drive-through distance on release, in socket-local yards.
+        thrust: f32,
+        /// How far the tip rotates BACK at full extension, in radians. The
+        /// butt rotates forward by the same angle; the 2H mounts rest pitched
+        /// 0.75 forward, so the butt-at-target pose needs flip well past that.
+        /// A small fraction of it (0.18) is applied as a same-direction cock
+        /// during the draw, telegraphing the flip.
+        flip: f32,
+        /// Torso pitch at full extension, in radians — the body drives forward
+        /// behind the butt, like [`Self::Lunge`]'s `body_drive`. Rides
+        /// `arc_rotation` directly (lean 1.0), matching its sibling interrupt.
+        body_drive: f32,
+    },
 }
 
 /// How far a style's swing PLANE leans off vertical, or `None` for a stroke that
@@ -131,7 +175,7 @@ pub fn swing_plane_tilt(style: SwingStyle) -> Option<f32> {
     match style.profile().arc {
         SwingArc::TiltedPlane { tilt, .. } => Some(tilt),
         SwingArc::Sagittal => Some(0.0),
-        SwingArc::Lunge { .. } => None,
+        SwingArc::Lunge { .. } | SwingArc::Unarmed { .. } | SwingArc::PommelStrike { .. } => None,
     }
 }
 
@@ -220,6 +264,32 @@ impl SwingStyle {
                     release: HOJ_RELEASE,
                 },
                 lean: HOJ_LEAN,
+            },
+            // The butt of the weapon slammed into the target: pull back, then
+            // flip tip-over-grip while thrusting so the pommel leads. The
+            // fastest gesture in the game — an interrupt is urgent by nature.
+            // `lean` is 1.0: `body_drive` IS the body angle, matching Kick.
+            SwingStyle::Pummel => SwingProfile {
+                release_secs: SWING_RELEASE_SECS * PUMMEL_RELEASE_MUL,
+                impact_hold_secs: SWING_IMPACT_HOLD_SECS * PUMMEL_HOLD_MUL,
+                follow_secs: SWING_FOLLOW_SECS * PUMMEL_FOLLOW_MUL,
+                arc: SwingArc::PommelStrike {
+                    pull: PUMMEL_PULL,
+                    thrust: PUMMEL_THRUST,
+                    flip: PUMMEL_FLIP,
+                    body_drive: PUMMEL_BODY_DRIVE,
+                },
+                lean: 1.0,
+            },
+            // The kick: load forward, rock BACK at extension while the body
+            // steps in — the front-kick silhouette. Slightly slower than
+            // Pummel with a longer hold, so the extended pose registers.
+            SwingStyle::Kick => SwingProfile {
+                release_secs: SWING_RELEASE_SECS * KICK_RELEASE_MUL,
+                impact_hold_secs: SWING_IMPACT_HOLD_SECS * KICK_HOLD_MUL,
+                follow_secs: SWING_FOLLOW_SECS * KICK_FOLLOW_MUL,
+                arc: SwingArc::Unarmed { drive: KICK_DRIVE },
+                lean: 1.0,
             },
         }
     }
@@ -341,6 +411,65 @@ const HOJ_RELEASE: f32 = 1.70;
 /// The body rises into it. Just past Mortal Strike's, because an uppercut
 /// commits the whole frame upward rather than turning it.
 const HOJ_LEAN: f32 = 0.30;
+
+// --- Pummel / Kick (the melee interrupts) -----------------------------------
+//
+// The Classic client data (wago.tools, 1.15.9.69547): Kick's caster kit plays
+// anim 95 — the literal `Kick` animation, a leg strike — and Pummel's plays
+// anim 118, `SpecialUnarmed`, a punch. Both have `HasMissile = 0` and NO
+// caster-side effect model: in the source the held weapons do not move. So
+// the roadmap's pre-research sketch of a "shallow weapon jab" was designed
+// from memory and is superseded. Kick keeps the source's shape (body-only,
+// weapon rigid); Pummel deliberately DEVIATES — a limbless capsule has no
+// punch to throw, so its gesture moves onto the prop the caster actually
+// holds: the butt end of the weapon slammed into the target (a design call
+// made at the bench, not an over-read of the source).
+//
+// Timings tuned in the pre-implementation bench (the Interrupt Gesture Bench
+// artifact). Both gestures are faster than Cheap Shot's 0.63s — an interrupt
+// is the most urgent button in the game and its gesture must read as a
+// reflex, never a ceremony.
+
+/// Pummel: ~0.59s total, paced like Kick. The first pass shipped 0.43s and,
+/// with a 109° flip inside a 0.13s release, felt distinctly faster than every
+/// other gesture in the game — quick is right for an interrupt, but not
+/// quicker than the vocabulary around it.
+const PUMMEL_RELEASE_MUL: f32 = 1.60;
+const PUMMEL_HOLD_MUL: f32 = 2.00;
+const PUMMEL_FOLLOW_MUL: f32 = 1.20;
+/// Draw-back on the load, in socket-local yards. Modest — the strike is the
+/// flip-and-thrust, not the pull.
+const PUMMEL_PULL: f32 = 0.35;
+/// Drive-through at full extension. Past the dagger auto's 0.85 so the butt
+/// visibly reaches the target rather than jabbing at air.
+const PUMMEL_THRUST: f32 = 0.95;
+/// The tip rotates ~109° BACK at full extension. The 2H mounts rest pitched
+/// 0.75 rad forward, so the net tip pose is ~66° behind vertical — the haft
+/// well past upright, butt leading forward-down into the target's chest.
+/// Unlike a Lunge's whisper of pitch, the flip here IS the gesture.
+const PUMMEL_FLIP: f32 = 1.90;
+/// ~13° of forward body drive at full extension (lean 1.0 — this is the whole
+/// angle). Deliberately SUBTLE: the flip carries the gesture, the body only
+/// commits behind it. The first pass shipped 0.42 and, with the symmetric
+/// windup that then applied, swung the torso through ~48° in the 0.13s
+/// release — it read as the capsule jerking over backwards, not a strike.
+const PUMMEL_BODY_DRIVE: f32 = 0.22;
+/// Fraction of `PUMMEL_BODY_DRIVE` the body winds BACK at full load (~4.5°).
+/// The stroke starts from s = -1, so a symmetric body curve doubles the total
+/// travel; a punch loads in the shoulders, not by rearing the whole torso.
+const PUMMEL_BODY_WINDUP_FRAC: f32 = 0.35;
+
+/// Kick: ~0.54s total, with a hold long enough for the rocked-back pose to
+/// register as a kick rather than a stumble.
+const KICK_RELEASE_MUL: f32 = 1.30;
+const KICK_HOLD_MUL: f32 = 2.20;
+const KICK_FOLLOW_MUL: f32 = 1.10;
+/// ~29° NEGATIVE: the torso rocks BACK at full extension (a front kick tips
+/// the upper body away from the target as the leg extends) while the shared
+/// weight-shift still steps the body IN. The opposite body direction to
+/// Pummel's forward drive is what separates the two interrupts at a glance —
+/// pin it in a test before "fixing" the signs to match.
+const KICK_DRIVE: f32 = -0.50;
 
 
 /// Normalized swing parameter in `[-1, 1]`.
@@ -495,6 +624,22 @@ fn arc_rotation(s: f32, arc: SwingArc) -> (Vec3, f32) {
         // commits behind it — so reading the lean off `pitch` gives a finisher
         // less body than a routine auto-attack.
         SwingArc::Lunge { body_drive, .. } => (Vec3::X, body_drive * s),
+        // The unarmed strike's body IS the gesture; the pommel strike's body
+        // drives behind the butt. Both carry the FULL angle (their styles set
+        // lean 1.0), and both pitch about X like everything else.
+        SwingArc::Unarmed { drive } => (Vec3::X, drive * s),
+        // Asymmetric like the sagittal chop: the load is a fraction of the
+        // drive-through. The stroke starts from s = -1, so a symmetric curve
+        // here rears the whole torso back by the full drive before snapping
+        // it forward — double the travel, and the jerk the first pass shipped.
+        SwingArc::PommelStrike { body_drive, .. } => {
+            let scaled = if s < 0.0 {
+                body_drive * PUMMEL_BODY_WINDUP_FRAC
+            } else {
+                body_drive
+            };
+            (Vec3::X, scaled * s)
+        }
     }
 }
 
@@ -517,6 +662,24 @@ fn swing_pose_arc(kind: WeaponKind, s: f32, arc: SwingArc) -> Transform {
             // what makes it a thrust.
             Transform::from_translation(Vec3::new(0.0, 0.0, -pull * draw + thrust * drive))
                 .with_rotation(Quat::from_rotation_x(pitch * draw - pitch * 0.5 * drive))
+        }
+        // The weapon never leaves its rest pose: the body carries the whole
+        // gesture (see `arc_rotation`), and the socket being a child of the
+        // VisualBody means it rides the torso's motion for free. The stillness
+        // is the point — do not give this arm a pose.
+        SwingArc::Unarmed { .. } => Transform::IDENTITY,
+        SwingArc::PommelStrike { pull, thrust, flip, .. } => {
+            let draw = if s < 0.0 { -s } else { 0.0 };
+            let drive = if s > 0.0 { s } else { 0.0 };
+            // The flip is swept monotonically THROUGH the release (`-flip *
+            // drive`), never posed during the windup: a windup-side flip would
+            // have to unwind through rest at s == 0 and re-flip on the way out,
+            // reading as the weapon wobbling twice per strike. The draw only
+            // cocks a fraction of it in the same direction, telegraphing where
+            // the release is about to go. Negative X-rotation raises the tip
+            // BACK (the sagittal windup's sign), so the butt leads forward.
+            Transform::from_translation(Vec3::new(0.0, 0.0, -pull * draw + thrust * drive))
+                .with_rotation(Quat::from_rotation_x(-flip * drive - flip * 0.18 * draw))
         }
         SwingArc::TiltedPlane { .. } => {
             // ONE rotation about ONE axis — the weapon sweeps through a plane,
@@ -847,6 +1010,18 @@ pub fn animate_body_lean(
 
         let (axis, angle) = arc_rotation(socket.last_s, socket.swing_style.profile().arc);
         let lean = socket.swing_style.profile().lean;
+        // The lean plays in the AIM frame, not the facing frame. The weapon
+        // composes its arc inside the socket's aim yaw (`yaw * pose * rest` in
+        // `animate_weapon_swings`), so its stroke always points at the victim
+        // even when the owner's facing lags the target — but a lean about the
+        // body's raw local X pitches relative to the FACING, and the two
+        // frames disagree by exactly `yaw_local`. At an auto's ~8° the
+        // mismatch hid; Kick's 29° body-only rock played visibly SIDEWAYS on
+        // any unit not squared up to its victim (the sandbox stages the dummy
+        // 90° off the caster's facing, which is where it was caught). Rotating
+        // the arc axis and the weight-shift step by the same yaw the weapon
+        // uses keeps body and blade in one plane by construction.
+        let aim = Quat::from_rotation_y(socket.yaw_local);
 
         for child in children.iter() {
             let Ok(mut body) = bodies.get_mut(child) else {
@@ -860,13 +1035,14 @@ pub fn animate_body_lean(
                 body.translation.z = 0.0;
                 continue;
             }
-            body.rotation = Quat::from_axis_angle(axis, angle * lean);
+            body.rotation = Quat::from_axis_angle(aim * axis, angle * lean);
             // Step into the blow: back through the windup, forward through the
-            // release. Local +Z is forward (the same axis the mount leans
-            // along), and `s` already carries the sign.
+            // release — along the AIM bearing, and `s` already carries the
+            // sign. Horizontal only: `translation.y` belongs to the gaits.
             let step = socket.last_s * SWING_WEIGHT_SHIFT;
-            body.translation.x = 0.0;
-            body.translation.z = step;
+            let step_dir = aim * Vec3::Z;
+            body.translation.x = step_dir.x * step;
+            body.translation.z = step_dir.z * step;
         }
     }
 }
@@ -1272,6 +1448,124 @@ mod swing_tests {
         );
         // And neither may become a pirouette.
         assert!(signature < 0.7, "a lean, not a spin: {signature:.3} rad");
+    }
+
+    // -- the melee interrupts (Pummel / Kick) --------------------------------
+
+    #[test]
+    fn kick_never_moves_the_weapon() {
+        // The source (anim 95, the literal Kick animation) kicks while the
+        // held weapons stay put; the stillness is part of what tells an
+        // interrupt from a swing. The socket is a child of the VisualBody, so
+        // the weapon still RIDES the torso — this pins that it adds nothing
+        // of its own.
+        let arc = SwingStyle::Kick.profile().arc;
+        for kind in [WeaponKind::Dagger, WeaponKind::TwoHandAxe] {
+            for s in [-1.0, -0.4, 0.0, 0.5, 1.0] {
+                let pose = swing_pose_arc(kind, s, arc);
+                assert_eq!(pose.translation, Vec3::ZERO, "{kind:?} at s={s}");
+                assert_eq!(pose.rotation, Quat::IDENTITY, "{kind:?} at s={s}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_pommel_strike_leads_with_the_butt() {
+        // At full extension the tip has rotated BACK (negative pitch, the
+        // windup's sign) by the full flip while the weapon thrusts forward —
+        // the butt end leading into the target. A positive pitch here is the
+        // strike turned back into an ordinary forward chop.
+        let arc = SwingStyle::Pummel.profile().arc;
+        let SwingArc::PommelStrike { flip, thrust, pull, .. } = arc else {
+            panic!("Pummel must be a PommelStrike");
+        };
+        let ext = swing_pose_arc(WeaponKind::TwoHandAxe, 1.0, arc);
+        assert!(
+            (pitch_of(ext) + flip).abs() < 1e-4,
+            "full extension must flip the tip back by the whole flip angle"
+        );
+        assert!(
+            (ext.translation.z - thrust).abs() < 1e-4,
+            "full extension must thrust the butt through the target"
+        );
+        // The flip is big enough to carry the haft past upright: the 2H rest
+        // mount leans 0.75 forward, so anything under that just looks like a
+        // wobbling chop.
+        assert!(flip > 0.75 * 2.0, "flip {flip} cannot clear the rest lean");
+        // The draw pulls back and cocks a fraction of the flip in the SAME
+        // direction, telegraphing the release rather than counter-rotating.
+        let wound = swing_pose_arc(WeaponKind::TwoHandAxe, -1.0, arc);
+        assert!((wound.translation.z + pull).abs() < 1e-4, "draw pulls back");
+        assert!(pitch_of(wound) < 0.0, "the cock tips the same way as the flip");
+        assert!(
+            pitch_of(wound).abs() < flip * 0.5,
+            "the draw only telegraphs; the flip itself belongs to the release"
+        );
+    }
+
+    #[test]
+    fn the_pommel_strike_passes_through_rest_without_a_jump() {
+        // Windup and release are separate branches; the flip is swept through
+        // the release precisely so both halves meet at rest.
+        let arc = SwingStyle::Pummel.profile().arc;
+        let below = swing_pose_arc(WeaponKind::TwoHandAxe, -1e-4, arc);
+        let above = swing_pose_arc(WeaponKind::TwoHandAxe, 1e-4, arc);
+        assert!(below.rotation.angle_between(above.rotation) < 1e-2);
+        assert!((below.translation - above.translation).length() < 1e-2);
+    }
+
+    #[test]
+    fn the_two_interrupts_disagree_on_body_direction() {
+        // Pummel drives the torso FORWARD behind the butt; Kick ROCKS BACK as
+        // the leg extends. The opposite signs are the entire glance-level
+        // distinction between the two interrupts — a well-meaning sign fix
+        // here collapses them into one gesture.
+        let body = |style: SwingStyle| {
+            let p = style.profile();
+            let (_, angle) = arc_rotation(1.0, p.arc);
+            angle * p.lean
+        };
+        let pummel = body(SwingStyle::Pummel);
+        let kick = body(SwingStyle::Kick);
+        assert!(pummel > 0.0, "Pummel's body must drive forward");
+        assert!(kick < 0.0, "Kick's body must rock back");
+        // Kick's body IS its gesture, so it commits well past a routine
+        // auto-attack's ~8°. Pummel's body is deliberately SUBTLE — the flip
+        // carries it — but still past the auto, and its backward load is a
+        // fraction of the drive (a symmetric curve doubled the travel and
+        // read as the capsule jerking over backwards).
+        let auto = {
+            let p = SwingStyle::Auto.profile();
+            let (_, a) = arc_rotation(1.0, p.arc);
+            (a * p.lean).abs()
+        };
+        assert!(pummel.abs() > auto);
+        assert!(kick.abs() > auto * 2.0);
+        let (_, pummel_load) = arc_rotation(-1.0, SwingStyle::Pummel.profile().arc);
+        assert!(
+            pummel_load.abs() < pummel.abs() * 0.5,
+            "Pummel must load in the shoulders, not rear the torso back"
+        );
+        // At rest both stand upright.
+        for style in [SwingStyle::Pummel, SwingStyle::Kick] {
+            let (_, angle) = arc_rotation(0.0, style.profile().arc);
+            assert_eq!(angle, 0.0, "{style:?} leans while standing still");
+        }
+    }
+
+    #[test]
+    fn the_interrupts_are_the_fastest_gestures() {
+        // An interrupt is the most urgent button in the game; its gesture must
+        // read as a reflex. Cheap Shot (0.63s) is the quickest signature — both
+        // interrupts undercut it, and neither approaches Mortal Strike.
+        let cheap = SwingStyle::CheapShot.profile().total();
+        for style in [SwingStyle::Pummel, SwingStyle::Kick] {
+            let total = style.profile().total();
+            assert!(
+                total < cheap,
+                "{style:?} runs {total:.2}s — slower than Cheap Shot's {cheap:.2}s"
+            );
+        }
     }
 
     /// Signed pitch (rotation about local X) of a pose, for the direction

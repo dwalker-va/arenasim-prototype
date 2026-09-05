@@ -416,6 +416,73 @@ fn a_dying_unit_cedes_rotation_and_loses_its_step() {
     assert!(t.translation.z.abs() < 1e-5, "the step is cleared on death");
 }
 
+#[test]
+fn the_lean_plays_in_the_aim_plane_not_the_facing_plane() {
+    // The regression this pins: the weapon composes its stroke inside the
+    // socket's aim yaw, but the body lean used the raw local X axis and raw
+    // local Z step — the FACING frame. On a unit not squared up to its victim
+    // the two disagree by `yaw_local`, and Kick's 29° body-only rock played
+    // visibly SIDEWAYS (caught in the sandbox, where the dummy is staged 90°
+    // off the caster's facing). Assert world directions, not stored fields.
+    let mut app = harness();
+    app.add_systems(Update, animate_body_lean);
+    let (attacker, socket) = spawn_warrior(&mut app);
+    let body = body_of(&mut app, attacker);
+
+    // Facing +Z, victim on the +X bearing: yaw_local = FRAC_PI_2, exactly the
+    // sandbox's staging. Kick at full extension.
+    {
+        let mut s = app.world_mut().entity_mut(socket);
+        let mut socket_state = s.get_mut::<WeaponSocket>().unwrap();
+        socket_state.swing_style = SwingStyle::Kick;
+        socket_state.last_s = 1.0;
+        socket_state.yaw_local = std::f32::consts::FRAC_PI_2;
+    }
+    app.update();
+
+    let t = *app.world().entity(body).get::<Transform>().unwrap();
+    // The capsule's top must tip AWAY from the +X victim (Kick rocks back)...
+    let tipped_up = t.rotation * Vec3::Y;
+    assert!(
+        tipped_up.x < -0.05,
+        "the torso must rock back from the victim; up-vector tipped to {tipped_up}"
+    );
+    // ...and not sideways relative to the aim (the old bug: all the tilt in
+    // the facing plane, none toward the victim).
+    assert!(
+        tipped_up.z.abs() < 0.02,
+        "no side tilt relative to the aim; up-vector tipped to {tipped_up}"
+    );
+    // The weight-shift step drives TOWARD the victim, along the aim bearing.
+    assert!(t.translation.x > 0.05, "the step must be toward the +X victim");
+    assert!(t.translation.z.abs() < 0.02, "not along the stale facing");
+}
+
+#[test]
+fn a_squared_up_unit_leans_exactly_as_before() {
+    // yaw_local == 0 is the pre-fix frame: the aim correction must be a
+    // provable no-op for a unit already facing its victim, or every shipped
+    // lean quietly changes shape.
+    let mut app = harness();
+    app.add_systems(Update, animate_body_lean);
+    let (attacker, socket) = spawn_warrior(&mut app);
+    let body = body_of(&mut app, attacker);
+
+    {
+        let mut s = app.world_mut().entity_mut(socket);
+        let mut socket_state = s.get_mut::<WeaponSocket>().unwrap();
+        socket_state.swing_style = SwingStyle::MortalStrike;
+        socket_state.last_s = 1.0;
+        socket_state.yaw_local = 0.0;
+    }
+    app.update();
+
+    let t = *app.world().entity(body).get::<Transform>().unwrap();
+    assert!(t.rotation.angle_between(Quat::IDENTITY) > 0.1);
+    assert!(t.translation.x.abs() < 1e-5, "no lateral step when squared up");
+    assert!((t.translation.z - 0.18).abs() < 1e-4, "the legacy forward step");
+}
+
 // ---------------------------------------------------------------------------
 // Mortal Wounds heal fracture
 // ---------------------------------------------------------------------------

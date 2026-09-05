@@ -45,6 +45,12 @@ const VIA_DRAIN: &[AbilityType] = &[
     AbilityType::SinisterStrike,
 ];
 
+/// Abilities that reach the marker through `combat_ai.rs`'s interrupt system,
+/// which selects the ability per class at runtime — the spawn site names
+/// `interrupt_ability`, not a literal, so the scan cannot see these either.
+/// Guarded by `the_interrupt_gestures_are_spawned_and_gated` below.
+const VIA_INTERRUPT: &[AbilityType] = &[AbilityType::Pummel, AbilityType::Kick];
+
 fn read(rel: &str) -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(rel);
     fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {rel}: {e}"))
@@ -141,7 +147,7 @@ fn every_listed_ability_has_a_spawn_site() {
     // makes the sandbox preview something a real match never shows.
     let scanned = scanned_spawn_sites();
     for ability in listed() {
-        if VIA_DRAIN.contains(&ability) {
+        if VIA_DRAIN.contains(&ability) || VIA_INTERRUPT.contains(&ability) {
             continue;
         }
         let name = format!("{ability:?}");
@@ -173,5 +179,32 @@ fn the_drain_abilities_still_queue_instant_attacks() {
     assert!(
         all.matches("instant_attacks.push").count() >= VIA_DRAIN.len(),
         "fewer instant_attacks.push sites than abilities said to use the drain"
+    );
+}
+
+#[test]
+fn the_interrupt_gestures_are_spawned_and_gated() {
+    // The two VIA_INTERRUPT abilities reach the marker through the interrupt
+    // system's runtime `interrupt_ability`, which the literal scan cannot see.
+    // Pin the site directly: the guard names exactly Pummel and Kick (Wind
+    // Shear is deliberately outside it — no weapon sockets, victim-side answer
+    // per roadmap B), and an InstantAbilityFired spawn sits inside the guard.
+    let src = read("src/states/play_match/combat_ai.rs");
+    let guard = "matches!(interrupt_ability, AbilityType::Pummel | AbilityType::Kick)";
+    let Some(at) = src.find(guard) else {
+        panic!(
+            "combat_ai.rs no longer gates the interrupt gesture on \
+             Pummel | Kick — update VIA_INTERRUPT and this test together"
+        );
+    };
+    let window = &src[at..(at + 800).min(src.len())];
+    assert!(
+        window.contains("InstantAbilityFired {"),
+        "the Pummel | Kick guard no longer wraps an InstantAbilityFired spawn"
+    );
+    assert!(
+        !src.contains("AbilityType::WindShear | "),
+        "Wind Shear appears in a gesture guard; it has no weapon sockets and \
+         its interrupt answer is victim-side (roadmap B)"
     );
 }
