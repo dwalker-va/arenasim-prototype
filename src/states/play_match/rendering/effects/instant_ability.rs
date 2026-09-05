@@ -54,6 +54,11 @@ pub fn swing_style_for_ability(ability: AbilityType) -> Option<SwingStyle> {
         // reference screenshot plainly shows the paladin in a raised-weapon pose
         // with a flash at the mace. The evidence was over-read.
         AbilityType::HammerOfJustice => Some(SwingStyle::HammerOfJustice),
+        // The melee interrupts (roadmap B). Stroke-only — no flourish arm: the
+        // victim side is already served by the casting orb's sputter, and the
+        // source gives neither ability a caster-side effect model.
+        AbilityType::Pummel => Some(SwingStyle::Pummel),
+        AbilityType::Kick => Some(SwingStyle::Kick),
         _ => None,
     }
 }
