@@ -243,19 +243,22 @@ fn mechanism_for(ability: AbilityType, config: &AbilityConfig) -> EntryFamily {
         // the Warlock's Felhunter), all driven by drive_sandbox_pet.
         AirTotem | WaterTotem | EarthTotem | FireTotem | FreezingTrap | FrostTrap | SpiderWeb
         | BoarCharge | MastersCall | SpellLock | DevourMagic => EntryFamily::Entity,
-        // M1 for the outcome plus a directly-spawned caster cosmetic. Every
-        // ability whose visual is emitted by code the sandbox does not run
-        // belongs here, signature or not: the family is about the application
-        // MECHANISM (KTD1), and one classified as `Cast` would silently fail to
-        // fire a flourish the day it gets one. Kept in sync with combat code by
-        // `InstantAbilityFired::is_spawned_for` — see the audit test below.
-        PsychicScream
-        | MortalStrike | Ambush | SinisterStrike
-        | CheapShot | KidneyShot | HammerOfJustice | FrostNova
-        // The melee interrupts: markers spawned at combat_ai.rs's committed-use
-        // site. On the sandbox dummy the interrupt itself is a no-op (nothing
-        // is casting), so the gesture IS the preview.
-        | Pummel | Kick => EntryFamily::Residue,
+        // M1 for the outcome plus a directly-spawned caster cosmetic. Psychic
+        // Scream's burst predates the shared marker (bespoke `ScreamBurst`),
+        // but its mechanism is the same shape.
+        PsychicScream => EntryFamily::Residue,
+        // Every ability whose combat path spawns an `InstantAbilityFired` —
+        // a visual emitted by code the sandbox does not run, so the sandbox
+        // must spawn the marker itself; one classified as `Cast` would
+        // silently fail to fire its gesture (KTD1). DERIVED from the same
+        // predicate combat code is audited against, so a new marker ability
+        // can never forget this arm — but keep this guard arm BELOW the
+        // explicit Component/Entity arms, which win by position for any
+        // ability that ever appears in both (the classification test walks
+        // every marker ability to catch exactly that shadowing).
+        // (On the sandbox dummy an interrupt's outcome is a no-op — nothing
+        // is casting — so the gesture IS the preview.)
+        a if InstantAbilityFired::is_spawned_for(a) => EntryFamily::Residue,
         // Data-only (no application code) / no distinct visual beyond the swing.
         WindShear | HeroicStrike => EntryFamily::Unsupported,
         // Config-derived default: channels, else Cast (hard casts and every
@@ -1521,11 +1524,12 @@ mod tests {
         assert_eq!(mech(PsychicScream), EntryFamily::Residue);
         assert_eq!(mech(WindShear), EntryFamily::Unsupported);
         // Every ability whose combat path spawns an `InstantAbilityFired` — a
-        // marker emitted by code the sandbox does not run. Classifying one of
-        // these as `Cast` fails silently: the preview still shows damage, so it
-        // looks fine, right up until the ability's signature never fires.
-        // Driven off the same predicate combat code uses, so the two cannot
-        // drift: adding a spawn site without a family arm fails HERE.
+        // marker emitted by code the sandbox does not run. `mechanism_for`
+        // now DERIVES its Residue arm from this predicate, so membership can
+        // no longer drift; what this loop still catches is SHADOWING — a
+        // marker ability later added to one of the explicit Component/Entity
+        // arms above the guard arm, which wins by match position and silently
+        // stops the gesture previewing.
         let defs = AbilityDefinitions::default();
         let mut checked = 0;
         for (&ability, config) in defs.iter() {
@@ -1536,14 +1540,14 @@ mod tests {
             assert_eq!(
                 mechanism_for(ability, config),
                 EntryFamily::Residue,
-                "{ability:?} spawns InstantAbilityFired, so the sandbox must \
-                 spawn it too — see spawn_sandbox_cosmetic"
+                "{ability:?} spawns InstantAbilityFired but an earlier match \
+                 arm shadows the derived Residue arm — see mechanism_for"
             );
             assert!(mechanism_for(ability, config).is_playable());
         }
         // Guard against the predicate silently emptying and the loop above
         // passing vacuously.
-        assert_eq!(checked, 9, "expected the nine marker-spawning abilities");
+        assert!(checked > 0, "is_spawned_for matched no ability at all");
     }
 
     #[test]

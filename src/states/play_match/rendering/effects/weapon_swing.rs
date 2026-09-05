@@ -158,8 +158,8 @@ pub(crate) enum SwingArc {
         /// How far the tip rotates BACK at full extension, in radians. The
         /// butt rotates forward by the same angle; the 2H mounts rest pitched
         /// 0.75 forward, so the butt-at-target pose needs flip well past that.
-        /// A small fraction of it (0.18) is applied as a same-direction cock
-        /// during the draw, telegraphing the flip.
+        /// A small fraction of it (`PUMMEL_COCK_FRAC`) is applied as a
+        /// same-direction cock during the draw, telegraphing the flip.
         flip: f32,
         /// Torso pitch at full extension, in radians — the body drives forward
         /// behind the butt, like [`Self::Lunge`]'s `body_drive`. Rides
@@ -266,8 +266,9 @@ impl SwingStyle {
                 lean: HOJ_LEAN,
             },
             // The butt of the weapon slammed into the target: pull back, then
-            // flip tip-over-grip while thrusting so the pommel leads. The
-            // fastest gesture in the game — an interrupt is urgent by nature.
+            // flip tip-over-grip while thrusting so the pommel leads. Paced
+            // beside Kick (~0.59s to its ~0.54s) — quick, as an interrupt must
+            // be, but no quicker than the vocabulary around it.
             // `lean` is 1.0: `body_drive` IS the body angle, matching Kick.
             SwingStyle::Pummel => SwingProfile {
                 release_secs: SWING_RELEASE_SECS * PUMMEL_RELEASE_MUL,
@@ -282,8 +283,9 @@ impl SwingStyle {
                 lean: 1.0,
             },
             // The kick: load forward, rock BACK at extension while the body
-            // steps in — the front-kick silhouette. Slightly slower than
-            // Pummel with a longer hold, so the extended pose registers.
+            // steps in — the front-kick silhouette. The quicker of the two
+            // interrupts, with a hold long enough for the extended pose to
+            // register.
             SwingStyle::Kick => SwingProfile {
                 release_secs: SWING_RELEASE_SECS * KICK_RELEASE_MUL,
                 impact_hold_secs: SWING_IMPACT_HOLD_SECS * KICK_HOLD_MUL,
@@ -458,6 +460,10 @@ const PUMMEL_BODY_DRIVE: f32 = 0.22;
 /// The stroke starts from s = -1, so a symmetric body curve doubles the total
 /// travel; a punch loads in the shoulders, not by rearing the whole torso.
 const PUMMEL_BODY_WINDUP_FRAC: f32 = 0.35;
+/// Fraction of `PUMMEL_FLIP` the WEAPON cocks in the same direction during the
+/// draw, telegraphing the release. The pinning test bounds it below half the
+/// flip — the flip itself belongs to the release.
+const PUMMEL_COCK_FRAC: f32 = 0.18;
 
 /// Kick: ~0.54s total, with a hold long enough for the rocked-back pose to
 /// register as a kick rather than a stumble.
@@ -679,7 +685,9 @@ fn swing_pose_arc(kind: WeaponKind, s: f32, arc: SwingArc) -> Transform {
             // the release is about to go. Negative X-rotation raises the tip
             // BACK (the sagittal windup's sign), so the butt leads forward.
             Transform::from_translation(Vec3::new(0.0, 0.0, -pull * draw + thrust * drive))
-                .with_rotation(Quat::from_rotation_x(-flip * drive - flip * 0.18 * draw))
+                .with_rotation(Quat::from_rotation_x(
+                    -flip * drive - flip * PUMMEL_COCK_FRAC * draw,
+                ))
         }
         SwingArc::TiltedPlane { .. } => {
             // ONE rotation about ONE axis — the weapon sweeps through a plane,

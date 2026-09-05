@@ -202,9 +202,13 @@ fn the_interrupt_gestures_are_spawned_and_gated() {
         window.contains("InstantAbilityFired {"),
         "the Pummel | Kick guard no longer wraps an InstantAbilityFired spawn"
     );
+    // Scoped to the guard's own window and matched in ANY position — an
+    // earlier whole-file scan for "WindShear | " missed the likeliest
+    // regression (WindShear appended LAST in the guard has no trailing " | ")
+    // and false-positived on unrelated or-patterns elsewhere in the file.
     assert!(
-        !src.contains("AbilityType::WindShear | "),
-        "Wind Shear appears in a gesture guard; it has no weapon sockets and \
-         its interrupt answer is victim-side (roadmap B)"
+        !window.contains("WindShear"),
+        "Wind Shear appears near the gesture guard; it has no weapon sockets \
+         and its interrupt answer is victim-side (roadmap B)"
     );
 }
