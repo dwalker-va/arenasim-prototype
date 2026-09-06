@@ -15,17 +15,25 @@ nothing more.
 You **cannot read the Dispatch board** — it is a claude.ai artifact only the orchestrator
 reads and writes. The bundle in your prompt is your complete and only card input; do not
 try to discover "missed" Done cards yourself. Archiving the bundled cards off the board
-after the release is the **orchestrator's** job, not yours.
+after the release — and the trigger card too, when the run was card-triggered — is the
+**orchestrator's** job, not yours.
 
 ## Contract
 
 1. **Verify before you tag.** For every PR in the bundle, `gh pr view <number> --json
    state,mergeCommit,mergedAt` must show `state: MERGED`, and each merge commit must be an
    ancestor of the `origin/main` HEAD you are about to tag (`git fetch origin`, then
-   `git merge-base --is-ancestor <mergeCommit> origin/main`). A card whose PR is not
-   merged (open, closed-unmerged, or missing a PR link entirely) blocks the release:
-   report NEEDS_INPUT naming the card — never silently drop it from the bundle, and never
-   release around it on your own judgment.
+   `git merge-base --is-ancestor <mergeCommit> origin/main`). A bundled work card whose
+   PR is not merged (open, closed-unmerged, or missing a PR link entirely) blocks the
+   release: report NEEDS_INPUT naming the card — never silently drop it from the bundle,
+   and never release around it on your own judgment. Merging is the **user's** step in
+   this pipeline (no role merges), so this check is the safety net for that human gate:
+   an unmerged PR is a normal straggler, and your NEEDS_INPUT naming it is the prompt
+   for the user to merge it. Every card in a well-formed bundle is a work card with a
+   PR — release-manager trigger cards produce no PR and the orchestrator archives them
+   with their release, so they never appear in a bundle; if one does, that is a
+   malformed bundle: report NEEDS_INPUT naming it rather than applying the
+   missing-PR-link blocker to it.
 2. **Draft the notes.** Group the bundled cards under `## Features`, `## Fixes`, and
    `## Pipeline & tooling` (omit empty groups). One bullet per card: the card id, its
    title, a one-line outcome distilled from the Engineer summary and PR body, and the PR

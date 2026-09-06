@@ -41,8 +41,8 @@ truth for code. GitHub issues are not used.
 | `needs_input` | agent blocked on the user; `question.text` holds the question | answering on the board moves the card back to `in_progress` with `agent: null` |
 | `in_progress` | an agent should be / is working it | orchestrator spawns the card's role agent when `agent == null` |
 | `review` | PR open, awaiting verification | orchestrator spawns the Tester on entry; APPROVE → `done`, REJECT → back to `in_progress` with findings |
-| `done` | verified, merged | bundled into the next release (see Release flow) |
-| `archived` | shipped in a release; `released` holds the tag | none — terminal |
+| `done` | verified by the Tester; the user merges the PR (the one human gate in the loop — no role merges) | bundled into the next release (see Release flow) |
+| `archived` | shipped in a release (or was that release's trigger card); `released` holds the tag | none — terminal |
 
 **The `agent` field is the dedup guard.** Any gesture that moves a card *into*
 `in_progress` (drag, edit, question answered) sets `agent: null`, which means
@@ -103,7 +103,11 @@ board recently usually gets its watch restored on `--resume`.
 5. On a Tester's completion notification, parse its `VERDICT:` report and
    republish the board accordingly:
    - `APPROVE` → `column: "done"`, `agent.status: "done"`, append the FINDINGS
-     note as activity (`by: "tester"`).
+     note as activity (`by: "tester"`). The PR itself now awaits the **user's**
+     merge — merging is the pipeline's one human gate (the Engineer and Tester
+     contracts both forbid it), and the Release flow's merged-and-ancestor
+     check is the safety net that catches any Done card the user has not
+     merged yet.
    - `REJECT` → `column: "in_progress"`, append the FINDINGS **verbatim** to the
      card `body` under a dated `## Tester findings` heading (they are the next
      Engineer's spec addendum), set `agent: null` (step 2 then spawns a fresh
@@ -112,9 +116,12 @@ board recently usually gets its watch restored on `--resume`.
      the raw report as the question text; never guess a verdict.
 6. On a Release Manager's completion notification, parse its `STATUS:` report:
    - `RELEASED` → for every card in `CARDS:`, set `released: <TAG>` and
-     `column: "archived"`; on the release-manager card itself (if the run was
-     card-triggered) set `column: "done"`, `agent.status: "done"`, and append
-     the tag + release URL as activity (`by: "release-manager"`); republish.
+     `column: "archived"`; the release-manager trigger card itself (if the run
+     was card-triggered) is archived exactly like the bundled cards — set
+     `released: <TAG>` and `column: "archived"` on it too, appending the tag +
+     release URL as activity (`by: "release-manager"`). It never parks in
+     `done`: a release run produces no PR, so a trigger card left in `done`
+     would block every subsequent bundle. Republish.
    - `NEEDS_INPUT` / `FAILED` → same handling as the Engineer's (step 4): the
      triggering card (if the run was card-triggered) goes to `needs_input` with
      the question or failure text; a user-requested run just surfaces it to the
@@ -163,8 +170,12 @@ spawn path then fires). Both routes converge on the same spawn.
 **What the orchestrator passes.** The Release Manager cannot read the board, so
 the orchestrator assembles the bundle from board state and puts it in the spawn
 prompt: every card in `done` without a `released` field, each as its id, title,
-PR link(s) from `links`, and the Engineer's SUMMARY from the activity log. An
-empty bundle is not spawnable — tell the user there is nothing to release.
+PR link(s) from `links`, and the Engineer's SUMMARY from the activity log. A
+release-manager trigger card is never a bundle candidate: the current run's
+trigger sits in `in_progress`, and every previous run's trigger was stamped and
+archived with its bundle (see post-release archival below) — so this rule only
+ever collects work cards, each of which has a PR. An empty bundle is not
+spawnable — tell the user there is nothing to release.
 
 **What the agent does** (`.claude/agents/release-manager.md` is authoritative):
 verifies each listed PR is `MERGED` and its merge commit is an ancestor of the
@@ -178,13 +189,19 @@ triggers `.github/workflows/release.yaml`, whose idempotent create step reuses
 the agent's release (notes survive) and attaches the platform binaries — the
 release is public for a few minutes before its assets land, which is expected.
 Any unmerged PR, tag collision, or empty bundle is a NEEDS_INPUT, never a
-silent drop.
+silent drop. The merged-and-ancestor check is the safety net for the
+pipeline's one human gate: merging is the **user's** step (no role merges), so
+a Done card whose PR the user has not merged yet is a normal straggler, not a
+pipeline fault — the agent's NEEDS_INPUT naming it is precisely the prompt for
+the user to merge and re-request the release.
 
 **Post-release board archival — orchestrator, not agent.** On a `RELEASED`
 report the orchestrator sets `released: <tag>` on every bundled card and moves
 it to `column: "archived"` (off the Done column; the card and its history stay
-in board state). The `released` field is also the dedup guard for the *next*
-bundle: only Done cards without it are release candidates.
+in board state). A card-triggered run's trigger card gets the identical stamp —
+`released: <tag>`, `column: "archived"` — so it is never left in `done` to leak
+into the next bundle. The `released` field is also the dedup guard for the
+*next* bundle: only Done cards without it are release candidates.
 
 ## Known limits (v1)
 
