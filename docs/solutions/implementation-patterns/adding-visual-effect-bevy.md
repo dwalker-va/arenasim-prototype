@@ -33,7 +33,7 @@ Every visual effect in the codebase follows a **three-system lifecycle**:
 2. **Update system** — Animates (fade, scale, follow target) each frame
 3. **Cleanup system** — Despawns when lifetime expires
 
-This pattern has been applied to: `SchoolImpact` (the shared school-coloured landing, which absorbed the old `SpellImpactEffect`), `ShieldBubble`, `FlameParticle`, `DrainLifeBeam`, `HealingLightColumn`, and `DispelBurst`.
+This pattern has been applied to: `SchoolImpact` (the shared school-coloured landing, which absorbed the old `SpellImpactEffect`), `ShieldBubble`, `FlameParticle`, `DrainLifeBeam`, `HealImpact` (which replaced the retired `HealingLightColumn` — client data showed no Classic heal lands as a column), and `DispelBurst`.
 
 ## The Pattern (5 Steps)
 
@@ -201,7 +201,7 @@ Combat systems (in `systems.rs`) run in both modes. Visual systems (in `src/stat
 
 ### 7. Name Components After Their Visual Shape
 
-Convention: `HealingLightColumn`, `ShieldBubble`, `DrainLifeBeam`, `DispelBurst` — not `HealingEffect` or `DispelAnimation`. The name should describe what the spectator sees.
+Convention: `ShieldBubble`, `DrainLifeBeam`, `DispelBurst` — not `HealingEffect` or `DispelAnimation`. The name should describe what the spectator sees.
 
 ### 8. Emissive Values Need 2x+ Scaling
 
@@ -219,8 +219,6 @@ Bevy has a compile-time tuple size limit for system groups. Each visual effect t
 
 | Class/School | Base Color | Emissive | Used By |
 |-------------|-----------|----------|---------|
-| Priest (healing) | `srgba(1.0, 1.0, 0.9, 0.35)` | `LinearRgba(2.8, 2.8, 2.4, 1.0)` | HealingLightColumn |
-| Paladin (healing) | `srgba(1.0, 0.9, 0.6, 0.35)` | `LinearRgba(2.5, 2.0, 1.0, 1.0)` | HealingLightColumn |
 | Priest (dispel) | `srgba(0.85, 0.85, 1.0, 0.5)` | `LinearRgba(2.0, 2.0, 2.8, 1.0)` | DispelBurst |
 | Paladin (dispel) | `srgba(1.0, 0.9, 0.6, 0.5)` | `LinearRgba(2.5, 2.0, 1.0, 1.0)` | DispelBurst |
 | Frost (shield) | `srgba(0.4, 0.7, 1.0, 0.25)` | varies | ShieldBubble |
@@ -245,5 +243,5 @@ When adding a new visual effect, touch these files:
 - [visual-probes-assert-rendered-geometry.md](visual-probes-assert-rendered-geometry.md) — what a probe for one of these effects must assert to be worth writing
 - [Adding a New Class: Paladin](adding-new-class-paladin.md) — Documents the dispel system and pending component pattern
 - [CLAUDE.md: Adding a New Ability](../../../CLAUDE.md) — Full ability addition checklist
-- Commit `56860b1` — HealingLightColumn implementation (the original pattern)
+- Commit `56860b1` — HealingLightColumn implementation (the original pattern; the effect itself was later retired — no Classic heal lands as a column)
 - Commit `070891c` — DispelBurst implementation (second application of the pattern)

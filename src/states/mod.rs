@@ -630,17 +630,6 @@ impl Plugin for StatesPlugin {
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_combat_scene),
             )
-            // Healing light column visual effects (separate group to avoid tuple size limits)
-            .add_systems(
-                Update,
-                (
-                    play_match::spawn_healing_light_visuals,    // Spawn healing light columns
-                    play_match::update_healing_light_columns,   // Update position/fade
-                    play_match::cleanup_expired_healing_lights, // Remove expired columns
-                )
-                    .after(CombatSystemPhase::CombatResolution)
-                    .run_if(in_combat_scene),
-            )
             // Dispel burst visual effects (separate group to avoid tuple size limits)
             // Still used by Concussive Shot impact and Master's Call — NOT the dispel.
             .add_systems(
