@@ -474,8 +474,10 @@ fn heal_stream_is_narrow_quiet_and_rising() {
     }
 }
 
-/// Healing Wave: 8 butterflies (16 wings) orbit the torso at the blessed
-/// radius, drift outward, and actually ORBIT — their bearings advance.
+/// Healing Wave: 8 butterflies (16 wings) orbit the torso at the tuned
+/// radius (user-tuned tighter than the blessed band — the band below is
+/// derived from the constant), drift outward, and actually ORBIT — their
+/// bearings advance.
 #[test]
 fn healing_wave_butterflies_orbit_the_torso() {
     let mut h = Harness::new();

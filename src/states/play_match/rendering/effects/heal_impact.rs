@@ -82,7 +82,12 @@ pub const FLASH_OF_LIGHT_DURATION: f32 = 0.90;
 // --- Lesser Healing Wave / Healing Wave --------------------------------------
 pub const HEALING_WAVE_DURATION: f32 = 1.4;
 pub const HEALING_WAVE_BUTTERFLIES: u32 = 8;
-pub const HEALING_WAVE_ORBIT_RADIUS: f32 = 1.45;
+/// Butterfly orbit radius. USER-TUNED below the client-measured 1.2–1.7 u
+/// vertex-cloud band (whose midpoint, 1.45, was the previous value): at 1.45
+/// the flutter read as detached from the body, so the orbit was pulled in to
+/// hug the silhouette. 1.0 still clears the widest wrap halo (0.95) and the
+/// 0.5 body capsule with margin; the outward drift is unchanged.
+pub const HEALING_WAVE_ORBIT_RADIUS: f32 = 1.0;
 pub const HEALING_WAVE_SWIRL_SPEED_SCALE: f32 = 1.0;
 pub const HEALING_WAVE_GLOW_INTENSITY: f32 = 1.0;
 /// Radius of the combatant capsule (`Capsule3d::new(0.5, 1.5)`). A glow quad
