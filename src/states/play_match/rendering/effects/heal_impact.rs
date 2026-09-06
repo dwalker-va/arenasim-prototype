@@ -96,11 +96,22 @@ pub const COMBATANT_BODY_RADIUS: f32 = 0.5;
 /// attach grounding the effect (blessed band 0.8–1.2).
 pub const HEALING_WAVE_UNDERGLOW_RADIUS: f32 = 1.0;
 pub const HEALING_WAVE_UNDERGLOW_ALPHA: f32 = 0.35;
-/// How far the under-glow quad sits below the rig (rig-local). The rig's
-/// Base anchor floats 0.10 above the floor (`HEAL_BASE_Y` vs the capsule
-/// bottom at -1.25); this drop leaves the quad a hair above the ground so it
-/// never z-fights the arena floor.
-const HEALING_WAVE_UNDERGLOW_DROP: f32 = 0.06;
+/// World height of the arena floor plane. `create_arena_floor_mesh`
+/// (`play_match/mod.rs`) emits its vertices at y = 0 under an identity
+/// transform, and combatants stand ON it with their capsule CENTRES at world
+/// y = 1.0 — the 2.5-yd capsule is deliberately sunk 0.25 into the ground, so
+/// the capsule bottom (combatant-local -1.25) is NOT the floor. Ground decals
+/// anchor to this plane, never to the capsule bottom: the in-repo authorities
+/// are `selection.rs::RING_GROUND_OFFSET_Y` and `polymorph.rs`'s `ground_y`
+/// derivation (`-(transform.y + rest_y)`), both of which resolve to this
+/// world plane.
+pub const ARENA_FLOOR_WORLD_Y: f32 = 0.0;
+/// Lift of the under-glow pool above the floor plane. The floor is opaque and
+/// depth-writing, so an additive quad AT or BELOW it is depth-rejected and
+/// never renders; this lift matches the selection ring's rendered height
+/// (`RING_GROUND_OFFSET_Y` puts the ring at world y = 0.10), well clear of
+/// z-fighting.
+pub const HEALING_WAVE_UNDERGLOW_LIFT: f32 = 0.10;
 /// Butterflies flutter between these heights above the feet (source vertex
 /// cloud: z 0.3–1.3).
 pub const HEALING_WAVE_BUTTERFLY_MIN_Y: f32 = 0.3;
@@ -122,8 +133,11 @@ const BUTTERFLY_WING_LENGTH: f32 = 0.14;
 
 /// Height of the Base attachment (the recipient's feet) above a combatant's
 /// transform. The capsule is `Capsule3d::new(0.5, 1.5)` CENTRED on the
-/// transform, spanning -1.25..+1.25; the feet sparkles sit just above the
-/// floor.
+/// transform, spanning -1.25..+1.25 and sunk 0.25 into the ground, so this
+/// anchor sits slightly BELOW the floor plane (world y = -0.15 for a
+/// combatant at y = 1.0). Rising motes surface within their first frames;
+/// anything that must render ON the ground (the under-glow pool) anchors to
+/// [`ARENA_FLOOR_WORLD_Y`] instead.
 pub const HEAL_BASE_Y: f32 = -1.15;
 
 /// Pure gold — the Holy palette (`star5a`, `yellow_star_dim`, gold ribbons).
@@ -414,6 +428,21 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
             // 0.50/0.38/0.28 defect). The occluded centre is a feature — only
             // the soft annulus around the silhouette reads, so these can't
             // saturate into the first build's solid 2.3 u disc either.
+            //
+            // Floor clipping is a DELIBERATE partial accept. The floor plane
+            // (ARENA_FLOOR_WORLD_Y) sits at combatant-local -1.00 — 0.15
+            // ABOVE this rig's Base anchor — so the layer centres stand
+            // 0.34 / 0.55 / 0.68 above the floor while their radii are
+            // 0.95 / 0.80 / 0.70: the green layer's bottom ~32% and the
+            // gold's ~16% render below the floor and are depth-clipped.
+            // That is the intended "rising from the ground" read — the wrap
+            // emerging out of the green pool at the feet — and each layer's
+            // visible portion stays substantial: ≥ ~0.65 of its vertical
+            // extent above the floor, and the whole annulus outside the
+            // 0.5-yd body silhouette. Pinned (visible-fraction floor of 0.6)
+            // by `healing_wave_glow_wraps_outside_the_body`; raising or
+            // shrinking the layers to dodge the clip entirely would pull
+            // them off the blessed spine heights and radial extents.
             torso_glows: vec![
                 GlowLayer {
                     height: 0.49,
@@ -713,9 +742,16 @@ pub fn spawn_heal_impacts(
         }
 
         if let Some((radius, alpha)) = style.under_glow {
-            // A flat pool of green light on the ground under the feet. Laid
-            // into the XZ plane at spawn and never billboarded — the ground
-            // is its plane.
+            // A flat pool of green light ON the arena floor under the feet.
+            // Laid into the XZ plane at spawn and never billboarded — the
+            // ground is its plane. Its local height is derived from the rig's
+            // world anchor so the rendered quad lands at ARENA_FLOOR_WORLD_Y
+            // + LIFT whatever the anchor's own height (the Base anchor sits
+            // BELOW the floor plane, and a pet's anchor at yet another
+            // height): a pool anchored below the opaque depth-writing floor
+            // is fully depth-rejected and never renders. Derived once at
+            // spawn — a recipient's sim y never changes mid-match.
+            let pool_local_y = ARENA_FLOOR_WORLD_Y + HEALING_WAVE_UNDERGLOW_LIFT - at.y;
             parts.push(
                 commands
                     .spawn((
@@ -731,7 +767,7 @@ pub fn spawn_heal_impacts(
                             2.0,
                             Some(assets.dot.clone()),
                         )),
-                        Transform::from_translation(Vec3::Y * -HEALING_WAVE_UNDERGLOW_DROP)
+                        Transform::from_translation(Vec3::Y * pool_local_y)
                             .with_rotation(Quat::from_rotation_x(-FRAC_PI_2)),
                         NotShadowCaster,
                     ))

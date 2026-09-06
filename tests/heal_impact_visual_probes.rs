@@ -39,9 +39,9 @@ use arenasim::states::play_match::{
     animate_heal_impacts, billboard_heal_impacts, butterfly_center, heal_envelope, heal_style,
     spawn_heal_impacts, HealAnchor, Ramp, COMBATANT_BODY_RADIUS, FLASH_HEAL_FLASH_DURATION,
     FLASH_HEAL_RAY_COUNT, FLASH_HEAL_RAY_LENGTH, FLASH_OF_LIGHT_BORROW_INTENSITY,
-    FLASH_OF_LIGHT_DURATION, HEALING_WAVE_BUTTERFLIES, HEALING_WAVE_ORBIT_RADIUS,
-    HEALING_WAVE_OUTWARD_DRIFT, HEAL_BASE_Y, HEAL_STREAM_WIDTH, HOLY_LIGHT_DURATION,
-    IMPACT_HEAD_Y,
+    FLASH_OF_LIGHT_DURATION, ARENA_FLOOR_WORLD_Y, HEALING_WAVE_BUTTERFLIES,
+    HEALING_WAVE_ORBIT_RADIUS, HEALING_WAVE_OUTWARD_DRIFT, HEALING_WAVE_UNDERGLOW_LIFT,
+    HEAL_BASE_Y, HEAL_STREAM_WIDTH, HOLY_LIGHT_DURATION, IMPACT_HEAD_Y,
 };
 use arenasim::CharacterClass;
 
@@ -559,19 +559,37 @@ fn healing_wave_butterflies_orbit_the_torso() {
     );
 }
 
-/// Healing Wave's glow must SURROUND the body, never hide inside it. A glow
-/// quad billboarded on the spine axis renders at or behind the capsule's
-/// front surface out to `COMBATANT_BODY_RADIUS`, so a layer at or under that
-/// radius is fully depth-occluded by the opaque body — the third build
-/// shipped exactly that (0.50/0.38/0.28 radii) and the green glow vanished
-/// from the screen while every stored field looked healthy. This pins the
+/// Healing Wave's glow must SURROUND the body, never hide inside it — and
+/// never hide UNDER the arena floor either. Two occluders bound the rendered
+/// geometry:
+///
+/// - The BODY: a glow quad billboarded on the spine axis renders at or
+///   behind the capsule's front surface out to `COMBATANT_BODY_RADIUS`, so a
+///   layer at or under that radius is fully depth-occluded by the opaque
+///   body — the third build shipped exactly that (0.50/0.38/0.28 radii) and
+///   the green glow vanished while every stored field looked healthy.
+/// - The FLOOR: the arena floor is an opaque depth-writing plane at world
+///   y = `ARENA_FLOOR_WORLD_Y` (0.0), and combatants stand on it with
+///   capsule centres at world y = 1.0 (the capsule is sunk 0.25 into the
+///   ground — the capsule bottom is NOT the floor). An additive quad below
+///   the floor plane is fully depth-rejected — the fourth build parked the
+///   green pool at world y = -0.21 and it never rendered.
+///
+/// So the recipient spawns at the REAL game height (y = 1.0) and every
+/// ground-relative assertion measures against the floor plane. This pins the
 /// RENDERED geometry: each wrap layer's drawn edge reaches outside the
-/// capsule silhouette at the blessed spine heights, and the green pool lies
-/// flat ON the ground at the feet, un-billboarded.
+/// capsule silhouette at the blessed spine heights with a substantial
+/// above-floor visible fraction (partial floor clipping of the lower layers
+/// is the intended "rising from the ground" read — see the recipe comment),
+/// and the green pool lies flat JUST ABOVE the floor plane, un-billboarded.
 #[test]
 fn healing_wave_glow_wraps_outside_the_body() {
     let mut h = Harness::new();
-    let at = Vec3::new(2.0, 0.0, -1.0);
+    // The real game height: combatants spawn with capsule centres 1.0 above
+    // the floor plane (`play_match/mod.rs` spawns at y = 1.0). Spawning at
+    // y = 0 here would shift every world height 1.0 down and let a
+    // below-the-floor defect pass unseen.
+    let at = Vec3::new(2.0, 1.0, -1.0);
     let recipient = h.spawn_recipient(at);
     h.land(HealImpactKind::HealingWave, recipient);
     // The billboard pass poses the wrap quads, so render under a real camera.
@@ -618,6 +636,23 @@ fn healing_wave_glow_wraps_outside_the_body() {
             "wrap layer's rendered edge reaches only {reach}yd from the spine \
              — buried inside the {COMBATANT_BODY_RADIUS}yd body"
         );
+        // A substantial fraction of the layer's vertical extent must render
+        // ABOVE the floor plane. Partial clipping of the lower layers is the
+        // deliberate "rising from the ground" read, but a layer mostly or
+        // wholly below the floor plane (world y = ARENA_FLOOR_WORLD_Y) is
+        // depth-rejected by the opaque floor and reads as missing.
+        let half_extent = reach; // billboarded square quad: vertical = radial
+        let visible = ((centre.y + half_extent - ARENA_FLOOR_WORLD_Y)
+            / (2.0 * half_extent))
+            .clamp(0.0, 1.0);
+        assert!(
+            visible >= 0.6,
+            "wrap layer centred at world y {} with half-extent {half_extent} \
+             has only {visible:.2} of its vertical extent above the floor \
+             plane (world y = {ARENA_FLOOR_WORLD_Y}) — the opaque floor clips \
+             the rest",
+            centre.y
+        );
     }
     seen_heights.sort_by(|a, b| a.partial_cmp(b).unwrap());
     for (seen, blessed) in seen_heights.iter().zip([0.49, 0.70, 0.83]) {
@@ -627,9 +662,9 @@ fn healing_wave_glow_wraps_outside_the_body() {
         );
     }
 
-    // The green pool at the feet: one flat quad on the ground, in the blessed
-    // radius band, and NOT billboarded — its normal stays vertical under the
-    // camera the billboard pass is using.
+    // The green pool at the feet: one flat quad JUST ABOVE the floor plane,
+    // in the blessed radius band, and NOT billboarded — its normal stays
+    // vertical under the camera the billboard pass is using.
     let pools: Vec<GlobalTransform> = h
         .sprites()
         .into_iter()
@@ -640,11 +675,23 @@ fn healing_wave_glow_wraps_outside_the_body() {
     let pos = pool.translation();
     let spine_r = Vec2::new(pos.x - at.x, pos.z - at.z).length();
     assert!(spine_r < 1e-3, "the pool sits under the feet, off by {spine_r}");
+    // The floor-representative assertion: the arena floor is an opaque
+    // depth-writing plane at world y = ARENA_FLOOR_WORLD_Y, so a pool AT or
+    // BELOW it never renders (the fourth build's world y = -0.21 defect
+    // fails here). It must sit a hair above — the selection-ring idiom.
     assert!(
-        (base.y - 0.12..=base.y + 0.01).contains(&pos.y),
-        "the pool lies at ground level, not at {} (feet at {})",
-        pos.y,
-        base.y
+        pos.y > ARENA_FLOOR_WORLD_Y && pos.y <= ARENA_FLOOR_WORLD_Y + 0.15,
+        "the pool must lie just above the arena floor plane (world y = \
+         {ARENA_FLOOR_WORLD_Y}), in ({ARENA_FLOOR_WORLD_Y}, {}]; a pool at \
+         world y = {} is depth-rejected by (or z-fights) the opaque floor \
+         and never renders",
+        ARENA_FLOOR_WORLD_Y + 0.15,
+        pos.y
+    );
+    assert!(
+        (pos.y - (ARENA_FLOOR_WORLD_Y + HEALING_WAVE_UNDERGLOW_LIFT)).abs() < 1e-3,
+        "the pool renders at the blessed lift above the floor plane, not {}",
+        pos.y
     );
     let normal = (pool.transform_point(Vec3::Z) - pos).normalize();
     assert!(
