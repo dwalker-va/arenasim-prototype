@@ -49,10 +49,11 @@ truth for code. GitHub issues are not used.
 "needs a spawn". The orchestrator sets `agent: {status: "working", ...}` **before**
 spawning, so overlapping notifications never double-spawn. Bouncing a card from
 Review back to In Progress is therefore automatically a respawn. The same guard
-covers the Review column: the Engineer's completion leaves `agent.status: "done"`,
-which in `review` means "needs a Tester spawn"; the orchestrator flips it back to
-`working` before spawning the Tester, so overlapping notifications never
-double-spawn there either.
+covers the Review column: a `review` card needs a Tester spawn when `agent` is
+`null` (a claim reset by startup recovery) *or* `agent.status` is `"done"` (the
+Engineer's normal hand-off); the orchestrator flips it to `working` before
+spawning the Tester, so overlapping notifications never double-spawn there
+either.
 
 ## The orchestrator
 
@@ -68,8 +69,9 @@ so they die with the orchestrator session that spawned them — while their card
 keeps its `agent: {status: "working"}` claim, which the dedup guard then reads
 as "already being worked" forever. A fresh orchestrator has spawned nothing
 yet, so **every `working` claim it finds at startup was made by a previous
-session and is stale by definition** — no liveness probing is needed.
-Therefore, immediately after starting the watch (before processing any
+session and is stale by definition** — no liveness probing is needed. (That
+argument holds only under the single-orchestrator assumption — see Known
+limits.) Therefore, immediately after starting the watch (before processing any
 notification), read the board once and sweep:
 
 - Every `in_progress` card with `agent.status == "working"` (an Engineer or
@@ -83,10 +85,10 @@ notification), read the board once and sweep:
 
 The sweep touches nothing else. `done` cards are past their agent work;
 `needs_input` cards already carry `agent: null` by protocol; and `archived`
-cards are terminal with no automation — a release-manager trigger card
-archived mid-claim (step 6 stamps `released` and the column, not the `agent`
-field) may carry
-a lingering `agent: working`, and the sweep must leave it alone.
+cards are terminal with no automation — step 6 closes the trigger card's claim
+when it archives it, so a lingering `agent: working` on an archived trigger
+implies a crash mid-archival; either way `archived` is terminal, and the sweep
+must leave it alone.
 
 Republish the board once with all resets applied, then run the notification
 steps below against the recovered state.
@@ -108,9 +110,10 @@ steps below against the recovered state.
       activity log and `question.answer`. A `release-manager` card additionally
       gets the Done-card bundle in its prompt (see Release flow) — the agent
       cannot read the board.
-3. For every card with `column == "review"`, `agent == null` **or**
-   `agent.status == "done"`, and an open-PR link in `links` (`done` is the
-   normal Engineer hand-off; `null` is a claim reset by startup recovery):
+3. For every card matching **all three** of: `column == "review"`; **and**
+   (`agent == null` **or** `agent.status == "done"`); **and** an open-PR link
+   in `links` (`done` is the normal Engineer hand-off; `null` is a claim reset
+   by startup recovery):
    a. Set `agent: {status: "working", started: <now>}`, append an activity entry
       (`by: "orchestrator"`), and **republish the board first** (same conflict
       rule as 2a).
@@ -128,7 +131,8 @@ steps below against the recovered state.
      on this same pass.)
    - `NEEDS_INPUT` → `column: "needs_input"`, `question: {text: QUESTION}`,
      `agent: null`, activity entry.
-   - `FAILED` → `column: "needs_input"` with the failure as the question text.
+   - `FAILED` → `column: "needs_input"` with the failure as the question text,
+     `agent: null`, activity entry (same claim reset as the NEEDS_INPUT branch).
 5. On a Tester's completion notification, parse its `VERDICT:` report and
    republish the board accordingly:
    - `APPROVE` → `column: "done"`, `agent.status: "done"`, append the FINDINGS
@@ -146,9 +150,10 @@ steps below against the recovered state.
 6. On a Release Manager's completion notification, parse its `STATUS:` report:
    - `RELEASED` → for every card in `CARDS:`, set `released: <TAG>` and
      `column: "archived"`; the release-manager trigger card itself (if the run
-     was card-triggered) is archived exactly like the bundled cards — set
-     `released: <TAG>` and `column: "archived"` on it too, and close out its
-     claim: `agent.status: "done"`, `finished: <now>` (the trigger entered
+     was card-triggered) is archived like the bundled cards — set
+     `released: <TAG>` and `column: "archived"` on it too — with one extra step
+     the bundled cards don't need: close out its claim,
+     `agent.status: "done"`, `agent.finished: <now>` (the trigger entered
      `in_progress` under a `working` claim; archiving without closing it would
      leave a dangling `working` with no `finished` timestamp), appending the
      tag + release URL as activity (`by: "release-manager"`). It never parks in
@@ -166,6 +171,19 @@ steps below against the recovered state.
      happened; the bundled Done cards stay in `done` untouched.
 7. Cards the *user* must see promptly (needs_input) warrant a mention in the
    orchestrator session's next visible message.
+
+**Live-claim audit — every wake, not just startup.** Steps 2a and 3a claim
+before spawning (republish first, then spawn), so a turn interrupted between
+the two leaves `agent: working` on the board with no agent ever spawned — under
+a *live* orchestrator, where startup recovery never fires because there was no
+restart. So on each wake, before processing the steps above, the orchestrator
+audits the `working` claims on `in_progress` and `review` cards (the same two
+columns the startup sweep covers — never `archived`) against its actual live
+agent list (the agents addressable in this session): any `working` claim with
+no matching live agent is a dropped spawn — respawn it (run the spawn half of
+step 2b/3b under the existing claim) or reset it to `agent: null` and let the
+normal spawn rules pick it up on the same pass. Claims with a matching live
+agent are untouched.
 
 **Writing cards as Claude (PM role):** read the board, edit the state JSON
 (append a card, bump `nextId`, activity `by: "claude"`), republish with `url:`.
@@ -237,12 +255,23 @@ the user to merge and re-request the release.
 report the orchestrator sets `released: <tag>` on every bundled card and moves
 it to `column: "archived"` (off the Done column; the card and its history stay
 in board state). A card-triggered run's trigger card gets the identical stamp —
-`released: <tag>`, `column: "archived"` — so it is never left in `done` to leak
-into the next bundle. The `released` field is also the dedup guard for the
+`released: <tag>`, `column: "archived"` — plus the claim closeout
+(`agent.status: "done"`, `agent.finished: <now>`; see step 6) — so it is never
+left in `done` to leak into the next bundle, nor archived with a dangling
+`working` claim. The `released` field is also the dedup guard for the
 *next* bundle: only Done cards without it are release candidates.
 
 ## Known limits (v1)
 
+- **One orchestrator at a time.** The startup-recovery argument — "every
+  `working` claim found at startup is stale by definition" — is only true
+  because a fresh orchestrator has spawned nothing yet *and no other session
+  has either*. A second orchestrator starting while the first still has live
+  workers would read those live claims as stale, sweep them to `agent: null`,
+  and duplicate-spawn every card the first orchestrator is already working.
+  There is no claim-ownership mechanism; the protocol simply assumes one
+  orchestrator session exists at a time, and the user must not start a second
+  while one is running.
 - Workers are in-process subagents: they die if the orchestrator session dies
   (their worktree changes survive). The stale `agent: working` claim they leave
   behind is handled by the next orchestrator's startup recovery sweep (see
