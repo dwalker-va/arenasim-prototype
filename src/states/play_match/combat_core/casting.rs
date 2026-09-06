@@ -548,7 +548,8 @@ pub fn process_casting(
 
             // The shared, school-coloured landing (`rendering/effects/
             // school_impact.rs`) for direct-effect casts routed to it — Mind
-            // Blast, on the victim's head. Deterministic spawn, no `game_rng`
+            // Blast on the victim's head, Frost Shock on the chest.
+            // Deterministic spawn, no `game_rng`
             // draw, so it is byte-neutral in headless like the Lightning Bolt
             // strike below. `anchor_for` is the single list of what lands here.
             if let Some(anchor) = SchoolImpact::anchor_for(ability) {

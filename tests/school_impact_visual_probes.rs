@@ -132,6 +132,7 @@ impl Harness {
             SpellSchool::Nature => AbilityType::SerpentSting,
             SpellSchool::Shadow => AbilityType::MindBlast,
             SpellSchool::Holy => AbilityType::HolyShock,
+            SpellSchool::Frost => AbilityType::FrostShock,
             _ => AbilityType::ArcaneShot,
         };
         self.land_ability(ability, school, anchor, victim, from, magnitude, is_crit)
@@ -261,6 +262,7 @@ fn the_router_names_the_intended_landings() {
         AbilityType::SerpentSting,
         AbilityType::HolyShock,
         AbilityType::ManaBurn,
+        AbilityType::FrostShock,
     ] {
         assert_eq!(
             SchoolImpact::anchor_for(ability),
@@ -655,6 +657,10 @@ fn mana_burn_overrides_the_shadow_row_without_leaving_its_colour() {
         (AbilityType::ArcaneShot, SpellSchool::Arcane),
         (AbilityType::SerpentSting, SpellSchool::Nature),
         (AbilityType::HolyShock, SpellSchool::Holy),
+        // Its impact kit (214) resolves to the SAME model Frostbolt's does
+        // (`ice_impactdd_med_chest.m2`) — the generic frost hit, so the stock
+        // Frost row IS the faithful rendition and no override may exist.
+        (AbilityType::FrostShock, SpellSchool::Frost),
     ] {
         assert_eq!(landing_style(ability, school), impact_style(school));
     }

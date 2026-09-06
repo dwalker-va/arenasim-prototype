@@ -51,6 +51,14 @@ use crate::states::play_match::components::*;
 //   alpha-blended `toonsmoke16` in violet fading to grey, all over by 2000ms.
 //   Its legacy sphere sat at chest height and expanded; the source lingers on
 //   the head and rises. This is why [`ImpactAnchor::Head`] exists.
+// - **Frost Shock lands as the generic frost hit.** Its impact kit (214)
+//   resolves to `spells/ice_impactdd_med_chest.m2` (fdid 166370) at chest
+//   attachment 34 — the SAME model Frostbolt's landing uses (kit 4991), so the
+//   stock Frost row below IS the source-faithful rendition and it takes no
+//   `landing_style` override. Its slow carries NO aura-state kit (SpellVisual
+//   144 has no StartEvent=7 row; Frostbolt's chill state is visual 13's, not
+//   shared), so the slow stays invisible on the receiver by the data, not by
+//   omission. See design-docs/2026-09-06-frost-shock-client-data.md.
 // - **Web has no impact at all.** `web_missile.m2` flies, and the only kit on
 //   landing is `web_state.m2` — the root STATE, which `hard_cc.rs` already
 //   draws as the shin-high web plus its apply flare. A generic burst on top
