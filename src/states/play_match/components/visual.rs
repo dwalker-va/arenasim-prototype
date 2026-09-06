@@ -87,7 +87,13 @@ impl SchoolImpact {
             | AbilityType::HolyShock
             // `manaburn_chest.m2` on attachment 34 — its own model, so it
             // overrides the Shadow row (see `landing_style`).
-            | AbilityType::ManaBurn => Some(ImpactAnchor::Chest),
+            | AbilityType::ManaBurn
+            // `ice_impactdd_med_chest.m2` on attachment 34 — its impact kit
+            // (214) resolves to the SAME model as Frostbolt's landing, so the
+            // stock Frost row is the faithful rendition and there is no
+            // `landing_style` override. See
+            // design-docs/2026-09-06-frost-shock-client-data.md.
+            | AbilityType::FrostShock => Some(ImpactAnchor::Chest),
             AbilityType::MindBlast => Some(ImpactAnchor::Head),
             _ => None,
         }
