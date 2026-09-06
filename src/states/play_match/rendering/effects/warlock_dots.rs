@@ -41,7 +41,10 @@ use crate::states::play_match::components::*;
 // DARKENS (alpha-blend), UA GLOWS (additive violet), CoA is a silhouette at a
 // moment (the skull); the two sustained pulses run at deliberately different
 // periods (3.00 s vs 1.20 s), and UA's crackle pop is sized to read OUTSIDE
-// Corruption's shroud silhouette.
+// Corruption's shroud silhouette. The UA glow and pop quads are additionally
+// held `UA_CAMERA_LIFT` toward the camera by the billboard pass, so their
+// bright centres beat the body's (and the stacked shroud's) depth test
+// instead of reading as a dim annulus.
 //
 // ## The AlphaMode::Blend exception (deliberate, justified)
 //
@@ -123,8 +126,12 @@ const WISP_RATE: f32 = 20.0;
 const WISP_LIFE: f32 = 2.5;
 /// Wisp drift speed (client: 0.28 u/s, all directions).
 const WISP_DRIFT_SPEED: f32 = 0.28;
-/// Wisp growth over life (client scale track 0.22→0.31→0.69).
-const WISP_SCALE: [f32; 3] = [0.22, 0.31, 0.69];
+/// Wisp growth over life. USER-TUNED (2026-09-06): the client track is
+/// 0.22→0.31→0.69, but at those quad sizes the wisps read as chunky blocks
+/// around the torso — shrunk to ~⅔ and given the soft radial sprite (an
+/// untextured additive quad has a hard edge) so they read as soft swelling
+/// murk instead.
+const WISP_SCALE: [f32; 3] = [0.15, 0.21, 0.46];
 /// Wisp alpha envelope (client 0.39→1.0→0).
 const WISP_ALPHA: [f32; 3] = [0.39, 1.0, 0.0];
 /// Wisp color ramp: near-black green rising to sickly yellow-green (client
@@ -209,21 +216,35 @@ pub const UA_CRACKLE_BOLTS: u32 = 5;
 const UA_BOLT_SEGMENTS: u32 = 3;
 /// Length of one bolt segment, yards (scaled by intensity at spawn).
 const UA_BOLT_SEGMENT_LEN: f32 = 0.34;
-const UA_BOLT_WIDTH: f32 = 0.055;
-/// Radius of the torso glow quad. Billboarded on the spine axis, it renders
-/// behind the body capsule out to `COMBATANT_BODY_RADIUS` — only the annulus
-/// outside 0.5 reads, so the radius must clear it with margin (AS-10).
+/// Bolt quad width. USER-TUNED (2026-09-06): 0.055 read as thin pale
+/// threads even at full intensity — widened so the discharge is an event.
+const UA_BOLT_WIDTH: f32 = 0.10;
+/// Radius of the torso glow quad. The billboard pass holds it
+/// `UA_CAMERA_LIFT` toward the camera, so the full disc — bright centre
+/// included — reads over the torso instead of only the annulus outside the
+/// body silhouette (the round-2 fix; AS-10's clear-the-capsule margin still
+/// applies to the silhouette the glow must halo past).
 pub const UA_GLOW_RADIUS: f32 = 0.9;
 /// Radius of the crackle pop BEFORE the `UA_CRACKLE_INTENSITY` multiplier.
 /// At intensity 1.4 the pop reaches 1.19 yd — outside `SHROUD_RADIUS`
 /// (0.68), which is what makes it read on a Corruption-stacked victim.
 pub const UA_CRACKLE_POP_RADIUS: f32 = 0.85;
 /// The authored violet (the client spends violet on shadow apply moments;
-/// UA's sustained glow claims it for the state channel).
-const UA_GLOW_COLOR: Color = Color::srgb(0.55, 0.15, 0.90);
+/// UA's sustained glow claims it for the state channel). USER-TUNED
+/// (2026-09-06): red lifted 0.55→0.62 — over the lit body the original mix
+/// read blue, not violet.
+const UA_GLOW_COLOR: Color = Color::srgb(0.62, 0.18, 0.92);
 const UA_BOLT_COLOR: Color = Color::srgb(0.75, 0.35, 1.0);
 /// Height of the torso glow above the victim's transform.
 const UA_GLOW_Y: f32 = 0.35;
+/// How far the billboard pass lifts the UA glow and crackle pop toward the
+/// camera. The quads are anchored at the torso CENTRE, so unlifted they lose
+/// the depth test to the body capsule and only the sprite's dim outer
+/// annulus reads (the round-2 "blue speckles" finding). The lift must clear
+/// both occluders: `COMBATANT_BODY_RADIUS` (0.5 — the opaque body) and
+/// `SHROUD_RADIUS` (0.68 — else Corruption's Blend shroud sorts in front and
+/// dims the stacked flash), so it is derived from the larger of the two.
+pub const UA_CAMERA_LIFT: f32 = SHROUD_RADIUS + 0.07;
 
 /// The exact aura names the detectors key on (the RON `name:` strings, same
 /// as the class-AI dedup checks).
@@ -363,6 +384,13 @@ impl DotAssets {
     }
 }
 
+/// Lit-emissive, NOT `unlit`: the unlit branch of `pbr.wgsl` is
+/// `out.color = material.base_color` — it discards emissive outright (see
+/// `hard_cc.rs::STUN_BEAD_COLOR`), which left every glow in this module LDR
+/// flat with nothing for `Bloom::NATURAL` to bloom (the round-2 "UA is
+/// substantially less visible than Corruption" finding). `AlphaMode::Add`
+/// premultiplies the whole fragment — emissive included — by `base_color`'s
+/// alpha, so the animate systems' alpha envelopes still gate the emissive.
 fn additive_material(
     materials: &mut Assets<StandardMaterial>,
     color: Color,
@@ -377,7 +405,6 @@ fn additive_material(
         alpha_mode: AlphaMode::Add,
         cull_mode: None,
         double_sided: true,
-        unlit: true,
         ..default()
     })
 }
@@ -529,6 +556,7 @@ fn spawn_apply_burst(
                 quad: assets.quad.clone(),
                 mote_material: spark_material.clone(),
                 extra_material: spark_material,
+                soft_dot: assets.dot.clone(),
             },
             Transform::from_translation(dot_anchor(CHEST_Y, at, is_pet)),
             Visibility::default(),
@@ -591,6 +619,7 @@ fn spawn_shroud_rig(
                 quad: assets.quad.clone(),
                 mote_material: fizz_material.clone(),
                 extra_material: fizz_material,
+                soft_dot: assets.dot.clone(),
             },
             Transform::from_translation(dot_anchor(SHROUD_CENTER_Y, at, is_pet)),
             Visibility::default(),
@@ -728,6 +757,7 @@ fn spawn_coa_skull(
                 quad: assets.quad.clone(),
                 mote_material: spark_material,
                 extra_material: fall_material,
+                soft_dot: assets.dot.clone(),
             },
             Transform::from_translation(dot_anchor(IMPACT_HEAD_Y, at, is_pet)),
             Visibility::default(),
@@ -753,7 +783,11 @@ fn spawn_ua_rig(
             DotSprite {
                 role: DotSpriteRole::UaGlow,
                 radius: UA_GLOW_RADIUS * UA_GLOW_SCALE * s,
-                base_alpha: 0.55,
+                // USER-TUNED (2026-09-06): 0.55 → 0.75. The rendered level is
+                // base_alpha × glow_level with emissive × glow_level on top —
+                // a squared pulse falloff — and at 0.55 the steady state read
+                // as barely-there.
+                base_alpha: 0.75,
                 life: f32::INFINITY,
                 age: 0.0,
             },
@@ -800,6 +834,7 @@ fn spawn_ua_rig(
                 quad: assets.quad.clone(),
                 mote_material: additive_material(materials, UA_BOLT_COLOR, 2.6, None),
                 extra_material: additive_material(materials, UA_BOLT_COLOR, 2.6, None),
+                soft_dot: assets.dot.clone(),
             },
             Transform::from_translation(dot_anchor(UA_GLOW_Y, at, is_pet)),
             Visibility::default(),
@@ -981,7 +1016,14 @@ pub fn animate_corruption_shrouds(
                 (dot_jitter(seed ^ 0x9E37) - 0.5) * 0.8,
                 (dot_jitter(seed ^ 0xC2B2) - 0.5) * 0.56,
             ) * stature;
-            let wisp_material = additive_material(&mut materials, WISP_COLOR[0], 1.6, None);
+            // The soft radial sprite, not a bare quad — a hard-edged
+            // additive rectangle reads as a block, not a wisp.
+            let wisp_material = additive_material(
+                &mut materials,
+                WISP_COLOR[0],
+                1.6,
+                Some(rig_assets.soft_dot.clone()),
+            );
             let wisp = commands
                 .spawn((
                     DotWisp {
@@ -1212,8 +1254,11 @@ pub fn animate_ua_states(
                         if let Some(material) = materials.get_mut(&material.0) {
                             material.base_color =
                                 UA_GLOW_COLOR.with_alpha(sprite.base_alpha * glow_level);
+                            // USER-TUNED (2026-09-06): 2.2 → 3.0 emissive —
+                            // alpha premultiplies the emissive under Add, so
+                            // the effective glow rides glow_level SQUARED.
                             material.emissive =
-                                emissive_of(UA_GLOW_COLOR, 2.2 * UA_GLOW_SCALE * glow_level);
+                                emissive_of(UA_GLOW_COLOR, 3.0 * UA_GLOW_SCALE * glow_level);
                         }
                     }
                     DotSpriteRole::CracklePop => {
@@ -1449,12 +1494,26 @@ pub fn billboard_warlock_dot_visuals(
 
     for (rig, children) in rigs.iter() {
         let facing = rig.rotation.inverse() * cam.rotation;
+        // Local-frame step toward the camera for the lifted quads (rigs are
+        // top-level entities, so rig.translation IS world space).
+        let lift = rig.rotation.inverse()
+            * ((cam.translation - rig.translation).normalize_or_zero() * UA_CAMERA_LIFT);
         for child in children.iter() {
             if let Ok((sprite, mut part)) = sprites.get_mut(child) {
                 match sprite.role {
-                    DotSpriteRole::UaGlow
-                    | DotSpriteRole::CracklePop
-                    | DotSpriteRole::SkullCore => {
+                    DotSpriteRole::UaGlow | DotSpriteRole::CracklePop => {
+                        part.rotation = facing;
+                        // Lift the quad proud of the body capsule (and the
+                        // stacked shroud shell) so its bright centre wins
+                        // the depth test instead of only the dim annulus
+                        // outside the silhouette reading — the round-2
+                        // "blue speckles" finding. Safe to overwrite: these
+                        // two quads author no local translation.
+                        part.translation = lift;
+                    }
+                    DotSpriteRole::SkullCore => {
+                        // Billboards but keeps its authored skull-local
+                        // translation.
                         part.rotation = facing;
                     }
                     // The ring lies flat; shells/spheres are 3D; bolts keep

@@ -950,6 +950,11 @@ pub struct WarlockDotRigAssets {
     pub mote_material: Handle<StandardMaterial>,
     /// CoA falling glow motes; clones `mote_material` on other rigs.
     pub extra_material: Handle<StandardMaterial>,
+    /// The shared soft radial-falloff sprite, carried on the rig because
+    /// per-wisp materials are built in the animate system (which never sees
+    /// `DotAssets`). An untextured additive quad has a hard edge — the
+    /// round-2 "chunky green blocks" finding.
+    pub soft_dot: Handle<Image>,
 }
 
 /// Affliction family for DoT drip indicators. The drip color is game

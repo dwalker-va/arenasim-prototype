@@ -42,7 +42,7 @@ use arenasim::states::play_match::{
     SHROUD_RADIUS, UA_AURA, UA_CRACKLE_PERIOD, UA_CRACKLE_SECS, UA_PULSE_PERIOD,
 };
 use arenasim::states::play_match::{
-    COMBATANT_BODY_RADIUS, IMPACT_HEAD_Y, IMPACT_PET_BODY_Y, IMPACT_PET_STATURE,
+    COMBATANT_BODY_RADIUS, IMPACT_HEAD_Y, IMPACT_PET_BODY_Y, IMPACT_PET_STATURE, UA_CAMERA_LIFT,
 };
 use arenasim::CharacterClass;
 
@@ -556,6 +556,58 @@ fn stacked_ua_crackle_pop_reads_outside_corruptions_shroud() {
         .filter(|(role, _)| matches!(role, DotSpriteRole::CrackleBolt))
         .count();
     assert_min("crackle bolt segments", bolts, 5);
+}
+
+/// Round-2: the billboard pass LIFTS the UA glow and crackle pop toward the
+/// camera. Anchored at the torso centre, the quads lose the depth test to
+/// the opaque body capsule and only the sprite's dim outer annulus reads —
+/// the round-2 "blue speckles" finding; stacked, Corruption's Blend shroud
+/// sorts in front and dims the flash besides. Asserted in WORLD SPACE off
+/// the propagated `GlobalTransform`s, per the geometry-not-bookkeeping rule.
+#[test]
+fn ua_glow_and_pop_lift_toward_the_camera_past_body_and_shroud() {
+    // The lift clears BOTH occluders — derived from the constants so a
+    // retune keeps the band honest.
+    assert!(
+        UA_CAMERA_LIFT > COMBATANT_BODY_RADIUS + 0.05,
+        "UA_CAMERA_LIFT ({UA_CAMERA_LIFT}) must clear the body capsule"
+    );
+    assert!(
+        UA_CAMERA_LIFT > SHROUD_RADIUS,
+        "UA_CAMERA_LIFT ({UA_CAMERA_LIFT}) must clear the stacked shroud shell"
+    );
+
+    let mut h = Harness::new();
+    let at = Vec3::new(2.0, COMBATANT_Y, -1.0);
+    h.spawn_victim(at, &[UA_AURA]);
+    let cam_from = Vec3::new(0.0, 9.0, 24.0);
+    h.spawn_camera(cam_from, at);
+    h.tick(4);
+
+    let rig_pos = {
+        let mut q = h.app.world_mut().query::<(&UaStateRig, &Transform)>();
+        q.iter(h.app.world()).next().expect("UA rig").1.translation
+    };
+    let to_cam = (cam_from - rig_pos).normalize();
+    for role in [DotSpriteRole::UaGlow, DotSpriteRole::CracklePop] {
+        let placed: Vec<Vec3> = h
+            .sprites()
+            .into_iter()
+            .filter_map(|(r, g)| (r == role).then(|| g.translation()))
+            .collect();
+        assert_eq!(placed.len(), 1, "one {role:?}");
+        let lift = placed[0] - rig_pos;
+        assert!(
+            lift.length() > COMBATANT_BODY_RADIUS,
+            "{role:?} sits {} yd from its anchor — buried in the body, only \
+             the sprite's dim annulus can read",
+            lift.length()
+        );
+        assert!(
+            lift.normalize().dot(to_cam) > 0.99,
+            "{role:?} lift must point at the camera, not sideways: {lift:?}"
+        );
+    }
 }
 
 /// The dispel path, all three DoTs at once: state rigs die the frame their
