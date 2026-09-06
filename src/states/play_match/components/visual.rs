@@ -883,6 +883,20 @@ pub enum SwingStyle {
     /// backward body direction — opposite Pummel's forward drive — is what
     /// separates the two interrupts at a glance.
     Kick,
+    /// Rogue Ambush: a fast dagger PIERCE from stealth. The source shares
+    /// Backstab's visual wholesale (SpellVisualID 155 on every rank): caster
+    /// anim `Attack1HPierce` (85) — the same anim FAMILY as Kidney Shot — with
+    /// a 634ms cast model (`backstab_cast_base.m2`), half Kidney Shot's
+    /// 1233ms. So the opener is a lunge that reads as SPEED where the
+    /// finisher's reads as weight.
+    Ambush,
+    /// Rogue Sinister Strike: a plain one-hand slash. The source plays
+    /// `Attack1H` (anim 17) — the same generic swing Cheap Shot uses — with no
+    /// cast model at all, only a muted pink-violet weapon-trail procedural
+    /// (SpellProceduralEffect type 8, 0xBD55C6; Kidney Shot carries the same
+    /// effect in magenta). Stroke-only here: the tilt of its swing plane is
+    /// what separates the spammed builder from Cheap Shot's near-sagittal jab.
+    SinisterStrike,
 }
 
 /// One instant ability performed by a caster, spawned by combat code at that

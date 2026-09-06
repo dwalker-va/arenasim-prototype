@@ -293,6 +293,38 @@ impl SwingStyle {
                 arc: SwingArc::Unarmed { drive: KICK_DRIVE },
                 lean: 1.0,
             },
+            // A pierce at Cheap Shot's pace: the source's cast model runs
+            // 634ms — the SAME length as Cheap Shot's, half Kidney Shot's —
+            // on the Attack1HPierce anim family Kidney Shot uses. Speed is
+            // what keeps the two lunges apart.
+            SwingStyle::Ambush => SwingProfile {
+                release_secs: SWING_RELEASE_SECS * AMBUSH_RELEASE_MUL,
+                impact_hold_secs: SWING_IMPACT_HOLD_SECS * AMBUSH_HOLD_MUL,
+                follow_secs: SWING_FOLLOW_SECS * AMBUSH_FOLLOW_MUL,
+                arc: SwingArc::Lunge {
+                    pull: AMBUSH_PULL,
+                    thrust: AMBUSH_THRUST,
+                    pitch: AMBUSH_PITCH,
+                    body_drive: AMBUSH_BODY_DRIVE,
+                },
+                lean: AMBUSH_LEAN,
+            },
+            // The spammed builder: a quick slash on a visibly tilted plane,
+            // paced between the interrupts and Cheap Shot. The source gives it
+            // no bespoke duration (plain Attack1H, no cast model), so the pace
+            // is set by its role — this fires every couple of GCDs and must
+            // never read as ceremony.
+            SwingStyle::SinisterStrike => SwingProfile {
+                release_secs: SWING_RELEASE_SECS * SINISTER_RELEASE_MUL,
+                impact_hold_secs: SWING_IMPACT_HOLD_SECS * SINISTER_HOLD_MUL,
+                follow_secs: SWING_FOLLOW_SECS * SINISTER_FOLLOW_MUL,
+                arc: SwingArc::TiltedPlane {
+                    tilt: SINISTER_TILT,
+                    windup: SINISTER_WINDUP,
+                    release: SINISTER_RELEASE,
+                },
+                lean: SINISTER_LEAN,
+            },
         }
     }
 }
@@ -470,6 +502,65 @@ const PUMMEL_COCK_FRAC: f32 = 0.18;
 const KICK_RELEASE_MUL: f32 = 1.30;
 const KICK_HOLD_MUL: f32 = 2.20;
 const KICK_FOLLOW_MUL: f32 = 1.10;
+
+// --- Ambush ----------------------------------------------------------------
+//
+// The Classic client data (wago.tools, 1.15.9.69547): every rank of Ambush
+// points at SpellVisualID 155 — BACKSTAB'S visual, shared wholesale, the same
+// sharing Cheap Shot has with Sap. Its caster kit plays `Attack1HPierce`
+// (anim 85, Kidney Shot's family — a pierce, not a swing) and its cast model
+// (`backstab_cast_base.m2`) runs 634ms: byte-for-byte the length of
+// `sap_cast_base.m2`, and HALF Kidney Shot's 1233ms. So the stealth opener is
+// a lunge like the finisher, separated from it by pace — quick and violent
+// where Kidney Shot is ceremonial. Total here is ~0.64s against its ~1.22s.
+const AMBUSH_RELEASE_MUL: f32 = 1.30;
+const AMBUSH_HOLD_MUL: f32 = 1.60;
+const AMBUSH_FOLLOW_MUL: f32 = 1.60;
+/// A short load — the Rogue is coming out of stealth, so a big telegraphed
+/// draw would contradict the ability (the same reasoning as Cheap Shot's
+/// short windup). Just past the dagger auto's 0.4.
+const AMBUSH_PULL: f32 = 0.45;
+/// Drives well past the dagger auto's 0.85 — packed into a release half
+/// Kidney Shot's, so the same travel-per-second reads faster and harder —
+/// while staying under the finisher's 2.05: Kidney Shot keeps the deepest
+/// lunge in the game.
+const AMBUSH_THRUST: f32 = 1.60;
+/// A whisper, applied the dagger's way (rises on the draw, levels into the
+/// drive). Matches Kidney Shot's 0.24 — the thrust IS the motion.
+const AMBUSH_PITCH: f32 = 0.22;
+/// The torso commits behind the point, a notch under Kidney Shot's 0.90.
+const AMBUSH_BODY_DRIVE: f32 = 0.75;
+/// ~12° of body at full extension — between Cheap Shot's 0.16 and Kidney
+/// Shot's 0.35, where an opener that outdamages the finisher but must not
+/// out-ceremony it belongs.
+const AMBUSH_LEAN: f32 = 0.28;
+
+// --- Sinister Strike --------------------------------------------------------
+//
+// The client data: its own SpellVisualID (253), but the caster kit plays plain
+// `Attack1H` (anim 17) — the exact anim Cheap Shot plays — with NO cast model;
+// the only bespoke touch is a muted pink-violet weapon-trail procedural
+// (SpellProceduralEffect type 8, colour 0xBD55C6 — Kidney Shot carries the
+// same effect in hot magenta 0xF80C7B). No bespoke duration exists (the rig
+// normalizes attack anims to 1000ms), so pace comes from the ability's role:
+// the spam builder, fired every couple of GCDs, must stay in the quick-jab
+// class. ~0.61s total — above both interrupts (an interrupt is a reflex and
+// stays fastest), at Cheap Shot's flank.
+const SINISTER_RELEASE_MUL: f32 = 1.20;
+const SINISTER_HOLD_MUL: f32 = 1.60;
+const SINISTER_FOLLOW_MUL: f32 = 1.55;
+/// ~31° off vertical — twice Cheap Shot's 14°, well short of Mortal Strike's
+/// 49°. Since the two share their source anim and Cheap Shot's distinction
+/// lives in its crescent flare (which this deliberately lacks), the plane is
+/// what keeps the builder from reading as a stun.
+const SINISTER_TILT: f32 = 0.55;
+/// Modest travel on the rising-slash signs every tilted stroke ships (loads
+/// low, finishes high — the reverse of the auto's chop): total sweep ~2.15
+/// rad sits just under the auto's ~2.3 — a workhorse slash, not a signature.
+const SINISTER_WINDUP: f32 = 0.95;
+const SINISTER_RELEASE: f32 = 1.20;
+/// Barely past Cheap Shot's 0.16 — the body works, without ceremony.
+const SINISTER_LEAN: f32 = 0.18;
 /// ~29° NEGATIVE: the torso rocks BACK at full extension (a front kick tips
 /// the upper body away from the target as the leg extends) while the shared
 /// weight-shift still steps the body IN. The opposite body direction to
@@ -1564,14 +1655,26 @@ mod swing_tests {
     #[test]
     fn the_interrupts_are_the_fastest_gestures() {
         // An interrupt is the most urgent button in the game; its gesture must
-        // read as a reflex. Cheap Shot (0.63s) is the quickest signature — both
-        // interrupts undercut it, and neither approaches Mortal Strike.
-        let cheap = SwingStyle::CheapShot.profile().total();
+        // read as a reflex — quicker than EVERY signature, not just the one
+        // that happened to be quickest when this was written (Sinister Strike
+        // has since undercut Cheap Shot).
+        let quickest_signature = [
+            SwingStyle::MortalStrike,
+            SwingStyle::CheapShot,
+            SwingStyle::KidneyShot,
+            SwingStyle::HammerOfJustice,
+            SwingStyle::Ambush,
+            SwingStyle::SinisterStrike,
+        ]
+        .iter()
+        .map(|s| s.profile().total())
+        .fold(f32::INFINITY, f32::min);
         for style in [SwingStyle::Pummel, SwingStyle::Kick] {
             let total = style.profile().total();
             assert!(
-                total < cheap,
-                "{style:?} runs {total:.2}s — slower than Cheap Shot's {cheap:.2}s"
+                total < quickest_signature,
+                "{style:?} runs {total:.2}s — an interrupt must undercut every \
+                 signature (quickest is {quickest_signature:.2}s)"
             );
         }
     }

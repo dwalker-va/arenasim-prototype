@@ -155,14 +155,15 @@ fn an_instant_without_a_signature_leaves_the_socket_alone_but_still_consumes_its
     let (attacker, socket) = spawn_warrior(&mut app);
     let target = spawn_target(&mut app, 2.0);
 
-    // Rogue instants drain through the same loop and get the same marker; they
-    // simply have no signature yet.
+    // Any instant without a `swing_style_for_ability` arm exercises the
+    // fall-through. Heroic Strike still has none (Sinister Strike, the
+    // previous example here, gained its stroke in the AS-14 pass).
     let marker = app
         .world_mut()
         .spawn(InstantAbilityFired {
             caster: attacker,
             target: Some(target),
-            ability: AbilityType::SinisterStrike,
+            ability: AbilityType::HeroicStrike,
             is_crit: false,
         })
         .id();

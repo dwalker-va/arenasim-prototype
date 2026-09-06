@@ -207,12 +207,49 @@ pub struct DisengageTrail {
     pub initial_lifetime: f32,
 }
 
-/// Speed streak trail behind Boar during charge.
-/// Static position, fades over its lifetime.
+/// Per-charge emitter state for the charge trail (Warrior Charge + Boar
+/// Charge). Lives on the charging entity while its `ChargingState` does;
+/// `last_emit` is the world position of the most recently emitted trail
+/// element, so emission is distance-paced along the actual dash path
+/// (frame-rate independent — the dash covers ~28 yd/s).
 #[derive(Component)]
-pub struct ChargeTrail {
+pub struct ChargeTrailEmitter {
+    /// World position of the last emitted trail element.
+    pub last_emit: Vec3,
+    /// Body-size scale: 1.0 for a combatant, smaller for the Boar.
+    pub scale: f32,
+    /// The charger's `VisualBody::rest_y`, resolved once when the emitter
+    /// arms (the way `CcRig` folds it into `lift` at spawn). It is the
+    /// sim-to-render correction: ~0 for a combatant, `0.3 - 1.75` for a pet,
+    /// whose sim entity rides ~1.45yd above its rendered capsule. The streak's
+    /// chest anchor adds it so the ribbon sits on the BODY, not the sim y.
+    pub rest_y: f32,
+}
+
+/// One segment of the charge trail's red streamer — the Bevy analog of the
+/// Classic `spells/chargetrail.m2` chest ribbon (red, ~0.94 units tall,
+/// 1s edge life). A thin vertical quad laid along the dash path, fading
+/// over its lifetime.
+#[derive(Component)]
+pub struct ChargeStreakSegment {
     /// Time remaining before despawn (seconds)
     pub lifetime: f32,
     /// Initial lifetime for fade calculation
     pub initial_lifetime: f32,
+}
+
+/// One small dust particle kicked up at ground level along the charge path —
+/// the Bevy analog of the Classic `spells/dustcloud_land.m2` base attachment
+/// (alpha smoke). Emitted in clusters of 3–5 varied-size puffs per emission
+/// point; drifts along `velocity` while expanding and fading over its life.
+#[derive(Component)]
+pub struct ChargeDustPuff {
+    /// Time remaining before despawn (seconds)
+    pub lifetime: f32,
+    /// Initial lifetime for fade calculation
+    pub initial_lifetime: f32,
+    /// Spawn-time uniform scale; grows from here as the puff ages.
+    pub base_scale: f32,
+    /// Constant drift (slight upward + outward), integrated per frame.
+    pub velocity: Vec3,
 }

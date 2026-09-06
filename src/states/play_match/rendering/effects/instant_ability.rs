@@ -59,6 +59,14 @@ pub fn swing_style_for_ability(ability: AbilityType) -> Option<SwingStyle> {
         // source gives neither ability a caster-side effect model.
         AbilityType::Pummel => Some(SwingStyle::Pummel),
         AbilityType::Kick => Some(SwingStyle::Kick),
+        // The rogue strikes (client data, 1.15.9.69547). Stroke-only, like the
+        // interrupts: Ambush shares Backstab's visual wholesale (anim
+        // `Attack1HPierce`, a 634ms pierce) and Sinister Strike is a plain
+        // `Attack1H` with no cast model — neither has a bespoke effect model
+        // to carry a flourish (Kidney Shot's crescents are what its extra
+        // ModelAttach rows add; these kits have none).
+        AbilityType::Ambush => Some(SwingStyle::Ambush),
+        AbilityType::SinisterStrike => Some(SwingStyle::SinisterStrike),
         _ => None,
     }
 }
