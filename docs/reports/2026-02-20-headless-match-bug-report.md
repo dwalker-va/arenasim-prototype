@@ -43,7 +43,7 @@ Actual match: 2v2 — Team 1 Mage, Team 2 Warrior, and Team 2 Warlock never spaw
 
 **Note:** All other 3v3 matches (M15, M16, M17, M19, M20) spawned correctly with 6 combatants. This may be seed-specific or a race condition in spawn ordering.
 
-**Reproduction:** `{"team1":["Rogue","Mage","Priest"],"team2":["Warrior","Warlock","Paladin"],"seed":304}`
+**Reproduction:** `{"team1":["Rogue","Mage","Priest"],"team2":["Warrior","Warlock","Paladin"],"random_seed":304}`
 
 ---
 
@@ -54,7 +54,7 @@ Actual match: 2v2 — Team 1 Mage, Team 2 Warrior, and Team 2 Warlock never spaw
 
 Match 8: Warlock dies at 30.18s and again at 34.68s. The dead Warlock continues receiving damage and is killed a second time. This means the `is_alive()` check is not preventing damage application to dead combatants, or the combatant's alive state was not properly set on first death.
 
-**Reproduction:** `{"team1":["Rogue","Priest"],"team2":["Warlock","Paladin"],"seed":202}`
+**Reproduction:** `{"team1":["Rogue","Priest"],"team2":["Warlock","Paladin"],"random_seed":202}`
 
 ---
 

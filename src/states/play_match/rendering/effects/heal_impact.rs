@@ -146,15 +146,15 @@ const BUTTERFLY_WING_LENGTH: f32 = 0.14;
 pub const HEAL_BASE_Y: f32 = -1.15;
 
 /// Pure gold — the Holy palette (`star5a`, `yellow_star_dim`, gold ribbons).
-fn holy_gold() -> Color {
+pub(crate) fn holy_gold() -> Color {
     Color::srgb(1.0, 0.84, 0.38)
 }
 /// The dimmer, paler star tint (`yellow_star_dim`).
-fn holy_gold_pale() -> Color {
+pub(crate) fn holy_gold_pale() -> Color {
     Color::srgb(1.0, 0.93, 0.62)
 }
 /// Nature's green (`green_glow3`).
-fn nature_green() -> Color {
+pub(crate) fn nature_green() -> Color {
     Color::srgb(0.45, 0.92, 0.30)
 }
 /// The butterflies' warm gold-green.
@@ -162,7 +162,7 @@ fn butterfly_gold() -> Color {
     Color::srgb(0.85, 0.95, 0.45)
 }
 
-fn emissive_of(color: Color, strength: f32) -> LinearRgba {
+pub(crate) fn emissive_of(color: Color, strength: f32) -> LinearRgba {
     let c = color.to_linear();
     LinearRgba::rgb(c.red * strength, c.green * strength, c.blue * strength)
 }
@@ -607,7 +607,7 @@ pub fn butterfly_heading(index: u32, age: f32) -> Quat {
 }
 
 /// Cheap deterministic jitter in [0, 1). Visual only — never `game_rng`.
-fn heal_jitter(seed: u32) -> f32 {
+pub(crate) fn heal_jitter(seed: u32) -> f32 {
     let s = seed.wrapping_mul(747_796_405).wrapping_add(2_891_336_453);
     let s = ((s >> ((s >> 28) + 4)) ^ s).wrapping_mul(277_803_737);
     ((s >> 22) ^ s) as f32 / u32::MAX as f32

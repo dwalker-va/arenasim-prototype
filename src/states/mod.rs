@@ -398,6 +398,46 @@ impl Plugin for StatesPlugin {
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_combat_scene),
             )
+            // Cast-side heal visuals (`rendering/effects/heal_cast.rs`): the
+            // per-hand glow-and-wisp rigs that replace the casting orb FOR
+            // HARD-CAST HEALS ONLY. Same chained spawn -> update -> cleanup ->
+            // billboard contract as the orb group above; its own group so the
+            // tuple stays small and the hunk disjoint.
+            .add_systems(
+                Update,
+                (
+                    play_match::spawn_heal_cast_glows,
+                    play_match::update_heal_cast_glows,
+                    play_match::cleanup_heal_cast_glows,
+                    play_match::billboard_heal_cast_glows,
+                )
+                    .chain()
+                    .after(CombatSystemPhase::CombatResolution)
+                    .run_if(in_combat_scene),
+            )
+            // The heal-cast body posture (ReadySpellOmni/SpellCastOmni on the
+            // capsule). Registered alone for the same reason animate_body_lean
+            // is: the ordering is a real dependency — it must overwrite the
+            // lean's absolute rotation while a heal cast owns the torso, and
+            // it derives its target from the rigs the group above manages.
+            .add_systems(
+                Update,
+                play_match::update_heal_cast_posture
+                    .after(play_match::animate_body_lean)
+                    .after(play_match::cleanup_heal_cast_glows)
+                    .run_if(in_combat_scene),
+            )
+            // Heal-cast CastEnding consumption: FixedUpdate for the same
+            // multi-tick-per-frame reason as `consume_cast_ending_signals`,
+            // and BEFORE it — that consumer owns despawning the marker; this
+            // one only reads it (launch flare vs stop-dead teardown).
+            .add_systems(
+                FixedUpdate,
+                play_match::consume_heal_cast_endings
+                    .after(CombatSystemPhase::CombatResolution)
+                    .before(play_match::consume_cast_ending_signals)
+                    .run_if(in_combat_scene),
+            )
             // Combat resolution, death, and visual effects (after core combat)
             .add_systems(
                 Update,

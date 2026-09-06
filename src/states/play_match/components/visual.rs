@@ -489,6 +489,146 @@ pub struct HealImpactRig {
     pub puff_material: Handle<StandardMaterial>,
 }
 
+/// Which cast-side family a heal's hand glow plays while the caster winds up.
+///
+/// From the Classic Era client data (build 1.15.9.69547 — see
+/// `docs/design/2026-09-06-cast-side-heal-client-data.md`): every heal's
+/// entire cast-side show lives on the caster's two spell hands (attach 21/22,
+/// always both, always symmetric), and the vocabulary splits cleanly by
+/// school. Holy (Priest + Paladin) is `holy_precast_low_hand.m2` — a gold
+/// two-layer glow ball with three wide gold ribbon wisps; Nature (Shaman) is
+/// `nature_precast_low_hand.m2` — the same swirl skeleton re-dressed green
+/// with thin star-threads plus a lazy shed of leaves.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum HealCastKind {
+    /// Gold glow + wide gold ribbon wisps; launch is a one-shot re-flare of
+    /// the SAME glow (kit 270 resolves to the precast model verbatim).
+    Holy,
+    /// Green glow + thin green star-thread wisps + leaf drift; launch is a
+    /// dedicated ~0.3s water-ring and gold-spark jet (`nature_cast_hand.m2`).
+    Nature,
+}
+
+impl HealCastKind {
+    /// Which cast-side family a HARD-CAST heal ability plays — the single
+    /// routing table for the hand glows, mirroring [`HealImpact::kind_for`]
+    /// on the impact side. `None` for everything that is not a hard-cast
+    /// heal: instants (Holy Shock never carries a `CastingState`) and every
+    /// non-heal cast, which keep the generic casting orb.
+    pub fn for_ability(ability: AbilityType) -> Option<HealCastKind> {
+        match ability {
+            AbilityType::FlashHeal | AbilityType::HolyLight | AbilityType::FlashOfLight => {
+                Some(HealCastKind::Holy)
+            }
+            AbilityType::LesserHealingWave => Some(HealCastKind::Nature),
+            _ => None,
+        }
+    }
+}
+
+/// Lifecycle phase of a [`HealCastHand`] rig.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum HealCastPhase {
+    /// The precast loop — alive for exactly as long as the `CastingState`
+    /// (the loop duration is the ACTUAL cast time, decided by gameplay).
+    Loop,
+    /// The one-shot launch, entered on a `CastEndingKind::Landed` marker.
+    /// Holy re-flares its own glow; Nature swaps to the burst jet.
+    Flare { remaining: f32 },
+}
+
+/// One spell-hand rig of a heal cast (graphical only): a CHILD of the
+/// caster's [`VisualBody`] parked at the spell-hand socket, so it rides the
+/// walk bob, the facing and the cast posture rigidly — composed in the socket
+/// frame, never re-derived from sim movement (fixed-timestep strobe lesson).
+/// Both hands always: the client attaches every heal's precast and launch
+/// kits at attach 21 AND 22 with pure symmetric KMA rows.
+#[derive(Component)]
+pub struct HealCastHand {
+    /// The sim combatant casting (NOT the `VisualBody` parent).
+    pub caster: Entity,
+    /// The `VisualBody` the rig hangs off — kept so the billboard pass can
+    /// compose the parent world rotation without walking the hierarchy.
+    pub body: Entity,
+    pub kind: HealCastKind,
+    /// +1 main-hand side, -1 off-hand side (mirrors [`WeaponHand`]'s mounts).
+    pub side: f32,
+    pub age: f32,
+    pub phase: HealCastPhase,
+    /// Whether a `Landed` ending plays the launch flare. True for every heal
+    /// except Flash of Light when `FLASH_OF_LIGHT_HAS_LAUNCH_FLASH` is off.
+    pub has_launch_flash: bool,
+    /// Fractional leaves owed since the last spawn (Nature loop).
+    pub leaf_carry: f32,
+    /// Fractional launch-burst motes owed: `[water rings, gold sparks]`.
+    pub burst_carry: [f32; 2],
+    /// Monotonic mote counter, seeding position-hashed scatter (never RNG).
+    pub emitted: u32,
+    pub quad: Handle<Mesh>,
+    /// The water-ring annulus mesh (Nature launch).
+    pub ring_mesh: Handle<Mesh>,
+    pub leaf_material: Handle<StandardMaterial>,
+    pub spark_material: Handle<StandardMaterial>,
+    pub ring_material: Handle<StandardMaterial>,
+}
+
+/// A flat piece of a heal-cast hand rig (graphical only).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum HealCastPieceRole {
+    /// The outer soft glow quad (`yellow_glow3a` / `green_glow3`).
+    GlowOuter,
+    /// The brighter core quad (`genericglow2c` / inner `green_glow3`).
+    GlowCore,
+    /// One of the three orbiting wisps (gold ribbons / green star-threads).
+    Wisp { index: u32 },
+}
+
+#[derive(Component)]
+pub struct HealCastPiece {
+    pub role: HealCastPieceRole,
+    pub base_alpha: f32,
+}
+
+/// One leaf puffing off a glowing Nature hand, in the rig's frame.
+#[derive(Component)]
+pub struct HealCastLeaf {
+    pub velocity: Vec3,
+    pub age: f32,
+    pub life: f32,
+}
+
+/// What a Nature launch-burst mote looks like.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum HealCastBurstKind {
+    /// An expanding water-ring sprite (`shockwavewater1`).
+    WaterRing,
+    /// A gold glow spark (`yellow_glow2/3`).
+    GoldSpark,
+}
+
+/// One mote of the Nature cast-launch jet, in the rig's frame.
+#[derive(Component)]
+pub struct HealCastBurstMote {
+    pub kind: HealCastBurstKind,
+    pub velocity: Vec3,
+    pub age: f32,
+    pub life: f32,
+}
+
+/// The cast body posture of a healer mid-heal (graphical only): the
+/// primitive-rig approximation of the omni cast pair — ReadySpellOmni's
+/// hands-raised loop leans the torso slightly BACK for the whole cast,
+/// SpellCastOmni's release surges it forward as the launch flares. Lives on
+/// the CASTER entity; the posture system derives its target from the live
+/// [`HealCastHand`] rigs and writes the `VisualBody`'s rotation, snapping
+/// back to identity (and removing itself) the frame no rig remains — an
+/// interrupted Classic heal's body loop stops dead, no failure flourish.
+#[derive(Component)]
+pub struct HealCastPosture {
+    /// Current eased torso pitch, radians (negative = leaning back).
+    pub pitch: f32,
+}
+
 /// Visual effect for dispel spells - an expanding sphere burst at the target.
 /// Spawned when a dispel successfully removes an aura, expands and fades over its lifetime.
 #[derive(Component)]
