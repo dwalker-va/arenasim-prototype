@@ -148,7 +148,7 @@ if !target_combatant.is_alive() {
 
 ```bash
 # Frostbolt kill scenario — CC should NOT apply after kill
-echo '{"team1":["Mage"],"team2":["Warrior"],"seed":202}' > /tmp/bug5.json
+echo '{"team1":["Mage"],"team2":["Warrior"],"random_seed":202}' > /tmp/bug5.json
 cargo run --release -- --headless /tmp/bug5.json
 # Verify: no [CC] entries after a [DEATH] entry for the same target
 ```
@@ -274,7 +274,7 @@ This prevents the dead caster from having a cast complete on the NEXT frame (whe
 
 ```bash
 # Reproduce M17 scenario
-echo '{"team1":["Warrior","Mage","Priest"],"team2":["Rogue","Mage","Paladin"],"seed":303}' > /tmp/bug8.json
+echo '{"team1":["Warrior","Mage","Priest"],"team2":["Rogue","Mage","Paladin"],"random_seed":303}' > /tmp/bug8.json
 cargo run --release -- --headless /tmp/bug8.json
 # Verify: no spell completions from dead casters (except projectiles already in flight)
 ```
@@ -372,7 +372,7 @@ if let Ok((combatant, transform, active_auras_opt)) = combatants.get_mut(pending
 
 ```bash
 # Paladin bubbles while Fear is cast
-echo '{"team1":["Warlock"],"team2":["Paladin"],"seed":303}' > /tmp/bug10.json
+echo '{"team1":["Warlock"],"team2":["Paladin"],"random_seed":303}' > /tmp/bug10.json
 cargo run --release -- --headless /tmp/bug10.json
 # Verify: no Fear entries on Paladin while Divine Shield is active
 ```
@@ -404,9 +404,9 @@ After all fixes:
 
 ```bash
 # Run the specific seeds from the bug report
-echo '{"team1":["Rogue","Priest"],"team2":["Warlock","Paladin"],"seed":202}' > /tmp/verify1.json
-echo '{"team1":["Warrior","Mage","Priest"],"team2":["Rogue","Mage","Paladin"],"seed":303}' > /tmp/verify2.json
-echo '{"team1":["Rogue","Mage","Priest"],"team2":["Warrior","Warlock","Paladin"],"seed":304}' > /tmp/verify3.json
+echo '{"team1":["Rogue","Priest"],"team2":["Warlock","Paladin"],"random_seed":202}' > /tmp/verify1.json
+echo '{"team1":["Warrior","Mage","Priest"],"team2":["Rogue","Mage","Paladin"],"random_seed":303}' > /tmp/verify2.json
+echo '{"team1":["Rogue","Mage","Priest"],"team2":["Warrior","Warlock","Paladin"],"random_seed":304}' > /tmp/verify3.json
 
 cargo run --release -- --headless /tmp/verify1.json
 cargo run --release -- --headless /tmp/verify2.json
