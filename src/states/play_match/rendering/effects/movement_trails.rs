@@ -3,16 +3,22 @@ use bevy::color::LinearRgba;
 use crate::states::play_match::components::*;
 
 // ==============================================================================
-// Charge Trail Visual (Boar Charge)
+// Charge Trail Visual (Warrior Charge + Boar Charge)
 // ==============================================================================
 
-/// Spawn speed streak trail when a pet starts charging.
-/// Uses `With<Pet>` filter to distinguish from Warrior charges.
+/// Spawn a speed streak trail when anything starts charging.
+///
+/// Keyed on `Added<ChargingState>` alone — the Warrior's Charge and the Boar's
+/// are the same gap-closer dash (`move_to_target` advances both identically),
+/// so they share one trail. The streak's dusty amber is deliberately
+/// class-neutral speed vocabulary, and it happens to sit near the Warrior's
+/// tan, so no per-charger tint is needed. (An earlier `With<Pet>` filter
+/// scoped this to the Boar; nothing else ever depended on that scoping.)
 pub fn spawn_charge_trail(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    new_charges: Query<(Entity, &Transform, &ChargingState), (Added<ChargingState>, With<Pet>)>,
+    new_charges: Query<(Entity, &Transform, &ChargingState), Added<ChargingState>>,
     targets: Query<&Transform, Without<ChargingState>>,
 ) {
     for (_entity, transform, charging) in new_charges.iter() {

@@ -747,7 +747,7 @@ impl Plugin for StatesPlugin {
                 (
                     play_match::spawn_disengage_trail,                 // Wind streak on Disengage
                     play_match::update_and_cleanup_disengage_trails,   // Fade + despawn
-                    play_match::spawn_charge_trail,                    // Boar charge streak
+                    play_match::spawn_charge_trail,                    // Charge streak (Warrior + Boar)
                     play_match::update_and_cleanup_charge_trails,      // Fade + despawn
                 )
                     .after(CombatSystemPhase::CombatResolution)
