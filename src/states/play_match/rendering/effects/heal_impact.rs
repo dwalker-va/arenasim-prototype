@@ -93,9 +93,13 @@ pub const HEALING_WAVE_SWIRL_RATE: f32 = 2.2;
 /// Wing flap rate (full open-close cycles per second) and amplitude.
 const BUTTERFLY_FLAP_HZ: f32 = 7.0;
 const BUTTERFLY_FLAP_AMPLITUDE: f32 = 0.95;
-/// Wing quad dimensions: span away from the body x length along it.
-const BUTTERFLY_WING_SPAN: f32 = 0.22;
-const BUTTERFLY_WING_LENGTH: f32 = 0.30;
+/// Wing quad dimensions: span away from the body x length along it. The
+/// blessed bench renders a butterfly at ~0.2 u full wingspan (6 px sprites at
+/// 58 px/u ≈ 0.1 u per wing) — small enough to read as an insect fluttering
+/// around a person, not a sheet of paper. Two of these quads side by side
+/// give that 0.2 u span.
+const BUTTERFLY_WING_SPAN: f32 = 0.10;
+const BUTTERFLY_WING_LENGTH: f32 = 0.14;
 
 /// Height of the Base attachment (the recipient's feet) above a combatant's
 /// transform. The capsule is `Capsule3d::new(0.5, 1.5)` CENTRED on the
@@ -249,6 +253,11 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
             head_glow: None,
             torso_glows: Vec::new(),
             butterflies: false,
+            // Mote SIZES here and in HealStream are render tuning, not M2
+            // transcription (the source records carry no world-size), and the
+            // 0.07–0.09 first cut was near-invisible on a 2.5 u body — raised
+            // ~35% so the rising stream actually reads. Rates/speeds/lives/
+            // areas/origins are the transcribed constants and stay untouched.
             emitters: vec![
                 // Two star5a emitters, scattered off-centre.
                 HealEmitter {
@@ -259,7 +268,7 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
                     area: Ramp::flat(0.14),
                     spread: 0.0,
                     kind: HealMoteKind::Star,
-                    size: 0.09,
+                    size: 0.12,
                 },
                 HealEmitter {
                     origin: Vec3::new(0.35, 0.0, 0.20),
@@ -269,7 +278,7 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
                     area: Ramp::flat(0.14),
                     spread: 0.0,
                     kind: HealMoteKind::Star,
-                    size: 0.09,
+                    size: 0.12,
                 },
                 // The slow dim-star spread.
                 HealEmitter {
@@ -280,7 +289,7 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
                     area: Ramp::flat(0.56),
                     spread: 0.0,
                     kind: HealMoteKind::Star,
-                    size: 0.08,
+                    size: 0.11,
                 },
                 // Two gold ribbon emitters, rate and area keyed.
                 HealEmitter {
@@ -291,7 +300,7 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
                     area: Ramp { start: 0.14, mid: 0.69, end: 0.14 },
                     spread: 0.0,
                     kind: HealMoteKind::Ribbon,
-                    size: 0.07,
+                    size: 0.09,
                 },
                 HealEmitter {
                     origin: Vec3::new(0.0, 1.35, 0.0),
@@ -301,7 +310,7 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
                     area: Ramp { start: 0.14, mid: 0.69, end: 0.14 },
                     spread: 0.0,
                     kind: HealMoteKind::Ribbon,
-                    size: 0.07,
+                    size: 0.09,
                 },
             ],
         },
@@ -313,6 +322,7 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
             head_glow: None,
             torso_glows: Vec::new(),
             butterflies: false,
+            // Mote sizes raised with Flash Heal's — see the note there.
             emitters: vec![
                 HealEmitter {
                     origin: Vec3::new(0.0, 1.35, 0.0),
@@ -322,7 +332,7 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
                     area: Ramp { start: 0.14, mid: 0.69, end: 0.14 },
                     spread: 0.0,
                     kind: HealMoteKind::Ribbon,
-                    size: 0.07,
+                    size: 0.09,
                 },
                 HealEmitter {
                     origin: Vec3::new(-0.28, 0.0, 0.0),
@@ -332,7 +342,7 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
                     area: Ramp::flat(HEAL_STREAM_WIDTH),
                     spread: 0.0,
                     kind: HealMoteKind::Star,
-                    size: 0.09,
+                    size: 0.12,
                 },
                 HealEmitter {
                     origin: Vec3::new(0.28, 0.0, 0.0),
@@ -342,7 +352,7 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
                     area: Ramp::flat(HEAL_STREAM_WIDTH),
                     spread: 0.0,
                     kind: HealMoteKind::Star,
-                    size: 0.09,
+                    size: 0.12,
                 },
                 HealEmitter {
                     origin: Vec3::new(0.0, 0.47, 0.0),
@@ -352,7 +362,7 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
                     area: Ramp::flat(HEAL_STREAM_WIDTH),
                     spread: 0.0,
                     kind: HealMoteKind::Star,
-                    size: 0.08,
+                    size: 0.11,
                 },
             ],
         },
@@ -366,22 +376,26 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
             intensity: 1.0,
             flash: None,
             head_glow: None,
+            // Blessed bench radii: soft glows the body shows THROUGH, layered
+            // green under gold under pale gold. The first build shipped these
+            // at 1.15/0.95/0.80 — a 2.3 u-wide additive stack that saturated
+            // into a solid-looking disc swallowing the combatant.
             torso_glows: vec![
                 GlowLayer {
                     height: 0.49,
-                    radius: 1.15,
+                    radius: 0.50,
                     color: nature_green(),
                     alpha: 0.35 * HEALING_WAVE_GLOW_INTENSITY,
                 },
                 GlowLayer {
                     height: 0.70,
-                    radius: 0.95,
+                    radius: 0.38,
                     color: holy_gold(),
                     alpha: 0.30 * HEALING_WAVE_GLOW_INTENSITY,
                 },
                 GlowLayer {
                     height: 0.83,
-                    radius: 0.80,
+                    radius: 0.28,
                     color: holy_gold_pale(),
                     alpha: 0.30 * HEALING_WAVE_GLOW_INTENSITY,
                 },

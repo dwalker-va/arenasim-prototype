@@ -165,14 +165,15 @@ pub fn spawn_casting_orbs(
 pub fn update_casting_orbs(
     time: Res<Time>,
     abilities: Res<AbilityDefinitions>,
-    mut orbs: Query<(&mut CastingOrb, &mut Transform)>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut orbs: Query<(&mut CastingOrb, &mut Transform, &MeshMaterial3d<StandardMaterial>)>,
     casters: Query<&Transform, (With<Combatant>, Without<CastingOrb>)>,
     cast_states: Query<&CastingState>,
     channel_states: Query<&ChannelingState>,
 ) {
     let dt = time.delta_secs();
 
-    for (mut orb, mut orb_transform) in orbs.iter_mut() {
+    for (mut orb, mut orb_transform, orb_material) in orbs.iter_mut() {
         let Ok(caster_transform) = casters.get(orb.caster) else {
             continue; // caster entity gone; cleanup handles despawn
         };
@@ -231,7 +232,21 @@ pub fn update_casting_orbs(
                 orb.ending_remaining -= dt;
                 let t = 1.0 - (orb.ending_remaining / CASTING_ORB_FLASH_SECS).clamp(0.0, 1.0);
                 // Expanding pulse under additive blending reads as a release
-                // flash at the projectile launch point.
+                // flash at the projectile launch point. The blending really
+                // must be additive: the orb's material is Opaque for the
+                // Growing/Holding read (see the spawn-site comment), and an
+                // OPAQUE ball expanding to 2.5x — 0.875 u radius, parked at
+                // head height on a self-cast — reads as a solid polymorph-like
+                // sphere swallowing the caster's head, not a flash. Absolute
+                // (never compounding) per-frame writes: mode set idempotently,
+                // alpha from `t` — the codebase's additive-fade idiom
+                // (`set_alpha`; Add premultiplies, so alpha fades the whole
+                // contribution). Motes share this handle but despawn the frame
+                // an ending phase begins, so nothing else is recolored.
+                if let Some(material) = materials.get_mut(&orb_material.0) {
+                    material.alpha_mode = AlphaMode::Add;
+                    material.base_color.set_alpha(1.0 - t);
+                }
                 orb_transform.scale =
                     Vec3::splat(CASTING_ORB_FULL_SCALE * (1.0 + 1.5 * t));
             }
@@ -333,10 +348,10 @@ pub fn update_casting_orb_motes(
 pub fn consume_cast_ending_signals(
     mut commands: Commands,
     signals: Query<(Entity, &CastEnding)>,
-    mut orbs: Query<&mut CastingOrb>,
+    mut orbs: Query<(Entity, &mut CastingOrb)>,
 ) {
     for (signal_entity, ending) in signals.iter() {
-        for mut orb in orbs.iter_mut() {
+        for (orb_entity, mut orb) in orbs.iter_mut() {
             if orb.caster != ending.caster {
                 continue;
             }
@@ -347,6 +362,10 @@ pub fn consume_cast_ending_signals(
                 CastEndingKind::Landed => {
                     orb.phase = CastingOrbPhase::Flash;
                     orb.ending_remaining = CASTING_ORB_FLASH_SECS;
+                    // The Flash phase renders additively (update_casting_orbs
+                    // swaps the material); a glow must not keep the solid
+                    // orb's shadow while it fades.
+                    commands.entity(orb_entity).insert(bevy::pbr::NotShadowCaster);
                 }
                 CastEndingKind::Fizzled | CastEndingKind::Interrupted => {
                     orb.phase = CastingOrbPhase::Sputter;
