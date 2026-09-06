@@ -304,8 +304,8 @@ Zero measurable impact. 1-6 entities, damage events at sub-Hz frequency per comb
 
 ## References
 
-- **Stat scaling system**: `design-docs/stat-scaling-system.md` — damage formula, crit listed as planned enhancement (#1)
-- **Bevy patterns**: `design-docs/bevy-patterns.md` — ECS query patterns, `Without<T>` filters
+- **Stat scaling system**: `docs/design/stat-scaling-system.md` — damage formula, crit listed as planned enhancement (#1)
+- **Bevy patterns**: `docs/design/bevy-patterns.md` — ECS query patterns, `Without<T>` filters
 - **Visual effect pattern**: `docs/solutions/implementation-patterns/adding-visual-effect-bevy.md`
 - **Paladin implementation**: `docs/solutions/implementation-patterns/adding-new-class-paladin.md` — pending component context propagation pattern
 - **WoW Classic crit behavior**: Damage crits = 200%, spell crits = 150% (we use 200% for all damage), healing crits = 150%, DoTs cannot crit, crit applies before armor/resistance reduction

@@ -346,7 +346,7 @@ Carried verbatim from origin (Scope Boundaries):
 ## Documentation / Operational Notes
 
 - No external documentation impact.
-- `CLAUDE.md` and `design-docs/session-notes.md` may want a session note after merge, but that's a post-merge concern outside this plan.
+- `CLAUDE.md` and `docs/design/session-notes.md` may want a session note after merge, but that's a post-merge concern outside this plan.
 
 ---
 

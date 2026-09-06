@@ -169,7 +169,7 @@ flowchart TB
 - **Goal:** Confirm the instant-delivery buff moves the Shaman by a minor amount (Success Criteria).
 - **Requirements:** Success Criteria; KTD6.
 - **Dependencies:** U1 (mechanic must be in place).
-- **Files:** none (measurement; optionally record the CSV under `design-docs/balance/`).
+- **Files:** none (measurement; optionally record the CSV under `docs/design/balance/`).
 - **Approach:** Run a paired before/after win-rate sweep on Shaman comps against a few representative opponents (include at least one melee trainer and one caster) at ~100 matches/cell, using the `balance-sweep` skill or `scripts/headtohead_sweep.py` with Wilson CIs / z-test. Compare Shaman win rate with the old projectile build vs the instant build. **Execution note:** this is a measurement gate, not code — report the delta and CI. Pass = shift within noise; a significant positive shift is flagged for a follow-up numeric tune (deferred), not silently shipped.
 - **Test scenarios:** `Test expectation: none` — this unit *is* the measurement.
 - **Verification:** A sweep result (delta + confidence interval) is recorded; the shift is within noise or the significant-shift flag is raised.

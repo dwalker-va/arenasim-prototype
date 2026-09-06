@@ -7,7 +7,7 @@
 > bowl with four octagonal pillars). The geometry these sweeps measured is
 > preserved verbatim, so **the numbers below remain valid — but they describe
 > `TwinPillars`, not Nagrand.** No Nagrand baseline exists yet; see
-> `design-docs/team-level-positioning-ai.md` for why one is deliberately deferred.
+> `docs/design/team-level-positioning-ai.md` for why one is deliberately deferred.
 
 **Sweeps run 2026-07-23** on branch `feat/line-of-sight-mechanics` (PR #86),
 before merge. This documents the balance impact of the line-of-sight feature

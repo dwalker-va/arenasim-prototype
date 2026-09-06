@@ -81,7 +81,7 @@
     // (bounds omitted => the default Octagon). Kept as its own map when
     // PillaredArena became the Nagrand replica: its pillars sit at (+/-9, 0),
     // which is where combat actually converges, so cover genuinely functions here.
-    // The line-of-sight probe suite and design-docs/balance/2026-07-23-line-of-sight-balance.md
+    // The line-of-sight probe suite and docs/design/balance/2026-07-23-line-of-sight-balance.md
     // are calibrated against exactly this geometry — do not retune it.
     twin_pillars: (
         volumes: [

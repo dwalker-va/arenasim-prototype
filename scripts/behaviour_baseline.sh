@@ -3,7 +3,7 @@
 # Behaviour baseline — a content digest of a fixed set of matches.
 #
 # WHY: some changes are supposed to alter nothing. The `TeamPlan` migration
-# (design-docs/team-level-positioning-ai.md) opens with a step that must be a
+# (docs/design/team-level-positioning-ai.md) opens with a step that must be a
 # *provable* no-op, and "the tests still pass" is far too coarse a check for
 # that — the calibrated probes assert bounded properties, not exact behaviour.
 # This records the exact outcome of a fixed match set so a later run can be

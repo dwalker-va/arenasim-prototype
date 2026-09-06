@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Head-to-head AI-profile sweep at real statistical power.
 
-This is the measurement methodology from `design-docs/team-level-positioning-ai.md`
+This is the measurement methodology from `docs/design/team-level-positioning-ai.md`
 ("How to measure a step") as a tool instead of folklore:
 
 - HEAD-TO-HEAD, not uniform: each cell sets the two teams' AI profiles

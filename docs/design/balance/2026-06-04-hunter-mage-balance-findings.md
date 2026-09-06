@@ -191,4 +191,4 @@ Both edits were live in the working tree during this investigation and are
 
 Recommendation: ship them as **two separate commits** (Hunter buff; Mage nerf), or
 hold pending the deeper Mage+healer / Paladin work. Data artifacts for every run are
-in `design-docs/balance/matrix_{1v1_n100,2v2_full_n20}_*_2026-06-04*.csv`.
+in `docs/design/balance/matrix_{1v1_n100,2v2_full_n20}_*_2026-06-04*.csv`.

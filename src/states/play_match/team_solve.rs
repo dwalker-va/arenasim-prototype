@@ -1,4 +1,4 @@
-//! Step 4 of `design-docs/team-level-positioning-ai.md`: positioning as
+//! Step 4 of `docs/design/team-level-positioning-ai.md`: positioning as
 //! constraint satisfaction, solved for the whole team at once and rooted at a
 //! focal unit.
 //!

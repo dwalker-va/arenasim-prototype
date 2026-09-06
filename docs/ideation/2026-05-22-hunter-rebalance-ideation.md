@@ -7,7 +7,7 @@ mode: repo-grounded
 
 # Ideation: Hunter Rebalance
 
-Hunter sits at ~7% winrate across the 4,900-match baseline at `design-docs/balance/matrix_baseline_2026-05-16.csv`, losing 0% of matches in 6 of 7 matchups (fastest defeat 10.46s vs Mage; longest 48s vs Paladin; mirror 45/55 — order-dependent). This document is the **second pass** of this ideation — the first pass was based on a hallucinated codebase scan that asserted several Hunter systems were missing when they in fact exist. The user's "wait, can we look at the Warlock pet first?" question caught the error before any code was written. Reverified diagnosis follows.
+Hunter sits at ~7% winrate across the 4,900-match baseline at `docs/design/balance/matrix_baseline_2026-05-16.csv`, losing 0% of matches in 6 of 7 matchups (fastest defeat 10.46s vs Mage; longest 48s vs Paladin; mirror 45/55 — order-dependent). This document is the **second pass** of this ideation — the first pass was based on a hallucinated codebase scan that asserted several Hunter systems were missing when they in fact exist. The user's "wait, can we look at the Warlock pet first?" question caught the error before any code was written. Reverified diagnosis follows.
 
 ## Methodological note (read first)
 

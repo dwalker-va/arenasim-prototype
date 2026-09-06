@@ -1,6 +1,6 @@
 # Healer-movement follow-ups — buckets A + B (implementation plan)
 
-Source: `design-docs/roadmap.md` §"Follow-ups from healer movement AI" (PR #63).
+Source: `docs/design/roadmap.md` §"Follow-ups from healer movement AI" (PR #63).
 Scope chosen by user: **buckets A (offensive-punish) + B (PR#63 code-review residuals)**.
 Conflict-aware ordering produced by the `healer-followups-research` workflow (8 agents).
 

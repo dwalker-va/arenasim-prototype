@@ -314,13 +314,13 @@ Per-tick sequence (Hunter player has a Spider pet, enemy at 28yd):
 - **Requirements:** R9, R10, R11.
 - **Dependencies:** U1-U6 all merged.
 - **Files:**
-  - `design-docs/balance/matrix_baseline_2026-05-22_pet_engage_1v1_post.csv` and `.md` (new — post-change 1v1 matrix)
-  - `design-docs/balance/matrix_baseline_2026-05-22_pet_engage_2v2_post.csv` and `.md` (new — post-change 2v2 matrix)
+  - `docs/design/balance/matrix_baseline_2026-05-22_pet_engage_1v1_post.csv` and `.md` (new — post-change 1v1 matrix)
+  - `docs/design/balance/matrix_baseline_2026-05-22_pet_engage_2v2_post.csv` and `.md` (new — post-change 2v2 matrix)
   - `docs/reports/2026-05-22-hunter-pet-engagement.md` (new — tuning report, mirrors `docs/reports/2026-05-22-hunter-mana-tuning.md` shape)
 - **Approach:**
-  - **Pre-change baseline reuse:** post-mana 1v1 baseline is `design-docs/balance/matrix_baseline_2026-05-22.csv` (N=20). Post-mana 2v2 baseline is `design-docs/balance/matrix_baseline_2026-05-22_2v2_post.csv` (N=10). Both serve as pre-change comparison for this iteration.
-  - **Post-change 1v1 matrix:** `target/release/arenasim --matrix 20 --seed-base 0`. Move output to `design-docs/balance/matrix_baseline_2026-05-22_pet_engage_1v1_post.{csv,md}`.
-  - **Post-change 2v2 matrix:** `scripts/hunter_2v2_matrix.sh 10 --seed-base 0 --out design-docs/balance/matrix_baseline_2026-05-22_pet_engage_2v2_post.csv`. Write markdown summary.
+  - **Pre-change baseline reuse:** post-mana 1v1 baseline is `docs/design/balance/matrix_baseline_2026-05-22.csv` (N=20). Post-mana 2v2 baseline is `docs/design/balance/matrix_baseline_2026-05-22_2v2_post.csv` (N=10). Both serve as pre-change comparison for this iteration.
+  - **Post-change 1v1 matrix:** `target/release/arenasim --matrix 20 --seed-base 0`. Move output to `docs/design/balance/matrix_baseline_2026-05-22_pet_engage_1v1_post.{csv,md}`.
+  - **Post-change 2v2 matrix:** `scripts/hunter_2v2_matrix.sh 10 --seed-base 0 --out docs/design/balance/matrix_baseline_2026-05-22_pet_engage_2v2_post.csv`. Write markdown summary.
   - **Trace audit:** Hunter v Warlock with `--trace-mode on`. jq recipes:
     ```bash
     # Confirm SpiderWeb:NoValidTarget drops ≥75% from ~1,000 baseline
@@ -337,7 +337,7 @@ Per-tick sequence (Hunter player has a Spider pet, enemy at 28yd):
   - **Tuning report:** Follow the shape of `docs/reports/2026-05-22-hunter-mana-tuning.md`. Compare pre/post 1v1 and 2v2 winrates per matchup; note the trace audit numbers; honest reading section flagging which matchups moved vs which didn't (likely Hunter v Mage still 0% due to 10s defeats, Hunter v Paladin still 0% due to no healer-CC).
 - **Patterns to follow:**
   - `docs/reports/2026-05-22-hunter-mana-tuning.md` — report shape
-  - `design-docs/balance/matrix_baseline_2026-05-22*.md` — baseline markdown shape
+  - `docs/design/balance/matrix_baseline_2026-05-22*.md` — baseline markdown shape
   - `CLAUDE.md` jq recipes for decision-trace audit
 - **Test scenarios:**
   - Test expectation: none — produces measurement artifacts. Validation is whether the data matches success criteria:
@@ -363,7 +363,7 @@ Per-tick sequence (Hunter player has a Spider pet, enemy at 28yd):
   - Existing tests untouched in spirit; some may require minor updates for the `CombatantInfo` field extension (U2)
 - **Documentation:**
   - `CLAUDE.md` may benefit from a subsection under "Diagnose AI behaviour with the decision trace" describing the new `dispatched_by` field and how to filter pet decisions by source. Optional polish in U7's report commit.
-  - New tuning report in `docs/reports/`. New balance baselines in `design-docs/balance/`.
+  - New tuning report in `docs/reports/`. New balance baselines in `docs/design/balance/`.
 
 ---
 

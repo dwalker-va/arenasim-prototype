@@ -46,5 +46,5 @@ un-CC'd second (statue band ~0.65, healthy ~2.8–3.3, threshold 1.5).
 Healer 1v1 helplessness vs stunlock (Rogue v Priest 97%) is a class-kit gap
 (no anti-stun tool), not a movement or pooling issue — candidate future kit
 work (PvP trinket / freedom analogs). Canonical baselines
-(`design-docs/balance/canonical_*`) should be regenerated when this branch
+(`docs/design/balance/canonical_*`) should be regenerated when this branch
 merges — they predate the healer-movement slice entirely.

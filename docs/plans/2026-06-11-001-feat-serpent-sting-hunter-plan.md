@@ -16,7 +16,7 @@ Add Serpent Sting to the Hunter kit: an instant, cheap, no-cooldown, pure-DoT Na
 
 ## Problem Frame
 
-Hunter has no sustained-damage component beyond Auto Shot, and it regressed in the recent balance patch (see origin and `design-docs/balance/2026-06-04-hunter-mage-balance-findings.md`). Serpent Sting fills the kiting-damage role — damage that keeps ticking while the Hunter repositions — and doubles as a recovery lever. The dangerous interaction (a Hunter DoT breaking the team's own Freezing Trap, which breaks on any damage) is the same bug class documented in `docs/solutions/ai-decision-patterns/friendly-cc-break-prevention.md` and is handled by existing guard infrastructure.
+Hunter has no sustained-damage component beyond Auto Shot, and it regressed in the recent balance patch (see origin and `docs/design/balance/2026-06-04-hunter-mage-balance-findings.md`). Serpent Sting fills the kiting-damage role — damage that keeps ticking while the Hunter repositions — and doubles as a recovery lever. The dangerous interaction (a Hunter DoT breaking the team's own Freezing Trap, which breaks on any damage) is the same bug class documented in `docs/solutions/ai-decision-patterns/friendly-cc-break-prevention.md` and is handled by existing guard infrastructure.
 
 ---
 
@@ -170,7 +170,7 @@ flowchart TB
 - **Goal:** R18's sweep gate passes with the intentional-buff framing; numbers adjusted if needed.
 - **Requirements:** R17, R18, origin success criteria.
 - **Dependencies:** U1–U4 (U4 optional for the sweep itself, required before merge).
-- **Files:** none (runs `scripts/hunter_2v2_matrix.sh`; optionally commits the CSV under `design-docs/balance/`).
+- **Files:** none (runs `scripts/hunter_2v2_matrix.sh`; optionally commits the CSV under `docs/design/balance/`).
 - **Approach:** Full `cargo test`, then `scripts/hunter_2v2_matrix.sh 100 --seed-base 0` against the latest post-casting-visibility-fix baseline CSV. Judge on side-symmetrized cells. Attach trace queries: sting dispel count per match (dispel tax read), `AlreadyApplied` counts (uptime-loop sanity), Freezing Trap break-by-sting incidents (KTD 3 residual measurement). If the gate fails high (a symmetrized cell > ~65%), step `magnitude` down (10 → 8) before touching mana; if the sting reads inert, check the dispel count before buffing.
 - **Test scenarios:** Test expectation: none — this unit is the measurement harness itself; its outputs are the sweep CSV and trace-query numbers reported against R18's gate.
 - **Verification:** sweep summary with symmetrized deltas vs baseline, plus the three trace-query counts, reported in the PR description.

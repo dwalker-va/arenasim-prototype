@@ -14,7 +14,7 @@ use crate::states::play_match::components::*;
 // The healing counterpart of `school_impact.rs`. Until this module every heal
 // landed as the same translucent cylinder (`HealingLightColumn`) — a shape
 // that exists NOWHERE in the Classic client data: the measured verdict from
-// `design-docs/2026-09-06-heal-impact-client-data.md` (wago.tools DB2 + M2
+// `docs/design/2026-09-06-heal-impact-client-data.md` (wago.tools DB2 + M2
 // parsing, build 1.15.9.69547) is that **no Classic heal lands as a column**.
 // What the client actually plays, and what this module reproduces with the
 // codebase's primitive-mesh vocabulary:

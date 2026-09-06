@@ -12,7 +12,7 @@ Refresh of the [2026-04-26 ideation](2026-04-26-open-ideation.md). Same project 
 ## What changed since April
 
 - **Done:** `--matrix N` runner + deterministic seeded replays (PR #48, merged). Closed the last non-determinism gap (`CombatSnapshot` `HashMap` → `BTreeMap`). `run_headless_match` returns `Result<MatchResult, String>`; seed embedded in log header.
-- **New artifact:** baseline matrix at `design-docs/balance/matrix_baseline_2026-05-16.{csv,md}` (4,900 matches, reproducible via `--matrix 100 --seed-base 0`).
+- **New artifact:** baseline matrix at `docs/design/balance/matrix_baseline_2026-05-16.{csv,md}` (4,900 matches, reproducible via `--matrix 100 --seed-base 0`).
 - **Bonus side effect:** headless integration tests now run ~30× faster (manual `app.update()` loop + `TimeUpdateStrategy::ManualDuration`).
 
 ## Carry-over from April (still open)
@@ -100,4 +100,4 @@ Average T1 row winrate per class:
 | Priest | 21% | Healer, loses to all DPS |
 | Hunter | 7% | **Broken** |
 
-Full matrix: `design-docs/balance/matrix_baseline_2026-05-16.md`.
+Full matrix: `docs/design/balance/matrix_baseline_2026-05-16.md`.

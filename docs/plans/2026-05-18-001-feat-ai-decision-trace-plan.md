@@ -19,7 +19,7 @@ execution_notes:
      conversions in combat_core/auto_attack.rs and auras.rs (see commit
      05c28b5). PR #48's narrower tests missed this; this work's broader
      49-pairing sweep surfaced it."
-  - "design-docs/balance/matrix_baseline_2026-05-21.md added to reflect
+  - "docs/design/balance/matrix_baseline_2026-05-21.md added to reflect
      post-fix outcomes — self-mirror diagonal cells shifted by 5-15
      percentage points because the previous nondeterminism was a per-match
      coin flip. Off-diagonal cells are unchanged within sampling variance.
@@ -704,4 +704,4 @@ U11 is intentionally pulled forward as an early safety gate (depends only on U1)
 - Update `CLAUDE.md` "Adding a New Ability" checklist: note that new ability AI insertions automatically get traced via existing reject/choose helpers — no trace-specific changes needed (R9).
 - Update `CLAUDE.md` "Common Tasks" with the `--trace-mode on` + `jq` recipe for AI diagnosis. Example: `jq 'select(.kind == "ability_decision" and .actor.class == "Hunter") | .candidates' match_logs/traces/match_42_Hunter_v_Warrior_trace.jsonl`.
 - Add `docs/solutions/implementation-patterns/ai-decision-trace.md` after U12 lands, documenting the builder pattern + front-load + audit-test discipline as a learning for future observability work. The variant-to-predicate map captured during U13 is the seed for this doc.
-- No changes to `design-docs/` needed — trace is implementation detail, not game design.
+- No changes to `docs/design/` needed — trace is implementation detail, not game design.

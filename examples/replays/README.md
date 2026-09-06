@@ -21,7 +21,7 @@ a `_legacy` twin on the same seed, so the pair isolates the AI.
 `Hunter+Priest` vs `Rogue+Priest` on `PillaredArena`. **HISTORICAL: the -17pt
 regression these configs were cut for was n=12 sample noise** — the definitive
 n=100 run measures the healer solve + kiter leash at **+14pt for this comp**
-(z=2.2; CSV in `design-docs/balance/`). The configs stay because the seeds are
+(z=2.2; CSV in `docs/design/balance/`). The configs stay because the seeds are
 still instructive to watch: the investigation they enabled found the kiter
 healer-leash bug (a Hunter fleeing clean out of its own Priest's range), which
 was real regardless of the phantom regression.
@@ -46,4 +46,4 @@ like it is following the Hunter around rather than holding a position? Seeds 3
 and 12 flip the other way (TeamPlan wins) if a counter-example is useful.
 
 `camp_*.json` are the older step-3 pillar-camp configs; see
-`design-docs/2026-08-01-nagrand-camp-handoff.md`.
+`docs/design/2026-08-01-nagrand-camp-handoff.md`.

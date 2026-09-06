@@ -213,8 +213,8 @@ All questions the brainstorm deferred to planning are resolved in Key Technical 
 
 ### Sources / Research
 
-- `design-docs/2026-08-06-in-match-kill-target-and-banter.md` — the seeding note this plan supersedes.
-- `design-docs/team-level-positioning-ai.md` — the step-5 amendment carrying the measured call table and the reasoning that made mid-match switching a prerequisite.
+- `docs/design/2026-08-06-in-match-kill-target-and-banter.md` — the seeding note this plan supersedes.
+- `docs/design/team-level-positioning-ai.md` — the step-5 amendment carrying the measured call table and the reasoning that made mid-match switching a prerequisite.
 - `src/states/play_match/combat_ai.rs` — target acquisition, the per-tick kill-target re-force, and the melee sticky-swap gate.
 - `src/states/match_config.rs` — the kill-target config fields and their slot-0 defaults.
 - `src/states/play_match/rendering/hud.rs` — the combat-log panel toggle precedent the call display follows, spanning `src/settings.rs` (persisted flag), `src/keybindings.rs` (action + default binding), and the copy into `DisplaySettings` at match setup.

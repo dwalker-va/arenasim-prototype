@@ -327,4 +327,4 @@ Headless JSON Override:
 
 - **Origin document:** [docs/brainstorms/2026-03-22-equipment-system-brainstorm.md](docs/brainstorms/2026-03-22-equipment-system-brainstorm.md)
 - Related code: `ability_config.rs` (RON loading pattern), `combatant.rs` (stat fields), `match_config.rs` (config bridge)
-- Design reference: `design-docs/stat-scaling-system.md` (damage/healing formulas that equipment stats feed into)
+- Design reference: `docs/design/stat-scaling-system.md` (damage/healing formulas that equipment stats feed into)

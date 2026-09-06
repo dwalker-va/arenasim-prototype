@@ -249,4 +249,4 @@ Place new effect processing systems in **Phase 1** unless they depend on damage/
 ## Related Patterns
 
 - [Adding Visual Effect (Bevy)](./adding-visual-effect-bevy.md) - Visual systems registration (graphical-only)
-- [Dual Mode Architecture](../../design-docs/bevy-patterns.md) - Headless vs graphical separation
+- [Dual Mode Architecture](../../docs/design/bevy-patterns.md) - Headless vs graphical separation

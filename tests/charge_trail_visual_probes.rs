@@ -4,7 +4,7 @@
 //! dash origin — it read as a pipe behind the Warrior. The redesign lays a
 //! SEQUENCE of elements along the actual dash path (the Classic source is a
 //! red chest ribbon plus base dust — see
-//! `design-docs/2026-09-06-charge-client-data.md`): thin vertical streak
+//! `docs/design/2026-09-06-charge-client-data.md`): thin vertical streak
 //! segments at chest height and dust puffs at ground level, all fading over
 //! their lifetimes. These pin the construction's WORLD geometry (positions on
 //! the path, vertical placement, orientation, fade) — not bookkeeping.

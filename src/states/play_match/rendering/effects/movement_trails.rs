@@ -6,7 +6,7 @@ use crate::states::play_match::components::*;
 // Charge Trail Visual (Warrior Charge + Boar Charge)
 // ==============================================================================
 //
-// Grounded in the Classic client data (design-docs/2026-09-06-charge-client-data.md):
+// Grounded in the Classic client data (docs/design/2026-09-06-charge-client-data.md):
 // Charge ranks 100/6178/11578 all resolve to SpellVisual 867, whose single
 // caster kit (44) attaches two models for the duration of the dash:
 //   - `spells/chargetrail.m2` at the chest — ONE RIBBON: red (0.81, 0, 0),

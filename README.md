@@ -115,7 +115,7 @@ for the schema.
 - **Default loadouts** per class in `loadouts.ron`, overridable per combatant
 - **Armory screen** to browse every item with filters (slot, armor type, item level, name)
 - **Stat scaling** — attack power / spell power coefficients per ability
-  (see [design-docs/stat-scaling-system.md](design-docs/stat-scaling-system.md))
+  (see [docs/design/stat-scaling-system.md](docs/design/stat-scaling-system.md))
 
 ## Client
 
@@ -150,7 +150,7 @@ scripts/gen_sweep.py / agg_sweep.py       # generate + aggregate batch sweeps
 scripts/comp_tiers.py                     # comp tier list from sweep output
 ```
 
-Historical balance baselines are committed under `design-docs/balance/`.
+Historical balance baselines are committed under `docs/design/balance/`.
 
 ## Testing
 
@@ -193,12 +193,12 @@ assets/config/                             # abilities, items, loadouts, charact
 
 - **[CLAUDE.md](CLAUDE.md)** — the working developer guide: how to add an ability, item, or
   system; tuning surfaces; trace recipes; dev loops
-- **[design-docs/game-design-doc.md](design-docs/game-design-doc.md)** — long-term game vision
-- **[design-docs/wow-mechanics.md](design-docs/wow-mechanics.md)** — implemented WoW mechanics
-- **[design-docs/stat-scaling-system.md](design-docs/stat-scaling-system.md)** — damage/healing formulas
-- **[design-docs/bevy-patterns.md](design-docs/bevy-patterns.md)** — Bevy/Rust patterns and pitfalls
-- **[design-docs/roadmap.md](design-docs/roadmap.md)** — TODOs and milestones
-- **[design-docs/session-notes.md](design-docs/session-notes.md)** — development history
+- **[docs/design/game-design-doc.md](docs/design/game-design-doc.md)** — long-term game vision
+- **[docs/design/wow-mechanics.md](docs/design/wow-mechanics.md)** — implemented WoW mechanics
+- **[docs/design/stat-scaling-system.md](docs/design/stat-scaling-system.md)** — damage/healing formulas
+- **[docs/design/bevy-patterns.md](docs/design/bevy-patterns.md)** — Bevy/Rust patterns and pitfalls
+- **[docs/design/roadmap.md](docs/design/roadmap.md)** — TODOs and milestones
+- **[docs/design/session-notes.md](docs/design/session-notes.md)** — development history
 - **[docs/solutions/](docs/solutions/)** — documented solutions to past bugs and implementation patterns
 - **[docs/known-issues.md](docs/known-issues.md)** — known issues
 

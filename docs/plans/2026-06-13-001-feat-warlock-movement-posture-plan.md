@@ -13,7 +13,7 @@ origin: docs/brainstorms/2026-06-13-warlock-movement-ai-requirements.md
 > help). A DoT caster with Drain Life sustain and a Fear peel is better
 > standing and casting than kiting in this combat model. The Warlock stays on
 > legacy pursuit. See
-> [`design-docs/balance/2026-06-14-warlock-movement-findings.md`](../../design-docs/balance/2026-06-14-warlock-movement-findings.md)
+> [`docs/design/balance/2026-06-14-warlock-movement-findings.md`](../../docs/design/balance/2026-06-14-warlock-movement-findings.md)
 > for the data and mechanism. This plan is retained as the migration recipe in
 > case the conclusion is revisited (re-measure first — balance will have
 > drifted).
