@@ -40,6 +40,19 @@ use crate::states::play_match::components::*;
 //   the feet where the Base attach grounds the effect, 8 small butterflies
 //   fluttering in orbit, and a light dusting of rising gold stars. The only
 //   non-pure-gold heal.
+// - **Healing Stream Totem tick** (AUTHORED — see
+//   `docs/design/2026-09-07-healing-stream-totem-client-data.md`): the client
+//   draws NO per-tick visual for Healing Stream at all; its only target-side
+//   identity is a persistent aura-state loop of Priest Lesser Heal's gold
+//   impact model, borrowed verbatim. This module instead plays a minimal
+//   Nature-green blip of rising motes per HoT tick, keeping the client's
+//   shape (Base attach, 0.56 envelope, source speeds) at a scale far below
+//   Healing Wave. Routed from the aura-tick site through
+//   `HealImpact::kind_for_hot_tick` — the AUDIT BOUNDARY for heals that
+//   arrive as aura ticks: `kind_for` and the config-field audit iterate
+//   healing fields, which a HoT config does not have, so aura-tick heals
+//   route through `kind_for_hot_tick` (exhaustive over `AuraType` — the
+//   compiler forces every new aura type to declare whether its ticks heal).
 //
 // Everything is additive (every material and emitter in the source set is M2
 // blend mode 4), Holy is pure gold, Nature is green + gold. Emitter constants
@@ -136,6 +149,23 @@ const BUTTERFLY_FLAP_AMPLITUDE: f32 = 0.95;
 /// give that 0.2 u span.
 const BUTTERFLY_WING_SPAN: f32 = 0.10;
 const BUTTERFLY_WING_LENGTH: f32 = 0.14;
+
+// --- Healing Stream Totem tick blip ------------------------------------------
+// AUTHORED on the AS-10 Nature vocabulary, not transcribed: the client has NO
+// per-tick visual for Healing Stream at all — its only target-side identity is
+// a persistent aura-state loop of Priest Lesser Heal's gold impact model
+// (`lesserheal_base.m2`), unusable here twice over (Priest-gold aliasing,
+// always-on noise). The blip keeps the client's SHAPE — rising motes from the
+// Base attach, the source's 0.56 emission area and 3.33/2.22 u/s speeds —
+// recolored green and cut to a one-shot per 1 s tick, deliberately far below
+// Healing Wave's butterfly-swirl scale (a tick fires every second; a spammy
+// landing here would out-shout every hard-cast heal). See
+// `docs/design/2026-09-07-healing-stream-totem-client-data.md`.
+/// How long the blip's emitters run. Well under the 1 s tick interval, so
+/// consecutive ticks read as discrete pulses, never a continuous stream.
+pub const TOTEM_PULSE_EMIT_SECS: f32 = 0.35;
+/// Emission envelope — the source's 0.56×0.56 area, same as HealStream's.
+pub const TOTEM_PULSE_WIDTH: f32 = 0.56;
 
 /// Height of the Base attachment (the recipient's feet) above a combatant's
 /// transform. The capsule is `Capsule3d::new(0.5, 1.5)` CENTRED on the
@@ -258,6 +288,9 @@ pub struct HealStyle {
     pub under_glow: Option<(f32, f32)>,
     pub torso_glows: Vec<GlowLayer>,
     pub butterflies: bool,
+    /// Tint of the star and ribbon mote materials. `None` keeps the Holy
+    /// family's gold; the totem blip sets Nature's green.
+    pub mote_tint: Option<Color>,
     pub emitters: Vec<HealEmitter>,
 }
 
@@ -295,6 +328,7 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
             head_glow: None,
             under_glow: None,
             torso_glows: Vec::new(),
+            mote_tint: None,
             butterflies: false,
             // Mote SIZES here and in HealStream are render tuning, not M2
             // transcription (the source records carry no world-size), and the
@@ -365,6 +399,7 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
             head_glow: None,
             under_glow: None,
             torso_glows: Vec::new(),
+            mote_tint: None,
             butterflies: false,
             // Mote sizes raised with Flash Heal's — see the note there.
             emitters: vec![
@@ -469,6 +504,7 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
                     alpha: 0.30 * HEALING_WAVE_GLOW_INTENSITY,
                 },
             ],
+            mote_tint: None,
             butterflies: true,
             emitters: vec![
                 // The above-head burst star emitter.
@@ -491,6 +527,54 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
                     area: Ramp::flat(0.67),
                     spread: 0.0,
                     kind: HealMoteKind::Star,
+                    size: 0.08,
+                },
+            ],
+        },
+        HealImpactKind::TotemPulse => HealStyle {
+            anchor: HealAnchor::Base,
+            emit_secs: TOTEM_PULSE_EMIT_SECS,
+            intensity: 1.0,
+            flash: None,
+            head_glow: None,
+            under_glow: None,
+            torso_glows: Vec::new(),
+            mote_tint: Some(nature_green()),
+            butterflies: false,
+            // A handful of motes per tick — the client's rising-sparkle shape
+            // (source speeds 3.33/2.22, the 0.56 envelope) at blip scale:
+            // ~3-4 stars + ~2 ribbon streaks over 0.35 s, then silence until
+            // the next tick. No flash, no glow, no butterflies — the totem's
+            // free sustain must never out-shout a hard-cast heal.
+            emitters: vec![
+                HealEmitter {
+                    origin: Vec3::new(-0.28, 0.0, 0.0),
+                    speed: 3.33,
+                    life: 0.6,
+                    rate: Ramp::flat(6.0),
+                    area: Ramp::flat(TOTEM_PULSE_WIDTH),
+                    spread: 0.0,
+                    kind: HealMoteKind::Star,
+                    size: 0.11,
+                },
+                HealEmitter {
+                    origin: Vec3::new(0.28, 0.0, 0.0),
+                    speed: 3.33,
+                    life: 0.6,
+                    rate: Ramp::flat(6.0),
+                    area: Ramp::flat(TOTEM_PULSE_WIDTH),
+                    spread: 0.0,
+                    kind: HealMoteKind::Star,
+                    size: 0.11,
+                },
+                HealEmitter {
+                    origin: Vec3::new(0.0, 0.47, 0.0),
+                    speed: 2.22,
+                    life: 0.5,
+                    rate: Ramp { start: 8.0, mid: 6.0, end: 0.0 },
+                    area: Ramp::flat(0.14),
+                    spread: 0.0,
+                    kind: HealMoteKind::Ribbon,
                     size: 0.08,
                 },
             ],
@@ -545,6 +629,7 @@ fn holy_light_style(duration: f32, intensity: f32) -> HealStyle {
         under_glow: None,
         torso_glows: Vec::new(),
         butterflies: false,
+        mote_tint: None,
         emitters,
     }
 }
@@ -825,9 +910,12 @@ pub fn spawn_heal_impacts(
         }
 
         // One material per mote kind for the whole landing; motes fade by
-        // shrinking, so nothing per-piece has to be written.
-        let star_material = glow(&mut materials, holy_gold(), 2.4, Some(assets.star.clone()));
-        let ribbon_material = glow(&mut materials, holy_gold(), 2.2, Some(assets.dot.clone()));
+        // shrinking, so nothing per-piece has to be written. The star and
+        // ribbon motes take the style's tint (the totem blip's Nature green);
+        // gold is the Holy default.
+        let mote_color = style.mote_tint.unwrap_or_else(holy_gold);
+        let star_material = glow(&mut materials, mote_color, 2.4, Some(assets.star.clone()));
+        let ribbon_material = glow(&mut materials, mote_color, 2.2, Some(assets.dot.clone()));
         let puff_material = glow(
             &mut materials,
             holy_gold_pale().with_alpha(0.55),

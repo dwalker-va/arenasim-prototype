@@ -29,20 +29,22 @@ use std::time::Duration;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
 
-use arenasim::states::play_match::abilities::AbilityType;
+use arenasim::states::play_match::abilities::{AbilityType, SpellSchool};
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::components::{
-    Combatant, HealButterflyWing, HealImpact, HealImpactKind, HealMote, HealSprite,
-    HealSpriteRole,
+    ActiveAuras, ArenaDampening, Aura, AuraType, Combatant, DispelType, HealButterflyWing,
+    HealImpact, HealImpactKind, HealMote, HealSprite, HealSpriteRole,
 };
 use arenasim::states::play_match::{
     animate_heal_impacts, billboard_heal_impacts, butterfly_center, heal_envelope, heal_style,
-    spawn_heal_impacts, HealAnchor, Ramp, COMBATANT_BODY_RADIUS, FLASH_HEAL_FLASH_DURATION,
-    FLASH_HEAL_RAY_COUNT, FLASH_HEAL_RAY_LENGTH, FLASH_OF_LIGHT_BORROW_INTENSITY,
-    FLASH_OF_LIGHT_DURATION, ARENA_FLOOR_WORLD_Y, HEALING_WAVE_BUTTERFLIES,
-    HEALING_WAVE_ORBIT_RADIUS, HEALING_WAVE_OUTWARD_DRIFT, HEALING_WAVE_UNDERGLOW_LIFT,
-    HEAL_BASE_Y, HEAL_STREAM_WIDTH, HOLY_LIGHT_DURATION, IMPACT_HEAD_Y,
+    process_hot_ticks, spawn_heal_impacts, HealAnchor, Ramp, COMBATANT_BODY_RADIUS,
+    FLASH_HEAL_FLASH_DURATION, FLASH_HEAL_RAY_COUNT, FLASH_HEAL_RAY_LENGTH,
+    FLASH_OF_LIGHT_BORROW_INTENSITY, FLASH_OF_LIGHT_DURATION, ARENA_FLOOR_WORLD_Y,
+    HEALING_WAVE_BUTTERFLIES, HEALING_WAVE_ORBIT_RADIUS, HEALING_WAVE_OUTWARD_DRIFT,
+    HEALING_WAVE_UNDERGLOW_LIFT, HEAL_BASE_Y, HEAL_STREAM_WIDTH, HOLY_LIGHT_DURATION,
+    IMPACT_HEAD_Y, TOTEM_PULSE_EMIT_SECS, TOTEM_PULSE_WIDTH,
 };
+use arenasim::combat::log::CombatLog;
 use arenasim::CharacterClass;
 
 const TICK: Duration = Duration::from_millis(16);
@@ -252,6 +254,7 @@ fn holy_light_is_the_only_falling_head_attached_heal() {
         HealImpactKind::FlashHeal,
         HealImpactKind::HealStream,
         HealImpactKind::HealingWave,
+        HealImpactKind::TotemPulse,
     ] {
         let style = heal_style(kind);
         assert_eq!(style.anchor, HealAnchor::Base, "{kind:?} attaches at the feet");
@@ -752,5 +755,203 @@ fn a_spent_landing_despawns_with_all_its_pieces() {
         "the rig must despawn when spent"
     );
     assert_eq!(h.wings().len(), 0, "wings die with the rig");
+    assert_eq!(h.motes().len(), 0, "motes die with the rig");
+}
+
+// ── aura-tick heals (Healing Stream Totem) ─────────────────────────────────
+//
+// The audit hole this section closes: a HoT heals through an AURA tick, so
+// its ability config has no healing fields, `is_heal()` is false, and
+// `every_heal_in_the_config_reaches_a_landing` structurally cannot see it —
+// Healing Stream Totem healed 111 times in one 3v3 log with zero visuals.
+// Aura-tick heals route through `HealImpact::kind_for_hot_tick`, which is
+// EXHAUSTIVE over `AuraType` (no wildcard), so the compiler itself is the
+// config-side audit: a new aura type does not build until it declares whether
+// its ticks heal. What the compiler cannot prove is that the tick SITE spawns
+// the landing — `hot_tick_spawns_the_totem_pulse_landing` drives the real
+// `process_hot_ticks` for that.
+
+/// The aura-tick router names the blessed mapping: HealingOverTime ticks land
+/// as the totem pulse blip; non-healing aura ticks land nothing.
+#[test]
+fn the_aura_tick_router_names_the_blessed_mapping() {
+    assert_eq!(
+        HealImpact::kind_for_hot_tick(AuraType::HealingOverTime),
+        Some(HealImpactKind::TotemPulse)
+    );
+    assert_eq!(HealImpact::kind_for_hot_tick(AuraType::DamageOverTime), None);
+    assert_eq!(HealImpact::kind_for_hot_tick(AuraType::Absorb), None);
+    assert_eq!(HealImpact::kind_for_hot_tick(AuraType::MaxHealthIncrease), None);
+}
+
+/// The Healing Stream Totem buff aura, as `totems.rs::make_totem_aura` builds
+/// it (1 s ticks, never breaks), with the tick timer nearly due.
+fn totem_hot_aura(caster: Entity) -> Aura {
+    Aura {
+        effect_type: AuraType::HealingOverTime,
+        duration: 2.0,
+        magnitude: 8.0,
+        break_on_damage_threshold: -1.0,
+        accumulated_damage: 0.0,
+        tick_interval: 1.0,
+        time_until_next_tick: 0.001,
+        caster: Some(caster),
+        ability_name: "Healing Stream Totem".to_string(),
+        fear_direction: (0.0, 0.0),
+        fear_direction_timer: 0.0,
+        spell_school: Some(SpellSchool::Nature),
+        applied_this_frame: false,
+        backlash_damage: None,
+        dr_category_override: None,
+        dispel_type: DispelType::Auto,
+    }
+}
+
+/// A HoT tick must LAND a visual: drive the real `process_hot_ticks` over a
+/// bearer whose Healing Stream aura is due to tick, and assert the heal that
+/// healed (health went up) also spawned a `HealImpact` routed to the totem
+/// pulse, targeting the bearer. This is the load-bearing wiring probe — the
+/// exhaustive router alone cannot prove the application site calls it.
+#[test]
+fn hot_tick_spawns_the_totem_pulse_landing() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .insert_resource(TimeUpdateStrategy::ManualDuration(TICK))
+        .insert_resource(CombatLog::default())
+        .insert_resource(ArenaDampening::default())
+        .add_systems(Update, process_hot_ticks);
+    // Warm the clock: Bevy's first update has a zero delta, which would leave
+    // the tick timer un-elapsed and the probe vacuous.
+    app.update();
+
+    // The totem's owner (attribution) and an injured bearer carrying the HoT.
+    let shaman = app
+        .world_mut()
+        .spawn((
+            Combatant::new(0, 0, CharacterClass::Shaman),
+            Transform::from_translation(Vec3::ZERO),
+        ))
+        .id();
+    let mut bearer_combatant = Combatant::new(0, 1, CharacterClass::Warrior);
+    bearer_combatant.current_health = bearer_combatant.max_health * 0.5;
+    let hp_before = bearer_combatant.current_health;
+    let bearer = app
+        .world_mut()
+        .spawn((
+            bearer_combatant,
+            Transform::from_translation(Vec3::new(3.0, 1.0, 0.0)),
+            ActiveAuras {
+                auras: vec![totem_hot_aura(shaman)],
+            },
+        ))
+        .id();
+
+    app.update(); // one 16 ms frame: the 0.001 s tick timer fires
+
+    let healed = app.world().get::<Combatant>(bearer).unwrap().current_health;
+    assert!(
+        healed > hp_before,
+        "the probe went vacuous — the HoT tick never healed ({hp_before} -> {healed})"
+    );
+
+    let impacts: Vec<(Entity, HealImpactKind)> = {
+        let mut q = app.world_mut().query::<&HealImpact>();
+        q.iter(app.world()).map(|i| (i.target, i.kind)).collect()
+    };
+    assert_eq!(
+        impacts.len(),
+        1,
+        "one HoT tick heals once and must land exactly one visual, got {impacts:?}"
+    );
+    assert_eq!(
+        impacts[0],
+        (bearer, HealImpactKind::TotemPulse),
+        "the landing must target the BEARER and route to the totem pulse blip"
+    );
+
+    // The next frame must NOT land another visual — the tick timer reset to
+    // its 1 s interval, and a blip per frame would be the spam the design
+    // constraint forbids.
+    app.update();
+    let count = {
+        let mut q = app.world_mut().query::<&HealImpact>();
+        q.iter(app.world()).count()
+    };
+    assert_eq!(count, 1, "no tick, no landing — a blip per FRAME is spam");
+}
+
+/// The totem pulse is a minimal rising green blip at the feet: no sprites at
+/// all, a handful of motes inside the narrow envelope, all rising, dwarfed by
+/// a hard-cast landing, and gone quickly.
+#[test]
+fn totem_pulse_is_a_minimal_rising_blip() {
+    // Scale ceiling first, from the recipes themselves: the blip's total mote
+    // budget (rate x window, summed) stays under half of Healing Wave's.
+    let mote_budget = |kind: HealImpactKind| -> f32 {
+        let style = heal_style(kind);
+        style
+            .emitters
+            .iter()
+            .map(|e| {
+                ((e.rate.start + e.rate.mid) / 2.0 + (e.rate.mid + e.rate.end) / 2.0) / 2.0
+                    * style.emit_secs
+            })
+            .sum()
+    };
+    let blip = mote_budget(HealImpactKind::TotemPulse);
+    let wave = mote_budget(HealImpactKind::HealingWave);
+    assert!(
+        blip < wave * 0.5,
+        "the per-tick blip ({blip:.1} motes) must stay well under a hard-cast \
+         Healing Wave ({wave:.1}) — it fires every second"
+    );
+    let style = heal_style(HealImpactKind::TotemPulse);
+    assert!(
+        style.life() < 1.0,
+        "a blip must be spent before the next 1 s tick, lives {:.2} s",
+        style.life()
+    );
+    assert_eq!(style.emit_secs, TOTEM_PULSE_EMIT_SECS);
+
+    // The rendered geometry: rig at the feet, no flash/glow/butterfly pieces,
+    // motes rising inside the narrow envelope.
+    let mut h = Harness::new();
+    let at = Vec3::new(-3.0, 1.0, 2.0);
+    let recipient = h.spawn_recipient(at);
+    let rig = h.land(HealImpactKind::TotemPulse, recipient);
+    h.tick(14); // ~0.22s: mid-window
+
+    let base = at + Vec3::Y * HEAL_BASE_Y;
+    let rig_pos = h.rig_pos(rig);
+    assert!(
+        rig_pos.distance(base) < 1e-3,
+        "the blip plays at the Base attach (feet): {rig_pos} vs {base}"
+    );
+    assert_eq!(h.sprites().len(), 0, "no flash, no glow — motes only");
+    assert_eq!(h.wings().len(), 0, "no butterflies on the free sustain");
+
+    let motes = h.motes();
+    assert_min("totem pulse motes", motes.len(), 2);
+    assert!(
+        motes.len() <= 8,
+        "{} motes mid-window — the blip must stay minimal",
+        motes.len()
+    );
+    let max_r = 0.28 + TOTEM_PULSE_WIDTH / 2.0 + 1e-3;
+    for (velocity, _, pos) in &motes {
+        assert!(velocity.y > 0.0, "blip motes rise, got {velocity}");
+        let horizontal = Vec2::new(pos.x - at.x, pos.z - at.z).length();
+        assert!(
+            horizontal <= max_r + 0.01,
+            "blip mote {pos} outside the narrow envelope ({horizontal} > {max_r})"
+        );
+    }
+
+    // Spent and gone well before the next tick would fire.
+    h.tick(50); // 14 + 50 frames = ~1.02 s > life()
+    assert!(
+        h.app.world().get_entity(rig).is_err(),
+        "the blip must despawn before the next tick"
+    );
     assert_eq!(h.motes().len(), 0, "motes die with the rig");
 }
