@@ -448,7 +448,7 @@ pub fn update_dispel_ribbons(
         // Follow the target and climb it; once the play-out begins the climb
         // is complete and the base ring holds, so the top end is FIXED in the
         // unit's frame. If the target is gone (died mid-ribbon), freeze at the
-        // last anchored position — matches DispelBurst / HealingLightColumn.
+        // last anchored position — matches DispelBurst.
         if let Ok(target_transform) = transforms.get(ribbon.target) {
             ribbon_transform.translation =
                 ribbon_origin(ribbon.caster_class, target_transform.translation, progress);
