@@ -112,8 +112,24 @@ pub const NATURE_LAUNCH_SPREAD: f32 = 0.035;
 pub const NATURE_LAUNCH_BURST_SCALE: f32 = 1.0;
 const NATURE_LAUNCH_RING_SPEED: f32 = 0.261;
 const NATURE_LAUNCH_SPARK_SPEED: f32 = 0.278;
-const NATURE_LAUNCH_RING_SIZE: f32 = 0.16;
-const NATURE_LAUNCH_SPARK_SIZE: f32 = 0.07;
+// Ring/spark sizes, expansion, brightness and ring alpha are repo render
+// tuning, not transcribed source values (the source gives textures, rates,
+// speeds, life and spread only). USER-TUNED down in round 2: at 0.16 u /
+// swell 2.5 / emissive 1.8 the ~6 rings alive at once (21.4/s x 0.3 s life)
+// stacked additively into two blown-out white donuts that swallowed the
+// hands. The launch is an accent on the cast, not the centerpiece — the
+// blessed rates/speeds/life/spread above are untouched.
+const NATURE_LAUNCH_RING_SIZE: f32 = 0.11;
+const NATURE_LAUNCH_SPARK_SIZE: f32 = 0.055;
+/// How far a water ring expands over its life, as a fraction of its size
+/// (scale grows to `1 + SWELL` as it fades).
+const NATURE_LAUNCH_RING_SWELL: f32 = 1.6;
+/// Emissive strengths of the burst materials (the loop glow uses 2.0/2.8).
+const NATURE_LAUNCH_RING_EMISSIVE: f32 = 0.9;
+const NATURE_LAUNCH_SPARK_EMISSIVE: f32 = 1.5;
+/// Base-color alpha of the ring material: additive rings overlap heavily
+/// while young, so each contributes well under full strength.
+const NATURE_LAUNCH_RING_ALPHA: f32 = 0.45;
 
 /// Seconds the hand glow blooms in from nothing at cast start. The source
 /// snaps (InitialAnimID -1, no intro); a couple of frames of growth just
@@ -372,13 +388,13 @@ pub fn spawn_heal_cast_glows(
                         spark_material: additive_material(
                             &mut materials,
                             super::heal_impact::holy_gold(),
-                            2.4,
+                            NATURE_LAUNCH_SPARK_EMISSIVE,
                             Some(assets.dot.clone()),
                         ),
                         ring_material: additive_material(
                             &mut materials,
-                            water_ring_blue(),
-                            1.8,
+                            water_ring_blue().with_alpha(NATURE_LAUNCH_RING_ALPHA),
+                            NATURE_LAUNCH_RING_EMISSIVE,
                             None,
                         ),
                     },
@@ -654,7 +670,7 @@ pub fn update_heal_cast_glows(
                 match mote.kind {
                     HealCastBurstKind::WaterRing => {
                         // The shockwave read: the ring EXPANDS as it fades.
-                        let swell = 1.0 + 2.5 * (1.0 - k);
+                        let swell = 1.0 + NATURE_LAUNCH_RING_SWELL * (1.0 - k);
                         part.scale = Vec3::splat(
                             (NATURE_LAUNCH_RING_SIZE * NATURE_LAUNCH_BURST_SCALE * swell
                                 * k.powf(0.35))
