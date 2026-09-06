@@ -134,17 +134,6 @@ pub enum HealAnchor {
     Head,
 }
 
-/// What a heal landing's motes look like.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum HealMoteKind {
-    /// A small star flash (`star5a` / `yellow_star_dim`).
-    Star,
-    /// A vertically stretched streak (`ribbonblur1bd_gold_side`).
-    Ribbon,
-    /// A soft, wide light-puff (`clouds8x8fade`).
-    Puff,
-}
-
 /// A 3-point piecewise-linear parameter over the emit window, keyed at
 /// start / midpoint / end — how the source keys its ramped rates and areas.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -431,7 +420,8 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
 /// head, with emission areas widening as the origins descend (the widening
 /// curtain), stars up top and soft light-puffs below.
 fn holy_light_style(duration: f32, intensity: f32) -> HealStyle {
-    // (y offset from head, area, band position 0..1 top-to-bottom)
+    // (y offset from head, emission area); the band's 0..1 top-to-bottom
+    // position is derived from its index below.
     const BANDS: [(f32, f32); 7] = [
         (1.05, 0.0),
         (0.97, 0.25),
@@ -727,11 +717,20 @@ pub fn spawn_heal_impacts(
             Some(assets.dot.clone()),
         );
 
-        commands.entity(entity).insert((
+        let carry = [0.0; 8];
+        debug_assert!(
+            style.emitters.len() <= carry.len(),
+            "{:?} declares {} emitters but the rig carries {} — a further \
+             emitter would silently never emit; grow HealImpactRig::carry",
+            impact.kind,
+            style.emitters.len(),
+            carry.len(),
+        );
+        commands.entity(entity).try_insert((
             Transform::from_translation(at),
             Visibility::default(),
             HealImpactRig {
-                carry: [0.0; 8],
+                carry,
                 emitted: 0,
                 quad: assets.quad.clone(),
                 star_material,

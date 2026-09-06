@@ -434,10 +434,21 @@ pub struct HealSprite {
     pub base_alpha: f32,
 }
 
+/// What a heal landing's motes look like.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum HealMoteKind {
+    /// A small star flash (`star5a` / `yellow_star_dim`).
+    Star,
+    /// A vertically stretched streak (`ribbonblur1bd_gold_side`).
+    Ribbon,
+    /// A soft, wide light-puff (`clouds8x8fade`).
+    Puff,
+}
+
 /// One rising or falling gold mote of a heal landing, in the rig's frame.
 #[derive(Component)]
 pub struct HealMote {
-    pub kind: crate::states::play_match::rendering::HealMoteKind,
+    pub kind: HealMoteKind,
     pub velocity: Vec3,
     pub age: f32,
     pub life: f32,

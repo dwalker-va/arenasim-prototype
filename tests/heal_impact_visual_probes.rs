@@ -12,6 +12,17 @@
 //! Runs on `MinimalPlugins` + `AssetPlugin` + `TransformPlugin` — no window,
 //! no GPU. `TransformPlugin` is load-bearing: without it `GlobalTransform`
 //! never propagates and every assertion below would read a child's LOCAL pose.
+//!
+//! The harness registers the full graphical chain, `spawn -> animate ->
+//! billboard`, because `billboard_heal_impacts` is what actually PLACES Flash
+//! Heal's ray fan (each ray's roll and its walked-out centre); a probe that
+//! asserted the fan before billboarding would pass on eight rays clumped at
+//! one point. Probes whose subject the billboard pass overwrites spawn a
+//! `Camera3d` and assert world/screen geometry; everything else — mote
+//! translations, the butterfly orbit, the rig anchor — is placed by
+//! `animate_heal_impacts`, which the billboard pass never touches (it writes
+//! sprite poses and mote ROTATIONS only), so those probes stay camera-free,
+//! matching the graphical system's own no-camera early-out.
 
 use std::time::Duration;
 
@@ -25,7 +36,7 @@ use arenasim::states::play_match::components::{
     HealSpriteRole,
 };
 use arenasim::states::play_match::{
-    animate_heal_impacts, butterfly_center, heal_envelope, heal_style,
+    animate_heal_impacts, billboard_heal_impacts, butterfly_center, heal_envelope, heal_style,
     spawn_heal_impacts, HealAnchor, Ramp, FLASH_HEAL_FLASH_DURATION,
     FLASH_HEAL_RAY_COUNT, FLASH_HEAL_RAY_LENGTH, FLASH_OF_LIGHT_BORROW_INTENSITY,
     FLASH_OF_LIGHT_DURATION, HEALING_WAVE_BUTTERFLIES, HEALING_WAVE_ORBIT_RADIUS,
@@ -52,8 +63,21 @@ impl Harness {
         app.init_asset::<StandardMaterial>();
         app.init_asset::<Image>();
         app.insert_resource(TimeUpdateStrategy::ManualDuration(TICK));
-        app.add_systems(Update, (spawn_heal_impacts, animate_heal_impacts).chain());
+        // The same chained contract graphical mode registers
+        // (`states/mod.rs`): `billboard` must see the poses `animate` wrote.
+        app.add_systems(
+            Update,
+            (spawn_heal_impacts, animate_heal_impacts, billboard_heal_impacts).chain(),
+        );
         Harness { app }
+    }
+
+    /// A camera for probes whose subject `billboard_heal_impacts` places.
+    /// Returns the camera's world rotation for screen-frame assertions.
+    fn spawn_camera(&mut self, from: Vec3, look_at: Vec3) -> Quat {
+        let transform = Transform::from_translation(from).looking_at(look_at, Vec3::Y);
+        self.app.world_mut().spawn((Camera3d::default(), transform));
+        transform.rotation
     }
 
     fn tick(&mut self, frames: u32) {
@@ -299,59 +323,127 @@ fn holy_light_curtain_falls_from_the_head() {
     );
 }
 
-/// Flash Heal: the ray-fan flash opens at the feet (8 rays reaching toward
-/// the blessed length), motes RISE, and the flash is gone after its window.
+/// Flash Heal: the ray-fan flash opens at the feet, motes RISE, and the
+/// flash is gone after its window.
+///
+/// The fan is PLACED by `billboard_heal_impacts` — each ray's roll about the
+/// view axis and its centre walked out by half its extent — so this asserts
+/// the rays' rendered WORLD geometry under a real `Camera3d`, from two
+/// genuinely different bearings. The first version read only local scale
+/// scalars and passed on eight rays clumped at one point (see
+/// `docs/solutions/implementation-patterns/visual-probes-assert-rendered-geometry.md`).
 #[test]
 fn flash_heal_rays_fan_and_motes_rise() {
-    let mut h = Harness::new();
     let at = Vec3::new(-2.0, 0.0, 6.0);
-    let recipient = h.spawn_recipient(at);
-    let rig = h.land(HealImpactKind::FlashHeal, recipient);
-    h.tick(12); // ~0.19s: flash fully open, motes flowing
-
-    let rig_pos = h.rig_pos(rig);
     let base = at + Vec3::Y * HEAL_BASE_Y;
-    assert!(rig_pos.distance(base) < 1e-3, "rig sits at the feet: {rig_pos}");
 
-    let rays: Vec<Transform> = h
-        .sprites()
-        .into_iter()
-        .filter(|(role, ..)| matches!(role, HealSpriteRole::Ray { .. }))
-        .map(|(_, t, _)| t)
-        .collect();
-    assert_eq!(rays.len(), FLASH_HEAL_RAY_COUNT as usize);
-    for ray in &rays {
-        assert!(
-            ray.scale.y > FLASH_HEAL_RAY_LENGTH * 0.5,
-            "an open ray reaches toward its full length, got {}",
-            ray.scale.y
-        );
-        assert!(ray.scale.y <= FLASH_HEAL_RAY_LENGTH + 1e-3);
-    }
-    let flares = h
-        .sprites()
-        .into_iter()
-        .filter(|(role, ..)| matches!(role, HealSpriteRole::LensFlare))
-        .count();
-    assert_eq!(flares, 1, "one central lens flare");
+    for cam_pos in [Vec3::new(0.0, 9.0, 24.0), Vec3::new(18.0, 5.0, -12.0)] {
+        let mut h = Harness::new();
+        let recipient = h.spawn_recipient(at);
+        let rig = h.land(HealImpactKind::FlashHeal, recipient);
+        let cam_rot = h.spawn_camera(cam_pos, at);
+        h.tick(12); // ~0.19s: flash fully open, motes flowing
 
-    let motes = h.motes();
-    assert_min("flash heal motes", motes.len(), 4);
-    for (velocity, _, pos) in &motes {
-        assert!(velocity.y > 0.0, "flash heal motes rise, got {velocity}");
-        assert!(pos.y >= base.y - 0.1, "motes start at/above the feet: {pos}");
-    }
+        let rig_pos = h.rig_pos(rig);
+        assert!(rig_pos.distance(base) < 1e-3, "rig sits at the feet: {rig_pos}");
 
-    // Past the flash window the rays have collapsed.
-    let flash_frames = (FLASH_HEAL_FLASH_DURATION / 0.016).ceil() as u32 + 2;
-    h.tick(flash_frames);
-    for (role, t, _) in h.sprites() {
-        if matches!(role, HealSpriteRole::Ray { .. }) {
+        let rays: Vec<(f32, GlobalTransform)> = h
+            .sprites()
+            .into_iter()
+            .filter_map(|(role, _, g)| match role {
+                HealSpriteRole::Ray { angle } => Some((angle, g)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(rays.len(), FLASH_HEAL_RAY_COUNT as usize);
+
+        // Each ray is a centre-origin quad: its world endpoints are the
+        // quad's local ±Y/2 through the propagated transform. The inner end
+        // must sit ON the flash centre and the outer end must actually reach
+        // the blessed length — a translation offset of anything but half the
+        // extent (the "reaching half as far as claimed" defect) fails here.
+        let mut outer_ends = Vec::new();
+        let mut bearings = Vec::new();
+        for (angle, g) in &rays {
+            let inner = g.transform_point(Vec3::new(0.0, -0.5, 0.0));
+            let outer = g.transform_point(Vec3::new(0.0, 0.5, 0.0));
             assert!(
-                t.scale.y <= 1e-3,
-                "a ray must be gone after the flash window, scale {}",
-                t.scale.y
+                inner.distance(rig_pos) < 0.05,
+                "ray {angle:.2}'s inner end {inner} is off the flash centre {rig_pos}"
             );
+            let reach = outer.distance(rig_pos);
+            assert!(
+                (FLASH_HEAL_RAY_LENGTH * 0.9..=FLASH_HEAL_RAY_LENGTH * 1.02)
+                    .contains(&reach),
+                "ray {angle:.2} reaches {reach}yd, not ~{FLASH_HEAL_RAY_LENGTH}yd"
+            );
+            // In the camera's own frame the ray must lie in the billboard
+            // plane, at its own bearing.
+            let dir = cam_rot.inverse() * (outer - inner).normalize();
+            assert!(
+                dir.z.abs() < 0.02,
+                "ray {angle:.2} leans {} out of the billboard plane",
+                dir.z
+            );
+            bearings.push(dir.y.atan2(dir.x));
+            outer_ends.push(outer);
+        }
+
+        // The fan's world extent: opposite rays' tips span ~2x the ray
+        // length. Eight distinct rolls at one point would span ~0.
+        let mut span = 0.0_f32;
+        for i in 0..outer_ends.len() {
+            for j in (i + 1)..outer_ends.len() {
+                span = span.max(outer_ends[i].distance(outer_ends[j]));
+            }
+        }
+        assert!(
+            (FLASH_HEAL_RAY_LENGTH * 1.8..=FLASH_HEAL_RAY_LENGTH * 2.1).contains(&span),
+            "the open fan spans {span}yd, not ~{}yd — clumped or overreaching",
+            FLASH_HEAL_RAY_LENGTH * 2.0
+        );
+
+        // Eight distinct, evenly spaced bearings around the flash centre.
+        bearings.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let step = std::f32::consts::TAU / FLASH_HEAL_RAY_COUNT as f32;
+        for pair in bearings.windows(2) {
+            let gap = pair[1] - pair[0];
+            assert!(
+                (gap - step).abs() < 0.1,
+                "uneven fan from {cam_pos}: gap {gap} rad, want {step}: {bearings:?}"
+            );
+        }
+        let wrap = bearings[0] + std::f32::consts::TAU - bearings.last().unwrap();
+        assert!(
+            (wrap - step).abs() < 0.1,
+            "uneven fan across the wrap: {wrap} rad, want {step}: {bearings:?}"
+        );
+
+        let flares = h
+            .sprites()
+            .into_iter()
+            .filter(|(role, ..)| matches!(role, HealSpriteRole::LensFlare))
+            .count();
+        assert_eq!(flares, 1, "one central lens flare");
+
+        let motes = h.motes();
+        assert_min("flash heal motes", motes.len(), 4);
+        for (velocity, _, pos) in &motes {
+            assert!(velocity.y > 0.0, "flash heal motes rise, got {velocity}");
+            assert!(pos.y >= base.y - 0.1, "motes start at/above the feet: {pos}");
+        }
+
+        // Past the flash window the rays have collapsed.
+        let flash_frames = (FLASH_HEAL_FLASH_DURATION / 0.016).ceil() as u32 + 2;
+        h.tick(flash_frames);
+        for (role, t, _) in h.sprites() {
+            if matches!(role, HealSpriteRole::Ray { .. }) {
+                assert!(
+                    t.scale.y <= 1e-3,
+                    "a ray must be gone after the flash window, scale {}",
+                    t.scale.y
+                );
+            }
         }
     }
 }
