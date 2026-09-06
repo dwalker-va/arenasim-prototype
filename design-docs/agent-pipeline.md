@@ -63,6 +63,34 @@ thing that spawns worker sessions; the board page never does.
 `Artifact action:"watch" url:<board url>`. A session that published or read the
 board recently usually gets its watch restored on `--resume`.
 
+**Becoming orchestrator (startup recovery).** Workers are in-process subagents,
+so they die with the orchestrator session that spawned them — while their card
+keeps its `agent: {status: "working"}` claim, which the dedup guard then reads
+as "already being worked" forever. A fresh orchestrator has spawned nothing
+yet, so **every `working` claim it finds at startup was made by a previous
+session and is stale by definition** — no liveness probing is needed.
+Therefore, immediately after starting the watch (before processing any
+notification), read the board once and sweep:
+
+- Every `in_progress` card with `agent.status == "working"` (an Engineer or
+  other role agent died mid-run): set `agent: null` and append an activity
+  entry (`by: "orchestrator"`, noting the recovery). The normal spawn rule
+  (step 2 below) then respawns it on this same pass.
+- Every `review` card with `agent.status == "working"` (a Tester died
+  mid-run): set `agent: null`, same activity entry. The review-entry rule
+  (step 3 below) then respawns the Tester, since the PR link is still in
+  `links`.
+
+The sweep touches nothing else. `done` cards are past their agent work;
+`needs_input` cards already carry `agent: null` by protocol; and `archived`
+cards are terminal with no automation — a release-manager trigger card
+archived mid-claim (step 6 stamps `released` and the column, not the `agent`
+field) may carry
+a lingering `agent: working`, and the sweep must leave it alone.
+
+Republish the board once with all resets applied, then run the notification
+steps below against the recovered state.
+
 **On each republish notification:**
 
 1. `Artifact action:"read"` the board; save the HTML to a local file; extract the
@@ -80,8 +108,9 @@ board recently usually gets its watch restored on `--resume`.
       activity log and `question.answer`. A `release-manager` card additionally
       gets the Done-card bundle in its prompt (see Release flow) — the agent
       cannot read the board.
-3. For every card with `column == "review"`, `agent.status == "done"`, and an
-   open-PR link in `links`:
+3. For every card with `column == "review"`, `agent == null` **or**
+   `agent.status == "done"`, and an open-PR link in `links` (`done` is the
+   normal Engineer hand-off; `null` is a claim reset by startup recovery):
    a. Set `agent: {status: "working", started: <now>}`, append an activity entry
       (`by: "orchestrator"`), and **republish the board first** (same conflict
       rule as 2a).
@@ -206,8 +235,11 @@ into the next bundle. The `released` field is also the dedup guard for the
 ## Known limits (v1)
 
 - Workers are in-process subagents: they die if the orchestrator session dies
-  (their worktree changes survive; the card stays `agent: working` — reset
-  `agent: null` to respawn).
+  (their worktree changes survive). The stale `agent: working` claim they leave
+  behind is handled by the next orchestrator's startup recovery sweep (see
+  *Becoming orchestrator*), which resets it so the normal spawn rules respawn
+  the card — but until an orchestrator session connects, the card simply sits
+  claimed.
 - Watches are session-local; if no orchestrator session is open, drags simply
   queue up as board state until one connects and reads the board.
 - Board writes are last-writer-wins with conflict-reload; fine for one human +
