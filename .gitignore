@@ -26,6 +26,10 @@ Thumbs.db
 
 # Match logs (for debugging)
 match_logs/
+
+# PM-session handoff outbox (working files, not repo content — see docs/design/agent-pipeline.md)
+.claude/pm-outbox/
+
 # egui_kittest transient snapshot artifacts (keep only the blessed *.png baseline)
 tests/snapshots/*.new.png
 tests/snapshots/*.old.png

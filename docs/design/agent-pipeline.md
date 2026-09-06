@@ -9,12 +9,23 @@ truth for code. GitHub issues are not used.
 
 ## The board
 
-- Artifact: **ArenaSim Dispatch** — `https://claude.ai/code/artifact/c0a5ab22-6889-4ffd-b53c-93cd2c11e86d`
+- Artifact: **ArenaSim Dispatch**. The board URL is deliberately not written
+  into the repo (it is a private artifact URL): it lives in the orchestrator's
+  project memory, and the artifact appears in the owner's `/artifacts` list by
+  title.
 - The page declares the `artifact` capability: every user interaction (drag,
   edit, answer) republishes the page with the new state embedded. State lives in
   the `<script id="state" type="application/json">` block of the published HTML.
 - Because republishes push **watch notifications** to any local session watching
   the artifact, the board is a *push* trigger — no polling.
+
+**Single board writer.** Exactly one session publishes the board artifact: the
+orchestrator. Every other session — PM sessions included — reads it freely but
+never publishes; the in-page save from a user gesture (drag, edit, answer) is
+the one designed-in second writer. Card creation or moves requested by a PM
+session flow through the orchestrator (see Roles). This is the general form of
+the single-orchestrator rule in Known limits: last-writer-wins publishing
+tolerates one automated writer, not several.
 
 ### State schema (`schema: 1`)
 
@@ -92,6 +103,31 @@ must leave it alone.
 
 Republish the board once with all resets applied, then run the notification
 steps below against the recovered state.
+
+**Orchestrator death + resume.** When the orchestrator session dies (terminal
+closed, machine rebooted, session killed), its in-process workers die with it —
+but their PRs and branches survive on GitHub, and their worktree changes
+survive on disk. Two ways back:
+
+1. **First choice: resume the session.** `claude --resume` (or `--continue`)
+   in the orchestrator's directory restores the session. The artifact watch on
+   the most-recently-used artifact is usually restored automatically, so board
+   drags wake it again — but verify with the Artifact `status` action before
+   trusting it, and re-arm with an explicit `watch` if it did not come back.
+2. **Fresh session as the new orchestrator.** The board URL is deliberately
+   not in the repo (see The board); recover it from the orchestrator's project
+   memory, or find the artifact in the owner's `/artifacts` list by title.
+   Then, in order:
+   a. Confirm the old orchestrator session is actually dead (single-orchestrator
+      rule — a live predecessor means stop here).
+   b. Read the artifact and adopt the live copy as the local base.
+   c. Explicitly re-arm the watch (`Artifact action:"watch"` — a read alone
+      does not subscribe; only a publish or an explicit watch action does).
+   d. Run the startup-recovery sweep above (every `working` claim is stale by
+      definition) and the live-claim audit.
+
+Either way, nothing that matters is lost with the process: the sweep re-spawns
+workers from card state, and open PRs are re-discovered via `gh pr list`.
 
 **On each republish notification:**
 
@@ -185,12 +221,36 @@ step 2b/3b under the existing claim) or reset it to `agent: null` and let the
 normal spawn rules pick it up on the same pass. Claims with a matching live
 agent are untouched.
 
-**Writing cards as Claude (PM role):** read the board, edit the state JSON
-(append a card, bump `nextId`, activity `by: "claude"`), republish with `url:`.
+**Writing cards as Claude:** read the board, edit the state JSON (append a
+card, bump `nextId`, activity `by: "claude"`), republish with `url:`. Only the
+orchestrator does this (single-board-writer rule) — it is also how card specs
+handed off from a PM session get filed.
 
 ## Roles
 
-- **PM** — interactive 1:1 sessions with the user; output is well-specified cards.
+- **PM** — a **dedicated interactive session** the user opens for scoping and
+  product discussions that span many user-paced turns. Not the orchestrator
+  session (scoping turns would interleave with orchestration updates and
+  scroll or compact out of history) and not a spawned subagent (workers cannot
+  wait on user input). A `role: "pm"` scoping card is the handoff: its body
+  carries the full context; the PM session reads the board and the relevant
+  files, refines with the user for as long as needed, and ends by handing the
+  **orchestrator** the card specs to file (under the single-board-writer rule
+  the PM session never publishes the board itself). PM sessions do not spawn
+  engineers; their actionable output is card text, not code.
+
+  **The handoff.** The durable artifact is a file, not a message: the PM
+  session writes its final output — the card specs to file — to
+  `.claude/pm-outbox/<card-id>.md` in the repo checkout (gitignored: handoffs
+  are working files, not repo content), then tells the user it is done. The
+  default path from there is user-relayed: the user notifies the orchestrator
+  ("AS-25 scoping is done"), which reads the outbox file and files the cards.
+  When live cross-session messaging is available, the PM session may
+  additionally message the orchestrator as a wake-up — but it still writes the
+  outbox file first; the message is the wake-up, the file is the payload.
+  (Cross-session discovery is not reliable — sessions under different
+  accounts or clients may simply not reach each other — so the file-plus-user
+  path is the protocol, and the message is the nice-to-have.)
 - **Engineer** — `.claude/agents/engineer.md`. Isolated worktree → PR. Reports
   `READY_FOR_REVIEW / NEEDS_INPUT / FAILED` in a fixed format.
 - **Tester** — `.claude/agents/tester.md`. Verification only: no Edit/Write
@@ -271,7 +331,9 @@ left in `done` to leak into the next bundle, nor archived with a dangling
   and duplicate-spawn every card the first orchestrator is already working.
   There is no claim-ownership mechanism; the protocol simply assumes one
   orchestrator session exists at a time, and the user must not start a second
-  while one is running.
+  while one is running. The single-board-writer rule (see The board) is this
+  constraint generalized to publishing: other sessions, PM included, read the
+  board but never publish it.
 - Workers are in-process subagents: they die if the orchestrator session dies
   (their worktree changes survive). The stale `agent: working` claim they leave
   behind is handled by the next orchestrator's startup recovery sweep (see
