@@ -10,7 +10,16 @@ use crate::states::match_config::{ArenaMap, CharacterClass, HunterPetType, MageA
 use crate::states::play_match::equipment::{ItemId, ItemSlot};
 
 /// Headless match configuration loaded from JSON
+///
+/// `deny_unknown_fields` because every field here has a serde default: a
+/// mistyped key ("seed" instead of "random_seed", a misspelled ai_profile
+/// key) would otherwise silently degrade to the default — which once burned a
+/// byte-identity comparison by running a "seeded" match randomly seeded. A
+/// typo must fail at load with the offending key named. This is the ONLY
+/// struct in the config tree (all fields are vectors/maps/options of
+/// primitives), so nothing nested needs its own attribute.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct HeadlessMatchConfig {
     /// Team 1 composition (1-3 class names)
     pub team1: Vec<String>,
@@ -696,5 +705,43 @@ mod tests {
     fn parse_map_rejects_unknown_and_lists_test_verticality() {
         let err = HeadlessMatchConfig::parse_map("Nonsense").unwrap_err();
         assert!(err.contains("TestVerticality"), "error should list the new map: {}", err);
+    }
+
+    /// The actual incident: `"seed"` instead of `"random_seed"` used to parse
+    /// fine and run the match randomly seeded — silently invalidating a
+    /// byte-identity comparison. It must now fail at parse time with the
+    /// offending key named in the error.
+    #[test]
+    fn unknown_key_fails_to_parse_and_names_the_key() {
+        let json = r#"{"team1":["Warrior"],"team2":["Mage"],"seed":42}"#;
+        let err = serde_json::from_str::<HeadlessMatchConfig>(json)
+            .expect_err("a config with an unknown key must not parse");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("seed"),
+            "error must name the offending key: {}",
+            msg
+        );
+    }
+
+    /// A valid config parses identically to before the deny_unknown_fields
+    /// change: explicit keys land in their fields, omitted keys take their
+    /// serde defaults.
+    #[test]
+    fn valid_config_parses_identically() {
+        let json = r#"{"team1":["Warrior","Priest"],"team2":["Mage"],"map":"TwinPillars","random_seed":42,"team2_kill_target":1,"ai_profile":"Legacy"}"#;
+        let config: HeadlessMatchConfig =
+            serde_json::from_str(json).expect("valid config must still parse");
+        assert_eq!(config.team1, vec!["Warrior", "Priest"]);
+        assert_eq!(config.team2, vec!["Mage"]);
+        assert_eq!(config.map, "TwinPillars");
+        assert_eq!(config.random_seed, Some(42));
+        assert_eq!(config.team2_kill_target, Some(1));
+        assert_eq!(config.ai_profile.as_deref(), Some("Legacy"));
+        // Omitted keys still take their serde defaults.
+        assert_eq!(config.max_duration_secs, default_max_duration());
+        assert_eq!(config.team1_kill_target, None);
+        assert!(config.team1_hunter_pet_types.is_empty());
+        config.validate().expect("valid config must still validate");
     }
 }
