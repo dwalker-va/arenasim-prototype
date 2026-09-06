@@ -42,8 +42,6 @@ mod traps;
 pub use traps::*;
 mod ice_block;
 pub use ice_block::*;
-mod slow_zone;
-pub use slow_zone::*;
 mod movement_trails;
 pub use movement_trails::*;
 mod affliction;

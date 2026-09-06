@@ -197,14 +197,41 @@ pub struct IceBlockVisual {
     pub grace_timer: f32,
 }
 
-/// Wind streak trail left behind during Disengage leap.
-/// Static position, fades over its lifetime.
+/// Per-leap emitter state for the Disengage wind trail. Lives on the leaping
+/// entity while its `DisengagingState` does; `last_emit` is the world
+/// position of the most recently emitted trail element, so emission is
+/// distance-paced along the actual leap path (the same construction as
+/// `ChargeTrailEmitter` — Disengage covers 15 yd at 30 yd/s).
 #[derive(Component)]
-pub struct DisengageTrail {
+pub struct DisengageTrailEmitter {
+    /// World position of the last emitted trail element.
+    pub last_emit: Vec3,
+}
+
+/// One thin wind sliver of the Disengage trail — a speed-line laid along the
+/// leap path at body height, fading over its lifetime. Authored (the Classic
+/// client has no leap visual for Disengage); the construction is the Charge
+/// trail's, the air-streak read is its own.
+#[derive(Component)]
+pub struct DisengageWindStreak {
     /// Time remaining before despawn (seconds)
     pub lifetime: f32,
     /// Initial lifetime for fade calculation
     pub initial_lifetime: f32,
+}
+
+/// One tiny additive spark mote scattered along the Disengage leap — the Bevy
+/// analog of the white-blue flare/sparkle emitters in Classic Disengage's own
+/// kit model (`spells/blink_impact_chest.m2`: Add-blended flare/star/pixie
+/// sprites, lives 0.35–1.14s). Drifts along `velocity` while fading.
+#[derive(Component)]
+pub struct DisengageSparkMote {
+    /// Time remaining before despawn (seconds)
+    pub lifetime: f32,
+    /// Initial lifetime for fade calculation
+    pub initial_lifetime: f32,
+    /// Constant drift, integrated per frame.
+    pub velocity: Vec3,
 }
 
 /// Per-charge emitter state for the charge trail (Warrior Charge + Boar
