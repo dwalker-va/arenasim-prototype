@@ -44,7 +44,12 @@ opt-level = 3
 [profile.dev]
 opt-level = 1
 
+# ThinLTO stays: dropping it would cut the warm rebuild tail 3x more but trends
+# ~3% slower on 49-cell matrix sim throughput (see docs/build-times.md).
+# codegen-units=16 (the rustc release default) parallelizes codegen at no
+# measured runtime cost; match logs are byte-identical to codegen-units=1 at
+# the same seed.
 [profile.release]
 lto = "thin"
-codegen-units = 1
+codegen-units = 16
 
