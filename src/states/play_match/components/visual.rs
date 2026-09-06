@@ -422,8 +422,12 @@ pub enum HealSpriteRole {
     LensFlare,
     /// Holy Light's glow bloom at the head.
     HeadGlow,
-    /// One of Healing Wave's green/gold torso glow layers.
+    /// One of Healing Wave's green/gold torso glow layers — halo quads whose
+    /// radii clear the combatant capsule so the wrap reads AROUND the body.
     TorsoGlow,
+    /// Healing Wave's green pool of light at the recipient's feet. Lies flat
+    /// on the ground and is never billboarded.
+    UnderGlow,
 }
 
 #[derive(Component)]

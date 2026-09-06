@@ -33,9 +33,12 @@ use crate::states::play_match::components::*;
 //   variants (visuals 6622/7379) borrow Holy Light's kit 154, so FoL renders
 //   the Holy Light effect at reduced intensity and duration.
 // - **Lesser Healing Wave / Healing Wave** (`restoration_impact_base.m2`,
-//   Base — one visual for both ranks and both spells): green/gold torso glow
-//   layers, 8 small butterflies fluttering in orbit, and a light dusting of
-//   rising gold stars. The only non-pure-gold heal.
+//   Base — one visual for both ranks and both spells): green/gold glow layers
+//   WRAPPING the torso (the source vertex cloud sits at radial extent
+//   1.2–1.7 u — around the body, never inside it), a green pool of light at
+//   the feet where the Base attach grounds the effect, 8 small butterflies
+//   fluttering in orbit, and a light dusting of rising gold stars. The only
+//   non-pure-gold heal.
 //
 // Everything is additive (every material and emitter in the source set is M2
 // blend mode 4), Holy is pure gold, Nature is green + gold. Emitter constants
@@ -82,6 +85,22 @@ pub const HEALING_WAVE_BUTTERFLIES: u32 = 8;
 pub const HEALING_WAVE_ORBIT_RADIUS: f32 = 1.45;
 pub const HEALING_WAVE_SWIRL_SPEED_SCALE: f32 = 1.0;
 pub const HEALING_WAVE_GLOW_INTENSITY: f32 = 1.0;
+/// Radius of the combatant capsule (`Capsule3d::new(0.5, 1.5)`). A glow quad
+/// billboarded on the spine axis renders at or BEHIND the capsule's front
+/// surface out to this radius, so any wrap layer must clear it with margin or
+/// the body occludes the glow entirely — which is exactly how the third build
+/// (0.50/0.38/0.28 radii) lost the green glow. Pinned by
+/// `healing_wave_glow_wraps_outside_the_body`.
+pub const COMBATANT_BODY_RADIUS: f32 = 0.5;
+/// Radius of the green pool of light at the recipient's feet — the Base
+/// attach grounding the effect (blessed band 0.8–1.2).
+pub const HEALING_WAVE_UNDERGLOW_RADIUS: f32 = 1.0;
+pub const HEALING_WAVE_UNDERGLOW_ALPHA: f32 = 0.35;
+/// How far the under-glow quad sits below the rig (rig-local). The rig's
+/// Base anchor floats 0.10 above the floor (`HEAL_BASE_Y` vs the capsule
+/// bottom at -1.25); this drop leaves the quad a hair above the ground so it
+/// never z-fights the arena floor.
+const HEALING_WAVE_UNDERGLOW_DROP: f32 = 0.06;
 /// Butterflies flutter between these heights above the feet (source vertex
 /// cloud: z 0.3–1.3).
 pub const HEALING_WAVE_BUTTERFLY_MIN_Y: f32 = 0.3;
@@ -214,6 +233,9 @@ pub struct HealStyle {
     pub flash: Option<RayFlash>,
     /// `(radius, alpha)` of Holy Light's head bloom.
     pub head_glow: Option<(f32, f32)>,
+    /// `(radius, alpha)` of Healing Wave's green pool at the feet — a flat
+    /// ground quad, never billboarded.
+    pub under_glow: Option<(f32, f32)>,
     pub torso_glows: Vec<GlowLayer>,
     pub butterflies: bool,
     pub emitters: Vec<HealEmitter>,
@@ -251,6 +273,7 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
                 intensity: FLASH_HEAL_FLASH_INTENSITY,
             }),
             head_glow: None,
+            under_glow: None,
             torso_glows: Vec::new(),
             butterflies: false,
             // Mote SIZES here and in HealStream are render tuning, not M2
@@ -320,6 +343,7 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
             intensity: 1.0,
             flash: None,
             head_glow: None,
+            under_glow: None,
             torso_glows: Vec::new(),
             butterflies: false,
             // Mote sizes raised with Flash Heal's — see the note there.
@@ -376,26 +400,36 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
             intensity: 1.0,
             flash: None,
             head_glow: None,
-            // Blessed bench radii: soft glows the body shows THROUGH, layered
-            // green under gold under pale gold. The first build shipped these
-            // at 1.15/0.95/0.80 — a 2.3 u-wide additive stack that saturated
-            // into a solid-looking disc swallowing the combatant.
+            under_glow: Some((
+                HEALING_WAVE_UNDERGLOW_RADIUS,
+                HEALING_WAVE_UNDERGLOW_ALPHA * HEALING_WAVE_GLOW_INTENSITY,
+            )),
+            // Wrap halos AROUND the torso, layered green under gold under
+            // pale gold at the blessed heights. The source glow layers wrap
+            // the body at radial extent 1.2–1.7 u — never inside it — and in
+            // 3D the geometry enforces the same: a quad billboarded on the
+            // spine renders behind the capsule's front surface out to
+            // COMBATANT_BODY_RADIUS, so every radius here must clear 0.5 with
+            // margin or the body swallows the glow whole (the third build's
+            // 0.50/0.38/0.28 defect). The occluded centre is a feature — only
+            // the soft annulus around the silhouette reads, so these can't
+            // saturate into the first build's solid 2.3 u disc either.
             torso_glows: vec![
                 GlowLayer {
                     height: 0.49,
-                    radius: 0.50,
+                    radius: 0.95,
                     color: nature_green(),
-                    alpha: 0.35 * HEALING_WAVE_GLOW_INTENSITY,
+                    alpha: 0.50 * HEALING_WAVE_GLOW_INTENSITY,
                 },
                 GlowLayer {
                     height: 0.70,
-                    radius: 0.38,
+                    radius: 0.80,
                     color: holy_gold(),
-                    alpha: 0.30 * HEALING_WAVE_GLOW_INTENSITY,
+                    alpha: 0.35 * HEALING_WAVE_GLOW_INTENSITY,
                 },
                 GlowLayer {
                     height: 0.83,
-                    radius: 0.28,
+                    radius: 0.70,
                     color: holy_gold_pale(),
                     alpha: 0.30 * HEALING_WAVE_GLOW_INTENSITY,
                 },
@@ -473,6 +507,7 @@ fn holy_light_style(duration: f32, intensity: f32) -> HealStyle {
             HOLY_LIGHT_HEAD_GLOW_RADIUS,
             0.8 * HOLY_LIGHT_HEAD_GLOW_INTENSITY,
         )),
+        under_glow: None,
         torso_glows: Vec::new(),
         butterflies: false,
         emitters,
@@ -671,6 +706,33 @@ pub fn spawn_heal_impacts(
                             Some(assets.dot.clone()),
                         )),
                         Transform::default(),
+                        NotShadowCaster,
+                    ))
+                    .id(),
+            );
+        }
+
+        if let Some((radius, alpha)) = style.under_glow {
+            // A flat pool of green light on the ground under the feet. Laid
+            // into the XZ plane at spawn and never billboarded — the ground
+            // is its plane.
+            parts.push(
+                commands
+                    .spawn((
+                        HealSprite {
+                            role: HealSpriteRole::UnderGlow,
+                            radius,
+                            base_alpha: alpha,
+                        },
+                        Mesh3d(assets.quad.clone()),
+                        MeshMaterial3d(glow(
+                            &mut materials,
+                            nature_green(),
+                            2.0,
+                            Some(assets.dot.clone()),
+                        )),
+                        Transform::from_translation(Vec3::Y * -HEALING_WAVE_UNDERGLOW_DROP)
+                            .with_rotation(Quat::from_rotation_x(-FRAC_PI_2)),
                         NotShadowCaster,
                     ))
                     .id(),
@@ -917,9 +979,20 @@ pub fn animate_heal_impacts(
                             )
                         }
                     }
-                    HealSpriteRole::HeadGlow | HealSpriteRole::TorsoGlow => {
+                    HealSpriteRole::HeadGlow => {
                         // Bloom in with the envelope, gone with the window.
                         let bloom = 0.5 + 0.5 * envelope;
+                        (
+                            Vec3::splat((sprite.radius * 2.0 * bloom).max(1e-4)),
+                            sprite.base_alpha * envelope,
+                        )
+                    }
+                    HealSpriteRole::TorsoGlow | HealSpriteRole::UnderGlow => {
+                        // The wrap and the pool breathe rather than bloom: a
+                        // deep bloom would drag the wrap's drawn radius back
+                        // under COMBATANT_BODY_RADIUS and bury it in the body
+                        // for part of its life.
+                        let bloom = 0.8 + 0.2 * envelope;
                         (
                             Vec3::splat((sprite.radius * 2.0 * bloom).max(1e-4)),
                             sprite.base_alpha * envelope,
@@ -987,7 +1060,8 @@ pub fn animate_heal_impacts(
 ///
 /// The lens flare, glows and motes are flat quads; the rays keep their own
 /// roll about the view axis so the fan stays a fan. Butterfly wings are NOT
-/// billboarded — their 3D flutter is the design.
+/// billboarded — their 3D flutter is the design — and neither is the feet
+/// under-glow, which lies in the ground plane.
 pub fn billboard_heal_impacts(
     camera: Query<
         &Transform,
@@ -1023,6 +1097,9 @@ pub fn billboard_heal_impacts(
                         // ray's own axis in the billboard plane.
                         part.translation = roll * Vec3::Y * (part.scale.y * 0.5);
                     }
+                    // The under-glow is a pool ON the ground — the ground is
+                    // its plane, so it keeps its spawn-time flat rotation.
+                    HealSpriteRole::UnderGlow => {}
                     _ => {
                         part.rotation = facing;
                     }

@@ -37,7 +37,7 @@ use arenasim::states::play_match::components::{
 };
 use arenasim::states::play_match::{
     animate_heal_impacts, billboard_heal_impacts, butterfly_center, heal_envelope, heal_style,
-    spawn_heal_impacts, HealAnchor, Ramp, FLASH_HEAL_FLASH_DURATION,
+    spawn_heal_impacts, HealAnchor, Ramp, COMBATANT_BODY_RADIUS, FLASH_HEAL_FLASH_DURATION,
     FLASH_HEAL_RAY_COUNT, FLASH_HEAL_RAY_LENGTH, FLASH_OF_LIGHT_BORROW_INTENSITY,
     FLASH_OF_LIGHT_DURATION, HEALING_WAVE_BUTTERFLIES, HEALING_WAVE_ORBIT_RADIUS,
     HEALING_WAVE_OUTWARD_DRIFT, HEAL_BASE_Y, HEAL_STREAM_WIDTH, HOLY_LIGHT_DURATION,
@@ -556,6 +556,108 @@ fn healing_wave_butterflies_orbit_the_torso() {
     assert!(
         mid.distance(expected) < 0.25,
         "wing midpoint {mid} strayed from the orbit centre {expected}"
+    );
+}
+
+/// Healing Wave's glow must SURROUND the body, never hide inside it. A glow
+/// quad billboarded on the spine axis renders at or behind the capsule's
+/// front surface out to `COMBATANT_BODY_RADIUS`, so a layer at or under that
+/// radius is fully depth-occluded by the opaque body — the third build
+/// shipped exactly that (0.50/0.38/0.28 radii) and the green glow vanished
+/// from the screen while every stored field looked healthy. This pins the
+/// RENDERED geometry: each wrap layer's drawn edge reaches outside the
+/// capsule silhouette at the blessed spine heights, and the green pool lies
+/// flat ON the ground at the feet, un-billboarded.
+#[test]
+fn healing_wave_glow_wraps_outside_the_body() {
+    let mut h = Harness::new();
+    let at = Vec3::new(2.0, 0.0, -1.0);
+    let recipient = h.spawn_recipient(at);
+    h.land(HealImpactKind::HealingWave, recipient);
+    // The billboard pass poses the wrap quads, so render under a real camera.
+    h.spawn_camera(Vec3::new(0.0, 9.0, 24.0), at);
+    h.tick(27); // ~0.43s: k ≈ 0.31, envelope at its full-bloom plateau
+
+    let base = at + Vec3::Y * HEAL_BASE_Y;
+
+    // The recipe itself: blessed spine heights, and every wrap radius clears
+    // the body with margin.
+    let style = heal_style(HealImpactKind::HealingWave);
+    let heights: Vec<f32> = style.torso_glows.iter().map(|g| g.height).collect();
+    assert_eq!(heights, vec![0.49, 0.70, 0.83], "the blessed spine heights");
+    for layer in &style.torso_glows {
+        assert!(
+            layer.radius > COMBATANT_BODY_RADIUS + 0.15,
+            "wrap layer at height {} has radius {} — at or inside the body \
+             (radius {COMBATANT_BODY_RADIUS}), it renders behind the capsule \
+             and is invisible",
+            layer.height,
+            layer.radius
+        );
+    }
+
+    // The rendered wrap: centred on the spine at the blessed heights, drawn
+    // edge OUTSIDE the capsule silhouette.
+    let glows: Vec<GlobalTransform> = h
+        .sprites()
+        .into_iter()
+        .filter_map(|(role, _, g)| matches!(role, HealSpriteRole::TorsoGlow).then_some(g))
+        .collect();
+    assert_eq!(glows.len(), 3, "three wrap layers");
+    let mut seen_heights: Vec<f32> = Vec::new();
+    for g in &glows {
+        let centre = g.translation();
+        let spine_r = Vec2::new(centre.x - at.x, centre.z - at.z).length();
+        assert!(spine_r < 1e-3, "wrap layer centred on the spine, off by {spine_r}");
+        seen_heights.push(centre.y - base.y);
+        // The world edge of the unit quad, through scale and billboard pose.
+        let edge = g.transform_point(Vec3::new(0.5, 0.0, 0.0));
+        let reach = Vec2::new(edge.x - at.x, edge.z - at.z).length();
+        assert!(
+            reach > COMBATANT_BODY_RADIUS + 0.1,
+            "wrap layer's rendered edge reaches only {reach}yd from the spine \
+             — buried inside the {COMBATANT_BODY_RADIUS}yd body"
+        );
+    }
+    seen_heights.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    for (seen, blessed) in seen_heights.iter().zip([0.49, 0.70, 0.83]) {
+        assert!(
+            (seen - blessed).abs() < 1e-3,
+            "wrap layer rendered at height {seen}, blessed {blessed}"
+        );
+    }
+
+    // The green pool at the feet: one flat quad on the ground, in the blessed
+    // radius band, and NOT billboarded — its normal stays vertical under the
+    // camera the billboard pass is using.
+    let pools: Vec<GlobalTransform> = h
+        .sprites()
+        .into_iter()
+        .filter_map(|(role, _, g)| matches!(role, HealSpriteRole::UnderGlow).then_some(g))
+        .collect();
+    assert_eq!(pools.len(), 1, "one feet under-glow");
+    let pool = pools[0];
+    let pos = pool.translation();
+    let spine_r = Vec2::new(pos.x - at.x, pos.z - at.z).length();
+    assert!(spine_r < 1e-3, "the pool sits under the feet, off by {spine_r}");
+    assert!(
+        (base.y - 0.12..=base.y + 0.01).contains(&pos.y),
+        "the pool lies at ground level, not at {} (feet at {})",
+        pos.y,
+        base.y
+    );
+    let normal = (pool.transform_point(Vec3::Z) - pos).normalize();
+    assert!(
+        normal.y.abs() > 0.99,
+        "the pool must lie FLAT on the ground (billboarding it tips it \
+         toward the camera); normal {normal}"
+    );
+    let edge = pool.transform_point(Vec3::new(0.5, 0.0, 0.0));
+    let reach = Vec2::new(edge.x - at.x, edge.z - at.z).length();
+    assert!(
+        (0.6..=1.3).contains(&reach),
+        "the pool's rendered radius {reach} is outside the blessed 0.8–1.2 \
+         band (with bloom slack)"
     );
 }
 
