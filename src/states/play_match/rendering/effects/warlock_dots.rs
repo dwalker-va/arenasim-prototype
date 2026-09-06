@@ -193,6 +193,17 @@ const COA_CORE_COLOR: Color = Color::srgb(1.0, 0.94, 0.15);
 /// Spark ramp mid-color (white→orange→red in the client; one shared additive
 /// material at the orange mid, faded by shrinking).
 const COA_SPARK_COLOR: Color = Color::srgb(0.94, 0.42, 0.14);
+/// Emissive strengths of the skull apparition's four material groups.
+/// USER-TUNED round-3 ("a touch too bright" verdict, 2026-09-07): the round-2
+/// unlit→lit fix woke this rig's formerly-dead emissive (it shipped at
+/// shells 2.4 / core+sparks 2.6 / fall motes 1.8), and the lit skull read as
+/// a floodlight. Dimmed the whole apparition ~33%, preserving the
+/// red-shell < yellow-core ordering and the spark/fall balance — a bright
+/// event, not a floodlight. Flicker, fade envelope, and geometry untouched.
+const COA_SHELL_EMISSIVE: f32 = 1.6;
+const COA_CORE_EMISSIVE: f32 = 1.75;
+const COA_SPARK_EMISSIVE: f32 = 1.8;
+const COA_FALL_EMISSIVE: f32 = 1.25;
 
 // --- Unstable Affliction (authored) ------------------------------------------
 
@@ -645,7 +656,7 @@ fn spawn_coa_skull(
     let lift = COA_SKULL_LIFT * s;
 
     let shell = |materials: &mut Assets<StandardMaterial>| {
-        additive_material(materials, COA_SHELL_COLOR, 2.4, None)
+        additive_material(materials, COA_SHELL_COLOR, COA_SHELL_EMISSIVE, None)
     };
     let cranium = commands
         .spawn((
@@ -726,7 +737,7 @@ fn spawn_coa_skull(
                 MeshMaterial3d(additive_material(
                     materials,
                     COA_CORE_COLOR,
-                    2.6,
+                    COA_CORE_EMISSIVE,
                     Some(assets.dot.clone()),
                 )),
                 Transform::from_translation(Vec3::new(0.0, lift, -0.02 * s)),
@@ -735,12 +746,16 @@ fn spawn_coa_skull(
             .id(),
     );
 
-    let spark_material =
-        additive_material(materials, COA_SPARK_COLOR, 2.6, Some(assets.star.clone()));
+    let spark_material = additive_material(
+        materials,
+        COA_SPARK_COLOR,
+        COA_SPARK_EMISSIVE,
+        Some(assets.star.clone()),
+    );
     let fall_material = additive_material(
         materials,
         Color::srgb(1.0, 0.85, 0.75),
-        1.8,
+        COA_FALL_EMISSIVE,
         Some(assets.dot.clone()),
     );
 
