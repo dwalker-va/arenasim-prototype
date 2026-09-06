@@ -218,6 +218,12 @@ pub struct ChargeTrailEmitter {
     pub last_emit: Vec3,
     /// Body-size scale: 1.0 for a combatant, smaller for the Boar.
     pub scale: f32,
+    /// The charger's `VisualBody::rest_y`, resolved once when the emitter
+    /// arms (the way `CcRig` folds it into `lift` at spawn). It is the
+    /// sim-to-render correction: ~0 for a combatant, `0.3 - 1.75` for a pet,
+    /// whose sim entity rides ~1.45yd above its rendered capsule. The streak's
+    /// chest anchor adds it so the ribbon sits on the BODY, not the sim y.
+    pub rest_y: f32,
 }
 
 /// One segment of the charge trail's red streamer — the Bevy analog of the

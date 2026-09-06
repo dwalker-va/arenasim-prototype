@@ -18,6 +18,7 @@ use bevy::time::TimeUpdateStrategy;
 
 use arenasim::states::play_match::components::{
     ChargeDustPuff, ChargeStreakSegment, ChargeTrailEmitter, ChargingState, Pet, PetType,
+    VisualBody,
 };
 use arenasim::states::play_match::{spawn_charge_trail, update_and_cleanup_charge_trails};
 
@@ -161,9 +162,10 @@ fn dust_puffs_sit_at_ground_level_along_the_path() {
     );
     for t in &found {
         // The charger's transform rides at y = 1.0 (capsule center); the dust
-        // must drop to the floor, not trail at body height.
+        // must drop to the floor, not trail at body height — and stay ABOVE
+        // the floor, not clip under it.
         assert!(
-            t.translation.y < 0.4,
+            t.translation.y > 0.0 && t.translation.y < 0.4,
             "dust puff at y = {:.2} — dust belongs at ground level",
             t.translation.y
         );
@@ -227,10 +229,25 @@ fn elements_fade_over_life_and_despawn_without_leaking() {
 #[test]
 fn a_charging_pet_gets_the_same_trail_scaled_to_its_body() {
     let mut app = harness();
-    let from = Vec3::new(2.0, 0.75, 1.0);
-    let to = Vec3::new(-6.0, 0.75, 4.0);
+    // The REAL geometry from `spawn_pet` (`play_match/mod.rs`): the sim entity
+    // sits at `owner_position + 0.75` (so world y 1.75 beside a combatant at
+    // 1.0) while the `VisualBody` child carries `rest_y = 0.3 - 1.75` and the
+    // capsule actually renders at world 0.3 (crown 0.95). Anchoring the ribbon
+    // off the sim y instead of the body would float it ~0.7yd above the Boar's
+    // head.
+    const PET_SIM_Y: f32 = 1.75;
+    const PET_MESH_Y: f32 = 0.3;
+    let from = Vec3::new(2.0, PET_SIM_Y, 1.0);
+    let to = Vec3::new(-6.0, PET_SIM_Y, 4.0);
     let target = app.world_mut().spawn(Transform::from_translation(to)).id();
     let owner = app.world_mut().spawn(Transform::default()).id();
+    let body = app
+        .world_mut()
+        .spawn((
+            VisualBody { rest_y: PET_MESH_Y - PET_SIM_Y },
+            Transform::from_xyz(0.0, PET_MESH_Y - PET_SIM_Y, 0.0),
+        ))
+        .id();
     let boar = app
         .world_mut()
         .spawn((
@@ -242,6 +259,7 @@ fn a_charging_pet_gets_the_same_trail_scaled_to_its_body() {
             },
         ))
         .id();
+    app.world_mut().entity_mut(boar).add_child(body);
     run_dash(&mut app, boar, from, to, 4);
 
     let found = streaks(&mut app);
@@ -251,11 +269,11 @@ fn a_charging_pet_gets_the_same_trail_scaled_to_its_body() {
         found.len()
     );
     for t in &found {
-        // Scaled construction: the Boar's ribbon rides at ITS chest
-        // (transform y 0.75 + scaled offset), well under the Warrior band.
+        // The band must sit on the RENDERED body (centre 0.3, crown 0.95) —
+        // scaled chest anchor above the body centre, well under the sim y.
         assert!(
-            t.translation.y < 1.1,
-            "a Boar streak segment at y = {:.2} — not scaled to its body",
+            t.translation.y > 0.3 && t.translation.y < 0.9,
+            "a Boar streak segment at y = {:.2} — anchored off the sim transform, not the rendered body",
             t.translation.y
         );
     }

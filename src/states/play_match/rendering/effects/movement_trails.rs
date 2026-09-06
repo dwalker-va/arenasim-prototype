@@ -31,8 +31,12 @@ const STREAK_LIFETIME: f32 = 0.7;
 const DUST_LIFETIME: f32 = 0.9;
 /// Ribbon half-height (client: heightAbove = heightBelow = 0.472 units).
 const STREAK_HALF_HEIGHT: f32 = 0.47;
-/// Chest offset above the charger's transform (capsule center) at scale 1.
-const STREAK_CHEST_OFFSET: f32 = 0.35;
+/// Chest offset above the charger's BODY CENTRE at scale 1 — the repo's shared
+/// chest convention (`school_impact::IMPACT_CHEST_Y`); the client ribbon
+/// straddles its chest attachment symmetrically (heightAbove = heightBelow),
+/// so the segment centres exactly there. Body centre is `translation.y +
+/// rest_y`, NOT the sim y — see `ChargeTrailEmitter::rest_y`.
+const STREAK_CHEST_OFFSET: f32 = super::IMPACT_CHEST_Y;
 /// Ground clearance of a dust puff's center at scale 1.
 const DUST_HEIGHT: f32 = 0.15;
 /// Body-size scale for pet chargers (the Boar).
@@ -46,6 +50,7 @@ fn spawn_streak_segment(
     dir: Vec3,
     length: f32,
     scale: f32,
+    rest_y: f32,
 ) {
     // Slight overlap so consecutive segments read as one continuous streamer.
     let mesh = meshes.add(Cuboid::new(
@@ -64,9 +69,13 @@ fn spawn_streak_segment(
     // Pure yaw: local +X onto the horizontal travel direction, so the
     // segment's height axis stays world-vertical whatever the heading.
     let yaw = (-dir.z).atan2(dir.x);
+    // Anchor off the RENDERED body, not the sim entity: `mid.y + rest_y` is
+    // the body centre for both unit kinds (a pet sims ~1.45yd above its
+    // capsule; a combatant's rest_y is 0) — the `hard_cc.rs` stun-whirl
+    // derivation.
     let pos = Vec3::new(
         mid.x,
-        mid.y + STREAK_CHEST_OFFSET * scale,
+        mid.y + rest_y + STREAK_CHEST_OFFSET * scale,
         mid.z,
     );
 
@@ -129,21 +138,34 @@ pub fn spawn_charge_trail(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut chargers: Query<
-        (Entity, &Transform, Option<&mut ChargeTrailEmitter>, Option<&Pet>),
+        (
+            Entity,
+            &Transform,
+            Option<&mut ChargeTrailEmitter>,
+            Option<&Pet>,
+            Option<&Children>,
+        ),
         With<ChargingState>,
     >,
+    bodies: Query<&VisualBody>,
     stale_emitters: Query<Entity, (With<ChargeTrailEmitter>, Without<ChargingState>)>,
 ) {
-    for (entity, transform, emitter, pet) in chargers.iter_mut() {
+    for (entity, transform, emitter, pet, children) in chargers.iter_mut() {
         let pos = transform.translation;
         match emitter {
             None => {
                 // Dash just started: arm the emitter and kick up launch dust
                 // (the client's `dustcloud_land` burst at the base).
                 let scale = if pet.is_some() { PET_SCALE } else { 1.0 };
+                // The streak anchors off the RENDERED body — see
+                // `ChargeTrailEmitter::rest_y`. Absent a body child, 0
+                // degrades to the sim y, which is correct for a combatant.
+                let rest_y = children
+                    .and_then(|cs| cs.iter().find_map(|c| bodies.get(c).ok()))
+                    .map_or(0.0, |b| b.rest_y);
                 commands
                     .entity(entity)
-                    .try_insert(ChargeTrailEmitter { last_emit: pos, scale });
+                    .try_insert(ChargeTrailEmitter { last_emit: pos, scale, rest_y });
                 spawn_dust_puff(&mut commands, &mut meshes, &mut materials, pos, scale * 1.4);
             }
             Some(mut em) => {
@@ -169,6 +191,7 @@ pub fn spawn_charge_trail(
                         dir,
                         spacing,
                         em.scale,
+                        em.rest_y,
                     );
                     spawn_dust_puff(&mut commands, &mut meshes, &mut materials, mid, em.scale);
                     em.last_emit = next;
