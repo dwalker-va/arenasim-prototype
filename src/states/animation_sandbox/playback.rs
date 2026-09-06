@@ -27,7 +27,7 @@ use super::super::play_match::ability_config::{AbilityConfig, AbilityDefinitions
 use super::super::play_match::components::{
     ActiveAuras, AuraPending, AuraType, BerserkerRagePending, Celebrating, CastingState, ChannelingState,
     ChargingState, Combatant, DRTracker, DeathAnimation, DisengagingState, DispelPending,
-    DivineShieldPending, HolyShockDamagePending, HolyShockHealPending, InstantAbilityFired,
+    DivineShieldPending, HealImpact, HolyShockDamagePending, HolyShockHealPending, InstantAbilityFired,
     MatchResults, Pet, SchoolImpact,
     PetType, PlayMatchEntity, ScreamBurst, Totem, TotemElement, TrapType, VictoryCelebration,
     VisualBody,
@@ -38,7 +38,7 @@ use super::super::play_match::class_ai::pet_ai::{
 };
 use super::super::play_match::class_ai::shaman::{totem_spec, totem_spacing_offset};
 use super::super::play_match::spawn_pet;
-use super::super::play_match::{landing_style, DISENGAGE_SPEED, MELEE_RANGE, TOTEM_DURATION, TOTEM_RADIUS};
+use super::super::play_match::{heal_style, landing_style, DISENGAGE_SPEED, MELEE_RANGE, TOTEM_DURATION, TOTEM_RADIUS};
 use crate::combat::log::CombatLog;
 use super::{SandboxEntity, SandboxStage};
 
@@ -590,13 +590,29 @@ fn entry_duration(playback: &SandboxPlayback, defs: &AbilityDefinitions) -> f32 
             } else {
                 0.0
             };
+            // A heal's landing (rendering/effects/heal_impact.rs) spawns at
+            // cast completion and plays for its style's full life — emit
+            // window plus the longest mote's own life. Without this term a
+            // heal window closed at `cast_time` (Flash Heal: 1.50s), so the
+            // impact the entry exists to preview was cut off at the exact
+            // frame it began. Derived from the same `heal_style` table the
+            // renderer plays, so a retuned landing can never outlive its
+            // preview window. Routed via `HealImpact::kind_for` — the single
+            // routing table the spawn sites use.
+            let heal_landing = HealImpact::kind_for(ability)
+                .map(|kind| heal_style(kind).life() + IMPACT_TAIL_SECS)
+                .unwrap_or(0.0);
 
             if let Some(channel) = config.channel_duration {
                 channel
             } else if holds {
-                config.cast_time + AURA_HOLD_SECS + travel + landing
+                // The hold and a heal landing run CONCURRENTLY after the cast
+                // resolves, so the window needs the longer of them, not their
+                // sum (Holy Shock: the 4.0s hold already covers its 3.05s
+                // heal-stream tail).
+                config.cast_time + AURA_HOLD_SECS.max(heal_landing) + travel + landing
             } else {
-                config.cast_time + travel + landing
+                config.cast_time + travel + landing + heal_landing
             }
         }
         Some(SandboxEntry::Body(body)) => body.duration(),

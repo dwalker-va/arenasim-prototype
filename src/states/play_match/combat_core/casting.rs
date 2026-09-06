@@ -723,16 +723,19 @@ pub fn process_casting(
                 message,
             );
 
-            // Spawn healing light column visual effect
-            commands.spawn((
-                HealingLightColumn {
-                    target: target_entity,
-                    healer_class: caster_class,
-                    lifetime: 0.8,
-                    initial_lifetime: 0.8,
-                },
-                PlayMatchEntity,
-            ));
+            // Spawn the per-spell heal landing (rendering/effects/
+            // heal_impact.rs). Deterministic spawn — no `game_rng` draw —
+            // so it is byte-neutral in headless, like the FCT above.
+            if let Some(kind) = HealImpact::kind_for(ability) {
+                commands.spawn((
+                    HealImpact {
+                        target: target_entity,
+                        kind,
+                        age: 0.0,
+                    },
+                    PlayMatchEntity,
+                ));
+            }
         }
 
         // Apply aura if applicable (store for later application)

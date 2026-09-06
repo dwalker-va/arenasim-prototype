@@ -574,6 +574,22 @@ impl Plugin for StatesPlugin {
                     .after(CombatSystemPhase::CombatAndMovement)
                     .run_if(in_combat_scene),
             )
+            // Per-spell heal landings (separate group to avoid tuple size
+            // limits) — spawn -> animate -> billboard, the same chained
+            // contract as the shared school impact above: `animate` must see
+            // the rig `spawn` just built, and `billboard` must see the poses
+            // both just wrote.
+            .add_systems(
+                Update,
+                (
+                    play_match::spawn_heal_impacts,
+                    play_match::animate_heal_impacts,
+                    play_match::billboard_heal_impacts,
+                )
+                    .chain()
+                    .after(CombatSystemPhase::CombatResolution)
+                    .run_if(in_combat_scene),
+            )
             // Healing light column visual effects (separate group to avoid tuple size limits)
             .add_systems(
                 Update,

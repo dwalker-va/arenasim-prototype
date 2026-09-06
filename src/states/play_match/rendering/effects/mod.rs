@@ -20,6 +20,8 @@ mod flame;
 pub use flame::*;
 mod drain_life;
 pub use drain_life::*;
+mod heal_impact;
+pub use heal_impact::*;
 mod healing_light;
 pub use healing_light::*;
 mod dispel_burst;
