@@ -46,6 +46,8 @@ mod movement_trails;
 pub use movement_trails::*;
 mod affliction;
 pub use affliction::*;
+mod warlock_dots;
+pub use warlock_dots::*;
 mod gait;
 pub use gait::*;
 mod totems;

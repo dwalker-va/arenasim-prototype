@@ -3,97 +3,6 @@ use bevy::color::LinearRgba;
 use crate::states::play_match::components::*;
 
 // ==============================================================================
-// Unstable Affliction DoT Glow
-// ==============================================================================
-//
-// Spawn/update/cleanup three-system pattern. The glow is a deep-violet sphere
-// that pulses at ~0.5 Hz around afflicted combatants. Distinct from Corruption
-// (faster green tendrils) so stacked Corruption + UA reads independently.
-//
-// Per project memory: AlphaMode::Add, Res<Time>, try_insert, Without<T>.
-
-/// Spawn the UA glow mesh when a `UnstableAfflictionGlow` component is added.
-pub fn spawn_ua_glow_visuals(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    new_glows: Query<(Entity, &UnstableAfflictionGlow), (Added<UnstableAfflictionGlow>, Without<Mesh3d>)>,
-    transforms: Query<&Transform, Without<UnstableAfflictionGlow>>,
-) {
-    for (glow_entity, glow) in new_glows.iter() {
-        let Ok(target_transform) = transforms.get(glow.target) else {
-            continue;
-        };
-
-        let mesh = meshes.add(Sphere::new(0.55));
-        let material = materials.add(StandardMaterial {
-            base_color: Color::srgba(0.35, 0.05, 0.55, 0.30),
-            emissive: LinearRgba::new(0.55, 0.10, 0.85, 1.0),
-            alpha_mode: AlphaMode::Add,
-            unlit: true,
-            ..default()
-        });
-
-        let position = target_transform.translation + Vec3::Y * 1.0;
-        commands.entity(glow_entity).try_insert((
-            Mesh3d(mesh),
-            MeshMaterial3d(material),
-            Transform::from_translation(position),
-        ));
-    }
-}
-
-/// Update the UA glow: follow target, pulse opacity at ~0.5 Hz.
-pub fn update_ua_glow(
-    time: Res<Time>,
-    mut glows: Query<(&mut UnstableAfflictionGlow, &mut Transform, &MeshMaterial3d<StandardMaterial>)>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    transforms: Query<&Transform, Without<UnstableAfflictionGlow>>,
-) {
-    let dt = time.delta_secs();
-    for (mut glow, mut glow_transform, material_handle) in glows.iter_mut() {
-        glow.phase += dt;
-
-        if let Ok(target_transform) = transforms.get(glow.target) {
-            glow_transform.translation = target_transform.translation + Vec3::Y * 1.0;
-        }
-
-        // 0.5 Hz pulse — period 2.0s, oscillates between 0.20 and 0.55 alpha.
-        let pulse = (glow.phase * std::f32::consts::TAU * 0.5).sin() * 0.5 + 0.5; // [0,1]
-        let alpha = 0.20 + 0.35 * pulse;
-        let intensity = 0.55 + 0.45 * pulse;
-
-        if let Some(material) = materials.get_mut(&material_handle.0) {
-            material.base_color = Color::srgba(0.35, 0.05, 0.55, alpha);
-            material.emissive = LinearRgba::new(0.55 * intensity, 0.10 * intensity, 0.85 * intensity, 1.0);
-        }
-    }
-}
-
-/// Despawn the UA glow when its target loses the UA aura (or dies).
-pub fn cleanup_ua_glow(
-    mut commands: Commands,
-    glows: Query<(Entity, &UnstableAfflictionGlow)>,
-    targets: Query<&ActiveAuras>,
-) {
-    for (glow_entity, glow) in glows.iter() {
-        let still_afflicted = targets
-            .get(glow.target)
-            .map(|auras| {
-                auras.auras.iter().any(|a| {
-                    a.effect_type == AuraType::DamageOverTime
-                        && a.ability_name == "Unstable Affliction"
-                })
-            })
-            .unwrap_or(false);
-
-        if !still_afflicted {
-            commands.entity(glow_entity).despawn();
-        }
-    }
-}
-
-// ==============================================================================
 // Backlash Burst (UA dispel impact on dispeller)
 // ==============================================================================
 //
@@ -174,31 +83,6 @@ pub fn cleanup_expired_backlash_bursts(
     }
 }
 
-/// Detect targets that have an Unstable Affliction aura but no `UnstableAfflictionGlow`
-/// visual yet, and spawn the glow. Cleanup is handled by `cleanup_ua_glow` once the
-/// UA aura is no longer present.
-pub fn spawn_ua_glow_for_afflicted(
-    mut commands: Commands,
-    afflicted: Query<(Entity, &ActiveAuras)>,
-    existing_glows: Query<&UnstableAfflictionGlow>,
-) {
-    use std::collections::HashSet;
-    let already_glowing: HashSet<Entity> = existing_glows.iter().map(|g| g.target).collect();
-
-    for (entity, auras) in afflicted.iter() {
-        let has_ua = auras.auras.iter().any(|a| {
-            a.effect_type == AuraType::DamageOverTime
-                && a.ability_name == "Unstable Affliction"
-        });
-        if has_ua && !already_glowing.contains(&entity) {
-            commands.spawn((
-                UnstableAfflictionGlow { target: entity, phase: 0.0 },
-                PlayMatchEntity,
-            ));
-        }
-    }
-}
-
 // ==============================================================================
 // DoT Drip Indicators (poison / bleed)
 // ==============================================================================
@@ -210,7 +94,8 @@ pub fn spawn_ua_glow_for_afflicted(
 // lifetime + shrink), emitters follow the detector/cleanup convention.
 
 /// Map an aura to the affliction family it should drip as, or None for DoTs
-/// with their own identity (UA glow) or no body visual (Corruption, CoA).
+/// with their own identity (the Warlock DoT aura visuals in
+/// `warlock_dots.rs` — Corruption, Curse of Agony, Unstable Affliction).
 /// Keys on the exact RON `name:` string, same as the class-AI dedup checks.
 fn drip_kind_for_aura(aura: &Aura) -> Option<DripKind> {
     if aura.effect_type != AuraType::DamageOverTime {

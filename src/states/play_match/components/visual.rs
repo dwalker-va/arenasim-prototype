@@ -626,15 +626,190 @@ pub struct BerserkGlow {
     pub initial_lifetime: f32,
 }
 
-/// Visual effect indicating a combatant has Unstable Affliction active.
-/// Pulses at ~0.5Hz (every 2s) in deep violet so it reads independently from
-/// Corruption's faster green tendrils when both DoTs are stacked on the target.
+// ============================================================================
+// Warlock DoT aura visuals (Corruption / Curse of Agony / Unstable Affliction)
+// ============================================================================
+//
+// Aura-keyed state visuals from the measured Classic client data
+// (`docs/design/2026-09-06-warlock-dot-client-data.md`) plus the authored UA
+// redesign. All graphical-only: detected off `ActiveAuras`, never spawned by
+// core, so headless stays byte-identical by construction. Systems live in
+// `rendering/effects/warlock_dots.rs`.
+
+/// Which shared apply-moment burst a [`DotApplyBurst`] plays. Corruption and
+/// Unstable Affliction share ONE apply visual (client kit 117 — the
+/// green→violet shadow ring + spark burst); Curse of Agony's apply is the
+/// skull apparition, its own rig.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DotApplyKind {
+    /// Kit 117: expanding shadow ring + green/violet spark burst at the chest.
+    /// Played verbatim for both Corruption and Unstable Affliction (the client
+    /// gives UA no apply identity of its own — same SpellVisual 381).
+    ShadowRing,
+}
+
+/// A one-shot Warlock-DoT apply burst playing on the victim (graphical only,
+/// self-expiring). Spawned by the aura detector on the apply transition.
 #[derive(Component)]
-pub struct UnstableAfflictionGlow {
-    /// The afflicted target — glow follows this entity until UA expires/dispels.
+pub struct DotApplyBurst {
+    /// The victim — the burst tracks it for its short life.
     pub target: Entity,
-    /// Phase accumulator (seconds) used to drive the pulse.
-    pub phase: f32,
+    pub kind: DotApplyKind,
+    pub age: f32,
+    /// Fractional sparks owed since the last one was emitted.
+    pub spark_carry: f32,
+    /// Sparks emitted so far — seeds the deterministic scatter.
+    pub emitted: u32,
+}
+
+/// Corruption's persistent aura-state rig (client kit 535): the DARKENING
+/// alpha-blend shroud over the victim's head/torso, re-blooming every
+/// `PULSE_PERIOD`, plus murk-green swelling wisps and a green mote fizz.
+/// Lives from aura-apply to aura-expire/dispel/death — no end flourish.
+#[derive(Component)]
+pub struct CorruptionShroudRig {
+    /// The corrupted victim the rig follows.
+    pub target: Entity,
+    pub age: f32,
+    /// Fractional wisps owed since the last one was emitted.
+    pub wisp_carry: f32,
+    /// Fractional fizz motes owed since the last one was emitted.
+    pub fizz_carry: f32,
+    /// Pieces emitted so far — seeds the deterministic scatter.
+    pub emitted: u32,
+}
+
+/// Curse of Agony's apply-only skull apparition (client kit 884): a red-shell
+/// yellow-core skull above the victim's head, flickering on the 433/267 ms
+/// global cycles, crackling with red-orange star sparks and shedding glow
+/// motes downward. Self-expires at `COA_APPARITION_SECS`; NOTHING follows for
+/// the rest of the curse (era-faithful — see `COA_SUSTAIN_WHISPER`).
+#[derive(Component)]
+pub struct CoaSkullRig {
+    /// The cursed victim the apparition hangs above.
+    pub target: Entity,
+    pub age: f32,
+    /// Fractional star sparks owed since the last one was emitted.
+    pub spark_carry: f32,
+    /// Fractional falling glow motes owed since the last one was emitted.
+    pub fall_carry: f32,
+    /// Pieces emitted so far — seeds the deterministic scatter.
+    pub emitted: u32,
+}
+
+/// Marker on a CURSED combatant recording that its Curse of Agony skull has
+/// already fired for the current application. The skull is apply-only, so
+/// this — not a live rig — is what stops the detector re-firing every frame.
+/// Removed when the curse leaves the victim, so a fresh curse fires a fresh
+/// skull.
+#[derive(Component)]
+pub struct CoaSkullFired;
+
+/// Unstable Affliction's authored aura state (the client gives UA no identity
+/// of its own): an additive violet torso glow pulsing at `UA_PULSE_PERIOD`
+/// with a nervous flicker, discharging a crackle of jagged violet bolts and a
+/// bright pop every `UA_CRACKLE_PERIOD`. Lives from aura-apply to
+/// expire/dispel/death.
+#[derive(Component)]
+pub struct UaStateRig {
+    /// The afflicted victim the rig follows.
+    pub target: Entity,
+    pub age: f32,
+    /// Index of the last crackle cycle whose bolts were spawned, so each
+    /// discharge fires exactly once. `u32::MAX` before the first.
+    pub last_crackle_cycle: u32,
+}
+
+/// What a flat piece of a Warlock-DoT rig is — picks its animation arm.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum DotSpriteRole {
+    /// The apply burst's expanding shadow ring (a flat torus, never
+    /// billboarded — it lies in the ground plane at chest height).
+    ShadowRing,
+    /// Corruption's darkening shroud shell (a 3D capsule, never billboarded).
+    ShroudShell,
+    /// The skull's cranium sphere (3D, not billboarded).
+    SkullCranium,
+    /// The skull's jaw sphere (3D, not billboarded).
+    SkullJaw,
+    /// One of the skull's dark eye sockets (3D, alpha-blend dark — reads as a
+    /// hole in the additive shell).
+    SkullEye,
+    /// The skull's yellow core glow (billboarded quad).
+    SkullCore,
+    /// UA's violet torso glow (billboarded quad).
+    UaGlow,
+    /// UA's crackle pop — the bright violet flash that must read through
+    /// Corruption's shroud when stacked (billboarded quad).
+    CracklePop,
+    /// One segment of a jagged UA crackle bolt (oriented quad, not
+    /// billboarded — its kinked world pose IS the jag).
+    CrackleBolt,
+}
+
+/// A non-mote piece of a Warlock-DoT rig.
+#[derive(Component)]
+pub struct DotSprite {
+    pub role: DotSpriteRole,
+    /// Full-size radius in yards (for bolt segments: the segment length).
+    pub radius: f32,
+    pub base_alpha: f32,
+    /// Seconds this piece stays alive, or `f32::INFINITY` to live with the
+    /// rig. Bolt segments and pops use it to die between discharges.
+    pub life: f32,
+    /// Seconds lived (only meaningful for finite-life pieces).
+    pub age: f32,
+}
+
+/// What an emitted Warlock-DoT mote looks like — picks material and fade arm.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DotMoteKind {
+    /// Apply-burst spark: green→violet→near-black over its life.
+    ApplySpark,
+    /// Corruption fizz: a small green mote streaming upward off the victim.
+    Fizz,
+    /// CoA star spark: white→orange→red, shrinking.
+    SkullSpark,
+    /// CoA glow mote sinking down over the victim's face/chest.
+    SkullFall,
+}
+
+/// One emitted mote of a Warlock-DoT rig, in the rig's local frame.
+#[derive(Component)]
+pub struct DotMote {
+    pub kind: DotMoteKind,
+    pub velocity: Vec3,
+    pub age: f32,
+    pub life: f32,
+    /// Full-size radius, yards.
+    pub size: f32,
+}
+
+/// One murk-green Corruption wisp: drifts slowly, GROWS over its life
+/// (0.22→0.69 u in the source) while its color ramps near-black-green →
+/// sickly yellow-green. Carries its own material so the ramp can be written
+/// per-wisp.
+#[derive(Component)]
+pub struct DotWisp {
+    pub velocity: Vec3,
+    pub age: f32,
+    pub life: f32,
+    /// Pet-stature multiplier baked at spawn so a wisp on a Felhunter grows
+    /// to pet proportions.
+    pub stature: f32,
+}
+
+/// Shared graphical assets a Warlock-DoT rig carries: the unit quad and the
+/// rig's shared mote materials (motes fade by SHRINKING, so one material
+/// serves every mote of a kind — per-mote materials are reserved for pieces
+/// whose COLOR ramps individually, i.e. wisps).
+#[derive(Component)]
+pub struct WarlockDotRigAssets {
+    pub quad: Handle<Mesh>,
+    /// Apply sparks / Corruption fizz / CoA star sparks, per rig kind.
+    pub mote_material: Handle<StandardMaterial>,
+    /// CoA falling glow motes; clones `mote_material` on other rigs.
+    pub extra_material: Handle<StandardMaterial>,
 }
 
 /// Affliction family for DoT drip indicators. The drip color is game
