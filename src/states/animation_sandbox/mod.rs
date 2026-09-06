@@ -56,6 +56,22 @@ pub(crate) fn stage_focus(config: &SandboxConfig) -> Vec3 {
     }
 }
 
+/// Facing for a unit staged at `from` whose partner stands at `to`, in the
+/// sim's own facing convention (+Z forward — `combat_core/movement.rs`
+/// derives yaw as `dir.x.atan2(dir.z)`). Staged units get no facing from
+/// anywhere else: `spawn_combatant` spawns at identity rotation (a match
+/// constraint — see its NOTE), a match's `move_to_target` never runs here,
+/// and `position_caster` writes translations only — so without an explicit
+/// spawn rotation both units stare down +Z past each other for the whole
+/// session.
+pub(crate) fn partner_facing(from: Vec3, to: Vec3) -> Quat {
+    let d = to - from;
+    if d.xz().length_squared() <= 1e-6 {
+        return Quat::IDENTITY;
+    }
+    Quat::from_rotation_y(d.x.atan2(d.z))
+}
+
 /// Marks every entity the sandbox spawns, so teardown despawns exactly its own
 /// scene. The sandbox does NOT reuse `PlayMatchEntity` for this: that marker is
 /// cleared by `cleanup_play_match` on `OnExit(PlayMatch)`, which never fires
@@ -238,6 +254,10 @@ fn stage_units(
     stage: &mut SandboxStage,
 ) {
     let caster_home = Vec3::new(-STAGE_SEPARATION, 1.0, 0.0);
+    let dummy_home = Vec3::new(STAGE_SEPARATION, 1.0, 0.0);
+    // Each unit squares off against its partner. With no dummy staged the
+    // caster still faces the dummy's spot — where every relational visual
+    // (projectile, trap throw, launch jet) is aimed.
     let caster = spawn_staged_unit(
         commands,
         meshes,
@@ -246,6 +266,7 @@ fn stage_units(
         1,
         config.caster_class,
         caster_home,
+        dummy_home,
         item_defs,
         default_loadouts,
     );
@@ -260,7 +281,8 @@ fn stage_units(
             asset_server,
             2,
             config.dummy_class,
-            Vec3::new(STAGE_SEPARATION, 1.0, 0.0),
+            dummy_home,
+            caster_home,
             item_defs,
             default_loadouts,
         )
@@ -268,7 +290,14 @@ fn stage_units(
 }
 
 /// Spawns one combatant through the match's own spawn path, then tags it as
-/// sandbox-owned.
+/// sandbox-owned and turns it to face `face_toward` (its stage partner).
+///
+/// The facing is a post-spawn override: `spawn_combatant` deliberately spawns
+/// at identity rotation for headless seed parity, a constraint that binds
+/// matches, not this stage — the sandbox is graphical-only and runs no
+/// seeded sim. The weapon sockets absorb the first-frame facing snap into
+/// their local yaw (`animate_weapon_swings`), so held weapons stay aimed at
+/// the stage centre through the turn.
 #[allow(clippy::too_many_arguments)]
 fn spawn_staged_unit(
     commands: &mut Commands,
@@ -278,6 +307,7 @@ fn spawn_staged_unit(
     team: u8,
     class: CharacterClass,
     position: Vec3,
+    face_toward: Vec3,
     item_defs: &ItemDefinitions,
     default_loadouts: &DefaultLoadouts,
 ) -> Entity {
@@ -303,7 +333,10 @@ fn spawn_staged_unit(
         &loadout,
         item_defs,
     );
-    commands.entity(entity).insert(SandboxEntity);
+    commands.entity(entity).insert((
+        SandboxEntity,
+        Transform::from_translation(position).with_rotation(partner_facing(position, face_toward)),
+    ));
     entity
 }
 
@@ -404,6 +437,37 @@ mod tests {
         let config = SandboxConfig::default();
         assert_eq!(config.caster_class, CharacterClass::Mage);
         assert!(config.dummy_enabled);
+    }
+
+    #[test]
+    fn staged_partners_face_each_other() {
+        // Two combatants square off: each staged unit's forward (+Z in the
+        // sim's facing convention) points at its partner. Identity rotation —
+        // what `spawn_combatant` leaves — has both facing world +Z, side-on
+        // to each other.
+        let caster_home = Vec3::new(-STAGE_SEPARATION, 1.0, 0.0);
+        let dummy_home = Vec3::new(STAGE_SEPARATION, 1.0, 0.0);
+        let caster_forward = partner_facing(caster_home, dummy_home) * Vec3::Z;
+        let dummy_forward = partner_facing(dummy_home, caster_home) * Vec3::Z;
+        let caster_to_dummy = (dummy_home - caster_home).normalize();
+        assert!(
+            caster_forward.dot(caster_to_dummy) > 0.99,
+            "caster forward {caster_forward} must point at the dummy ({caster_to_dummy})"
+        );
+        assert!(
+            dummy_forward.dot(-caster_to_dummy) > 0.99,
+            "dummy forward {dummy_forward} must point back at the caster ({})",
+            -caster_to_dummy
+        );
+    }
+
+    #[test]
+    fn coincident_partner_keeps_identity_facing() {
+        // Degenerate staging (zero XZ offset) must not produce a NaN
+        // rotation; identity is the only sane answer.
+        let at = Vec3::new(3.0, 1.0, 0.0);
+        assert_eq!(partner_facing(at, at), Quat::IDENTITY);
+        assert_eq!(partner_facing(at, at + Vec3::Y), Quat::IDENTITY);
     }
 
     #[test]
