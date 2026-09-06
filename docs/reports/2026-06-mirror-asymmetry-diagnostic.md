@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-06
 **Plan:** `docs/plans/2026-06-06-001-feat-healer-posture-movement-ai-plan.md`, U1 (R1)
-**Baseline:** `design-docs/balance/matrix_baseline_2026-05-23_pet_dispatch_1v1_post_n100.md` (N=100, seed base 0)
+**Baseline:** `docs/design/balance/matrix_baseline_2026-05-23_pet_dispatch_1v1_post_n100.md` (N=100, seed base 0)
 **Verdict:** Root cause identified with direct trace evidence. **No fix lands in this slice** — the cause is the sequential-resolution architecture of same-frame decision races, and every localized candidate only flips or relocates the bias. **Side-symmetrized cell deltas are the standing measurement protocol for U4/U9.**
 
 ---

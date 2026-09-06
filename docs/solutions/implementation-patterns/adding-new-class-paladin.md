@@ -226,9 +226,9 @@ echo '{"team1":["Warrior","Paladin"],"team2":["Warrior","Priest"]}' > /tmp/2v2.j
 
 ## Related Documentation
 
-- **[WoW Mechanics](../../../design-docs/wow-mechanics.md)** - Implemented mechanics reference
-- **[Bevy Patterns](../../../design-docs/bevy-patterns.md)** - ECS patterns and bug detection checklist
-- **[Stat Scaling](../../../design-docs/stat-scaling-system.md)** - Damage/healing formulas
+- **[WoW Mechanics](../../../docs/design/wow-mechanics.md)** - Implemented mechanics reference
+- **[Bevy Patterns](../../../docs/design/bevy-patterns.md)** - ECS patterns and bug detection checklist
+- **[Stat Scaling](../../../docs/design/stat-scaling-system.md)** - Damage/healing formulas
 - **[Two-Agent Bug Hunting](../workflows/two-agent-bug-hunting.md)** - Testing methodology
 
 ## Commits

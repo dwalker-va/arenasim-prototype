@@ -87,8 +87,8 @@ The pet auto-attack damage assumed by the design comment at `combatant.rs:215` (
 - R8. Heel mode persists until pet HP recovers above 25%, OR until match end. (Pets currently do not respawn or self-heal in normal play, so Heel mode is typically one-shot per match per pet — confirm at planning.)
 
 **Validation**
-- R9. 2v2-with-healer matrix sweep at N=10 (autopilot) and N=100 (pre-merge): Hunter+Priest vs each-class+Priest. Compared against `design-docs/balance/matrix_baseline_2026-05-22_2v2_post.csv` (post-mana baseline).
-- R10. 1v1 matrix sweep at N=20 (autopilot) and N=100 (pre-merge). Compared against `design-docs/balance/matrix_baseline_2026-05-22.csv`.
+- R9. 2v2-with-healer matrix sweep at N=10 (autopilot) and N=100 (pre-merge): Hunter+Priest vs each-class+Priest. Compared against `docs/design/balance/matrix_baseline_2026-05-22_2v2_post.csv` (post-mana baseline).
+- R10. 1v1 matrix sweep at N=20 (autopilot) and N=100 (pre-merge). Compared against `docs/design/balance/matrix_baseline_2026-05-22.csv`.
 - R11. Decision-trace audit on Hunter v Warlock: confirm `SpiderWeb:NoValidTarget` rejection count drops by ≥75% from the ~1,000 pre-change baseline; confirm pet auto-attack damage events appear in the match log (currently zero).
 
 ## Acceptance Examples

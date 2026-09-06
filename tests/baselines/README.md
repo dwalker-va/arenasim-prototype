@@ -6,10 +6,10 @@ not a balance measurement.
 ## What these are for
 
 The claim they support is *"nothing changed"*, not *"these are the win rates"*.
-Balance data lives in `design-docs/balance/` and is expected to move; these files
+Balance data lives in `docs/design/balance/` and is expected to move; these files
 are expected to stay frozen, and a change to one is an event that needs a reason.
 
-The `TeamPlan` migration (`design-docs/team-level-positioning-ai.md`) opens with a
+The `TeamPlan` migration (`docs/design/team-level-positioning-ai.md`) opens with a
 step that must be a **provable no-op**, and the test suite is the wrong instrument
 for proving that. The 97 movement probes assert *bounded* properties — "occlusion
 ≥ 0.5s", "converges in < 200 steps" — so a real behaviour change that stays inside

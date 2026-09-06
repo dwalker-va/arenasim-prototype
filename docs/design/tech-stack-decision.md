@@ -97,7 +97,7 @@ arenasim-prototype/
 │       ├── characters.ron    # Character definitions
 │       ├── abilities.ron     # Ability data
 │       └── maps.ron          # Map configurations
-└── design-docs/              # Design documentation
+└── docs/design/              # Design documentation
 ```
 
 ---

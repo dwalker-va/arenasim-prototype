@@ -1278,7 +1278,7 @@ pub(crate) fn spawn_pet(
     // four-yard positional difference from headless on the very first frame. The
     // Felhunter then reached the enemy sooner and shifted every subsequent event
     // ~0.7s earlier, growing to 3.8s by the end of the match. That is the bulk of
-    // the graphical/headless seed divergence in `design-docs/2026-08-01-nagrand-
+    // the graphical/headless seed divergence in `docs/design/2026-08-01-nagrand-
     // camp-handoff.md` §3.3 — it is a POSITIONAL difference, not the archetype /
     // RNG-draw-order effect that document hypothesised. (An RNG-order change
     // would alter damage VALUES; every value matched, only timings moved.)

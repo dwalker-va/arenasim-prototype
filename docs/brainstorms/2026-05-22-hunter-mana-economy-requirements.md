@@ -13,7 +13,7 @@ Tune Hunter's mana economy to match the pattern of the other four mana classes (
 
 ## Problem Frame
 
-Hunter sits at ~7% winrate across the 4,900-match 1v1 baseline at `design-docs/balance/matrix_baseline_2026-05-16.csv`, losing 0% of matches in 6 of 7 matchups. Diagnostic tracing of a Hunter v Warrior match (27.77s) surfaces ~1,767 `InsufficientMana` rejections in the AI decision trace — 945 FrostTrap, 388 ArcaneShot, 261 Disengage, 173 ConcussiveShot. The Hunter executes only 6 ability casts in the entire match. The AI wants to act and cannot afford to.
+Hunter sits at ~7% winrate across the 4,900-match 1v1 baseline at `docs/design/balance/matrix_baseline_2026-05-16.csv`, losing 0% of matches in 6 of 7 matchups. Diagnostic tracing of a Hunter v Warrior match (27.77s) surfaces ~1,767 `InsufficientMana` rejections in the AI decision trace — 945 FrostTrap, 388 ArcaneShot, 261 Disengage, 173 ConcussiveShot. The Hunter executes only 6 ability casts in the entire match. The AI wants to act and cannot afford to.
 
 The cause is structural rather than tactical. Hunter is the only class in the roster with non-zero mana regen (3.0/s) AND the smallest mana pool (150). Hunter's full rotation costs 180 mana, so Hunter cannot afford a single full rotation from the starting pool and depends on continuous regen to function. Other mana classes (Mage 200, Warlock 180, Paladin 160, Priest 150) operate on a "one bar per fight, no regen" model — they accept hard OOM as a feature of the resource and balance ability budgets accordingly. The original Hunter brainstorm (`docs/brainstorms/2026-02-22-hunter-class-brainstorm.md:25`) called out OOM pressure as an intended feature; in practice that intent collided with a pool too small to support one rotation, leaving the AI mana-gated for most of the fight.
 
@@ -92,4 +92,4 @@ This work brings Hunter into structural parity with the other mana classes, with
 
 - [Affects R10][Technical] **2v2 matrix tooling implementation:** wrapper script around `--headless` (simplest) vs. extension to the matrix runner. Planner picks based on how reusable the tooling needs to be for future balance work.
 - [Affects R10][Technical] **Seed selection and run count for 2v2 validation:** N=100 per matchup matches the 1v1 baseline cadence but may be over- or under-sampled for the 6 paired matchups; planner picks based on variance observed in early runs.
-- [Affects R11][Needs research] **Whether ±5 percentage points is the right regression tolerance for non-Hunter matchups,** or whether some matchups have noisier baselines that need wider bands. Planner consults `design-docs/balance/matrix_baseline_2026-05-16.csv` variance.
+- [Affects R11][Needs research] **Whether ±5 percentage points is the right regression tolerance for non-Hunter matchups,** or whether some matchups have noisier baselines that need wider bands. Planner consults `docs/design/balance/matrix_baseline_2026-05-16.csv` variance.

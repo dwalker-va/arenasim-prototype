@@ -69,7 +69,7 @@ duration: 33.4s post vs 27.8s pre (Hunter survived ~5s longer).
 
 ### 1v1 Matrix (Hunter row, N=20)
 
-Comparing this run against `design-docs/balance/matrix_baseline_2026-05-21.md`
+Comparing this run against `docs/design/balance/matrix_baseline_2026-05-21.md`
 (N=100, pre-change):
 
 | Matchup            | Pre  | Post | Δ      | Pre Avg | Post Avg | Note |

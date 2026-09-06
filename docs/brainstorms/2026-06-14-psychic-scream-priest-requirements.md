@@ -225,4 +225,4 @@ enemy healer.
 - WoW Classic spell reference via the Wowhead MCP
   (`lookup_spell("Psychic Scream")`) for radius / cooldown / duration values.
 - Balance context: Priest underpowered (project memory + matrix CSVs under
-  `design-docs/balance/`).
+  `docs/design/balance/`).

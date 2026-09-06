@@ -7,7 +7,7 @@
 - **Max match duration:** 120s (combat phase)
 - **Hunter state:** post-change (`max_mana=240`, `mana_regen=0.0`, ability costs cut ~15%)
 
-Comparison run for `design-docs/balance/matrix_baseline_2026-05-22_2v2_pre.md`
+Comparison run for `docs/design/balance/matrix_baseline_2026-05-22_2v2_pre.md`
 following U3+U4 of `docs/plans/2026-05-22-001-fix-hunter-mana-economy-plan.md`.
 
 ## Team 1 (Hunter+Priest) Winrate
@@ -43,4 +43,4 @@ trap-on-healer logic). Those are separately tracked survivors in the ideation
 doc.
 
 The 1v1 axis tells the more revealing story — see
-`design-docs/balance/matrix_baseline_2026-05-22.md`.
+`docs/design/balance/matrix_baseline_2026-05-22.md`.

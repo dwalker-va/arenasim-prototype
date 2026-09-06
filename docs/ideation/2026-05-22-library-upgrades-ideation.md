@@ -11,7 +11,7 @@ mode: repo-grounded
 
 **Current versions (`Cargo.toml`):** bevy 0.15 (jpeg), bevy_egui 0.31, serde 1.0, serde_json 1.0, ron 0.8, rand 0.8, clap 4.4, smallvec 1.13.
 
-**Codebase coupling:** ~239 Bevy idiom call sites across ~70 source files. Dual-path system registration enforced by `tests/registration_audit.rs` (headless `add_core_combat_systems()` + graphical `StatesPlugin::build()`). Seeded 7×7 matrix runner is load-bearing for replay determinism — 4900 trace JSONL files per matrix run, BTreeMap migration done. The deliberate January 2026 `bevy_egui` migration (`design-docs/egui-migration-summary.md`) eliminated 8 UI bugs and dropped 968→240 LoC in ConfigureMatch — that bet is currently held back by `bevy_egui = 0.31`'s lock-step with Bevy 0.15. No prior captured library-upgrade learnings in `docs/solutions/`. AI-native development workflow — Claude is the dominant contributor.
+**Codebase coupling:** ~239 Bevy idiom call sites across ~70 source files. Dual-path system registration enforced by `tests/registration_audit.rs` (headless `add_core_combat_systems()` + graphical `StatesPlugin::build()`). Seeded 7×7 matrix runner is load-bearing for replay determinism — 4900 trace JSONL files per matrix run, BTreeMap migration done. The deliberate January 2026 `bevy_egui` migration (`docs/design/egui-migration-summary.md`) eliminated 8 UI bugs and dropped 968→240 LoC in ConfigureMatch — that bet is currently held back by `bevy_egui = 0.31`'s lock-step with Bevy 0.15. No prior captured library-upgrade learnings in `docs/solutions/`. AI-native development workflow — Claude is the dominant contributor.
 
 **External version landscape (May 2026):**
 - **Bevy 0.16** (Apr 2025): `Query::single()` → `Result`; `EventWriter::send()` → `write()`; `Parent` → `ChildOf`; `despawn()` recursive by default; `AssetChanged` query filter; transform propagation 11× faster.
@@ -74,12 +74,12 @@ mode: repo-grounded
 ---
 
 ### 3. `bevy_egui` is the silent ecosystem gate; every quarter on Bevy 0.15 shrinks the addressable Bevy crate landscape
-**Description:** The January 2026 `bevy_egui` bet (per `design-docs/egui-migration-summary.md`) was explicitly about *reaching for ecosystem leverage instead of hand-rolling UI*. That bet is currently being undermined by staying on Bevy 0.15 — most community Bevy crates (avian/rapier physics, bevy_hanabi particles, leafwing-input-manager, bevy_replicon, ECS inspectors) have dropped sub-0.16 support during 2025. The friction is invisible *today* because no one's tried to add one of these crates — but it's the silent reason any "let me grab this Bevy crate" gesture will currently fail. Adding to this: Claude's training data and Bevy community examples skew toward the latest stable, so every LLM-generated Bevy idea in this project currently pays a translation-from-current-to-0.15 tax.
+**Description:** The January 2026 `bevy_egui` bet (per `docs/design/egui-migration-summary.md`) was explicitly about *reaching for ecosystem leverage instead of hand-rolling UI*. That bet is currently being undermined by staying on Bevy 0.15 — most community Bevy crates (avian/rapier physics, bevy_hanabi particles, leafwing-input-manager, bevy_replicon, ECS inspectors) have dropped sub-0.16 support during 2025. The friction is invisible *today* because no one's tried to add one of these crates — but it's the silent reason any "let me grab this Bevy crate" gesture will currently fail. Adding to this: Claude's training data and Bevy community examples skew toward the latest stable, so every LLM-generated Bevy idea in this project currently pays a translation-from-current-to-0.15 tax.
 
 **Axis:** Integration coupling & ecosystem reach
 
 **Basis:**
-- `direct:` `Cargo.toml` line 11 pins `bevy_egui = "0.31"`; `design-docs/egui-migration-summary.md` documents the deliberate January 2026 ecosystem-leverage bet.
+- `direct:` `Cargo.toml` line 11 pins `bevy_egui = "0.31"`; `docs/design/egui-migration-summary.md` documents the deliberate January 2026 ecosystem-leverage bet.
 - `external:` `bevy_egui` CHANGELOG version-to-Bevy table — 0.33+ requires Bevy 0.16+; ecosystem-wide drop of sub-0.16 support during 2025 (verified across multiple Bevy ecosystem crate release notes by Phase 1 web researcher).
 - `reasoned:` Project is AI-native (per CLAUDE.md and the bug-hunt skill). LLM training cutoffs make older Bevy APIs progressively less accurate over time — the tax compounds with every prompt.
 
@@ -135,7 +135,7 @@ mode: repo-grounded
 ---
 
 ### 6. Adopt per-dependency upgrade tracks (RCM triage)
-**Description:** Factories sort equipment into three maintenance strategies based on failure cost: run-to-failure (cheap to replace), scheduled (predictable wear), predictive (catastrophic if missed). Apply the same to this dependency graph and write the result into `CLAUDE.md` or a new `design-docs/dependency-policy.md`:
+**Description:** Factories sort equipment into three maintenance strategies based on failure cost: run-to-failure (cheap to replace), scheduled (predictable wear), predictive (catastrophic if missed). Apply the same to this dependency graph and write the result into `CLAUDE.md` or a new `docs/design/dependency-policy.md`:
 - **Run-to-failure** (just bump when something breaks): `serde`, `serde_json`, `clap`, `smallvec`.
 - **Scheduled** (planned upgrade windows, never in the same PR as a feature): `bevy`, `bevy_egui`, `ron`.
 - **Predictive** (instrument before touching, requires explicit category boundary): `rand`.
@@ -154,7 +154,7 @@ This is the meta-framework that absorbs the cadence cluster of ideas (Debian tra
 **Downsides:** Risk of over-formalizing for a solo/prototype project. The categorization itself is a judgment call (e.g., is `bevy_egui` scheduled like Bevy, or run-to-failure like leaf crates? — it's actually scheduled-coupled-to-Bevy, which is a slightly different fourth class).
 
 **Confidence:** 65%
-**Complexity:** Low (write the policy; ≈1 page in `design-docs/`)
+**Complexity:** Low (write the policy; ≈1 page in `docs/design/`)
 **Status:** Unexplored
 
 ---
@@ -181,7 +181,7 @@ This is the meta-framework that absorbs the cadence cluster of ideas (Debian tra
 
 | # | Idea | Reason Rejected |
 |---|------|-----------------|
-| F2.2 | Remove `bevy_egui` entirely; render debug UI as Bevy entities | Basis wrong — `design-docs/egui-migration-summary.md` shows `bevy_egui` is user-facing (ConfigureMatch, 968→240 LoC win), not debug-only. Removal would re-undo the deliberate January 2026 ecosystem-leverage bet |
+| F2.2 | Remove `bevy_egui` entirely; render debug UI as Bevy entities | Basis wrong — `docs/design/egui-migration-summary.md` shows `bevy_egui` is user-facing (ConfigureMatch, 968→240 LoC win), not debug-only. Removal would re-undo the deliberate January 2026 ecosystem-leverage bet |
 | F5.8 | Publish ArenaSim's trace-versioning pattern as community write-up to attract Bevy upgrade PRs | Scope overrun; below meeting-test for this assessment. Could be a follow-up after idea #4 ships |
 | F6.3 | Abandon byte-identical replay determinism (free `rand` 0.10 + `SmallRng`) | Useful diagnostic question ("is our determinism need byte-identical or statistical?") but as a design it's a subject-shifting move, not a library-upgrade conclusion |
 | F6.7 | Snapshot demolition — split human-edited RON (stable) from machine-generated traces (per-version) | Too speculative; current format works and no observed defect motivates the split |

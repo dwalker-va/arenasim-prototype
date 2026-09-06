@@ -96,7 +96,7 @@ def noncompetitive_anomalies(rows, size):
 # CLI: python3 scripts/comp_tiers.py <canonical.csv> [--size 2|3]
 # Prints all-comps + competitive class tiers, top/bottom comps, the
 # non-competitive anomaly canary, and (3v3) the dominant-shape watch.
-# Used to regenerate design-docs/balance/canonical_baselines_summary.md
+# Used to regenerate docs/design/balance/canonical_baselines_summary.md
 # after a shipped balance change (see the balance-sweep skill).
 # ---------------------------------------------------------------------------
 def report(path, size):

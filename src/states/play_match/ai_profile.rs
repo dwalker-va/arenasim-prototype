@@ -3,7 +3,7 @@
 //! The escape hatch for evolving the AI without leaving the game in a broken
 //! state. `Legacy` is the reactive, per-unit AI that every balance baseline and
 //! movement probe is calibrated against; `TeamPlan` is the team-level positioning
-//! layer described in `design-docs/team-level-positioning-ai.md`. Both live in the
+//! layer described in `docs/design/team-level-positioning-ai.md`. Both live in the
 //! same build, selected per match, so the two can be A/B'd against identical seeds.
 //!
 //! ## Why this exists

@@ -92,7 +92,7 @@ impl SchoolImpact {
             // (214) resolves to the SAME model as Frostbolt's landing, so the
             // stock Frost row is the faithful rendition and there is no
             // `landing_style` override. See
-            // design-docs/2026-09-06-frost-shock-client-data.md.
+            // docs/design/2026-09-06-frost-shock-client-data.md.
             | AbilityType::FrostShock => Some(ImpactAnchor::Chest),
             AbilityType::MindBlast => Some(ImpactAnchor::Head),
             _ => None,
@@ -358,7 +358,7 @@ pub struct HealingLightColumn {
 /// Which per-spell heal landing a [`HealImpact`] plays.
 ///
 /// From the Classic Era client data (build 1.15.9.69547 — see
-/// `design-docs/2026-09-06-heal-impact-client-data.md`): several abilities
+/// `docs/design/2026-09-06-heal-impact-client-data.md`): several abilities
 /// share one implementation. Holy Shock's heal is byte-identical to Priest
 /// Heal in the client (visual 135, kit 232), Lesser Healing Wave and Healing
 /// Wave are the same visual 58, and Flash of Light — impact-less for players
@@ -717,7 +717,7 @@ pub struct WalkAnim {
 /// the death sink and the victory bounce all used to write `translation.y`
 /// directly on the combatant entity, so a ±0.10 visual bob perturbed real range
 /// checks and a seed stopped reproducing between the client and headless (see
-/// `design-docs/2026-08-01-nagrand-camp-handoff.md` §3.3). Those animations now
+/// `docs/design/2026-08-01-nagrand-camp-handoff.md` §3.3). Those animations now
 /// write this child's LOCAL transform, which nothing in the simulation reads.
 ///
 /// The parent's `Transform` is therefore the unit's logical position, written

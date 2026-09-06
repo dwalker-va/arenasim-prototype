@@ -41,7 +41,7 @@ The Paladin class was just merged to main with 6 abilities (Devotion Aura, Flash
 + - **Paladin**: Mana, healer/melee, Holy Shock/Flash of Light/Hammer of Justice
 ```
 
-### 2. design-docs/roadmap.md
+### 2. docs/design/roadmap.md
 
 **Line 6** - Classes count:
 ```diff
@@ -49,7 +49,7 @@ The Paladin class was just merged to main with 6 abilities (Devotion Aura, Flash
 + - **Classes**: Warrior, Mage, Rogue, Priest, Warlock, Paladin (6)
 ```
 
-### 3. design-docs/wow-mechanics.md
+### 3. docs/design/wow-mechanics.md
 
 **Mana section (around line 37)** - Add Paladin stats:
 ```diff

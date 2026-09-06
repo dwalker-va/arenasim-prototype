@@ -58,7 +58,7 @@ use crate::states::play_match::components::*;
 //   `landing_style` override. Its slow carries NO aura-state kit (SpellVisual
 //   144 has no StartEvent=7 row; Frostbolt's chill state is visual 13's, not
 //   shared), so the slow stays invisible on the receiver by the data, not by
-//   omission. See design-docs/2026-09-06-frost-shock-client-data.md.
+//   omission. See docs/design/2026-09-06-frost-shock-client-data.md.
 // - **Web has no impact at all.** `web_missile.m2` flies, and the only kit on
 //   landing is `web_state.m2` — the root STATE, which `hard_cc.rs` already
 //   draws as the shin-high web plus its apply flare. A generic burst on top

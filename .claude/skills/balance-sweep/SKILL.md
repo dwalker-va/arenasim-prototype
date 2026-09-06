@@ -138,10 +138,10 @@ Current-state references (batch harness, 300s cap). **Regenerate and overwrite
 these after any change that ships**, and update the summary's class/comp tier
 lists:
 
-- `design-docs/balance/canonical_1v1_n100_300s.csv` (full 8×8)
-- `design-docs/balance/canonical_2v2_full_n100_300s.csv` (complete 784-cell matrix)
-- `design-docs/balance/canonical_3v3_full_n50_300s.csv` (complete 3,136-cell matrix)
-- `design-docs/balance/canonical_baselines_summary.md` — tier lists + the current
+- `docs/design/balance/canonical_1v1_n100_300s.csv` (full 8×8)
+- `docs/design/balance/canonical_2v2_full_n100_300s.csv` (complete 784-cell matrix)
+- `docs/design/balance/canonical_3v3_full_n50_300s.csv` (complete 3,136-cell matrix)
+- `docs/design/balance/canonical_baselines_summary.md` — tier lists + the current
   meta read (what's meta-defining / unplayable), with a generated-on date inside.
 
 Analyze with `scripts/comp_tiers.py <csv> --size {2,3}`. The summary must report
@@ -163,4 +163,4 @@ Analyze with `scripts/comp_tiers.py <csv> --size {2,3}`. The summary must report
   the warning sign. Report the top-10 shape split.
 
 For deeper context on a worked investigation (Hunter/Mage), see
-`design-docs/balance/2026-06-04-hunter-mage-balance-findings.md`.
+`docs/design/balance/2026-06-04-hunter-mage-balance-findings.md`.

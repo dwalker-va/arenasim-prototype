@@ -41,8 +41,8 @@ Success criteria from the origin's `## Success Criteria` are addressed in U5's v
 - **`starting_resource` (5th tuple value at `src/states/play_match/components/combatant.rs:215`) is raised 150 → 240 alongside `max_mana`.** Rationale: `apply_equipment` (`combatant.rs:463`) overwrites `current_mana` to the new `max_mana` for any combatant equipped via loadout, but `tests/cast_guard_tests.rs:110` constructs combatants via `Combatant::new` directly without equipment. Updating both values keeps the direct-construction path consistent with R3 ("full pool at match start").
 - **2v2 validation uses a shell-script wrapper around `--headless`, not a matrix-runner extension.** Rationale: `HeadlessMatchConfig.team1: Vec<String>` (`src/headless/config.rs:16-19`) already accepts multi-class teams, so no schema work is needed. The wrapper mirrors `scripts/run_combat_tests.sh` and emits one JSON config per matchup × seed. Extending the matrix runner is a separate decision that should not gate this work (see origin's Dependencies / Assumptions).
 - **Priest is the 2v2 healer partner.** Rationale: Paladin is also a healer but is currently dominant (Paladin v Rogue 100% in the baseline) — pairing Hunter with Paladin would conflate Hunter improvements with Paladin's existing advantage. Priest is the cleaner partner. Paladin re-runs are deferred as optional follow-up.
-- **N=100 matches per matchup for both 1v1 and 2v2 sweeps**, matching the cadence of `design-docs/balance/matrix_baseline_2026-05-21.md`. Deterministic seeds via `--seed-base 0`.
-- **Pre-change comparison uses `design-docs/balance/matrix_baseline_2026-05-21.md` for the 1v1 axis** (the latest pre-change baseline already exists). A new pre-change 2v2 baseline must be captured in U2 because no 2v2 data exists today.
+- **N=100 matches per matchup for both 1v1 and 2v2 sweeps**, matching the cadence of `docs/design/balance/matrix_baseline_2026-05-21.md`. Deterministic seeds via `--seed-base 0`.
+- **Pre-change comparison uses `docs/design/balance/matrix_baseline_2026-05-21.md` for the 1v1 axis** (the latest pre-change baseline already exists). A new pre-change 2v2 baseline must be captured in U2 because no 2v2 data exists today.
 - **Cost cuts are uniform ~15% across all six Hunter abilities** (per origin's Key Decisions). Selective cuts (e.g., keep Freezing Trap expensive) deferred as a possible follow-up.
 
 ---
@@ -76,15 +76,15 @@ Success criteria from the origin's `## Success Criteria` are addressed in U5's v
 - **Requirements:** R10, R11.
 - **Dependencies:** U1.
 - **Files:**
-  - `design-docs/balance/matrix_baseline_2026-05-22_2v2_pre.csv` (new)
-  - `design-docs/balance/matrix_baseline_2026-05-22_2v2_pre.md` (new — short human-readable summary in the shape of `matrix_baseline_2026-05-21.md`)
+  - `docs/design/balance/matrix_baseline_2026-05-22_2v2_pre.csv` (new)
+  - `docs/design/balance/matrix_baseline_2026-05-22_2v2_pre.md` (new — short human-readable summary in the shape of `matrix_baseline_2026-05-21.md`)
 - **Approach:**
   - Run `scripts/hunter_2v2_matrix.sh 100 --seed-base 0 > /tmp/2v2_pre.csv` (or equivalent invocation).
-  - Move the CSV to `design-docs/balance/matrix_baseline_2026-05-22_2v2_pre.csv`.
+  - Move the CSV to `docs/design/balance/matrix_baseline_2026-05-22_2v2_pre.csv`.
   - Write the accompanying `.md` summary by hand following `matrix_baseline_2026-05-21.md` shape: matchup table with winrate, avg duration, and a 1-2 line interpretation note.
   - Commit under `docs(balance):` prefix.
 - **Patterns to follow:**
-  - `design-docs/balance/matrix_baseline_2026-05-21.md` — markdown summary shape.
+  - `docs/design/balance/matrix_baseline_2026-05-21.md` — markdown summary shape.
   - Git history: `abbf3b6 docs(balance): capture initial 4900-match class matchup baseline` — commit convention.
 - **Test scenarios:**
   - Test expectation: none — produces measurement artifacts, not behavior.
@@ -134,14 +134,14 @@ Success criteria from the origin's `## Success Criteria` are addressed in U5's v
 - **Requirements:** R10, R11, R12.
 - **Dependencies:** U3, U4.
 - **Files:**
-  - `design-docs/balance/matrix_baseline_2026-05-22.csv` (new — full 1v1 post-change)
-  - `design-docs/balance/matrix_baseline_2026-05-22.md` (new — markdown summary)
-  - `design-docs/balance/matrix_baseline_2026-05-22_2v2_post.csv` (new — 2v2 post-change)
-  - `design-docs/balance/matrix_baseline_2026-05-22_2v2_post.md` (new — 2v2 markdown summary)
+  - `docs/design/balance/matrix_baseline_2026-05-22.csv` (new — full 1v1 post-change)
+  - `docs/design/balance/matrix_baseline_2026-05-22.md` (new — markdown summary)
+  - `docs/design/balance/matrix_baseline_2026-05-22_2v2_post.csv` (new — 2v2 post-change)
+  - `docs/design/balance/matrix_baseline_2026-05-22_2v2_post.md` (new — 2v2 markdown summary)
   - `docs/reports/2026-05-22-hunter-mana-tuning.md` (new — tuning report)
 - **Approach:**
-  - **1v1 sweep:** Run `target/release/arenasim --matrix 100 --seed-base 0`. The runner emits `match_logs/matrix_<timestamp>.{csv,md}` automatically. Move to `design-docs/balance/matrix_baseline_2026-05-22.{csv,md}`.
-  - **2v2 sweep:** Run `scripts/hunter_2v2_matrix.sh 100 --seed-base 0`. Move output to `design-docs/balance/matrix_baseline_2026-05-22_2v2_post.csv`. Write a markdown summary alongside it.
+  - **1v1 sweep:** Run `target/release/arenasim --matrix 100 --seed-base 0`. The runner emits `match_logs/matrix_<timestamp>.{csv,md}` automatically. Move to `docs/design/balance/matrix_baseline_2026-05-22.{csv,md}`.
+  - **2v2 sweep:** Run `scripts/hunter_2v2_matrix.sh 100 --seed-base 0`. Move output to `docs/design/balance/matrix_baseline_2026-05-22_2v2_post.csv`. Write a markdown summary alongside it.
   - **Trace audit:** Run `target/release/arenasim --headless /tmp/hunter_warrior.json --trace-mode on` with `team1=["Hunter"], team2=["Warrior"], max_duration_secs=60, random_seed=0`. Run the documented `jq` recipe on the resulting trace file:
     ```bash
     jq -r 'select(.actor.class == "Hunter") | .candidates[] | select(.status == "rejected") | .reason | if type == "object" then keys[0] else . end' $T | sort | uniq -c
@@ -175,7 +175,7 @@ Success criteria from the origin's `## Success Criteria` are addressed in U5's v
   - `tests/headless_tests.rs` — Hunter pairings included, validates determinism not winrate
   - `tests/registration_audit.rs` — no system registration changes
 - **Equipment:** No Hunter equipment in `assets/config/loadouts.ron` carries `max_mana` or `mana_regen`, so the base-stat change is the entire effective change. No equipment retuning needed.
-- **Documentation surface:** Three new files in `design-docs/balance/` (post-change CSV+MD, plus 2v2 pre+post). One new file in `docs/reports/`. The brainstorm doc (`docs/brainstorms/2026-05-22-hunter-mana-economy-requirements.md`) and the ideation doc (`docs/ideation/2026-05-22-hunter-rebalance-ideation.md`) remain unchanged.
+- **Documentation surface:** Three new files in `docs/design/balance/` (post-change CSV+MD, plus 2v2 pre+post). One new file in `docs/reports/`. The brainstorm doc (`docs/brainstorms/2026-05-22-hunter-mana-economy-requirements.md`) and the ideation doc (`docs/ideation/2026-05-22-hunter-rebalance-ideation.md`) remain unchanged.
 
 ---
 
@@ -204,7 +204,7 @@ Success criteria from the origin's `## Success Criteria` are addressed in U5's v
 
 - **Assumes `target/release/arenasim` builds cleanly with the stat changes.** No tests pin existing Hunter mana values (verified by research).
 - **Assumes `HeadlessMatchConfig` already accepts `team1: ["Hunter","Priest"]`** per `src/headless/config.rs:16-19`. Confirmed by research.
-- **Assumes the existing 1v1 pre-change baseline at `design-docs/balance/matrix_baseline_2026-05-21.md` is the comparison target** for the 1v1 axis. If a fresher baseline is committed before this plan ships, retarget U5's comparison.
+- **Assumes the existing 1v1 pre-change baseline at `docs/design/balance/matrix_baseline_2026-05-21.md` is the comparison target** for the 1v1 axis. If a fresher baseline is committed before this plan ships, retarget U5's comparison.
 - **Assumes the AI's existing decision tree functions correctly once mana isn't the binding constraint** (origin's stated bet). If post-change matrix shows surprising AI behavior (e.g., burns full pool in first 5 seconds then idles), AI changes become an in-scope follow-up — surface as Residual Actionable Work.
 - **Assumes the matrix runner's determinism (BTreeMap discipline, fixed-step time) is unaffected** by stat tuple changes. Verified by research — no new collections introduced.
 

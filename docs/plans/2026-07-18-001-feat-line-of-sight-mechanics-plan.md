@@ -33,7 +33,7 @@ Add line of sight to ArenaSim: maps declare obstacle volumes that block hostile 
 
 The sim has zero line-of-sight logic anywhere. Range checks are pure Euclidean distance (`src/states/play_match/class_ai/cast_guard.rs:182`), projectiles fly straight with distance-only hit detection, and the `ArenaMap` choice is never read by any gameplay system — PillaredArena spawns no pillars at all, not even visually. Both maps play identically.
 
-This leaves three costs. Mage is the clear #1 in 2v2/3v3 with no structural counterplay; the roadmap (`design-docs/roadmap.md:78`) names LoS as the counter. The ESCAPE posture has no outcome class beyond fleeing in the open. And the map pool cannot differentiate gameplay, blocking the ambition of maps with distinct tactical character — including vertical ones (Blade's Edge, Dalaran Sewers, Ruins of Lordaeron analogues).
+This leaves three costs. Mage is the clear #1 in 2v2/3v3 with no structural counterplay; the roadmap (`docs/design/roadmap.md:78`) names LoS as the counter. The ESCAPE posture has no outcome class beyond fleeing in the open. And the map pool cannot differentiate gameplay, blocking the ambition of maps with distinct tactical character — including vertical ones (Blade's Edge, Dalaran Sewers, Ruins of Lordaeron analogues).
 
 ### Key Decisions
 
@@ -151,7 +151,7 @@ Deferred for later:
 
 ### Sources / Research
 
-- `design-docs/roadmap.md:78` — LoS named as the structural counter to Mage dominance; "LoS terms plug into the existing scorer term list."
+- `docs/design/roadmap.md:78` — LoS named as the structural counter to Mage dominance; "LoS terms plug into the existing scorer term list."
 - `src/states/play_match/class_ai/cast_guard.rs` — `pre_cast_ok` (~68-109) and `classify_pre_cast_failure` must stay in predicate lockstep (file's own warning: the trace "can lie" if they drift).
 - `src/states/play_match/combat_core/casting.rs` — completion resolution: projectile spawn ~277-293, instant-effect target re-fetch and `is_alive()` fizzle ~299-307; the only existing completion re-validation.
 - `src/states/play_match/combat_core/auto_attack.rs` — melee/ranged share one function; range gates ~210-236 (incl. Hunter dead-zone pattern to mirror).

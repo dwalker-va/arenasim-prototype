@@ -1,5 +1,5 @@
 //! Team-level strategy layer — the `TeamPlan` from
-//! `design-docs/team-level-positioning-ai.md`.
+//! `docs/design/team-level-positioning-ai.md`.
 //!
 //! **The layer is inert under `AiProfile::Legacy`, which is the default and what
 //! every recorded baseline runs.** The types, the resource, and the recompute
@@ -477,7 +477,7 @@ pub fn should_hold(nearest_enemy_distance: Option<f32>, engage_radius: f32) -> b
 /// was there to heal on 60-94% of the frames where it was actively trying to, and
 /// every TeamPlan loss in the 12-seed sweep delivered exactly zero healing.
 ///
-/// A camp is an OPENER — `design-docs/team-level-positioning-ai.md` step 3, "the
+/// A camp is an OPENER — `docs/design/team-level-positioning-ai.md` step 3, "the
 /// team takes the pillar *before contact*". In-fight positioning around cover is
 /// step 4's focal-rooted team solve, and until that lands the tuned posture layer
 /// (heal range, `cover_pull`, `medic_chase`) is strictly better at it than a

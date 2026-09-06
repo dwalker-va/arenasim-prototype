@@ -6672,7 +6672,7 @@ mod pillar_self_block {
 // key. That is this module.
 //
 // Calibration data comes from the shipped measurement trail (the n=100
-// head-to-head CSV in design-docs/balance/ and the pillar_self_block numbers
+// head-to-head CSV in docs/design/balance/ and the pillar_self_block numbers
 // above); thresholds sit at roughly half the measured healthy value so a real
 // regression fails loudly while seed-level drift does not. `scan_nagrand_
 // teamplan` re-prints the per-seed numbers when trajectories drift and pins

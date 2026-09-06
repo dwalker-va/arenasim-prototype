@@ -4,7 +4,7 @@ topic: ai-decision-trace
 status: requirements
 related:
   - docs/ideation/2026-05-18-open-ideation.md (item #7)
-  - design-docs/balance/matrix_baseline_2026-05-16.md
+  - docs/design/balance/matrix_baseline_2026-05-16.md
 ---
 
 # Requirements: AI Decision Trace + Inspector Overlay

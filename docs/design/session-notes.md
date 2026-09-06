@@ -60,7 +60,7 @@ combat already is.
 
 **Next session**
 
-Implement `design-docs/team-level-positioning-ai.md` (status AGREED, 8-step
+Implement `docs/design/team-level-positioning-ai.md` (status AGREED, 8-step
 migration plan). Step 2 is a provable no-op; **step 3 is the cheap experiment that
 decides whether Nagrand's 40/80 spacing is viable** — give a melee/healer comp a
 pillar-camp opener and see whether combat relocates off centre. Do that before
@@ -401,7 +401,7 @@ Migrated all 21 ability definitions from hardcoded Rust to RON configuration fil
 - `src/states/play_match/auras.rs` - AuraType::ShadowSight match arm
 - `src/states/mod.rs` - System registration for graphical mode
 - `src/headless/runner.rs` - System registration for headless mode
-- `design-docs/game-design-doc.md` - Shadow Sight mechanic documentation
+- `docs/design/game-design-doc.md` - Shadow Sight mechanic documentation
 
 **Key Learnings:**
 - Bevy query conflicts require explicit `Without<T>` filters when multiple queries access same component

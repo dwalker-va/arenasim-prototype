@@ -112,7 +112,7 @@ The Bug Hunter writes findings to `/tmp/combat-bugs.json`:
 
 ### Intended Behaviors Document
 
-To prevent false positives, document intended behaviors in `design-docs/wow-mechanics.md`:
+To prevent false positives, document intended behaviors in `docs/design/wow-mechanics.md`:
 
 ```markdown
 ## Intended Behaviors (Not Bugs)
@@ -135,7 +135,7 @@ A first-class `/bug-hunt` skill now automates this workflow — it launches a sw
 ```
 Task(subagent_type="general-purpose", prompt="Bug Hunter - Run 6 diverse match
 simulations, analyze logs for anomalies, output to /tmp/combat-bugs.json.
-Read design-docs/wow-mechanics.md for intended behaviors to avoid false positives.")
+Read docs/design/wow-mechanics.md for intended behaviors to avoid false positives.")
 
 # Wait for completion, then:
 
@@ -217,9 +217,9 @@ fix HIGH confidence issues, ask about MEDIUM, report LOW.")
 
 ## Cross-References
 
-- `design-docs/wow-mechanics.md` - Intended behaviors list
-- `design-docs/bevy-patterns.md` - Common pitfalls & solutions
-- `design-docs/session-notes.md` - Development history with bug fixes
+- `docs/design/wow-mechanics.md` - Intended behaviors list
+- `docs/design/bevy-patterns.md` - Common pitfalls & solutions
+- `docs/design/session-notes.md` - Development history with bug fixes
 - `CLAUDE.md` - Headless simulation instructions
 
 ## The Compounding Philosophy

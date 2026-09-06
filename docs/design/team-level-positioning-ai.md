@@ -30,7 +30,7 @@ byte-identical throughout; everything is gated on `AiProfiles`.
 
 **DEFINITIVE MEASUREMENT 2026-08-06, n=100 per cell** (600 matches via the
 parallel batch runner; CSV committed at
-`design-docs/balance/2026-08-06-team-solve-headtohead-n100.csv`). Head-to-head,
+`docs/design/balance/2026-08-06-team-solve-headtohead-n100.csv`). Head-to-head,
 the named side gets the healer solve + kiter leash, the other side runs Legacy:
 
 | Side given the solve | Baseline | With solve | Effect | z |

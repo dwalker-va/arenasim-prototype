@@ -139,7 +139,7 @@ Deferred for later:
 - A web or WASM build, and the second persistence world it implies.
 - Code signing and notarization on either platform.
 - Intel Mac support and universal binaries.
-- Linux builds and the SteamDeck work already tracked in `design-docs/roadmap.md`.
+- Linux builds and the SteamDeck work already tracked in `docs/design/roadmap.md`.
 - Auto-update or any patcher.
 - Distribution through itch.io, Steam, or any storefront.
 
@@ -340,7 +340,7 @@ The registration audit (`tests/registration_audit.rs`) is unaffected — the sea
 
 Deferred — none block implementation:
 
-- Whether later releases should also attach a Linux artifact for the SteamDeck work in `design-docs/roadmap.md`. R3 keeps this to adding a sibling job.
+- Whether later releases should also attach a Linux artifact for the SteamDeck work in `docs/design/roadmap.md`. R3 keeps this to adding a sibling job.
 - Whether the per-user match-log directory should eventually be pruned or capped. Recorded under deferred follow-up work.
 
 ## Sources / Research
@@ -354,4 +354,4 @@ Deferred — none block implementation:
 - `scripts/behaviour_baseline.sh:69` — reads the defaulted log path, so it depends on the development classification being correct.
 - `docs/solutions/implementation-patterns/bevy-macos-exit-deadlock-egui-teardown.md` — the macOS exit path has no automated coverage and is re-verified by hand on packaging changes.
 - `build.rs` and `.cargo/config.toml` — the existing `wasm32` target gating, and the pattern U4's Windows branch follows.
-- `design-docs/roadmap.md:228` — "SteamDeck testing and optimization", the tracked reason R3 asks the pipeline to stay extensible.
+- `docs/design/roadmap.md:228` — "SteamDeck testing and optimization", the tracked reason R3 asks the pipeline to stay extensible.

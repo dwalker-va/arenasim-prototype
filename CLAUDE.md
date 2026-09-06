@@ -27,7 +27,7 @@ cargo run --release -- --headless /tmp/test.json
 - `ai_profile`: "Legacy" (default) or "TeamPlan" — which AI implementation to run.
   `Legacy` is the reactive per-unit AI every balance baseline and movement probe is
   calibrated against; `TeamPlan` is the opt-in team-level positioning layer (see
-  `design-docs/team-level-positioning-ai.md`). Because matches are deterministic,
+  `docs/design/team-level-positioning-ai.md`). Because matches are deterministic,
   running the same seed under both profiles is a PAIRED comparison in which the AI
   is the only variable. Also available as `--ai-profile` for `--matrix`, which
   records it in the CSV header and the output filename. `team1_ai_profile` /
@@ -138,11 +138,11 @@ assets/
 
 For deeper context, see these focused references:
 
-- **[Session Notes](design-docs/session-notes.md)** - Full development history (17 sessions)
-- **[WoW Mechanics](design-docs/wow-mechanics.md)** - Implemented game mechanics (CC, resources, combat)
-- **[Bevy Patterns](design-docs/bevy-patterns.md)** - Rust/Bevy learnings and common pitfalls
-- **[Roadmap](design-docs/roadmap.md)** - Long-term TODOs and milestones
-- **[Team-Level Positioning AI](design-docs/team-level-positioning-ai.md)** -
+- **[Session Notes](docs/design/session-notes.md)** - Full development history (17 sessions)
+- **[WoW Mechanics](docs/design/wow-mechanics.md)** - Implemented game mechanics (CC, resources, combat)
+- **[Bevy Patterns](docs/design/bevy-patterns.md)** - Rust/Bevy learnings and common pitfalls
+- **[Roadmap](docs/design/roadmap.md)** - Long-term TODOs and milestones
+- **[Team-Level Positioning AI](docs/design/team-level-positioning-ai.md)** -
   PARTLY IMPLEMENTED design for the `TeamPlan` layer (team stance, obligations,
   positioning solve). Read before touching pillar/cover behaviour, and read the
   2026-08-04 amendments before building any of it — the design's shape held up
@@ -152,7 +152,7 @@ For deeper context, see these focused references:
   result — per-frame, thousands of samples). The DPS half was reverted:
   constraint satisfaction cannot express a kiter's distance-maximisation.
   `Legacy` is byte-identical throughout.
-  **Definitive n=100 head-to-head** (2026-08-06, CSV in `design-docs/balance/`):
+  **Definitive n=100 head-to-head** (2026-08-06, CSV in `docs/design/balance/`):
   the healer solve + kiter leash is worth +36pt to Warlock+Priest (z=5.2), +14pt
   to Hunter+Priest (z=2.2), +10pt to Warrior+Priest (z=1.8), -6pt (noise) to
   Rogue+Priest. **Sample-size warning stands:** every earlier n=12 win-rate figure
@@ -162,9 +162,9 @@ For deeper context, see these focused references:
   **Measurement rule:** `AiProfiles` is PER-TEAM; a uniform-profile A/B cannot
   answer "is the new AI better", so set the sides differently and run both
   assignments — see *How to measure a step* in that doc, and `tests/camp_sweep.rs`.
-  Background on the camp: **[the camp handoff](design-docs/2026-08-01-nagrand-camp-handoff.md)**.
-- **[Stat Scaling](design-docs/stat-scaling-system.md)** - Damage/healing formulas and coefficients
-- **[Game Design](design-docs/game-design-doc.md)** - High-level game vision
+  Background on the camp: **[the camp handoff](docs/design/2026-08-01-nagrand-camp-handoff.md)**.
+- **[Stat Scaling](docs/design/stat-scaling-system.md)** - Damage/healing formulas and coefficients
+- **[Game Design](docs/design/game-design-doc.md)** - High-level game vision
 - **[Concepts](CONCEPTS.md)** - Vocabulary substrate: the words that mean something
   specific in this codebase, defined once so other docs can cite rather than
   redefine them. Currently seeded for the animation/visual-effects area.
@@ -457,10 +457,10 @@ cat match_logs/$(ls -t match_logs | head -1)
 cargo build --release
 scripts/hunter_2v2_matrix.sh 100 --seed-base 0
 
-# Custom output path (e.g., commit to design-docs/balance/)
+# Custom output path (e.g., commit to docs/design/balance/)
 scripts/hunter_2v2_matrix.sh 100 \
   --seed-base 0 \
-  --out design-docs/balance/matrix_baseline_<date>_2v2.csv
+  --out docs/design/balance/matrix_baseline_<date>_2v2.csv
 ```
 
 CSV columns are byte-compatible with the 1v1 matrix output from

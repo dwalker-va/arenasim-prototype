@@ -28,7 +28,7 @@ U4 lands: Hunter AI now owns the strategic decision to dispatch Spider Web, Boar
 
 ### 1v1 Matrix Sweep (N=20, seed_base=0)
 
-Compared against iteration 2a (`design-docs/balance/matrix_baseline_2026-05-22_pet_engage_1v1_post.csv`). Hunter rows shown; non-Hunter matchups are unchanged because they don't run any code on this path.
+Compared against iteration 2a (`docs/design/balance/matrix_baseline_2026-05-22_pet_engage_1v1_post.csv`). Hunter rows shown; non-Hunter matchups are unchanged because they don't run any code on this path.
 
 | Matchup | 2a wins/N | 2b wins/N | Delta |
 |---|---:|---:|---:|
@@ -50,7 +50,7 @@ Sub-second floating-point variation appears in two `avg_duration_secs` values (H
 
 ### N=100 Sweep Addendum
 
-Completed 2026-05-23 (`design-docs/balance/matrix_baseline_2026-05-23_pet_dispatch_1v1_post_n100.csv`). No iteration 2a N=100 baseline exists for direct comparison; the N=20 byte-identical result above is the strongest signal of zero regression. N=100 numbers below characterize iteration 2b's behavior at higher sample size.
+Completed 2026-05-23 (`docs/design/balance/matrix_baseline_2026-05-23_pet_dispatch_1v1_post_n100.csv`). No iteration 2a N=100 baseline exists for direct comparison; the N=20 byte-identical result above is the strongest signal of zero regression. N=100 numbers below characterize iteration 2b's behavior at higher sample size.
 
 | Matchup | N=20 | N=100 |
 |---|---:|---:|

@@ -120,7 +120,7 @@ Headline post-fix Hunter winrates (symmetrized, N=50/side):
 **Critical context for ANY Hunter balance work:** every Hunter matrix predating
 `1a41deb` was computed with a damage-dead pet — the ranged dead-zone silently
 cancelled every melee-pet auto-attack swing. All Hunter baselines in
-`design-docs/balance/` are stale; re-sweep before tuning.
+`docs/design/balance/` are stale; re-sweep before tuning.
 
 ### A. Hunter 2v2 holes (diagnosed, NOT pet-related)
 
@@ -132,7 +132,7 @@ cancelled every melee-pet auto-attack swing. All Hunter baselines in
       class. Fix: +60 gear mana + Freezing Trap 43→26 + smarter Concussive/trap
       AI → Hunter+Priest 2v2 25%→~35%, overall Hunter 2v2 +4.7pt, 3v3 +5.1pt, no
       1v1 regression. Full re-diagnosis:
-      `design-docs/balance/2026-06-20-warrior-2v2-rediagnosis.md`. (Remaining
+      `docs/design/balance/2026-06-20-warrior-2v2-rediagnosis.md`. (Remaining
       Hunter holes — Mage control, deeper melee-pin — are separate, below.)
 - [ ] **Mage 2v2 0%** — control matchup (Polymorph / Frost Nova / kiting).
       LoS / pillar play is the structural counter (see healer bucket C — shared
@@ -176,7 +176,7 @@ cancelled every melee-pet auto-attack swing. All Hunter baselines in
 - [x] ~~**Open the PR** for `main..HEAD` on `worktree-ai-tuning` (Hunter migration
       + pet/kite fixes + rebaseline).~~ DONE 2026-06-13 — PR #71.
 - [x] ~~**Re-sweep** the full 7×7 1v1 + 2v2/3v3 matrices with the pet-damage fix
-      live, replacing the stale `design-docs/balance/` Hunter baselines.~~ DONE
+      live, replacing the stale `docs/design/balance/` Hunter baselines.~~ DONE
       2026-06-13 — `canonical_{1v1_n100,2v2_full_n100,3v3_full_n50}_300s.csv`
       regenerated + `canonical_baselines_summary.md` rewritten. Hunter 1v1
       20.7→59.4; team formats +3-4; Mage+Paladin meta unchanged (Hunter-isolated).

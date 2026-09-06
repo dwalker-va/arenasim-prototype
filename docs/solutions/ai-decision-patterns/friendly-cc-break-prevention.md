@@ -158,6 +158,6 @@ Look for `check_friendly_dots: true` (e.g. `class_ai/mage.rs::try_polymorph`, `c
 ## Related Documentation
 
 - Bug report: `docs/reports/2026-03-16-headless-match-bug-report.md` (BUG-5)
-- CC type taxonomy: `design-docs/wow-mechanics.md`
+- CC type taxonomy: `docs/design/wow-mechanics.md`
 - Known issues: `docs/known-issues.md` (KI-8: Divine Shield while CC'd is intentional)
 - Dual system registration: `docs/solutions/implementation-patterns/graphical-mode-missing-system-registration.md`

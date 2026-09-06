@@ -86,7 +86,7 @@ Add Serpent Sting to the Hunter kit: an instant, cheap, no-cooldown Nature DoT m
 
 - The Wowhead Classic MCP was not connected during this brainstorm. Classic reference values (damage over duration, mana cost) and the icon download (`get_spell_icon("Serpent Sting")`) need the MCP reconnected at planning/implementation time, or values entered from a manual reference check.
 - Assumes DoT ticks already count toward `break_on_damage` thresholds (this is current engine behavior — Freezing Trap breaks on any damage) and that the friendly-DoT check used by the cast guard surfaces Hunter-owned stings the same as Warlock DoTs. Verify during planning.
-- Hunter balance baseline: the most recent sweep CSVs under `design-docs/balance/` are the comparison point for R17.
+- Hunter balance baseline: the most recent sweep CSVs under `docs/design/balance/` are the comparison point for R17.
 
 ---
 
@@ -107,4 +107,4 @@ Add Serpent Sting to the Hunter kit: an instant, cheap, no-cooldown Nature DoT m
 - Hunter AI structure (`try_*` helpers, kiting branch): `src/states/play_match/class_ai/hunter.rs`
 - Visual surface precedents: DoT body effects in `src/states/play_match/rendering/effects.rs` (Corruption vs Unstable Affliction distinguishability), aura icon keys in `src/states/play_match/rendering/mod.rs`, HUD aura colors in `src/states/play_match/rendering/hud.rs`, per-ability combat-log entries in `src/states/play_match/rendering/combat_log.rs`
 - Prior related brainstorms: `docs/brainstorms/2026-05-22-hunter-mana-economy-requirements.md`, `docs/brainstorms/2026-04-18-unstable-affliction-warlock-requirements.md` (the most recent add-a-DoT precedent)
-- Balance context: `design-docs/balance/2026-06-04-hunter-mage-balance-findings.md`
+- Balance context: `docs/design/balance/2026-06-04-hunter-mage-balance-findings.md`
