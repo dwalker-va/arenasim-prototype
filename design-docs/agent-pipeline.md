@@ -147,8 +147,11 @@ steps below against the recovered state.
    - `RELEASED` → for every card in `CARDS:`, set `released: <TAG>` and
      `column: "archived"`; the release-manager trigger card itself (if the run
      was card-triggered) is archived exactly like the bundled cards — set
-     `released: <TAG>` and `column: "archived"` on it too, appending the tag +
-     release URL as activity (`by: "release-manager"`). It never parks in
+     `released: <TAG>` and `column: "archived"` on it too, and close out its
+     claim: `agent.status: "done"`, `finished: <now>` (the trigger entered
+     `in_progress` under a `working` claim; archiving without closing it would
+     leave a dangling `working` with no `finished` timestamp), appending the
+     tag + release URL as activity (`by: "release-manager"`). It never parks in
      `done`: a release run produces no PR, so a trigger card left in `done`
      would block every subsequent bundle. Republish.
    - `NEEDS_INPUT` / `FAILED` → same handling as the Engineer's (step 4): the
@@ -156,6 +159,11 @@ steps below against the recovered state.
      the question or failure text; a user-requested run just surfaces it to the
      user. Either way, no board changes to the bundled Done cards — they stay
      in `done` for the next attempt.
+   - A malformed report (no parseable `STATUS:`) → treat like `FAILED`: the
+     triggering card (if the run was card-triggered) goes to `needs_input` with
+     the raw report as the question text, naming the run; a user-requested run
+     surfaces it to the user the same way. Never guess whether the release
+     happened; the bundled Done cards stay in `done` untouched.
 7. Cards the *user* must see promptly (needs_input) warrant a mention in the
    orchestrator session's next visible message.
 
@@ -186,7 +194,8 @@ steps below against the recovered state.
   sha>`. Bash/Read/Grep/Glob only — it writes no repo files (notes go straight
   through `gh`), never merges, never pushes branches, never touches the board.
   Reports `RELEASED / NEEDS_INPUT / FAILED` in a fixed format; board archival
-  of the bundled cards is the orchestrator's job (see Release flow).
+  of the bundled cards — and of the trigger card, when the run was
+  card-triggered — is the orchestrator's job (see Release flow).
 
 ## Release flow
 
