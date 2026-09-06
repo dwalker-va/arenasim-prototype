@@ -349,6 +349,125 @@ pub struct HealingLightColumn {
     pub initial_lifetime: f32,
 }
 
+/// Which per-spell heal landing a [`HealImpact`] plays.
+///
+/// From the Classic Era client data (build 1.15.9.69547 — see
+/// `design-docs/2026-09-06-heal-impact-client-data.md`): several abilities
+/// share one implementation. Holy Shock's heal is byte-identical to Priest
+/// Heal in the client (visual 135, kit 232), Lesser Healing Wave and Healing
+/// Wave are the same visual 58, and Flash of Light — impact-less for players
+/// in the source — borrows Holy Light's head shower the way the non-player
+/// FoL variants (visuals 6622/7379) do, at reduced intensity.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum HealImpactKind {
+    /// `flashheal_base.m2`: gold ray-fan flash + lens flare, then rising motes.
+    FlashHeal,
+    /// `heal_low_base.m2`: no flash — a narrow rising stream of gold motes.
+    /// Priest Heal's model; Holy Shock's heal lands with it verbatim.
+    HealStream,
+    /// `holylight_low_head.m2`: head glow + a falling curtain of gold stars
+    /// and soft light-puffs. The only head-attached heal in the set.
+    HolyLight,
+    /// Holy Light's shower at reduced intensity and duration — the sanctioned
+    /// borrow the non-player Flash of Light variants use.
+    FlashOfLight,
+    /// `restoration_impact_base.m2`: green/gold torso glow, orbiting
+    /// butterflies, rising gold stars. Nature's one heal landing.
+    HealingWave,
+}
+
+/// A landed heal playing its per-spell, Classic-faithful landing on the
+/// recipient — the healing counterpart of [`SchoolImpact`].
+///
+/// Spawned by combat code at the site where the heal RESOLVES (the
+/// cast-completion heal branch in `process_casting`, and
+/// `process_holy_shock_heals` for Holy Shock's instant heal), so it exists in
+/// both modes; rendered only in graphical mode
+/// (`rendering/effects/heal_impact.rs`). Purely cosmetic: it reads combat
+/// state, writes none, and draws no `game_rng`.
+#[derive(Component)]
+pub struct HealImpact {
+    /// The recipient. The landing TRACKS it, so a healed runner carries it.
+    pub target: Entity,
+    pub kind: HealImpactKind,
+    pub age: f32,
+}
+
+impl HealImpact {
+    /// Which landing a heal ability plays — the single routing table the
+    /// spawn sites derive from. `None` only for abilities that are not
+    /// direct heals; `tests/heal_impact_visual_probes.rs` checks every
+    /// `is_heal()` ability in the config reaches SOME landing.
+    pub fn kind_for(ability: AbilityType) -> Option<HealImpactKind> {
+        match ability {
+            AbilityType::FlashHeal => Some(HealImpactKind::FlashHeal),
+            // Holy Shock's heal reuses Heal's visual verbatim in the client.
+            AbilityType::HolyShock => Some(HealImpactKind::HealStream),
+            AbilityType::HolyLight => Some(HealImpactKind::HolyLight),
+            AbilityType::FlashOfLight => Some(HealImpactKind::FlashOfLight),
+            // LHW and Healing Wave are one visual in the client.
+            AbilityType::LesserHealingWave => Some(HealImpactKind::HealingWave),
+            _ => None,
+        }
+    }
+}
+
+/// A flat, per-landing piece of a heal impact (graphical only).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum HealSpriteRole {
+    /// One of Flash Heal's radiating gradient light rays, rolled to `angle`
+    /// in the billboard plane.
+    Ray { angle: f32 },
+    /// The central lens-flare flash under Flash Heal's rays.
+    LensFlare,
+    /// Holy Light's glow bloom at the head.
+    HeadGlow,
+    /// One of Healing Wave's green/gold torso glow layers.
+    TorsoGlow,
+}
+
+#[derive(Component)]
+pub struct HealSprite {
+    pub role: HealSpriteRole,
+    /// Full-size radius in yards (for rays: full length).
+    pub radius: f32,
+    pub base_alpha: f32,
+}
+
+/// One rising or falling gold mote of a heal landing, in the rig's frame.
+#[derive(Component)]
+pub struct HealMote {
+    pub kind: crate::states::play_match::rendering::HealMoteKind,
+    pub velocity: Vec3,
+    pub age: f32,
+    pub life: f32,
+    pub radius: f32,
+}
+
+/// One butterfly wing of the Healing Wave swirl. Wings are direct children
+/// of the rig; the animate system computes the whole butterfly pose (orbit
+/// position, heading, flap) from these fields each frame.
+#[derive(Component)]
+pub struct HealButterflyWing {
+    /// Which butterfly of the swirl this wing belongs to.
+    pub index: u32,
+    /// -1.0 for the left wing, +1.0 for the right.
+    pub side: f32,
+}
+
+/// Graphical-only state a [`HealImpact`] rig carries while it plays.
+#[derive(Component)]
+pub struct HealImpactRig {
+    /// Fractional motes owed per emitter since the last one was spawned.
+    pub carry: [f32; 8],
+    /// How many motes the rig has emitted, seeding their scatter.
+    pub emitted: u32,
+    pub quad: Handle<Mesh>,
+    pub star_material: Handle<StandardMaterial>,
+    pub ribbon_material: Handle<StandardMaterial>,
+    pub puff_material: Handle<StandardMaterial>,
+}
+
 /// Visual effect for dispel spells - an expanding sphere burst at the target.
 /// Spawned when a dispel successfully removes an aura, expands and fades over its lifetime.
 #[derive(Component)]

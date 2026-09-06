@@ -99,6 +99,22 @@ pub fn process_holy_shock_heals(
                 PlayMatchEntity,
             ));
 
+            // The per-spell heal landing (rendering/effects/heal_impact.rs) —
+            // Holy Shock's heal resolves to Priest Heal's visual verbatim in
+            // the client (visual 135, kit 232), so it lands as the quiet
+            // rising gold mote stream. Deterministic spawn, no `game_rng`
+            // draw; byte-neutral in headless like the FCT above.
+            if let Some(kind) = HealImpact::kind_for(AbilityType::HolyShock) {
+                commands.spawn((
+                    HealImpact {
+                        target: pending.target,
+                        kind,
+                        age: 0.0,
+                    },
+                    PlayMatchEntity,
+                ));
+            }
+
             // Log the heal with caster attribution
             let caster_id = combatant_id(pending.caster_team, pending.caster_slot, pending.caster_class);
             let verb = if is_crit { "CRITICALLY heals" } else { "heals" };

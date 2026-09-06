@@ -85,8 +85,10 @@ pub const IMPACT_CHEST_Y: f32 = 0.55;
 pub const IMPACT_HEAD_Y: f32 = 1.05;
 /// A pet's mesh child sits below its transform (`PET_MESH_Y - pet_position.y`
 /// in `play_match/mod.rs`), and its capsule is roughly half a combatant's.
-const IMPACT_PET_BODY_Y: f32 = -0.45;
-const IMPACT_PET_STATURE: f32 = 0.55;
+/// Shared with the heal landings (`heal_impact.rs`), which apply the same
+/// correction.
+pub const IMPACT_PET_BODY_Y: f32 = -0.45;
+pub const IMPACT_PET_STATURE: f32 = 0.55;
 
 /// Damage as a fraction of the victim's max health at which a burst reaches
 /// full size. Below it the flash and spray shrink toward the floor.
