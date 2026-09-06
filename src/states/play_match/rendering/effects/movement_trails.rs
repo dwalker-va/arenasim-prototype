@@ -23,12 +23,21 @@ use crate::states::play_match::components::*;
 
 /// Distance between emitted trail elements along the path (yards, at scale 1).
 const EMIT_SPACING: f32 = 0.55;
-/// Streak segment fade time. The client ribbon's edge lifetime is 1.0s; a
-/// touch shorter keeps the additive red from lingering as a wall after the
-/// dash lands.
-const STREAK_LIFETIME: f32 = 0.7;
-/// Dust puff fade time (client: 0.9–1.0s lives).
-const DUST_LIFETIME: f32 = 0.9;
+/// Fraction of the emission spacing a streak segment actually fills. Kept
+/// well under 1.0 so consecutive segments leave visible gaps — the trail must
+/// read as a sequence of discrete dissolving streaks, not fuse back into the
+/// solid slab this card replaced.
+const STREAK_FILL: f32 = 0.55;
+/// Nominal streak segment fade time. Short relative to the ~28 yd/s dash so
+/// the tail visibly dissolves behind the runner (a comet tail, not a wall);
+/// jittered per segment (see `hash01`) so no two neighbors fade in lockstep.
+const STREAK_LIFETIME: f32 = 0.32;
+/// Per-segment lifetime jitter half-range (fraction of `STREAK_LIFETIME`).
+const STREAK_LIFE_JITTER: f32 = 0.15;
+/// Dust particle life range (staggered per particle; client puffs live
+/// 0.9–1.0s, but small fast puffs read better at roughly half that).
+const DUST_LIFE_MIN: f32 = 0.4;
+const DUST_LIFE_MAX: f32 = 0.7;
 /// Ribbon half-height (client: heightAbove = heightBelow = 0.472 units).
 const STREAK_HALF_HEIGHT: f32 = 0.47;
 /// Chest offset above the charger's BODY CENTRE at scale 1 — the repo's shared
@@ -37,10 +46,34 @@ const STREAK_HALF_HEIGHT: f32 = 0.47;
 /// so the segment centres exactly there. Body centre is `translation.y +
 /// rest_y`, NOT the sim y — see `ChargeTrailEmitter::rest_y`.
 const STREAK_CHEST_OFFSET: f32 = super::IMPACT_CHEST_Y;
-/// Ground clearance of a dust puff's center at scale 1.
-const DUST_HEIGHT: f32 = 0.15;
+/// Dust particle base radius range at scale 1 (small puffs, not pearls).
+const DUST_RADIUS_MIN: f32 = 0.05;
+const DUST_RADIUS_MAX: f32 = 0.12;
+/// Horizontal scatter range of a cluster's particles around the emission
+/// point (yards, at scale 1).
+const DUST_SCATTER_MIN: f32 = 0.15;
+const DUST_SCATTER_MAX: f32 = 0.3;
 /// Body-size scale for pet chargers (the Boar).
 const PET_SCALE: f32 = 0.55;
+
+/// Deterministic 0..1 hash — per-element variation without touching
+/// `game_rng` (this is a render-only system; drawing the sim RNG here would
+/// break headless/graphical seed parity).
+fn hash01(seed: u32) -> f32 {
+    let mut h = seed.wrapping_mul(0x9E37_79B9);
+    h ^= h >> 16;
+    h = h.wrapping_mul(0x7feb_352d);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x846c_a68b);
+    h ^= h >> 16;
+    (h & 0x00FF_FFFF) as f32 / 16_777_216.0
+}
+
+/// Seed a hash stream from a world position (plus a salt for independent
+/// draws) — two clusters at different points along the path never match.
+fn seed_from(pos: Vec3, salt: u32) -> u32 {
+    pos.x.to_bits() ^ pos.z.to_bits().rotate_left(13) ^ salt.wrapping_mul(0x0068_5DA5)
+}
 
 fn spawn_streak_segment(
     commands: &mut Commands,
@@ -52,9 +85,10 @@ fn spawn_streak_segment(
     scale: f32,
     rest_y: f32,
 ) {
-    // Slight overlap so consecutive segments read as one continuous streamer.
+    // Deliberately shorter than the emission spacing: the gaps are what make
+    // the trail read as a sequence of discrete streaks instead of one slab.
     let mesh = meshes.add(Cuboid::new(
-        length * 1.25,
+        length * STREAK_FILL,
         STREAK_HALF_HEIGHT * 2.0 * scale,
         0.05,
     ));
@@ -79,49 +113,77 @@ fn spawn_streak_segment(
         mid.z,
     );
 
+    // Jittered life so adjacent segments never fade in lockstep — even two
+    // segments emitted in the same fast frame dissolve on their own clocks.
+    let life = STREAK_LIFETIME
+        * (1.0 + STREAK_LIFE_JITTER * (2.0 * hash01(seed_from(mid, 0)) - 1.0));
+
     commands.spawn((
         Mesh3d(mesh),
         MeshMaterial3d(material),
         Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(yaw)),
         ChargeStreakSegment {
-            lifetime: STREAK_LIFETIME,
-            initial_lifetime: STREAK_LIFETIME,
+            lifetime: life,
+            initial_lifetime: life,
         },
         PlayMatchEntity,
     ));
 }
 
-fn spawn_dust_puff(
+/// Kick up a small CLUSTER of dust at one emission point: 3–5 varied-size
+/// puffs scattered around it, drifting up and outward as they expand and
+/// fade. One big uniform sphere per point read as pearls on a string; the
+/// cluster's per-particle variation (all hashed off the position — no
+/// `game_rng`) is what makes it read as kicked-up smoke.
+fn spawn_dust_cluster(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
     at: Vec3,
     scale: f32,
 ) {
-    let mesh = meshes.add(Sphere::new(0.16));
-    // Dusty tan, kept dim: the dust is grounding, not glow (the client's puffs
-    // are alpha-blended smoke; Add is the repo's Z-fighting-safe idiom, so the
-    // smoke read comes from low emissive instead of true alpha).
-    let material = materials.add(StandardMaterial {
-        base_color: Color::srgba(0.55, 0.48, 0.38, 0.35),
-        emissive: LinearRgba::new(0.35, 0.30, 0.22, 1.0),
-        alpha_mode: AlphaMode::Add,
-        ..default()
-    });
+    let count = 3 + (hash01(seed_from(at, 100)) * 3.0) as u32; // 3..=5
+    for i in 0..count {
+        let salt = 101 + i * 7;
+        let h = |k: u32| hash01(seed_from(at, salt + k * 31));
 
-    let pos = Vec3::new(at.x, DUST_HEIGHT * scale, at.z);
+        let radius = (DUST_RADIUS_MIN + (DUST_RADIUS_MAX - DUST_RADIUS_MIN) * h(0)) * scale;
+        let angle = std::f32::consts::TAU * h(1);
+        let out = Vec3::new(angle.cos(), 0.0, angle.sin());
+        let scatter = (DUST_SCATTER_MIN + (DUST_SCATTER_MAX - DUST_SCATTER_MIN) * h(2)) * scale;
+        // Slight upward + outward drift; the upward component keeps every
+        // particle above the floor for its whole life (the round-3 bound).
+        let velocity = (out * (0.3 + 0.3 * h(3)) + Vec3::Y * (0.3 + 0.4 * h(4))) * scale;
+        let life = DUST_LIFE_MIN + (DUST_LIFE_MAX - DUST_LIFE_MIN) * h(5);
+        let spawn_y = (0.05 + 0.10 * h(6)) * scale;
 
-    commands.spawn((
-        Mesh3d(mesh),
-        MeshMaterial3d(material),
-        Transform::from_translation(pos).with_scale(Vec3::splat(scale)),
-        ChargeDustPuff {
-            lifetime: DUST_LIFETIME,
-            initial_lifetime: DUST_LIFETIME,
-            base_scale: scale,
-        },
-        PlayMatchEntity,
-    ));
+        let mesh = meshes.add(Sphere::new(radius));
+        // Dusty tan, kept dim: the dust is grounding, not glow (the client's
+        // puffs are alpha-blended smoke; Add is the repo's Z-fighting-safe
+        // idiom, so the smoke read comes from low emissive instead of true
+        // alpha).
+        let material = materials.add(StandardMaterial {
+            base_color: Color::srgba(0.55, 0.48, 0.38, 0.35),
+            emissive: LinearRgba::new(0.35, 0.30, 0.22, 1.0),
+            alpha_mode: AlphaMode::Add,
+            ..default()
+        });
+
+        let pos = Vec3::new(at.x, spawn_y, at.z) + out * scatter;
+
+        commands.spawn((
+            Mesh3d(mesh),
+            MeshMaterial3d(material),
+            Transform::from_translation(pos),
+            ChargeDustPuff {
+                lifetime: life,
+                initial_lifetime: life,
+                base_scale: 1.0,
+                velocity,
+            },
+            PlayMatchEntity,
+        ));
+    }
 }
 
 /// Emit the charge trail along the dash path.
@@ -166,7 +228,7 @@ pub fn spawn_charge_trail(
                 commands
                     .entity(entity)
                     .try_insert(ChargeTrailEmitter { last_emit: pos, scale, rest_y });
-                spawn_dust_puff(&mut commands, &mut meshes, &mut materials, pos, scale * 1.4);
+                spawn_dust_cluster(&mut commands, &mut meshes, &mut materials, pos, scale * 1.4);
             }
             Some(mut em) => {
                 let spacing = EMIT_SPACING * em.scale;
@@ -193,7 +255,7 @@ pub fn spawn_charge_trail(
                         em.scale,
                         em.rest_y,
                     );
-                    spawn_dust_puff(&mut commands, &mut meshes, &mut materials, mid, em.scale);
+                    spawn_dust_cluster(&mut commands, &mut meshes, &mut materials, mid, em.scale);
                     em.last_emit = next;
                 }
             }
@@ -248,8 +310,9 @@ pub fn update_and_cleanup_charge_trails(
             continue;
         }
         let progress = (puff.lifetime / puff.initial_lifetime).max(0.0);
-        // Dust expands as it dissipates (the client puffs fly outward at
-        // ~4 u/s; a growing sphere is the single-mesh analog).
+        // Dust drifts up-and-outward while expanding as it dissipates (the
+        // client puffs fly outward at ~4 u/s).
+        transform.translation += puff.velocity * dt;
         let age = 1.0 - progress;
         transform.scale = Vec3::splat(puff.base_scale * (1.0 + 1.2 * age));
         if let Some(material) = materials.get_mut(&material_handle.0) {

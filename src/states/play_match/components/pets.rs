@@ -238,9 +238,10 @@ pub struct ChargeStreakSegment {
     pub initial_lifetime: f32,
 }
 
-/// One dust puff kicked up at ground level along the charge path — the Bevy
-/// analog of the Classic `spells/dustcloud_land.m2` base attachment (alpha
-/// smoke, ~1s life). Expands slightly and fades over its lifetime.
+/// One small dust particle kicked up at ground level along the charge path —
+/// the Bevy analog of the Classic `spells/dustcloud_land.m2` base attachment
+/// (alpha smoke). Emitted in clusters of 3–5 varied-size puffs per emission
+/// point; drifts along `velocity` while expanding and fading over its life.
 #[derive(Component)]
 pub struct ChargeDustPuff {
     /// Time remaining before despawn (seconds)
@@ -249,4 +250,6 @@ pub struct ChargeDustPuff {
     pub initial_lifetime: f32,
     /// Spawn-time uniform scale; grows from here as the puff ages.
     pub base_scale: f32,
+    /// Constant drift (slight upward + outward), integrated per frame.
+    pub velocity: Vec3,
 }
