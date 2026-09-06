@@ -56,6 +56,26 @@ const DUST_SCATTER_MAX: f32 = 0.3;
 /// Body-size scale for pet chargers (the Boar).
 const PET_SCALE: f32 = 0.55;
 
+/// Walk the segment between the last emitted point and the mover's current
+/// position, invoking `emit(mid, dir)` every `spacing` yards of actual
+/// travel and advancing `last_emit`. The loop matters: one fast frame can
+/// cover several spacings, and each element must land ON the path, not at
+/// the endpoint. Shared by every path-laid trail (Charge, Disengage).
+fn emit_along_path(last_emit: &mut Vec3, pos: Vec3, spacing: f32, mut emit: impl FnMut(Vec3, Vec3)) {
+    loop {
+        let delta = pos - *last_emit;
+        let dist = delta.length();
+        if dist < spacing {
+            break;
+        }
+        let dir = delta / dist;
+        let next = *last_emit + dir * spacing;
+        let mid = (*last_emit + next) * 0.5;
+        emit(mid, dir);
+        *last_emit = next;
+    }
+}
+
 /// Deterministic 0..1 hash — per-element variation without touching
 /// `game_rng` (this is a render-only system; drawing the sim RNG here would
 /// break headless/graphical seed parity).
@@ -232,19 +252,8 @@ pub fn spawn_charge_trail(
             }
             Some(mut em) => {
                 let spacing = EMIT_SPACING * em.scale;
-                // Walk the traveled segment, emitting an element every
-                // `spacing` yards. The loop matters: one fast frame can cover
-                // several spacings, and each element must land ON the path,
-                // not at the endpoint.
-                loop {
-                    let delta = pos - em.last_emit;
-                    let dist = delta.length();
-                    if dist < spacing {
-                        break;
-                    }
-                    let dir = delta / dist;
-                    let next = em.last_emit + dir * spacing;
-                    let mid = (em.last_emit + next) * 0.5;
+                let (scale, rest_y) = (em.scale, em.rest_y);
+                emit_along_path(&mut em.last_emit, pos, spacing, |mid, dir| {
                     spawn_streak_segment(
                         &mut commands,
                         &mut meshes,
@@ -252,12 +261,11 @@ pub fn spawn_charge_trail(
                         mid,
                         dir,
                         spacing,
-                        em.scale,
-                        em.rest_y,
+                        scale,
+                        rest_y,
                     );
-                    spawn_dust_cluster(&mut commands, &mut meshes, &mut materials, mid, em.scale);
-                    em.last_emit = next;
-                }
+                    spawn_dust_cluster(&mut commands, &mut meshes, &mut materials, mid, scale);
+                });
             }
         }
     }
@@ -267,6 +275,266 @@ pub fn spawn_charge_trail(
     // the old end point across the map.
     for entity in stale_emitters.iter() {
         commands.entity(entity).remove::<ChargeTrailEmitter>();
+    }
+}
+
+// ==============================================================================
+// Disengage Trail Visual (Hunter backward leap)
+// ==============================================================================
+//
+// AUTHORED design — the Classic Era client has no leap visual to port. In
+// 1.15.9 Disengage (781/14272/14273 → SpellVisual 738) is the vanilla melee
+// threat-drop: HasMissile = 0, no positioners, no area model, no ribbon —
+// just a Special1H swipe anim and a one-shot chest flash on caster and
+// target (`spells/blink_impact_chest.m2`: nine Add-blended flare / star /
+// sparkle / pixie emitters, white-blue, lives 0.35–1.14 s). The backward
+// leap is a Wrath-era mechanic this sim adopted, so its trail borrows the
+// Charge trail's client-grounded path-laid construction — distance-paced
+// elements laid along the live transform, per-element fade — while the
+// palette and particle vocabulary come from Disengage's own kit model: thin
+// wind slivers (speed-lines, not Charge's tall red ribbon) plus tiny
+// white-blue spark motes, and a launch flash at the jump point (the
+// blink-flash analog). No ground elements: this is an air move.
+
+/// Distance between emitted trail elements along the leap path (yards).
+const WIND_EMIT_SPACING: f32 = 0.55;
+/// Fraction of the emission spacing a wind sliver actually fills — gaps keep
+/// the trail reading as streaking air, not a solid pipe.
+const WIND_STREAK_FILL: f32 = 0.6;
+/// Wind sliver cross-section (thin speed-lines, nothing like the ~1-yd-tall
+/// Charge ribbon band).
+const WIND_STREAK_HEIGHT: f32 = 0.08;
+const WIND_STREAK_DEPTH: f32 = 0.04;
+/// Vertical jitter half-range of sliver centres around the chest anchor.
+const WIND_HEIGHT_JITTER: f32 = 0.4;
+/// Lateral jitter half-range of slivers off the path line (yards).
+const WIND_LATERAL_JITTER: f32 = 0.25;
+/// Nominal sliver fade time; the leap lasts 0.5 s (15 yd at 30 yd/s), so the
+/// tail dissolves visibly behind the Hunter mid-flight.
+const WIND_LIFETIME: f32 = 0.3;
+/// Per-sliver lifetime jitter half-range (fraction of `WIND_LIFETIME`).
+const WIND_LIFE_JITTER: f32 = 0.15;
+/// Spark mote radius range (tiny additive glints, client flare/pixie analog).
+const MOTE_RADIUS_MIN: f32 = 0.03;
+const MOTE_RADIUS_MAX: f32 = 0.07;
+/// Spark mote life range (client sparkle lives 0.35–1.14 s; short end fits
+/// the half-second leap).
+const MOTE_LIFE_MIN: f32 = 0.3;
+const MOTE_LIFE_MAX: f32 = 0.55;
+/// Spark mote scatter radius range around an emission point (yards).
+const MOTE_SCATTER_MIN: f32 = 0.15;
+const MOTE_SCATTER_MAX: f32 = 0.4;
+/// Chest anchor above the sim transform — only combatants Disengage, so
+/// unlike the Charge emitter there is no pet `rest_y` correction to carry.
+const WIND_CHEST_OFFSET: f32 = super::IMPACT_CHEST_Y;
+
+fn spawn_wind_slivers(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    mid: Vec3,
+    dir: Vec3,
+    length: f32,
+) {
+    // The horizontal travel heading and its lateral normal (the leap
+    // direction is horizontal; `dir` comes from the actual traveled delta).
+    let yaw = (-dir.z).atan2(dir.x);
+    let lateral = Vec3::new(-dir.z, 0.0, dir.x).normalize_or_zero();
+
+    let count = 2 + (hash01(seed_from(mid, 200)) * 2.0) as u32; // 2..=3
+    for i in 0..count {
+        let salt = 201 + i * 13;
+        let h = |k: u32| hash01(seed_from(mid, salt + k * 29));
+
+        let mesh = meshes.add(Cuboid::new(
+            length * WIND_STREAK_FILL,
+            WIND_STREAK_HEIGHT,
+            WIND_STREAK_DEPTH,
+        ));
+        // Pale blue-white air, faint glow — the wind palette (and the client
+        // kit's white-blue), not Charge's red.
+        let material = materials.add(StandardMaterial {
+            base_color: Color::srgba(0.85, 0.92, 1.0, 0.35),
+            emissive: LinearRgba::new(1.1, 1.4, 1.9, 1.0),
+            alpha_mode: AlphaMode::Add,
+            ..default()
+        });
+
+        let pos = Vec3::new(mid.x, mid.y + WIND_CHEST_OFFSET, mid.z)
+            + Vec3::Y * (WIND_HEIGHT_JITTER * (2.0 * h(0) - 1.0))
+            + lateral * (WIND_LATERAL_JITTER * (2.0 * h(1) - 1.0));
+
+        let life = WIND_LIFETIME * (1.0 + WIND_LIFE_JITTER * (2.0 * h(2) - 1.0));
+
+        commands.spawn((
+            Mesh3d(mesh),
+            MeshMaterial3d(material),
+            Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(yaw)),
+            DisengageWindStreak {
+                lifetime: life,
+                initial_lifetime: life,
+            },
+            PlayMatchEntity,
+        ));
+    }
+}
+
+/// Scatter a handful of spark motes around one point at body height: tiny
+/// additive white-blue glints (the flare / sparkle / pixie emitters of
+/// `blink_impact_chest.m2`) drifting gently as they fade. `burst` widens the
+/// scatter and count and throws the motes outward — the one-shot launch
+/// flash at the jump point.
+fn spawn_spark_motes(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    at: Vec3,
+    burst: bool,
+) {
+    let count = if burst {
+        5 + (hash01(seed_from(at, 300)) * 3.0) as u32 // 5..=7
+    } else {
+        2 + (hash01(seed_from(at, 300)) * 2.0) as u32 // 2..=3
+    };
+    for i in 0..count {
+        let salt = 301 + i * 11;
+        let h = |k: u32| hash01(seed_from(at, salt + k * 37));
+
+        let radius = MOTE_RADIUS_MIN + (MOTE_RADIUS_MAX - MOTE_RADIUS_MIN) * h(0);
+        let angle = std::f32::consts::TAU * h(1);
+        let out = Vec3::new(angle.cos(), 0.0, angle.sin());
+        let scatter_max = if burst { MOTE_SCATTER_MAX * 1.5 } else { MOTE_SCATTER_MAX };
+        let scatter = MOTE_SCATTER_MIN + (scatter_max - MOTE_SCATTER_MIN) * h(2);
+        // Trail motes hang in the air with a gentle rise; the launch burst
+        // throws them outward (the client flash's radial sparkle shell).
+        let velocity = if burst {
+            out * (0.8 + 0.7 * h(3)) + Vec3::Y * (0.2 + 0.3 * h(4))
+        } else {
+            out * (0.15 + 0.2 * h(3)) + Vec3::Y * (0.15 + 0.25 * h(4))
+        };
+        let life = MOTE_LIFE_MIN + (MOTE_LIFE_MAX - MOTE_LIFE_MIN) * h(5);
+        let dy = WIND_CHEST_OFFSET + (0.5 * (2.0 * h(6) - 1.0));
+
+        let mesh = meshes.add(Sphere::new(radius));
+        let material = materials.add(StandardMaterial {
+            base_color: Color::srgba(0.9, 0.95, 1.0, 0.5),
+            emissive: LinearRgba::new(1.5, 1.8, 2.4, 1.0),
+            alpha_mode: AlphaMode::Add,
+            ..default()
+        });
+
+        let pos = Vec3::new(at.x, at.y + dy, at.z) + out * scatter;
+
+        commands.spawn((
+            Mesh3d(mesh),
+            MeshMaterial3d(material),
+            Transform::from_translation(pos),
+            DisengageSparkMote {
+                lifetime: life,
+                initial_lifetime: life,
+                velocity,
+            },
+            PlayMatchEntity,
+        ));
+    }
+}
+
+/// Emit the Disengage wind trail along the leap path.
+///
+/// Runs every frame while anything carries `DisengagingState`; emission is
+/// distance-paced along the live transform exactly like the Charge trail, so
+/// the trail hugs the real leap path (obstacle slides included) at any frame
+/// rate — the replacement for the old single wind-streak cylinder parked at
+/// the leap origin.
+pub fn spawn_disengage_trail(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut leapers: Query<
+        (Entity, &Transform, Option<&mut DisengageTrailEmitter>),
+        With<DisengagingState>,
+    >,
+    stale_emitters: Query<Entity, (With<DisengageTrailEmitter>, Without<DisengagingState>)>,
+) {
+    for (entity, transform, emitter) in leapers.iter_mut() {
+        let pos = transform.translation;
+        match emitter {
+            None => {
+                commands
+                    .entity(entity)
+                    .try_insert(DisengageTrailEmitter { last_emit: pos });
+                spawn_spark_motes(&mut commands, &mut meshes, &mut materials, pos, true);
+            }
+            Some(mut em) => {
+                emit_along_path(&mut em.last_emit, pos, WIND_EMIT_SPACING, |mid, dir| {
+                    spawn_wind_slivers(
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        mid,
+                        dir,
+                        WIND_EMIT_SPACING,
+                    );
+                    spawn_spark_motes(&mut commands, &mut meshes, &mut materials, mid, false);
+                });
+            }
+        }
+    }
+
+    // The leap ended (DisengagingState removed): disarm, so the next
+    // Disengage starts a fresh trail instead of drawing a streak from the
+    // old landing point across the map.
+    for entity in stale_emitters.iter() {
+        commands.entity(entity).remove::<DisengageTrailEmitter>();
+    }
+}
+
+/// Update and cleanup Disengage trail elements: fade wind slivers, drift and
+/// fade spark motes, despawn everything when expired.
+pub fn update_and_cleanup_disengage_trails(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut slivers: Query<(Entity, &mut DisengageWindStreak, &MeshMaterial3d<StandardMaterial>)>,
+    mut motes: Query<
+        (
+            Entity,
+            &mut DisengageSparkMote,
+            &mut Transform,
+            &MeshMaterial3d<StandardMaterial>,
+        ),
+        Without<DisengageWindStreak>,
+    >,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let dt = time.delta_secs();
+
+    for (entity, mut sliver, material_handle) in slivers.iter_mut() {
+        sliver.lifetime -= dt;
+        if sliver.lifetime <= 0.0 {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        let progress = (sliver.lifetime / sliver.initial_lifetime).max(0.0);
+        if let Some(material) = materials.get_mut(&material_handle.0) {
+            material.base_color = Color::srgba(0.85, 0.92, 1.0, 0.35 * progress);
+            material.emissive =
+                LinearRgba::new(1.1 * progress, 1.4 * progress, 1.9 * progress, 1.0);
+        }
+    }
+
+    for (entity, mut mote, mut transform, material_handle) in motes.iter_mut() {
+        mote.lifetime -= dt;
+        if mote.lifetime <= 0.0 {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        let progress = (mote.lifetime / mote.initial_lifetime).max(0.0);
+        transform.translation += mote.velocity * dt;
+        if let Some(material) = materials.get_mut(&material_handle.0) {
+            material.base_color = Color::srgba(0.9, 0.95, 1.0, 0.5 * progress);
+            material.emissive =
+                LinearRgba::new(1.5 * progress, 1.8 * progress, 2.4 * progress, 1.0);
+        }
     }
 }
 

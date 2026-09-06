@@ -761,7 +761,7 @@ impl Plugin for StatesPlugin {
             .add_systems(
                 Update,
                 (
-                    play_match::spawn_disengage_trail,                 // Wind streak on Disengage
+                    play_match::spawn_disengage_trail,                 // Path-laid wind slivers + spark motes (Hunter)
                     play_match::update_and_cleanup_disengage_trails,   // Fade + despawn
                     play_match::spawn_charge_trail,                    // Path-laid streak + dust (Warrior + Boar)
                     play_match::update_and_cleanup_charge_trails,      // Fade + despawn
