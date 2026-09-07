@@ -701,21 +701,43 @@ impl Plugin for StatesPlugin {
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_combat_scene),
             )
-            // Unstable Affliction visuals: DoT glow, backlash burst, silenced text
-            // (graphical only — never registered in headless systems.rs).
+            // UA dispel-backlash burst on the dispeller (graphical only —
+            // never registered in headless systems.rs).
             .add_systems(
                 Update,
                 (
-                    play_match::spawn_ua_glow_for_afflicted,   // Detect UA aura and spawn glow
-                    play_match::spawn_ua_glow_visuals,         // Build mesh for new glows
-                    play_match::update_ua_glow,                // Pulse and follow target
-                    play_match::cleanup_ua_glow,               // Despawn when UA is gone
                     play_match::spawn_backlash_burst_visuals,  // Build mesh for new bursts
                     play_match::update_backlash_bursts,        // Expand and fade
                     play_match::cleanup_expired_backlash_bursts, // Remove expired bursts
                     // Silence visibility uses the standard CC pattern: [CC] log entry
                     // plus the HUD aura icon — no bespoke floating text.
                 )
+                    .after(CombatSystemPhase::CombatResolution)
+                    .run_if(in_combat_scene),
+            )
+            // Warlock DoT aura visuals: Corruption's darkening shroud (the
+            // one deliberate AlphaMode::Blend exception — see
+            // rendering/effects/warlock_dots.rs), the shared apply ring, the
+            // Curse of Agony skull apparition, and UA's authored violet
+            // glow + crackle. Aura-keyed and graphical only — never
+            // registered in headless systems.rs. Chained: animates must see
+            // the rigs `spawn` just built, the particle pass must see the
+            // pieces the animates emitted, and the billboard pass (fed by
+            // the skull yaw) runs on the final poses.
+            .add_systems(
+                Update,
+                (
+                    play_match::spawn_warlock_dot_visuals,     // Detect DoT auras, build rigs
+                    play_match::animate_dot_apply_bursts,      // Ring ramp + spark burst
+                    play_match::animate_corruption_shrouds,    // Shroud throb + wisps + fizz
+                    play_match::animate_coa_skulls,            // Skull envelope + sparks
+                    play_match::animate_ua_states,             // Glow pulse + crackle
+                    play_match::age_warlock_dot_particles,     // Motes/wisps/bolts age out
+                    play_match::yaw_coa_skulls,                // Face the skull to camera
+                    play_match::billboard_warlock_dot_visuals, // Face the flat pieces
+                    play_match::cleanup_warlock_dot_visuals,   // End states at aura end
+                )
+                    .chain()
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_combat_scene),
             )
