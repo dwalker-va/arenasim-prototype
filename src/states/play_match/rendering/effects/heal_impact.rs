@@ -161,11 +161,33 @@ const BUTTERFLY_WING_LENGTH: f32 = 0.14;
 // Healing Wave's butterfly-swirl scale (a tick fires every second; a spammy
 // landing here would out-shout every hard-cast heal). See
 // `docs/design/2026-09-07-healing-stream-totem-client-data.md`.
+//
+// The motes spawn in a RING clear of the body, not in the source's square
+// envelope: on a 0.5-yd capsule the axis-centred 0.56 square buries nearly
+// every mote in the body interior, where the opaque capsule depth-rejects the
+// whole rise (measured: radial 0.05–0.63 from the axis in the round-1 build —
+// only sparkle tips at the surface survived). The 0.56 area becomes the
+// annulus depth instead, so the blip rises around the feet, read from the
+// ground on every side.
 /// How long the blip's emitters run. Well under the 1 s tick interval, so
 /// consecutive ticks read as discrete pulses, never a continuous stream.
 pub const TOTEM_PULSE_EMIT_SECS: f32 = 0.35;
-/// Emission envelope — the source's 0.56×0.56 area, same as HealStream's.
+/// Width of the blip's spawn annulus — the source's 0.56 emission area,
+/// reinterpreted as the ring's radial depth (see [`TOTEM_PULSE_RING_RADIUS`]).
 pub const TOTEM_PULSE_WIDTH: f32 = 0.56;
+/// Radial clearance of the blip ring past the body surface. The round-1 blip
+/// kept the source's square envelope centred on the axis, which put nearly
+/// every mote INSIDE the 0.5-yd capsule — the whole rise played out in the
+/// body interior and was depth-rejected, leaving two sparkle tips peeking out
+/// of the surface (the same buried-in-the-capsule defect class as Healing
+/// Wave's third-build glow). Same cure as the wrap halos: clear the body with
+/// margin (their minimum edge clearance was 0.1).
+pub const TOTEM_PULSE_RING_CLEARANCE: f32 = 0.12;
+/// Inner radius of the blip's spawn annulus, measured from the bearer's axis.
+/// Every blip mote spawns in `[ring, ring + area/2]` at a jittered angle and
+/// rises AROUND the body from the feet — visibly from the ground on every
+/// camera side — instead of through the capsule interior.
+pub const TOTEM_PULSE_RING_RADIUS: f32 = COMBATANT_BODY_RADIUS + TOTEM_PULSE_RING_CLEARANCE;
 
 /// Height of the Base attachment (the recipient's feet) above a combatant's
 /// transform. The capsule is `Capsule3d::new(0.5, 1.5)` CENTRED on the
@@ -291,6 +313,13 @@ pub struct HealStyle {
     /// Tint of the star and ribbon mote materials. `None` keeps the Holy
     /// family's gold; the totem blip sets Nature's green.
     pub mote_tint: Option<Color>,
+    /// When set, every mote spawns on an annulus of this inner radius around
+    /// the emitter origin's axis (`[ring, ring + area/2]`, angle jittered)
+    /// instead of within the emitter's square area — the totem blip's
+    /// radial-clearance fix, so its motes rise AROUND the body rather than
+    /// depth-rejected inside the capsule. Must clear
+    /// [`COMBATANT_BODY_RADIUS`] with margin to mean anything.
+    pub mote_ring: Option<f32>,
     pub emitters: Vec<HealEmitter>,
 }
 
@@ -329,6 +358,7 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
             under_glow: None,
             torso_glows: Vec::new(),
             mote_tint: None,
+            mote_ring: None,
             butterflies: false,
             // Mote SIZES here and in HealStream are render tuning, not M2
             // transcription (the source records carry no world-size), and the
@@ -400,6 +430,7 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
             under_glow: None,
             torso_glows: Vec::new(),
             mote_tint: None,
+            mote_ring: None,
             butterflies: false,
             // Mote sizes raised with Flash Heal's — see the note there.
             emitters: vec![
@@ -505,6 +536,7 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
                 },
             ],
             mote_tint: None,
+            mote_ring: None,
             butterflies: true,
             emitters: vec![
                 // The above-head burst star emitter.
@@ -540,15 +572,21 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
             under_glow: None,
             torso_glows: Vec::new(),
             mote_tint: Some(nature_green()),
+            mote_ring: Some(TOTEM_PULSE_RING_RADIUS),
             butterflies: false,
             // A handful of motes per tick — the client's rising-sparkle shape
-            // (source speeds 3.33/2.22, the 0.56 envelope) at blip scale:
-            // ~3-4 stars + ~2 ribbon streaks over 0.35 s, then silence until
-            // the next tick. No flash, no glow, no butterflies — the totem's
-            // free sustain must never out-shout a hard-cast heal.
+            // (source speeds 3.33/2.22, the 0.56 area as the annulus depth)
+            // at blip scale: ~3-4 stars + ~2 ribbon streaks over 0.35 s, then
+            // silence until the next tick. No flash, no glow, no butterflies —
+            // the totem's free sustain must never out-shout a hard-cast heal.
+            //
+            // Emitter origins sit ON the bearer's axis (the source stars'
+            // ±0.28 x scatter is dropped): with `mote_ring` set, the ring is
+            // centred on the origin, and an off-axis centre would swing the
+            // annulus back through the body on one side.
             emitters: vec![
                 HealEmitter {
-                    origin: Vec3::new(-0.28, 0.0, 0.0),
+                    origin: Vec3::ZERO,
                     speed: 3.33,
                     life: 0.6,
                     rate: Ramp::flat(6.0),
@@ -558,7 +596,7 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
                     size: 0.11,
                 },
                 HealEmitter {
-                    origin: Vec3::new(0.28, 0.0, 0.0),
+                    origin: Vec3::ZERO,
                     speed: 3.33,
                     life: 0.6,
                     rate: Ramp::flat(6.0),
@@ -630,6 +668,7 @@ fn holy_light_style(duration: f32, intensity: f32) -> HealStyle {
         torso_glows: Vec::new(),
         butterflies: false,
         mote_tint: None,
+        mote_ring: None,
         emitters,
     }
 }
@@ -1030,12 +1069,25 @@ pub fn animate_heal_impacts(
                     rig.emitted = rig.emitted.wrapping_add(1);
                     let seed = entity.index().wrapping_add(i.wrapping_mul(0x85EB_CA6B));
                     let area = emitter.area.at(k);
+                    // Ring styles (the totem blip) place the mote on an
+                    // annulus AROUND the body — `[ring, ring + area/2]` at a
+                    // jittered angle — so it rises visibly at the silhouette
+                    // instead of depth-rejected inside the capsule. Everything
+                    // else scatters within the emitter's square area, as the
+                    // source keys it.
                     let local = emitter.origin
-                        + Vec3::new(
-                            (heal_jitter(seed) - 0.5) * area,
-                            0.0,
-                            (heal_jitter(seed ^ 0x51ED) - 0.5) * area,
-                        );
+                        + match style.mote_ring {
+                            Some(ring) => {
+                                let angle = heal_jitter(seed) * TAU;
+                                let r = ring + heal_jitter(seed ^ 0x51ED) * (area * 0.5);
+                                Vec3::new(angle.cos() * r, 0.0, angle.sin() * r)
+                            }
+                            None => Vec3::new(
+                                (heal_jitter(seed) - 0.5) * area,
+                                0.0,
+                                (heal_jitter(seed ^ 0x51ED) - 0.5) * area,
+                            ),
+                        };
                     let mut velocity = Vec3::Y * emitter.speed * HEAL_MOTE_SPEED_SCALE;
                     if emitter.spread > 0.0 {
                         let a = heal_jitter(seed ^ 0x27D4) * TAU;

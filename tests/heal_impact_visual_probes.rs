@@ -42,7 +42,8 @@ use arenasim::states::play_match::{
     FLASH_OF_LIGHT_BORROW_INTENSITY, FLASH_OF_LIGHT_DURATION, ARENA_FLOOR_WORLD_Y,
     HEALING_WAVE_BUTTERFLIES, HEALING_WAVE_ORBIT_RADIUS, HEALING_WAVE_OUTWARD_DRIFT,
     HEALING_WAVE_UNDERGLOW_LIFT, HEAL_BASE_Y, HEAL_STREAM_WIDTH, HOLY_LIGHT_DURATION,
-    IMPACT_HEAD_Y, TOTEM_PULSE_EMIT_SECS, TOTEM_PULSE_WIDTH,
+    IMPACT_HEAD_Y, TOTEM_PULSE_EMIT_SECS, TOTEM_PULSE_RING_CLEARANCE, TOTEM_PULSE_RING_RADIUS,
+    TOTEM_PULSE_WIDTH,
 };
 use arenasim::combat::log::CombatLog;
 use arenasim::CharacterClass;
@@ -937,13 +938,35 @@ fn totem_pulse_is_a_minimal_rising_blip() {
         "{} motes mid-window — the blip must stay minimal",
         motes.len()
     );
-    let max_r = 0.28 + TOTEM_PULSE_WIDTH / 2.0 + 1e-3;
+    // Every mote must spawn OUTSIDE the body with clearance — the annulus
+    // band, derived from the constants. Fail-first: run against the round-1
+    // construction (the source's square envelope centred on the axis, world
+    // radial span 0–0.63), this assertion fails with `radial 0.053 < body
+    // 0.5 + clearance 0.12` — a mote rising a twentieth of a yard off the
+    // bearer's axis, depth-rejected in the body interior like nearly all of
+    // its siblings, leaving two sparkle tips at the capsule surface (the
+    // user's round-2 screenshot). Rising "from the ground" means rising
+    // AROUND the body.
+    let inner = COMBATANT_BODY_RADIUS + TOTEM_PULSE_RING_CLEARANCE;
+    let outer = TOTEM_PULSE_RING_RADIUS + TOTEM_PULSE_WIDTH / 2.0;
+    assert!(
+        (TOTEM_PULSE_RING_RADIUS - inner).abs() < 1e-6,
+        "the ring radius must be exactly body + clearance"
+    );
     for (velocity, _, pos) in &motes {
         assert!(velocity.y > 0.0, "blip motes rise, got {velocity}");
-        let horizontal = Vec2::new(pos.x - at.x, pos.z - at.z).length();
+        let radial = Vec2::new(pos.x - at.x, pos.z - at.z).length();
         assert!(
-            horizontal <= max_r + 0.01,
-            "blip mote {pos} outside the narrow envelope ({horizontal} > {max_r})"
+            radial >= inner - 1e-3,
+            "blip mote {pos} buried in the body: radial {radial:.3} < body \
+             {COMBATANT_BODY_RADIUS} + clearance {TOTEM_PULSE_RING_CLEARANCE} — \
+             it rises depth-rejected inside the capsule"
+        );
+        assert!(
+            radial <= outer + 0.01,
+            "blip mote {pos} outside the annulus ({radial:.3} > {outer:.3}) — \
+             the blip must hug the silhouette, not sprawl toward butterfly-orbit \
+             territory"
         );
     }
 

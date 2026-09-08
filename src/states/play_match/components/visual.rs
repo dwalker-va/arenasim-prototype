@@ -368,7 +368,8 @@ pub enum HealImpactKind {
     /// butterflies, rising gold stars. Nature's one heal landing.
     HealingWave,
     /// The Healing Stream Totem tick blip: a minimal one-shot of rising
-    /// Nature-green sparkles at the bearer's feet, once per HoT tick.
+    /// Nature-green sparkles in a ring around the bearer's feet, once per
+    /// HoT tick.
     ///
     /// AUTHORED, not transcribed (see
     /// `docs/design/2026-09-07-healing-stream-totem-client-data.md`): the
@@ -377,9 +378,12 @@ pub enum HealImpactKind {
     /// `lesserheal_base.m2`, Priest Lesser Heal's gold impact model borrowed
     /// verbatim. Gold would alias Shaman sustain with Priest landings and a
     /// persistent loop is constant noise, so this keeps the client's SHAPE
-    /// (rising motes from the Base attach, the source's narrow 0.56 area and
-    /// emitter speeds) recolored on the AS-10 Nature vocabulary and cut to a
-    /// per-tick one-shot, deliberately far below Healing Wave's swirl scale.
+    /// (rising motes from the Base attach, the source's 0.56 area as the
+    /// ring's radial depth, source emitter speeds) recolored on the AS-10
+    /// Nature vocabulary and cut to a per-tick one-shot, deliberately far
+    /// below Healing Wave's swirl scale. The ring clears the body capsule
+    /// (`TOTEM_PULSE_RING_RADIUS`) so the rise reads from the ground instead
+    /// of being depth-rejected inside the body.
     TotemPulse,
 }
 
