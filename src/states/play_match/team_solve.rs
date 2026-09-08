@@ -44,7 +44,7 @@ use bevy::prelude::*;
 use std::collections::BTreeMap;
 
 use super::arena_bounds::ArenaBounds;
-use super::map_geometry::{has_line_of_sight, position_blocked, ObstacleVolume, EYE_HEIGHT, MOVER_RADIUS};
+use super::map_geometry::{has_line_of_sight, ObstacleVolume, EYE_HEIGHT, MOVER_RADIUS};
 use super::team_plan::{Anchor, RoleIntent, Stance};
 
 /// Where a candidate position is probed from, as an offset ring around the
