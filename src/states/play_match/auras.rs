@@ -1185,6 +1185,23 @@ pub fn process_hot_ticks(
             PlayMatchEntity,
         ));
 
+        // The tick's landing visual — same both-modes spawn idiom as the
+        // cast-resolution sites (`process_casting`, `process_holy_shock_heals`):
+        // purely cosmetic, reads combat state, writes none, draws no
+        // `game_rng`; rendered only in graphical mode. Routed through the
+        // aura-tick router because a HoT's config has no healing fields for
+        // `kind_for` to see (the Healing Stream Totem silent-heal hole).
+        if let Some(kind) = HealImpact::kind_for_hot_tick(AuraType::HealingOverTime) {
+            commands.spawn((
+                HealImpact {
+                    target: target_entity,
+                    kind,
+                    age: 0.0,
+                },
+                PlayMatchEntity,
+            ));
+        }
+
         // Log to combat log with structured data.
         let caster_id = combatant_id(caster_team, caster_slot, caster_class);
         let message = format!(

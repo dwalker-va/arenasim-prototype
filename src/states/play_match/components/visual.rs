@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy_egui::egui;
 use super::super::abilities::{AbilityType, SpellSchool};
 use super::super::match_config::CharacterClass;
+use super::auras::AuraType;
 
 // ============================================================================
 // Visual Effect Components
@@ -366,6 +367,24 @@ pub enum HealImpactKind {
     /// `restoration_impact_base.m2`: green/gold torso glow, orbiting
     /// butterflies, rising gold stars. Nature's one heal landing.
     HealingWave,
+    /// The Healing Stream Totem tick blip: a minimal one-shot of rising
+    /// Nature-green sparkles in a ring around the bearer's feet, once per
+    /// HoT tick.
+    ///
+    /// AUTHORED, not transcribed (see
+    /// `docs/design/2026-09-07-healing-stream-totem-client-data.md`): the
+    /// client draws NO per-tick visual at all — Healing Stream's only
+    /// target-side identity is a persistent aura-state loop of
+    /// `lesserheal_base.m2`, Priest Lesser Heal's gold impact model borrowed
+    /// verbatim. Gold would alias Shaman sustain with Priest landings and a
+    /// persistent loop is constant noise, so this keeps the client's SHAPE
+    /// (rising motes from the Base attach, the source's 0.56 area as the
+    /// ring's radial depth, source emitter speeds) recolored on the AS-10
+    /// Nature vocabulary and cut to a per-tick one-shot, deliberately far
+    /// below Healing Wave's swirl scale. The ring clears the body capsule
+    /// (`TOTEM_PULSE_RING_RADIUS`) so the rise reads from the ground instead
+    /// of being depth-rejected inside the body.
+    TotemPulse,
 }
 
 /// A landed heal playing its per-spell, Classic-faithful landing on the
@@ -400,6 +419,61 @@ impl HealImpact {
             // LHW and Healing Wave are one visual in the client.
             AbilityType::LesserHealingWave => Some(HealImpactKind::HealingWave),
             _ => None,
+        }
+    }
+
+    /// Which landing an aura-tick heal plays — the routing table for heals
+    /// that arrive as AURA ticks rather than resolved casts, spawned at the
+    /// tick application site (`process_hot_ticks`). This closes the hole
+    /// [`Self::kind_for`] structurally cannot cover: a HoT heals through an
+    /// aura, so its ability config has no healing fields, `is_heal()` is
+    /// false, and a config-field audit never sees it (Healing Stream Totem
+    /// healed 111 times in one 3v3 log with zero visuals).
+    ///
+    /// EXHAUSTIVE over [`AuraType`] on purpose — no wildcard arm — so adding
+    /// a new aura type forces a decision here at compile time: either its
+    /// ticks heal the bearer and it names a landing, or it goes in the
+    /// explicit non-healing group. `tests/heal_impact_visual_probes.rs` pins
+    /// the mapping and proves the tick site actually spawns it.
+    pub fn kind_for_hot_tick(aura: AuraType) -> Option<HealImpactKind> {
+        match aura {
+            // The one aura type whose ticks heal the bearer (Healing Stream
+            // Totem's pulse buff).
+            AuraType::HealingOverTime => Some(HealImpactKind::TotemPulse),
+            // Every other aura type's ticks do not heal the bearer. DoT
+            // leeches (Death Coil, Drain Life) heal the CASTER at their own
+            // sites, not through the bearer's aura tick.
+            AuraType::MovementSpeedSlow
+            | AuraType::Root
+            | AuraType::Stun
+            | AuraType::MaxHealthIncrease
+            | AuraType::DamageOverTime
+            | AuraType::SpellSchoolLockout
+            | AuraType::HealingReduction
+            | AuraType::Fear
+            | AuraType::MaxManaIncrease
+            | AuraType::AttackPowerIncrease
+            | AuraType::ShadowSight
+            | AuraType::Absorb
+            | AuraType::WeakenedSoul
+            | AuraType::Polymorph
+            | AuraType::DamageReduction
+            | AuraType::CastTimeIncrease
+            | AuraType::DamageTakenReduction
+            | AuraType::DamageImmunity
+            | AuraType::Incapacitate
+            | AuraType::SpellResistanceBuff
+            | AuraType::AttackPowerReduction
+            | AuraType::CritChanceIncrease
+            | AuraType::ManaRegenIncrease
+            | AuraType::AttackSpeedSlow
+            | AuraType::LockoutDurationReduction
+            | AuraType::FrostArmorBuff
+            | AuraType::Silence
+            | AuraType::WeaponPoison
+            | AuraType::SpellPowerIncrease
+            | AuraType::WindfuryBuff
+            | AuraType::FearImmunity => None,
         }
     }
 }
