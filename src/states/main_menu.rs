@@ -51,7 +51,7 @@ const IDLE_POSES: &[(CharacterClass, Vec3)] = &[
 /// camera, and a static tableau of class-colored idle combatants.
 ///
 /// Everything is tagged `MenuSceneEntity` and torn down by
-/// `cleanup_menu_scene`, so Options/Armory/Results round-trips rebuild the
+/// `cleanup_menu_scene`, so Options/Encyclopedia/Results round-trips rebuild the
 /// scene symmetrically.
 pub fn setup_menu_scene(
     mut commands: Commands,
@@ -163,7 +163,7 @@ pub fn cleanup_menu_scene(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuAction {
     StartMatch,
-    Armory,
+    Encyclopedia,
     AnimationSandbox,
     Options,
     Exit,
@@ -176,7 +176,7 @@ pub enum MenuAction {
 /// cannot leave the last button hanging outside the backdrop.
 const MENU_ITEMS: [(&str, MenuAction); 5] = [
     ("MATCH", MenuAction::StartMatch),
-    ("ARMORY", MenuAction::Armory),
+    ("ENCYCLOPEDIA", MenuAction::Encyclopedia),
     ("ANIMATIONS", MenuAction::AnimationSandbox),
     ("OPTIONS", MenuAction::Options),
     ("EXIT", MenuAction::Exit),
@@ -458,9 +458,9 @@ pub fn main_menu_ui(
             info!("Match button pressed - transitioning to ConfigureMatch");
             next_state.set(GameState::ConfigureMatch);
         }
-        Some(MenuAction::Armory) => {
-            info!("Armory button pressed - transitioning to Armory");
-            next_state.set(GameState::Armory);
+        Some(MenuAction::Encyclopedia) => {
+            info!("Encyclopedia button pressed - transitioning to Encyclopedia");
+            next_state.set(GameState::Encyclopedia);
         }
         Some(MenuAction::AnimationSandbox) => {
             info!("Animations button pressed - transitioning to AnimationSandbox");
