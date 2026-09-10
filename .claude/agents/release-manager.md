@@ -27,9 +27,12 @@ after the release — and the trigger card too, when the run was card-triggered 
    PR is not merged (open, closed-unmerged, or missing a PR link entirely) blocks the
    release: report NEEDS_INPUT naming the card — never silently drop it from the bundle,
    and never release around it on your own judgment. Merging is the **user's** step in
-   this pipeline (no role merges), so this check is the safety net for that human gate:
-   an unmerged PR is a normal straggler, and your NEEDS_INPUT naming it is the prompt
-   for the user to merge it. Every card in a well-formed bundle is a work card with a
+   this pipeline (no role merges), and approved-but-unmerged work waits in the board's
+   `human_review` column, which is never bundled — so every card you are handed should
+   already be merged and this check should never fire. If it does, the card reached
+   Done ahead of its merge; your NEEDS_INPUT naming it is the prompt for the user to
+   merge it (or fix the board) and re-request the release. Every card in a well-formed
+   bundle is a work card with a
    PR — release-manager trigger cards and `role: "pm"` scoping cards produce no PR and
    the orchestrator stamps and archives them alongside the release instead of bundling
    them, so neither ever appears in a bundle; if one does, that is a malformed bundle:

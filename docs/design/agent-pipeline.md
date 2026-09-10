@@ -1,7 +1,8 @@
 # Agent Pipeline — ArenaSim Dispatch
 
 Status: **v1 shipped 2026-09-05** (board + orchestrator protocol + Engineer role);
-**Tester stage shipped** (card AS-1); **Release Manager stage shipped** (card AS-2).
+**Tester stage shipped** (card AS-1); **Release Manager stage shipped** (card AS-2);
+**`human_review` column shipped 2026-09-10** (card AS-39).
 
 A lightweight kanban board drives autonomous agent sessions on the dev machine.
 The board is the **source of truth for workflow state**; PRs are the source of
@@ -32,7 +33,7 @@ tolerates one automated writer, not several.
 ```json
 { "schema": 1, "nextId": 3, "cards": [ {
     "id": "AS-1", "title": "...", "body": "<spec>",
-    "column": "backlog | needs_input | in_progress | review | done | archived",
+    "column": "backlog | needs_input | in_progress | review | human_review | done | archived",
     "role": "engineer | tester | release-manager | pm",
     "priority": "P1 | P2 | P3",
     "links": [{"label": "PR #112", "url": "..."}],
@@ -51,8 +52,9 @@ tolerates one automated writer, not several.
 | `backlog` | written, not started | none |
 | `needs_input` | agent blocked on the user; `question.text` holds the question | answering on the board moves the card back to `in_progress` with `agent: null` |
 | `in_progress` | an agent should be / is working it | orchestrator spawns the card's role agent when `agent == null` |
-| `review` | PR open, awaiting verification | orchestrator spawns the Tester on entry; APPROVE → `done`, REJECT → back to `in_progress` with findings |
-| `done` | verified by the Tester; the user merges the PR (the one human gate in the loop — no role merges) | bundled into the next release (see Release flow) |
+| `review` | PR open, awaiting the **Tester's** verification | orchestrator spawns the Tester on entry; APPROVE → `human_review`, REJECT → back to `in_progress` with findings |
+| `human_review` | Tester-approved, PR open, awaiting the user's eyeball and/or merge | **none** — both exits are the user's gesture (see The eyeball loop) |
+| `done` | **merged** — the PR is in `main` and the work is finished | bundled into the next release (see Release flow) |
 | `archived` | shipped in a release (or was that release's trigger card); `released` holds the tag | none — terminal |
 
 **The `agent` field is the dedup guard.** Any gesture that moves a card *into*
@@ -69,6 +71,39 @@ for a `role: "pm"` card, so `agent: null` on one is a *resting state*, not a
 spawn request, and stays `null` for the card's whole life. Step 2 skips pm
 cards by role rather than relying on the guard to hold them back.
 
+#### The eyeball loop (`human_review`)
+
+A Tester APPROVE means "no machine objects", not "finished". The user still reads
+the PR, and eyeball feedback routinely sends a card back: AS-10 (PR #125) went six
+rounds — three Tester REJECTs and **two user bounces**. `human_review` is the home
+for that state, so approved-but-open work stops parking in `done` beside genuinely
+shipped work, indistinguishable from it.
+
+From `human_review` there are exactly **two exits, and both are the user's
+gesture**. No automation runs on the column:
+
+- **Merged** → `done`. Merging is the pipeline's one human gate; no role merges.
+- **Eyeball feedback** → `in_progress`, with the findings appended to the card
+  `body` under a dated heading (`## User findings`, the counterpart of the
+  Tester's `## Tester findings`) and `agent: null`, so step 2 spawns a fresh
+  Engineer on the **same PR branch**.
+
+The feedback exit is *mechanically identical to a Tester REJECT* — same body
+append, same claim reset, same respawn onto the same PR — and differs only in who
+wrote the findings. That symmetry is why the column needs no new machinery.
+
+**Why a separate column, and not "leave approved cards in `review`".** Step 3
+spawns a Tester for any `review` card with a PR link whose `agent` is `null`
+**or** `agent.status == "done"` — and the APPROVE path sets exactly
+`agent.status: "done"`. An approved card left in `review` would therefore be
+respawned on every wake, forever. Keeping the approved-but-unmerged state in its
+own column leaves that dedup guard untouched.
+
+**Board behaviour** (already live; documented here, not proposed): the PR-link
+gate AS-4 added for `review` now also covers `human_review` — dragging a non-pm
+card there without a PR link opens the attach-PR dialog, and `role: "pm"` cards
+remain exempt. Cards in `human_review` render an "awaiting your merge" tag.
+
 #### Scoping cards (`role: "pm"`)
 
 A scoping card travels the same columns with different meanings. It ships no
@@ -81,7 +116,8 @@ code and spawns no agent: the work happens in an interactive PM session the
 | `in_progress` | a PM session is actively refining the card with the user | **none** — the orchestrator never spawns for a pm card (step 2) |
 | `needs_input` | the PM session has written its draft card specs to `.claude/pm-outbox/<card-id>.md` and is waiting on the user's agreement; `question.text` points at that file and says what is being asked | answering on the board returns the card to `in_progress` with `agent: null` — for a pm card that means "keep refining", not "respawn" |
 | `review` | **skipped by design** — the user's agreement to the drafts *is* the review, and it happens inside the PM session | none |
-| `done` | the derived cards are filed on the board **and** the user agreed to them | excluded from release bundles, but stamped and archived alongside one (see Release flow) |
+| `human_review` | **skipped by design** — a pm card carries no PR and has nothing to merge, so there is no eyeball-and-merge state for it to sit in | none |
+| `done` | the derived cards are filed on the board **and** the user agreed to them — *not* the work-card meaning of "merged" | excluded from release bundles, but stamped and archived alongside one (see Release flow) |
 | `archived` | unchanged — terminal | none |
 
 **The draft/agreement loop.** A scoping card cycles `in_progress` →
@@ -91,18 +127,24 @@ orchestrator files the cards). `needs_input`'s existing automation already
 implements this — the return to `in_progress` with `agent: null` is exactly
 "the user sent the draft back", and step 2's pm exemption guarantees no agent
 is spawned to meet it. Agreement on the *first* draft is explicitly not
-expected; the bounce is the normal path, not a failure.
+expected; the bounce is the normal path, not a failure. The final hop is
+`in_progress` → `done` **directly**: a pm card never passes through `review` or
+`human_review`, because neither of the things those columns wait on — a Tester
+verdict, a merge — exists for a card that ships no code.
 
-**Review is skipped, not policed.** There is no Tester for card text. A pm card
-misfiled into `review` is already inert — step 3 spawns a Tester only for a card
-carrying an open-PR link, and the board's drag-to-Review PR gate exempts pm
+**Review and Human Review are skipped, not policed.** There is no Tester for card
+text, and no PR to merge. A pm card misfiled into either column is already inert —
+step 3 spawns a Tester only for a card carrying an open-PR link, `human_review`
+has no automation at all, and the board's PR-link gate on both columns exempts pm
 cards (AS-4). This documents a property the pipeline already has; nothing new
 enforces it.
 
-**Done means *filed*, not *written*.** A scoping card is done when its derived
-cards exist on the board and the user has agreed to them. An outbox file alone
-is not done: AS-28's outbox was written 2026-09-06 and sat unfiled with the card
-still in `backlog`.
+**Done means *filed*, not *written* — and not *merged*.** A scoping card is done
+when its derived cards exist on the board and the user has agreed to them. An
+outbox file alone is not done: AS-28's outbox was written 2026-09-06 and sat
+unfiled with the card still in `backlog`. The work-card sense of `done` (the PR
+is merged) simply does not apply — a pm card has no PR, which is also why release
+bundles exclude it (see Release flow).
 
 ## The orchestrator
 
@@ -132,8 +174,9 @@ notification), read the board once and sweep:
   (step 3 below) then respawns the Tester, since the PR link is still in
   `links`.
 
-The sweep touches nothing else. `done` cards are past their agent work;
-`needs_input` cards already carry `agent: null` by protocol; and `archived`
+The sweep touches nothing else. `human_review` and `done` cards are past their
+agent work (no role runs on either); `needs_input` cards already carry
+`agent: null` by protocol; and `archived`
 cards are terminal with no automation — step 6 closes the trigger card's claim
 when it archives it, so a lingering `agent: working` on an archived trigger
 implies a crash mid-archival; either way `archived` is terminal, and the sweep
@@ -219,12 +262,15 @@ workers from card state, and open PRs are re-discovered via `gh pr list`.
      `agent: null`, activity entry (same claim reset as the NEEDS_INPUT branch).
 5. On a Tester's completion notification, parse its `VERDICT:` report and
    republish the board accordingly:
-   - `APPROVE` → `column: "done"`, `agent.status: "done"`, append the FINDINGS
-     note as activity (`by: "tester"`). The PR itself now awaits the **user's**
-     merge — merging is the pipeline's one human gate (the Engineer and Tester
-     contracts both forbid it), and the Release flow's merged-and-ancestor
-     check is the safety net that catches any Done card the user has not
-     merged yet.
+   - `APPROVE` → `column: "human_review"`, `agent.status: "done"`, append the
+     FINDINGS note as activity (`by: "tester"`). The card now waits on the
+     **user**, who either merges the PR — the pipeline's one human gate, which
+     the Engineer and Tester contracts both forbid them from passing — or
+     bounces it back to `in_progress` with eyeball feedback. Both exits are user
+     gestures and the orchestrator runs nothing on the column (see The eyeball
+     loop). It is `agent.status: "done"` that makes the separate column
+     necessary: an approved card left in `review` would match step 3's spawn
+     condition and be handed back to a Tester on every wake.
    - `REJECT` → `column: "in_progress"`, append the FINDINGS **verbatim** to the
      card `body` under a dated `## Tester findings` heading (they are the next
      Engineer's spec addendum), set `agent: null` (step 2 then spawns a fresh
@@ -320,8 +366,10 @@ handed off from a PM session get filed.
   an independent review of the diff (correctness, repo conventions,
   byte-identity constraints, missing registrations). Reports a machine-parsed
   `VERDICT: APPROVE | REJECT` with a PR URL and FINDINGS; the orchestrator moves
-  the card to Done on APPROVE, or back to In Progress (findings appended to the
-  spec, `agent: null`) on REJECT. Never fixes the Engineer's work, never pushes.
+  the card to Human Review on APPROVE — where the user merges it or bounces it
+  back with eyeball feedback — or straight back to In Progress (findings appended
+  to the spec, `agent: null`) on REJECT. Never fixes the Engineer's work, never
+  pushes.
 - **Release Manager** — `.claude/agents/release-manager.md`. Bundles the Done
   cards the orchestrator hands it into a tagged GitHub release: verifies each
   listed PR is merged to the `origin/main` HEAD it will tag, drafts grouped
@@ -360,6 +408,15 @@ construction:
 So this rule only ever collects work cards, each of which has a PR. An empty
 bundle is not spawnable — tell the user there is nothing to release.
 
+**The bundle is correct by construction.** `done` means *merged*: Tester-approved
+work whose PR is still open waits in `human_review`, which the rule never
+collects. So every work card the bundle picks up already has its PR in `main`,
+and the Release Manager's merged-and-ancestor check is a genuine safety net that
+should never fire — rather than the expected failure mode it was when `done` also
+held approved-but-unmerged cards and a single straggler could block a whole
+bundle. If the check ever does fire, a card reached `done` ahead of its merge:
+fix that card (or merge its PR), never release around it.
+
 **What the agent does** (`.claude/agents/release-manager.md` is authoritative):
 verifies each listed PR is `MERGED` and its merge commit is an ancestor of the
 `origin/main` HEAD it records; drafts notes grouped features / fixes /
@@ -372,11 +429,12 @@ triggers `.github/workflows/release.yaml`, whose idempotent create step reuses
 the agent's release (notes survive) and attaches the platform binaries — the
 release is public for a few minutes before its assets land, which is expected.
 Any unmerged PR, tag collision, or empty bundle is a NEEDS_INPUT, never a
-silent drop. The merged-and-ancestor check is the safety net for the
-pipeline's one human gate: merging is the **user's** step (no role merges), so
-a Done card whose PR the user has not merged yet is a normal straggler, not a
-pipeline fault — the agent's NEEDS_INPUT naming it is precisely the prompt for
-the user to merge and re-request the release.
+silent drop. The merged-and-ancestor check guards the pipeline's one human gate
+from the far side: merging is the **user's** step (no role merges), but work
+still awaiting that merge sits in `human_review` and is never bundled — so an
+unmerged PR in a bundle means a card reached `done` early, not that it is
+simply waiting its turn. The agent's NEEDS_INPUT naming it is the prompt to
+correct the board (or merge the PR) and re-request the release.
 
 **Post-release board archival — orchestrator, not agent.** On a `RELEASED`
 report the orchestrator sets `released: <tag>` on every bundled card and moves
