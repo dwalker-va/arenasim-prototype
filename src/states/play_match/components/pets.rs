@@ -1,11 +1,15 @@
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 
 // ============================================================================
 // Pet Types
 // ============================================================================
 
 /// Pet type enum (extensible for future demons and hunter pets)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+///
+/// Ordering is the declaration order and is load-bearing for display: it is the
+/// order pet subsections appear under a class's kit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum PetType {
     Felhunter,
     Spider,
@@ -14,6 +18,16 @@ pub enum PetType {
 }
 
 impl PetType {
+    /// The class that owns this pet. Used to validate ability attribution in
+    /// `abilities.ron`: a pet ability's `class` must be its pet's owner.
+    pub fn owner_class(&self) -> crate::states::match_config::CharacterClass {
+        use crate::states::match_config::CharacterClass;
+        match self {
+            PetType::Felhunter => CharacterClass::Warlock,
+            PetType::Spider | PetType::Boar | PetType::Bird => CharacterClass::Hunter,
+        }
+    }
+
     pub fn name(&self) -> &'static str {
         match self {
             PetType::Felhunter => "Felhunter",

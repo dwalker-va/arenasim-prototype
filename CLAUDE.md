@@ -222,6 +222,10 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
    ```ron
    NewAbility: (
        name: "New Ability",
+       class: Mage,           // REQUIRED - the owning class. No serde default:
+                              // omit it and the config fails to parse at startup.
+                              // For a PET ability this is the pet's OWNER, and
+                              // `pet: Some(Spider)` names the pet.
        icon: "icons/abilities/<icon_name>.jpg",
        cast_time: 1.5,        // 0.0 for instant
        range: 40.0,           // Use MELEE_RANGE (2.5) for melee
@@ -263,11 +267,13 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
 6. **Add special handling** in `combat_core.rs` if the ability has unique mechanics
    (most abilities work automatically via the config)
 
-7. **Add to the class's `get_class_abilities()` list** in `src/states/view_combatant_ui.rs`
-   so the ability shows in the View Combatant screen's abilities section. This is a
-   hardcoded per-class `Vec` and is NOT exhaustiveness-checked — omitting it compiles
-   fine but silently drops the ability from that UI (unlike the `get_ability_name`
-   match right below it, which the compiler forces you to update).
+7. **Nothing to do for the per-class UI lists.** Every surface that shows a class kit
+   (View Combatant, the Animation Sandbox, and the encyclopedia) derives it from the
+   `class` field you set in step 3, via `AbilityDefinitions::abilities_for_class` /
+   `own_abilities_for_class` / `pet_abilities_for_class`. The display name comes from
+   the RON `name` field the same way. There is no hand-maintained list to update, and
+   no way to silently drop the ability from a screen — that trap (a `get_class_abilities()`
+   `Vec` that was not exhaustiveness-checked) is retired.
 
 8. **Test with headless simulation**:
    ```bash
