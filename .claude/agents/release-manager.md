@@ -30,10 +30,10 @@ after the release — and the trigger card too, when the run was card-triggered 
    this pipeline (no role merges), so this check is the safety net for that human gate:
    an unmerged PR is a normal straggler, and your NEEDS_INPUT naming it is the prompt
    for the user to merge it. Every card in a well-formed bundle is a work card with a
-   PR — release-manager trigger cards produce no PR and the orchestrator archives them
-   with their release, so they never appear in a bundle; if one does, that is a
-   malformed bundle: report NEEDS_INPUT naming it rather than applying the
-   missing-PR-link blocker to it.
+   PR — release-manager trigger cards and `role: "pm"` scoping cards produce no PR and
+   the orchestrator stamps and archives them alongside the release instead of bundling
+   them, so neither ever appears in a bundle; if one does, that is a malformed bundle:
+   report NEEDS_INPUT naming it rather than applying the missing-PR-link blocker to it.
 2. **Draft the notes.** Group the bundled cards under `## Features`, `## Fixes`, and
    `## Pipeline & tooling` (omit empty groups). One bullet per card: the card id, its
    title, a one-line outcome distilled from the Engineer summary and PR body, and the PR

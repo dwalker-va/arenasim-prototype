@@ -64,7 +64,45 @@ covers the Review column: a `review` card needs a Tester spawn when `agent` is
 `null` (a claim reset by startup recovery) *or* `agent.status` is `"done"` (the
 Engineer's normal hand-off); the orchestrator flips it to `working` before
 spawning the Tester, so overlapping notifications never double-spawn there
-either.
+either. **Scoping cards invert the guard's meaning:** nothing is ever spawned
+for a `role: "pm"` card, so `agent: null` on one is a *resting state*, not a
+spawn request, and stays `null` for the card's whole life. Step 2 skips pm
+cards by role rather than relying on the guard to hold them back.
+
+#### Scoping cards (`role: "pm"`)
+
+A scoping card travels the same columns with different meanings. It ships no
+code and spawns no agent: the work happens in an interactive PM session the
+*user* opens (see Roles).
+
+| Column | Meaning for a `pm` card | Automation |
+|---|---|---|
+| `backlog` | topic scoped, no PM session opened yet | none |
+| `in_progress` | a PM session is actively refining the card with the user | **none** — the orchestrator never spawns for a pm card (step 2) |
+| `needs_input` | the PM session has written its draft card specs to `.claude/pm-outbox/<card-id>.md` and is waiting on the user's agreement; `question.text` points at that file and says what is being asked | answering on the board returns the card to `in_progress` with `agent: null` — for a pm card that means "keep refining", not "respawn" |
+| `review` | **skipped by design** — the user's agreement to the drafts *is* the review, and it happens inside the PM session | none |
+| `done` | the derived cards are filed on the board **and** the user agreed to them | excluded from release bundles, but stamped and archived alongside one (see Release flow) |
+| `archived` | unchanged — terminal | none |
+
+**The draft/agreement loop.** A scoping card cycles `in_progress` →
+`needs_input` (a draft is in the outbox) → `in_progress` (the user wants
+changes) → `needs_input` (the next draft) → … → `done` (the user agrees and the
+orchestrator files the cards). `needs_input`'s existing automation already
+implements this — the return to `in_progress` with `agent: null` is exactly
+"the user sent the draft back", and step 2's pm exemption guarantees no agent
+is spawned to meet it. Agreement on the *first* draft is explicitly not
+expected; the bounce is the normal path, not a failure.
+
+**Review is skipped, not policed.** There is no Tester for card text. A pm card
+misfiled into `review` is already inert — step 3 spawns a Tester only for a card
+carrying an open-PR link, and the board's drag-to-Review PR gate exempts pm
+cards (AS-4). This documents a property the pipeline already has; nothing new
+enforces it.
+
+**Done means *filed*, not *written*.** A scoping card is done when its derived
+cards exist on the board and the user has agreed to them. An outbox file alone
+is not done: AS-28's outbox was written 2026-09-06 and sat unfiled with the card
+still in `backlog`.
 
 ## The orchestrator
 
@@ -133,7 +171,17 @@ workers from card state, and open PRs are re-discovered via `gh pr list`.
 
 1. `Artifact action:"read"` the board; save the HTML to a local file; extract the
    state JSON block.
-2. For every card with `column == "in_progress"` and `agent == null`:
+2. For every card with `column == "in_progress"` and `agent == null`, **except
+   cards with `role: "pm"`** — a scoping card in `in_progress` is worked by an
+   interactive session the *user* opens, the orchestrator never spawns for it,
+   and its `agent` stays `null` permanently (see Scoping cards). Without this
+   exemption the orchestrator would try to spawn a `pm` subagent, which does not
+   exist as a role definition, and the documented fallback — a `general-purpose`
+   subagent — cannot wait on user input, which is the whole reason PM work is an
+   interactive session. The orchestrator may note the skip in the activity log
+   (*"PM session expected; no agent spawned"*), but only when no such entry is
+   already the card's latest: it wakes on every republish, and an unconditional
+   append would spam the log for as long as the card sits there.
    a. Set `agent: {status: "working", started: <now>}`, append an activity entry
       (`by: "orchestrator"`), and **republish the board first** (edit the state
       line in the saved HTML, publish that file with `url:` the board URL; on a
@@ -194,7 +242,9 @@ workers from card state, and open PRs are re-discovered via `gh pr list`.
      leave a dangling `working` with no `finished` timestamp), appending the
      tag + release URL as activity (`by: "release-manager"`). It never parks in
      `done`: a release run produces no PR, so a trigger card left in `done`
-     would block every subsequent bundle. Republish.
+     would block every subsequent bundle. Any `done` `role: "pm"` card without a
+     `released` field is stamped and archived on the same pass for the same
+     reason, even though it was never bundled (see Release flow). Republish.
    - `NEEDS_INPUT` / `FAILED` → same handling as the Engineer's (step 4): the
      triggering card (if the run was card-triggered) goes to `needs_input` with
      the question or failure text; a user-requested run just surfaces it to the
@@ -238,6 +288,15 @@ handed off from a PM session get filed.
   **orchestrator** the card specs to file (under the single-board-writer rule
   the PM session never publishes the board itself). PM sessions do not spawn
   engineers; their actionable output is card text, not code.
+
+  **Starting one.** The start gesture is the same as an engineer card's: the
+  **user drags the scoping card into In Progress**. The only difference is who
+  opens the session — a human, because step 2 skips pm cards and the
+  orchestrator never spawns one. So the PM session's *first* turn reads the
+  board and, if its card is still in `backlog`, asks the user to drag it. From
+  there the card follows the draft/agreement loop in Scoping cards, and is done
+  only once the derived cards are filed on the board and the user has agreed to
+  them.
 
   **The handoff.** The durable artifact is a file, not a message: the PM
   session writes its final output — the card specs to file — to
@@ -285,13 +344,21 @@ spawn path then fires). Both routes converge on the same spawn.
 
 **What the orchestrator passes.** The Release Manager cannot read the board, so
 the orchestrator assembles the bundle from board state and puts it in the spawn
-prompt: every card in `done` without a `released` field, each as its id, title,
-PR link(s) from `links`, and the Engineer's SUMMARY from the activity log. A
-release-manager trigger card is never a bundle candidate: the current run's
-trigger sits in `in_progress`, and every previous run's trigger was stamped and
-archived with its bundle (see post-release archival below) — so this rule only
-ever collects work cards, each of which has a PR. An empty bundle is not
-spawnable — tell the user there is nothing to release.
+prompt: every card in `done` without a `released` field **and without
+`role: "pm"`**, each as its id, title, PR link(s) from `links`, and the
+Engineer's SUMMARY from the activity log. Two kinds of card are excluded by
+construction:
+
+- A **release-manager trigger card** — the current run's trigger sits in
+  `in_progress`, and every previous run's trigger was stamped and archived with
+  its bundle (see post-release archival below).
+- A **scoping card** (`role: "pm"`) — it ships no code and carries no PR, so
+  handing it to the Release Manager would trip the missing-PR-link blocker on a
+  card that cannot satisfy it. It is stamped and archived with the release
+  anyway (below), just never bundled.
+
+So this rule only ever collects work cards, each of which has a PR. An empty
+bundle is not spawnable — tell the user there is nothing to release.
 
 **What the agent does** (`.claude/agents/release-manager.md` is authoritative):
 verifies each listed PR is `MERGED` and its merge commit is an ancestor of the
@@ -318,8 +385,12 @@ in board state). A card-triggered run's trigger card gets the identical stamp �
 `released: <tag>`, `column: "archived"` — plus the claim closeout
 (`agent.status: "done"`, `agent.finished: <now>`; see step 6) — so it is never
 left in `done` to leak into the next bundle, nor archived with a dangling
-`working` claim. The `released` field is also the dedup guard for the
-*next* bundle: only Done cards without it are release candidates.
+`working` claim. **Scoping cards are stamped from the other side:** every
+`done` `role: "pm"` card without a `released` field gets the same
+`released: <tag>` + `column: "archived"` treatment on the same pass, even
+though it was never in the bundle — so Done stays clean and no pm card lingers
+to be re-considered by a later run. The `released` field is also the dedup
+guard for the *next* bundle: only Done cards without it are release candidates.
 
 ## Known limits (v1)
 
