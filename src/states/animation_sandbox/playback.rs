@@ -1714,6 +1714,52 @@ mod tests {
         assert!(checked > 0, "no caster-targeted aura entries left to check");
     }
 
+    /// The other half of the target rule, and the reason it is worth writing:
+    /// the test above only catches a debuff wrongly sent to the CASTER. The
+    /// mirror failure — a beneficial buff wrongly classified HOSTILE, staging
+    /// itself over the dummy — had nothing watching it at all.
+    ///
+    /// The invariant is that the purgeable set and the hostile set are
+    /// DISJOINT: Purge strips enemy buffs, `is_hostile_effect` marks what a
+    /// Divine Shield clears, and no aura can honestly be both. That
+    /// intersection is empty today, so pinning it costs nothing and the day it
+    /// stops being empty is the day one of the two classifiers has drifted.
+    #[test]
+    fn an_entry_previews_on_the_dummy_only_for_a_non_beneficial_aura() {
+        use super::super::super::play_match::components::Aura;
+
+        let defs = AbilityDefinitions::default();
+        let mut checked = 0;
+        for (ability, config) in defs.iter() {
+            let Some(applied) = config.applies_aura.as_ref() else {
+                continue;
+            };
+            // Mirror the sibling test's skips: these entries are sent to the
+            // dummy by damage / mana burn / interrupt, before the aura is ever
+            // consulted, so they say nothing about the classifier.
+            if config.damage_base_max > 0.0 || config.mana_burn_amount > 0.0 || config.is_interrupt
+            {
+                continue;
+            }
+            if !entry_targets_dummy(config) {
+                continue;
+            }
+            checked += 1;
+            let sample = Aura {
+                effect_type: applied.aura_type,
+                ..Default::default()
+            };
+            assert!(
+                !sample.can_be_purged(),
+                "{ability:?} previews on the DUMMY, but its {:?} aura is a \
+                 beneficial buff the Shaman can purge — a buff belongs on the \
+                 caster",
+                applied.aura_type
+            );
+        }
+        assert!(checked > 0, "no dummy-targeted aura entries left to check");
+    }
+
     #[test]
     fn every_class_lists_its_abilities_plus_the_body_animations() {
         let defs = AbilityDefinitions::default();
