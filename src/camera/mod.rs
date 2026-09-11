@@ -73,8 +73,10 @@ fn handle_escape_key(
             GameState::Results => {
                 next_state.set(GameState::MainMenu);
             }
-            GameState::Armory => {
-                next_state.set(GameState::MainMenu);
+            GameState::Encyclopedia => {
+                // The Encyclopedia has its own Back handler: the key clears an
+                // active search, then pops the navigation stack, and only
+                // leaves for the main menu once it is at the root.
             }
             GameState::AnimationSandbox => {
                 next_state.set(GameState::MainMenu);

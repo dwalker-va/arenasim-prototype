@@ -705,7 +705,41 @@ and font fidelity still needs the real client. **To extend this pattern to
 another screen**, refactor its UI system the same way: split the Bevy wrapper
 (grabs `EguiContexts` + resources, applies actions) from a pure
 `draw_*(ctx, &data...) -> Action` function, then drive that function from a
-kittest harness with mock data.
+kittest harness with mock data. `tests/main_menu_snapshot.rs` and
+`tests/encyclopedia_snapshot.rs` follow it; the encyclopedia's harness loads the
+real `items.ron` rather than mock data, so a content change shows up in the
+snapshot.
+
+### Browsing game content in-game (the Encyclopedia)
+
+`GameState::Encyclopedia` (`src/states/encyclopedia/`) is the player-facing
+reference screen — reached from the main menu, and the screen that subsumed the
+old standalone Armory. It is a navigation FRAMEWORK plus per-section content:
+
+- **`Topic`** (`topic.rs`) addresses every entity — `Class | Ability | Aura |
+  Item`. Navigation state is a stack of `View`s (section tab + optional topic).
+- **The linked-icon widget** (`widget.rs`) is the invariant to preserve: every
+  icon the screen draws goes through it, so hovering always shows that entity's
+  tooltip and clicking always navigates to its page. Tooltip text must delegate
+  to the entity's existing builder — never write a second copy here.
+- **Search** (`search.rs`) is a registry each section populates from its own
+  data source. Adding a section means one call in `build_registry`.
+- **Zero marginal cost:** every list, page and search hit derives from the RON
+  configs / Rust registries. A new item in `items.ron` appears in the grid, the
+  filters, search and its own detail page with no code change.
+- **Back and Exit are separate, always-visible affordances.** Back pops one
+  stack level (disabled at the root); Exit leaves the screen outright, from any
+  depth, in one click. `Esc` walks the Back ladder — clear an active search,
+  then pop, and only exit from the root — so no depth traps the reader.
+- **The exit returns to the CALLING CONTEXT.** The encyclopedia is an
+  informational context you enter *from* somewhere, so leaving returns you
+  there. `EncyclopediaState::return_to` (default `MainMenu`) carries it; a new
+  entry point calls `state.open_from(GameState::X)` before the transition and
+  needs to set nothing else. The exit button names the destination, and every
+  exit path funnels through `leave()`, which clears the search and resets the
+  stack so a re-entry is always fresh.
+- `draw_encyclopedia` is pure egui; `encyclopedia_ui` is the Bevy wrapper that
+  applies the returned `EncyclopediaAction`. Snapshot loop as above.
 
 ### Adding a New Combat System
 

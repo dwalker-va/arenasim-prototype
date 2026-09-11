@@ -51,7 +51,7 @@ const IDLE_POSES: &[(CharacterClass, Vec3)] = &[
 /// camera, and a static tableau of class-colored idle combatants.
 ///
 /// Everything is tagged `MenuSceneEntity` and torn down by
-/// `cleanup_menu_scene`, so Options/Armory/Results round-trips rebuild the
+/// `cleanup_menu_scene`, so Options/Encyclopedia/Results round-trips rebuild the
 /// scene symmetrically.
 pub fn setup_menu_scene(
     mut commands: Commands,
@@ -163,7 +163,7 @@ pub fn cleanup_menu_scene(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuAction {
     StartMatch,
-    Armory,
+    Encyclopedia,
     AnimationSandbox,
     Options,
     Exit,
@@ -176,7 +176,7 @@ pub enum MenuAction {
 /// cannot leave the last button hanging outside the backdrop.
 const MENU_ITEMS: [(&str, MenuAction); 5] = [
     ("MATCH", MenuAction::StartMatch),
-    ("ARMORY", MenuAction::Armory),
+    ("ENCYCLOPEDIA", MenuAction::Encyclopedia),
     ("ANIMATIONS", MenuAction::AnimationSandbox),
     ("OPTIONS", MenuAction::Options),
     ("EXIT", MenuAction::Exit),
@@ -447,6 +447,7 @@ pub fn main_menu_ui(
     time: Res<Time>,
     mut next_state: ResMut<NextState<GameState>>,
     mut commands: Commands,
+    mut encyclopedia: ResMut<crate::states::encyclopedia::EncyclopediaState>,
     primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
 ) {
     // Use try_ctx_mut to gracefully handle window close (the context
@@ -458,9 +459,13 @@ pub fn main_menu_ui(
             info!("Match button pressed - transitioning to ConfigureMatch");
             next_state.set(GameState::ConfigureMatch);
         }
-        Some(MenuAction::Armory) => {
-            info!("Armory button pressed - transitioning to Armory");
-            next_state.set(GameState::Armory);
+        Some(MenuAction::Encyclopedia) => {
+            info!("Encyclopedia button pressed - transitioning to Encyclopedia");
+            // The encyclopedia is an informational context: it returns you to
+            // whatever screen opened it. Declaring the entry point is the ONE
+            // thing a caller has to do (see `EncyclopediaState::open_from`).
+            encyclopedia.open_from(GameState::MainMenu);
+            next_state.set(GameState::Encyclopedia);
         }
         Some(MenuAction::AnimationSandbox) => {
             info!("Animations button pressed - transitioning to AnimationSandbox");

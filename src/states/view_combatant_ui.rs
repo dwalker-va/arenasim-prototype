@@ -16,7 +16,10 @@ use super::play_match::AbilityType;
 use super::play_match::abilities::{ScalingStat, SpellSchool};
 use super::play_match::ability_config::{AbilityDefinitions, AbilityConfig};
 use super::play_match::components::{AuraType, ClassBaseStats, PetType, ResourceType, class_base_stats};
-use super::play_match::equipment::{ItemSlot, ItemId, ItemConfig, ItemDefinitions, DefaultLoadouts, resolve_loadout, enforce_two_hand_conflicts, find_one_handed_mainhand};
+use super::play_match::equipment::{ItemSlot, ItemId, ItemDefinitions, DefaultLoadouts, resolve_loadout, enforce_two_hand_conflicts, find_one_handed_mainhand};
+// Item presentation lives in the encyclopedia's Items section — the loadout
+// editor renders the same tooltip and stat line so the two never drift.
+use super::encyclopedia::items::{format_item_stats, render_item_tooltip};
 
 /// Tracks which equipment slot has its picker open (if any)
 #[derive(Default)]
@@ -1660,81 +1663,6 @@ fn set_equipment_override(
                     }
                 }
             }
-        }
-    }
-}
-
-/// Build a list of formatted stat strings for an item.
-/// Armor stats use "+X" format; weapons show absolute damage range and speed.
-fn item_stat_parts(item: &ItemConfig) -> Vec<String> {
-    let mut parts = Vec::new();
-
-    if item.is_weapon {
-        if item.attack_damage_min > 0.0 || item.attack_damage_max > 0.0 {
-            parts.push(format!("{:.0}-{:.0} Damage", item.attack_damage_min, item.attack_damage_max));
-        }
-        if item.attack_speed > 0.0 {
-            parts.push(format!("{:.1} Speed", item.attack_speed));
-        }
-    }
-
-    if item.max_health != 0.0 { parts.push(format!("+{:.0} HP", item.max_health)); }
-    if item.max_mana != 0.0 { parts.push(format!("+{:.0} Mana", item.max_mana)); }
-    if item.mana_regen != 0.0 { parts.push(format!("+{:.1} MP5", item.mana_regen)); }
-    if item.attack_power != 0.0 { parts.push(format!("+{:.0} AP", item.attack_power)); }
-    if item.spell_power != 0.0 { parts.push(format!("+{:.0} SP", item.spell_power)); }
-    if item.crit_chance != 0.0 { parts.push(format!("+{:.1}% Crit", item.crit_chance * 100.0)); }
-    if item.movement_speed != 0.0 { parts.push(format!("+{:.0}% Speed", item.movement_speed * 100.0)); }
-    if item.armor != 0.0 { parts.push(format!("{:.0} Armor", item.armor)); }
-    if item.fire_resistance != 0.0 { parts.push(format!("+{:.0} Fire Resist", item.fire_resistance)); }
-    if item.frost_resistance != 0.0 { parts.push(format!("+{:.0} Frost Resist", item.frost_resistance)); }
-    if item.shadow_resistance != 0.0 { parts.push(format!("+{:.0} Shadow Resist", item.shadow_resistance)); }
-    if item.arcane_resistance != 0.0 { parts.push(format!("+{:.0} Arcane Resist", item.arcane_resistance)); }
-    if item.nature_resistance != 0.0 { parts.push(format!("+{:.0} Nature Resist", item.nature_resistance)); }
-    if item.holy_resistance != 0.0 { parts.push(format!("+{:.0} Holy Resist", item.holy_resistance)); }
-
-    parts
-}
-
-/// Format stat bonuses as a comma-separated string for inline display.
-fn format_item_stats(item: &ItemConfig) -> String {
-    item_stat_parts(item).join(", ")
-}
-
-/// Render a tooltip showing an item's full stat breakdown.
-pub fn render_item_tooltip(ui: &mut egui::Ui, item: &ItemConfig) {
-    ui.label(
-        egui::RichText::new(&item.name)
-            .size(14.0)
-            .color(egui::Color32::from_rgb(255, 215, 0))
-            .strong(),
-    );
-
-    if item.item_level > 0 {
-        ui.label(
-            egui::RichText::new(format!("Item Level {}", item.item_level))
-                .size(12.0)
-                .color(egui::Color32::from_rgb(170, 170, 170)),
-        );
-    }
-
-    if item.armor_type != super::play_match::equipment::ArmorType::None {
-        ui.label(
-            egui::RichText::new(format!("{:?}", item.armor_type))
-                .size(12.0)
-                .color(egui::Color32::from_rgb(170, 170, 170)),
-        );
-    }
-
-    let stat_parts = item_stat_parts(item);
-    if !stat_parts.is_empty() {
-        ui.add_space(4.0);
-        for part in &stat_parts {
-            ui.label(
-                egui::RichText::new(part)
-                    .size(12.0)
-                    .color(egui::Color32::from_rgb(100, 255, 100)),
-            );
         }
     }
 }

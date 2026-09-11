@@ -113,14 +113,15 @@ for the schema.
 - **~136 items** in `assets/config/items.ron` — plate/mail/leather/cloth armor, weapons,
   and accessories, with item-level stat budgets enforced by `cargo test`
 - **Default loadouts** per class in `loadouts.ron`, overridable per combatant
-- **Armory screen** to browse every item with filters (slot, armor type, item level, name)
+- **Encyclopedia** — browse every item with filters (slot, armor type, item level, name),
+  with a detail page and cross-links for each (see *Client* below)
 - **Stat scaling** — attack power / spell power coefficients per ability
   (see [docs/design/stat-scaling-system.md](docs/design/stat-scaling-system.md))
 
 ## Client
 
 Screens: Main Menu → Configure Match → (View Combatant) → Play Match → Results, plus
-Options, Keybindings, and Armory.
+Options, Keybindings, the Encyclopedia, and the Animation Sandbox.
 
 - **Match view** — health/resource bars, aura icons, floating combat text, ability
   timeline, live combat log, projectile and spell effects
@@ -128,6 +129,10 @@ Options, Keybindings, and Armory.
 - **Camera** — follow-center, follow-combatant, and manual modes
 - **Results** — WoW-Details-style damage/healing breakdown per combatant and ability,
   with pet damage folded into the owner's rows
+- **Encyclopedia** — the in-game reference: section tabs, breadcrumbs, a Back stack and a
+  global search over a registry derived straight from the game data, with every icon
+  linking to its own page. Items ship first; classes, abilities and auras follow
+- **Animation Sandbox** — play any combat animation on demand against an inert dummy
 - **Fully remappable keybindings**, persisted with video settings in `settings.ron`
 
 ## Headless & Balance Tooling
@@ -164,7 +169,8 @@ guards worth knowing about:
 - **`decision_trace_audit`** — keeps trace instrumentation in sync with AI predicates
 - **Item budget validation** — no item may exceed its item-level stat budget
 - **egui snapshot tests** (`--ignored`, needs a GPU adapter) — offscreen renders of the
-  Results / Configure Match / Main Menu / team-frame UI for fast visual iteration
+  Results / Configure Match / Main Menu / Encyclopedia / Animation Sandbox / team-frame UI
+  for fast visual iteration
 
 ## Project Layout
 
@@ -175,7 +181,9 @@ src/
   headless/                  # runner, matrix, parallel batch, JSON config
   states/
     main_menu.rs, configure_match_ui.rs, view_combatant_ui.rs,
-    results_ui.rs, armory_ui.rs, match_config.rs
+    results_ui.rs, match_config.rs
+    animation_sandbox/          # on-demand animation playback on an inert dummy
+    encyclopedia/               # in-game reference: nav framework, search, linked icons
     play_match/
       abilities.rs, ability_config.rs      # data-driven ability defs
       class_ai/                            # per-class AI + posture machines

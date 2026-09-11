@@ -10,10 +10,10 @@ pub mod main_menu;
 pub mod animation_sandbox;
 pub mod arena_layout_debug;
 pub mod configure_match_ui;
+pub mod encyclopedia;
 pub mod play_match;
 pub mod results_ui;
 pub mod view_combatant_ui;
-pub mod armory_ui;
 
 pub use match_config::MatchConfig;
 
@@ -35,10 +35,33 @@ pub enum GameState {
     PlayMatch,
     /// Post-match results - statistics and breakdown
     Results,
-    /// Armory - browse all equipment in the game
-    Armory,
+    /// Encyclopedia - browsable reference for classes, abilities, auras and items
+    Encyclopedia,
     /// Animation sandbox - play combat animations on demand on an inert caster
     AnimationSandbox,
+}
+
+impl GameState {
+    /// Human-readable name of the screen this state shows.
+    ///
+    /// Used where one screen has to NAME another in its own chrome — the
+    /// encyclopedia's exit button says where it will put you, because the
+    /// encyclopedia is an informational context entered from somewhere and
+    /// leaving it returns you to that somewhere (see
+    /// [`encyclopedia::EncyclopediaState::open_from`]).
+    pub fn screen_name(&self) -> &'static str {
+        match self {
+            GameState::MainMenu => "Main Menu",
+            GameState::Options => "Options",
+            GameState::Keybindings => "Keybindings",
+            GameState::ConfigureMatch => "Match Setup",
+            GameState::ViewCombatant => "Combatant",
+            GameState::PlayMatch => "Match",
+            GameState::Results => "Results",
+            GameState::Encyclopedia => "Encyclopedia",
+            GameState::AnimationSandbox => "Animations",
+        }
+    }
 }
 
 use play_match::systems::{
@@ -87,8 +110,10 @@ impl Plugin for StatesPlugin {
             // Initialize hunter pet icon resources for view combatant screen
             .init_resource::<view_combatant_ui::HunterPetIcons>()
             .init_resource::<view_combatant_ui::HunterPetIconHandles>()
-            // Initialize armory filter state
-            .init_resource::<armory_ui::ArmoryFilters>()
+            // Encyclopedia navigation/search/filter state. Owned for the app
+            // lifetime so the nav stack and filters survive a round-trip to the
+            // main menu, the way the Armory's filters used to.
+            .init_resource::<encyclopedia::EncyclopediaState>()
             // Player selection (click-to-select) — graphical-only
             .init_resource::<play_match::Selection>()
             // Kill-target call watcher (banter) — graphical-only. Owned for the
@@ -145,17 +170,19 @@ impl Plugin for StatesPlugin {
                     .chain()
                     .run_if(in_state(GameState::ViewCombatant)),
             )
-            // Armory systems (defined in armory_ui module).
-            // Reuses view_combatant_ui::load_item_icons — the loader's internal
-            // `loaded: bool` guard makes the second registration idempotent.
+            // Encyclopedia systems (defined in the encyclopedia module).
+            // Reuses the item and class icon loaders — each has an internal
+            // `loaded: bool` guard, so re-registering them here is idempotent
+            // (the same trick the retired Armory screen used).
             .add_systems(
                 Update,
                 (
                     view_combatant_ui::load_item_icons,
-                    armory_ui::armory_ui,
+                    configure_match_ui::load_class_icons,
+                    encyclopedia::encyclopedia_ui,
                 )
                     .chain()
-                    .run_if(in_state(GameState::Armory)),
+                    .run_if(in_state(GameState::Encyclopedia)),
             )
             // Animation sandbox systems (defined in animation_sandbox module).
             // Graphical-only: no headless registration, and it reaches no
@@ -187,7 +214,8 @@ impl Plugin for StatesPlugin {
                 (
                     // Both loaders self-guard on an internal `loaded` flag, so
                     // registering them here as well as in their own states is
-                    // idempotent — the same trick the Armory uses for item icons.
+                    // idempotent — the same trick the Encyclopedia uses for its
+                    // item and class icons.
                     play_match::load_spell_icons,
                     configure_match_ui::load_class_icons,
                     animation_sandbox::restage_on_config_change,
