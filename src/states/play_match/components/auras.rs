@@ -135,16 +135,84 @@ impl AuraType {
     /// Returns true if this aura type is inherently magic-dispellable.
     /// This covers CC effects that are always magical in WoW, plus Silence (which is
     /// removable by Dispel Magic / Cleanse).
+    ///
+    /// **Exhaustive on purpose — do not add a `_ =>` arm.** This is the same
+    /// hazard class as [`AuraType::is_hostile_effect`] below, one degree worse:
+    /// a hostility miss puts a sandbox preview over the wrong unit (cosmetic),
+    /// whereas a variant silently missing from THIS list is an aura that no
+    /// dispel and no cleanse can ever remove. That changes matchup outcomes and
+    /// is invisible to every test in this repo — nothing observes "the debuff
+    /// that was never a dispel candidate". The compiler refusing to build until
+    /// variant N+1 is classified is the only guard that actually holds.
+    ///
+    /// The exclusions below are deliberate and stay exclusions — "correcting"
+    /// one into the general rule changes what a dispel can strip, which is a
+    /// balance change, not a cleanup.
     pub fn is_magic_dispellable(&self) -> bool {
-        matches!(
-            self,
+        match self {
+            // Inherently magical crowd control, plus Silence (the Unstable
+            // Affliction dispel backlash), which Dispel Magic / Cleanse lifts.
             AuraType::MovementSpeedSlow
-                | AuraType::Root
-                | AuraType::Fear
-                | AuraType::Polymorph
-                | AuraType::Incapacitate
-                | AuraType::Silence
-        )
+            | AuraType::Root
+            | AuraType::Fear
+            | AuraType::Polymorph
+            | AuraType::Incapacitate
+            | AuraType::Silence => true,
+
+            // Classified PER AURA, not per type: [`Aura::can_be_dispelled`]
+            // admits a DoT only when its `spell_school` is non-physical, so
+            // Corruption and Immolate are dispellable and Rend is not. Listing
+            // the type here would make Rend dispellable.
+            AuraType::DamageOverTime => false,
+
+            // Stat debuffs, not crowd control — this classifier's true arm is
+            // scoped to CC. Stuns are never dispellable in WoW at all; the
+            // healing reduction (Mortal Strike, Aimed Shot) and the AP cut
+            // (Demoralizing Shout) are physical. `AttackSpeedSlow` is the
+            // frost-school half of Frost Armor's proc and is the one judgement
+            // call here: its paired `MovementSpeedSlow` half IS dispellable, so
+            // a dispel lifts half a proc. Widening this arm would change what
+            // the dispel pool contains, so it stays a stat debuff until someone
+            // measures the alternative.
+            AuraType::Stun
+            | AuraType::HealingReduction
+            | AuraType::AttackPowerReduction
+            | AuraType::AttackSpeedSlow => false,
+
+            // Curses (Curse of Weakness, Curse of Tongues). In WoW these are
+            // lifted by Remove Curse, not Dispel Magic; there is no curse
+            // cleanse in this game, so they are undispellable by design.
+            AuraType::DamageReduction | AuraType::CastTimeIncrease => false,
+
+            // Interrupt lockout. Not a dispellable debuff in WoW — an interrupt
+            // that could be dispelled off would make interrupts worthless.
+            AuraType::SpellSchoolLockout => false,
+
+            // Mechanical markers, not effects. Lifting `WeakenedSoul` would hand
+            // the Priest a free Power Word: Shield reset; the other two are
+            // tracking state.
+            AuraType::WeakenedSoul | AuraType::ShadowSight | AuraType::WeaponPoison => false,
+
+            // Beneficial auras. Dispel Magic here is friendly-only (see
+            // `try_dispel_ally` and the Felhunter's Devour Magic, both of which
+            // scan ALLIES); stripping enemy buffs is the Shaman Purge's job and
+            // goes through [`Aura::can_be_purged`] instead.
+            AuraType::Absorb
+            | AuraType::MaxHealthIncrease
+            | AuraType::MaxManaIncrease
+            | AuraType::AttackPowerIncrease
+            | AuraType::SpellPowerIncrease
+            | AuraType::HealingOverTime
+            | AuraType::WindfuryBuff
+            | AuraType::DamageTakenReduction
+            | AuraType::DamageImmunity
+            | AuraType::CritChanceIncrease
+            | AuraType::ManaRegenIncrease
+            | AuraType::LockoutDurationReduction
+            | AuraType::FrostArmorBuff
+            | AuraType::SpellResistanceBuff
+            | AuraType::FearImmunity => false,
+        }
     }
 
     /// Returns true if this aura TYPE is a HOSTILE effect — one that a full immunity
@@ -326,27 +394,67 @@ impl Aura {
     /// offensive dispel (Shaman's Purge) can strip.
     ///
     /// Only beneficial auras qualify — Purge removes enemy buffs, never their
-    /// debuffs/CC (those are the *target's* problem, not ours). Excludes:
-    /// `DamageImmunity` (Divine Shield is unpurgeable by design), `ShadowSight`
-    /// and `WeaponPoison` (mechanical markers, not real buffs), and every
-    /// debuff/CC aura type.
+    /// debuffs/CC (those are the *target's* problem, not ours).
+    ///
+    /// **Exhaustive on purpose — do not add a `_ =>` arm.** Same reasoning as
+    /// [`AuraType::is_magic_dispellable`]: a buff silently missing from this
+    /// list is a buff the Shaman can never strip, which is a matchup swing no
+    /// test in this repo observes. A wildcard arm would let variant N+1 default
+    /// into "unpurgeable" without anyone deciding that.
+    ///
+    /// Purgeable is BENEFICIAL-minus-exceptions, and the two exceptions are
+    /// deliberate self buffs that must survive this list rather than be folded
+    /// into the general rule:
+    /// - `DamageImmunity` — Divine Shield is unpurgeable by design.
+    /// - `FearImmunity` — Berserker Rage is a physical enrage, not magic, so
+    ///   there is nothing for a magic purge to take.
+    ///
+    /// `ShadowSight` and `WeaponPoison` are mechanical markers rather than real
+    /// buffs, and the whole debuff/CC half belongs to the target.
+    ///
+    /// The purgeable set is disjoint from [`AuraType::is_hostile_effect`] by
+    /// construction, and `an_entry_previews_on_the_caster_only_for_a_beneficial_aura`
+    /// / `an_entry_previews_on_the_dummy_only_for_a_non_beneficial_aura` in the
+    /// animation sandbox pin both directions of that.
     pub fn can_be_purged(&self) -> bool {
-        matches!(
-            self.effect_type,
+        match self.effect_type {
+            // Beneficial buffs: defensives, throughput, and minor utility.
             AuraType::Absorb
-                | AuraType::MaxHealthIncrease
-                | AuraType::MaxManaIncrease
-                | AuraType::AttackPowerIncrease
-                | AuraType::SpellPowerIncrease
-                | AuraType::HealingOverTime
-                | AuraType::WindfuryBuff
-                | AuraType::DamageTakenReduction
-                | AuraType::CritChanceIncrease
-                | AuraType::ManaRegenIncrease
-                | AuraType::LockoutDurationReduction
-                | AuraType::FrostArmorBuff
-                | AuraType::SpellResistanceBuff
-        )
+            | AuraType::MaxHealthIncrease
+            | AuraType::MaxManaIncrease
+            | AuraType::AttackPowerIncrease
+            | AuraType::SpellPowerIncrease
+            | AuraType::HealingOverTime
+            | AuraType::WindfuryBuff
+            | AuraType::DamageTakenReduction
+            | AuraType::CritChanceIncrease
+            | AuraType::ManaRegenIncrease
+            | AuraType::LockoutDurationReduction
+            | AuraType::FrostArmorBuff
+            | AuraType::SpellResistanceBuff => true,
+
+            // Beneficial, but DELIBERATELY unpurgeable — see the doc above.
+            AuraType::DamageImmunity | AuraType::FearImmunity => false,
+
+            // Mechanical markers, not buffs.
+            AuraType::ShadowSight | AuraType::WeaponPoison | AuraType::WeakenedSoul => false,
+
+            // Debuffs and crowd control — the target's problem, not ours.
+            AuraType::MovementSpeedSlow
+            | AuraType::Root
+            | AuraType::Stun
+            | AuraType::Fear
+            | AuraType::Polymorph
+            | AuraType::Incapacitate
+            | AuraType::Silence
+            | AuraType::SpellSchoolLockout
+            | AuraType::DamageOverTime
+            | AuraType::HealingReduction
+            | AuraType::DamageReduction
+            | AuraType::CastTimeIncrease
+            | AuraType::AttackPowerReduction
+            | AuraType::AttackSpeedSlow => false,
+        }
     }
 }
 
@@ -675,6 +783,15 @@ mod tests {
                 aura(ty).can_be_purged(),
                 "{:?} is a beneficial buff and must be purgeable",
                 ty
+            );
+            // The purgeable set and the hostile set are disjoint by
+            // construction. Nothing enforces that across two separate matches,
+            // so pin it: a buff that starts reading as hostile would be cleared
+            // off its own holder by Divine Shield.
+            assert!(
+                !aura(ty).is_hostile_effect(),
+                "{ty:?} is purgeable AND hostile — the two classifications must \
+                 stay disjoint"
             );
         }
     }
