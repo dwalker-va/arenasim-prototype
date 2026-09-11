@@ -41,6 +41,29 @@ pub enum GameState {
     AnimationSandbox,
 }
 
+impl GameState {
+    /// Human-readable name of the screen this state shows.
+    ///
+    /// Used where one screen has to NAME another in its own chrome — the
+    /// encyclopedia's exit button says where it will put you, because the
+    /// encyclopedia is an informational context entered from somewhere and
+    /// leaving it returns you to that somewhere (see
+    /// [`encyclopedia::EncyclopediaState::open_from`]).
+    pub fn screen_name(&self) -> &'static str {
+        match self {
+            GameState::MainMenu => "Main Menu",
+            GameState::Options => "Options",
+            GameState::Keybindings => "Keybindings",
+            GameState::ConfigureMatch => "Match Setup",
+            GameState::ViewCombatant => "Combatant",
+            GameState::PlayMatch => "Match",
+            GameState::Results => "Results",
+            GameState::Encyclopedia => "Encyclopedia",
+            GameState::AnimationSandbox => "Animations",
+        }
+    }
+}
+
 use play_match::systems::{
     CombatSystemPhase, configure_combat_system_ordering, add_core_combat_systems,
 };

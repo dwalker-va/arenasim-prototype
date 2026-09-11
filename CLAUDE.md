@@ -727,6 +727,17 @@ old standalone Armory. It is a navigation FRAMEWORK plus per-section content:
 - **Zero marginal cost:** every list, page and search hit derives from the RON
   configs / Rust registries. A new item in `items.ron` appears in the grid, the
   filters, search and its own detail page with no code change.
+- **Back and Exit are separate, always-visible affordances.** Back pops one
+  stack level (disabled at the root); Exit leaves the screen outright, from any
+  depth, in one click. `Esc` walks the Back ladder — clear an active search,
+  then pop, and only exit from the root — so no depth traps the reader.
+- **The exit returns to the CALLING CONTEXT.** The encyclopedia is an
+  informational context you enter *from* somewhere, so leaving returns you
+  there. `EncyclopediaState::return_to` (default `MainMenu`) carries it; a new
+  entry point calls `state.open_from(GameState::X)` before the transition and
+  needs to set nothing else. The exit button names the destination, and every
+  exit path funnels through `leave()`, which clears the search and resets the
+  stack so a re-entry is always fresh.
 - `draw_encyclopedia` is pure egui; `encyclopedia_ui` is the Bevy wrapper that
   applies the returned `EncyclopediaAction`. Snapshot loop as above.
 

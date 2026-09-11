@@ -6,12 +6,20 @@
 //!
 //! 1. **[`Topic`]** addresses every encyclopedia entity. Navigation state is a
 //!    stack of [`View`]s (a section tab plus an optional topic).
-//! 2. **Hierarchical navigation** — section tabs, a breadcrumb trail, a Back
-//!    button that pops the stack. `Esc` clears an active search, otherwise pops
-//!    the stack; at the root it leaves for the main menu.
+//! 2. **Hierarchical navigation** — section tabs, a breadcrumb trail, and TWO
+//!    always-visible chrome buttons that do different jobs: *Back* pops the
+//!    stack one level, *Exit* leaves the screen entirely. `Esc` walks the same
+//!    ladder as Back (clear search, pop, then exit at the root).
 //! 3. **Search** over an extensible [registry](search::build_registry) that
 //!    each section populates from its own data source. Nothing is hand-authored:
 //!    item N+1 appears in search the moment it exists in `items.ron`.
+//!
+//!    Results TAKE OVER the content area rather than floating in a dropdown
+//!    over it, which is a deliberate divergence from the blessed HTML mockup
+//!    — endorsed by the user on review. It is a choice, not a limitation: egui
+//!    can float overlays (`egui::Area`, `popup_below_widget`). The takeover
+//!    buys simpler `Esc` semantics (one ladder, not two) and a state the
+//!    snapshot tests can render. Please do not "fix" it back to a dropdown.
 //! 4. **The linked-icon widget** ([`widget`]) — every icon the encyclopedia
 //!    draws shows that entity's tooltip on hover and navigates to its page on
 //!    click. Tooltips reuse the game's existing text builders, so there is no
@@ -99,7 +107,7 @@ pub enum EncyclopediaAction {
     Navigate(View),
     /// Pop the stack. At the root this means [`Self::Exit`].
     Back,
-    /// Leave the encyclopedia for the main menu.
+    /// Leave the encyclopedia for [`EncyclopediaState::return_to`].
     Exit,
 }
 
@@ -118,6 +126,12 @@ pub struct EncyclopediaState {
     /// Search registry, built once from the data sources. Empty until
     /// [`Self::rebuild_registry`] runs.
     pub registry: Vec<SearchEntry>,
+    /// The screen to return to when the user leaves. The encyclopedia is an
+    /// INFORMATIONAL CONTEXT entered from somewhere, so its exit puts the
+    /// player back in the context they came from rather than unconditionally
+    /// at the main menu. Set it via [`Self::open_from`]; a new entry point
+    /// needs to set nothing else.
+    return_to: GameState,
 }
 
 impl Default for EncyclopediaState {
@@ -130,11 +144,44 @@ impl Default for EncyclopediaState {
             search: String::new(),
             item_filters: ItemFilters::default(),
             registry: Vec::new(),
+            // The main menu is the only entry point today, and the sensible
+            // fallback for any caller that forgets to open_from.
+            return_to: GameState::MainMenu,
         }
     }
 }
 
 impl EncyclopediaState {
+    /// Open the encyclopedia from `from`: the exit button and the `Esc`-at-root
+    /// path both return there.
+    ///
+    /// This is the ONE field a new entry point has to set. Call it from
+    /// whatever screen links in, immediately before the
+    /// `GameState::Encyclopedia` transition. (Which screens do link in is
+    /// AS-34's call; today only the main menu does.)
+    pub fn open_from(&mut self, from: GameState) {
+        self.return_to = from;
+    }
+
+    /// Where the exit affordance will put the player.
+    pub fn return_to(&self) -> GameState {
+        self.return_to
+    }
+
+    /// Leave the encyclopedia: reset the transient view state and hand back the
+    /// screen to transition to.
+    ///
+    /// Every exit path funnels through here, so re-entering always lands on a
+    /// section index rather than on whatever page — or stale search results —
+    /// the last visit ended on. (Round 1 cleared the search on the `Esc` path
+    /// only, so exiting by button and re-entering showed stale results.)
+    #[must_use]
+    pub fn leave(&mut self) -> GameState {
+        self.search.clear();
+        self.stack.truncate(1);
+        self.return_to
+    }
+
     /// The view currently on screen.
     pub fn current(&self) -> View {
         *self.stack.last().expect("encyclopedia nav stack is never empty")
@@ -172,7 +219,12 @@ impl EncyclopediaState {
     }
 
     /// The Back key ladder: clear an active search first, then pop the stack,
-    /// and only leave for the main menu from the root. Returns `true` on exit.
+    /// and only leave the screen from the root. Returns `true` on exit, at
+    /// which point the caller must call [`Self::leave`] for the destination.
+    ///
+    /// The always-visible Exit button is the shortcut PAST this ladder, not a
+    /// replacement for it: `Esc` still unwinds one level at a time, so no depth
+    /// traps the user and no depth exits unexpectedly.
     pub fn back_key(&mut self) -> bool {
         if !self.search.trim().is_empty() {
             self.search.clear();
@@ -227,7 +279,7 @@ pub fn encyclopedia_ui(
     }
 
     if keybindings.action_just_pressed(GameAction::Back, &keyboard) && state.back_key() {
-        next_state.set(GameState::MainMenu);
+        next_state.set(state.leave());
         return;
     }
 
@@ -239,7 +291,7 @@ pub fn encyclopedia_ui(
 
     if let Some(action) = draw_encyclopedia(ctx, &mut state, &data) {
         if state.apply(action) {
-            next_state.set(GameState::MainMenu);
+            next_state.set(state.leave());
         }
     }
 }
@@ -267,9 +319,10 @@ pub fn draw_encyclopedia(
 
     // Split the borrows up front so the search box can be edited in the same
     // pass that reads the registry.
-    let EncyclopediaState { stack, search, item_filters, registry } = state;
+    let EncyclopediaState { stack, search, item_filters, registry, return_to } = state;
     let current = *stack.last().expect("encyclopedia nav stack is never empty");
     let can_go_back = stack.len() > 1;
+    let exit_label = exit_label(*return_to);
 
     let mut action = None;
 
@@ -281,54 +334,75 @@ pub fn draw_encyclopedia(
             bottom: 0,
         }))
         .show(ctx, |ui| {
-            // --- Top bar: Back, title, search ---
+            // --- Top bar: Back, title, Exit ---
+            //
+            // Back and Exit are SEPARATE, ALWAYS-VISIBLE affordances. They
+            // answer different questions — "up one level" and "out of here" —
+            // and collapsing them into one button (round 1 swapped the label
+            // the moment you navigated anywhere) left a reader two pages deep
+            // with no one-click way out. Back is disabled rather than hidden at
+            // the root so the row never reflows under the cursor.
             ui.horizontal(|ui| {
-                // At the root the button is the way out rather than a dead
-                // control — the screen must never trap a mouse-only player
-                // with Esc as its only exit.
-                let label = if can_go_back { "◀ BACK" } else { "◀ MAIN MENU" };
-                if ui
-                    .add(
-                        egui::Button::new(egui::RichText::new(label).size(14.0).color(TEXT))
-                            .fill(PANEL)
-                            .stroke(egui::Stroke::new(1.0, LINE)),
-                    )
-                    .clicked()
-                {
-                    action = Some(if can_go_back {
-                        EncyclopediaAction::Back
-                    } else {
-                        EncyclopediaAction::Exit
-                    });
+                let back = ui.add_enabled(
+                    can_go_back,
+                    chrome_button("◀ BACK", if can_go_back { TEXT } else { DIM }),
+                );
+                if back.clicked() {
+                    action = Some(EncyclopediaAction::Back);
                 }
                 ui.add_space(10.0);
                 ui.label(egui::RichText::new("ENCYCLOPEDIA").size(30.0).color(GOLD));
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // The exit NAMES its destination, because the destination
+                    // is whatever context opened the encyclopedia — not a fixed
+                    // main menu.
+                    if ui.add(chrome_button(&exit_label, TEXT)).clicked() {
+                        action = Some(EncyclopediaAction::Exit);
+                    }
+                });
+            });
+
+            ui.add_space(10.0);
+
+            // --- Search: a primary control, not an afterthought ---
+            // Full-width and tall on its own row. Search is one of the four
+            // framework invariants and the only way to reach an entity whose
+            // section you do not know; it is sized to say so.
+            ui.horizontal(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     // "×" rather than a heavier glyph: egui's default font has
                     // no coverage for most dingbats and draws them as tofu.
-                    if !search.trim().is_empty()
-                        && ui
-                            .add(
+                    if !search.trim().is_empty() {
+                        if ui
+                            .add_sized(
+                                [SEARCH_HEIGHT, SEARCH_HEIGHT],
                                 egui::Button::new(
-                                    egui::RichText::new("×").size(16.0).color(MUTED),
+                                    egui::RichText::new("×").size(19.0).color(MUTED),
                                 )
                                 .fill(PANEL)
                                 .stroke(egui::Stroke::new(1.0, LINE)),
                             )
+                            .on_hover_text("Clear search")
                             .clicked()
-                    {
-                        search.clear();
+                        {
+                            search.clear();
+                        }
+                        ui.add_space(6.0);
                     }
-                    ui.add(
+                    ui.add_sized(
+                        [ui.available_width(), SEARCH_HEIGHT],
                         egui::TextEdit::singleline(search)
-                            .hint_text("Search everything…")
-                            .desired_width(280.0),
+                            .hint_text(
+                                egui::RichText::new("Search everything…").size(16.0).color(DIM),
+                            )
+                            .font(egui::FontId::proportional(16.0))
+                            .margin(egui::Margin::symmetric(12, 8)),
                     );
                 });
             });
 
-            ui.add_space(8.0);
+            ui.add_space(10.0);
 
             // --- Section tabs ---
             ui.horizontal(|ui| {
@@ -364,6 +438,10 @@ pub fn draw_encyclopedia(
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 let needle = search.trim().to_lowercase();
                 if !needle.is_empty() {
+                    // Results TAKE OVER the content area. The blessed mockup
+                    // floated them in a dropdown; this divergence is deliberate
+                    // and user-endorsed (simpler Esc ladder, snapshot-testable
+                    // state) — see the module docs. Not an egui limitation.
                     if let Some(topic) = search::render_results(ui, &needle, registry, data) {
                         action = Some(EncyclopediaAction::Navigate(View::topic(topic)));
                     }
@@ -381,6 +459,21 @@ pub fn draw_encyclopedia(
         });
 
     action
+}
+
+/// Height of the search field and its clear button. Sized as a primary control.
+const SEARCH_HEIGHT: f32 = 34.0;
+
+/// The exit button's label, naming where it will put the player.
+fn exit_label(return_to: GameState) -> String {
+    format!("EXIT TO {}", return_to.screen_name().to_uppercase())
+}
+
+/// A chrome button in the screen's palette — the Back and Exit affordances.
+fn chrome_button(label: &str, color: egui::Color32) -> egui::Button<'static> {
+    egui::Button::new(egui::RichText::new(label.to_string()).size(14.0).color(color))
+        .fill(PANEL)
+        .stroke(egui::Stroke::new(1.0, LINE))
 }
 
 /// Push egui's stock widget colours onto the game's palette, so the built-in
@@ -599,6 +692,64 @@ mod tests {
         let mut state = EncyclopediaState::default();
         state.apply(EncyclopediaAction::Navigate(View::index(Section::Items)));
         assert!(!state.can_go_back());
+    }
+
+    #[test]
+    fn leaving_clears_the_search_and_the_stack_so_re_entry_is_fresh() {
+        // Round 1 cleared the search on the Esc path only, so exiting by
+        // button with results on screen and coming back landed on stale ones.
+        let mut state = EncyclopediaState::default();
+        state.apply(EncyclopediaAction::Navigate(View::topic(Topic::Item(
+            ItemId::WandOfTheInvoker,
+        ))));
+        state.search = "bulwark".to_string();
+        assert!(state.can_go_back());
+
+        assert!(state.apply(EncyclopediaAction::Exit));
+        assert_eq!(state.leave(), GameState::MainMenu);
+
+        assert!(state.search.is_empty());
+        assert!(!state.can_go_back());
+        assert_eq!(state.current(), View::index(Section::Items));
+    }
+
+    #[test]
+    fn the_exit_returns_to_the_calling_context() {
+        let mut state = EncyclopediaState::default();
+        // Default entry point.
+        assert_eq!(state.return_to(), GameState::MainMenu);
+        assert_eq!(exit_label(state.return_to()), "EXIT TO MAIN MENU");
+
+        // A future entry point sets one field and both exit paths follow it.
+        state.open_from(GameState::ConfigureMatch);
+        assert_eq!(exit_label(state.return_to()), "EXIT TO MATCH SETUP");
+
+        // ...the button path,
+        assert!(state.apply(EncyclopediaAction::Exit));
+        assert_eq!(state.leave(), GameState::ConfigureMatch);
+
+        // ...and the Esc-at-root path.
+        state.open_from(GameState::ViewCombatant);
+        assert!(state.back_key());
+        assert_eq!(state.leave(), GameState::ViewCombatant);
+    }
+
+    #[test]
+    fn back_and_exit_are_independent_at_every_depth() {
+        // Two pages deep, Back unwinds one level while Exit leaves outright —
+        // neither affordance is ever the other's fallback.
+        let mut state = EncyclopediaState::default();
+        state.apply(EncyclopediaAction::Navigate(View::topic(Topic::Item(
+            ItemId::WandOfTheInvoker,
+        ))));
+        state.apply(EncyclopediaAction::Navigate(View::topic(Topic::Class(
+            CharacterClass::Mage,
+        ))));
+        assert!(state.can_go_back());
+
+        assert!(!state.apply(EncyclopediaAction::Back));
+        assert!(state.can_go_back());
+        assert!(state.apply(EncyclopediaAction::Exit));
     }
 
     #[test]

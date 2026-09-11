@@ -447,6 +447,7 @@ pub fn main_menu_ui(
     time: Res<Time>,
     mut next_state: ResMut<NextState<GameState>>,
     mut commands: Commands,
+    mut encyclopedia: ResMut<crate::states::encyclopedia::EncyclopediaState>,
     primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
 ) {
     // Use try_ctx_mut to gracefully handle window close (the context
@@ -460,6 +461,10 @@ pub fn main_menu_ui(
         }
         Some(MenuAction::Encyclopedia) => {
             info!("Encyclopedia button pressed - transitioning to Encyclopedia");
+            // The encyclopedia is an informational context: it returns you to
+            // whatever screen opened it. Declaring the entry point is the ONE
+            // thing a caller has to do (see `EncyclopediaState::open_from`).
+            encyclopedia.open_from(GameState::MainMenu);
             next_state.set(GameState::Encyclopedia);
         }
         Some(MenuAction::AnimationSandbox) => {
