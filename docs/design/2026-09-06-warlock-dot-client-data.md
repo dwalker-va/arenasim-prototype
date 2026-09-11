@@ -270,8 +270,12 @@ itself demonstrates the differentiation axes that don't spend new hues:
 > pass; its caster pair was then filled in from the belief that Directed is the
 > shadow-school default with Fear/SW:Pain as the lone exception.
 >
-> **That belief is false.** The book sweep below shows the era Warlock book split
-> roughly half and half, with the curse family itself split down the middle.
+> **That belief is false.** The book sweep below — an *inventory* join over every
+> `SkillLineAbility` row on the three Warlock skill lines — puts both pairs in heavy
+> use, and the curse family **spans both of them**: seven curses sit on Directed,
+> Curse of Weakness and Curse of Shadow on Omni. So "it is a curse" predicts
+> nothing, and neither does "it is a shadow spell" — Shadow Bolt is Directed, Fear
+> is Omni, and Shadowburn is one of each.
 > **These rows are per-visual DB2 data and no school-level rule generates them:
 > join each spell, or do not list it.**
 >
@@ -302,16 +306,48 @@ presents both hands forward (AS-11's naming).
 
 ### The book sweep (why there is no school rule)
 
-Every era Warlock player spell, rank 1, resolved the same way. Grouped by what the
-caster rows actually say:
+**The spell set below is an inventory, not a list.** It is every `SkillLineAbility`
+row on the three Warlock skill lines — **354 Demonology, 355 Affliction, 593
+Destruction** — with the Season of Discovery spells this build also carries on those
+lines excluded as non-era by the clean `SpellID ≥ 400000` cut (20 names: Haunt, Chaos
+Bolt, Metamorphosis, Shadow Cleave, Incinerate, Shadowflame, Fel Armor, Invocation,
+Demonic Grace, Menace, Vengeance, Dance of the Wicked, Grimoire of Synergy, Demon
+Charge, Demonic Howl, Portal of Summoning, Soul Harvesting, the SoD Drain Life rune,
+and the two Metamorphosis sub-spells). That leaves **114 distinct era spell names**.
 
-| Body-anim pair | Spells (visual) |
-|---|---|
-| **Directed** — 114 → 51 / 118 → 53 | Shadow Bolt (64), Death Coil (**64 — shares Shadow Bolt's visual**), Corruption / Siphon Life (381), Curse of Agony (824), Curse of Recklessness (1265), Curse of Tongues (339), Curse of the Elements (785), Curse of Doom (5019), Banish (1305) |
-| **Omni** — 217 → 52 / 218 → 54 | **Curse of Weakness AND Curse of Shadow (both 346)**, Fear (336), Life Tap (1225), Shadow Ward (343), Demon Skin / Demon Armor (130), Unending Breath (352), Enslave Demon (1266), Inferno (4859) |
-| Mixed / other | **Shadowburn (3057): precast 114 → 51 Directed, cast 218 → 54 Omni** — the pair is not atomic (Priest Mind Blast shares visual 3057). Howl of Terror (4801): precast 217 → 52, cast kit 389 → LoopAnim 55 (unnamed in this series). Immolate (46) and Rain of Fire (329): precast kit 60 → 52 Omni. Searing Pain / Conflagrate / Soul Fire: precast 30 → 51, cast 38 → 53 (the fire hand kits, Directed). Summons: precast 137 → 52 Omni. Drain Life / Drain Mana / Drain Soul / Health Funnel: **no `(1,2)` row at all**, cast kit → LoopAnim 124 (the channel anim) |
+Of those, **42 have no `SpellXSpellVisual` row at all** — the passive talents
+(Suppression, Ruin, Shadow Mastery, Devastation, Nightfall, every `Improved *`, …)
+plus `Curse of Doom Effect` and `Ritual of Doom Effect` — so they have no caster rows
+to join. **The other 72 were all joined**, every SpellID under every name, and every
+one of them appears in the table below. Nothing was sampled and nothing was dropped.
 
-The curse family alone spans all three groups, so "it is a curse" predicts nothing.
+Deriving the set from `SkillLineAbility` instead of typing it out is the point of
+this round: round 1 of this audit swept a hand-curated 41-ID list, and that list
+silently omitted Curse of Exhaustion (a curse, on the Directed pair), Dark Pact,
+Soul Link and the whole stone-creation family.
+
+A by-product that re-confirms §1 across the whole book: **every one of the 114 names
+resolves to exactly one `SpellVisual`**, at Probability 1 — ranks never diverge. (Two
+names have individual ranks with no row at all: the Pyroclasm talent ranks 18073 /
+18096, and Drain Mana 18394.)
+
+| Caster body anims (precast → cast) | n | Spells — *name (visual: precast kit / cast kit)* |
+|---|---|---|
+| **Directed** — 51 → 53 | 16 | On kits 114/118: Shadow Bolt (64), Death Coil (**64 — shares Shadow Bolt's visual**), Corruption (381), Siphon Life (**381** — shares Corruption's), Curse of Agony (824), Curse of Doom (5019), **Curse of Exhaustion (185)**, Curse of Idiocy (**185** — shares Exhaustion's), Curse of Recklessness (1265), Curse of Tongues (339), Curse of the Elements (785), Banish (1305), Demonic Sacrifice (**1305** — shares Banish's). On the *fire* hand kits 30/38: Searing Pain (945), Conflagrate (5199), Soul Fire (2253) |
+| **Omni** — 52 → 54 | 23 | On kits 217/218: **Curse of Weakness AND Curse of Shadow (both 346)**, Fear (336), Life Tap (1225), Shadow Ward (343), Demon Skin / Demon Armor (130), Unending Breath (352), Subjugate Demon (1266), Inferno (4859). On kits **60/61**: Immolate (46), **Dark Pact (827)**. On kits **266/267** — a third Warlock kit pair: **Soul Link (969)**. On 217/**493**: Detect Lesser / Detect / Detect Greater Invisibility (all 140). On 137/*per-summon*: Summon Imp (4043), Voidwalker (4054), Succubus (4055), Incubus (113920), Felhunter (7313), Felsteed and Dreadsteed (both 656) |
+| **123 → 54** — Omni cast, precast anim outside the Directed/Omni series | 17 | The entire stone-creation family: **Create Healthstone** ×5, Create Soulstone ×5, Create Spellstone ×3 (all visual 138, kits 398/275) and Create Firestone ×4 (visual 4800, kits 400/275) |
+| **Mixed** — 51 → 54 | 1 | **Shadowburn (3057): precast 114 → 51 Directed, cast 218 → 54 Omni** — the pair is not atomic (Priest Mind Blast shares visual 3057) |
+| Neither pair | 15 | Channels, **no `(1,2)` row at all**, cast kit → LoopAnim **124**: Drain Life (177: —/341), Drain Mana (277: —/429), Drain Soul (788: —/948), Health Funnel (163: —/341). LoopAnim **125**: Hellfire (5423: —/4810), Rain of Fire (329: 60 → 52 /5391), Ritual of Doom (4963: 217 → 52 /5350). LoopAnim **55**: Howl of Terror (4801: 217 → 52 /389). Ritual of Summoning (1523: 1485 → 52 / 1486 → 124). Cast kit carries **no EffectType-6 row**, i.e. no body anim: Amplify Curse (4600), Fel Domination (4600), Eye of Kilrogg (350: 217 → 52 /4209), Sense Demons (323), Hellfire Effect (781). Pyroclasm (2816): neither row |
+
+LoopAnims **55**, **123**, **124** and **125** have no name available in this build —
+`AnimationData` at 1.15.9.69547 carries no name column, so only 51/52/53/54 can be
+named, from AS-11's mapping.
+
+The curse family lands on **both** named pairs — seven curses on Directed (Agony,
+Doom, Exhaustion, Idiocy, Recklessness, Tongues, the Elements) against two on Omni
+(Weakness, Shadow) — so **"it is a curse" predicts nothing about the pair**. Neither
+does school: Shadow Bolt is Directed, Fear is Omni, Shadowburn is one of each. The
+pair is per-visual data and has to be joined.
 
 **Visual 346 is a shared *weakening-curse* visual, not a Curse of Weakness visual.**
 Its spell set includes Curse of Shadow, Priest **Devouring Plague**, Hex of Weakness,
@@ -356,10 +392,11 @@ Holy Omni pair, which is unaffected.
 - **Unstable Affliction (427717) has no distinct visual** — single SpellXSpellVisual
   row pointing at Corruption's visual 381.
 - **No forced victim animation** — kits 117/535/884 contain no EffectType-6 entries.
-- **(AS-37) No school-level rule generates the caster body-anim pair.** The era
-  Warlock book splits roughly evenly between the Directed and Omni pairs, the curse
-  family is split across both, and Shadowburn mixes one of each — so the pair cannot
-  be inferred from spell school or spell family and must be joined per visual (§5).
+- **(AS-37) No school-level rule generates the caster body-anim pair.** Both pairs
+  are in heavy use across the era Warlock book — of the 72 joined name×visual rows,
+  16 are Directed, 23 Omni, 1 mixed and 32 on neither pair — the curse family spans
+  both, and Shadowburn mixes one of each. The pair cannot be inferred from spell
+  school or spell family and must be joined per visual (§5).
 - **(AS-37) No extra visual to find for CoW.** Visual 346 carries no `(7,8)` row;
   the audit turned up no unreached or ambiguous join anywhere in this doc.
 
@@ -376,8 +413,13 @@ Holy Omni pair, which is unaffected.
 - AS-37 audit (2026-09-11): `join.py` — name-driven, no hardcoded spell IDs; walks
   every SpellXSpellVisual row of a spell name and prints each `(StartEvent,
   EndEvent, TargetType)` with its kit's EffectType-6 anim and EffectType-2 model
-  attach, which is what makes an unjoined row impossible to fake. `sweep.py` — the
-  era Warlock book at rank 1, printing each spell's name back from `SpellName` as a
-  self-check on the ID list. Run against CSVs re-fetched from
-  `wago.tools/db2/<table>/csv?build=1.15.9.69547` with a browser User-Agent
-  (`urllib` gets a 403) and `cmp`-verified byte-identical to the local copies.
+  attach, which is what makes an unjoined row impossible to fake. `sweep2.py` /
+  `group.py` — the §5 book sweep: they build the spell set from `SkillLineAbility`
+  (Warlock skill lines 354 / 355 / 593, `SpellID < 400000`) instead of a typed ID
+  list, then join and group every name in it, so a missing spell is impossible
+  rather than merely unlikely. They supersede round 1's `sweep.py`, whose
+  hand-curated 41-ID input list was the source of the omissions this round fixed —
+  **do not reuse `sweep.py`, and do not start a new sweep from a typed list.** Run
+  against CSVs fetched from `wago.tools/db2/<table>/csv?build=1.15.9.69547` with a
+  browser User-Agent (`urllib` gets a 403); the five join tables were re-fetched for
+  round 2 and `cmp`-verified byte-identical to the round-1 copies.
