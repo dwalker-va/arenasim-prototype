@@ -715,25 +715,26 @@ impl Plugin for StatesPlugin {
                     .after(CombatSystemPhase::CombatResolution)
                     .run_if(in_combat_scene),
             )
-            // Warlock DoT aura visuals: Corruption's darkening shroud (the
-            // one deliberate AlphaMode::Blend exception — see
+            // Warlock DoT + curse aura visuals: Corruption's darkening
+            // shroud (the one deliberate AlphaMode::Blend exception — see
             // rendering/effects/warlock_dots.rs), the shared apply ring, the
-            // Curse of Agony skull apparition, and UA's authored violet
-            // glow + crackle. Aura-keyed and graphical only — never
-            // registered in headless systems.rs. Chained: animates must see
-            // the rigs `spawn` just built, the particle pass must see the
-            // pieces the animates emitted, and the billboard pass (fed by
-            // the skull yaw) runs on the final poses.
+            // three curse apply apparitions (Agony/Weakness skulls, Tongues'
+            // rune circle), and UA's authored violet glow + crackle.
+            // Aura-keyed and graphical only — never registered in headless
+            // systems.rs. Chained: animates must see the rigs `spawn` just
+            // built, the particle pass must see the pieces the animates
+            // emitted, and the billboard pass (fed by the apparition
+            // orientation pass) runs on the final poses.
             .add_systems(
                 Update,
                 (
                     play_match::spawn_warlock_dot_visuals,     // Detect DoT auras, build rigs
                     play_match::animate_dot_apply_bursts,      // Ring ramp + spark burst
                     play_match::animate_corruption_shrouds,    // Shroud throb + wisps + fizz
-                    play_match::animate_coa_skulls,            // Skull envelope + sparks
+                    play_match::animate_curse_apparitions,     // Curse envelopes + emitters
                     play_match::animate_ua_states,             // Glow pulse + crackle
                     play_match::age_warlock_dot_particles,     // Motes/wisps/bolts age out
-                    play_match::yaw_coa_skulls,                // Face the skull to camera
+                    play_match::orient_curse_apparitions,      // Yaw skulls / spin the rune ring
                     play_match::billboard_warlock_dot_visuals, // Face the flat pieces
                     play_match::cleanup_warlock_dot_visuals,   // End states at aura end
                 )

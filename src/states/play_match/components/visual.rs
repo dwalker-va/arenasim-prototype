@@ -879,31 +879,64 @@ pub struct CorruptionShroudRig {
     pub emitted: u32,
 }
 
-/// Curse of Agony's apply-only skull apparition (client kit 884): a red-shell
-/// yellow-core skull above the victim's head, flickering on the 433/267 ms
-/// global cycles, crackling with red-orange star sparks and shedding glow
-/// motes downward. Self-expires at `COA_APPARITION_SECS`; NOTHING follows for
-/// the rest of the curse (era-faithful — see `COA_SUSTAIN_WHISPER`).
+/// Which Warlock curse an apparition belongs to. The client gives all three
+/// curses a one-shot on-victim apparition at apply and (for Agony and
+/// Weakness) nothing afterwards; the per-curse constants live in the
+/// `CURSE_APPARITIONS` table in `rendering/effects/warlock_dots.rs`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CurseKind {
+    /// Red-shell, yellow-core skull above the head (client kit 884).
+    Agony,
+    /// Violet skull-and-bone with a green core glow, above the head
+    /// (client kit 719 — `curseofmannoroth_head.m2`; the filenames in this
+    /// family lie, the kit joins do not).
+    Weakness,
+    /// Magenta-violet rune circle at the chest (client kit 503).
+    Tongues,
+}
+
+impl CurseKind {
+    /// Every curse, in table order — the detector and cleanup iterate this.
+    pub const ALL: [CurseKind; 3] = [CurseKind::Agony, CurseKind::Weakness, CurseKind::Tongues];
+
+    /// This curse's bit in [`CurseApparitionsFired`].
+    pub fn bit(self) -> u8 {
+        1 << (self as u8)
+    }
+}
+
+/// A curse's apply-only apparition on the victim, self-expiring at the end of
+/// its spec's envelope. NOTHING follows for the rest of the curse — the
+/// era-faithful behaviour for Agony and Weakness alike (see
+/// `CURSE_SUSTAIN_WHISPER`).
 #[derive(Component)]
-pub struct CoaSkullRig {
-    /// The cursed victim the apparition hangs above.
+pub struct CurseApparitionRig {
+    /// The cursed victim the apparition plays on.
     pub target: Entity,
+    /// Which curse's spec drives the envelope, palette and emitters.
+    pub curse: CurseKind,
     pub age: f32,
-    /// Fractional star sparks owed since the last one was emitted.
+    /// Fractional sparks/rune motes owed since the last one was emitted.
     pub spark_carry: f32,
-    /// Fractional falling glow motes owed since the last one was emitted.
+    /// Fractional falling glow motes owed since the last one was emitted
+    /// (Curse of Agony only — no other curse kit has a downward emitter).
     pub fall_carry: f32,
+    /// Fractional swelling blooms owed since the last one was emitted.
+    pub bloom_carry: f32,
     /// Pieces emitted so far — seeds the deterministic scatter.
     pub emitted: u32,
 }
 
-/// Marker on a CURSED combatant recording that its Curse of Agony skull has
-/// already fired for the current application. The skull is apply-only, so
-/// this — not a live rig — is what stops the detector re-firing every frame.
-/// Removed when the curse leaves the victim, so a fresh curse fires a fresh
-/// skull.
-#[derive(Component)]
-pub struct CoaSkullFired;
+/// Latch on a CURSED combatant recording which curses' apparitions have
+/// already fired for the current application, one bit per [`CurseKind`]. The
+/// apparitions are apply-only, so this — not a live rig — is what stops the
+/// detector re-firing every frame. A bit is cleared when its curse leaves the
+/// victim, so a fresh curse fires a fresh apparition.
+#[derive(Component, Default)]
+pub struct CurseApparitionsFired {
+    /// Bitmask over [`CurseKind::bit`].
+    pub fired: u8,
+}
 
 /// Unstable Affliction's authored aura state (the client gives UA no identity
 /// of its own): an additive violet torso glow pulsing at `UA_PULSE_PERIOD`
@@ -935,8 +968,19 @@ pub enum DotSpriteRole {
     /// One of the skull's dark eye sockets (3D, alpha-blend dark — reads as a
     /// hole in the additive shell).
     SkullEye,
-    /// The skull's yellow core glow (billboarded quad).
+    /// The skull's core glow behind the shell (billboarded quad) — yellow for
+    /// Curse of Agony, green for Curse of Weakness.
     SkullCore,
+    /// Curse of Weakness's bone beside the skull (a 3D capsule; the client's
+    /// `bone_purple` submesh, the silhouette that tells CoW from CoA).
+    SkullBone,
+    /// One of Curse of Tongues' flat horizontal rune discs (a torus lying in
+    /// the ground plane at chest height — never billboarded).
+    RuneDisc,
+    /// One of Curse of Tongues' upright glyph tablets standing on the rune
+    /// ring, facing outward (oriented quad, not billboarded — its radial pose
+    /// IS what makes the ring read as a ring).
+    RuneTablet,
     /// UA's violet torso glow (billboarded quad).
     UaGlow,
     /// UA's crackle pop — the bright violet flash that must read through
@@ -968,10 +1012,31 @@ pub enum DotMoteKind {
     ApplySpark,
     /// Corruption fizz: a small green mote streaming upward off the victim.
     Fizz,
-    /// CoA star spark: white→orange→red, shrinking.
+    /// Curse apparition star spark, shrinking (CoA's red-orange `red_star2`
+    /// crackle and CoW's green `starflash_grey`/`star5a` pair — same track,
+    /// the rig's material carries the palette).
     SkullSpark,
     /// CoA glow mote sinking down over the victim's face/chest.
     SkullFall,
+    /// Curse of Tongues rune mote: a slow, near-static violet mote shrinking
+    /// off the chest sigil (client `aurarune_a`).
+    RuneMote,
+}
+
+/// What an emitted Warlock-DoT wisp looks like — picks its scale/colour/alpha
+/// tracks. Wisps are the pieces that GROW over their life (and so must fade
+/// by alpha, not by shrinking), which is why each carries its own material.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DotWispKind {
+    /// Corruption's murk: near-black green swelling to sickly yellow-green
+    /// (client kit 535, `clouds8x8fade`).
+    CorruptionMurk,
+    /// Curse of Weakness's violet bloom swelling around the skull (client kit
+    /// 719, the additive `toonsmoke16` pair).
+    CurseBloom,
+    /// Curse of Tongues' rune glow: near-black swelling to violet (client kits
+    /// 502/503, `genericglow_black`).
+    RuneGlow,
 }
 
 /// One emitted mote of a Warlock-DoT rig, in the rig's local frame.
@@ -985,12 +1050,13 @@ pub struct DotMote {
     pub size: f32,
 }
 
-/// One murk-green Corruption wisp: drifts slowly, GROWS over its life
-/// (0.22→0.69 u in the source) while its color ramps near-black-green →
-/// sickly yellow-green. Carries its own material so the ramp can be written
-/// per-wisp.
+/// One swelling wisp: drifts slowly and GROWS over its life while its colour
+/// ramps along its kind's track. Carries its own material so the ramp can be
+/// written per-wisp (a growing piece cannot fade by shrinking the way the
+/// shared-material motes do).
 #[derive(Component)]
 pub struct DotWisp {
+    pub kind: DotWispKind,
     pub velocity: Vec3,
     pub age: f32,
     pub life: f32,
