@@ -173,38 +173,24 @@ impl EntryFamily {
     }
 }
 
-/// Aura types applied to an ENEMY (debuffs / CC). Used by the target rule
-/// (KTD5): an offensive entry aims at the dummy, a friendly buff at the caster.
-fn is_hostile_aura(aura: super::super::play_match::components::AuraType) -> bool {
-    use super::super::play_match::components::AuraType::*;
-    matches!(
-        aura,
-        MovementSpeedSlow
-            | Root
-            | Stun
-            | DamageOverTime
-            | SpellSchoolLockout
-            | HealingReduction
-            | Fear
-            | Polymorph
-            | CastTimeIncrease
-            | Incapacitate
-            | AttackPowerReduction
-            | AttackSpeedSlow
-            | Silence
-            | WeakenedSoul
-    )
-}
-
 /// Whether a Cast/Channel entry should aim at the dummy (offensive/relational)
 /// rather than the caster (self/friendly buff). Damage, mana burn, an interrupt,
-/// or a hostile aura mark it offensive.
+/// or a hostile aura mark it offensive (the target rule, KTD5).
+///
+/// The aura half delegates to [`AuraType::is_hostile_effect`], the match's own
+/// exhaustive classifier. It used to be a private `matches!` over a hand-listed
+/// subset of `AuraType` here, and it drifted exactly the way such a list always
+/// does: it never listed `DamageReduction`, so once Curse of Weakness grew a
+/// visual (AS-19) the preview played it over the CASTER. It also listed
+/// `WeakenedSoul`, which a Priest hangs on the ALLY it shielded. Both are fixed
+/// by not having a second list — a new `AuraType` variant now has to be
+/// classified before the crate compiles.
 fn entry_targets_dummy(config: &AbilityConfig) -> bool {
     if config.damage_base_max > 0.0 || config.mana_burn_amount > 0.0 || config.is_interrupt {
         return true;
     }
     match config.applies_aura.as_ref() {
-        Some(aura) => is_hostile_aura(aura.aura_type),
+        Some(aura) => aura.aura_type.is_hostile_effect(),
         None => false,
     }
 }
@@ -1670,6 +1656,78 @@ mod tests {
         assert!(!entry_targets_dummy(cfg(AbilityType::ArcaneIntellect))); // ally buff
         assert!(entry_targets_dummy(cfg(AbilityType::Corruption))); // DoT
         assert!(entry_targets_dummy(cfg(AbilityType::MortalStrike))); // damage
+
+        // The whole curse family, which is the aura branch's hardest case:
+        // three dealt-to-an-enemy abilities carrying NO damage, so each is
+        // decided purely by its aura's classification. Curse of Weakness
+        // (`DamageReduction`) previewed on the caster until the local hostile
+        // list was retired in favour of `AuraType::is_hostile_effect`.
+        for curse in [
+            AbilityType::CurseOfAgony,
+            AbilityType::CurseOfWeakness,
+            AbilityType::CurseOfTongues,
+        ] {
+            let config = cfg(curse);
+            assert_eq!(
+                config.damage_base_max, 0.0,
+                "{curse:?} deals damage, so this case no longer exercises the aura branch"
+            );
+            assert!(
+                entry_targets_dummy(config),
+                "{curse:?} must preview on the dummy, not the caster"
+            );
+        }
+    }
+
+    /// A cross-check on the target rule that does NOT go through the classifier
+    /// the rule itself uses, so it can still catch that classifier drifting.
+    ///
+    /// An aura-only ability may preview on the CASTER only when the aura it
+    /// applies is a beneficial buff — and `can_be_purged` decides that from a
+    /// separate list, written for the Shaman's Purge. `DamageReduction` is
+    /// exactly what this catches: a debuff that no beneficial list contains,
+    /// which the sandbox's own (now retired) hostile list nonetheless sent to
+    /// the caster, putting Curse of Weakness over the Warlock's own head.
+    ///
+    /// The exceptions are the two self buffs that are UNPURGEABLE by design, so
+    /// the beneficial list cannot vouch for them: `DamageImmunity` (Divine
+    /// Shield) and `FearImmunity` (Berserker Rage — a physical enrage, not
+    /// magic). Anything else appearing here is a debuff previewing on the wrong
+    /// unit, and adding to this list is how that gets waved through.
+    #[test]
+    fn an_entry_previews_on_the_caster_only_for_a_beneficial_aura() {
+        use super::super::super::play_match::components::Aura;
+
+        let defs = AbilityDefinitions::default();
+        let mut checked = 0;
+        for (ability, config) in defs.iter() {
+            let Some(applied) = config.applies_aura.as_ref() else {
+                continue;
+            };
+            if config.damage_base_max > 0.0 || config.mana_burn_amount > 0.0 || config.is_interrupt
+            {
+                continue; // decided before the aura is ever consulted
+            }
+            if entry_targets_dummy(config) {
+                continue;
+            }
+            checked += 1;
+            let sample = Aura {
+                effect_type: applied.aura_type,
+                ..Default::default()
+            };
+            let unpurgeable_self_buff = matches!(
+                applied.aura_type,
+                AuraType::DamageImmunity | AuraType::FearImmunity
+            );
+            assert!(
+                sample.can_be_purged() || unpurgeable_self_buff,
+                "{ability:?} previews on the CASTER, but its {:?} aura is not a \
+                 beneficial buff — a debuff belongs on the dummy",
+                applied.aura_type
+            );
+        }
+        assert!(checked > 0, "no caster-targeted aura entries left to check");
     }
 
     #[test]

@@ -212,8 +212,12 @@ Deliberate transcription deviations, all for reasons the codebase already docume
   opposite of what they do. The two additive violet emitters are kept.
 - **The paired emitters are merged.** CoW's two green star emitters are identical in
   speed / life / rate and differ only in the direction of their white↔green ramp;
-  they become one stream. Its two additive violet bloom emitters differ by ~10 % in
-  speed, life and size; they become one at the pair's mid values.
+  they become one stream. That stream runs at **200/s, not the pair's 300/s** — an
+  authored trim, the one departure from measurement in the emitter constants: 300/s
+  of star sprites reads as a solid haze at our mote scale, and 200/s is the density
+  the in-client eyeball blessed. Its two additive violet bloom emitters differ by
+  ~10 % in speed, life and size; they become one at the pair's mid values, keeping
+  the per-emitter 50/s.
 - **CoW's single red glow quad is dropped** (the other two glow quads are green). A red
   accent on the head apparition is precisely the channel Curse of Agony owns, so
   keeping it works against the distinctness the rest of the data is spending.

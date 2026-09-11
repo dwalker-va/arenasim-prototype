@@ -377,6 +377,12 @@ const WEAKNESS: CurseApparitionSpec = CurseApparitionSpec {
     spark: Some(MoteEmitter {
         kind: DotMoteKind::SkullSpark,
         // Client starflash_grey + star5a, 150/s each, life 0.75 s, 0.83 u/s.
+        // The pair is merged (they differ only in the direction of their
+        // white<->green ramp), so a faithful merge would run at 300/s. 200/s
+        // is an AUTHORED trim of that, not a measurement: 300/s of star
+        // sprites reads as a solid haze at our mote scale, and this is the
+        // density the round-1 in-client eyeball blessed. (The bloom below
+        // merges its pair's shape but keeps their per-emitter rate.)
         rate: 200.0,
         life: 0.75,
         speed: 0.83,
@@ -449,7 +455,15 @@ pub const CURSE_APPARITIONS: [CurseApparitionSpec; 3] = [AGONY, WEAKNESS, TONGUE
 
 /// The measured spec for one curse.
 pub fn curse_spec(curse: CurseKind) -> &'static CurseApparitionSpec {
-    &CURSE_APPARITIONS[curse as usize]
+    let spec = &CURSE_APPARITIONS[curse as usize];
+    // The table is indexed positionally, so reordering it would hand every
+    // curse another curse's whole apparition — a silent swap no probe would
+    // catch, since each effect would still spawn and animate correctly.
+    debug_assert_eq!(
+        spec.curse, curse,
+        "CURSE_APPARITIONS is out of CurseKind order"
+    );
+    spec
 }
 
 // --- Unstable Affliction (authored) ------------------------------------------
@@ -998,6 +1012,10 @@ fn spawn_curse_apparition(
     });
     // Every rig carries both mote slots; a spec without an emitter simply
     // never emits into its slot, so the placeholder is never rendered.
+    // DORMANT TODAY: all three curses declare a spark emitter, so this arm is
+    // unreachable — `unwrap_or_else` means it also costs nothing. It stays so
+    // that a fourth curse with no spark stream is a table entry rather than a
+    // new code path (or a panic).
     let placeholder = || additive_material(materials, spec.shell_color, 1.0, None);
     let mote_material = spark_material.unwrap_or_else(placeholder);
     let extra_material = fall_material.unwrap_or_else(|| mote_material.clone());
@@ -2076,7 +2094,7 @@ pub fn billboard_warlock_dot_visuals(
                         // translation.
                         part.rotation = facing;
                     }
-                                    // The ring lies flat; shells/spheres/bones are 3D; the
+                    // The ring lies flat; shells/spheres/bones are 3D; the
                     // rune discs lie flat and the tablets keep their radial
                     // poses; bolts keep their kinked poses.
                     _ => {}

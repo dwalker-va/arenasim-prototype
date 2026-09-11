@@ -146,6 +146,74 @@ impl AuraType {
                 | AuraType::Silence
         )
     }
+
+    /// Returns true if this aura TYPE is a HOSTILE effect — one that a full immunity
+    /// (Divine Shield) both BLOCKS on application and CLEARS from its holder.
+    ///
+    /// Single source of truth for that classification, and for "is this aura
+    /// something you put on an ENEMY" generally — the animation sandbox's target
+    /// rule reads it too. It previously existed as three separate hand-maintained
+    /// lists (the Divine Shield purge, the apply-time immunity gate in `auras.rs`,
+    /// and `is_ccd`), which had already drifted apart: the purge list omitted
+    /// `Incapacitate`, and the apply gate omitted `Silence`, `AttackPowerReduction`
+    /// and `AttackSpeedSlow`. A FOURTH copy then grew in the sandbox and drifted the
+    /// same way — it missed `DamageReduction`, so Curse of Weakness previewed on the
+    /// caster instead of the dummy. That copy is gone; everything delegates here.
+    ///
+    /// **Exhaustive on purpose — do not add a `_ =>` arm.** This started life as
+    /// an inline allowlist in `process_divine_shield`, and when `Incapacitate`
+    /// was added to `AuraType` later nobody updated it, so Freezing Trap survived
+    /// the bubble: a trapped Paladin popped Divine Shield, the log cheerfully
+    /// reported "removes 3 debuffs", and the Paladin then stood still for the
+    /// remaining 8 seconds while its partner died. A wildcard arm would silently
+    /// reintroduce exactly that class of bug; the compiler refusing to build until
+    /// a new variant is classified is the whole point.
+    ///
+    /// `WeakenedSoul` is deliberately NOT cleared despite being a debuff — it is
+    /// the Power Word: Shield cooldown marker, and stripping it would let a Priest
+    /// re-shield instantly. Mechanical markers are not CC. It reads correctly for
+    /// the sandbox too: the Priest hangs it on the ALLY it just shielded, so a
+    /// preview of it belongs on the caster, not the dummy.
+    pub fn is_hostile_effect(self) -> bool {
+        match self {
+            // Hostile: crowd control, damage-over-time, and stat/casting debuffs.
+            AuraType::MovementSpeedSlow
+            | AuraType::Root
+            | AuraType::Stun
+            | AuraType::Fear
+            | AuraType::Polymorph
+            | AuraType::Incapacitate
+            | AuraType::Silence
+            | AuraType::SpellSchoolLockout
+            | AuraType::DamageOverTime
+            | AuraType::HealingReduction
+            | AuraType::DamageReduction
+            | AuraType::CastTimeIncrease
+            | AuraType::AttackPowerReduction
+            | AuraType::AttackSpeedSlow => true,
+
+            // Beneficial — never stripped from their holder.
+            AuraType::Absorb
+            | AuraType::MaxHealthIncrease
+            | AuraType::MaxManaIncrease
+            | AuraType::AttackPowerIncrease
+            | AuraType::SpellPowerIncrease
+            | AuraType::HealingOverTime
+            | AuraType::WindfuryBuff
+            | AuraType::DamageTakenReduction
+            | AuraType::DamageImmunity
+            | AuraType::CritChanceIncrease
+            | AuraType::ManaRegenIncrease
+            | AuraType::LockoutDurationReduction
+            | AuraType::FrostArmorBuff
+            | AuraType::SpellResistanceBuff
+            | AuraType::FearImmunity => false,
+
+            // Mechanical markers, not effects: clearing these would grant a
+            // cooldown reset (WeakenedSoul) or corrupt tracking state.
+            AuraType::WeakenedSoul | AuraType::ShadowSight | AuraType::WeaponPoison => false,
+        }
+    }
 }
 
 // ============================================================================
@@ -247,6 +315,13 @@ impl Aura {
         matches!(self.dispel_type, DispelType::Poison | DispelType::Disease)
     }
 
+    /// Returns true if this aura is a HOSTILE effect — see
+    /// [`AuraType::is_hostile_effect`], which owns the (exhaustive)
+    /// classification. Hostility is a property of the aura TYPE alone.
+    pub fn is_hostile_effect(&self) -> bool {
+        self.effect_type.is_hostile_effect()
+    }
+
     /// Returns true if this aura is a BENEFICIAL (buff) effect that an enemy
     /// offensive dispel (Shaman's Purge) can strip.
     ///
@@ -255,68 +330,6 @@ impl Aura {
     /// `DamageImmunity` (Divine Shield is unpurgeable by design), `ShadowSight`
     /// and `WeaponPoison` (mechanical markers, not real buffs), and every
     /// debuff/CC aura type.
-    /// Returns true if this aura is a HOSTILE effect — one that a full immunity
-    /// (Divine Shield) both BLOCKS on application and CLEARS from its holder.
-    ///
-    /// Single source of truth for that classification. It previously existed as
-    /// three separate hand-maintained lists (the Divine Shield purge, the
-    /// apply-time immunity gate in `auras.rs`, and `is_ccd`), which had already
-    /// drifted apart: the purge list omitted `Incapacitate`, and the apply gate
-    /// omitted `Silence`, `AttackPowerReduction` and `AttackSpeedSlow`.
-    ///
-    /// **Exhaustive on purpose — do not add a `_ =>` arm.** This started life as
-    /// an inline allowlist in `process_divine_shield`, and when `Incapacitate`
-    /// was added to `AuraType` later nobody updated it, so Freezing Trap survived
-    /// the bubble: a trapped Paladin popped Divine Shield, the log cheerfully
-    /// reported "removes 3 debuffs", and the Paladin then stood still for the
-    /// remaining 8 seconds while its partner died. A wildcard arm would silently
-    /// reintroduce exactly that class of bug; the compiler refusing to build until
-    /// a new variant is classified is the whole point.
-    ///
-    /// `WeakenedSoul` is deliberately NOT cleared despite being a debuff — it is
-    /// the Power Word: Shield cooldown marker, and stripping it would let a Priest
-    /// re-shield instantly. Mechanical markers are not CC.
-    pub fn is_hostile_effect(&self) -> bool {
-        match self.effect_type {
-            // Hostile: crowd control, damage-over-time, and stat/casting debuffs.
-            AuraType::MovementSpeedSlow
-            | AuraType::Root
-            | AuraType::Stun
-            | AuraType::Fear
-            | AuraType::Polymorph
-            | AuraType::Incapacitate
-            | AuraType::Silence
-            | AuraType::SpellSchoolLockout
-            | AuraType::DamageOverTime
-            | AuraType::HealingReduction
-            | AuraType::DamageReduction
-            | AuraType::CastTimeIncrease
-            | AuraType::AttackPowerReduction
-            | AuraType::AttackSpeedSlow => true,
-
-            // Beneficial — never stripped from their holder.
-            AuraType::Absorb
-            | AuraType::MaxHealthIncrease
-            | AuraType::MaxManaIncrease
-            | AuraType::AttackPowerIncrease
-            | AuraType::SpellPowerIncrease
-            | AuraType::HealingOverTime
-            | AuraType::WindfuryBuff
-            | AuraType::DamageTakenReduction
-            | AuraType::DamageImmunity
-            | AuraType::CritChanceIncrease
-            | AuraType::ManaRegenIncrease
-            | AuraType::LockoutDurationReduction
-            | AuraType::FrostArmorBuff
-            | AuraType::SpellResistanceBuff
-            | AuraType::FearImmunity => false,
-
-            // Mechanical markers, not effects: clearing these would grant a
-            // cooldown reset (WeakenedSoul) or corrupt tracking state.
-            AuraType::WeakenedSoul | AuraType::ShadowSight | AuraType::WeaponPoison => false,
-        }
-    }
-
     pub fn can_be_purged(&self) -> bool {
         matches!(
             self.effect_type,
