@@ -4,6 +4,11 @@ All findings are from WoW Classic Era build **1.15.9.69547** client data (wago.t
 CSVs + CASC file fetches), parsed directly from the DB2 tables and M2 model binaries.
 No prose/wiki sources were used as evidence.
 
+**Amended 2026-09-11 (AS-37).** §5's caster-side table has been re-derived row by
+row; one row (Curse of Weakness) was wrong, and the generalisation it was inferred
+from was wrong with it. Read the erratum box at the top of §5 before transcribing
+anything from this doc. §1–§4 were re-joined at the same time and held unchanged.
+
 ## Method notes (what was actually done)
 
 - Same toolchain as AS-9/AS-11: `SpellName → SpellXSpellVisual → SpellVisual →
@@ -165,7 +170,10 @@ Two negative findings, both design constraints:
 - **MODEL**: fdid **165852** → `spells/curseofagony_head.m2` — a dedicated model —
   attach **20 = Head**, scale 1. (The curse family shuffles names: Curse of
   Weakness's kit 719 uses `curseofmannoroth_head.m2` 165854, Curse of Doom's kit 311
-  uses `curseofweakness_head.m2` 165858. All are one-shot head apparitions.)
+  uses `curseofweakness_head.m2` 165858. Both of those are one-shot head
+  apparitions like CoA — but **that is not a family property**: Curse of Tongues
+  attaches at the CHEST and carries a persistent `(7,8)` state kit, measured in
+  AS-19 `2026-09-10-warlock-curse-client-data.md` §0. Join the curse you mean.)
 - **TEXTURES (TXID order)**: `spells/skull.blp`, `spells/genericglow64.blp`,
   `spells/skull_purple.blp`, `spells/red_star2.blp`, `spells/genericglow2b.blp`,
   `creature/golemharvest/red_glow3.blp`.
@@ -242,31 +250,99 @@ itself demonstrates the differentiation axes that don't spend new hues:
    Corruption's state green is near-black murk (18–163 luminance ramp), not signal
    green.
 
-## 5. Caster-side (brief) — shared shadow precast/cast kits
+## 5. Caster-side — precast/cast kits and body anims
 
-Corruption and CoA share the caster-side pair **precast 114 / cast 118** with almost
-the whole Warlock shadow book; a second pair 217/218 (same hand model, Omni body
-anims) serves Fear and SW:Pain:
+> **⚠ ERRATUM, AND HOW IT HAPPENED: ONE ROW OF THIS TABLE WAS NEVER JOINED.**
+>
+> The 2026-09-06 version of this table put **Curse of Weakness on the Directed
+> pair** (114 → 51, 118 → 53). It is on the **OMNI** pair: visual 346's caster rows
+> are `(1,2)` kit **217** → LoopAnim **52 ReadySpellOmni** and `(3,13)` kit **218**
+> → LoopAnim **54 SpellCastOmni**. Found by the AS-19 measure pass, corrected and
+> audited here (AS-37, 2026-09-11).
+>
+> **Root cause is NOT the curse family's filename shuffle** — that trap is real,
+> separate, and still stands (kit 719 loads `curseofmannoroth_head.m2`, kit 311
+> loads `curseofweakness_head.m2`; §3). The cause here is that the row was never
+> derived at all. The AS-15 session ran the per-spell `SpellVisualEvent` join for
+> exactly three spells — `as15_chain.py` hardcodes the Corruption, CoA and UA rank
+> lists — and inspected kits 217/218 only as a Fear / SW:Pain *comparison*
+> (`as15_kits2.py`). CoW's visual ID (346) came in from the impact-kit comparison
+> pass; its caster pair was then filled in from the belief that Directed is the
+> shadow-school default with Fear/SW:Pain as the lone exception.
+>
+> **That belief is false.** The book sweep below shows the era Warlock book split
+> roughly half and half, with the curse family itself split down the middle.
+> **These rows are per-visual DB2 data and no school-level rule generates them:
+> join each spell, or do not list it.**
+>
+> Every row below was re-derived on 2026-09-11 from
+> `SpellName → SpellXSpellVisual → SpellVisual → SpellVisualEvent →
+> SpellVisualKit → SpellVisualKitEffect (EffectType 6) → SpellVisualAnim`, against
+> CSVs re-fetched from wago.tools at build 1.15.9.69547 and verified byte-identical
+> to the local copies. **Status** is the verdict against the 2026-09-06 table.
 
-| Spell | Visual | Precast kit → body anim | Cast kit → body anim |
-|---|---|---|---|
-| Corruption / Siphon Life / UA | 381 | 114 → **51 ReadySpellDirected** | 118 → **53 SpellCastDirected** |
-| Curse of Agony | 824 | 114 → 51 | 118 → 53 |
-| Shadow Bolt | 64 | 114 → 51 | 118 → 53 |
-| Curse of Weakness | 346 | 114 → 51 | 118 → 53 |
-| Curse of Doom | 5019 | 114 → 51 | 118 → 53 |
-| Fear | 336 | 217 → **52 ReadySpellOmni** | 218 → **54 SpellCastOmni** |
-| Shadow Word: Pain (Priest) | 71 | 217 → 52 | 218 → 54 |
+| Spell | Visual | Precast kit → body anim | Cast kit → body anim | Status |
+|---|---|---|---|---|
+| Corruption / Siphon Life / UA | 381 | 114 → **51 ReadySpellDirected** | 118 → **53 SpellCastDirected** | held |
+| Curse of Agony | 824 | 114 → 51 | 118 → 53 | held |
+| Shadow Bolt | 64 | 114 → 51 | 118 → 53 | held |
+| **Curse of Weakness** | 346 | **217 → 52 ReadySpellOmni** | **218 → 54 SpellCastOmni** | **MOVED** (was 114/118 → 51/53) |
+| Curse of Doom | 5019 | 114 → 51 | 118 → 53 | held |
+| Fear | 336 | 217 → **52 ReadySpellOmni** | 218 → **54 SpellCastOmni** | held |
+| Shadow Word: Pain (Priest) | 71 | 217 → 52 | 218 → 54 | held |
 
-Both kits attach the same hand model to **both** spell hands (21+22): fdid **166807**
-→ `spells/shadow_precast_low_hand.m2` — 0 verts, 3 emitters: green flame licks
-(`fire1a2` tinted (32,255,2)→black, Alpha blend, life 1.2 s) plus two constantly
-pulsing `shockwave10` rings, one **bright green** (18,255,0) and one **violet**
-(114,0,255), on 0.5–1.2 s global cycles. So a casting Warlock's hands burn
-green-and-violet whether it's Corruption or CoA — per AS-11's anim naming, the
-shadow school distinguishes itself from Holy/Nature by using the **Directed**
-(one-hand reach toward the target) anims rather than Omni, except for Fear/SW:Pain
-which use Omni.
+Both pairs attach the same hand model to **both** spell hands (21+22) — verified on
+all four kits 114/118/217/218: fdid **166807** → `spells/shadow_precast_low_hand.m2`
+— 0 verts, 3 emitters: green flame licks (`fire1a2` tinted (32,255,2)→black, Alpha
+blend, life 1.2 s) plus two constantly pulsing `shockwave10` rings, one **bright
+green** (18,255,0) and one **violet** (114,0,255), on 0.5–1.2 s global cycles. So a
+casting Warlock's hands burn green-and-violet regardless of spell; the pair choice
+changes only the **body** anim — Directed reaches one hand toward the target, Omni
+presents both hands forward (AS-11's naming).
+
+### The book sweep (why there is no school rule)
+
+Every era Warlock player spell, rank 1, resolved the same way. Grouped by what the
+caster rows actually say:
+
+| Body-anim pair | Spells (visual) |
+|---|---|
+| **Directed** — 114 → 51 / 118 → 53 | Shadow Bolt (64), Death Coil (**64 — shares Shadow Bolt's visual**), Corruption / Siphon Life (381), Curse of Agony (824), Curse of Recklessness (1265), Curse of Tongues (339), Curse of the Elements (785), Curse of Doom (5019), Banish (1305) |
+| **Omni** — 217 → 52 / 218 → 54 | **Curse of Weakness AND Curse of Shadow (both 346)**, Fear (336), Life Tap (1225), Shadow Ward (343), Demon Skin / Demon Armor (130), Unending Breath (352), Enslave Demon (1266), Inferno (4859) |
+| Mixed / other | **Shadowburn (3057): precast 114 → 51 Directed, cast 218 → 54 Omni** — the pair is not atomic (Priest Mind Blast shares visual 3057). Howl of Terror (4801): precast 217 → 52, cast kit 389 → LoopAnim 55 (unnamed in this series). Immolate (46) and Rain of Fire (329): precast kit 60 → 52 Omni. Searing Pain / Conflagrate / Soul Fire: precast 30 → 51, cast 38 → 53 (the fire hand kits, Directed). Summons: precast 137 → 52 Omni. Drain Life / Drain Mana / Drain Soul / Health Funnel: **no `(1,2)` row at all**, cast kit → LoopAnim 124 (the channel anim) |
+
+The curse family alone spans all three groups, so "it is a curse" predicts nothing.
+
+**Visual 346 is a shared *weakening-curse* visual, not a Curse of Weakness visual.**
+Its spell set includes Curse of Shadow, Priest **Devouring Plague**, Hex of Weakness,
+Voodoo Hex, Curse of Mending and Enfeeble. Anything transcribed from kit 719 (§3 of
+the AS-19 doc — the violet skull-and-bone) is therefore the look of that whole
+family, which is a reason to keep it generic rather than read it as CoW-specific.
+
+### Re-derivation audit of the rest of the doc (AS-37)
+
+Re-joined from the same CSVs, all **held**, no changes:
+
+- **§1 ranks** — Corruption's seven player ranks and UA 427717 → visual 381
+  (probability 1, single row for 427717); CoA's six ranks → 824; Siphon Life 18265
+  → 381; `HasMissile = 0` on both 381 and 824.
+- **§2 event rows** — visual 381 has exactly the six rows listed (114 / 118 /
+  117 ×2 TargetType / 535 ×2); visual 824 has exactly four and **no `(7,8)` row**.
+- **§3 models** — kit 117 → fdid 166796 `shadow_impactdd_low_chest.m2` attach 34;
+  kit 535 → 166637 `pestilence_impact_chest.m2` attach 20; kit 884 → 165852
+  `curseofagony_head.m2` attach 20; all scale 1. The filename-shuffle cross-checks
+  resolve as documented (719 → 165854 `curseofmannoroth_head.m2`, 311 → 165858
+  `curseofweakness_head.m2`, Shadow Bolt's 219 → 165890
+  `deathcoil_impact_chest.m2`).
+- **§3/§4 "no forced victim animation"** — kits 117, 535 and 884 carry zero
+  EffectType-6 entries.
+- Nothing in this audit was unreachable: every join resolved, so there is no row
+  left silently unverified.
+
+No shipped code was built from the wrong row — the Warlock effects in
+`rendering/effects/warlock_dots.rs` and `affliction.rs` are victim-side only, and the
+one caster-side body-posture implementation in the repo (`heal_cast.rs`) is the AS-11
+Holy Omni pair, which is unaffected.
 
 ## Negative findings (exact)
 
@@ -280,6 +356,12 @@ which use Omni.
 - **Unstable Affliction (427717) has no distinct visual** — single SpellXSpellVisual
   row pointing at Corruption's visual 381.
 - **No forced victim animation** — kits 117/535/884 contain no EffectType-6 entries.
+- **(AS-37) No school-level rule generates the caster body-anim pair.** The era
+  Warlock book splits roughly evenly between the Directed and Omni pairs, the curse
+  family is split across both, and Shadowburn mixes one of each — so the pair cannot
+  be inferred from spell school or spell family and must be joined per visual (§5).
+- **(AS-37) No extra visual to find for CoW.** Visual 346 carries no `(7,8)` row;
+  the audit turned up no unreached or ambiguous join anywhere in this doc.
 
 ## Artifacts (scratchpad)
 
@@ -291,3 +373,11 @@ which use Omni.
 - Scripts: `as15_chain.py`, `as15_events.py`, `as15_kits.py`, `as15_deep.py`
   (adds colorTrack/alphaTrack/scaleTrack, mesh tints, transparency tracks,
   sequences, SFID), `as15_kits2.py`.
+- AS-37 audit (2026-09-11): `join.py` — name-driven, no hardcoded spell IDs; walks
+  every SpellXSpellVisual row of a spell name and prints each `(StartEvent,
+  EndEvent, TargetType)` with its kit's EffectType-6 anim and EffectType-2 model
+  attach, which is what makes an unjoined row impossible to fake. `sweep.py` — the
+  era Warlock book at rank 1, printing each spell's name back from `SpellName` as a
+  self-check on the ID list. Run against CSVs re-fetched from
+  `wago.tools/db2/<table>/csv?build=1.15.9.69547` with a browser User-Agent
+  (`urllib` gets a 403) and `cmp`-verified byte-identical to the local copies.
