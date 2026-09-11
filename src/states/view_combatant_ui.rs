@@ -15,7 +15,7 @@ use super::configure_match_ui::ClassIcons;
 use super::play_match::AbilityType;
 use super::play_match::abilities::{ScalingStat, SpellSchool};
 use super::play_match::ability_config::{AbilityDefinitions, AbilityConfig};
-use super::play_match::components::AuraType;
+use super::play_match::components::{AuraType, ClassBaseStats, PetType, ResourceType, class_base_stats};
 use super::play_match::equipment::{ItemSlot, ItemId, ItemConfig, ItemDefinitions, DefaultLoadouts, resolve_loadout, enforce_two_hand_conflicts, find_one_handed_mainhand};
 
 /// Tracks which equipment slot has its picker open (if any)
@@ -78,18 +78,6 @@ pub struct HunterPetIconHandles {
 }
 
 
-/// Base stats for a class (used for display)
-struct ClassStats {
-    health: u32,
-    resource_name: &'static str,
-    resource_max: u32,
-    attack_power: u32,
-    spell_power: u32,
-    attack_speed: f32,
-    move_speed: f32,
-    armor: f32,
-}
-
 /// Equipment stat contributions for the stats panel
 #[derive(Default)]
 struct EquipmentBonuses {
@@ -140,267 +128,6 @@ impl EquipmentBonuses {
             }
         }
         bonuses
-    }
-}
-
-/// Get the base stats for a class
-fn get_class_stats(class: CharacterClass) -> ClassStats {
-    match class {
-        CharacterClass::Warrior => ClassStats {
-            health: 200,
-            resource_name: "Rage",
-            resource_max: 100,
-            attack_power: 30,
-            spell_power: 0,
-            attack_speed: 1.0,
-            move_speed: 5.0,
-            armor: 0.0,
-        },
-        CharacterClass::Mage => ClassStats {
-            health: 150,
-            resource_name: "Mana",
-            resource_max: 200,
-            attack_power: 0,
-            spell_power: 50,
-            attack_speed: 0.7,
-            move_speed: 4.5,
-            armor: 0.0,
-        },
-        CharacterClass::Rogue => ClassStats {
-            health: 175,
-            resource_name: "Energy",
-            resource_max: 100,
-            attack_power: 35,
-            spell_power: 0,
-            attack_speed: 1.3,
-            move_speed: 6.0,
-            armor: 0.0,
-        },
-        CharacterClass::Priest => ClassStats {
-            health: 150,
-            resource_name: "Mana",
-            resource_max: 150,
-            attack_power: 0,
-            spell_power: 40,
-            attack_speed: 0.8,
-            move_speed: 5.0,
-            armor: 0.0,
-        },
-        CharacterClass::Warlock => ClassStats {
-            health: 160,
-            resource_name: "Mana",
-            resource_max: 180,
-            attack_power: 0,
-            spell_power: 45,
-            attack_speed: 0.7,
-            move_speed: 4.5,
-            armor: 0.0,
-        },
-        CharacterClass::Paladin => ClassStats {
-            health: 175,
-            resource_name: "Mana",
-            resource_max: 160,
-            attack_power: 20,
-            spell_power: 35,
-            attack_speed: 0.9,
-            move_speed: 5.0,
-            armor: 0.0,
-        },
-        CharacterClass::Hunter => ClassStats {
-            health: 165,
-            resource_name: "Mana",
-            resource_max: 150,
-            attack_power: 30,
-            spell_power: 0,
-            attack_speed: 0.4,
-            move_speed: 5.0,
-            armor: 0.0,
-        },
-        CharacterClass::Shaman => ClassStats {
-            health: 265,
-            resource_name: "Mana",
-            resource_max: 160,
-            attack_power: 0,
-            spell_power: 42,
-            attack_speed: 0.8,
-            move_speed: 5.0,
-            armor: 0.0,
-        },
-    }
-}
-
-/// Get the list of abilities for a class
-/// `pub(crate)` so the Animation Sandbox builds its ability list from the same
-/// per-class source this screen shows. NOTE: this list is hand-maintained and
-/// NOT exhaustiveness-checked, so an ability missing here is missing from both
-/// surfaces. Nothing asserts full coverage today — the sandbox's
-/// `every_class_lists_its_abilities_plus_the_body_animations` only proves each
-/// class lists at least one ability, so a dropped entry still passes.
-pub(crate) fn get_class_abilities(class: CharacterClass) -> Vec<AbilityType> {
-    match class {
-        CharacterClass::Warrior => vec![
-            AbilityType::BattleShout,
-            AbilityType::DemoralizingShout,
-            AbilityType::CommandingShout,
-            AbilityType::Charge,
-            AbilityType::BerserkerRage,
-            AbilityType::Rend,
-            AbilityType::MortalStrike,
-            AbilityType::Pummel,
-            AbilityType::HeroicStrike,
-        ],
-        CharacterClass::Mage => vec![
-            AbilityType::Frostbolt,
-            AbilityType::FrostNova,
-            AbilityType::ArcaneIntellect,
-            AbilityType::IceBarrier,
-            AbilityType::FrostArmor,
-            AbilityType::MageArmorSpell,
-            AbilityType::MoltenArmor,
-            AbilityType::Polymorph,
-        ],
-        CharacterClass::Rogue => vec![
-            AbilityType::Ambush,
-            AbilityType::CheapShot,
-            AbilityType::SinisterStrike,
-            AbilityType::KidneyShot,
-            AbilityType::Kick,
-            AbilityType::CripplingPoison,
-        ],
-        CharacterClass::Priest => vec![
-            AbilityType::FlashHeal,
-            AbilityType::MindBlast,
-            AbilityType::PowerWordFortitude,
-            AbilityType::PowerWordShield,
-            AbilityType::DispelMagic,
-            AbilityType::PsychicScream,
-            AbilityType::ManaBurn,
-        ],
-        CharacterClass::Warlock => vec![
-            AbilityType::Corruption,
-            AbilityType::UnstableAffliction,
-            AbilityType::Shadowbolt,
-            AbilityType::Fear,
-            AbilityType::DeathCoil,
-            AbilityType::Immolate,
-            AbilityType::DrainLife,
-            AbilityType::CurseOfAgony,
-            AbilityType::CurseOfWeakness,
-            AbilityType::CurseOfTongues,
-        ],
-        CharacterClass::Paladin => vec![
-            AbilityType::DevotionAura,
-            AbilityType::ShadowResistanceAura,
-            AbilityType::ConcentrationAura,
-            AbilityType::DivineShield,
-            AbilityType::FlashOfLight,
-            AbilityType::HolyLight,
-            AbilityType::HolyShock,
-            AbilityType::HammerOfJustice,
-            AbilityType::PaladinCleanse,
-        ],
-        CharacterClass::Hunter => vec![
-            AbilityType::AimedShot,
-            AbilityType::ArcaneShot,
-            AbilityType::ConcussiveShot,
-            AbilityType::SerpentSting,
-            AbilityType::Disengage,
-            AbilityType::FreezingTrap,
-            AbilityType::FrostTrap,
-        ],
-        CharacterClass::Shaman => vec![
-            AbilityType::LightningBolt,
-            AbilityType::FrostShock,
-            AbilityType::LesserHealingWave,
-            AbilityType::Purge,
-            AbilityType::WindShear,
-            AbilityType::AirTotem,
-            AbilityType::WaterTotem,
-            AbilityType::EarthTotem,
-            AbilityType::FireTotem,
-        ],
-    }
-}
-
-/// Get the display name for an ability
-fn get_ability_name(ability: AbilityType) -> &'static str {
-    match ability {
-        AbilityType::Frostbolt => "Frostbolt",
-        AbilityType::FlashHeal => "Flash Heal",
-        AbilityType::HeroicStrike => "Heroic Strike",
-        AbilityType::Ambush => "Ambush",
-        AbilityType::CheapShot => "Cheap Shot",
-        AbilityType::FrostNova => "Frost Nova",
-        AbilityType::MindBlast => "Mind Blast",
-        AbilityType::SinisterStrike => "Sinister Strike",
-        AbilityType::Charge => "Charge",
-        AbilityType::KidneyShot => "Kidney Shot",
-        AbilityType::PowerWordFortitude => "Power Word: Fortitude",
-        AbilityType::PsychicScream => "Psychic Scream",
-        AbilityType::ManaBurn => "Mana Burn",
-        AbilityType::Rend => "Rend",
-        AbilityType::MortalStrike => "Mortal Strike",
-        AbilityType::Pummel => "Pummel",
-        AbilityType::Kick => "Kick",
-        AbilityType::CripplingPoison => "Crippling Poison",
-        AbilityType::Corruption => "Corruption",
-        AbilityType::Shadowbolt => "Shadow Bolt",
-        AbilityType::Fear => "Fear",
-        AbilityType::DeathCoil => "Death Coil",
-        AbilityType::Immolate => "Immolate",
-        AbilityType::DrainLife => "Drain Life",
-        AbilityType::ArcaneIntellect => "Arcane Intellect",
-        AbilityType::BattleShout => "Battle Shout",
-        AbilityType::IceBarrier => "Ice Barrier",
-        AbilityType::PowerWordShield => "Power Word: Shield",
-        AbilityType::Polymorph => "Polymorph",
-        AbilityType::DispelMagic => "Dispel Magic",
-        AbilityType::CurseOfAgony => "Curse of Agony",
-        AbilityType::CurseOfWeakness => "Curse of Weakness",
-        AbilityType::CurseOfTongues => "Curse of Tongues",
-        AbilityType::UnstableAffliction => "Unstable Affliction",
-        // Paladin abilities
-        AbilityType::FlashOfLight => "Flash of Light",
-        AbilityType::HolyLight => "Holy Light",
-        AbilityType::HolyShock => "Holy Shock",
-        AbilityType::HammerOfJustice => "Hammer of Justice",
-        AbilityType::PaladinCleanse => "Cleanse",
-        AbilityType::DevotionAura => "Devotion Aura",
-        AbilityType::DivineShield => "Divine Shield",
-        AbilityType::BerserkerRage => "Berserker Rage",
-        // Pet abilities (Felhunter)
-        AbilityType::SpellLock => "Spell Lock",
-        AbilityType::DevourMagic => "Devour Magic",
-        // Hunter abilities
-        AbilityType::AimedShot => "Aimed Shot",
-        AbilityType::ArcaneShot => "Arcane Shot",
-        AbilityType::ConcussiveShot => "Concussive Shot",
-        AbilityType::SerpentSting => "Serpent Sting",
-        AbilityType::Disengage => "Disengage",
-        AbilityType::FreezingTrap => "Freezing Trap",
-        AbilityType::FrostTrap => "Frost Trap",
-        // Hunter pet abilities
-        AbilityType::SpiderWeb => "Web",
-        AbilityType::BoarCharge => "Boar Charge",
-        AbilityType::MastersCall => "Master's Call",
-        // Strategic option abilities
-        AbilityType::DemoralizingShout => "Demoralizing Shout",
-        AbilityType::CommandingShout => "Commanding Shout",
-        AbilityType::FrostArmor => "Frost Armor",
-        AbilityType::MageArmorSpell => "Mage Armor",
-        AbilityType::MoltenArmor => "Molten Armor",
-        AbilityType::ShadowResistanceAura => "Shadow Resistance Aura",
-        AbilityType::ConcentrationAura => "Concentration Aura",
-        // Shaman abilities
-        AbilityType::LightningBolt => "Lightning Bolt",
-        AbilityType::FrostShock => "Frost Shock",
-        AbilityType::LesserHealingWave => "Lesser Healing Wave",
-        AbilityType::Purge => "Purge",
-        AbilityType::WindShear => "Wind Shear",
-        AbilityType::AirTotem => "Windfury Totem",
-        AbilityType::WaterTotem => "Healing Stream Totem",
-        AbilityType::EarthTotem => "Strength of Earth Totem",
-        AbilityType::FireTotem => "Flametongue Totem",
     }
 }
 
@@ -586,8 +313,33 @@ pub fn view_combatant_ui(
     };
 
     let class = view_state.class;
-    let stats = get_class_stats(class);
-    let abilities = get_class_abilities(class);
+    // Base stats and the class kit are both DERIVED: `class_base_stats` is the
+    // same table `Combatant::new` builds from, and the ability list comes from
+    // the `class` attribution on each `abilities.ron` entry. Neither can drift
+    // from the sim or silently drop ability N+1.
+    let stats = class_base_stats(class);
+    let abilities = ability_definitions.own_abilities_for_class(class);
+    // The pet whose abilities belong in THIS combatant's kit. View Combatant is
+    // a loadout editor, so it shows the pet that is actually configured (the Pet
+    // Type panel below is where that choice is made) rather than every pet the
+    // class could bring. The encyclopedia, which documents the whole class, uses
+    // `pet_abilities_for_class` instead.
+    let active_pet: Option<PetType> = match class {
+        CharacterClass::Warlock => Some(PetType::Felhunter),
+        CharacterClass::Hunter => {
+            let hunter_pet = if view_state.team == 1 {
+                match_config.team1_hunter_pet_types.get(view_state.slot).copied().unwrap_or_default()
+            } else {
+                match_config.team2_hunter_pet_types.get(view_state.slot).copied().unwrap_or_default()
+            };
+            Some(match hunter_pet {
+                HunterPetType::Spider => PetType::Spider,
+                HunterPetType::Boar => PetType::Boar,
+                HunterPetType::Bird => PetType::Bird,
+            })
+        }
+        _ => None,
+    };
 
     // Compute equipment bonuses for the stats panel
     let equip_overrides = if view_state.team == 1 {
@@ -739,7 +491,7 @@ pub fn view_combatant_ui(
                             egui::vec2(panel_width, main_panel_height),
                             egui::Layout::top_down(egui::Align::LEFT),
                             |ui| {
-                                render_abilities_panel(ui, &abilities, panel_width, main_panel_height, &ability_icons, &ability_definitions, &stats);
+                                render_abilities_panel(ui, &abilities, active_pet, panel_width, main_panel_height, &ability_icons, &ability_definitions, &stats);
                             },
                         );
                     },
@@ -986,7 +738,7 @@ fn stat_row_float(
 /// Render the Stats panel with effective totals (base + equipment).
 /// Stats boosted by equipment are green; negative would be red.
 /// Hover tooltip shows the breakdown.
-fn render_stats_panel(ui: &mut egui::Ui, stats: &ClassStats, equip: &EquipmentBonuses, width: f32, height: f32) {
+fn render_stats_panel(ui: &mut egui::Ui, stats: &ClassBaseStats, equip: &EquipmentBonuses, width: f32, height: f32) {
     let neutral = egui::Color32::from_rgb(230, 230, 230);
     let green = egui::Color32::from_rgb(100, 255, 100);
     let red = egui::Color32::from_rgb(255, 100, 100);
@@ -1009,17 +761,17 @@ fn render_stats_panel(ui: &mut egui::Ui, stats: &ClassStats, equip: &EquipmentBo
             .num_columns(2)
             .spacing([40.0, 8.0])
             .show(ui, |ui| {
-                stat_row_int(ui, "Health:", stats.health as i32, equip.health as i32, "", neutral, green, red, label_color);
+                stat_row_int(ui, "Health:", stats.max_health as i32, equip.health as i32, "", neutral, green, red, label_color);
 
                 // Resource: show mana bonus if applicable
-                let mana_bonus = if stats.resource_name == "Mana" { equip.mana as i32 } else { 0 };
-                let resource_effective = stats.resource_max as i32 + mana_bonus;
+                let mana_bonus = if stats.resource_type == ResourceType::Mana { equip.mana as i32 } else { 0 };
+                let resource_effective = stats.max_resource as i32 + mana_bonus;
                 let resource_color = if mana_bonus > 0 { green } else if mana_bonus < 0 { red } else { neutral };
                 ui.label(egui::RichText::new("Resource:").size(14.0).color(label_color));
-                let res_response = ui.label(egui::RichText::new(format!("{} {}", stats.resource_name, resource_effective)).size(14.0).color(resource_color));
+                let res_response = ui.label(egui::RichText::new(format!("{} {}", stats.resource_type.name(), resource_effective)).size(14.0).color(resource_color));
                 if mana_bonus != 0 && res_response.hovered() {
                     egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), ui.id().with("resource_tooltip"), |ui| {
-                        ui.label(format!("{} + {} from equipment", stats.resource_max, mana_bonus));
+                        ui.label(format!("{} + {} from equipment", stats.max_resource, mana_bonus));
                     });
                 }
                 ui.end_row();
@@ -1027,18 +779,20 @@ fn render_stats_panel(ui: &mut egui::Ui, stats: &ClassStats, equip: &EquipmentBo
                 stat_row_int(ui, "Attack Power:", stats.attack_power as i32, equip.attack_power as i32, "", neutral, green, red, label_color);
                 stat_row_int(ui, "Spell Power:", stats.spell_power as i32, equip.spell_power as i32, "", neutral, green, red, label_color);
 
-                // Crit chance (only show if equipment provides it)
-                if equip.crit_chance > 0.0 {
-                    ui.label(egui::RichText::new("Crit Chance:").size(14.0).color(label_color));
-                    let crit_text = format!("{:.1}%", equip.crit_chance * 100.0);
-                    let crit_response = ui.label(egui::RichText::new(&crit_text).size(14.0).color(green));
-                    if crit_response.hovered() {
-                        egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), ui.id().with("crit_tooltip"), |ui| {
-                            ui.label(format!("0% base + {:.1}% from equipment", equip.crit_chance * 100.0));
-                        });
-                    }
-                    ui.end_row();
+                // Crit chance: every class has a non-zero base (Rogue 10% down to
+                // Priest 4%), so this row always shows. It used to appear only when
+                // equipment granted crit, and then reported the base as 0%.
+                let effective_crit = stats.crit_chance + equip.crit_chance;
+                ui.label(egui::RichText::new("Crit Chance:").size(14.0).color(label_color));
+                let crit_text = format!("{:.1}%", effective_crit * 100.0);
+                let crit_color = if equip.crit_chance > 0.0 { green } else if equip.crit_chance < 0.0 { red } else { neutral };
+                let crit_response = ui.label(egui::RichText::new(&crit_text).size(14.0).color(crit_color));
+                if equip.crit_chance != 0.0 && crit_response.hovered() {
+                    egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), ui.id().with("crit_tooltip"), |ui| {
+                        ui.label(format!("{:.1}% base + {:.1}% from equipment", stats.crit_chance * 100.0, equip.crit_chance * 100.0));
+                    });
                 }
+                ui.end_row();
 
                 // Mana regen (only show if equipment provides it)
                 if equip.mana_regen > 0.0 {
@@ -1069,7 +823,7 @@ fn render_stats_panel(ui: &mut egui::Ui, stats: &ClassStats, equip: &EquipmentBo
                     stat_row_float(ui, "Attack Speed:", stats.attack_speed, 0.0, "/s", neutral, green, red, label_color);
                 }
 
-                stat_row_float(ui, "Move Speed:", stats.move_speed, equip.move_speed, "/s", neutral, green, red, label_color);
+                stat_row_float(ui, "Move Speed:", stats.movement_speed, equip.move_speed, "/s", neutral, green, red, label_color);
 
                 // Armor (only show if equipment provides it, since base is 0)
                 if equip.armor > 0.0 {
@@ -1117,11 +871,12 @@ fn render_stats_panel(ui: &mut egui::Ui, stats: &ClassStats, equip: &EquipmentBo
 fn render_abilities_panel(
     ui: &mut egui::Ui,
     abilities: &[AbilityType],
+    active_pet: Option<PetType>,
     width: f32,
     height: f32,
     ability_icons: &Option<Res<AbilityIcons>>,
     ability_definitions: &AbilityDefinitions,
-    stats: &ClassStats,
+    stats: &ClassBaseStats,
 ) {
     ui.group(|ui| {
         ui.set_min_width(width - 20.0);
@@ -1137,81 +892,115 @@ fn render_abilities_panel(
         ui.add_space(12.0);
 
         for ability in abilities {
-            let ability_name = get_ability_name(*ability);
-            let ability_config = ability_definitions.get(ability);
+            render_ability_row(ui, *ability, ability_icons, ability_definitions, stats);
+        }
 
-            // Get icon texture if available
-            let icon_texture = ability_icons.as_ref().and_then(|icons| {
-                icons.textures.get(ability_name).copied()
-            });
-
-            // Allocate space for the row first, with hover sense
-            let row_height = 26.0;
-            let available_width = ui.available_width();
-            let (rect, response) = ui.allocate_exact_size(
-                egui::vec2(available_width, row_height),
-                egui::Sense::hover(),
-            );
-
-            // Draw content manually using painter
-            let painter = ui.painter();
-            let icon_size = 22.0;
-            let icon_rect = egui::Rect::from_min_size(
-                rect.min + egui::vec2(0.0, (row_height - icon_size) / 2.0),
-                egui::vec2(icon_size, icon_size),
-            );
-
-            // Draw icon
-            if let Some(texture_id) = icon_texture {
-                painter.image(
-                    texture_id,
-                    icon_rect,
-                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                    egui::Color32::WHITE,
+        // Pet subsection, labeled by the pet that casts them. Before ability
+        // attribution existed these five abilities (Spell Lock, Devour Magic,
+        // Web, Boar Charge, Master's Call) appeared on no class screen at all.
+        if let Some(pet) = active_pet {
+            let pet_abilities = ability_definitions.abilities_for_pet(pet);
+            if !pet_abilities.is_empty() {
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new(format!("{} (PET)", pet.name().to_uppercase()))
+                        .size(14.0)
+                        .color(egui::Color32::from_rgb(190, 170, 220))
+                        .strong(),
                 );
-                painter.rect_stroke(
-                    icon_rect,
-                    3.0,
-                    egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 80, 100)),
-                    egui::StrokeKind::Outside,
-                );
-            } else {
-                painter.rect_filled(icon_rect, 3.0, egui::Color32::from_rgb(50, 50, 65));
-                painter.rect_stroke(
-                    icon_rect,
-                    3.0,
-                    egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 80, 100)),
-                    egui::StrokeKind::Outside,
-                );
-            }
-
-            // Draw ability name
-            let text_pos = rect.min + egui::vec2(icon_size + 10.0, (row_height - 14.0) / 2.0);
-            painter.text(
-                text_pos,
-                egui::Align2::LEFT_TOP,
-                ability_name,
-                egui::FontId::proportional(14.0),
-                egui::Color32::from_rgb(220, 220, 220),
-            );
-
-            // Attach tooltip using show_tooltip_at_pointer when hovered
-            if let Some(config) = ability_config {
-                if response.hovered() {
-                    egui::show_tooltip_at_pointer(
-                        ui.ctx(),
-                        ui.layer_id(),
-                        ui.id().with(ability_name),
-                        |ui| {
-                            render_ability_tooltip(ui, *ability, ability_name, config, stats);
-                        },
-                    );
+                ui.add_space(6.0);
+                for ability in pet_abilities {
+                    render_ability_row(ui, ability, ability_icons, ability_definitions, stats);
                 }
             }
-
-            ui.add_space(4.0);
         }
     });
+}
+
+/// Render one ability row: icon, name, and the hover tooltip.
+///
+/// The display name comes from the loaded `AbilityConfig`, so `abilities.ron`
+/// is the only place an ability is named.
+fn render_ability_row(
+    ui: &mut egui::Ui,
+    ability: AbilityType,
+    ability_icons: &Option<Res<AbilityIcons>>,
+    ability_definitions: &AbilityDefinitions,
+    stats: &ClassBaseStats,
+) {
+    let ability_config = ability_definitions.get(&ability);
+    let ability_name = ability_config.map(|c| c.name.as_str()).unwrap_or("Unknown");
+
+    // Get icon texture if available
+    let icon_texture = ability_icons.as_ref().and_then(|icons| {
+        icons.textures.get(ability_name).copied()
+    });
+
+    // Allocate space for the row first, with hover sense
+    let row_height = 26.0;
+    let available_width = ui.available_width();
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(available_width, row_height),
+        egui::Sense::hover(),
+    );
+
+    // Draw content manually using painter
+    let painter = ui.painter();
+    let icon_size = 22.0;
+    let icon_rect = egui::Rect::from_min_size(
+        rect.min + egui::vec2(0.0, (row_height - icon_size) / 2.0),
+        egui::vec2(icon_size, icon_size),
+    );
+
+    // Draw icon
+    if let Some(texture_id) = icon_texture {
+        painter.image(
+            texture_id,
+            icon_rect,
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
+        );
+        painter.rect_stroke(
+            icon_rect,
+            3.0,
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 80, 100)),
+            egui::StrokeKind::Outside,
+        );
+    } else {
+        painter.rect_filled(icon_rect, 3.0, egui::Color32::from_rgb(50, 50, 65));
+        painter.rect_stroke(
+            icon_rect,
+            3.0,
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 80, 100)),
+            egui::StrokeKind::Outside,
+        );
+    }
+
+    // Draw ability name
+    let text_pos = rect.min + egui::vec2(icon_size + 10.0, (row_height - 14.0) / 2.0);
+    painter.text(
+        text_pos,
+        egui::Align2::LEFT_TOP,
+        ability_name,
+        egui::FontId::proportional(14.0),
+        egui::Color32::from_rgb(220, 220, 220),
+    );
+
+    // Attach tooltip using show_tooltip_at_pointer when hovered
+    if let Some(config) = ability_config {
+        if response.hovered() {
+            egui::show_tooltip_at_pointer(
+                ui.ctx(),
+                ui.layer_id(),
+                ui.id().with(ability_name),
+                |ui| {
+                    render_ability_tooltip(ui, ability, ability_name, config, stats);
+                },
+            );
+        }
+    }
+
+    ui.add_space(4.0);
 }
 
 /// Get the color for a spell school (shared authority: `SpellSchool::color_rgb8`)
@@ -1221,7 +1010,7 @@ fn get_spell_school_color(school: SpellSchool) -> egui::Color32 {
 }
 
 /// Render a WoW-style ability tooltip
-fn render_ability_tooltip(ui: &mut egui::Ui, ability: AbilityType, name: &str, config: &AbilityConfig, stats: &ClassStats) {
+fn render_ability_tooltip(ui: &mut egui::Ui, ability: AbilityType, name: &str, config: &AbilityConfig, stats: &ClassBaseStats) {
     ui.set_min_width(250.0);
     ui.set_max_width(300.0);
 
@@ -1346,7 +1135,7 @@ fn totem_description(ability: AbilityType) -> Option<String> {
     Some(format!("Summons a totem that {}. Lasts {:.0} sec.", effect, TOTEM_DURATION))
 }
 
-fn build_ability_description(ability: AbilityType, config: &AbilityConfig, stats: &ClassStats) -> String {
+fn build_ability_description(ability: AbilityType, config: &AbilityConfig, stats: &ClassBaseStats) -> String {
     // Totems: generate the description straight from the gameplay buff spec so
     // the tooltip can never drift from the actual magnitude (single source of
     // truth: `class_ai::shaman::totem_spec`). Wins over everything else.
@@ -1364,14 +1153,14 @@ fn build_ability_description(ability: AbilityType, config: &AbilityConfig, stats
 
     // Calculate stat contribution for damage
     let damage_stat_value = match config.damage_scales_with {
-        ScalingStat::AttackPower => stats.attack_power as f32,
-        ScalingStat::SpellPower => stats.spell_power as f32,
+        ScalingStat::AttackPower => stats.attack_power,
+        ScalingStat::SpellPower => stats.spell_power,
         ScalingStat::None => 0.0,
     };
     let damage_bonus = damage_stat_value * config.damage_coefficient;
 
     // Calculate stat contribution for healing (uses spell power)
-    let healing_bonus = stats.spell_power as f32 * config.healing_coefficient;
+    let healing_bonus = stats.spell_power * config.healing_coefficient;
 
     // Damage
     if config.damage_base_max > 0.0 {

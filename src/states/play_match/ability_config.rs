@@ -21,7 +21,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use super::abilities::{AbilityType, ScalingStat, SpellSchool};
-use super::components::{AuraType, DRCategory, DispelType};
+use super::components::{AuraType, DRCategory, DispelType, PetType};
+use super::match_config::CharacterClass;
 
 /// Default value for break_on_damage: -1.0 means the aura doesn't break on damage.
 fn default_break_on_damage() -> f32 {
@@ -96,6 +97,21 @@ pub struct ProjectileVisuals {
 pub struct AbilityConfig {
     /// Display name of the ability
     pub name: String,
+    /// The class this ability belongs to. REQUIRED — there is no serde default,
+    /// so an entry added to `abilities.ron` without it fails to parse at
+    /// startup. Every per-class kit list in the game is derived from this field
+    /// ([`AbilityDefinitions::abilities_for_class`]), so ability N+1 can never
+    /// again be silently absent from a class's displayed kit.
+    ///
+    /// For a PET ability this is the pet's OWNING class (Spell Lock is
+    /// `Warlock`), with [`AbilityConfig::pet`] naming the pet.
+    pub class: CharacterClass,
+    /// Set when this ability belongs to a pet rather than to the class itself.
+    /// Drives the "class page -> Pet subsection labeled by pet" grouping.
+    /// `validate()` rejects a `pet` whose [`PetType::owner_class`] disagrees
+    /// with `class`.
+    #[serde(default)]
+    pub pet: Option<PetType>,
     /// Icon asset path (e.g. "icons/abilities/spell_frost_frostbolt02.jpg")
     #[serde(default)]
     pub icon: String,
@@ -267,6 +283,11 @@ impl AbilityConfig {
         self.channel_duration.is_some()
     }
 
+    /// True when this ability is cast by a pet rather than by the class itself.
+    pub fn is_pet_ability(&self) -> bool {
+        self.pet.is_some()
+    }
+
     /// Resolve this ability's cast color as `(base_rgb, emissive_rgb)` in
     /// 0..1 linear-ish component form: the exact `projectile_visuals` pair when
     /// the ability defines one (the casting orb then matches the outgoing
@@ -428,6 +449,36 @@ impl AbilityDefinitions {
             .filter(|ability| !self.definitions.contains_key(ability))
             .collect();
 
+        // === Class attribution ===
+        // `class` has no serde default, so a missing attribution is already a
+        // hard parse failure. What can still go wrong is a WRONG attribution:
+        // a pet ability filed under a class that does not own that pet (it
+        // would then show up in the wrong class's kit), or a class whose
+        // derived kit came out empty because every one of its abilities was
+        // mis-filed. Both are fatal — the per-class lists every display
+        // surface renders are derived from this field alone.
+        for (ability, def) in &self.definitions {
+            if let Some(pet) = def.pet {
+                let owner = pet.owner_class();
+                if def.class != owner {
+                    panic!(
+                        "abilities.ron: {:?} is attributed to {:?} but its pet {:?} is owned by \
+                         {:?}. A pet ability's `class` must be the pet's owning class.",
+                        ability, def.class, pet, owner
+                    );
+                }
+            }
+        }
+        for class in CharacterClass::all() {
+            if self.abilities_for_class(*class).is_empty() {
+                panic!(
+                    "abilities.ron: no ability is attributed to {:?}. Every class must have a \
+                     non-empty kit — check the `class` field on that class's entries.",
+                    class
+                );
+            }
+        }
+
         // SP-scaled aura magnitudes only take effect at call sites using
         // `AuraPending::from_ability_scaled`. Reject a non-zero coefficient on
         // any ability whose apply site isn't wired for it — otherwise the RON
@@ -451,6 +502,72 @@ impl AbilityDefinitions {
         } else {
             Err(missing)
         }
+    }
+
+    /// Every ability attributed to `class`, its pets' included, in a stable
+    /// order (the `AbilityType` declaration order, with the class's own
+    /// abilities first and pet abilities after, grouped by `PetType`).
+    ///
+    /// This is the ONE source for "what is in this class's kit". It is derived
+    /// from the `class` field on each entry in `abilities.ron`, so a new
+    /// ability appears here the moment it is defined — no hand-maintained list
+    /// to forget.
+    pub fn abilities_for_class(&self, class: CharacterClass) -> Vec<AbilityType> {
+        let mut all = self.own_abilities_for_class(class);
+        for (_, pet_abilities) in self.pet_abilities_for_class(class) {
+            all.extend(pet_abilities);
+        }
+        all
+    }
+
+    /// The class's OWN abilities — pet abilities excluded. Sorted by the
+    /// `AbilityType` declaration order.
+    pub fn own_abilities_for_class(&self, class: CharacterClass) -> Vec<AbilityType> {
+        let mut abilities: Vec<AbilityType> = self
+            .definitions
+            .iter()
+            .filter(|(_, def)| def.class == class && def.pet.is_none())
+            .map(|(ability, _)| *ability)
+            .collect();
+        abilities.sort_unstable();
+        abilities
+    }
+
+    /// The class's PET abilities, grouped by the pet that casts them and
+    /// ordered by the `PetType` declaration order. Each group's abilities are
+    /// sorted by the `AbilityType` declaration order.
+    ///
+    /// This is the shape a "class page -> Pet subsection labeled by pet"
+    /// display needs: the `PetType` is the subsection label.
+    pub fn pet_abilities_for_class(&self, class: CharacterClass) -> Vec<(PetType, Vec<AbilityType>)> {
+        let mut by_pet: Vec<(PetType, Vec<AbilityType>)> = Vec::new();
+        let mut entries: Vec<(PetType, AbilityType)> = self
+            .definitions
+            .iter()
+            .filter(|(_, def)| def.class == class)
+            .filter_map(|(ability, def)| def.pet.map(|pet| (pet, *ability)))
+            .collect();
+        entries.sort_unstable();
+        for (pet, ability) in entries {
+            match by_pet.last_mut() {
+                Some((last_pet, abilities)) if *last_pet == pet => abilities.push(ability),
+                _ => by_pet.push((pet, vec![ability])),
+            }
+        }
+        by_pet
+    }
+
+    /// The abilities cast by one specific pet, sorted by the `AbilityType`
+    /// declaration order. Empty when the pet has no headline abilities.
+    pub fn abilities_for_pet(&self, pet: PetType) -> Vec<AbilityType> {
+        let mut abilities: Vec<AbilityType> = self
+            .definitions
+            .iter()
+            .filter(|(_, def)| def.pet == Some(pet))
+            .map(|(ability, _)| *ability)
+            .collect();
+        abilities.sort_unstable();
+        abilities
     }
 
     /// Get all ability types that are defined
@@ -514,6 +631,8 @@ mod tests {
     fn base_test_config() -> AbilityConfig {
         AbilityConfig {
             name: "Test".to_string(),
+            class: CharacterClass::Mage,
+            pet: None,
             icon: String::new(),
             description: String::new(),
             cast_time: 0.0,
@@ -544,6 +663,224 @@ mod tests {
             is_dispel: false,
             mana_burn_amount: 0.0,
             dispel_backlash: None,
+        }
+    }
+
+    #[test]
+    fn every_ability_is_attributed_to_a_class() {
+        // `class` has no serde default, so this passing at all means every
+        // entry in abilities.ron carries an attribution — the RON would fail to
+        // parse otherwise. What this pins is the consequence: the union of the
+        // per-class kits is the WHOLE config, so no ability can be defined and
+        // yet belong to no displayed kit.
+        let defs = AbilityDefinitions::default();
+        let mut listed = 0usize;
+        for class in CharacterClass::all() {
+            listed += defs.abilities_for_class(*class).len();
+        }
+        assert_eq!(
+            listed,
+            defs.iter().count(),
+            "the per-class kits must partition abilities.ron exactly"
+        );
+    }
+
+    #[test]
+    fn every_class_has_a_non_empty_kit() {
+        let defs = AbilityDefinitions::default();
+        for class in CharacterClass::all() {
+            assert!(
+                !defs.abilities_for_class(*class).is_empty(),
+                "{class:?} has an empty kit"
+            );
+        }
+    }
+
+    #[test]
+    fn pet_abilities_group_under_their_owning_class() {
+        // The five abilities that no class list carried before attribution
+        // existed. Each must land under its owner, grouped by the pet that
+        // casts it — the shape a "class page -> Pet subsection" display needs.
+        let defs = AbilityDefinitions::default();
+
+        let warlock_pets = defs.pet_abilities_for_class(CharacterClass::Warlock);
+        assert_eq!(
+            warlock_pets,
+            vec![(
+                PetType::Felhunter,
+                vec![AbilityType::SpellLock, AbilityType::DevourMagic]
+            )]
+        );
+
+        let hunter_pets = defs.pet_abilities_for_class(CharacterClass::Hunter);
+        assert_eq!(
+            hunter_pets,
+            vec![
+                (PetType::Spider, vec![AbilityType::SpiderWeb]),
+                (PetType::Boar, vec![AbilityType::BoarCharge]),
+                (PetType::Bird, vec![AbilityType::MastersCall]),
+            ]
+        );
+
+        // ...and the same abilities are absent from the classes' OWN kits, so a
+        // surface that wants only the player's abilities gets only those.
+        for own in [
+            defs.own_abilities_for_class(CharacterClass::Warlock),
+            defs.own_abilities_for_class(CharacterClass::Hunter),
+        ] {
+            for pet_ability in [
+                AbilityType::SpellLock,
+                AbilityType::DevourMagic,
+                AbilityType::SpiderWeb,
+                AbilityType::BoarCharge,
+                AbilityType::MastersCall,
+            ] {
+                assert!(!own.contains(&pet_ability), "{pet_ability:?} leaked into an own-kit");
+            }
+        }
+    }
+
+    #[test]
+    fn derived_kits_cover_the_lists_they_replaced() {
+        // The hand-maintained `view_combatant_ui::get_class_abilities` Vec this
+        // work retired, transcribed here as the regression floor: every ability
+        // it listed must still be in the derived kit for the same class. (The
+        // derived kits are supersets — they also carry the five pet abilities
+        // the old Vec omitted, which is the point.)
+        let defs = AbilityDefinitions::default();
+        let previously_listed: &[(CharacterClass, &[AbilityType])] = &[
+            (
+                CharacterClass::Warrior,
+                &[
+                    AbilityType::BattleShout,
+                    AbilityType::DemoralizingShout,
+                    AbilityType::CommandingShout,
+                    AbilityType::Charge,
+                    AbilityType::BerserkerRage,
+                    AbilityType::Rend,
+                    AbilityType::MortalStrike,
+                    AbilityType::Pummel,
+                    AbilityType::HeroicStrike,
+                ],
+            ),
+            (
+                CharacterClass::Mage,
+                &[
+                    AbilityType::Frostbolt,
+                    AbilityType::FrostNova,
+                    AbilityType::ArcaneIntellect,
+                    AbilityType::IceBarrier,
+                    AbilityType::FrostArmor,
+                    AbilityType::MageArmorSpell,
+                    AbilityType::MoltenArmor,
+                    AbilityType::Polymorph,
+                ],
+            ),
+            (
+                CharacterClass::Rogue,
+                &[
+                    AbilityType::Ambush,
+                    AbilityType::CheapShot,
+                    AbilityType::SinisterStrike,
+                    AbilityType::KidneyShot,
+                    AbilityType::Kick,
+                    AbilityType::CripplingPoison,
+                ],
+            ),
+            (
+                CharacterClass::Priest,
+                &[
+                    AbilityType::FlashHeal,
+                    AbilityType::MindBlast,
+                    AbilityType::PowerWordFortitude,
+                    AbilityType::PowerWordShield,
+                    AbilityType::DispelMagic,
+                    AbilityType::PsychicScream,
+                    AbilityType::ManaBurn,
+                ],
+            ),
+            (
+                CharacterClass::Warlock,
+                &[
+                    AbilityType::Corruption,
+                    AbilityType::UnstableAffliction,
+                    AbilityType::Shadowbolt,
+                    AbilityType::Fear,
+                    AbilityType::DeathCoil,
+                    AbilityType::Immolate,
+                    AbilityType::DrainLife,
+                    AbilityType::CurseOfAgony,
+                    AbilityType::CurseOfWeakness,
+                    AbilityType::CurseOfTongues,
+                ],
+            ),
+            (
+                CharacterClass::Paladin,
+                &[
+                    AbilityType::DevotionAura,
+                    AbilityType::ShadowResistanceAura,
+                    AbilityType::ConcentrationAura,
+                    AbilityType::DivineShield,
+                    AbilityType::FlashOfLight,
+                    AbilityType::HolyLight,
+                    AbilityType::HolyShock,
+                    AbilityType::HammerOfJustice,
+                    AbilityType::PaladinCleanse,
+                ],
+            ),
+            (
+                CharacterClass::Hunter,
+                &[
+                    AbilityType::AimedShot,
+                    AbilityType::ArcaneShot,
+                    AbilityType::ConcussiveShot,
+                    AbilityType::SerpentSting,
+                    AbilityType::Disengage,
+                    AbilityType::FreezingTrap,
+                    AbilityType::FrostTrap,
+                ],
+            ),
+            (
+                CharacterClass::Shaman,
+                &[
+                    AbilityType::LightningBolt,
+                    AbilityType::FrostShock,
+                    AbilityType::LesserHealingWave,
+                    AbilityType::Purge,
+                    AbilityType::WindShear,
+                    AbilityType::AirTotem,
+                    AbilityType::WaterTotem,
+                    AbilityType::EarthTotem,
+                    AbilityType::FireTotem,
+                ],
+            ),
+        ];
+        for (class, old_list) in previously_listed {
+            let derived = defs.own_abilities_for_class(*class);
+            for ability in *old_list {
+                assert!(
+                    derived.contains(ability),
+                    "{class:?} lost {ability:?} in the move to derived kits"
+                );
+            }
+            assert_eq!(
+                derived.len(),
+                old_list.len(),
+                "{class:?} own-kit size changed: {derived:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn per_class_kits_are_deterministic() {
+        // The kits come out of a HashMap, so ordering has to be imposed rather
+        // than inherited. Two calls must agree, or the UI would reshuffle.
+        let defs = AbilityDefinitions::default();
+        for class in CharacterClass::all() {
+            assert_eq!(
+                defs.abilities_for_class(*class),
+                defs.abilities_for_class(*class)
+            );
         }
     }
 

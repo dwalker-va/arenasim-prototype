@@ -24,6 +24,196 @@ pub enum ResourceType {
     Rage,
 }
 
+impl ResourceType {
+    /// Display name for UI surfaces ("Mana" / "Energy" / "Rage").
+    pub fn name(&self) -> &'static str {
+        match self {
+            ResourceType::Mana => "Mana",
+            ResourceType::Energy => "Energy",
+            ResourceType::Rage => "Rage",
+        }
+    }
+}
+
+/// The base, pre-equipment stat block for a class.
+///
+/// SINGLE SOURCE OF TRUTH: [`Combatant::new`] builds every combatant from this,
+/// and every display surface reads the same values. Before this existed, the
+/// View Combatant screen carried a hand-copied duplicate that had drifted
+/// (Warrior shown as 200 HP against a real 300, Mage 150 against 250, Warlock
+/// 160 against 280) — a table that could go stale silently. There is now
+/// nowhere for a second copy to live.
+///
+/// Changing any number here CHANGES THE SIM.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ClassBaseStats {
+    /// Which resource pool the class spends
+    pub resource_type: ResourceType,
+    /// Starting and maximum health
+    pub max_health: f32,
+    /// Maximum resource (mana / energy / rage)
+    pub max_resource: f32,
+    /// Passive resource regeneration per second (0.0 for the one-bar classes)
+    pub resource_regen: f32,
+    /// Resource the combatant spawns with (Rage starts empty)
+    pub starting_resource: f32,
+    /// Base weapon damage per auto-attack swing, before equipment
+    pub attack_damage: f32,
+    /// Base swings per second, before a weapon's speed replaces it
+    pub attack_speed: f32,
+    /// Base attack power
+    pub attack_power: f32,
+    /// Base spell power
+    pub spell_power: f32,
+    /// Base critical strike chance (0.0-1.0)
+    pub crit_chance: f32,
+    /// Base movement speed in units per second
+    pub movement_speed: f32,
+    /// Base armor. Zero for every class today — armor comes entirely from
+    /// equipment — but it is part of the block so a display never has to
+    /// hardcode the assumption.
+    pub armor: f32,
+}
+
+/// The base stat block for a class. See [`ClassBaseStats`].
+///
+/// EDITING THESE NUMBERS EDITS THE SIM.
+pub const fn class_base_stats(class: match_config::CharacterClass) -> ClassBaseStats {
+    // Common to every class today; named once so the per-class arms stay
+    // readable.
+    const NO_ARMOR: f32 = 0.0;
+    match class {
+        // Warriors: High HP, physical damage, scales with Attack Power (8% crit)
+        match_config::CharacterClass::Warrior => ClassBaseStats {
+            resource_type: ResourceType::Rage,
+            max_health: 300.0,
+            max_resource: 100.0,
+            resource_regen: 0.0,
+            starting_resource: 0.0,
+            attack_damage: 12.0,
+            attack_speed: 1.0,
+            attack_power: 30.0,
+            spell_power: 0.0,
+            crit_chance: 0.08,
+            movement_speed: 5.0,
+            armor: NO_ARMOR,
+        },
+        // Mages: Low HP, magical damage (wand), scales with Spell Power (6% crit)
+        match_config::CharacterClass::Mage => ClassBaseStats {
+            resource_type: ResourceType::Mana,
+            max_health: 250.0,
+            max_resource: 200.0,
+            resource_regen: 0.0,
+            starting_resource: 200.0,
+            attack_damage: 10.0,
+            attack_speed: 0.7,
+            attack_power: 0.0,
+            spell_power: 50.0,
+            crit_chance: 0.06,
+            movement_speed: 4.5,
+            armor: NO_ARMOR,
+        },
+        // Rogues: Medium HP, physical burst damage, scales with Attack Power (10% crit - highest)
+        match_config::CharacterClass::Rogue => ClassBaseStats {
+            resource_type: ResourceType::Energy,
+            max_health: 275.0,
+            max_resource: 100.0,
+            resource_regen: 20.0,
+            starting_resource: 100.0,
+            attack_damage: 10.0,
+            attack_speed: 1.3,
+            attack_power: 35.0,
+            spell_power: 0.0,
+            crit_chance: 0.10,
+            movement_speed: 6.0,
+            armor: NO_ARMOR,
+        },
+        // Priests: Medium HP, healing & wand damage, scales with Spell Power (4% crit)
+        match_config::CharacterClass::Priest => ClassBaseStats {
+            resource_type: ResourceType::Mana,
+            max_health: 250.0,
+            max_resource: 150.0,
+            resource_regen: 0.0,
+            starting_resource: 150.0,
+            attack_damage: 6.0,
+            attack_speed: 0.8,
+            attack_power: 0.0,
+            spell_power: 40.0,
+            crit_chance: 0.04,
+            movement_speed: 5.0,
+            armor: NO_ARMOR,
+        },
+        // Warlocks: Medium HP (280 — between cloth and mail tier; addresses "dies first"
+        // survivability gap since Warlock has no defensive cooldown like Mage/Priest absorbs),
+        // shadow damage (wand), scales with Spell Power, DoT focused (5% crit)
+        match_config::CharacterClass::Warlock => ClassBaseStats {
+            resource_type: ResourceType::Mana,
+            max_health: 280.0,
+            max_resource: 180.0,
+            resource_regen: 0.0,
+            starting_resource: 180.0,
+            attack_damage: 8.0,
+            attack_speed: 0.7,
+            attack_power: 0.0,
+            spell_power: 45.0,
+            crit_chance: 0.05,
+            movement_speed: 4.5,
+            armor: NO_ARMOR,
+        },
+        // Paladins: High HP (plate), healing & melee hybrid, scales with Spell Power primarily (6% crit)
+        // Tankier than Priest but lower spell power to offset utility
+        match_config::CharacterClass::Paladin => ClassBaseStats {
+            resource_type: ResourceType::Mana,
+            max_health: 275.0,
+            max_resource: 160.0,
+            resource_regen: 0.0,
+            starting_resource: 160.0,
+            attack_damage: 8.0,
+            attack_speed: 0.9,
+            attack_power: 20.0,
+            spell_power: 35.0,
+            crit_chance: 0.06,
+            movement_speed: 5.0,
+            armor: NO_ARMOR,
+        },
+        // Hunters: Medium HP (mail), ranged physical, scales with Attack Power (7% crit)
+        // Auto Shot is the primary sustained damage (~18 per 2.5s = 7.2 DPS base).
+        // Mana model matches the other mana classes (Mage/Priest/Warlock/Paladin):
+        // one full bar per fight, no regen. Pool sized to afford ~1.6 full rotations
+        // (240 / ~150 post cost-cut). See docs/plans/2026-05-22-001-fix-hunter-mana-economy-plan.md.
+        match_config::CharacterClass::Hunter => ClassBaseStats {
+            resource_type: ResourceType::Mana,
+            max_health: 265.0,
+            max_resource: 240.0,
+            resource_regen: 0.0,
+            starting_resource: 240.0,
+            attack_damage: 18.0,
+            attack_speed: 0.4,
+            attack_power: 30.0,
+            spell_power: 0.0,
+            crit_chance: 0.07,
+            movement_speed: 5.0,
+            armor: NO_ARMOR,
+        },
+        // Shaman: Medium HP (caster-mail), mana ranged caster-healer, scales with Spell Power (5% crit).
+        // Offensive support — Lightning Bolt pressure + opportunistic Lesser Healing Wave.
+        match_config::CharacterClass::Shaman => ClassBaseStats {
+            resource_type: ResourceType::Mana,
+            max_health: 265.0,
+            max_resource: 160.0,
+            resource_regen: 0.0,
+            starting_resource: 160.0,
+            attack_damage: 7.0,
+            attack_speed: 0.8,
+            attack_power: 0.0,
+            spell_power: 42.0,
+            crit_chance: 0.05,
+            movement_speed: 5.0,
+            armor: NO_ARMOR,
+        },
+    }
+}
+
 // ============================================================================
 // Marker Components
 // ============================================================================
@@ -205,33 +395,22 @@ pub struct Combatant {
 impl Combatant {
     /// Create a new combatant with class-specific stats.
     pub fn new(team: u8, slot: u8, class: match_config::CharacterClass) -> Self {
-        // Class-specific stats (resource_type, health, max_resource, resource_regen, starting_resource, damage, attack speed, attack_power, spell_power, crit_chance, movement speed)
-        let (resource_type, max_health, max_resource, resource_regen, starting_resource, attack_damage, attack_speed, attack_power, spell_power, crit_chance, movement_speed) = match class {
-            // Warriors: High HP, physical damage, scales with Attack Power (8% crit)
-            match_config::CharacterClass::Warrior => (ResourceType::Rage, 300.0, 100.0, 0.0, 0.0, 12.0, 1.0, 30.0, 0.0, 0.08, 5.0),
-            // Mages: Low HP, magical damage (wand), scales with Spell Power (6% crit)
-            match_config::CharacterClass::Mage => (ResourceType::Mana, 250.0, 200.0, 0.0, 200.0, 10.0, 0.7, 0.0, 50.0, 0.06, 4.5),
-            // Rogues: Medium HP, physical burst damage, scales with Attack Power (10% crit - highest)
-            match_config::CharacterClass::Rogue => (ResourceType::Energy, 275.0, 100.0, 20.0, 100.0, 10.0, 1.3, 35.0, 0.0, 0.10, 6.0),
-            // Priests: Medium HP, healing & wand damage, scales with Spell Power (4% crit)
-            match_config::CharacterClass::Priest => (ResourceType::Mana, 250.0, 150.0, 0.0, 150.0, 6.0, 0.8, 0.0, 40.0, 0.04, 5.0),
-            // Warlocks: Medium HP (180 — between cloth and mail tier; addresses "dies first"
-            // survivability gap since Warlock has no defensive cooldown like Mage/Priest absorbs),
-            // shadow damage (wand), scales with Spell Power, DoT focused (5% crit)
-            match_config::CharacterClass::Warlock => (ResourceType::Mana, 280.0, 180.0, 0.0, 180.0, 8.0, 0.7, 0.0, 45.0, 0.05, 4.5),
-            // Paladins: High HP (plate), healing & melee hybrid, scales with Spell Power primarily (6% crit)
-            // Tankier than Priest but lower spell power to offset utility
-            match_config::CharacterClass::Paladin => (ResourceType::Mana, 275.0, 160.0, 0.0, 160.0, 8.0, 0.9, 20.0, 35.0, 0.06, 5.0),
-            // Hunters: Medium HP (mail), ranged physical, scales with Attack Power (7% crit)
-            // Auto Shot is the primary sustained damage (~18 per 2.5s = 7.2 DPS base).
-            // Mana model matches the other mana classes (Mage/Priest/Warlock/Paladin):
-            // one full bar per fight, no regen. Pool sized to afford ~1.6 full rotations
-            // (240 / ~150 post cost-cut). See docs/plans/2026-05-22-001-fix-hunter-mana-economy-plan.md.
-            match_config::CharacterClass::Hunter => (ResourceType::Mana, 265.0, 240.0, 0.0, 240.0, 18.0, 0.4, 30.0, 0.0, 0.07, 5.0),
-            // Shaman: Medium HP (caster-mail), mana ranged caster-healer, scales with Spell Power (5% crit).
-            // Offensive support — Lightning Bolt pressure + opportunistic Lesser Healing Wave.
-            match_config::CharacterClass::Shaman => (ResourceType::Mana, 265.0, 160.0, 0.0, 160.0, 7.0, 0.8, 0.0, 42.0, 0.05, 5.0),
-        };
+        // Base stats come from `class_base_stats` — the single table the UI
+        // reads too, so a display can never drift from the sim.
+        let ClassBaseStats {
+            resource_type,
+            max_health,
+            max_resource,
+            resource_regen,
+            starting_resource,
+            attack_damage,
+            attack_speed,
+            attack_power,
+            spell_power,
+            crit_chance,
+            movement_speed,
+            armor,
+        } = class_base_stats(class);
 
         // Rogues start stealthed
         let stealthed = class == match_config::CharacterClass::Rogue;
@@ -252,7 +431,7 @@ impl Combatant {
             attack_power,
             spell_power,
             crit_chance,
-            armor: 0.0,
+            armor,
             fire_resistance: 0.0,
             frost_resistance: 0.0,
             shadow_resistance: 0.0,
@@ -732,4 +911,70 @@ pub struct DispelPending {
     /// When true, this dispel also removes poison/disease debuffs (Paladin Cleanse).
     /// Dispel Magic / Devour Magic leave poisons untouched (false).
     pub removes_poison: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The View Combatant screen used to carry a hand-copied duplicate of the
+    /// class stat table, and it had drifted: Warrior shown as 200 HP against a
+    /// real 300, Mage 150 against 250, Warlock 160 against 280. `Combatant::new`
+    /// and every display now read `class_base_stats`, and this pins that they do
+    /// — a spawned combatant must equal its class's base block field for field.
+    #[test]
+    fn spawned_combatants_match_the_shared_base_stat_table() {
+        for &class in match_config::CharacterClass::all() {
+            let base = class_base_stats(class);
+            let c = Combatant::new(1, 0, class);
+            assert_eq!(c.resource_type, base.resource_type, "{class:?} resource_type");
+            assert_eq!(c.max_health, base.max_health, "{class:?} max_health");
+            assert_eq!(c.current_health, base.max_health, "{class:?} current_health");
+            assert_eq!(c.max_mana, base.max_resource, "{class:?} max_resource");
+            assert_eq!(c.current_mana, base.starting_resource, "{class:?} starting_resource");
+            assert_eq!(c.mana_regen, base.resource_regen, "{class:?} resource_regen");
+            assert_eq!(c.attack_damage, base.attack_damage, "{class:?} attack_damage");
+            assert_eq!(c.attack_speed, base.attack_speed, "{class:?} attack_speed");
+            assert_eq!(c.attack_power, base.attack_power, "{class:?} attack_power");
+            assert_eq!(c.spell_power, base.spell_power, "{class:?} spell_power");
+            assert_eq!(c.crit_chance, base.crit_chance, "{class:?} crit_chance");
+            assert_eq!(c.base_movement_speed, base.movement_speed, "{class:?} movement_speed");
+            assert_eq!(c.armor, base.armor, "{class:?} armor");
+        }
+    }
+
+    /// The values themselves, transcribed from the tuple table that lived inside
+    /// `Combatant::new` before it was extracted. This is the refactor's
+    /// value-identity guard: it fails if the extraction changed a number.
+    #[test]
+    fn base_stats_are_value_identical_to_the_pre_extraction_table() {
+        use match_config::CharacterClass as C;
+        // (class, health, max_resource, regen, starting, attack_damage,
+        //  attack_speed, attack_power, spell_power, crit, move_speed)
+        let expected: &[(C, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32)] = &[
+            (C::Warrior, 300.0, 100.0, 0.0, 0.0, 12.0, 1.0, 30.0, 0.0, 0.08, 5.0),
+            (C::Mage, 250.0, 200.0, 0.0, 200.0, 10.0, 0.7, 0.0, 50.0, 0.06, 4.5),
+            (C::Rogue, 275.0, 100.0, 20.0, 100.0, 10.0, 1.3, 35.0, 0.0, 0.10, 6.0),
+            (C::Priest, 250.0, 150.0, 0.0, 150.0, 6.0, 0.8, 0.0, 40.0, 0.04, 5.0),
+            (C::Warlock, 280.0, 180.0, 0.0, 180.0, 8.0, 0.7, 0.0, 45.0, 0.05, 4.5),
+            (C::Paladin, 275.0, 160.0, 0.0, 160.0, 8.0, 0.9, 20.0, 35.0, 0.06, 5.0),
+            (C::Hunter, 265.0, 240.0, 0.0, 240.0, 18.0, 0.4, 30.0, 0.0, 0.07, 5.0),
+            (C::Shaman, 265.0, 160.0, 0.0, 160.0, 7.0, 0.8, 0.0, 42.0, 0.05, 5.0),
+        ];
+        assert_eq!(expected.len(), C::all().len(), "a class is missing from the pin");
+        for &(class, hp, res, regen, start, dmg, spd, ap, sp, crit, mv) in expected {
+            let b = class_base_stats(class);
+            assert_eq!(
+                (b.max_health, b.max_resource, b.resource_regen, b.starting_resource,
+                 b.attack_damage, b.attack_speed, b.attack_power, b.spell_power,
+                 b.crit_chance, b.movement_speed),
+                (hp, res, regen, start, dmg, spd, ap, sp, crit, mv),
+                "{class:?} base stats changed"
+            );
+            assert_eq!(b.armor, 0.0, "{class:?} base armor is equipment-only");
+        }
+        assert_eq!(class_base_stats(C::Warrior).resource_type, ResourceType::Rage);
+        assert_eq!(class_base_stats(C::Rogue).resource_type, ResourceType::Energy);
+        assert_eq!(class_base_stats(C::Mage).resource_type, ResourceType::Mana);
+    }
 }

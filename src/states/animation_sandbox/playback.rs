@@ -269,27 +269,13 @@ pub struct EntryListing {
 
 /// Builds the entry list for one caster class.
 ///
-/// Ability rows come from the class's own ability list joined against the
-/// loaded [`AbilityDefinitions`], so the list tracks the config data rather
-/// than a hand-maintained copy of it.
+/// Ability rows are DERIVED from [`AbilityDefinitions`] via the `class`
+/// attribution on each `abilities.ron` entry, so a newly defined ability is
+/// previewable the moment it exists — there is no list to keep in sync. Pet
+/// abilities (the Hunter's three pet commands, the Felhunter's two) come back
+/// from the same call and preview via the staged pet.
 pub fn entries_for_class(class: CharacterClass, defs: &AbilityDefinitions) -> Vec<EntryListing> {
-    let mut abilities = super::super::view_combatant_ui::get_class_abilities(class);
-    // The Hunter's three pet-command abilities are the PET's, so they are not in
-    // `get_class_abilities` (the View Combatant screen lists the Hunter's own
-    // abilities). The sandbox previews them via the staged pet, so append them
-    // here — sandbox-only, without touching the shared class-ability list.
-    if class == CharacterClass::Hunter {
-        abilities.extend([
-            AbilityType::SpiderWeb,
-            AbilityType::BoarCharge,
-            AbilityType::MastersCall,
-        ]);
-    }
-    // The Warlock's Felhunter has two abilities (Spell Lock, Devour Magic),
-    // likewise not in the shared class list — appended for the same reason.
-    if class == CharacterClass::Warlock {
-        abilities.extend([AbilityType::SpellLock, AbilityType::DevourMagic]);
-    }
+    let abilities = defs.abilities_for_class(class);
     let mut listings: Vec<EntryListing> = abilities
         .into_iter()
         .filter_map(|ability| {
@@ -1570,14 +1556,12 @@ mod tests {
 
     #[test]
     fn every_ability_is_a_sandbox_entry_in_some_class() {
-        // Guard against the silent-drop gap: `get_class_abilities` is
-        // hand-maintained and the sandbox iterates it (plus the pet appends),
-        // NOT the AbilityType enum — so a new variant that is not wired into
-        // some class's list is un-previewable with no compile error. This test
-        // is that missing check (the pattern tests/registration_audit.rs uses
-        // for system wiring). If it fails, add the ability to the right class in
-        // `view_combatant_ui::get_class_abilities`, or — for a pet ability — to
-        // the pet appends in `entries_for_class`.
+        // Every defined ability must be previewable under some class. Class
+        // attribution now makes that structural (the sandbox iterates
+        // `abilities_for_class`, and `class` is a required RON field), so this
+        // is a backstop rather than the load-bearing check it used to be: if it
+        // fails, the ability's `class` in abilities.ron names a class that
+        // never renders it.
         let defs = AbilityDefinitions::default();
         for (&ability, _) in defs.iter() {
             let listed = CharacterClass::all().iter().any(|&class| {
@@ -1587,17 +1571,17 @@ mod tests {
             });
             assert!(
                 listed,
-                "{ability:?} is not a sandbox entry for any class — wire it into \
-                 get_class_abilities or the entries_for_class pet appends"
+                "{ability:?} is not a sandbox entry for any class — check its \
+                 `class` attribution in abilities.ron"
             );
         }
     }
 
     #[test]
     fn pet_owning_classes_list_their_pet_abilities() {
-        // Pet abilities aren't in get_class_abilities (they're the pet's), but
-        // the sandbox appends them so they're selectable and preview via a
-        // staged pet (drive_sandbox_pet).
+        // Pet abilities carry their owning class plus a `pet` marker, so they
+        // come back from `abilities_for_class` alongside the class's own kit —
+        // selectable here, and previewed via a staged pet (drive_sandbox_pet).
         let defs = AbilityDefinitions::default();
         let cases = [
             (

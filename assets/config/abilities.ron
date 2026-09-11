@@ -13,6 +13,7 @@
 
         Frostbolt: (
             name: "Frostbolt",
+            class: Mage,
             icon: "icons/abilities/spell_frost_frostbolt02.jpg",
             cast_time: 1.5,
             range: 40.0,
@@ -38,6 +39,7 @@
 
         FrostNova: (
             name: "Frost Nova",
+            class: Mage,
             icon: "icons/abilities/spell_frost_frostnova.jpg",
             cast_time: 0.0,
             range: 10.0,
@@ -58,6 +60,7 @@
 
         ArcaneIntellect: (
             name: "Arcane Intellect",
+            class: Mage,
             icon: "icons/abilities/spell_holy_magicalsentry.jpg",
             cast_time: 0.0,
             range: 40.0,
@@ -73,6 +76,7 @@
 
         IceBarrier: (
             name: "Ice Barrier",
+            class: Mage,
             icon: "icons/abilities/spell_ice_lament.jpg",
             cast_time: 0.0,
             range: 0.0,
@@ -88,6 +92,7 @@
 
         Polymorph: (
             name: "Polymorph",
+            class: Mage,
             icon: "icons/abilities/spell_nature_polymorph.jpg",
             cast_time: 1.5,
             range: 30.0,
@@ -108,6 +113,7 @@
 
         FlashHeal: (
             name: "Flash Heal",
+            class: Priest,
             icon: "icons/abilities/spell_holy_flashheal.jpg",
             cast_time: 1.5,
             range: 40.0,
@@ -121,6 +127,7 @@
 
         MindBlast: (
             name: "Mind Blast",
+            class: Priest,
             icon: "icons/abilities/spell_shadow_unholyfrenzy.jpg",
             cast_time: 1.5,
             range: 30.0,
@@ -136,6 +143,7 @@
 
         PowerWordFortitude: (
             name: "Power Word: Fortitude",
+            class: Priest,
             icon: "icons/abilities/spell_holy_wordfortitude.jpg",
             cast_time: 0.0,
             range: 40.0,
@@ -151,6 +159,7 @@
 
         PowerWordShield: (
             name: "Power Word: Shield",
+            class: Priest,
             icon: "icons/abilities/spell_holy_powerwordshield.jpg",
             cast_time: 0.0,
             range: 40.0,
@@ -171,6 +180,7 @@
 
         DispelMagic: (
             name: "Dispel Magic",
+            class: Priest,
             icon: "icons/abilities/spell_holy_dispelmagic.jpg",
             cast_time: 0.0,
             range: 30.0,
@@ -182,6 +192,7 @@
 
         PsychicScream: (
             name: "Psychic Scream",
+            class: Priest,
             icon: "icons/abilities/spell_shadow_psychicscream.jpg",
             cast_time: 0.0,
             range: 8.0,
@@ -199,6 +210,7 @@
 
         ManaBurn: (
             name: "Mana Burn",
+            class: Priest,
             icon: "icons/abilities/spell_shadow_manaburn.jpg",
             description: "Destroys 50 mana on an enemy mana user. Interruptible Shadow cast (deals no damage, so it never breaks crowd control) — the lockout blocks Mind Blast and Psychic Scream, not heals.",
             cast_time: 1.5,
@@ -215,6 +227,7 @@
 
         HeroicStrike: (
             name: "Heroic Strike",
+            class: Warrior,
             icon: "icons/abilities/ability_rogue_ambush.jpg",
             cast_time: 0.0,
             range: 2.5,
@@ -225,6 +238,7 @@
 
         Charge: (
             name: "Charge",
+            class: Warrior,
             icon: "icons/abilities/ability_warrior_charge.jpg",
             cast_time: 0.0,
             range: 25.0,
@@ -236,6 +250,7 @@
 
         Rend: (
             name: "Rend",
+            class: Warrior,
             icon: "icons/abilities/ability_gouge.jpg",
             cast_time: 0.0,
             range: 2.5,
@@ -252,6 +267,7 @@
 
         MortalStrike: (
             name: "Mortal Strike",
+            class: Warrior,
             icon: "icons/abilities/ability_warrior_savageblow.jpg",
             cast_time: 0.0,
             range: 2.5,
@@ -271,6 +287,7 @@
 
         Pummel: (
             name: "Pummel",
+            class: Warrior,
             icon: "icons/abilities/inv_gauntlets_04.jpg",
             cast_time: 0.0,
             range: 2.5,
@@ -283,6 +300,7 @@
 
         BattleShout: (
             name: "Battle Shout",
+            class: Warrior,
             icon: "icons/abilities/ability_warrior_battleshout.jpg",
             cast_time: 0.0,
             range: 0.0,
@@ -306,6 +324,7 @@
         // process_berserker_rage via the BerserkerRagePending deferred pattern.
         BerserkerRage: (
             name: "Berserker Rage",
+            class: Warrior,
             icon: "icons/abilities/spell_nature_ancestralguardian.jpg",
             cast_time: 0.0,
             range: 0.0,           // Self-cast
@@ -326,6 +345,7 @@
 
         Ambush: (
             name: "Ambush",
+            class: Rogue,
             icon: "icons/abilities/ability_rogue_ambush.jpg",
             cast_time: 0.0,
             range: 2.5,
@@ -341,6 +361,7 @@
 
         CheapShot: (
             name: "Cheap Shot",
+            class: Rogue,
             icon: "icons/abilities/ability_cheapshot.jpg",
             cast_time: 0.0,
             range: 2.5,
@@ -357,6 +378,7 @@
 
         SinisterStrike: (
             name: "Sinister Strike",
+            class: Rogue,
             icon: "icons/abilities/spell_shadow_ritualofsacrifice.jpg",
             cast_time: 0.0,
             range: 2.5,
@@ -371,6 +393,7 @@
 
         KidneyShot: (
             name: "Kidney Shot",
+            class: Rogue,
             icon: "icons/abilities/ability_rogue_kidneyshot.jpg",
             cast_time: 0.0,
             range: 2.5,
@@ -390,6 +413,7 @@
 
         Kick: (
             name: "Kick",
+            class: Rogue,
             icon: "icons/abilities/ability_kick.jpg",
             cast_time: 0.0,
             range: 2.5,
@@ -406,6 +430,7 @@
         // cleanse. magnitude 0.3 = 70% slow; refreshed in place (no DR).
         CripplingPoison: (
             name: "Crippling Poison",
+            class: Rogue,
             icon: "icons/abilities/ability_poisonsting.jpg",
             cast_time: 0.0,
             range: 2.5,
@@ -427,6 +452,7 @@
 
         Corruption: (
             name: "Corruption",
+            class: Warlock,
             icon: "icons/abilities/spell_shadow_abominationexplosion.jpg",
             cast_time: 0.0,
             range: 30.0,
@@ -443,6 +469,7 @@
 
         Shadowbolt: (
             name: "Shadow Bolt",
+            class: Warlock,
             icon: "icons/abilities/spell_shadow_shadowbolt.jpg",
             cast_time: 2.0,
             range: 30.0,
@@ -462,6 +489,7 @@
 
         Fear: (
             name: "Fear",
+            class: Warlock,
             icon: "icons/abilities/spell_shadow_possession.jpg",
             cast_time: 1.5,
             range: 30.0,
@@ -480,6 +508,7 @@
 
         Immolate: (
             name: "Immolate",
+            class: Warlock,
             icon: "icons/abilities/spell_fire_immolation.jpg",
             cast_time: 2.0,
             range: 30.0,
@@ -500,6 +529,7 @@
 
         DrainLife: (
             name: "Drain Life",
+            class: Warlock,
             icon: "icons/abilities/spell_shadow_lifedrain02.jpg",
             cast_time: 0.0,
             range: 20.0,
@@ -521,6 +551,7 @@
         // 6 ticks (every 4 seconds), 14 damage per tick = 84 total
         CurseOfAgony: (
             name: "Curse of Agony",
+            class: Warlock,
             icon: "icons/abilities/spell_shadow_curseofsargeras.jpg",
             cast_time: 0.0,
             range: 30.0,
@@ -539,6 +570,7 @@
         // WoW Classic: 20 mana, 30yd range, instant, 2 min duration
         CurseOfWeakness: (
             name: "Curse of Weakness",
+            class: Warlock,
             icon: "icons/abilities/spell_shadow_curseofmannoroth.jpg",
             cast_time: 0.0,
             range: 30.0,
@@ -556,6 +588,7 @@
         // WoW Classic: 80 mana, 30yd range, instant, 30s duration
         CurseOfTongues: (
             name: "Curse of Tongues",
+            class: Warlock,
             icon: "icons/abilities/spell_shadow_curseoftounges.jpg",
             cast_time: 0.0,
             range: 30.0,
@@ -574,6 +607,7 @@
         // via simulation in Unit 8.
         UnstableAffliction: (
             name: "Unstable Affliction",
+            class: Warlock,
             icon: "icons/abilities/spell_shadow_unstableaffliction_3.jpg",
             cast_time: 1.5,
             range: 30.0,
@@ -605,6 +639,7 @@
         // target do not diminish each other.
         DeathCoil: (
             name: "Death Coil",
+            class: Warlock,
             icon: "icons/abilities/spell_shadow_deathcoil.jpg",
             cast_time: 0.0,
             range: 30.0,
@@ -641,6 +676,7 @@
         // Scaled for our stat system
         FlashOfLight: (
             name: "Flash of Light",
+            class: Paladin,
             icon: "icons/abilities/spell_holy_flashheal.jpg",
             cast_time: 1.5,
             range: 40.0,
@@ -657,6 +693,7 @@
         // Scaled for our stat system
         HolyLight: (
             name: "Holy Light",
+            class: Paladin,
             icon: "icons/abilities/spell_holy_holybolt.jpg",
             cast_time: 2.5,
             range: 40.0,
@@ -677,6 +714,7 @@
         // Range is set to 40 for ally healing; AI checks 20yd for enemy targeting
         HolyShock: (
             name: "Holy Shock",
+            class: Paladin,
             icon: "icons/abilities/spell_holy_searinglight.jpg",
             cast_time: 0.0,
             range: 40.0,
@@ -699,6 +737,7 @@
         // Using 6s stun for maximum rank feel
         HammerOfJustice: (
             name: "Hammer of Justice",
+            class: Paladin,
             icon: "icons/abilities/spell_holy_sealofmight.jpg",
             cast_time: 0.0,
             range: 10.0,
@@ -717,6 +756,7 @@
         // Our system only has magic debuffs, so it works like Dispel Magic
         PaladinCleanse: (
             name: "Cleanse",
+            class: Paladin,
             icon: "icons/abilities/spell_holy_renew.jpg",
             cast_time: 0.0,
             range: 30.0,
@@ -731,6 +771,7 @@
         // Lasts entire match (600s duration to cover any match length)
         DevotionAura: (
             name: "Devotion Aura",
+            class: Paladin,
             icon: "icons/abilities/spell_holy_devotionaura.jpg",
             cast_time: 0.0,
             range: 100.0,  // Unlimited range for team buff
@@ -751,6 +792,7 @@
         // Debuff purge is handled by process_divine_shield() system
         DivineShield: (
             name: "Divine Shield",
+            class: Paladin,
             icon: "icons/abilities/spell_holy_divineintervention.jpg",
             cast_time: 0.0,
             range: 0.0,  // Self-cast
@@ -772,6 +814,8 @@
         // Silences target for 3 seconds, locks out school for 8 seconds on interrupt
         SpellLock: (
             name: "Spell Lock",
+            class: Warlock,
+            pet: Some(Felhunter),
             icon: "icons/abilities/spell_shadow_mindrot.jpg",
             cast_time: 0.0,
             range: 30.0,
@@ -787,6 +831,8 @@
         // Heals Felhunter for 30 on successful devour (scaled from WoW's 619)
         DevourMagic: (
             name: "Devour Magic",
+            class: Warlock,
+            pet: Some(Felhunter),
             icon: "icons/abilities/spell_nature_purge.jpg",
             cast_time: 0.0,
             range: 30.0,
@@ -804,6 +850,7 @@
         // Scaled for our stat system — reduced cast time to 2.5s for flow
         AimedShot: (
             name: "Aimed Shot",
+            class: Hunter,
             icon: "icons/abilities/inv_spear_07.jpg",
             cast_time: 2.5,
             range: 35.0,
@@ -831,6 +878,7 @@
         // WoW Classic Spell ID 3044: Instant, 25 mana, 35yd, 6s CD, Arcane school
         ArcaneShot: (
             name: "Arcane Shot",
+            class: Hunter,
             icon: "icons/abilities/ability_impalingbolt.jpg",
             cast_time: 0.0,
             range: 35.0,
@@ -853,6 +901,7 @@
         // WoW Classic Spell ID 5116: Instant, 35yd, 12s CD, 50% slow for 4s
         ConcussiveShot: (
             name: "Concussive Shot",
+            class: Hunter,
             icon: "icons/abilities/spell_frost_stun.jpg",
             cast_time: 0.0,
             range: 35.0,
@@ -880,6 +929,7 @@
         // time — see docs/plans/2026-06-11-001-feat-serpent-sting-hunter-plan.md).
         SerpentSting: (
             name: "Serpent Sting",
+            class: Hunter,
             icon: "icons/abilities/ability_hunter_quickshot.jpg",
             cast_time: 0.0,
             range: 35.0,
@@ -904,6 +954,7 @@
         // TBC ability adapted for Classic — instant, 25s CD, no range requirement
         Disengage: (
             name: "Disengage",
+            class: Hunter,
             icon: "icons/abilities/ability_rogue_feint.jpg",
             cast_time: 0.0,
             range: 0.0,  // Self-cast, no target needed
@@ -916,6 +967,7 @@
         // WoW Classic Spell ID 1499: Instant, 50 mana, 25s CD, 10s freeze
         FreezingTrap: (
             name: "Freezing Trap",
+            class: Hunter,
             icon: "icons/abilities/spell_frost_chainsofice.jpg",
             cast_time: 0.0,
             range: 30.0,  // Placement range
@@ -935,6 +987,7 @@
         // Scaled: 10s zone duration for faster ArenaSim gameplay
         FrostTrap: (
             name: "Frost Trap",
+            class: Hunter,
             icon: "icons/abilities/spell_frost_freezingbreath.jpg",
             cast_time: 0.0,
             range: 30.0,  // Placement range
@@ -951,6 +1004,8 @@
         // Gives Hunter breathing room to re-establish range
         SpiderWeb: (
             name: "Web",
+            class: Hunter,
+            pet: Some(Spider),
             icon: "icons/abilities/spell_nature_web.jpg",
             cast_time: 0.0,
             range: 20.0,
@@ -974,6 +1029,8 @@
         // Disrupts enemy casters, creates burst windows
         BoarCharge: (
             name: "Boar Charge",
+            class: Hunter,
+            pet: Some(Boar),
             icon: "icons/abilities/ability_golemstormbolt.jpg",
             cast_time: 0.0,
             range: 25.0,
@@ -992,6 +1049,8 @@
         // Counter to slows/roots — used on Hunter or teammate
         MastersCall: (
             name: "Master's Call",
+            class: Hunter,
+            pet: Some(Bird),
             icon: "icons/abilities/ability_hunter_masterscall.jpg",
             cast_time: 0.0,
             range: 40.0,  // Can target allies at range
@@ -1009,6 +1068,7 @@
         // WoW Classic: Instant, no rage cost in our system, 30yd range, 2 min duration
         DemoralizingShout: (
             name: "Demoralizing Shout",
+            class: Warrior,
             icon: "icons/abilities/demoralizing_shout.jpg",
             cast_time: 0.0,
             range: 30.0,
@@ -1026,6 +1086,7 @@
         // WoW Classic: Instant, no rage cost in our system, 30yd range, 2 min duration
         CommandingShout: (
             name: "Commanding Shout",
+            class: Warrior,
             icon: "icons/abilities/commanding_shout.jpg",
             cast_time: 0.0,
             range: 30.0,
@@ -1043,6 +1104,7 @@
         // When a melee attacker hits, they receive MovementSpeedSlow + AttackSpeedSlow (Unit 3)
         FrostArmor: (
             name: "Frost Armor",
+            class: Mage,
             icon: "icons/abilities/frost_armor.jpg",
             cast_time: 0.0,
             range: 0.0,
@@ -1060,6 +1122,7 @@
         // WoW Classic: Instant, no cost, 30 min duration
         MageArmorSpell: (
             name: "Mage Armor",
+            class: Mage,
             icon: "icons/abilities/mage_armor.jpg",
             cast_time: 0.0,
             range: 0.0,
@@ -1077,6 +1140,7 @@
         // WoW Classic (TBC): Instant, no cost, 30 min duration, +5% crit
         MoltenArmor: (
             name: "Molten Armor",
+            class: Mage,
             icon: "icons/abilities/molten_armor.jpg",
             cast_time: 0.0,
             range: 0.0,
@@ -1094,6 +1158,7 @@
         // WoW Classic: Instant, no cost, party-wide aura, +30 shadow resistance
         ShadowResistanceAura: (
             name: "Shadow Resistance Aura",
+            class: Paladin,
             icon: "icons/abilities/shadow_resistance_aura.jpg",
             cast_time: 0.0,
             range: 100.0,
@@ -1111,6 +1176,7 @@
         // WoW Classic: Instant, no cost, party-wide aura
         ConcentrationAura: (
             name: "Concentration Aura",
+            class: Paladin,
             icon: "icons/abilities/concentration_aura.jpg",
             cast_time: 0.0,
             range: 100.0,
@@ -1134,6 +1200,7 @@
         // Lightning Bolt: ranged Nature nuke, the Shaman's main sustained pressure.
         LightningBolt: (
             name: "Lightning Bolt",
+            class: Shaman,
             icon: "icons/abilities/spell_nature_lightning.jpg",
             cast_time: 2.0,
             range: 30.0,
@@ -1161,6 +1228,7 @@
         // Slow is non-breaking, matching Frostbolt's slow semantics.
         FrostShock: (
             name: "Frost Shock",
+            class: Shaman,
             icon: "icons/abilities/spell_frost_frostshock.jpg",
             cast_time: 0.0,
             range: 25.0,
@@ -1182,6 +1250,7 @@
         // Lesser Healing Wave: fast direct heal. The Shaman's only heal.
         LesserHealingWave: (
             name: "Lesser Healing Wave",
+            class: Shaman,
             icon: "icons/abilities/spell_nature_healingwavelesser.jpg",
             cast_time: 1.5,
             range: 40.0,
@@ -1197,6 +1266,7 @@
         // Enemy-buff-removal mechanic arrives in U4; this entry just declares it.
         Purge: (
             name: "Purge",
+            class: Shaman,
             description: "Removes one beneficial magic effect from an enemy.",
             icon: "icons/abilities/spell_nature_purge.jpg",
             cast_time: 0.0,
@@ -1211,6 +1281,7 @@
         // Reuses the Pummel/Kick interrupt fields.
         WindShear: (
             name: "Wind Shear",
+            class: Shaman,
             icon: "icons/abilities/spell_nature_cyclone.jpg",
             cast_time: 0.0,
             range: 30.0,
@@ -1224,6 +1295,7 @@
         // Air — Windfury Totem: empowers melee allies' auto-attacks (U3 behavior).
         AirTotem: (
             name: "Windfury Totem",
+            class: Shaman,
             icon: "icons/abilities/spell_nature_windfury.jpg",
             cast_time: 0.0,
             range: 0.0,
@@ -1240,6 +1312,7 @@
         // the trickle, so keeping it up competes with hardcast heals.
         WaterTotem: (
             name: "Healing Stream Totem",
+            class: Shaman,
             icon: "icons/abilities/inv_spear_04.jpg",
             cast_time: 0.0,
             range: 0.0,
@@ -1251,6 +1324,7 @@
         // Earth — Strength of Earth Totem: ally attack power in radius (U3 behavior).
         EarthTotem: (
             name: "Strength of Earth Totem",
+            class: Shaman,
             icon: "icons/abilities/spell_nature_strengthofearthtotem02.jpg",
             cast_time: 0.0,
             range: 0.0,
@@ -1262,6 +1336,7 @@
         // Fire — Flametongue Totem: ally spell power in radius (U3 behavior).
         FireTotem: (
             name: "Flametongue Totem",
+            class: Shaman,
             icon: "icons/abilities/spell_fire_flametounge.jpg",
             cast_time: 0.0,
             range: 0.0,
