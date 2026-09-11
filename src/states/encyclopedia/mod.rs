@@ -20,6 +20,12 @@
 //!    can float overlays (`egui::Area`, `popup_below_widget`). The takeover
 //!    buys simpler `Esc` semantics (one ladder, not two) and a state the
 //!    snapshot tests can render. Please do not "fix" it back to a dropdown.
+//!
+//!    Because the whole screen relayouts as the query changes, the search
+//!    field is pinned to an ABSOLUTE egui `Id` — egui tracks keyboard focus by
+//!    `Id` and derives an unpinned one from the widget's position among its
+//!    siblings, so anything added or removed near the field would otherwise
+//!    take its focus away mid-type. Keep the `.id(..)` if you touch that row.
 //! 4. **The linked-icon widget** ([`widget`]) — every icon the encyclopedia
 //!    draws shows that entity's tooltip on hover and navigates to its page on
 //!    click. Tooltips reuse the game's existing text builders, so there is no
@@ -342,24 +348,41 @@ pub fn draw_encyclopedia(
             // the moment you navigated anywhere) left a reader two pages deep
             // with no one-click way out. Back is disabled rather than hidden at
             // the root so the row never reflows under the cursor.
-            ui.horizontal(|ui| {
-                let back = ui.add_enabled(
-                    can_go_back,
-                    chrome_button("◀ BACK", if can_go_back { TEXT } else { DIM }),
-                );
-                if back.clicked() {
-                    action = Some(EncyclopediaAction::Back);
-                }
-                ui.add_space(10.0);
-                ui.label(egui::RichText::new("ENCYCLOPEDIA").size(30.0).color(GOLD));
-
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    // The exit NAMES its destination, because the destination
-                    // is whatever context opened the encyclopedia — not a fixed
-                    // main menu.
-                    if ui.add(chrome_button(&exit_label, TEXT)).clicked() {
-                        action = Some(EncyclopediaAction::Exit);
+            //
+            // The row is allocated at an EXPLICIT height — the title's own line
+            // height — and laid out with `horizontal_centered`, so Back, the
+            // title and Exit all share one vertical centre. A plain
+            // `ui.horizontal` gives the row only `interact_size.y` (18pt) of
+            // cross-axis space, which the 30pt title overflows: Back ended up
+            // pinned near the top of that band while the title and Exit sat 8px
+            // lower. Two buttons flanking a title read as a pair, so that
+            // offset read as a mistake.
+            let title_height = ui
+                .painter()
+                .layout_no_wrap(TITLE.to_owned(), egui::FontId::proportional(TITLE_SIZE), GOLD)
+                .size()
+                .y;
+            let row_height = title_height.max(ui.spacing().interact_size.y);
+            ui.allocate_ui(egui::vec2(ui.available_width(), row_height), |ui| {
+                ui.horizontal_centered(|ui| {
+                    let back = ui.add_enabled(
+                        can_go_back,
+                        chrome_button("◀ BACK", if can_go_back { TEXT } else { DIM }),
+                    );
+                    if back.clicked() {
+                        action = Some(EncyclopediaAction::Back);
                     }
+                    ui.add_space(10.0);
+                    ui.label(egui::RichText::new(TITLE).size(TITLE_SIZE).color(GOLD));
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // The exit NAMES its destination, because the destination
+                        // is whatever context opened the encyclopedia — not a fixed
+                        // main menu.
+                        if ui.add(chrome_button(&exit_label, TEXT)).clicked() {
+                            action = Some(EncyclopediaAction::Exit);
+                        }
+                    });
                 });
             });
 
@@ -371,28 +394,43 @@ pub fn draw_encyclopedia(
             // section you do not know; it is sized to say so.
             ui.horizontal(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // The clear button is ALWAYS drawn — DISABLED while the box
+                    // is empty, never removed. Two reasons, one of them a bug
+                    // fix: egui numbers a widget's Id by its position in the
+                    // sibling sequence, so a button that appears the instant the
+                    // query becomes non-empty renumbers the field behind it and
+                    // silently takes its keyboard focus with it (the field went
+                    // dead mid-type). The reserved slot also stops the field
+                    // jumping width on the first and last keystroke.
+                    //
                     // "×" rather than a heavier glyph: egui's default font has
                     // no coverage for most dingbats and draws them as tofu.
-                    if !search.trim().is_empty() {
-                        if ui
-                            .add_sized(
-                                [SEARCH_HEIGHT, SEARCH_HEIGHT],
-                                egui::Button::new(
-                                    egui::RichText::new("×").size(19.0).color(MUTED),
-                                )
+                    let has_query = !search.trim().is_empty();
+                    let clear = ui
+                        .add_enabled(
+                            has_query,
+                            egui::Button::new(egui::RichText::new("×").size(19.0).color(MUTED))
                                 .fill(PANEL)
-                                .stroke(egui::Stroke::new(1.0, LINE)),
-                            )
-                            .on_hover_text("Clear search")
-                            .clicked()
-                        {
-                            search.clear();
-                        }
-                        ui.add_space(6.0);
+                                .stroke(egui::Stroke::new(1.0, LINE))
+                                .min_size(egui::vec2(SEARCH_HEIGHT, SEARCH_HEIGHT)),
+                        )
+                        .on_hover_text("Clear search");
+                    if clear.clicked() {
+                        search.clear();
                     }
+                    ui.add_space(6.0);
                     ui.add_sized(
                         [ui.available_width(), SEARCH_HEIGHT],
                         egui::TextEdit::singleline(search)
+                            // An ABSOLUTE Id, not egui's positional default and
+                            // not `.id_salt` (which is still hashed with the
+                            // widget's sequence number). The search field is the
+                            // one widget on this screen whose focus must survive
+                            // an arbitrary relayout of everything around it —
+                            // the results take over the content area as the
+                            // query changes — so it is pinned to an Id nothing
+                            // else on the screen can move.
+                            .id(egui::Id::new(SEARCH_FIELD_ID))
                             .hint_text(
                                 egui::RichText::new("Search everything…").size(16.0).color(DIM),
                             )
@@ -463,6 +501,16 @@ pub fn draw_encyclopedia(
 
 /// Height of the search field and its clear button. Sized as a primary control.
 const SEARCH_HEIGHT: f32 = 34.0;
+
+/// The screen's title. Its laid-out height also sets the chrome row's height,
+/// so the title, Back and Exit share a vertical centre no matter what size the
+/// title is given.
+const TITLE: &str = "ENCYCLOPEDIA";
+const TITLE_SIZE: f32 = 30.0;
+
+/// The search field's absolute egui `Id`. Stable by construction — see the
+/// comment at its `TextEdit`.
+const SEARCH_FIELD_ID: &str = "encyclopedia_search_field";
 
 /// The exit button's label, naming where it will put the player.
 fn exit_label(return_to: GameState) -> String {
@@ -750,6 +798,112 @@ mod tests {
         assert!(!state.apply(EncyclopediaAction::Back));
         assert!(state.can_go_back());
         assert!(state.apply(EncyclopediaAction::Exit));
+    }
+
+    /// Typing must NEVER drop the search field's keyboard focus — not on the
+    /// keystroke that first fills the box, not on the one that empties it, and
+    /// not when the result count changes underneath.
+    ///
+    /// egui derives a widget's `Id` from its position in the sibling sequence
+    /// unless one is given explicitly, and focus is tracked by `Id`. The clear
+    /// button appearing the moment the query became non-empty renumbered the
+    /// field behind it, so the field went dead mid-type. The field now carries
+    /// an absolute `Id` and the clear button's slot is always reserved.
+    ///
+    /// Driven through a real headless `egui::Context`: the keystrokes are input
+    /// events and the text is edited by the widget itself, so this exercises the
+    /// same focus bookkeeping the client does rather than asserting on a field.
+    #[test]
+    fn typing_never_drops_focus_from_the_search_field() {
+        let items = crate::states::play_match::equipment::load_item_definitions()
+            .expect("items.ron must load");
+        let mut state = EncyclopediaState::default();
+        state.rebuild_registry(&items);
+
+        let ctx = egui::Context::default();
+        let field = egui::Id::new(SEARCH_FIELD_ID);
+
+        let frame = |state: &mut EncyclopediaState, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1400.0, 900.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let _ = ctx.run(input, |ctx| {
+                let data =
+                    EncyclopediaData { items: &items, item_icons: None, class_icons: None };
+                let _ = draw_encyclopedia(ctx, state, &data);
+            });
+        };
+
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+
+        // Lay the screen out once, then focus the field by CLICKING it, the way
+        // a player does — so what follows tests the real focus path rather than
+        // a hand-planted memory entry.
+        frame(&mut state, vec![]);
+        let click_at = ctx
+            .read_response(field)
+            .expect("the search field is drawn every frame")
+            .rect
+            .center();
+        let button = |pressed| egui::Event::PointerButton {
+            pos: click_at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        // Hover, press and release each need their own frame: egui hit-tests
+        // against the previous frame's pointer position and widget rects, and
+        // only promotes a press to a click for a widget that saw the button
+        // held down during its own frame.
+        frame(&mut state, vec![egui::Event::PointerMoved(click_at)]);
+        frame(&mut state, vec![button(true)]);
+        frame(&mut state, vec![button(false)]);
+        assert_eq!(
+            ctx.memory(|m| m.focused()),
+            Some(field),
+            "clicking the search field did not focus it"
+        );
+
+        // Type a query with results. The FIRST keystroke is the one that used
+        // to reveal the clear button and renumber the row.
+        for ch in ["g", "u"] {
+            frame(&mut state, vec![egui::Event::Text(ch.to_string())]);
+            assert_eq!(
+                ctx.memory(|m| m.focused()),
+                Some(field),
+                "focus lost while typing '{ch}'"
+            );
+        }
+        // The load-bearing assertion: against the old code the 'u' never
+        // arrived, because the 'g' had already cost the field its focus.
+        assert_eq!(state.search, "gu");
+
+        // ...and delete it all again, crossing back to empty.
+        for _ in 0..2 {
+            frame(&mut state, vec![key(egui::Key::Backspace)]);
+            assert_eq!(
+                ctx.memory(|m| m.focused()),
+                Some(field),
+                "focus lost on backspace"
+            );
+        }
+        assert!(state.search.is_empty());
+
+        // The field is still live: typing resumes without a re-click.
+        frame(&mut state, vec![egui::Event::Text("w".to_string())]);
+        assert_eq!(state.search, "w");
+        assert_eq!(ctx.memory(|m| m.focused()), Some(field));
     }
 
     #[test]
