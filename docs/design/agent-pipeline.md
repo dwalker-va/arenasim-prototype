@@ -372,11 +372,12 @@ handed off from a PM session get filed.
   pushes.
 - **Release Manager** — `.claude/agents/release-manager.md`. Bundles the Done
   cards the orchestrator hands it into a tagged GitHub release: verifies each
-  listed PR is merged to the `origin/main` HEAD it will tag, drafts grouped
-  release notes (features / fixes / pipeline, plus the standing install section
-  from `packaging/release-notes.md`), picks the next `v0.x.y` tag from the
-  existing scheme, and publishes with `gh release create --target <verified
-  sha>`. Bash/Read/Grep/Glob only — it writes no repo files (notes go straight
+  listed PR is merged to the `origin/main` HEAD it will tag, drafts
+  **player-facing** notes grouped by what a player experiences — no card ids, no
+  PR links, no pipeline section — with the standing install section from
+  `packaging/release-notes.md` appended verbatim, picks the next `v0.x.y` tag
+  from the existing scheme, and publishes with `gh release create --target
+  <verified sha>`. Bash/Read/Grep/Glob only — it writes no repo files (notes go straight
   through `gh`), never merges, never pushes branches, never touches the board.
   Reports `RELEASED / NEEDS_INPUT / FAILED` in a fixed format; board archival
   of the bundled cards — and of the trigger card, when the run was
@@ -408,6 +409,14 @@ construction:
 So this rule only ever collects work cards, each of which has a PR. An empty
 bundle is not spawnable — tell the user there is nothing to release.
 
+**The bundle's shape is not the notes' shape.** The ids and PR links travel in
+the bundle so the Release Manager can verify each PR is merged and in the tagged
+HEAD — they are verification *input*, and nothing in the bundle's structure
+implies a section, a heading or a bullet in the published notes. v0.3.0 shipped
+with a card id on every bullet and a `## Pipeline & tooling` section listing
+twelve of them because that separation was not stated anywhere; it now is, in
+the agent's contract (items 1 and 2).
+
 **The bundle is correct by construction.** `done` means *merged*: Tester-approved
 work whose PR is still open waits in `human_review`, which the rule never
 collects. So every work card the bundle picks up already has its PR in `main`,
@@ -419,9 +428,10 @@ fix that card (or merge its PR), never release around it.
 
 **What the agent does** (`.claude/agents/release-manager.md` is authoritative):
 verifies each listed PR is `MERGED` and its merge commit is an ancestor of the
-`origin/main` HEAD it records; drafts notes grouped features / fixes /
-pipeline & tooling with the standing install section from
-`packaging/release-notes.md` appended; picks the next tag by inspecting
+`origin/main` HEAD it records; drafts player-facing notes — Steam-patch-note
+register, grouped by what a player experiences, with no card ids, no PR links
+and no pipeline section, and the standing install section from
+`packaging/release-notes.md` appended verbatim; picks the next tag by inspecting
 `git tag` / `gh release list` (pre-1.0 semver — minor bump for any feature in
 the bundle, patch for fix-only; `v0.1.0` if the repo had no version tags); and
 publishes with `gh release create <tag> --target <verified sha>`. The tag push
