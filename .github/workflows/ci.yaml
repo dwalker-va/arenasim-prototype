@@ -16,7 +16,7 @@ on:
 # A newer push to the same branch makes the older run's verdict stale, so cancel
 # it rather than paying for two answers and reading the wrong one.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-probe-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -37,9 +37,12 @@ jobs:
     # the only way to get green again would be to loosen the bit-exactness that
     # is the entire point of the guard. Nothing ships on Linux either: the
     # release workflow builds macOS and Windows.
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Linux build deps (probe only)
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev
 
       # `tests/db2_spell_sweep_fixtures.rs` shells out to `python3` and PANICS
       # when it is missing, on purpose — a fixture suite that silently does not
