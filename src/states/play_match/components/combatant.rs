@@ -1,9 +1,8 @@
 use bevy::prelude::*;
-use std::collections::HashMap;
 use super::super::match_config::{self, RogueOpener, RoguePoison, WarlockCurse, WarriorShout, MageArmor, PaladinAura};
 use super::super::abilities::{AbilityType, ScalingStat, SpellSchool};
 use super::super::ability_config::AbilityConfig;
-use super::super::equipment::{ItemSlot, ItemId, ItemDefinitions};
+use super::super::equipment::{ItemSlot, Loadout, ItemDefinitions};
 use super::auras::AuraType;
 use super::pets::PetType;
 use super::resources::GameRng;
@@ -677,7 +676,7 @@ impl Combatant {
     ///   attack_damage and attack_speed, ADD other stats.
     /// - Off Hand weapons: only ADD non-weapon stats (no attack_damage/attack_speed replacement).
     /// - After all items: reset current_health and current_mana to their new maximums.
-    pub fn apply_equipment(&mut self, loadout: &HashMap<ItemSlot, ItemId>, items: &ItemDefinitions) {
+    pub fn apply_equipment(&mut self, loadout: &Loadout, items: &ItemDefinitions) {
         // Determine the primary weapon slot based on class
         let primary_weapon_slot = if self.class.is_melee() {
             ItemSlot::MainHand

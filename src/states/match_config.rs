@@ -5,9 +5,8 @@
 
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
-use crate::states::play_match::equipment::{ItemId, ItemSlot};
+use crate::states::play_match::equipment::Loadout;
 
 /// Rogue stealth opener choice
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
@@ -464,9 +463,9 @@ pub struct MatchConfig {
     /// Team 2's paladin aura preferences (one per slot, defaults to DevotionAura)
     pub team2_paladin_auras: Vec<PaladinAura>,
     /// Team 1's equipment overrides per slot (one HashMap per team slot)
-    pub team1_equipment: Vec<HashMap<ItemSlot, ItemId>>,
+    pub team1_equipment: Vec<Loadout>,
     /// Team 2's equipment overrides per slot (one HashMap per team slot)
-    pub team2_equipment: Vec<HashMap<ItemSlot, ItemId>>,
+    pub team2_equipment: Vec<Loadout>,
 }
 
 impl Default for MatchConfig {
@@ -496,8 +495,8 @@ impl Default for MatchConfig {
             team2_mage_armors: vec![MageArmor::default()],
             team1_paladin_auras: vec![PaladinAura::default()],
             team2_paladin_auras: vec![PaladinAura::default()],
-            team1_equipment: vec![HashMap::new()],
-            team2_equipment: vec![HashMap::new()],
+            team1_equipment: vec![Loadout::new()],
+            team2_equipment: vec![Loadout::new()],
         }
     }
 }
@@ -525,7 +524,7 @@ impl MatchConfig {
         self.team1_warrior_shouts.resize(size, WarriorShout::default());
         self.team1_mage_armors.resize(size, MageArmor::default());
         self.team1_paladin_auras.resize(size, PaladinAura::default());
-        self.team1_equipment.resize(size, HashMap::new());
+        self.team1_equipment.resize(size, Loadout::new());
     }
 
     /// Set team 2 size, adjusting the slots vector
@@ -554,7 +553,7 @@ impl MatchConfig {
         self.team2_warrior_shouts.resize(size, WarriorShout::default());
         self.team2_mage_armors.resize(size, MageArmor::default());
         self.team2_paladin_auras.resize(size, PaladinAura::default());
-        self.team2_equipment.resize(size, HashMap::new());
+        self.team2_equipment.resize(size, Loadout::new());
     }
 
     /// Check if the match configuration is valid (all slots filled)

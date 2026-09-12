@@ -13,9 +13,28 @@
 
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::states::match_config::CharacterClass;
+
+/// What a character wears: one item per equip socket.
+///
+/// **A `BTreeMap`, deliberately, and not for lookup speed.** Applying a loadout
+/// sums float stats across its entries ([`crate::states::play_match::components::Combatant::apply_equipment`],
+/// and the View Combatant screen's `EquipmentBonuses::from_loadout`), and float
+/// addition is not associative — so iteration order decides the last ULP of every
+/// derived stat. A `HashMap` with the default `RandomState` is seeded per process,
+/// which made those sums differ between runs of one unmodified binary (AS-58:
+/// Rogue `crit_chance` took three distinct bit patterns, 0x3e2e147a..0x3e2e147c,
+/// across 40 runs). That is fatal for a project whose verification protocol is
+/// headless byte-identity.
+///
+/// `BTreeMap` puts the ordering in the TYPE rather than in a rule each summation
+/// site must remember. Iteration follows [`ItemSlot`]'s derived `Ord`, which is
+/// its declaration order and therefore [`ItemSlot::all`]'s canonical order.
+/// Never widen a loadout back to a `HashMap`; `loadout_is_ordered` in this
+/// module's tests fails if you do.
+pub type Loadout = BTreeMap<ItemSlot, ItemId>;
 
 // ============================================================================
 // ENUMS
@@ -112,7 +131,12 @@ impl ItemSlotType {
 /// [`resolve_loadout`]): it answers "what is worn HERE". An item never names a
 /// socket; it names an [`ItemSlotType`], and the socket decides which kinds it
 /// accepts via [`ItemSlot::slot_type`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+///
+/// `Ord` is derived, so it follows the declaration order below — which is also
+/// [`ItemSlot::all`]'s canonical presentation order. That is what gives
+/// [`Loadout`] its deterministic iteration; reordering these variants changes the
+/// order equipment stats are summed in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum ItemSlot {
     Head,
     Neck,
@@ -574,7 +598,7 @@ pub fn can_equip(class: CharacterClass, item: &ItemConfig) -> bool {
 /// Validate that all items in a loadout are equippable by the given class
 pub fn validate_class_restrictions(
     class: CharacterClass,
-    loadout: &HashMap<ItemSlot, ItemId>,
+    loadout: &Loadout,
     items: &ItemDefinitions,
 ) -> Result<(), String> {
     for (slot, item_id) in loadout {
@@ -601,7 +625,7 @@ pub fn validate_class_restrictions(
 /// Validate that no item occupies both sockets of a sibling pair. Items are
 /// unique-equipped: two ring sockets means two DIFFERENT rings.
 pub fn validate_unique_equipped(
-    loadout: &HashMap<ItemSlot, ItemId>,
+    loadout: &Loadout,
     items: &ItemDefinitions,
 ) -> Result<(), String> {
     for (primary, secondary) in SIBLING_SOCKET_PAIRS {
@@ -689,8 +713,8 @@ pub fn validate_item_budget(name: &str, item: &ItemConfig) -> Result<(), String>
 pub fn resolve_loadout(
     class: CharacterClass,
     defaults: &DefaultLoadouts,
-    overrides: &HashMap<ItemSlot, ItemId>,
-) -> HashMap<ItemSlot, ItemId> {
+    overrides: &Loadout,
+) -> Loadout {
     let mut loadout = defaults.get(class).cloned().unwrap_or_default();
     for (slot, item_id) in overrides {
         loadout.insert(*slot, *item_id);
@@ -700,7 +724,7 @@ pub fn resolve_loadout(
 
 /// Strip off-hand from a resolved loadout when the main-hand is a two-handed weapon.
 /// Call this after `resolve_loadout` to enforce the 2H constraint.
-pub fn enforce_two_hand_conflicts(loadout: &mut HashMap<ItemSlot, ItemId>, items: &ItemDefinitions) {
+pub fn enforce_two_hand_conflicts(loadout: &mut Loadout, items: &ItemDefinitions) {
     let has_2h = loadout.get(&ItemSlot::MainHand)
         .and_then(|id| items.get(id))
         .map_or(false, |item| item.two_handed);
@@ -716,7 +740,7 @@ pub fn enforce_two_hand_conflicts(loadout: &mut HashMap<ItemSlot, ItemId>, items
 ///
 /// The primary socket keeps the item, mirroring the 2H rule's preference for
 /// the main hand, so the outcome is independent of map iteration order.
-pub fn enforce_unique_equipped(loadout: &mut HashMap<ItemSlot, ItemId>) {
+pub fn enforce_unique_equipped(loadout: &mut Loadout) {
     for (primary, secondary) in SIBLING_SOCKET_PAIRS {
         if let (Some(a), Some(b)) = (loadout.get(primary), loadout.get(secondary)) {
             if a == b {
@@ -794,7 +818,7 @@ impl ItemDefinitions {
         &self,
         slot: ItemSlot,
         class: CharacterClass,
-        loadout: &HashMap<ItemSlot, ItemId>,
+        loadout: &Loadout,
     ) -> Vec<(ItemId, &ItemConfig)> {
         let worn_in_sibling = slot.sibling().and_then(|s| loadout.get(&s)).copied();
         self.items_for_slot(slot, class)
@@ -807,13 +831,13 @@ impl ItemDefinitions {
 /// Root structure for loadouts.ron
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LoadoutsConfig {
-    pub loadouts: HashMap<CharacterClass, HashMap<ItemSlot, ItemId>>,
+    pub loadouts: HashMap<CharacterClass, Loadout>,
 }
 
 /// Resource containing default loadouts per class
 #[derive(Resource, Clone)]
 pub struct DefaultLoadouts {
-    loadouts: HashMap<CharacterClass, HashMap<ItemSlot, ItemId>>,
+    loadouts: HashMap<CharacterClass, Loadout>,
 }
 
 impl DefaultLoadouts {
@@ -823,7 +847,7 @@ impl DefaultLoadouts {
         }
     }
 
-    pub fn get(&self, class: CharacterClass) -> Option<&HashMap<ItemSlot, ItemId>> {
+    pub fn get(&self, class: CharacterClass) -> Option<&Loadout> {
         self.loadouts.get(&class)
     }
 }
@@ -917,7 +941,7 @@ impl Plugin for EquipmentPlugin {
 
 /// Format an equipment loadout for combat log display
 pub fn format_loadout(
-    loadout: &HashMap<ItemSlot, ItemId>,
+    loadout: &Loadout,
     items: &ItemDefinitions,
 ) -> String {
     if loadout.is_empty() {
@@ -1023,6 +1047,57 @@ mod tests {
         }
     }
 
+    // ---- loadout ordering guard (AS-58) ----
+
+    /// A [`Loadout`] must iterate in canonical socket order, because applying one
+    /// sums floats and float addition is not associative.
+    ///
+    /// **Why this test and not a repetition test.** The obvious guard — derive the
+    /// same loadout's stats N times and assert they match — cannot fail, whatever
+    /// map type is used: `RandomState` is seeded ONCE PER PROCESS, so a `HashMap`
+    /// iterates in a fixed (if arbitrary) order for the whole life of a test
+    /// binary. The bug is only visible ACROSS processes, which no in-process test
+    /// can observe. So the guard is structural instead, in two halves:
+    ///
+    /// 1. `assert_is_btreemap` is a type assertion. Aliasing [`Loadout`] back to a
+    ///    `HashMap` makes this line stop COMPILING — it does not merely fail.
+    /// 2. The scrambled-insertion check pins the order to [`ItemSlot::all`], so
+    ///    reordering the `ItemSlot` variants or hand-writing a different `Ord`
+    ///    (either of which silently re-sums the stats in a new order) fails here.
+    #[test]
+    fn loadout_is_ordered() {
+        fn assert_is_btreemap(_: &BTreeMap<ItemSlot, ItemId>) {}
+
+        // Insert every socket in REVERSE canonical order; an ordered map must
+        // still hand them back in canonical order.
+        let mut loadout = Loadout::new();
+        for slot in ItemSlot::all().iter().rev() {
+            loadout.insert(*slot, ItemId::LionheartHelm);
+        }
+        assert_is_btreemap(&loadout);
+
+        let iterated: Vec<ItemSlot> = loadout.keys().copied().collect();
+        assert_eq!(
+            iterated,
+            ItemSlot::all().to_vec(),
+            "a Loadout must iterate in ItemSlot::all() order — equipment stat sums depend on it"
+        );
+    }
+
+    /// `ItemSlot`'s derived `Ord` is what [`Loadout`] orders by, and
+    /// [`ItemSlot::all`] is what every presentation surface orders by. They are
+    /// only the same list while the variant declaration order matches `all()`.
+    #[test]
+    fn item_slot_ord_matches_canonical_order() {
+        let mut sorted = ItemSlot::all().to_vec();
+        sorted.sort();
+        assert_eq!(
+            sorted,
+            ItemSlot::all().to_vec(),
+            "ItemSlot::all() must be in Ord order — it is the loadout summation order"
+        );
+    }
+
     // ---- apply_equipment tests ----
 
     #[test]
@@ -1034,7 +1109,7 @@ mod tests {
         let base_health = combatant.max_health;
         let base_ap = combatant.attack_power;
 
-        let mut loadout = HashMap::new();
+        let mut loadout = Loadout::new();
         loadout.insert(ItemSlot::Head, ItemId::LionheartHelm);
         combatant.apply_equipment(&loadout, &items);
 
@@ -1051,7 +1126,7 @@ mod tests {
         let base_health = combatant.max_health;
         let base_damage = combatant.attack_damage;
 
-        let loadout = HashMap::new();
+        let loadout = Loadout::new();
         combatant.apply_equipment(&loadout, &items);
 
         assert_eq!(combatant.max_health, base_health);
@@ -1065,7 +1140,7 @@ mod tests {
         ]);
         let mut combatant = super::super::components::combatant::Combatant::new(1, 0, CharacterClass::Warrior);
 
-        let mut loadout = HashMap::new();
+        let mut loadout = Loadout::new();
         loadout.insert(ItemSlot::MainHand, ItemId::ArcaniteReaper);
         combatant.apply_equipment(&loadout, &items);
 
@@ -1084,7 +1159,7 @@ mod tests {
         // Mage is ranged, so Ranged slot is primary weapon slot
         let mut combatant = super::super::components::combatant::Combatant::new(1, 0, CharacterClass::Mage);
 
-        let mut loadout = HashMap::new();
+        let mut loadout = Loadout::new();
         loadout.insert(ItemSlot::Ranged, ItemId::WandOfShadows);
         combatant.apply_equipment(&loadout, &items);
 
@@ -1101,7 +1176,7 @@ mod tests {
         let base_damage = combatant.attack_damage;
         let base_speed = combatant.attack_speed;
 
-        let mut loadout = HashMap::new();
+        let mut loadout = Loadout::new();
         loadout.insert(ItemSlot::OffHand, ItemId::WallOfTheDeadShield);
         combatant.apply_equipment(&loadout, &items);
 
@@ -1117,13 +1192,13 @@ mod tests {
     #[test]
     fn resolve_loadout_uses_defaults_when_no_overrides() {
         let mut loadout_map = HashMap::new();
-        let mut warrior_loadout = HashMap::new();
+        let mut warrior_loadout = Loadout::new();
         warrior_loadout.insert(ItemSlot::Head, ItemId::LionheartHelm);
         warrior_loadout.insert(ItemSlot::MainHand, ItemId::ArcaniteReaper);
         loadout_map.insert(CharacterClass::Warrior, warrior_loadout);
 
         let defaults = DefaultLoadouts { loadouts: loadout_map };
-        let overrides = HashMap::new();
+        let overrides = Loadout::new();
 
         let result = resolve_loadout(CharacterClass::Warrior, &defaults, &overrides);
         assert_eq!(result.get(&ItemSlot::Head), Some(&ItemId::LionheartHelm));
@@ -1133,12 +1208,12 @@ mod tests {
     #[test]
     fn resolve_loadout_overrides_replace_defaults() {
         let mut loadout_map = HashMap::new();
-        let mut warrior_loadout = HashMap::new();
+        let mut warrior_loadout = Loadout::new();
         warrior_loadout.insert(ItemSlot::MainHand, ItemId::ArcaniteReaper);
         loadout_map.insert(CharacterClass::Warrior, warrior_loadout);
 
         let defaults = DefaultLoadouts { loadouts: loadout_map };
-        let mut overrides = HashMap::new();
+        let mut overrides = Loadout::new();
         overrides.insert(ItemSlot::MainHand, ItemId::FrostbiteBlade);
 
         let result = resolve_loadout(CharacterClass::Warrior, &defaults, &overrides);
@@ -1148,7 +1223,7 @@ mod tests {
     #[test]
     fn resolve_loadout_missing_class_returns_only_overrides() {
         let defaults = DefaultLoadouts { loadouts: HashMap::new() };
-        let mut overrides = HashMap::new();
+        let mut overrides = Loadout::new();
         overrides.insert(ItemSlot::Head, ItemId::LionheartHelm);
 
         let result = resolve_loadout(CharacterClass::Warrior, &defaults, &overrides);
@@ -1197,7 +1272,7 @@ mod tests {
     #[test]
     fn format_loadout_empty() {
         let items = make_item_defs(vec![]);
-        let loadout = HashMap::new();
+        let loadout = Loadout::new();
         assert_eq!(format_loadout(&loadout, &items), "No equipment");
     }
 
@@ -1206,7 +1281,7 @@ mod tests {
         let items = make_item_defs(vec![
             (ItemId::LionheartHelm, armor_item("Lionheart Helm", ItemSlotType::Head, ArmorType::Plate)),
         ]);
-        let mut loadout = HashMap::new();
+        let mut loadout = Loadout::new();
         loadout.insert(ItemSlot::Head, ItemId::LionheartHelm);
         let result = format_loadout(&loadout, &items);
         assert_eq!(result, "Head=Lionheart Helm");
@@ -1218,7 +1293,7 @@ mod tests {
             (ItemId::ArcaniteReaper, weapon_item("Arcanite Reaper", ItemSlotType::MainHand, 20.0, 30.0, 0.5)),
             (ItemId::LionheartHelm, armor_item("Lionheart Helm", ItemSlotType::Head, ArmorType::Plate)),
         ]);
-        let mut loadout = HashMap::new();
+        let mut loadout = Loadout::new();
         loadout.insert(ItemSlot::MainHand, ItemId::ArcaniteReaper);
         loadout.insert(ItemSlot::Head, ItemId::LionheartHelm);
         let result = format_loadout(&loadout, &items);
@@ -1234,7 +1309,7 @@ mod tests {
         let items = make_item_defs(vec![
             (ItemId::LionheartHelm, armor_item("Helm", ItemSlotType::Head, ArmorType::Plate)),
         ]);
-        let mut loadout = HashMap::new();
+        let mut loadout = Loadout::new();
         loadout.insert(ItemSlot::Head, ItemId::LionheartHelm);
         assert!(validate_class_restrictions(CharacterClass::Warrior, &loadout, &items).is_ok());
     }
@@ -1244,7 +1319,7 @@ mod tests {
         let items = make_item_defs(vec![
             (ItemId::LionheartHelm, armor_item("Helm", ItemSlotType::Head, ArmorType::Plate)),
         ]);
-        let mut loadout = HashMap::new();
+        let mut loadout = Loadout::new();
         loadout.insert(ItemSlot::Head, ItemId::LionheartHelm);
         assert!(validate_class_restrictions(CharacterClass::Mage, &loadout, &items).is_err());
     }
@@ -1254,7 +1329,7 @@ mod tests {
         let items = make_item_defs(vec![
             (ItemId::LionheartHelm, armor_item("Helm", ItemSlotType::Head, ArmorType::Plate)),
         ]);
-        let mut loadout = HashMap::new();
+        let mut loadout = Loadout::new();
         // Place a Head item in the Chest slot
         loadout.insert(ItemSlot::Chest, ItemId::LionheartHelm);
         assert!(validate_class_restrictions(CharacterClass::Warrior, &loadout, &items).is_err());
@@ -1263,7 +1338,7 @@ mod tests {
     #[test]
     fn validate_class_restrictions_fails_unknown_item() {
         let items = make_item_defs(vec![]); // empty
-        let mut loadout = HashMap::new();
+        let mut loadout = Loadout::new();
         loadout.insert(ItemSlot::Head, ItemId::LionheartHelm);
         assert!(validate_class_restrictions(CharacterClass::Warrior, &loadout, &items).is_err());
     }
@@ -1405,7 +1480,7 @@ mod tests {
             (ItemId::ArcaniteReaper, two_handed_weapon("Arcanite Reaper")),
             (ItemId::WallOfTheDeadShield, armor_item("Shield", ItemSlotType::OffHand, ArmorType::None)),
         ]);
-        let mut loadout = HashMap::new();
+        let mut loadout = Loadout::new();
         loadout.insert(ItemSlot::MainHand, ItemId::ArcaniteReaper);
         loadout.insert(ItemSlot::OffHand, ItemId::WallOfTheDeadShield);
 
@@ -1421,7 +1496,7 @@ mod tests {
             (ItemId::FrostbiteBlade, weapon_item("Frostbite", ItemSlotType::MainHand, 10.0, 14.0, 1.1)),
             (ItemId::WallOfTheDeadShield, armor_item("Shield", ItemSlotType::OffHand, ArmorType::None)),
         ]);
-        let mut loadout = HashMap::new();
+        let mut loadout = Loadout::new();
         loadout.insert(ItemSlot::MainHand, ItemId::FrostbiteBlade);
         loadout.insert(ItemSlot::OffHand, ItemId::WallOfTheDeadShield);
 
@@ -1435,7 +1510,7 @@ mod tests {
         let items = make_item_defs(vec![
             (ItemId::WallOfTheDeadShield, armor_item("Shield", ItemSlotType::OffHand, ArmorType::None)),
         ]);
-        let mut loadout = HashMap::new();
+        let mut loadout = Loadout::new();
         loadout.insert(ItemSlot::OffHand, ItemId::WallOfTheDeadShield);
 
         enforce_two_hand_conflicts(&mut loadout, &items);
@@ -1456,7 +1531,7 @@ mod tests {
 
     #[test]
     fn enforce_unique_strips_the_secondary_socket() {
-        let mut loadout = HashMap::new();
+        let mut loadout = Loadout::new();
         loadout.insert(ItemSlot::Ring1, ItemId::BandOfAccuria);
         loadout.insert(ItemSlot::Ring2, ItemId::BandOfAccuria);
 
@@ -1468,7 +1543,7 @@ mod tests {
 
     #[test]
     fn enforce_unique_keeps_two_different_rings() {
-        let mut loadout = HashMap::new();
+        let mut loadout = Loadout::new();
         loadout.insert(ItemSlot::Ring1, ItemId::BandOfAccuria);
         loadout.insert(ItemSlot::Ring2, ItemId::RingOfProtection);
         loadout.insert(ItemSlot::Trinket1, ItemId::MarkOfTheChampion);
@@ -1482,14 +1557,14 @@ mod tests {
     fn validate_unique_rejects_a_duplicate_and_accepts_distinct_items() {
         let items = ring_defs();
 
-        let mut duped = HashMap::new();
+        let mut duped = Loadout::new();
         duped.insert(ItemSlot::Ring1, ItemId::BandOfAccuria);
         duped.insert(ItemSlot::Ring2, ItemId::BandOfAccuria);
         let err = validate_unique_equipped(&duped, &items).unwrap_err();
         assert!(err.contains("Band of Accuria"), "error should name the item: {}", err);
         assert!(err.contains("unique-equipped"));
 
-        let mut fine = HashMap::new();
+        let mut fine = Loadout::new();
         fine.insert(ItemSlot::Ring1, ItemId::BandOfAccuria);
         fine.insert(ItemSlot::Ring2, ItemId::RingOfProtection);
         assert!(validate_unique_equipped(&fine, &items).is_ok());
@@ -1498,7 +1573,7 @@ mod tests {
     #[test]
     fn picker_hides_the_item_worn_in_the_sibling_socket() {
         let items = ring_defs();
-        let mut loadout = HashMap::new();
+        let mut loadout = Loadout::new();
         loadout.insert(ItemSlot::Ring1, ItemId::BandOfAccuria);
 
         let ring2 = items.selectable_items_for_slot(ItemSlot::Ring2, CharacterClass::Mage, &loadout);
@@ -1523,7 +1598,7 @@ mod tests {
             assert!(!sockets.is_empty(), "{:?} has a slot kind with no socket", id);
             for socket in sockets {
                 assert!(socket.accepts(item.slot), "{:?} is rejected by {:?}", id, socket);
-                let mut loadout = HashMap::new();
+                let mut loadout = Loadout::new();
                 loadout.insert(*socket, *id);
                 let class = *CharacterClass::all()
                     .iter()
