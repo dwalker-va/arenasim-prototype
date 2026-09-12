@@ -36,6 +36,7 @@ use arenasim::states::play_match::{
     AbilityConfigPlugin, CombatantStats, MapConfigPlugin, MatchResults, MovementConfigPlugin,
 };
 use arenasim::states::results_ui::{apply_results_action, ResultsAction};
+use arenasim::states::view_combatant_ui::AbilityIconHandles;
 use arenasim::states::{GameState, StatesPlugin};
 
 /// Builds the app with everything `StatesPlugin` needs, minus the window and
@@ -126,6 +127,48 @@ fn the_results_state_can_be_entered() {
     let mut app = boot_app();
     enter_results(&mut app);
     assert!(app.world().get_resource::<MatchResults>().is_some());
+}
+
+/// The ability icons must be there on a COLD entry — straight from a match,
+/// having never opened View Combatant or the encyclopedia.
+///
+/// Round 1 shipped the Results screen reading `AbilityIcons` through
+/// `EncyclopediaData` while `load_ability_icons` was registered only under
+/// `ViewCombatant` and `Encyclopedia`. Nothing filled the resource on the way
+/// into Results, so every ability bar drew the neutral placeholder tile until
+/// the reader clicked through to the encyclopedia — whose loader filled it —
+/// and came back. That is the exact path a player takes, and no test walked it.
+///
+/// WHAT THIS PINS, honestly stated: the test app has no image codec (the
+/// renderer's `ImagePlugin` wants a GPU adapter, which the default `cargo test`
+/// has no business requiring), so the jpegs never finish decoding here and
+/// `AbilityIcons::textures` can never fill. What the loader DOES do on its
+/// first run, before any decoding, is request one handle per ability that has
+/// an icon. So this asserts the loader RAN IN THE RESULTS STATE, keyed on real
+/// `abilities.ron` data — which is precisely the registration bug, and leaves
+/// the resource empty when the system is absent from the Results schedule.
+#[test]
+fn entering_results_cold_loads_the_ability_icons() {
+    let mut app = boot_app();
+    enter_results(&mut app);
+
+    let handles = app.world().resource::<AbilityIconHandles>();
+    assert!(
+        !handles.handles.is_empty(),
+        "the ability icon loader never ran in the Results state — the bars draw \
+         placeholder tiles until some other screen happens to fill AbilityIcons"
+    );
+
+    // Keyed on abilities named in the bounced screenshot, so a rename in
+    // `abilities.ron` that silently drops an icon fails here rather than in a
+    // player's eyeball.
+    let names: Vec<&str> = handles.handles.iter().map(|(n, _)| n.as_str()).collect();
+    for expected in ["Frost Shock", "Lightning Bolt", "Sinister Strike"] {
+        assert!(
+            names.contains(&expected),
+            "no icon handle requested for {expected} — have {names:?}"
+        );
+    }
 }
 
 /// Click a linked icon, read the page, come back — and find the same numbers.

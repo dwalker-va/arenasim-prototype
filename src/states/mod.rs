@@ -951,10 +951,31 @@ impl Plugin for StatesPlugin {
                 play_match::reset_banter_scheduler_on_exit,
             )
             .add_systems(OnExit(GameState::PlayMatch), play_match::cleanup_play_match)
-            // Results systems (defined in results_ui module)
+            // Results systems (defined in results_ui module).
+            //
+            // The icon loaders run here too. The Results screen reads its class
+            // and ability icons through `EncyclopediaData`, and nothing else
+            // fills those resources on the way in: the ability loader otherwise
+            // runs only under ViewCombatant and Encyclopedia, so a reader who
+            // went straight from a match to the results got an empty
+            // placeholder tile on every ability bar until they happened to open
+            // one of those screens. Both loaders self-guard on an internal
+            // `loaded` flag, so registering them here as well as in their own
+            // states is idempotent — the same trick the Encyclopedia and the
+            // Animation Sandbox use.
+            //
+            // The ITEM loader is deliberately NOT here: the Results screen
+            // resolves only `Topic::Class` and `Topic::Ability`, so it never
+            // paints an item icon. Add it if that ever changes.
             .add_systems(
                 Update,
-                results_ui::results_ui.run_if(in_state(GameState::Results)),
+                (
+                    view_combatant_ui::load_ability_icons,
+                    configure_match_ui::load_class_icons,
+                    results_ui::results_ui,
+                )
+                    .chain()
+                    .run_if(in_state(GameState::Results)),
             );
     }
 }
