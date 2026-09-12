@@ -90,6 +90,20 @@ A handful the engine applies from code with a hardcoded name instead — those a
 listed explicitly in `encyclopedia::auras::EngineAura` and guarded against drift
 by `tests/aura_catalog_audit.rs`.
 
+### Frame name
+The string the engine writes into `Aura::ability_name` — literally what the
+actor frames print. Usually it is also the named aura's catalog name, but the
+engine hangs several distinct auras under one frame name ("Frost Armor" is the
+Mage's self-buff and both procs it puts on attackers; "Crippling Poison" is the
+Rogue's coating marker and the slow that coating applies). Those get a catalog
+name of their own with a parenthetical qualifier, while `frame_name` stays what
+the player reads.
+
+The distinction is load-bearing twice over: it is what lets the catalog give the
+player a correct page for each, and it is what `tests/aura_catalog_audit.rs`
+keys on — an apply site is matched by (frame name, mechanic), because matching
+on the name alone silently resolved six auras to three entries.
+
 ### Mechanic
 The `AuraType` underneath a named aura — the engine's category for how the
 effect behaves. Rend, Corruption and Serpent Sting are three named auras sharing

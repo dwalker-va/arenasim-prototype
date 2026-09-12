@@ -16,6 +16,19 @@ pub const SHADOW_SIGHT_SPAWN_TIME: f32 = 90.0;
 /// Duration of the Shadow Sight buff (seconds)
 pub const SHADOW_SIGHT_DURATION: f32 = 15.0;
 
+/// Break-on-damage threshold of the Shadow Sight buff.
+///
+/// `0.0` means "breaks on ANY damage" (`auras.rs` accumulates against this for
+/// every threshold `>= 0.0`), so in practice the buff ends on the first hit the
+/// holder takes rather than running its full [`SHADOW_SIGHT_DURATION`]. That
+/// looks like a bug — the apply site once carried a comment claiming the
+/// opposite — but changing it changes match outcomes, so it is left alone here
+/// and tracked as its own card.
+///
+/// The encyclopedia reads THIS, so its Shadow Sight page states what the
+/// simulation does, not what the mechanic was meant to do.
+pub const SHADOW_SIGHT_BREAK_ON_DAMAGE: f32 = 0.0;
+
 /// Radius at which a combatant can pick up an orb
 const ORB_PICKUP_RADIUS: f32 = 2.5;
 
@@ -173,7 +186,10 @@ pub fn check_orb_pickups(
                         effect_type: AuraType::ShadowSight,
                         duration: SHADOW_SIGHT_DURATION,
                         magnitude: 1.0, // Unused for this aura type
-                        break_on_damage_threshold: 0.0, // Does not break on damage
+                        // 0.0 = breaks on ANY damage. See the constant's doc:
+                        // almost certainly not the intent, but it is what the
+                        // simulation does today.
+                        break_on_damage_threshold: SHADOW_SIGHT_BREAK_ON_DAMAGE,
                         accumulated_damage: 0.0,
                         tick_interval: 0.0,
                         time_until_next_tick: 0.0,

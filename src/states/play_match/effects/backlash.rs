@@ -32,6 +32,31 @@ use crate::states::play_match::abilities::SpellSchool;
 use crate::states::play_match::combat_core::apply_damage_with_absorb;
 use crate::states::play_match::components::*;
 
+/// How long the dispeller is silenced. `process_dispels` stamps this onto every
+/// `BacklashPending` it spawns, so it is the duration a player actually sees on
+/// the "Unstable Affliction" silence — which is why the encyclopedia's catalog
+/// entry for that silence reads it from here rather than retyping 5.
+pub const DISPEL_BACKLASH_SILENCE_DURATION: f32 = 5.0;
+
+/// The Silence the UA backlash hangs on the dispeller.
+///
+/// Shared constructor so the apply site below and the encyclopedia's catalog
+/// entry describe the same aura. `caster` is `None` only for the catalog's
+/// representative sample; in play it is the Warlock who cast the UA, which is
+/// what DR bookkeeping and combat-log attribution key off.
+pub fn dispel_backlash_silence_aura(caster: Option<Entity>, duration: f32) -> Aura {
+    Aura {
+        effect_type: AuraType::Silence,
+        duration,
+        magnitude: 1.0,
+        caster,
+        ability_name: "Unstable Affliction".to_string(),
+        spell_school: Some(SpellSchool::Shadow),
+        break_on_damage_threshold: -1.0, // Silence does not break on damage
+        ..Default::default()
+    }
+}
+
 /// Pending backlash event spawned by `process_dispels` when an opposing-team
 /// combatant strips an Unstable Affliction aura. Consumed by `process_backlash`
 /// in the same Phase 1 tick.
@@ -149,16 +174,8 @@ pub fn process_backlash(
             continue;
         }
 
-        let silence_aura = Aura {
-            effect_type: AuraType::Silence,
-            duration: event.silence_duration,
-            magnitude: 1.0,
-            caster: Some(event.caster),
-            ability_name: "Unstable Affliction".to_string(),
-            spell_school: Some(SpellSchool::Shadow),
-            break_on_damage_threshold: -1.0, // Silence does not break on damage
-            ..Default::default()
-        };
+        let silence_aura =
+            dispel_backlash_silence_aura(Some(event.caster), event.silence_duration);
 
         commands.spawn(AuraPending {
             target: event.dispeller,

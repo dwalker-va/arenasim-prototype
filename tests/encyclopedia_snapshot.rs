@@ -200,6 +200,27 @@ fn encyclopedia_aura_detail_engine() {
     snapshot("encyclopedia_aura_detail_engine", state);
 }
 
+/// A DISAMBIGUATED aura page. The Rogue's weapon coating and the slow that
+/// coating applies are both called "Crippling Poison" on the actor frames, and
+/// a catalog keyed on name alone gave the player only the debuff's page — wrong
+/// polarity, wrong mechanic, wrong duration, wrong removal rule. This is the
+/// page they should reach from their own gold-bordered buff: a Buff badge, the
+/// Weapon Poison mechanic, no expiry, and a provenance line naming what the
+/// frames call it.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn encyclopedia_aura_detail_name_collision() {
+    let mut state = state_at_root();
+    state.apply(arenasim::states::encyclopedia::EncyclopediaAction::Navigate(
+        View::topic(Topic::Aura(AuraId::Engine(
+            arenasim::states::encyclopedia::EngineAura::WeaponPoisonCoating(
+                arenasim::states::match_config::RoguePoison::Crippling,
+            ),
+        ))),
+    ));
+    snapshot("encyclopedia_aura_detail_name_collision", state);
+}
+
 // ============================================================================
 // Harness
 // ============================================================================

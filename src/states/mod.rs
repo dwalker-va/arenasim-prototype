@@ -180,7 +180,6 @@ impl Plugin for StatesPlugin {
             .add_systems(
                 Update,
                 (
-                    view_combatant_ui::load_ability_icons,
                     view_combatant_ui::load_item_icons,
                     view_combatant_ui::load_ability_icons,
                     configure_match_ui::load_class_icons,

@@ -549,46 +549,12 @@ pub fn combat_auto_attack(
         // Apply MovementSpeedSlow (30% slow = magnitude 0.7) for 5 seconds
         commands.spawn(AuraPending {
             target: attacker_entity,
-            aura: Aura {
-                effect_type: AuraType::MovementSpeedSlow,
-                duration: 5.0,
-                magnitude: 0.7, // 30% slow (0.7 = 70% speed)
-                break_on_damage_threshold: -1.0,
-                accumulated_damage: 0.0,
-                tick_interval: 0.0,
-                time_until_next_tick: 0.0,
-                caster: None,
-                ability_name: "Frost Armor".to_string(),
-                fear_direction: (0.0, 0.0),
-                fear_direction_timer: 0.0,
-                spell_school: Some(SpellSchool::Frost),
-                applied_this_frame: false,
-                backlash_damage: None,
-                dr_category_override: None,
-                dispel_type: DispelType::Auto,
-            },
+            aura: frost_armor_movement_slow_aura(),
         });
         // Apply AttackSpeedSlow (25% slower attacks) for 5 seconds
         commands.spawn(AuraPending {
             target: attacker_entity,
-            aura: Aura {
-                effect_type: AuraType::AttackSpeedSlow,
-                duration: 5.0,
-                magnitude: 0.25,
-                break_on_damage_threshold: -1.0,
-                accumulated_damage: 0.0,
-                tick_interval: 0.0,
-                time_until_next_tick: 0.0,
-                caster: None,
-                ability_name: "Frost Armor".to_string(),
-                fear_direction: (0.0, 0.0),
-                fear_direction_timer: 0.0,
-                spell_school: Some(SpellSchool::Frost),
-                applied_this_frame: false,
-                backlash_damage: None,
-                dr_category_override: None,
-                dispel_type: DispelType::Auto,
-            },
+            aura: frost_armor_attack_speed_aura(),
         });
     }
 
@@ -655,6 +621,59 @@ pub fn combat_auto_attack(
         commands.entity(target_entity).insert(DamageTakenThisFrame {
             amount: total_damage,
         });
+    }
+}
+
+/// How long a Frost Armor proc chills its victim.
+pub const FROST_ARMOR_PROC_DURATION: f32 = 5.0;
+
+/// The movement slow a Frost Armor proc hangs on a melee attacker.
+///
+/// Shared constructor so the apply site and the encyclopedia's catalog entry
+/// cannot disagree. Note the name: BOTH procs and the Mage's own self-buff are
+/// called "Frost Armor" on the frames, which is why the catalog addresses them
+/// separately and the audit keys on name PLUS mechanic.
+pub fn frost_armor_movement_slow_aura() -> Aura {
+    Aura {
+        effect_type: AuraType::MovementSpeedSlow,
+        duration: FROST_ARMOR_PROC_DURATION,
+        magnitude: 0.7, // 30% slow (0.7 = 70% speed)
+        break_on_damage_threshold: -1.0,
+        accumulated_damage: 0.0,
+        tick_interval: 0.0,
+        time_until_next_tick: 0.0,
+        caster: None,
+        ability_name: "Frost Armor".to_string(),
+        fear_direction: (0.0, 0.0),
+        fear_direction_timer: 0.0,
+        spell_school: Some(SpellSchool::Frost),
+        applied_this_frame: false,
+        backlash_damage: None,
+        dr_category_override: None,
+        dispel_type: DispelType::Auto,
+    }
+}
+
+/// The attack-speed slow a Frost Armor proc hangs on a melee attacker,
+/// alongside [`frost_armor_movement_slow_aura`].
+pub fn frost_armor_attack_speed_aura() -> Aura {
+    Aura {
+        effect_type: AuraType::AttackSpeedSlow,
+        duration: FROST_ARMOR_PROC_DURATION,
+        magnitude: 0.25,
+        break_on_damage_threshold: -1.0,
+        accumulated_damage: 0.0,
+        tick_interval: 0.0,
+        time_until_next_tick: 0.0,
+        caster: None,
+        ability_name: "Frost Armor".to_string(),
+        fear_direction: (0.0, 0.0),
+        fear_direction_timer: 0.0,
+        spell_school: Some(SpellSchool::Frost),
+        applied_this_frame: false,
+        backlash_damage: None,
+        dr_category_override: None,
+        dispel_type: DispelType::Auto,
     }
 }
 

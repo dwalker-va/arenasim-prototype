@@ -392,6 +392,39 @@ pub struct Combatant {
     pub paladin_aura: PaladinAura,
 }
 
+/// How long the weapon-poison marker is stamped for. Longer than any match's
+/// 300s cap, so it never expires in play; a finite value avoids `inf` in the
+/// buff-bar duration readout.
+pub const WEAPON_POISON_MARKER_DURATION: f32 = 3600.0;
+
+/// The Rogue's weapon-poison marker aura — the gold-bordered self-buff that
+/// says the weapon is coated.
+///
+/// A shared constructor rather than an inline literal so ONE shape serves both
+/// the apply site ([`Combatant::weapon_poison_self_buff`]) and the
+/// encyclopedia's catalog entry for it. The catalog would otherwise retype
+/// these numbers, and a page that retypes the simulation drifts from it.
+pub fn weapon_poison_marker_aura(poison: RoguePoison) -> super::Aura {
+    super::Aura {
+        effect_type: super::AuraType::WeaponPoison,
+        duration: WEAPON_POISON_MARKER_DURATION,
+        magnitude: 1.0,
+        break_on_damage_threshold: -1.0,
+        accumulated_damage: 0.0,
+        tick_interval: 0.0,
+        time_until_next_tick: 0.0,
+        caster: None,
+        ability_name: poison.name().to_string(),
+        fear_direction: (0.0, 0.0),
+        fear_direction_timer: 0.0,
+        spell_school: None,
+        applied_this_frame: false,
+        backlash_damage: None,
+        dr_category_override: None,
+        dispel_type: super::DispelType::Auto,
+    }
+}
+
 impl Combatant {
     /// Create a new combatant with class-specific stats.
     pub fn new(team: u8, slot: u8, class: match_config::CharacterClass) -> Self {
@@ -481,33 +514,13 @@ impl Combatant {
 
     /// The weapon-poison self-buff marker aura for a Rogue (e.g. "Crippling
     /// Poison"), shown in the buff bar to signify the coated weapon. `None` for
-    /// non-Rogues. Effectively permanent for the match (weapon poisons don't
-    /// expire mid-fight). Purely informational — the on-hit proc reads
-    /// `rogue_poison`, not this aura.
+    /// non-Rogues. Purely informational — the on-hit proc reads `rogue_poison`,
+    /// not this aura.
     pub fn weapon_poison_self_buff(&self) -> Option<super::Aura> {
         if self.class != match_config::CharacterClass::Rogue {
             return None;
         }
-        Some(super::Aura {
-            effect_type: super::AuraType::WeaponPoison,
-            // Effectively permanent for any match (cap is 300s); a finite value
-            // avoids `inf` in the buff-bar duration readout.
-            duration: 3600.0,
-            magnitude: 1.0,
-            break_on_damage_threshold: -1.0,
-            accumulated_damage: 0.0,
-            tick_interval: 0.0,
-            time_until_next_tick: 0.0,
-            caster: None,
-            ability_name: self.rogue_poison.name().to_string(),
-            fear_direction: (0.0, 0.0),
-            fear_direction_timer: 0.0,
-            spell_school: None,
-            applied_this_frame: false,
-            backlash_damage: None,
-            dr_category_override: None,
-            dispel_type: super::DispelType::Auto,
-        })
+        Some(weapon_poison_marker_aura(self.rogue_poison))
     }
 
     /// Create a new pet combatant with stats derived from the owner.
