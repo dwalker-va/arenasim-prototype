@@ -152,14 +152,20 @@ pub enum EntryFamily {
     Residue,
     /// Body motion started by inserting the driving component.
     Body,
-    /// Defined as data (`abilities.ron`) but with no application code, so it has
-    /// nothing to preview. Wind Shear only.
+    /// Defined as data (`abilities.ron`) but with no application code, or with
+    /// no distinct visual of its own, so it has nothing to preview. Two
+    /// abilities: Wind Shear (data-only) and Heroic Strike (a next-swing bonus
+    /// previewed by the Auto attack body animation). The count is pinned by
+    /// `every_ability_classifies_and_only_two_are_unsupported`.
     Unsupported,
 }
 
 impl EntryFamily {
-    /// Whether this mechanism's start path is wired yet. Extended as each
-    /// mechanism's unit lands; `Unsupported` is never playable.
+    /// Whether this mechanism's start path is wired yet. Every mechanism is
+    /// wired today, so this is true for every family except `Unsupported` —
+    /// the property that makes the panel's `soon` tag unreachable scaffolding
+    /// (see `ui.rs`). A future family joins this list when its start path
+    /// lands, and renders as `soon` until it does.
     pub fn is_playable(self) -> bool {
         matches!(
             self,
@@ -1482,10 +1488,14 @@ mod tests {
 
     #[test]
     fn wired_mechanisms_are_playable_and_unsupported_never_is() {
-        // Wired so far: Cast (hard casts + M1 instants), Channel, Body.
-        // Component/Entity/Residue land in later units; Unsupported never plays.
+        // Every mechanism is wired now — Component, Entity and Residue landed
+        // with their units. `Unsupported` alone never plays, which is what
+        // makes the panel's `soon` tag unreachable (see ui.rs).
         assert!(EntryFamily::Cast.is_playable());
         assert!(EntryFamily::Channel.is_playable());
+        assert!(EntryFamily::Component.is_playable());
+        assert!(EntryFamily::Entity.is_playable());
+        assert!(EntryFamily::Residue.is_playable());
         assert!(EntryFamily::Body.is_playable());
         assert!(!EntryFamily::Unsupported.is_playable());
     }
@@ -1552,6 +1562,44 @@ mod tests {
         assert_eq!(unsupported.len(), 2, "unexpected Unsupported set: {unsupported:?}");
         assert!(unsupported.contains(&AbilityType::WindShear));
         assert!(unsupported.contains(&AbilityType::HeroicStrike));
+    }
+
+    #[test]
+    fn entry_needs_dummy_pins_the_snapshot_fixture_rows() {
+        // These six pairs are exactly what `mock_rows` in
+        // tests/animation_sandbox_snapshot.rs hand-sets its `needs_dummy` field
+        // to. That fixture cannot call this predicate (`pub(crate)`, and an
+        // integration test is a separate crate), and a stale value there moves
+        // NO pixels — the snapshot would keep passing while pinning a fiction.
+        // So the claim lives here instead, in the DEFAULT `cargo test`: change
+        // the predicate and this fails immediately, rather than at whoever next
+        // re-blesses the PNG.
+        let defs = AbilityDefinitions::default();
+        let needs = |a: AbilityType| entry_needs_dummy(SandboxEntry::Ability(a), &defs);
+        for (ability, expected) in [
+            // Offensive: direct damage or a hostile aura aims at the dummy.
+            (AbilityType::Frostbolt, true),
+            (AbilityType::Polymorph, true),
+            (AbilityType::FrostNova, true),
+            // Self buffs play complete against nothing.
+            (AbilityType::FrostArmor, false),
+            (AbilityType::ArcaneIntellect, false),
+            // The fixture's `n/a` row, borrowed from the Warrior.
+            (AbilityType::HeroicStrike, false),
+        ] {
+            assert_eq!(
+                needs(ability),
+                expected,
+                "{ability:?} changed its dummy requirement — update `mock_rows` \
+                 in tests/animation_sandbox_snapshot.rs and re-bless the sandbox \
+                 snapshots in the same commit"
+            );
+        }
+        // Body entries never need one, and the fixture relies on that.
+        assert!(!entry_needs_dummy(
+            SandboxEntry::Body(BodyAnimation::WalkBob),
+            &defs
+        ));
     }
 
     #[test]

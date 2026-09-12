@@ -476,6 +476,16 @@ pub fn draw_sandbox_ui(ctx: &egui::Context, view: &SandboxView) -> Vec<SandboxAc
                     // a second unit — disable it while the dummy is off.
                     let dummy_off = row.needs_dummy && !view.dummy_enabled;
                     let enabled = mechanism_playable && !dummy_off;
+                    // The `soon` arm is unreachable today and deliberately
+                    // kept: `EntryFamily::is_playable` is true for every family
+                    // except `Unsupported`, so nothing currently lands here. It
+                    // is held for the next unwired mechanism — a family added
+                    // to `EntryFamily` but left out of `is_playable` while its
+                    // start path is built, which is how every mechanism in this
+                    // panel arrived. Deleting it would label that family `n/a`
+                    // under a hover claiming it has no application code, which
+                    // would be false. Keep the two in step: drop this arm only
+                    // together with the hover below.
                     let tag = if !mechanism_playable {
                         Some(match row.family {
                             EntryFamily::Unsupported => "n/a",
@@ -493,6 +503,8 @@ pub fn draw_sandbox_ui(ctx: &egui::Context, view: &SandboxView) -> Vec<SandboxAc
                                 "Not previewable: defined as data but with no application code \
                                  (or no distinct cast visual)."
                             }
+                            // Pairs with the `soon` tag above: unreachable
+                            // while `is_playable` excludes only `Unsupported`.
                             _ => "This ability's preview mechanism is not wired yet.",
                         });
                     } else if dummy_off {
@@ -633,7 +645,13 @@ pub fn draw_sandbox_ui(ctx: &egui::Context, view: &SandboxView) -> Vec<SandboxAc
 }
 
 /// Ability data worth checking an animation against.
-fn ability_details(
+///
+/// `pub` so the snapshot fixture (`tests/animation_sandbox_snapshot.rs`) can
+/// DERIVE its SELECTED readout from the same function the panel renders,
+/// instead of restating the numbers by hand — which is how the blessed
+/// baseline came to pin a Frostbolt with a 30yd range and a 24 mana cost that
+/// the shipped panel never produced (AS-50).
+pub fn ability_details(
     entry: SandboxEntry,
     defs: &AbilityDefinitions,
 ) -> (Option<String>, Vec<(String, String)>) {
