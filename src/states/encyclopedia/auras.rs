@@ -273,52 +273,57 @@ impl NamedAura {
         subtitle_for(self.mechanic)
     }
 
-    /// How this aura comes off early, as a badge label plus the tooltip that
-    /// names the abilities. Answered by the ENGINE's own predicates on this
-    /// entry's representative aura, so it can never disagree with what a dispel
-    /// actually does.
+    /// How this aura comes off early, as a badge label plus a tooltip.
+    /// Answered by the ENGINE's own predicates on this entry's representative
+    /// aura, so it can never disagree with what a dispel actually does.
     ///
-    /// The two halves are disjoint by construction: a friendly dispel lifts
-    /// harmful magic off an ally, while Purge strips buffs off an enemy.
+    /// **The wording describes the removal CLASS and names no ability.** A
+    /// debuff is Magic, Poison, Disease, Curse or Physical, and each class is
+    /// served by a category of effect — dispels, cleanses, curse-removal, or
+    /// the rare effects that clear physical harm. Which spells belong to each
+    /// category is the engine's business, and it changes: a Mage decurse, a
+    /// second physical-removal trinket, a Shaman cleanse would each force a
+    /// rewrite of every tooltip that had spelled out a name. So none do.
     ///
-    /// The last two rungs are the honest ones. "Cannot be removed" used to
-    /// catch every aura no dispel reaches, and that overclaimed: Divine Shield
-    /// clears every hostile effect from its holder, so Rend, Kidney Shot and
-    /// Curse of Weakness all come off to it. A harmful aura therefore gets a
-    /// badge that NAMES the exception, and only the auras Divine Shield does
-    /// not touch — the mechanical markers and the unpurgeable self-buffs —
-    /// keep the absolute wording.
+    /// A class with no ability serving it today is still a class, not a dead
+    /// end — "Curse ... none in the arena yet" is a different statement from
+    /// "cannot be removed", and a Warlock reading the page should see the
+    /// difference. The absolute rung is reserved for what genuinely nothing
+    /// touches: the unpurgeable self-buffs (Divine Shield, Berserker Rage) and
+    /// the mechanical markers (Weakened Soul, Shadow Sight, weapon poisons).
+    ///
+    /// The buff half is disjoint by construction: a dispel lifts harmful magic
+    /// off an ally, a purge strips buffs off an enemy.
     fn removal(&self) -> (&'static str, &'static str) {
         if self.sample.can_be_dispelled() {
-            (
-                "Dispellable",
-                "A Priest's Dispel Magic, a Paladin's Cleanse or a Felhunter's Devour Magic can \
-                 lift this off an ally.",
-            )
+            ("Dispellable", "Magic. Removed by dispels.")
         } else if self.sample.is_cleansable_poison() {
+            ("Cleansable", "Poison. Not affected by dispels; removed by cleanses.")
+        } else if self.sample.is_curse() {
             (
-                "Cleansable",
-                "A poison. Dispel Magic cannot touch it — only a Paladin's Cleanse.",
-            )
-        } else if self.sample.can_be_purged() {
-            (
-                "Purgeable",
-                "A Shaman's Purge can strip this off an enemy.",
+                "Curse",
+                "Curse. Not affected by dispels or cleanses; removed by curse-removal effects — \
+                 none in the arena yet.",
             )
         } else if self.sample.is_physical() {
             (
                 "Immune to dispel",
-                "A physical effect — a wound or an impact, with no magic on it to dissipate. No \
-                 dispel, cleanse or purge in the game touches it. A Paladin's Divine Shield, \
-                 which clears every harmful effect from its holder, is the only thing that ends \
-                 it early.",
+                "Physical — a wound or an impact, with no magic on it to dissipate. Not affected \
+                 by dispels, cleanses or purges; removed only by effects that clear physical \
+                 debuffs.",
             )
+        } else if self.sample.can_be_purged() {
+            ("Purgeable", "Beneficial magic. An enemy can strip this with a purge.")
         } else if self.sample.is_hostile_effect() {
+            // Stuns, interrupt lockouts, the attack-speed half of Frost Armor's
+            // proc: not a physical debuff, but not a dispellable KIND of effect
+            // either. Deliberately says nothing about the class — some of these
+            // are magic (Hammer of Justice is Holy) and some are schoolless with
+            // no determined class at all.
             (
                 "Immune to dispel",
-                "No dispel, cleanse or purge in the game touches this. A Paladin's Divine \
-                 Shield, which clears every harmful effect from its holder, is the only thing \
-                 that ends it early.",
+                "No dispel, cleanse or purge removes an effect of this kind; only effects that \
+                 clear harmful effects outright end it early.",
             )
         } else {
             (
@@ -939,6 +944,19 @@ fn stat_rows(entry: &NamedAura) -> Vec<(String, String)> {
         rows.push(("School".to_string(), "Physical".to_string()));
     }
 
+    // The removal class is a SEPARATE fact from the school, and the page has to
+    // show both or it cannot be read correctly: Corruption and Curse of Agony
+    // are both Shadow, one is Magic and one is a Curse, and a dispel takes only
+    // the first. Debuffs only — on a buff the badge already says whether a
+    // purge reaches it, and "Magic" on Power Word: Fortitude answers a question
+    // nobody asked. `None` (a schoolless undeclared aura) prints no row rather
+    // than a guess; see `Aura::removal_class_name`.
+    if aura.is_hostile_effect() {
+        if let Some(class) = aura.removal_class_name() {
+            rows.push(("Removal class".to_string(), class.to_string()));
+        }
+    }
+
     rows
 }
 
@@ -1140,13 +1158,11 @@ mod tests {
         assert!(concussive.sample.is_physical());
     }
 
-    /// The page says what the engine does. A physical debuff is immune to
-    /// ordinary removal but Divine Shield still clears it, so its badge must
-    /// name that exception instead of claiming nothing takes it — and the
-    /// wording has to be the SAME for the physical slow and the physical DoT,
-    /// which is the asymmetry the card was opened on.
+    /// The page says what the engine does. A physical debuff describes its
+    /// CLASS — and the wording has to be the SAME for the physical slow and the
+    /// physical DoT, which is the asymmetry the card was opened on.
     #[test]
-    fn a_physical_debuffs_badge_names_divine_shield_as_the_exception() {
+    fn a_physical_debuff_reads_as_physical_on_both_the_badge_and_the_stat_block() {
         let entries = catalog(&abilities());
         let by_name = |name: &str| {
             entries.iter().find(|e| e.name == name).unwrap_or_else(|| panic!("{} missing", name))
@@ -1155,16 +1171,147 @@ mod tests {
             let entry = by_name(name);
             let (badge, tooltip) = entry.removal();
             assert_eq!(badge, "Immune to dispel", "{name} badge");
-            assert!(tooltip.contains("Divine Shield"), "{name} must name the exception");
+            assert!(tooltip.starts_with("Physical"), "{name} names its class first: {tooltip}");
             assert!(
-                entry.sample.is_hostile_effect(),
-                "{name} is only true because Divine Shield clears hostile effects"
-            );
-            assert!(
-                stat_rows(entry).iter().any(|(k, v)| k == "School" && v == "Physical"),
+                stat_rows(entry)
+                    .iter()
+                    .any(|(k, v)| k == "Removal class" && v == "Physical"),
                 "{name} should say it is physical on the page, not only in the tooltip"
             );
         }
+    }
+
+    /// A curse is a removal CLASS with no ability serving it, not an
+    /// unremovable debuff. Curse of Agony is the one that proves the class has
+    /// to be declared rather than derived: it is a Shadow DoT, exactly like
+    /// Corruption, and the school alone would call it dispellable magic.
+    #[test]
+    fn a_curse_reads_as_a_curse_not_as_unremovable() {
+        let entries = catalog(&abilities());
+        let by_name = |name: &str| {
+            entries.iter().find(|e| e.name == name).unwrap_or_else(|| panic!("{} missing", name))
+        };
+        for name in ["Curse of Agony", "Curse of Weakness", "Curse of Tongues"] {
+            let entry = by_name(name);
+            let (badge, tooltip) = entry.removal();
+            assert_eq!(badge, "Curse", "{name} badge");
+            assert!(tooltip.contains("none in the arena yet"), "{name}: {tooltip}");
+            assert!(!entry.sample.can_be_dispelled(), "{name} is not magic");
+            assert!(
+                stat_rows(entry).iter().any(|(k, v)| k == "Removal class" && v == "Curse"),
+                "{name} stat block"
+            );
+        }
+
+        // Same school, different removal class — the whole reason the stat
+        // block carries both lines.
+        let agony = by_name("Curse of Agony");
+        let corruption = by_name("Corruption");
+        assert_eq!(agony.sample.spell_school, corruption.sample.spell_school, "both Shadow");
+        assert!(corruption.sample.can_be_dispelled(), "Corruption is ordinary Shadow magic");
+        assert_eq!(corruption.removal().0, "Dispellable");
+    }
+
+    /// No player-facing removal wording names an ability. The engine's
+    /// predicates decide who performs a removal; the page describes the class,
+    /// so a decurse or a second physical-removal effect does not send anyone
+    /// hunting through tooltips.
+    #[test]
+    fn removal_wording_describes_the_class_and_names_no_ability() {
+        const NAMES: [&str; 9] = [
+            "Divine Shield",
+            "Dispel Magic",
+            "Cleanse",
+            "Devour Magic",
+            "Purge",
+            "Remove Curse",
+            "Master's Call",
+            "Paladin",
+            "Priest",
+        ];
+        // The badges are a closed set of CATEGORY words, so "Purgeable" is
+        // allowed to contain "Purge" — pinning the set is the check that no
+        // ability name reaches a badge.
+        const BADGES: [&str; 6] = [
+            "Dispellable",
+            "Cleansable",
+            "Curse",
+            "Purgeable",
+            "Immune to dispel",
+            "Cannot be removed",
+        ];
+        for entry in catalog(&abilities()) {
+            let (badge, tooltip) = entry.removal();
+            assert!(BADGES.contains(&badge), "{} has an unknown badge {badge}", entry.name);
+            for name in NAMES {
+                assert!(
+                    !tooltip.contains(name),
+                    "{}'s removal tooltip names {name}: {tooltip}",
+                    entry.name
+                );
+            }
+        }
+    }
+
+    /// Every entry the page tells a player no dispel reaches. Two kinds live
+    /// here and the split is the card's whole subject: the PHYSICAL debuffs
+    /// (arrow, wound, boot) and the mechanics no dispel takes whatever their
+    /// school (stuns, interrupt lockouts, the attack-speed half of Frost
+    /// Armor's proc). Pinned because this rung is where a widening of
+    /// `is_magic_dispellable` would silently show up — moving a name out of
+    /// this list is a balance change, not a wording change.
+    #[test]
+    fn the_immune_to_dispel_rung_is_pinned() {
+        let mut rows: Vec<String> = catalog(&abilities())
+            .iter()
+            .filter(|e| e.removal().0 == "Immune to dispel")
+            .map(|e| format!("{} [{}]", e.name, e.sample.removal_class_name().unwrap_or("—")))
+            .collect();
+        rows.sort();
+        assert_eq!(
+            rows,
+            vec![
+                "Aimed Shot [Physical]",
+                "Boar Charge [Physical]",
+                "Cheap Shot [Physical]",
+                "Concussive Shot [Physical]",
+                "Demoralizing Shout [—]",
+                "Frost Armor (attack speed) [Magic]",
+                "Hammer of Justice [Magic]",
+                "Kick [—]",
+                "Kidney Shot [Physical]",
+                "Mortal Strike [Physical]",
+                "Pummel [—]",
+                "Rend [Physical]",
+                "Spell Lock [—]",
+                "Wind Shear [—]",
+            ]
+        );
+    }
+
+    /// The absolute rung is for what genuinely nothing touches: the deliberately
+    /// unpurgeable self-buffs and the mechanical markers. Anything else on it is
+    /// a page overclaiming.
+    #[test]
+    fn cannot_be_removed_is_reserved_for_the_untouchable_set() {
+        let untouchable: Vec<String> = catalog(&abilities())
+            .into_iter()
+            .filter(|e| e.removal().0 == "Cannot be removed")
+            .map(|e| e.name.clone())
+            .collect();
+        let mut sorted = untouchable.clone();
+        sorted.sort();
+        assert_eq!(
+            sorted,
+            vec![
+                "Berserker Rage".to_string(),
+                "Crippling Poison (weapon coating)".to_string(),
+                "Divine Shield".to_string(),
+                "Shadow Sight".to_string(),
+                "Weakened Soul".to_string(),
+            ],
+            "unexpected entry claiming nothing can remove it"
+        );
     }
 
     #[test]

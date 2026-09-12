@@ -69,13 +69,18 @@ pub struct AuraEffect {
     /// must not share stun DR with Cheap Shot.
     #[serde(default)]
     pub dr_category: Option<DRCategory>,
-    /// Dispel classification of the applied aura. Leave it at `Auto` (the
-    /// default) and the class is derived from the ability's `spell_school`:
-    /// a `Physical` ability applies a physical debuff that no dispel, cleanse
-    /// or purge removes, and anything else applies a magic one whose
-    /// removability comes from the aura type. Set `Poison` explicitly for a
-    /// poison debuff on a magic-school ability (Crippling Poison is `Nature`),
-    /// which is the one case the school gets wrong.
+    /// Removal class of the applied aura. Leave it at `Auto` (the default) and
+    /// the class is derived from the ability's `spell_school`: a `Physical`
+    /// ability applies a physical debuff that no dispel, cleanse or purge
+    /// removes, and anything else applies a magic one whose removability comes
+    /// from the aura type.
+    ///
+    /// Declare it explicitly for the two families the school gets wrong:
+    /// - `Poison` for a poison on a magic-school ability (Crippling Poison is
+    ///   `Nature`).
+    /// - `Curse` for the Warlock's curses, which are `Shadow` and would
+    ///   otherwise read as ordinary dispellable magic.
+    ///
     /// See [`DispelType::for_ability`].
     #[serde(default)]
     pub dispel_type: DispelType,
@@ -1007,5 +1012,68 @@ mod tests {
             missing.len(),
             missing.join("\n")
         );
+    }
+
+    /// A curse must DECLARE `dispel_type: Curse` in the RON — the school cannot
+    /// say it (curses are Shadow and so is Corruption) and the name must not
+    /// (a classification rule does not belong inside a display string).
+    ///
+    /// This is the guard that makes the declaration safe: it keys on the
+    /// player-facing name, so a fourth curse added without the declaration
+    /// fails here rather than silently shipping as a dispellable Shadow effect
+    /// — which is exactly what Curse of Agony was before this test existed.
+    /// A curse-like ability that deliberately is NOT a curse belongs on the
+    /// exemption list below, with a reason.
+    #[test]
+    fn every_curse_declares_the_curse_class() {
+        let defs = load_ability_definitions().expect("abilities.ron must load");
+        let mut curses: Vec<&str> = Vec::new();
+
+        for (ability_type, config) in defs.iter() {
+            if !config.name.starts_with("Curse of") {
+                continue;
+            }
+            let effect = config
+                .applies_aura
+                .as_ref()
+                .unwrap_or_else(|| panic!("{:?} is a curse that applies no aura", ability_type));
+            assert_eq!(
+                effect.dispel_type,
+                DispelType::Curse,
+                "{} must declare `dispel_type: Curse` — without it the Shadow school \
+                 makes it ordinary dispellable magic",
+                config.name
+            );
+            curses.push(&config.name);
+        }
+
+        curses.sort_unstable();
+        assert_eq!(
+            curses,
+            ["Curse of Agony", "Curse of Tongues", "Curse of Weakness"],
+            "the curse family changed; check the new member is classified and that the \
+             encyclopedia's curse test covers it"
+        );
+    }
+
+    /// The converse: nothing else claims the class. Curse removal does not
+    /// exist yet, so a mistaken `Curse` is an undispellable debuff nobody
+    /// decided to create.
+    #[test]
+    fn only_curses_declare_the_curse_class() {
+        let defs = load_ability_definitions().expect("abilities.ron must load");
+        for (ability_type, config) in defs.iter() {
+            let Some(effect) = config.applies_aura.as_ref() else {
+                continue;
+            };
+            if effect.dispel_type == DispelType::Curse {
+                assert!(
+                    config.name.starts_with("Curse of"),
+                    "{:?} ({}) declares the Curse class but is not a curse",
+                    ability_type,
+                    config.name
+                );
+            }
+        }
     }
 }

@@ -693,6 +693,27 @@ pub fn purge_priority(aura_type: AuraType) -> i32 {
     }
 }
 
+/// How far a dispel ABILITY reaches across the removal classes. Every dispel
+/// takes MAGIC (that is what `Aura::can_be_dispelled` answers); this says
+/// whether it additionally takes POISON and DISEASE.
+///
+/// The full per-class truth, which `dispel_reach_matches_the_removal_model`
+/// pins against the predicates rather than restating here:
+/// - Priest's Dispel Magic — magic only.
+/// - Paladin's Cleanse — magic + poison/disease.
+/// - Felhunter's Devour Magic — magic only.
+/// - Nothing reaches CURSE or PHYSICAL. A curse is removable in principle and
+///   has no ability serving it yet; a physical debuff yields only to effects
+///   that clear physical harm outright, which are not dispels at all and do not
+///   come through here (Divine Shield's retain, Master's Call's typed filter).
+///
+/// Named rather than inlined so that truth is testable. It used to be an `==`
+/// buried mid-function, which is a fine way to write a rule and a poor way to
+/// let anyone check it.
+pub fn dispel_removes_poison(ability_type: AbilityType) -> bool {
+    matches!(ability_type, AbilityType::PaladinCleanse)
+}
+
 /// Shared dispel logic used by Priest (Dispel Magic) and Paladin (Cleanse).
 ///
 /// Finds the ally with the highest priority dispellable debuff and casts
@@ -757,8 +778,7 @@ pub fn try_dispel_ally(
         return false;
     }
 
-    // Cleanse also removes poison/disease; Dispel Magic / Devour Magic do not.
-    let removes_poison = ability_type == AbilityType::PaladinCleanse;
+    let removes_poison = dispel_removes_poison(ability_type);
 
     // Find ally with highest priority dispellable debuff
     let mut best_candidate: Option<(Entity, i32)> = None;
@@ -992,4 +1012,88 @@ pub fn try_purge_enemy(
     });
 
     true
+}
+
+#[cfg(test)]
+mod dispel_reach_tests {
+    use super::*;
+    use crate::states::play_match::abilities::SpellSchool;
+    use crate::states::play_match::components::DispelType;
+
+    fn aura(effect_type: AuraType, school: Option<SpellSchool>, class: DispelType) -> Aura {
+        Aura {
+            effect_type,
+            spell_school: school,
+            dispel_type: class,
+            ..Default::default()
+        }
+    }
+
+    /// The per-class removal truth, asserted against the ENGINE's predicates
+    /// rather than against a comment: a dispel removes exactly MAGIC; a cleanse
+    /// removes magic AND poison/disease; NOTHING removes a curse or a physical
+    /// debuff.
+    ///
+    /// The Curse row is the one worth staring at. Curse of Agony is a Shadow
+    /// damage-over-time effect, so before it declared its class it was removed
+    /// by both a dispel and a cleanse — identical in every respect the engine
+    /// looked at to Corruption, which SHOULD come off.
+    #[test]
+    fn dispel_reach_matches_the_removal_model() {
+        let corruption = aura(
+            AuraType::DamageOverTime,
+            Some(SpellSchool::Shadow),
+            DispelType::Auto,
+        );
+        let frost_nova = aura(AuraType::Root, Some(SpellSchool::Frost), DispelType::Auto);
+        let crippling = aura(
+            AuraType::MovementSpeedSlow,
+            Some(SpellSchool::Nature),
+            DispelType::Poison,
+        );
+        let agony = aura(
+            AuraType::DamageOverTime,
+            Some(SpellSchool::Shadow),
+            DispelType::Curse,
+        );
+        let concussive = aura(AuraType::MovementSpeedSlow, None, DispelType::Physical);
+        let rend = aura(AuraType::DamageOverTime, None, DispelType::Physical);
+
+        // (ability, magic, poison, curse, physical)
+        let expected = [
+            (AbilityType::DispelMagic, true, false, false, false),
+            (AbilityType::PaladinCleanse, true, true, false, false),
+            (AbilityType::DevourMagic, true, false, false, false),
+        ];
+
+        for (ability, magic, poison, curse, physical) in expected {
+            let removes_poison = dispel_removes_poison(ability);
+            // The filter `process_dispels` applies, spelled once here so the
+            // matrix tests the real expression and not a paraphrase of it.
+            let removes = |a: &Aura| {
+                a.can_be_dispelled() || (removes_poison && a.is_cleansable_poison())
+            };
+
+            assert_eq!(removes(&corruption), magic, "{ability:?} vs Corruption (magic)");
+            assert_eq!(removes(&frost_nova), magic, "{ability:?} vs Frost Nova (magic)");
+            assert_eq!(removes(&crippling), poison, "{ability:?} vs Crippling Poison");
+            assert_eq!(removes(&agony), curse, "{ability:?} vs Curse of Agony");
+            assert_eq!(removes(&concussive), physical, "{ability:?} vs Concussive Shot");
+            assert_eq!(removes(&rend), physical, "{ability:?} vs Rend");
+        }
+    }
+
+    /// Only the Cleanse reaches poison. Scans the whole ability config so a new
+    /// dispel cannot quietly inherit `false` unnoticed.
+    #[test]
+    fn only_the_cleanse_removes_poison() {
+        let defs = AbilityDefinitions::default();
+        let mut reaching: Vec<AbilityType> = defs
+            .iter()
+            .map(|(ability, _)| *ability)
+            .filter(|a| dispel_removes_poison(*a))
+            .collect();
+        reaching.sort_by_key(|a| format!("{a:?}"));
+        assert_eq!(reaching, vec![AbilityType::PaladinCleanse]);
+    }
 }

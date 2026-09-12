@@ -203,6 +203,22 @@ fn encyclopedia_aura_detail() {
     snapshot("encyclopedia_aura_detail", state);
 }
 
+/// A CURSE's page, and the reason the stat block carries a removal line of its
+/// own. Curse of Agony is a Shadow damage-over-time effect — the same school and
+/// the same mechanic as Corruption above — and the two pages have to read
+/// differently, because a dispel takes Corruption and nothing in the arena takes
+/// a curse. School and removal class are separate lines precisely so this page
+/// can say "Shadow" and "Curse" at once.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn encyclopedia_aura_detail_curse() {
+    let mut state = state_at_root();
+    state.apply(arenasim::states::encyclopedia::EncyclopediaAction::Navigate(
+        View::topic(Topic::Aura(AuraId::Ability(AbilityType::CurseOfAgony))),
+    ));
+    snapshot("encyclopedia_aura_detail_curse", state);
+}
+
 /// An aura page with a diminishing-returns section and an engine origin: the
 /// Frost Trap slow is re-applied by a zone, so it has no fixed duration and no
 /// `applies_aura` block behind it.
