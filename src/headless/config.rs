@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::states::match_config::{ArenaMap, CharacterClass, HunterPetType, MageArmor, MatchConfig, PaladinAura, RogueOpener, RoguePoison, WarlockCurse, WarriorShout};
-use crate::states::play_match::equipment::{ItemId, ItemSlot};
+use crate::states::play_match::equipment::{ItemId, ItemSlot, Loadout};
 
 /// Headless match configuration loaded from JSON
 ///
@@ -482,8 +482,8 @@ impl HeadlessMatchConfig {
     }
 
     /// Parse a string-keyed equipment map into typed ItemSlot/ItemId map
-    fn parse_equipment_map(map: &HashMap<String, String>) -> Result<HashMap<ItemSlot, ItemId>, String> {
-        let mut result = HashMap::new();
+    fn parse_equipment_map(map: &HashMap<String, String>) -> Result<Loadout, String> {
+        let mut result = Loadout::new();
         for (slot_str, item_str) in map {
             let slot = Self::parse_item_slot(slot_str)?;
             let item = Self::parse_item_id(item_str)?;
@@ -496,7 +496,7 @@ impl HeadlessMatchConfig {
     fn parse_equipment_overrides(
         raw: &[HashMap<String, String>],
         team_size: usize,
-    ) -> Result<Vec<HashMap<ItemSlot, ItemId>>, String> {
+    ) -> Result<Vec<Loadout>, String> {
         let mut result = Vec::with_capacity(team_size);
         for (i, map) in raw.iter().enumerate() {
             if i >= team_size {
@@ -505,7 +505,7 @@ impl HeadlessMatchConfig {
             result.push(Self::parse_equipment_map(map)?);
         }
         // Pad remaining slots with empty maps
-        result.resize(team_size, HashMap::new());
+        result.resize(team_size, Loadout::new());
         Ok(result)
     }
 

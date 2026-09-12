@@ -99,7 +99,7 @@ use bevy::render::render_asset::RenderAssetUsages;
 use super::match_config::{self, MatchConfig};
 use super::GameState;
 use crate::combat::log::{CombatLog, CombatLogEventType};
-use equipment::{ItemDefinitions, DefaultLoadouts, ItemSlot, ItemId, resolve_loadout, enforce_two_hand_conflicts, enforce_unique_equipped, format_loadout};
+use equipment::{ItemDefinitions, DefaultLoadouts, Loadout, resolve_loadout, enforce_two_hand_conflicts, enforce_unique_equipped, format_loadout};
 
 // ============================================================================
 // Helper Functions
@@ -1135,7 +1135,7 @@ pub(crate) fn spawn_combatant(
     warrior_shout: match_config::WarriorShout,
     mage_armor: match_config::MageArmor,
     paladin_aura: match_config::PaladinAura,
-    equipment_loadout: &std::collections::HashMap<ItemSlot, ItemId>,
+    equipment_loadout: &Loadout,
     item_defs: &ItemDefinitions,
 ) -> (Entity, Combatant) {
     // Get vibrant class colors for 3D visibility

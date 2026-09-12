@@ -29,7 +29,6 @@ pub mod ui;
 use bevy::core_pipeline::bloom::Bloom;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
-use std::collections::HashMap;
 
 use super::match_config::{
     ArenaMap, CharacterClass, MageArmor, PaladinAura, RogueOpener, RoguePoison, WarriorShout,
@@ -40,7 +39,7 @@ use super::play_match::components::{
     ShadowSightState, SimulationSpeed, VictoryCelebration,
 };
 use super::play_match::equipment::{
-    enforce_two_hand_conflicts, resolve_loadout, DefaultLoadouts, ItemDefinitions,
+    enforce_two_hand_conflicts, resolve_loadout, DefaultLoadouts, ItemDefinitions, Loadout,
 };
 use super::play_match::map_config::{ActiveMapGeometry, MapGeometryConfig};
 use super::play_match::team_plan::TeamPlans;
@@ -311,7 +310,7 @@ fn spawn_staged_unit(
     item_defs: &ItemDefinitions,
     default_loadouts: &DefaultLoadouts,
 ) -> Entity {
-    let mut loadout: HashMap<_, _> = resolve_loadout(class, default_loadouts, &HashMap::new());
+    let mut loadout: Loadout = resolve_loadout(class, default_loadouts, &Loadout::new());
     enforce_two_hand_conflicts(&mut loadout, item_defs);
 
     let (entity, _combatant) = spawn_combatant(

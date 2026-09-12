@@ -16,7 +16,7 @@ use super::play_match::AbilityType;
 use super::play_match::abilities::SpellSchool;
 use super::play_match::ability_config::{AbilityDefinitions, AbilityConfig};
 use super::play_match::components::{ClassBaseStats, PetType, ResourceType, class_base_stats};
-use super::play_match::equipment::{ItemSlot, ItemId, ItemDefinitions, DefaultLoadouts, resolve_loadout, enforce_two_hand_conflicts, enforce_unique_equipped, find_one_handed_mainhand};
+use super::play_match::equipment::{ItemSlot, ItemId, Loadout, ItemDefinitions, DefaultLoadouts, resolve_loadout, enforce_two_hand_conflicts, enforce_unique_equipped, find_one_handed_mainhand};
 // Item presentation lives in the encyclopedia's Items section — the loadout
 // editor renders the same tooltip and stat line so the two never drift.
 use super::encyclopedia::items::{format_item_stats, render_item_tooltip};
@@ -107,7 +107,7 @@ struct EquipmentBonuses {
 }
 
 impl EquipmentBonuses {
-    fn from_loadout(loadout: &HashMap<ItemSlot, ItemId>, items: &ItemDefinitions, class: CharacterClass) -> Self {
+    fn from_loadout(loadout: &Loadout, items: &ItemDefinitions, class: CharacterClass) -> Self {
         let mut bonuses = Self::default();
         // Determine which weapon slot is primary (melee classes use MainHand, ranged use Ranged)
         let primary_weapon_slot = if class.is_melee() { ItemSlot::MainHand } else { ItemSlot::Ranged };
@@ -1138,8 +1138,8 @@ fn render_equipment_panel(
     defaults: &Res<DefaultLoadouts>,
     picker_state: &mut EquipmentPickerState,
     class: CharacterClass,
-    resolved: &HashMap<ItemSlot, ItemId>,
-    overrides: &HashMap<ItemSlot, ItemId>,
+    resolved: &Loadout,
+    overrides: &Loadout,
     item_icons: &Option<Res<ItemIcons>>,
 ) {
     let gold = egui::Color32::from_rgb(255, 215, 0);
