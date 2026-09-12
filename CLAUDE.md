@@ -557,14 +557,21 @@ flip a roll and cascade through the whole log; equally, a real difference can
 hide inside a comparison's margin and print nothing. Byte-identity is evidence
 about OUTPUT, never a proof about state.
 
-**The known source of run-to-run wobble is fixed (AS-58).** Loadouts were
-`HashMap`s, and applying one sums float stats in iteration order — which the
-default `RandomState` reseeds every process. Measured on one unmodified release
-binary over 40 runs: Rogue `crit_chance` took three distinct bit patterns
-(`0x3e2e147a` / `0x3e2e147b` / `0x3e2e147c`, a 2-ULP spread, ~3e-8). Loadouts
-are now `Loadout = BTreeMap<ItemSlot, ItemId>`, so the order is a property of
-the type; `equipment::tests::loadout_is_ordered` and
-`tests/loadout_order_audit.rs` keep it that way.
+**The only known source of run-to-run wobble that reaches the match log is
+fixed (AS-58).** Loadouts were `HashMap`s, and applying one sums float stats in
+iteration order — which the default `RandomState` reseeds every process.
+Measured on one unmodified release binary over 40 runs: Rogue `crit_chance`
+took three distinct bit patterns (`0x3e2e147a` / `0x3e2e147b` / `0x3e2e147c`, a
+2-ULP spread, ~3e-8). Loadouts are now `Loadout = BTreeMap<ItemSlot, ItemId>`,
+so the order is a property of the type; `equipment::tests::loadout_is_ordered`
+and `tests/loadout_order_audit.rs` keep it that way.
+
+**Read that narrowly — other hash-ordered float reductions still exist.** Card
+AS-75 carries four more. They are latent rather than fixed: their results
+(`CombatLog::total_damage_dealt` / `total_healing_done` among them) have
+test-only callers today, so nothing they sum reaches a match report. Give one a
+production caller and the wobble is back. At any NEW site that folds floats out
+of a `HashMap`, use an ordered map — or sort before the fold.
 
 **What follows for how you read a diff:**
 
@@ -585,12 +592,25 @@ the type; `equipment::tests::loadout_is_ordered` and
   crits, or ended every match by timeout, proves nothing. Count the decisive
   events (kills, crits, distinct durations), not just the rows.
 
-**A last-ULP stat change is far below the resolution of an outcome.** Measured
-directly: a build shifting every combatant's `crit_chance` down by exactly the
-2 ULP the wobble spanned produced logs byte-identical to canonical across 48
-Rogue matches — 4295 damage events, 462 crit rolls. `random_f32()` lands on
-multiples of 2^-24 (~6e-8), so a 3e-8 window holds at most one drawable value:
-of order one flip per million matches. The protocol has not been losing signal.
+**A last-ULP stat change is far below the resolution of an outcome — but it is
+the arithmetic that shows it, not the bracket.** Measured directly: a build
+shifting every combatant's `crit_chance` down by exactly the 2 ULP the wobble
+spanned produced logs byte-identical to canonical across 48 Rogue matches —
+4295 damage events, 462 of them crits. (The ROLLS carry the non-vacuity weight,
+not the crits: every non-DoT damage event rolls once against `crit_chance`, so
+of order 4000 rolls, ~90 a match.)
+
+**That bracket had to come out clean, which is why it is not general evidence.**
+`random_f32()` lands on multiples of 2^-24 (~6e-8) and `roll_crit` is a strict
+`roll < crit_chance`, so a shift flips a roll only if a multiple of 2^-24 lies
+inside the window it scans. This one straddles none: `0x3e2e147c` is itself a
+grid point (2852127 x 2^-24) and the smallest one at or above `0x3e2e147a`, so
+`[0x3e2e147a, 0x3e2e147c)` contains no drawable value at all. The general claim
+is the RATE: a 3e-8 window holds at most one drawable value, so a roll flips
+with probability ~3e-8 — of order one flipped match per few hundred thousand at
+~90 rolls each. The protocol has not been losing signal. But that is the rate
+talking, and a window that DID straddle a grid point would flip at it, so a
+clean 2-ULP bracket over one window is no licence for last-ULP changes at large.
 
 ### Run a 2v2-with-healer balance sweep
 
