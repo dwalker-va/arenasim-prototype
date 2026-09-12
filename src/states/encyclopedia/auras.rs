@@ -280,6 +280,14 @@ impl NamedAura {
     ///
     /// The two halves are disjoint by construction: a friendly dispel lifts
     /// harmful magic off an ally, while Purge strips buffs off an enemy.
+    ///
+    /// The last two rungs are the honest ones. "Cannot be removed" used to
+    /// catch every aura no dispel reaches, and that overclaimed: Divine Shield
+    /// clears every hostile effect from its holder, so Rend, Kidney Shot and
+    /// Curse of Weakness all come off to it. A harmful aura therefore gets a
+    /// badge that NAMES the exception, and only the auras Divine Shield does
+    /// not touch — the mechanical markers and the unpurgeable self-buffs —
+    /// keep the absolute wording.
     fn removal(&self) -> (&'static str, &'static str) {
         if self.sample.can_be_dispelled() {
             (
@@ -296,6 +304,21 @@ impl NamedAura {
             (
                 "Purgeable",
                 "A Shaman's Purge can strip this off an enemy.",
+            )
+        } else if self.sample.is_physical() {
+            (
+                "Immune to dispel",
+                "A physical effect — a wound or an impact, with no magic on it to dissipate. No \
+                 dispel, cleanse or purge in the game touches it. A Paladin's Divine Shield, \
+                 which clears every harmful effect from its holder, is the only thing that ends \
+                 it early.",
+            )
+        } else if self.sample.is_hostile_effect() {
+            (
+                "Immune to dispel",
+                "No dispel, cleanse or purge in the game touches this. A Paladin's Divine \
+                 Shield, which clears every harmful effect from its holder, is the only thing \
+                 that ends it early.",
             )
         } else {
             (
@@ -907,8 +930,13 @@ fn stat_rows(entry: &NamedAura) -> Vec<(String, String)> {
         },
     ));
 
+    // `spell_school` is the DAMAGE school and is `None` for a physical aura,
+    // so the row would otherwise go missing on exactly the auras whose school
+    // is the reason they cannot be dispelled. The removal class knows.
     if let Some(school) = aura.spell_school {
         rows.push(("School".to_string(), format!("{:?}", school)));
+    } else if aura.is_physical() {
+        rows.push(("School".to_string(), "Physical".to_string()));
     }
 
     rows
@@ -1091,6 +1119,52 @@ mod tests {
             by_name("Crippling Poison").sample.is_cleansable_poison(),
             "a poison is cleansed, not dispelled"
         );
+    }
+
+    /// The same holds for the SLOW mechanic, which is where the two rules used
+    /// to disagree: Frostbolt's chill is frost magic and comes off, Concussive
+    /// Shot's is an arrow to the leg and does not. Both are
+    /// `AuraType::MovementSpeedSlow`, so a type-level answer cannot be right
+    /// for both.
+    #[test]
+    fn a_physical_slow_is_not_dispellable_but_a_frost_one_is() {
+        let entries = catalog(&abilities());
+        let by_name = |name: &str| {
+            entries.iter().find(|e| e.name == name).unwrap_or_else(|| panic!("{} missing", name))
+        };
+        let concussive = by_name("Concussive Shot");
+        let frostbolt = by_name("Frostbolt");
+        assert_eq!(concussive.mechanic, frostbolt.mechanic, "same mechanic");
+        assert!(frostbolt.sample.can_be_dispelled(), "a frost slow is magic");
+        assert!(!concussive.sample.can_be_dispelled(), "an arrow is not magic");
+        assert!(concussive.sample.is_physical());
+    }
+
+    /// The page says what the engine does. A physical debuff is immune to
+    /// ordinary removal but Divine Shield still clears it, so its badge must
+    /// name that exception instead of claiming nothing takes it — and the
+    /// wording has to be the SAME for the physical slow and the physical DoT,
+    /// which is the asymmetry the card was opened on.
+    #[test]
+    fn a_physical_debuffs_badge_names_divine_shield_as_the_exception() {
+        let entries = catalog(&abilities());
+        let by_name = |name: &str| {
+            entries.iter().find(|e| e.name == name).unwrap_or_else(|| panic!("{} missing", name))
+        };
+        for name in ["Concussive Shot", "Rend"] {
+            let entry = by_name(name);
+            let (badge, tooltip) = entry.removal();
+            assert_eq!(badge, "Immune to dispel", "{name} badge");
+            assert!(tooltip.contains("Divine Shield"), "{name} must name the exception");
+            assert!(
+                entry.sample.is_hostile_effect(),
+                "{name} is only true because Divine Shield clears hostile effects"
+            );
+            assert!(
+                stat_rows(entry).iter().any(|(k, v)| k == "School" && v == "Physical"),
+                "{name} should say it is physical on the page, not only in the tooltip"
+            );
+        }
     }
 
     #[test]

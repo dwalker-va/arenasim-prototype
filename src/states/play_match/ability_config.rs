@@ -69,9 +69,14 @@ pub struct AuraEffect {
     /// must not share stun DR with Cheap Shot.
     #[serde(default)]
     pub dr_category: Option<DRCategory>,
-    /// Dispel classification of the applied aura. Defaults to `Auto` (magic
-    /// removability derived from the aura type). Set `Poison` for poison debuffs
-    /// (Crippling Poison) so Dispel Magic can't remove them — only a cleanse can.
+    /// Dispel classification of the applied aura. Leave it at `Auto` (the
+    /// default) and the class is derived from the ability's `spell_school`:
+    /// a `Physical` ability applies a physical debuff that no dispel, cleanse
+    /// or purge removes, and anything else applies a magic one whose
+    /// removability comes from the aura type. Set `Poison` explicitly for a
+    /// poison debuff on a magic-school ability (Crippling Poison is `Nature`),
+    /// which is the one case the school gets wrong.
+    /// See [`DispelType::for_ability`].
     #[serde(default)]
     pub dispel_type: DispelType,
 }

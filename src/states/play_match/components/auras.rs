@@ -116,7 +116,14 @@ pub enum AuraType {
 }
 
 /// How a debuff is classified for dispel/removal. Orthogonal to `AuraType` so a
-/// single effect (e.g. a `MovementSpeedSlow`) can be magic OR poison.
+/// single effect (e.g. a `MovementSpeedSlow`) can be magic, poison OR physical.
+///
+/// This is the REMOVAL axis, and it is the only one that decides removability —
+/// `AuraType` says what an effect does, not how it comes off. The distinction
+/// matters because the same mechanic arrives by different means: a slow is
+/// Frostbolt's frost magic, Crippling Poison's coating, or Concussive Shot's
+/// arrow to the leg, and only the first of those is something a Dispel Magic
+/// can lift.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize, Default)]
 pub enum DispelType {
     /// Derive removability from the aura type (the historical behavior):
@@ -129,6 +136,61 @@ pub enum DispelType {
     /// A disease debuff — reserved for future use; same family as Poison,
     /// removed by a disease/poison cleanse rather than Dispel Magic.
     Disease,
+    /// A PHYSICAL debuff — an arrow in the leg, a torn wound, a boot to the
+    /// head. There is no magic on it to dissipate, so no ordinary removal
+    /// touches it: not Dispel Magic, not Cleanse, not Devour Magic, not Purge.
+    ///
+    /// **Physical is not permanent.** It is immune to ORDINARY removal, and
+    /// still yields to an effect that specifically clears physical harm. The
+    /// only such effect in the sim today is Divine Shield, which retains
+    /// against [`AuraType::is_hostile_effect`] and therefore takes physical
+    /// debuffs along with everything else. Anything written about a physical
+    /// aura — engine comment or encyclopedia badge — has to name that
+    /// exception rather than claim nothing removes it.
+    ///
+    /// Derived from the applying ability's `spell_school`, not hand-declared:
+    /// see [`DispelType::for_ability`]. That keeps one fact ("Concussive Shot
+    /// is physical") in one place instead of restating it on the aura, where
+    /// the two copies could disagree.
+    Physical,
+}
+
+impl DispelType {
+    /// The removal class an ability's aura carries: the ability's declared
+    /// `dispel_type` when it names one, otherwise derived from its school —
+    /// a `Physical` ability yields a physical debuff, everything else `Auto`.
+    ///
+    /// An explicit declaration wins so a magic-school ability can still be a
+    /// poison (Crippling Poison is `Nature` + `Poison`); nothing in the RON
+    /// declares a type on a physical ability today, and if one ever does it
+    /// means the author knew better than the school.
+    ///
+    /// **Exhaustive on purpose — do not add a `_ =>` arm.** Same hazard class
+    /// as [`AuraType::is_magic_dispellable`]: a school silently falling into
+    /// the wrong arm changes what a dispel can strip, and no test in this repo
+    /// observes "the debuff that was never a dispel candidate".
+    pub fn for_ability(declared: DispelType, school: SpellSchool) -> DispelType {
+        match declared {
+            DispelType::Poison => DispelType::Poison,
+            DispelType::Disease => DispelType::Disease,
+            DispelType::Physical => DispelType::Physical,
+            DispelType::Auto => match school {
+                SpellSchool::Physical => DispelType::Physical,
+                // Schoolless is NOT physical. `SpellSchool::None` means "no
+                // school, cannot be locked out" — Freezing Trap declares it,
+                // yet the trap the engine actually springs is Frost and IS
+                // dispellable. Reading schoolless as physical would have made
+                // the encyclopedia's Freezing Trap page contradict the trap.
+                SpellSchool::None
+                | SpellSchool::Frost
+                | SpellSchool::Holy
+                | SpellSchool::Shadow
+                | SpellSchool::Arcane
+                | SpellSchool::Fire
+                | SpellSchool::Nature => DispelType::Auto,
+            },
+        }
+    }
 }
 
 impl AuraType {
@@ -274,9 +336,16 @@ impl AuraType {
         }
     }
 
-    /// Returns true if this aura type is inherently magic-dispellable.
+    /// Returns true if this aura type is dispellable WHEN IT IS MAGIC.
     /// This covers CC effects that are always magical in WoW, plus Silence (which is
     /// removable by Dispel Magic / Cleanse).
+    ///
+    /// This is a question about the MECHANIC only, and it is asked second:
+    /// [`Aura::can_be_dispelled`] rules out poison, disease and physical auras
+    /// before it gets here, so a `true` arm below means "dispellable if magic",
+    /// not "always dispellable". Concussive Shot's snare is a `MovementSpeedSlow`
+    /// and still undispellable, because it is a physical arrow rather than a
+    /// frost spell.
     ///
     /// **Exhaustive on purpose — do not add a `_ =>` arm.** This is the same
     /// hazard class as [`AuraType::is_hostile_effect`] below, one degree worse:
@@ -292,8 +361,10 @@ impl AuraType {
     /// balance change, not a cleanup.
     pub fn is_magic_dispellable(&self) -> bool {
         match self {
-            // Inherently magical crowd control, plus Silence (the Unstable
-            // Affliction dispel backlash), which Dispel Magic / Cleanse lifts.
+            // Crowd control, plus Silence (the Unstable Affliction dispel
+            // backlash), which Dispel Magic / Cleanse lifts — provided the
+            // aura is magic. A physical instance of any of these (Concussive
+            // Shot's snare) is filtered out upstream by its removal class.
             AuraType::MovementSpeedSlow
             | AuraType::Root
             | AuraType::Fear
@@ -304,7 +375,8 @@ impl AuraType {
             // Classified PER AURA, not per type: [`Aura::can_be_dispelled`]
             // admits a DoT only when its `spell_school` is non-physical, so
             // Corruption and Immolate are dispellable and Rend is not. Listing
-            // the type here would make Rend dispellable.
+            // the type here would make a SCHOOLLESS DoT dispellable — the
+            // removal class already stops the physical ones.
             AuraType::DamageOverTime => false,
 
             // Stat debuffs, not crowd control — this classifier's true arm is
@@ -455,8 +527,12 @@ pub struct Aura {
     pub fear_direction: (f32, f32),
     /// For Fear: time until direction change
     pub fear_direction_timer: f32,
-    /// Spell school of the ability that created this aura (None = physical)
-    /// Used to determine if DoTs can be dispelled (only magic DoTs are dispellable)
+    /// Spell school of the ability that created this aura, for DAMAGE purposes:
+    /// the school a DoT tick lands as, and the school a `SpellResistanceBuff`
+    /// matches against. `None` covers BOTH physical and schoolless, which is
+    /// why it cannot answer a removability question — the two are the same here
+    /// and must not be to a dispel (a physical arrow is immune, the schoolless
+    /// Freezing Trap is not). Removability lives on `dispel_type`.
     pub spell_school: Option<SpellSchool>,
     /// True on the frame the aura was applied — prevents the applying ability's own damage
     /// from counting toward the break threshold
@@ -473,9 +549,12 @@ pub struct Aura {
     /// carries `Some(DRCategory::KidneyShotStun)` so it does not share DR with Cheap Shot or
     /// other stuns. `None` for every other aura (they fall back to `from_aura_type`).
     pub dr_category_override: Option<DRCategory>,
-    /// Dispel classification (magic-derived `Auto` by default, or `Poison`/`Disease`).
-    /// Decouples removability from `effect_type` so e.g. a poison `MovementSpeedSlow`
-    /// (Crippling Poison) is immune to Dispel Magic but removable by a poison cleanse.
+    /// Removal classification — `Auto` (magic) by default, or `Poison`,
+    /// `Disease`, `Physical`. Decouples removability from `effect_type` so the
+    /// one `MovementSpeedSlow` mechanic can be Frostbolt's dispellable chill,
+    /// Crippling Poison's cleansable coating, or Concussive Shot's physical
+    /// snare that only Divine Shield ends early. Set by
+    /// [`DispelType::for_ability`] for every RON-defined aura.
     pub dispel_type: DispelType,
 }
 
@@ -492,14 +571,31 @@ impl Aura {
     }
 
     /// Returns true if this aura can be removed by Dispel Magic.
-    /// Magic-dispellable aura types (slows, roots, fear, polymorph) are always dispellable.
-    /// DoTs are dispellable only if they have a magic spell school (Corruption, Immolate)
-    /// but not if they're physical (Rend).
+    ///
+    /// The REMOVAL CLASS decides first, and it can only ever say no: a poison,
+    /// a disease or a physical debuff is not magic, so there is nothing for a
+    /// Dispel Magic to take hold of. Only once an aura is magic does the
+    /// mechanic get a vote — magic-dispellable types (slows, roots, fear,
+    /// polymorph, silence) are dispellable, and a DoT is dispellable when it
+    /// carries a magic school.
+    ///
+    /// The physical gate lives HERE, above the type check, rather than being
+    /// spelled out per aura type. That ordering is the point: the rule was
+    /// previously written down only inside the `DamageOverTime` arm, so a
+    /// physical DoT (Rend) was correctly undispellable while a physical SLOW
+    /// (Concussive Shot) was dispellable — same school, opposite answers,
+    /// because the rule existed in only one of the two places. A rule about
+    /// physical effects belongs on the physical axis, once.
     pub fn can_be_dispelled(&self) -> bool {
-        // Poison/disease debuffs are NOT magic — Dispel Magic cannot touch them
-        // (they are removed by a poison/disease cleanse instead; see `is_cleansable_poison`).
-        if !matches!(self.dispel_type, DispelType::Auto) {
-            return false;
+        // **Exhaustive on purpose — do not add a `_ =>` arm.** A removal class
+        // silently falling through to the magic branch is a debuff becoming
+        // dispellable without anyone deciding it should be.
+        match self.dispel_type {
+            // Not magic. Poisons/diseases come off to a poison cleanse (see
+            // `is_cleansable_poison`); physical comes off to nothing short of
+            // Divine Shield.
+            DispelType::Poison | DispelType::Disease | DispelType::Physical => return false,
+            DispelType::Auto => {}
         }
 
         // Inherently magic-dispellable aura types
@@ -507,15 +603,30 @@ impl Aura {
             return true;
         }
 
-        // DoTs are dispellable only if magic school
+        // DoTs are dispellable only if magic school. Physical DoTs never reach
+        // this arm — they are `DispelType::Physical` and returned above — but
+        // the school check stays as the backstop for a DoT built by hand in
+        // engine code, which never passes through `DispelType::for_ability`.
         if matches!(self.effect_type, AuraType::DamageOverTime) {
             if let Some(school) = self.spell_school {
-                // Physical DoTs (Rend) are NOT dispellable
                 return school != SpellSchool::Physical;
             }
         }
 
         false
+    }
+
+    /// Returns true if this aura is PHYSICAL — immune to ordinary dispel,
+    /// cleanse and purge, and removable only by an effect that clears physical
+    /// harm specifically. Divine Shield is the only such effect in the sim
+    /// today: it retains against [`Aura::is_hostile_effect`], which physical
+    /// debuffs satisfy.
+    ///
+    /// Exists so player-facing surfaces can say WHY an aura resists removal,
+    /// and name the one thing that still takes it, without re-deriving either
+    /// from the school. The encyclopedia's removal badge reads this.
+    pub fn is_physical(&self) -> bool {
+        matches!(self.dispel_type, DispelType::Physical)
     }
 
     /// Returns true if this aura is a poison/disease debuff removable by a
@@ -651,11 +762,16 @@ impl AuraPending {
     ) -> Option<Self> {
         let aura_effect = ability_def.applies_aura.as_ref()?;
 
-        // Convert spell school to Option (None for Physical, since physical = not magic-dispellable)
+        // Convert spell school to Option. Physical and schoolless both store
+        // `None` here — this field feeds DAMAGE (resistance matching, DoT tick
+        // school), not removability. Removability is `dispel_type` below, which
+        // keeps Physical distinct from schoolless.
         let spell_school = match ability_def.spell_school {
             SpellSchool::Physical | SpellSchool::None => None,
             school => Some(school),
         };
+        let dispel_type =
+            DispelType::for_ability(aura_effect.dispel_type, ability_def.spell_school);
 
         Some(Self {
             target,
@@ -676,7 +792,8 @@ impl AuraPending {
                 applied_this_frame: false,
                 backlash_damage: None,
                 dr_category_override: aura_effect.dr_category,
-                dispel_type: aura_effect.dispel_type,            },
+                dispel_type,
+            },
         })
     }
 
@@ -691,11 +808,16 @@ impl AuraPending {
     ) -> Option<Self> {
         let aura_effect = ability_def.applies_aura.as_ref()?;
 
-        // Convert spell school to Option (None for Physical, since physical = not magic-dispellable)
+        // Convert spell school to Option. Physical and schoolless both store
+        // `None` here — this field feeds DAMAGE (resistance matching, DoT tick
+        // school), not removability. Removability is `dispel_type` below, which
+        // keeps Physical distinct from schoolless.
         let spell_school = match ability_def.spell_school {
             SpellSchool::Physical | SpellSchool::None => None,
             school => Some(school),
         };
+        let dispel_type =
+            DispelType::for_ability(aura_effect.dispel_type, ability_def.spell_school);
 
         Some(Self {
             target,
@@ -715,7 +837,8 @@ impl AuraPending {
                 applied_this_frame: false,
                 backlash_damage: None,
                 dr_category_override: aura_effect.dr_category,
-                dispel_type: aura_effect.dispel_type,            },
+                dispel_type,
+            },
         })
     }
 
@@ -730,11 +853,16 @@ impl AuraPending {
     ) -> Option<Self> {
         let aura_effect = ability_def.applies_aura.as_ref()?;
 
-        // Convert spell school to Option (None for Physical, since physical = not magic-dispellable)
+        // Convert spell school to Option. Physical and schoolless both store
+        // `None` here — this field feeds DAMAGE (resistance matching, DoT tick
+        // school), not removability. Removability is `dispel_type` below, which
+        // keeps Physical distinct from schoolless.
         let spell_school = match ability_def.spell_school {
             SpellSchool::Physical | SpellSchool::None => None,
             school => Some(school),
         };
+        let dispel_type =
+            DispelType::for_ability(aura_effect.dispel_type, ability_def.spell_school);
 
         Some(Self {
             target,
@@ -754,7 +882,8 @@ impl AuraPending {
                 applied_this_frame: false,
                 backlash_damage: None,
                 dr_category_override: aura_effect.dr_category,
-                dispel_type: aura_effect.dispel_type,            },
+                dispel_type,
+            },
         })
     }
 }
@@ -1030,5 +1159,113 @@ mod tests {
                 ty
             );
         }
+    }
+
+    // ========================================================================
+    // Physical debuffs are immune to ORDINARY removal
+    // ========================================================================
+
+    /// The removal class derived for an ability's aura. A PHYSICAL ability
+    /// yields a physical debuff; a schoolless one does NOT — `SpellSchool::None`
+    /// means "no school, cannot be locked out", and the schoolless Freezing
+    /// Trap is sprung by the engine as a Frost aura that stays dispellable.
+    #[test]
+    fn for_ability_derives_physical_from_the_school_only() {
+        assert_eq!(
+            DispelType::for_ability(DispelType::Auto, SpellSchool::Physical),
+            DispelType::Physical
+        );
+        for school in [
+            SpellSchool::None,
+            SpellSchool::Frost,
+            SpellSchool::Holy,
+            SpellSchool::Shadow,
+            SpellSchool::Arcane,
+            SpellSchool::Fire,
+            SpellSchool::Nature,
+        ] {
+            assert_eq!(
+                DispelType::for_ability(DispelType::Auto, school),
+                DispelType::Auto,
+                "{:?} is not physical",
+                school
+            );
+        }
+    }
+
+    /// An explicitly declared class wins over the school, so a Nature-school
+    /// poison (Crippling Poison) stays a poison rather than becoming magic.
+    #[test]
+    fn for_ability_keeps_an_explicitly_declared_class() {
+        assert_eq!(
+            DispelType::for_ability(DispelType::Poison, SpellSchool::Nature),
+            DispelType::Poison
+        );
+        assert_eq!(
+            DispelType::for_ability(DispelType::Disease, SpellSchool::Physical),
+            DispelType::Disease
+        );
+    }
+
+    /// The rule, stated on the mechanic-by-mechanic grid it used to be wrong
+    /// on: the SAME mechanic is dispellable as magic and immune as physical.
+    /// A frost slow (Frostbolt) comes off; an arrow slow (Concussive Shot)
+    /// does not.
+    #[test]
+    fn a_physical_debuff_is_never_dispellable_whatever_its_mechanic() {
+        for ty in [
+            AuraType::MovementSpeedSlow,
+            AuraType::Root,
+            AuraType::Fear,
+            AuraType::Polymorph,
+            AuraType::Incapacitate,
+            AuraType::Silence,
+            AuraType::DamageOverTime,
+        ] {
+            let magic = Aura {
+                effect_type: ty,
+                spell_school: Some(SpellSchool::Frost),
+                dispel_type: DispelType::Auto,
+                ..Default::default()
+            };
+            let physical = Aura {
+                effect_type: ty,
+                spell_school: None,
+                dispel_type: DispelType::Physical,
+                ..Default::default()
+            };
+            assert!(
+                magic.can_be_dispelled(),
+                "{:?} as magic must stay dispellable",
+                ty
+            );
+            assert!(
+                !physical.can_be_dispelled(),
+                "{:?} as a PHYSICAL effect must not be dispellable",
+                ty
+            );
+            assert!(physical.is_physical());
+        }
+    }
+
+    /// Physical is immune to ORDINARY removal, not permanent: every removal
+    /// predicate says no, while Divine Shield's `is_hostile_effect` retain
+    /// still takes it. Losing this is how "physical" quietly becomes
+    /// "unremovable".
+    #[test]
+    fn a_physical_debuff_is_still_cleared_by_divine_shield() {
+        let concussive = Aura {
+            effect_type: AuraType::MovementSpeedSlow,
+            dispel_type: DispelType::Physical,
+            ..Default::default()
+        };
+        assert!(!concussive.can_be_dispelled());
+        assert!(!concussive.is_cleansable_poison());
+        assert!(!concussive.can_be_purged());
+        assert!(
+            concussive.is_hostile_effect(),
+            "Divine Shield retains against hostile effects — a physical debuff \
+             must remain one, or the bubble stops clearing it"
+        );
     }
 }
