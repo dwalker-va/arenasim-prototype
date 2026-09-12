@@ -869,6 +869,74 @@ mod tests {
         assert!(!state.can_go_back());
     }
 
+    /// The deep-link contract other screens are built on: open the
+    /// encyclopedia ON a page, and the FIRST Back — button or `Esc` — hands the
+    /// player back to the screen they linked from, not to a section index they
+    /// never visited.
+    #[test]
+    fn a_deep_link_returns_to_its_caller_on_the_first_back() {
+        let mut state = EncyclopediaState::default();
+        state.open_at(
+            Topic::Ability(AbilityType::Corruption),
+            GameState::ViewCombatant,
+        );
+
+        assert_eq!(
+            state.current(),
+            View::topic(Topic::Ability(AbilityType::Corruption))
+        );
+        // The tab follows the topic, so the chrome reads as the Abilities section.
+        assert_eq!(state.current().section, Section::Abilities);
+        assert!(
+            !state.can_go_back(),
+            "the linked page is the ROOT of the stack — there is nowhere above it"
+        );
+        assert_eq!(exit_label(state.return_to()), "EXIT TO COMBATANT");
+
+        assert!(state.back_key(), "Esc at the root leaves the encyclopedia");
+        assert_eq!(state.leave(), GameState::ViewCombatant);
+    }
+
+    /// Browsing ONWARD from a deep-linked page still unwinds the route the
+    /// reader took, and only then leaves.
+    #[test]
+    fn browsing_on_from_a_deep_link_unwinds_before_it_leaves() {
+        let mut state = EncyclopediaState::default();
+        state.open_at(
+            Topic::Ability(AbilityType::Corruption),
+            GameState::ViewCombatant,
+        );
+        state.apply(EncyclopediaAction::Navigate(View::topic(Topic::Class(
+            CharacterClass::Warlock,
+        ))));
+
+        assert!(!state.back_key(), "the first Back pops to the ability page");
+        assert_eq!(
+            state.current(),
+            View::topic(Topic::Ability(AbilityType::Corruption))
+        );
+        assert!(state.back_key());
+        assert_eq!(state.leave(), GameState::ViewCombatant);
+    }
+
+    /// A deep-linked page must not become the LANDING view for the next visit
+    /// from somewhere else. `leave` resets the stack to [`root_view`] rather
+    /// than truncating it, which is what makes that true once a link can set
+    /// the root.
+    #[test]
+    fn a_deep_link_does_not_poison_the_next_visit() {
+        let mut state = EncyclopediaState::default();
+        state.open_at(
+            Topic::Item(ItemId::WandOfTheInvoker),
+            GameState::ViewCombatant,
+        );
+        assert_eq!(state.leave(), GameState::ViewCombatant);
+
+        state.open_from(GameState::MainMenu);
+        assert_eq!(state.current(), View::index(Section::Classes));
+        assert!(!state.can_go_back());
+    }
+
     #[test]
     fn back_and_exit_are_independent_at_every_depth() {
         // Two pages deep, Back unwinds one level while Exit leaves outright —

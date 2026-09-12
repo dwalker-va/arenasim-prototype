@@ -28,11 +28,11 @@ use crate::states::play_match::components::{AuraType, ClassBaseStats};
 use crate::states::play_match::AbilityType;
 
 /// What [`build_ability_description`] says when none of an ability's numeric
-/// or flag fields yields a sentence. It is the generator's ONLY empty-ish
-/// output — the function never returns an empty string — so a test that wants
-/// to know whether the effect half was actually generated compares against
-/// this, not against `""`. Only legitimate beside an aura sentence: an ability
-/// with no effect text and no aura would have nothing to show on any surface.
+/// or flag fields yields a sentence AND the ability applies no aura — the one
+/// case where saying nothing would leave nothing to show on any surface. An
+/// ability whose whole effect is its aura gets `""` instead, so the aura
+/// sentence leads. A test that wants to know whether the effect half was
+/// actually generated therefore compares against this AND against `""`.
 pub const UTILITY_FALLBACK: &str = "Utility ability.";
 
 /// Totem tooltip text generated from the gameplay buff spec (magnitude +
@@ -61,9 +61,22 @@ pub fn totem_description(ability: AbilityType) -> Option<String> {
     Some(format!("Summons a totem that {}. Lasts {:.0} sec.", effect, TOTEM_DURATION))
 }
 
+/// The ability's PRECONDITIONS, as a trailing sentence — what must be true to
+/// press it, as opposed to what pressing it does.
+///
+/// Kept out of [`build_ability_description`] so it can be appended LAST, after
+/// the aura sentence: Cheap Shot's whole effect is its stun, and a description
+/// that led with "Must be stealthed." made its one-line summary say only that.
+pub fn requirement_sentence(config: &AbilityConfig) -> Option<String> {
+    config.requires_stealth.then(|| "Must be stealthed.".to_string())
+}
+
 /// Build a description string for an ability based on its config and the
 /// casting class's base stats (damage and healing ranges are shown already
 /// scaled, so the numbers read as what the player will see land).
+///
+/// EFFECTS only. The aura sentence and the precondition
+/// ([`requirement_sentence`]) are composed on top by the caller, in that order.
 pub fn build_ability_description(
     ability: AbilityType,
     config: &AbilityConfig,
@@ -133,21 +146,28 @@ pub fn build_ability_description(
         parts.push("Charges to the target.".to_string());
     }
 
-    // Stealth requirement
-    if config.requires_stealth {
-        parts.push("Must be stealthed.".to_string());
-    }
+    // NOTE: the stealth requirement is NOT an effect and is deliberately not
+    // here — see `requirement_sentence`.
 
     // Dispel
     if config.is_dispel {
         parts.push("Removes one magic debuff from an ally.".to_string());
     }
 
-    if parts.is_empty() {
-        UTILITY_FALLBACK.to_string()
-    } else {
-        parts.join(" ")
+    if !parts.is_empty() {
+        return parts.join(" ");
     }
+
+    // Nothing the numeric fields can express. When the ability's whole effect
+    // IS the aura it applies — half the corpus: every shout, curse, armor,
+    // aura and hard CC — say NOTHING here and let the aura sentence carry the
+    // meaning. Leading each of those with a filler line buried the only real
+    // sentence they have, and it made the one-line summary that View Combatant
+    // shows read "Utility ability." and nothing else.
+    if config.applies_aura.is_some() {
+        return String::new();
+    }
+    UTILITY_FALLBACK.to_string()
 }
 
 /// Build a description string for an aura effect
@@ -276,22 +296,26 @@ mod tests {
     use crate::states::play_match::ability_config::load_ability_definitions;
     use crate::states::play_match::components::class_base_stats;
 
-    /// Every ability in `abilities.ron` produces text, and every applied aura
-    /// produces its own sentence — the property the encyclopedia's
+    /// Every ability in `abilities.ron` produces player-facing text, and every
+    /// applied aura produces its own sentence — the property the encyclopedia's
     /// zero-marginal-cost rule depends on. Ability N+1 gets prose for free, or
     /// this fails.
     ///
-    /// "Produces text" is judged against the generator's own filler, not
-    /// against `""`: `build_ability_description` never returns an empty string
-    /// (it falls back to [`UTILITY_FALLBACK`]), so a bare non-empty check
-    /// passes for every ability no matter what broke. The assertions that carry
-    /// weight are the two around the filler:
+    /// An ability whose whole effect is its aura returns nothing HERE by
+    /// design; the aura sentence is its text. So the invariant is that one of
+    /// the two speaks — never neither.
+    ///
+    /// "Produces text" is otherwise judged against the generator's own filler,
+    /// not against `""`: an ability with no aura falls back to
+    /// [`UTILITY_FALLBACK`], so a bare non-empty check would pass for it no
+    /// matter what broke. The assertions that carry weight are the two around
+    /// the filler:
     ///
     /// - an ability whose config declares an effect (damage, healing, an
-    ///   interrupt, …) must NOT fall back. That is the regression that would
-    ///   silently empty the EFFECT half of a two-sentence ability — Frostbolt,
-    ///   Mortal Strike — while its aura sentence kept the tooltip looking
-    ///   populated;
+    ///   interrupt, …) must NOT fall back — or say nothing. That is the
+    ///   regression that would silently empty the EFFECT half of a
+    ///   two-sentence ability — Frostbolt, Mortal Strike — while its aura
+    ///   sentence kept the tooltip looking populated;
     /// - an ability that DOES fall back must carry an aura, so the filler is
     ///   never the whole story on any surface ("never neither").
     #[test]
@@ -300,17 +324,21 @@ mod tests {
         for (ability, config) in abilities.iter() {
             let stats = class_base_stats(config.class);
             let text = build_ability_description(*ability, config, &stats);
-            assert!(!text.trim().is_empty(), "{:?} generated no description", ability);
-
-            // The fields the generator turns into effect sentences.
+            // The fields the generator turns into effect sentences. The stealth
+            // requirement is NOT one — it is a precondition, rendered by
+            // `requirement_sentence`, not an effect.
             let declares_an_effect = config.damage_base_max > 0.0
                 || config.healing_base_max > 0.0
                 || config.channel_healing_per_tick > 0.0
                 || config.is_interrupt
                 || config.is_charge
-                || config.requires_stealth
                 || config.is_dispel;
             if declares_an_effect {
+                assert!(
+                    !text.trim().is_empty(),
+                    "{:?} declares an effect but generated no effect text",
+                    ability
+                );
                 assert_ne!(
                     text, UTILITY_FALLBACK,
                     "{:?} declares an effect but its effect text fell back to the filler",
@@ -324,11 +352,18 @@ mod tests {
                     "{:?}'s aura generated no description",
                     ability
                 ),
-                None => assert_ne!(
-                    text, UTILITY_FALLBACK,
-                    "{:?} applies no aura and generated no effect text — nothing to show",
-                    ability
-                ),
+                None => {
+                    assert!(
+                        !text.trim().is_empty(),
+                        "{:?} generated no description and has no aura to speak for it",
+                        ability
+                    );
+                    assert_ne!(
+                        text, UTILITY_FALLBACK,
+                        "{:?} applies no aura and generated no effect text — nothing to show",
+                        ability
+                    );
+                }
             }
         }
     }

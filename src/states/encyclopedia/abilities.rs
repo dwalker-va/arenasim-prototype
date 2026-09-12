@@ -11,7 +11,7 @@
 
 use bevy_egui::egui;
 
-use crate::states::ability_text::{build_ability_description, build_aura_description};
+use crate::states::ability_text::{build_ability_description, build_aura_description, requirement_sentence};
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::{ScalingStat, SpellSchool};
 use crate::states::play_match::ability_config::{AbilityConfig, AbilityDefinitions};
@@ -186,6 +186,10 @@ fn yards(distance: f32) -> String {
 /// The full generated mechanics text: what the ability does, plus a sentence
 /// for the aura it applies. Both come from the shared generator, so this reads
 /// identically to the same ability's tooltip in View Combatant.
+///
+/// An aura-only ability contributes no sentence of its own (see
+/// [`build_ability_description`]), so the aura sentence LEADS rather than
+/// trailing a filler line.
 pub fn mechanics_text(ability: AbilityType, config: &AbilityConfig) -> String {
     let stats = class_base_stats(config.class);
     let mut text = build_ability_description(ability, config, &stats);
@@ -198,10 +202,51 @@ pub fn mechanics_text(ability: AbilityType, config: &AbilityConfig) -> String {
                 sentence = format!("{:.0}% chance: {}", chance * 100.0, sentence);
             }
         }
-        text.push(' ');
+        if !text.is_empty() {
+            text.push(' ');
+        }
         text.push_str(&sentence);
     }
+    // Preconditions go LAST: "Stuns the target for 4 sec. Must be stealthed."
+    if let Some(requirement) = requirement_sentence(config) {
+        if !text.is_empty() {
+            text.push(' ');
+        }
+        text.push_str(&requirement);
+    }
     text
+}
+
+/// The one-line gist: the FIRST sentence of the generated mechanics text.
+///
+/// For a surface that links on to the article instead of being it — the View
+/// Combatant kit list — so the hover says what the ability does without
+/// reprinting the page. Still the shared generator: the sentence shown here is
+/// literally the opening sentence of [`mechanics_text`].
+pub fn summary_sentence(ability: AbilityType, config: &AbilityConfig) -> String {
+    first_sentence(&mechanics_text(ability, config))
+}
+
+/// Cut a generated paragraph at its first sentence.
+///
+/// The boundary is a full stop followed by whitespace (or the end of the
+/// string), NOT any full stop — the generator prints durations as `4.0 sec`,
+/// and a naive split would leave the reader with "Interrupts spellcasting and
+/// locks out the school for 4".
+fn first_sentence(text: &str) -> String {
+    let text = text.trim();
+    let bytes = text.as_bytes();
+    for (i, byte) in bytes.iter().enumerate() {
+        if *byte != b'.' {
+            continue;
+        }
+        match bytes.get(i + 1) {
+            None => break,
+            Some(next) if next.is_ascii_whitespace() => return text[..=i].to_string(),
+            _ => {}
+        }
+    }
+    text.to_string()
 }
 
 // ============================================================================
@@ -225,6 +270,30 @@ pub fn tooltip(ui: &mut egui::Ui, ability: AbilityType, data: &EncyclopediaData)
     ui.label(egui::RichText::new(cost_line(config)).size(12.0).color(DIM));
     ui.add_space(3.0);
     ui.label(egui::RichText::new(mechanics_text(ability, config)).size(12.0).color(TEXT));
+}
+
+/// The SLIM ability tooltip: name in its school colour, the stat strip, and one
+/// sentence of prose.
+///
+/// What a screen shows when the ability's page is one click away. View
+/// Combatant used to carry its own long-form tooltip — a second rendering of
+/// facts this module already owns — which is what the encyclopedia exists to
+/// stop. Same builders, less of them.
+pub fn slim_tooltip(ui: &mut egui::Ui, ability: AbilityType, data: &EncyclopediaData) {
+    ui.set_max_width(320.0);
+    let Some(config) = data.abilities.get(&ability) else {
+        ui.label(egui::RichText::new(Topic::Ability(ability).name(data)).size(14.0).color(TEXT));
+        return;
+    };
+    ui.label(
+        egui::RichText::new(&config.name)
+            .size(14.0)
+            .color(school_color(config.spell_school))
+            .strong(),
+    );
+    ui.label(egui::RichText::new(cost_line(config)).size(12.0).color(DIM));
+    ui.add_space(3.0);
+    ui.label(egui::RichText::new(summary_sentence(ability, config)).size(12.0).color(TEXT));
 }
 
 /// A spell school as an egui colour — the shared `SpellSchool::color_rgb8`
@@ -544,6 +613,108 @@ mod tests {
         let unique: HashSet<AbilityType> = order.iter().copied().collect();
         assert_eq!(order.len(), unique.len(), "an ability is listed twice");
         assert_eq!(unique.len(), abilities.ability_types().count());
+    }
+
+    /// The sentence split must not fire on a DECIMAL. The generator prints
+    /// durations as `4.0 sec`, and a naive "cut at the first full stop" leaves
+    /// the reader with "...locks out the school for 4".
+    #[test]
+    fn the_sentence_split_survives_decimals() {
+        assert_eq!(
+            first_sentence(
+                "Interrupts spellcasting and locks out the school for 4.0 sec. Locks out a spell school for 4 sec."
+            ),
+            "Interrupts spellcasting and locks out the school for 4.0 sec."
+        );
+        assert_eq!(first_sentence("Deals 10-20 damage."), "Deals 10-20 damage.");
+        assert_eq!(first_sentence("Utility ability."), "Utility ability.");
+        // No terminator at all is still a whole summary, not an empty one.
+        assert_eq!(first_sentence("Charges to the target"), "Charges to the target");
+    }
+
+    /// The slim summary View Combatant shows is a genuine PREFIX of the full
+    /// mechanics text — one sentence of the same generated prose, never a
+    /// second rendering of it. Every ability has one, so ability N+1 gets its
+    /// one-liner for free.
+    #[test]
+    fn every_slim_summary_is_the_first_sentence_of_the_full_text() {
+        let abilities = load_ability_definitions().expect("abilities.ron must load");
+        for (ability, config) in abilities.iter() {
+            let full = mechanics_text(*ability, config);
+            let gist = summary_sentence(*ability, config);
+            assert!(!gist.trim().is_empty(), "{:?} generated no summary", ability);
+            assert!(
+                full.starts_with(&gist),
+                "{:?} summary {:?} is not a prefix of {:?}",
+                ability,
+                gist,
+                full
+            );
+            assert!(
+                !gist.contains(". "),
+                "{:?} summary {:?} runs to more than one sentence",
+                ability,
+                gist
+            );
+        }
+    }
+
+    /// An ability whose whole effect is its aura summarises as THAT — not as
+    /// the generator's filler line.
+    ///
+    /// The one-line summary is what exposed this: 34 of the 70 abilities (every
+    /// shout, curse, armor, aura and hard CC) used to lead with "Utility
+    /// ability.", so their gist said nothing at all. Fixed in the shared
+    /// builder, which fixes the encyclopedia page too.
+    #[test]
+    fn an_aura_only_ability_summarises_as_its_aura() {
+        let abilities = load_ability_definitions().expect("abilities.ron must load");
+
+        let poly = abilities.get_unchecked(&AbilityType::Polymorph);
+        assert!(
+            summary_sentence(AbilityType::Polymorph, poly)
+                .starts_with("Transforms the target into a sheep"),
+            "Polymorph summarised as {:?}",
+            summary_sentence(AbilityType::Polymorph, poly)
+        );
+
+        for (ability, config) in abilities.iter() {
+            if config.applies_aura.is_none() {
+                continue;
+            }
+            assert_ne!(
+                summary_sentence(*ability, config),
+                "Utility ability.",
+                "{:?} has an aura but summarises as the filler line",
+                ability
+            );
+        }
+    }
+
+    /// A PRECONDITION trails the effect it gates, so the one-line gist is the
+    /// effect. Cheap Shot's description used to open with "Must be stealthed.",
+    /// which made its whole summary a requirement and never mentioned the stun.
+    #[test]
+    fn a_precondition_trails_the_effect_it_gates() {
+        let abilities = load_ability_definitions().expect("abilities.ron must load");
+
+        let cheap_shot = abilities.get_unchecked(&AbilityType::CheapShot);
+        let full = mechanics_text(AbilityType::CheapShot, cheap_shot);
+        assert!(
+            full.ends_with("Must be stealthed."),
+            "the precondition must come last: {:?}",
+            full
+        );
+        assert!(
+            !summary_sentence(AbilityType::CheapShot, cheap_shot).contains("stealthed"),
+            "Cheap Shot's gist must be its stun, not its precondition"
+        );
+
+        // Ambush leads with its damage and still carries the requirement.
+        let ambush = abilities.get_unchecked(&AbilityType::Ambush);
+        let full = mechanics_text(AbilityType::Ambush, ambush);
+        assert!(full.starts_with("Deals "), "{:?}", full);
+        assert!(full.ends_with("Must be stealthed."), "{:?}", full);
     }
 
     /// A class page and the index agree on order, because one derives from the
