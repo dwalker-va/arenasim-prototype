@@ -18,29 +18,75 @@
 //! `#[ignore]` keeps it out of the default `cargo test` run because it needs a
 //! GPU adapter (wgpu), which CI runners may lack.
 
+use bevy_egui::egui;
+use egui_kittest::kittest::Queryable as _;
 use egui_kittest::Harness;
 
 use arenasim::combat::log::CombatLog;
-use arenasim::states::configure_match_ui::ClassIcons;
+use arenasim::states::encyclopedia::EncyclopediaData;
 use arenasim::states::match_config::CharacterClass;
+use arenasim::states::play_match::ability_config::{load_ability_definitions, AbilityDefinitions};
+use arenasim::states::play_match::equipment::{load_item_definitions, ItemDefinitions};
 use arenasim::states::play_match::{CombatantStats, MatchResults};
-use arenasim::states::results_ui::draw_results_screen;
+use arenasim::states::results_ui::{class_link_id, draw_results_screen};
 
 #[test]
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
 fn results_screen_2v2() {
-    let results = mock_results();
-    let log = mock_combat_log();
-    let icons = ClassIcons::default(); // no textures -> class-color fallback squares
-
-    let mut harness = Harness::builder()
-        .with_size([1500.0, 820.0])
-        .build(move |ctx| {
-            draw_results_screen(ctx, Some(&results), &log, &icons);
-        });
-
+    let mut harness = harness(mock_results(), mock_combat_log());
     harness.run();
     harness.snapshot("results_screen");
+}
+
+/// A TOOLTIP-OPEN frame: the pointer is parked on Team 1's class cell, so the
+/// linked-icon contract the Results screen borrowed from the encyclopedia is
+/// what the snapshot actually shows — the class's own tooltip, built by the
+/// shared builder, plus the "click to open" affordance line.
+///
+/// The hover is driven as real input (a `PointerMoved` event through egui's own
+/// hover machinery), not by calling the tooltip renderer directly, so this
+/// covers the interaction rather than the drawing of its contents. The widget's
+/// rect is found by its PINNED id, so the probe does not depend on screen
+/// coordinates that a layout tweak would silently invalidate.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn results_screen_class_tooltip() {
+    let mut harness = harness(mock_results(), mock_combat_log());
+    harness.run();
+
+    let rect = harness
+        .ctx
+        .read_response(class_link_id(1, 0, CharacterClass::Rogue))
+        .expect("the Team 1 Rogue row must expose a linked class cell")
+        .rect;
+    harness
+        .input_mut()
+        .events
+        .push(egui::Event::PointerMoved(rect.center()));
+    harness.run();
+
+    harness.snapshot("results_screen_class_tooltip");
+}
+
+/// The ability breakdowns EXPANDED, which is where the screen's ability icons
+/// live: every bar that names a real ability carries that ability's icon and is
+/// a link to its page, and the rows that name no ability (auto attacks, wands)
+/// keep the reserved slot empty rather than stepping their labels in and out.
+///
+/// The expanders are opened by CLICKING them through the harness, so the
+/// snapshot is of a state a reader can actually reach.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn results_screen_ability_links() {
+    let mut harness = sized_harness(mock_results(), mock_combat_log(), [1500.0, 1000.0]);
+    harness.run();
+
+    for node in harness.get_all_by_label("Ability breakdown") {
+        node.click();
+    }
+    harness.run();
+
+    harness.snapshot("results_screen_ability_links");
 }
 
 /// Stress the stat-column alignment: deliberately mix value widths within and
@@ -82,14 +128,40 @@ fn results_screen_value_combos() {
         log.log_damage(warlock.clone(), "Team 1 Rogue #2".to_string(), "Shadow Bolt".to_string(), 100.0, true, false, String::new());
     }
 
-    let icons = ClassIcons::default();
-    let mut harness = Harness::builder()
-        .with_size([1500.0, 820.0])
-        .build(move |ctx| {
-            draw_results_screen(ctx, Some(&results), &log, &icons);
-        });
+    let mut harness = harness(results, log);
     harness.run();
     harness.snapshot("results_screen_value_combos");
+}
+
+/// Build the offscreen harness over the real pure draw.
+///
+/// `EncyclopediaData` is the same read-only bundle the encyclopedia renders
+/// from — it is Bevy-free, which is exactly why the Results screen could adopt
+/// the linked-icon widget without giving up this loop. No egui textures exist
+/// in kittest, so class icons stay the screen's class-color fallback squares
+/// and ability icons render the widget's placeholder tile.
+fn harness(results: MatchResults, log: CombatLog) -> Harness<'static> {
+    sized_harness(results, log, [1500.0, 820.0])
+}
+
+/// [`harness`] at an explicit size, for the views that need more room.
+fn sized_harness(results: MatchResults, log: CombatLog, size: [f32; 2]) -> Harness<'static> {
+    let items: ItemDefinitions = load_item_definitions().expect("items.ron must load");
+    let abilities: AbilityDefinitions =
+        load_ability_definitions().expect("abilities.ron must load");
+
+    Harness::builder()
+        .with_size(size)
+        .build(move |ctx| {
+            let data = EncyclopediaData {
+                items: &items,
+                abilities: &abilities,
+                item_icons: None,
+                class_icons: None,
+                ability_icons: None,
+            };
+            let _ = draw_results_screen(ctx, Some(&results), &log, &data);
+        })
 }
 
 fn cs(class: CharacterClass, slot: u8, dmg: f32, heal: f32, tkn: f32, survived: bool) -> CombatantStats {

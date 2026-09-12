@@ -3,16 +3,35 @@
 //! Displays match results after a battle concludes:
 //! - Compact winner banner (victor color, match duration)
 //! - Two aligned, face-off team panels (loser panel dimmed)
-//! - Per-combatant rows with class icon, aligned stat columns, a relative
-//!   damage mini-bar, survival tag, and a click-to-expand ability breakdown
+//! - Per-combatant rows with a linked class icon, aligned stat columns, a
+//!   relative damage mini-bar, survival tag, and a click-to-expand ability
+//!   breakdown whose bars link on to each ability
 //! - Team Σ TOTAL subtotal row
 //! - Return-to-menu button
 //!
 //! ## Data Source
 //! Reads the `MatchResults` resource inserted at match end (winner, duration,
 //! per-combatant `CombatantStats`) plus the `CombatLog` for per-ability
-//! damage/healing, killing blows, and CC time. Class icons come from the
-//! shared `ClassIcons` egui-texture resource loaded in ConfigureMatch.
+//! damage/healing, killing blows, and CC time. Icons and tooltip text come from
+//! the encyclopedia's read-only `EncyclopediaData` bundle.
+//!
+//! ## Linked icons
+//! Every class cell and every named ability in a breakdown is a LINK: hovering
+//! shows that entity's tooltip, clicking opens its encyclopedia page with a
+//! working way back here. Both halves come from `encyclopedia::widget`, so this
+//! screen writes no tooltip prose of its own and cannot drift from the text the
+//! encyclopedia and View Combatant show for the same thing.
+//!
+//! Navigation is RETURNED as a [`ResultsAction`], never applied inside the draw.
+//! That is what keeps [`draw_results_screen`] a pure function of its inputs —
+//! and that purity is what makes the offscreen snapshot loop in
+//! `tests/results_screen_snapshot.rs` possible (CLAUDE.md, "Iterate on an egui
+//! screen fast"). Reaching for `EguiContexts` or a `ResMut` in here would cost
+//! the screen that loop; put it in [`results_ui`] instead.
+//!
+//! The round trip — step into the encyclopedia, come back to the same numbers —
+//! rests on `MatchResults` being discarded only by DONE, and is pinned by
+//! `tests/results_encyclopedia_round_trip.rs`.
 //!
 //! ## UI Structure
 //! ```text
@@ -31,7 +50,12 @@ use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use super::{GameState, play_match::{MatchResults, CombatantStats}};
 use super::configure_match_ui::ClassIcons;
+use super::encyclopedia::{widget, EncyclopediaData, EncyclopediaState, Topic};
 use super::match_config::CharacterClass;
+use super::play_match::ability_config::AbilityDefinitions;
+use super::play_match::equipment::ItemDefinitions;
+use super::play_match::AbilityType;
+use super::view_combatant_ui::{AbilityIcons, ItemIcons};
 use crate::combat::log::CombatLog;
 
 // --- Layout constants (fixed widths keep numeric columns aligned across the
@@ -67,47 +91,154 @@ const DIM_LOSER: f32 = 0.72;
 /// edge-to-edge on a wide window.
 const CONTENT_MAX_W: f32 = 1080.0;
 
+/// The encyclopedia link layer, bundled so the render helpers take one extra
+/// parameter instead of four.
+///
+/// It owns no text of its own: hover copy comes from [`widget::link`], which
+/// delegates to the same builders the encyclopedia and View Combatant use. The
+/// only thing this struct adds is the name→topic resolution the combat log
+/// forces, because the log records an ability by its DISPLAY NAME.
+struct Links<'a> {
+    data: &'a EncyclopediaData<'a>,
+    /// Display name → ability, built once per frame from `abilities.ron`.
+    by_name: std::collections::HashMap<&'a str, AbilityType>,
+    /// The topic the reader clicked this frame, if any.
+    clicked: Option<Topic>,
+}
+
+impl<'a> Links<'a> {
+    fn new(data: &'a EncyclopediaData<'a>) -> Self {
+        Self {
+            data,
+            by_name: data
+                .abilities
+                .iter()
+                .map(|(ability, config)| (config.name.as_str(), *ability))
+                .collect(),
+            clicked: None,
+        }
+    }
+
+    /// Attach the hover tooltip + click-to-navigate contract to an already-drawn
+    /// response, recording a click for the caller to return.
+    fn link(&mut self, response: egui::Response, topic: Topic) {
+        if let Some(topic) = widget::link(response, topic, self.data) {
+            self.clicked = Some(topic);
+        }
+    }
+
+    /// Resolve a combat-log ability label to its encyclopedia topic.
+    ///
+    /// Pet damage is folded into its owner's breakdown under `"<Pet>: <ability>"`
+    /// (see `MatchResults::pet_damage_links`), so the prefix is stripped before
+    /// the lookup. Labels that name no ability at all — auto attacks, wands —
+    /// resolve to `None` and simply stay unlinked.
+    fn ability_topic(&self, label: &str) -> Option<Topic> {
+        let bare = label.rsplit_once(": ").map_or(label, |(_, name)| name);
+        self.by_name.get(bare).copied().map(Topic::Ability)
+    }
+}
+
+/// What the reader asked the Results screen to do this frame.
+///
+/// Navigation is RETURNED rather than applied inside the draw, so
+/// [`draw_results_screen`] stays a pure function of its inputs — which is what
+/// lets `tests/results_screen_snapshot.rs` render it offscreen. The Bevy
+/// wrapper below is the only thing that touches the ECS.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ResultsAction {
+    /// DONE — discard the results and go back to the main menu.
+    Done,
+    /// A linked icon was clicked: open this topic in the encyclopedia and come
+    /// back here afterwards.
+    OpenTopic(Topic),
+}
+
 /// Main UI system for the Results screen.
 ///
 /// Thin Bevy wrapper: grabs the egui context + resources and delegates the
 /// actual drawing to [`draw_results_screen`] (which is pure egui, so it can be
-/// snapshot-tested offscreen). Applies the DONE action on click.
+/// snapshot-tested offscreen). Applies whatever [`ResultsAction`] comes back.
 pub fn results_ui(
     mut contexts: EguiContexts,
     results: Option<Res<MatchResults>>,
     combat_log: Res<CombatLog>,
     class_icons: Res<ClassIcons>,
+    item_definitions: Res<ItemDefinitions>,
+    ability_definitions: Res<AbilityDefinitions>,
+    item_icons: Option<Res<ItemIcons>>,
+    ability_icons: Option<Res<AbilityIcons>>,
+    mut encyclopedia: ResMut<EncyclopediaState>,
     mut next_state: ResMut<NextState<GameState>>,
     mut commands: Commands,
 ) {
     let Some(ctx) = contexts.try_ctx_mut() else { return; };
 
-    let done = draw_results_screen(ctx, results.as_deref(), &combat_log, &class_icons);
+    let data = EncyclopediaData {
+        items: &item_definitions,
+        abilities: &ability_definitions,
+        item_icons: item_icons.as_deref(),
+        class_icons: Some(&class_icons),
+        ability_icons: ability_icons.as_deref(),
+    };
 
-    if done {
-        commands.remove_resource::<MatchResults>();
-        next_state.set(GameState::MainMenu);
+    let action = draw_results_screen(ctx, results.as_deref(), &combat_log, &data);
+    apply_results_action(action, &mut encyclopedia, &mut next_state, &mut commands);
+}
+
+/// Apply the screen's action to the world.
+///
+/// Split out of [`results_ui`] so a test can drive it with a real `World` and
+/// prove the property the encyclopedia round trip depends on: **only the DONE
+/// path discards [`MatchResults`]**. Nothing else in the app removes that
+/// resource, and neither the Results nor the Encyclopedia state has an
+/// `OnEnter`/`OnExit` hook, so a reader who steps into the encyclopedia and
+/// walks back comes home to the same numbers.
+pub fn apply_results_action(
+    action: Option<ResultsAction>,
+    encyclopedia: &mut EncyclopediaState,
+    next_state: &mut NextState<GameState>,
+    commands: &mut Commands,
+) {
+    match action {
+        None => {}
+        Some(ResultsAction::Done) => {
+            commands.remove_resource::<MatchResults>();
+            next_state.set(GameState::MainMenu);
+        }
+        Some(ResultsAction::OpenTopic(topic)) => {
+            // The results are LEFT IN PLACE: the encyclopedia is an
+            // informational detour, and `open_at` records where to come back to.
+            encyclopedia.open_at(topic, GameState::Results);
+            next_state.set(GameState::Encyclopedia);
+        }
     }
 }
 
-/// Render the entire Results screen into `ctx`. Returns `true` if the DONE
-/// button was clicked this frame.
+/// Render the entire Results screen into `ctx`, returning the action the reader
+/// requested this frame (if any).
 ///
 /// This is deliberately free of Bevy ECS types (takes plain references) so it
 /// can be driven directly by an egui harness — see
 /// `tests/results_screen_snapshot.rs`, which renders it offscreen with
-/// `egui_kittest` for a fast, human-free visual-iteration loop.
+/// `egui_kittest` for a fast, human-free visual-iteration loop. The linked-icon
+/// widget it borrows from the encyclopedia is Bevy-free for the same reason, so
+/// the two compose without dragging the ECS into the draw.
 pub fn draw_results_screen(
     ctx: &egui::Context,
     results: Option<&MatchResults>,
     combat_log: &CombatLog,
-    class_icons: &ClassIcons,
-) -> bool {
+    data: &EncyclopediaData,
+) -> Option<ResultsAction> {
     let mut style = (*ctx.style()).clone();
     style.visuals.window_fill = BG;
     style.visuals.panel_fill = BG;
+    // Zero-delay tooltips, matching the encyclopedia: hovering a linked icon
+    // must answer at once — that immediacy is the point of the widget.
+    style.interaction.tooltip_delay = 0.0;
     ctx.set_style(style);
 
+    let mut links = Links::new(data);
     let mut done = false;
 
     egui::CentralPanel::default()
@@ -151,12 +282,12 @@ pub fn draw_results_screen(
             ui.columns(2, |columns| {
                 render_team_panel(
                     &mut columns[0], "TEAM 1", 1, &results.team1_combatants, combat_log,
-                    class_icons, egui::Color32::from_rgb(90, 140, 230),
+                    &mut links, egui::Color32::from_rgb(90, 140, 230),
                     results.winner, max_damage, &results.pet_damage_links,
                 );
                 render_team_panel(
                     &mut columns[1], "TEAM 2", 2, &results.team2_combatants, combat_log,
-                    class_icons, egui::Color32::from_rgb(230, 90, 90),
+                    &mut links, egui::Color32::from_rgb(230, 90, 90),
                     results.winner, max_damage, &results.pet_damage_links,
                 );
             });
@@ -178,7 +309,13 @@ pub fn draw_results_screen(
           });
         });
 
-    done
+    // A click on a linked icon wins over DONE: they cannot both happen in one
+    // frame, and answering the reader's most specific gesture is the safe order.
+    match (links.clicked, done) {
+        (Some(topic), _) => Some(ResultsAction::OpenTopic(topic)),
+        (None, true) => Some(ResultsAction::Done),
+        (None, false) => None,
+    }
 }
 
 /// Render the top winner banner: victory line (in winner color) + match duration.
@@ -223,7 +360,7 @@ fn render_team_panel(
     team: u8,
     combatants: &[CombatantStats],
     combat_log: &CombatLog,
-    class_icons: &ClassIcons,
+    links: &mut Links,
     team_color: egui::Color32,
     winner: Option<u8>,
     max_damage: f32,
@@ -290,7 +427,7 @@ fn render_team_panel(
             // saved report to this screen always finds the same label, and two
             // same-class teammates are never ambiguous.
             for stats in combatants {
-                combatant_block(ui, stats, team, combat_log, class_icons, max_damage, dimf, pet_links);
+                combatant_block(ui, stats, team, combat_log, links, max_damage, dimf, pet_links);
             }
 
             // Σ TOTAL row.
@@ -299,12 +436,13 @@ fn render_team_panel(
 }
 
 /// One combatant: stat row + relative damage mini-bar + expandable breakdown.
+#[allow(clippy::too_many_arguments)]
 fn combatant_block(
     ui: &mut egui::Ui,
     stats: &CombatantStats,
     team: u8,
     combat_log: &CombatLog,
-    class_icons: &ClassIcons,
+    links: &mut Links,
     max_damage: f32,
     dimf: f32,
     pet_links: &std::collections::HashMap<String, (String, String)>,
@@ -316,7 +454,20 @@ fn combatant_block(
 
     // Stat row (name left, stats right-aligned to the panel edge).
     ui.horizontal(|ui| {
-        name_cell(ui, class_icons.textures.get(&stats.class).copied(), &row_label, class_color);
+        // The class cell is a LINK: hovering it shows the class's own tooltip
+        // (built by the shared builder, not restated here) and clicking it
+        // opens that class in the encyclopedia.
+        let icon = links
+            .data
+            .class_icons
+            .and_then(|icons| icons.textures.get(&stats.class).copied());
+        let cell = name_cell(ui, icon, &row_label, class_color);
+        let hit = ui.interact(
+            cell.rect,
+            class_link_id(team, stats.slot, stats.class),
+            egui::Sense::click(),
+        );
+        links.link(hit, Topic::Class(stats.class));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = STAT_GAP;
             num_cell(ui, W_K, kills.to_string(), dim(C_KILL, dimf), false);
@@ -359,7 +510,7 @@ fn combatant_block(
     )
     .id_salt(&cid)
     .show(ui, |ui| {
-        render_ability_details(ui, &cid, combat_log, dimf, pet_links);
+        render_ability_details(ui, &cid, combat_log, dimf, pet_links, links);
     });
 
     ui.add_space(8.0);
@@ -417,20 +568,21 @@ fn render_ability_details(
     combat_log: &CombatLog,
     dimf: f32,
     pet_links: &std::collections::HashMap<String, (String, String)>,
+    links: &mut Links,
 ) {
     ui.add_space(2.0);
 
     let damage = combat_log.damage_by_ability_including_pets(cid, pet_links);
     if !damage.is_empty() {
         ui.label(egui::RichText::new("Damage").size(10.0).color(dim(C_DMG, dimf)));
-        render_ability_bars(ui, &damage, dim(C_DMG, dimf), dim(BAR_TEXT, dimf));
+        render_ability_bars(ui, &damage, dim(C_DMG, dimf), dim(BAR_TEXT, dimf), links);
     }
 
     let healing = combat_log.healing_by_ability(cid);
     if !healing.is_empty() {
         ui.add_space(5.0);
         ui.label(egui::RichText::new("Healing").size(10.0).color(dim(C_HEAL, dimf)));
-        render_ability_bars(ui, &healing, dim(C_HEAL, dimf), dim(BAR_TEXT, dimf));
+        render_ability_bars(ui, &healing, dim(C_HEAL, dimf), dim(BAR_TEXT, dimf), links);
     }
 
     let cc_received = combat_log.cc_received_seconds(cid);
@@ -453,15 +605,32 @@ fn render_ability_bars(
     by_ability: &std::collections::HashMap<String, f32>,
     bar_color: egui::Color32,
     text_color: egui::Color32,
+    links: &mut Links,
 ) {
+    /// Icon square inside a bar, and the gap either side of it. The slot is
+    /// reserved on EVERY row — including the auto-attack lines that name no
+    /// ability — so the labels stay on one left edge instead of stepping in
+    /// and out with whatever happens to be linkable.
+    const BAR_ICON: f32 = 12.0;
+    const BAR_PAD: f32 = 4.0;
+
+    // Biggest contribution first, ties broken by NAME. The source is a
+    // `HashMap`, whose iteration order varies run to run, so amount alone left
+    // two equal bars swapping places between renders of the same match.
     let mut entries: Vec<_> = by_ability.iter().collect();
-    entries.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
+    entries.sort_by(|a, b| {
+        b.1.partial_cmp(a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.0.cmp(b.0))
+    });
     let total: f32 = entries.iter().map(|(_, &v)| v).sum();
 
     for (ability, &amount) in entries.iter().take(5) {
         let pct = if total > 0.0 { amount / total } else { 0.0 };
         let width = ui.available_width().min(260.0);
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 16.0), egui::Sense::hover());
+        let topic = links.ability_topic(ability);
+        let sense = if topic.is_some() { egui::Sense::click() } else { egui::Sense::hover() };
+        let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 16.0), sense);
         if !ui.is_rect_visible(rect) {
             continue;
         }
@@ -469,8 +638,23 @@ fn render_ability_bars(
         painter.rect_filled(rect, 2.0, egui::Color32::from_rgb(34, 34, 46));
         let fill = egui::Rect::from_min_size(rect.min, egui::vec2(rect.width() * pct, rect.height()));
         painter.rect_filled(fill, 2.0, bar_color.linear_multiply(0.5));
+        let icon_rect = egui::Rect::from_center_size(
+            egui::pos2(rect.left() + BAR_PAD + BAR_ICON / 2.0, rect.center().y),
+            egui::vec2(BAR_ICON, BAR_ICON),
+        );
+        if let Some(topic) = topic {
+            widget::paint_icon(painter, icon_rect, topic, links.data);
+            if response.hovered() {
+                painter.rect_stroke(
+                    rect,
+                    2.0,
+                    egui::Stroke::new(1.0, text_color.gamma_multiply(0.4)),
+                    egui::StrokeKind::Inside,
+                );
+            }
+        }
         painter.text(
-            rect.left_center() + egui::vec2(6.0, 0.0),
+            egui::pos2(icon_rect.right() + BAR_PAD, rect.center().y),
             egui::Align2::LEFT_CENTER,
             ability,
             egui::FontId::proportional(10.0),
@@ -483,13 +667,38 @@ fn render_ability_bars(
             egui::FontId::proportional(9.0),
             text_color,
         );
+        if let Some(topic) = topic {
+            links.link(response, topic);
+        }
     }
 }
 
 // --- Cell helpers (fixed-width for column alignment) ---
 
+/// Absolute egui id of a combatant row's class link.
+///
+/// PINNED rather than derived from sibling order (egui's default), for the same
+/// reason the encyclopedia pins its search field: the id has to survive rows
+/// being added or reordered, and the snapshot harness needs a stable handle to
+/// drive a real hover over the widget.
+pub fn class_link_id(team: u8, slot: u8, class: CharacterClass) -> egui::Id {
+    egui::Id::new((
+        "results_class_link",
+        super::play_match::combatant_id(team, slot, class),
+    ))
+}
+
 /// Class name cell: accent stripe + icon (or color fallback) + class name.
-fn name_cell(ui: &mut egui::Ui, icon: Option<egui::TextureId>, name: &str, color: egui::Color32) {
+///
+/// Returns the cell's response so the caller can hang the linked-icon contract
+/// on it — the cell is drawn exactly as before, and the link is layered on top
+/// via `ui.interact`, so a non-hovered frame is pixel-identical.
+fn name_cell(
+    ui: &mut egui::Ui,
+    icon: Option<egui::TextureId>,
+    name: &str,
+    color: egui::Color32,
+) -> egui::Response {
     ui.allocate_ui_with_layout(
         egui::vec2(W_NAME, ROW_HEIGHT),
         egui::Layout::left_to_right(egui::Align::Center),
@@ -513,7 +722,8 @@ fn name_cell(ui: &mut egui::Ui, icon: Option<egui::TextureId>, name: &str, color
             }
             ui.label(egui::RichText::new(name).size(14.0).strong().color(color));
         },
-    );
+    )
+    .response
 }
 
 /// Right-aligned numeric cell of an *exact* `width`. We reserve the rect and
