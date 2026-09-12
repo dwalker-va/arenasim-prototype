@@ -77,6 +77,32 @@ headless match's outcome bit-for-bit unchanged at the same seed. It is what
 makes visual work safe to ship without a balance sweep, and it is checked by
 re-running fixed seeds, not by inspection.
 
+## Auras
+
+### Named aura
+One aura as a PLAYER identifies it — Rend, Corruption, Weakened Soul. It is what
+the actor frames label and what the encyclopedia's Buffs & Debuffs catalog has
+one entry per. The engine agrees with the player: every applied `Aura` carries an
+`ability_name`, and the buff-bar icons key off it.
+
+Most named auras come from an ability's `applies_aura` block in `abilities.ron`.
+A handful the engine applies from code with a hardcoded name instead — those are
+listed explicitly in `encyclopedia::auras::EngineAura` and guarded against drift
+by `tests/aura_catalog_audit.rs`.
+
+### Mechanic
+The `AuraType` underneath a named aura — the engine's category for how the
+effect behaves. Rend, Corruption and Serpent Sting are three named auras sharing
+the one `DamageOverTime` mechanic.
+
+A mechanic is an application-architecture concept, not something a player sees
+named anywhere, so it is never the unit a catalog enumerates. It IS how related
+auras are grouped and cross-linked, and it answers the type-level questions
+(buff or debuff, which diminishing-returns bucket). The per-AURA questions —
+whether a dispel can lift this particular one — are answered per aura, because
+`AuraType` alone gets them wrong: Rend and Corruption share a mechanic and only
+Corruption is dispellable.
+
 ## Flagged ambiguities
 
 - "actor-side" and "caster-side" were both used for the gesture played on the

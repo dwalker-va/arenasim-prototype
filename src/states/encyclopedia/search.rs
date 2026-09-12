@@ -47,11 +47,12 @@ pub fn build_registry(
     abilities: &AbilityDefinitions,
 ) -> Vec<SearchEntry> {
     let mut entries = Vec::new();
-    // Auras join here as their section lands; each contributor is one call that
-    // reads its own registry.
+    // Every section contributes here; each is one call that reads its own
+    // data source.
     super::classes::search_entries(&mut entries);
     super::abilities::search_entries(abilities, &mut entries);
     super::items::search_entries(items, &mut entries);
+    super::auras::search_entries(abilities, &mut entries);
     entries.sort_by(|a, b| {
         a.topic
             .section()
@@ -156,9 +157,13 @@ mod tests {
     fn every_entity_is_searchable_without_a_hand_authored_entry() {
         let (items, abilities) = fixtures();
         let registry = build_registry(&items, &abilities);
+        let auras = super::super::auras::catalog(&abilities).len();
         assert_eq!(
             registry.len(),
-            CharacterClass::all().len() + abilities.ability_types().count() + items.item_count()
+            CharacterClass::all().len()
+                + abilities.ability_types().count()
+                + auras
+                + items.item_count()
         );
     }
 
@@ -187,6 +192,20 @@ mod tests {
         let registry = build_registry(&items, &abilities);
         let hits = registry.iter().filter(|e| rank(e, "wand").is_some()).count();
         assert!(hits > 0, "expected at least one item whose name contains 'wand'");
+    }
+
+    /// A named aura and the ability that applies it share a name, so a search
+    /// for "corruption" must reach the debuff's page as well.
+    #[test]
+    fn named_auras_are_reachable_by_search() {
+        let (items, abilities) = fixtures();
+        let registry = build_registry(&items, &abilities);
+        assert!(
+            registry
+                .iter()
+                .any(|e| e.name == "Corruption" && e.topic.section() == Section::Auras),
+            "the Corruption debuff must be searchable"
+        );
     }
 
     /// One query reaching three sections — the reason search groups its results

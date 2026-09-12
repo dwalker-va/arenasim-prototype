@@ -179,11 +179,24 @@ pub const TRAP_ARM_DELAY: f32 = 1.5;
 /// Radius around an armed trap that triggers it when an enemy enters.
 pub const TRAP_TRIGGER_RADIUS: f32 = 5.0;
 
+/// Duration (seconds) of the Weakened Soul marker Power Word: Shield leaves on
+/// the ally it shields, during which that ally cannot be shielded again.
+///
+/// Weakened Soul is applied from code with a hardcoded name and has no
+/// `abilities.ron` entry, so this constant is the one place its duration lives
+/// — the apply site and the encyclopedia's catalog entry both read it.
+pub const WEAKENED_SOUL_DURATION: f32 = 15.0;
+
 /// Radius of the Frost Trap slow zone after triggering.
 pub const FROST_TRAP_ZONE_RADIUS: f32 = 8.0;
 
 /// Duration of the Frost Trap slow zone in seconds.
 pub const FROST_TRAP_ZONE_DURATION: f32 = 10.0;
+
+/// Movement-speed MULTIPLIER applied to an enemy standing in the Frost Trap
+/// zone (0.4 = moves at 40% speed, i.e. a 60% slow). The zone re-applies it
+/// every tick while the enemy is inside, so the aura itself is short-lived.
+pub const FROST_TRAP_SLOW_MAGNITUDE: f32 = 0.4;
 
 /// Minimum distance from Hunter to target for trap to be "launched" (arc projectile).
 /// Within this range, traps drop instantly at feet.

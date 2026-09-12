@@ -22,7 +22,7 @@ use crate::states::play_match::components::*;
 use crate::states::play_match::combat_core::{
     calculate_cast_time, clamp_to_arena, get_spell_power_bonus,
 };
-use crate::states::play_match::constants::GCD;
+use crate::states::play_match::constants::{GCD, WEAKENED_SOUL_DURATION};
 use crate::states::play_match::decision_trace::{
     DecisionEventBuilder, DecisionTrace, MovementGoalKind, MovementTrigger,
     Posture as TracePosture, RejectionReason,
@@ -642,7 +642,7 @@ fn try_power_word_shield(
         target: shield_entity,
         aura: Aura {
             effect_type: AuraType::WeakenedSoul,
-            duration: 15.0,
+            duration: WEAKENED_SOUL_DURATION,
             magnitude: 0.0,
             break_on_damage_threshold: -1.0,
             accumulated_damage: 0.0,

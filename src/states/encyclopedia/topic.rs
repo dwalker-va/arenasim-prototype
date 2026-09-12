@@ -1,10 +1,10 @@
 //! The encyclopedia's identity model.
 //!
 //! [`Topic`] is the address of every entity the encyclopedia can show a page
-//! for. It is deliberately wider than the content that exists today: the
-//! addresses for classes, abilities and auras are here so navigation, the
-//! search registry and the linked-icon widget can be built against the whole
-//! space now, and a later content card only has to fill in a page renderer.
+//! for. Navigation, the search registry and the linked-icon widget are all
+//! built against the address space rather than against any one section, so a
+//! new content domain is a new variant plus a page renderer and nothing else
+//! has to be re-wired.
 //!
 //! Everything a `Topic` knows about itself is derived from the game's own data
 //! sources — `items.ron`, `CharacterClass`, the ability and aura registries.
@@ -13,10 +13,10 @@
 use bevy_egui::egui;
 
 use crate::states::match_config::CharacterClass;
-use crate::states::play_match::components::AuraType;
 use crate::states::play_match::equipment::ItemId;
 use crate::states::play_match::AbilityType;
 
+use super::auras::AuraId;
 use super::EncyclopediaData;
 
 /// A top-level section of the encyclopedia — one tab, one index page, one
@@ -55,15 +55,6 @@ impl Section {
         }
     }
 
-    /// What a section that has no content yet tells the reader. Empty once a
-    /// section is populated — Buffs & Debuffs is the last one still pending.
-    pub fn pending_note(self) -> &'static str {
-        match self {
-            Section::Auras => "Buff and debuff pages arrive with the aura catalog.",
-            Section::Classes | Section::Abilities | Section::Items => "",
-        }
-    }
-
     /// Display order index, used to sort the registry and group results.
     pub fn order(self) -> usize {
         Section::all().iter().position(|s| *s == self).unwrap_or(usize::MAX)
@@ -79,7 +70,9 @@ impl Section {
 pub enum Topic {
     Class(CharacterClass),
     Ability(AbilityType),
-    Aura(AuraType),
+    /// A NAMED aura — Rend, Corruption, Weakened Soul — not an `AuraType`.
+    /// See [`AuraId`] for why the address is shaped this way.
+    Aura(AuraId),
     Item(ItemId),
 }
 
@@ -103,17 +96,17 @@ impl Topic {
                 .get(&id)
                 .map(|item| item.name.clone())
                 .unwrap_or_else(|| spaced_debug(&id)),
-            // `abilities.ron`'s `name` field is the only place an ability is
-            // named — the same string View Combatant and the combat log show.
+            // Both read `abilities.ron`: an ability's own `name`, and for an
+            // aura the name of the entry that ability's `applies_aura` block
+            // produces. The spaced-out variant is the fallback for an address
+            // the data no longer contains.
             Topic::Ability(ability) => data
                 .abilities
                 .get(&ability)
                 .map(|config| config.name.clone())
                 .unwrap_or_else(|| spaced_debug(&ability)),
-            // Auras carry no display name of their own yet. Until the aura
-            // catalog lands, the variant name spaced out is the honest
-            // fallback — still derived, still zero-marginal-cost.
-            Topic::Aura(aura) => spaced_debug(&aura),
+            Topic::Aura(id) => super::auras::name_of(id, data.abilities)
+                .unwrap_or_else(|| "Unknown aura".to_string()),
         }
     }
 
@@ -130,7 +123,9 @@ impl Topic {
                 Some(config) => super::abilities::cost_line(config),
                 None => String::new(),
             },
-            Topic::Aura(_) => String::new(),
+            // An aura's subtitle is its polarity and mechanic ("Debuff ·
+            // Damage over Time").
+            Topic::Aura(id) => super::auras::subtitle_of(id, data.abilities).unwrap_or_default(),
         }
     }
 
@@ -145,15 +140,17 @@ impl Topic {
                 .item_icons
                 .and_then(|icons| icons.textures.get(&id).copied()),
             // `AbilityIcons` is keyed by the ability's display NAME, so the
-            // lookup goes through `abilities.ron` rather than the enum.
+            // lookup goes through `abilities.ron` rather than the enum. An aura
+            // borrows the icon of the ability that applies it (the convention
+            // `get_aura_icon_key` already uses in-match); the two engine auras
+            // with no applying ability render the placeholder tile.
             Topic::Ability(ability) => {
                 let name = &data.abilities.get(&ability)?.name;
                 data.ability_icons.and_then(|icons| icons.textures.get(name).copied())
             }
-            // Aura icons are the aura catalog's (AS-33) to resolve: the engine
-            // has a mapping (`rendering::get_aura_icon_key`), but it is keyed
-            // by the SOURCE ability — which is the address that card settles.
-            Topic::Aura(_) => None,
+            Topic::Aura(id) => super::auras::icon_key(id, data.abilities).and_then(|key| {
+                data.ability_icons.and_then(|icons| icons.textures.get(&key).copied())
+            }),
         }
     }
 
@@ -198,6 +195,7 @@ fn spaced_debug<T: std::fmt::Debug>(value: &T) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::states::play_match::components::AuraType;
 
     #[test]
     fn sections_order_matches_the_tab_row() {
@@ -209,7 +207,10 @@ mod tests {
     fn topics_route_to_their_section() {
         assert_eq!(Topic::Item(ItemId::WandOfTheInvoker).section(), Section::Items);
         assert_eq!(Topic::Class(CharacterClass::Mage).section(), Section::Classes);
-        assert_eq!(Topic::Aura(AuraType::Stun).section(), Section::Auras);
+        assert_eq!(
+            Topic::Aura(AuraId::Ability(AbilityType::CheapShot)).section(),
+            Section::Auras
+        );
     }
 
     #[test]

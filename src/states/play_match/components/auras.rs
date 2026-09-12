@@ -132,6 +132,148 @@ pub enum DispelType {
 }
 
 impl AuraType {
+    /// Player-facing name of this MECHANIC, as the encyclopedia's mechanic
+    /// badge renders it and as the catalog groups siblings by.
+    ///
+    /// A mechanic is not an aura: players see *Rend*, *Corruption* and *Serpent
+    /// Sting*, which share the one `DamageOverTime` mechanic. The catalog is
+    /// built from named auras and uses this only for the badge and the
+    /// "other X effects" cross-links.
+    ///
+    /// **Exhaustive on purpose — do not add a `_ =>` arm.** A wildcard would
+    /// let variant N+1 ship with a machine-readable label ("MaxHealthIncrease")
+    /// in front of players. The compiler asking for a name is the only thing
+    /// that catches that, because no test can tell a bad label from a good one.
+    pub fn display_name(self) -> &'static str {
+        match self {
+            AuraType::MovementSpeedSlow => "Slow",
+            AuraType::Root => "Root",
+            AuraType::Stun => "Stun",
+            AuraType::Fear => "Fear",
+            AuraType::Polymorph => "Polymorph",
+            AuraType::Incapacitate => "Incapacitate",
+            AuraType::Silence => "Silence",
+            AuraType::SpellSchoolLockout => "School Lockout",
+            AuraType::DamageOverTime => "Damage over Time",
+            AuraType::HealingOverTime => "Healing over Time",
+            AuraType::HealingReduction => "Mortal Wound",
+            AuraType::DamageReduction => "Weakness",
+            AuraType::CastTimeIncrease => "Casting Slow",
+            AuraType::AttackPowerReduction => "Attack Power Reduction",
+            AuraType::AttackSpeedSlow => "Attack Speed Slow",
+            AuraType::Absorb => "Absorb Shield",
+            AuraType::DamageTakenReduction => "Damage Reduction",
+            AuraType::DamageImmunity => "Damage Immunity",
+            AuraType::FearImmunity => "Fear Immunity",
+            AuraType::MaxHealthIncrease => "Health Buff",
+            AuraType::MaxManaIncrease => "Mana Buff",
+            AuraType::AttackPowerIncrease => "Attack Power Buff",
+            AuraType::SpellPowerIncrease => "Spell Power Buff",
+            AuraType::CritChanceIncrease => "Critical Strike Buff",
+            AuraType::ManaRegenIncrease => "Mana Regeneration Buff",
+            AuraType::SpellResistanceBuff => "Resistance Buff",
+            AuraType::LockoutDurationReduction => "Lockout Reduction",
+            AuraType::WindfuryBuff => "Windfury",
+            AuraType::FrostArmorBuff => "Frost Armor",
+            AuraType::WeaponPoison => "Weapon Poison",
+            AuraType::WeakenedSoul => "Weakened Soul",
+            AuraType::ShadowSight => "Shadow Sight",
+        }
+    }
+
+    /// One player-facing sentence about what this MECHANIC does, independent of
+    /// any ability that applies it. Shown on the mechanic badge's tooltip and
+    /// above the cross-links to an aura's mechanic siblings.
+    ///
+    /// Mechanics-honest and written for a player: these are deliberately NOT
+    /// the enum's doc comments above, which describe the implementation
+    /// (magnitude encodings, "behavior wired in U2", `f32` casts).
+    ///
+    /// **Exhaustive on purpose — do not add a `_ =>` arm**, for the same reason
+    /// as [`AuraType::display_name`].
+    pub fn description(self) -> &'static str {
+        match self {
+            AuraType::MovementSpeedSlow => {
+                "Reduces how fast the target can move. Does not stop casting or attacking."
+            }
+            AuraType::Root => {
+                "Pins the target in place. It can still cast, attack and turn — it just cannot move."
+            }
+            AuraType::Stun => "The target cannot move, attack or cast at all.",
+            AuraType::Fear => {
+                "The target flees under its own power, unable to act, until the effect ends or \
+                 enough damage shakes it loose."
+            }
+            AuraType::Polymorph => {
+                "The target is transformed and wanders harmlessly. Any damage ends it immediately."
+            }
+            AuraType::Incapacitate => {
+                "The target is frozen where it stands, unable to act. Any damage frees it."
+            }
+            AuraType::Silence => {
+                "The target cannot use any ability that costs mana. Rage, energy and free \
+                 abilities still work."
+            }
+            AuraType::SpellSchoolLockout => {
+                "One school of magic is locked out by an interrupt. Spells of other schools are \
+                 unaffected."
+            }
+            AuraType::DamageOverTime => "Deals damage in periodic ticks until it expires.",
+            AuraType::HealingOverTime => "Restores health in periodic ticks until it expires.",
+            AuraType::HealingReduction => {
+                "Reduces the healing the target receives — the counter to a healer out-sustaining \
+                 your damage."
+            }
+            AuraType::DamageReduction => "Reduces the physical damage the target deals.",
+            AuraType::CastTimeIncrease => "Makes the target's spells take longer to cast.",
+            AuraType::AttackPowerReduction => {
+                "Lowers the target's attack power, weakening its physical hits."
+            }
+            AuraType::AttackSpeedSlow => "Slows how often the target swings its weapon.",
+            AuraType::Absorb => {
+                "Soaks incoming damage until the shield is spent or expires. Absorbed damage never \
+                 reaches health."
+            }
+            AuraType::DamageTakenReduction => "Reduces all damage the holder takes.",
+            AuraType::DamageImmunity => {
+                "Negates all incoming damage and blocks new harmful effects for its duration."
+            }
+            AuraType::FearImmunity => {
+                "Breaks fear and blocks new fear effects. Horror effects bypass it."
+            }
+            AuraType::MaxHealthIncrease => "Raises the holder's maximum health.",
+            AuraType::MaxManaIncrease => "Raises the holder's maximum mana.",
+            AuraType::AttackPowerIncrease => "Raises the holder's attack power.",
+            AuraType::SpellPowerIncrease => "Raises the holder's spell power.",
+            AuraType::CritChanceIncrease => "Raises the holder's chance to land a critical strike.",
+            AuraType::ManaRegenIncrease => "Restores extra mana every second.",
+            AuraType::SpellResistanceBuff => {
+                "Raises resistance to one school of magic, reducing damage from it."
+            }
+            AuraType::LockoutDurationReduction => {
+                "Shortens the school lockout an interrupt inflicts on the holder."
+            }
+            AuraType::WindfuryBuff => {
+                "Gives the holder's melee swings a chance at an extra attack. Inert for ranged \
+                 attackers and casters."
+            }
+            AuraType::FrostArmorBuff => {
+                "Chills melee attackers who strike the holder, slowing their movement and swings."
+            }
+            AuraType::WeaponPoison => {
+                "Marks a weapon as coated. The coating's effect applies on hit, not from this mark."
+            }
+            AuraType::WeakenedSoul => {
+                "The target's soul is spent — it cannot receive another Power Word: Shield until \
+                 this fades."
+            }
+            AuraType::ShadowSight => {
+                "Reveals stealthed enemies to the holder — and makes the holder visible to the \
+                 enemy team in turn."
+            }
+        }
+    }
+
     /// Returns true if this aura type is inherently magic-dispellable.
     /// This covers CC effects that are always magical in WoW, plus Silence (which is
     /// removable by Dispel Magic / Cleanse).

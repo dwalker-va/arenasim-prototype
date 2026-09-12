@@ -99,27 +99,58 @@ pub fn get_aura_icon_key(aura: &Aura, ability_definitions: &AbilityDefinitions) 
 }
 
 /// Determine if an aura type is a buff (beneficial) or debuff (harmful).
-/// Used for border color: gold for buffs, red for debuffs.
+/// Used for border color (gold for buffs, red for debuffs) and for the
+/// encyclopedia's buff/debuff split.
+///
+/// **Exhaustive on purpose — do not add a `_ =>` arm.** This was a `matches!`
+/// allowlist, which silently classified variant N+1 as a DEBUFF: a new buff
+/// would have drawn a red border in the buff bar and filed itself under
+/// DEBUFFS in the encyclopedia catalog with no test able to notice. The
+/// classification below is unchanged from that allowlist — only the compiler
+/// guard is new.
 pub fn is_buff_aura(aura_type: &AuraType) -> bool {
-    matches!(aura_type,
-        AuraType::Absorb |
-        AuraType::MaxHealthIncrease |
-        AuraType::MaxManaIncrease |
-        AuraType::AttackPowerIncrease |
-        AuraType::ShadowSight |
-        AuraType::DamageTakenReduction |
-        AuraType::DamageImmunity |
-        AuraType::CritChanceIncrease |
-        AuraType::ManaRegenIncrease |
-        AuraType::LockoutDurationReduction |
-        AuraType::FrostArmorBuff |
-        AuraType::SpellResistanceBuff |
-        AuraType::WeaponPoison |
-        AuraType::SpellPowerIncrease |
-        AuraType::HealingOverTime |
-        AuraType::FearImmunity |
-        AuraType::WindfuryBuff
-    )
+    match aura_type {
+        // Beneficial: defensives, throughput and the two informational markers
+        // a player carries on themselves.
+        AuraType::Absorb
+        | AuraType::MaxHealthIncrease
+        | AuraType::MaxManaIncrease
+        | AuraType::AttackPowerIncrease
+        | AuraType::ShadowSight
+        | AuraType::DamageTakenReduction
+        | AuraType::DamageImmunity
+        | AuraType::CritChanceIncrease
+        | AuraType::ManaRegenIncrease
+        | AuraType::LockoutDurationReduction
+        | AuraType::FrostArmorBuff
+        | AuraType::SpellResistanceBuff
+        | AuraType::WeaponPoison
+        | AuraType::SpellPowerIncrease
+        | AuraType::HealingOverTime
+        | AuraType::FearImmunity
+        | AuraType::WindfuryBuff => true,
+
+        // Harmful: crowd control, damage over time and stat/casting debuffs.
+        AuraType::MovementSpeedSlow
+        | AuraType::Root
+        | AuraType::Stun
+        | AuraType::Fear
+        | AuraType::Polymorph
+        | AuraType::Incapacitate
+        | AuraType::Silence
+        | AuraType::SpellSchoolLockout
+        | AuraType::DamageOverTime
+        | AuraType::HealingReduction
+        | AuraType::DamageReduction
+        | AuraType::CastTimeIncrease
+        | AuraType::AttackPowerReduction
+        | AuraType::AttackSpeedSlow => false,
+
+        // Weakened Soul is the Power Word: Shield cooldown marker the Priest
+        // hangs on the ally it just shielded. Not beneficial — it is what stops
+        // the next shield — so it reads as a debuff, as it always has.
+        AuraType::WeakenedSoul => false,
+    }
 }
 
 /// System to load spell icons and register them with egui.
