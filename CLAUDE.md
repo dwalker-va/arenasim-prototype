@@ -836,8 +836,10 @@ UPDATE_SNAPSHOTS=1 cargo test --release --test results_screen_snapshot -- --igno
 ```
 
 **Blessing is part of the change, not a follow-up.** Every one of these
-harnesses is `#[ignore]`d and `.github/workflows/` carries no test job, so
-nothing anywhere catches a stale baseline. A commit that touches a harnessed
+harnesses is `#[ignore]`d, and CI runs only the default `cargo test` (see the CI
+section at the end of this file — the snapshot suites are deliberately excluded,
+because a runner's GPU adapter is a different rasterizer), so nothing anywhere
+catches a stale baseline. A commit that touches a harnessed
 `draw_*` function — `draw_results_screen`, `draw_sandbox_ui`, any other — **or a
 harness's own MOCK DATA** must re-render and bless in the SAME commit. Read each
 `.new.png` before blessing and confirm every visible difference is one you
@@ -918,3 +920,56 @@ old standalone Armory. It is a navigation FRAMEWORK plus per-section content:
 If you forget to register a new system, `cargo test` fails with the file path, line number, and the three registration paths to choose from. The audit is name-agnostic — it detects systems by signature, so renaming a registered function without updating its registration is also caught.
 
 The historical bugs this prevents: `process_dispels`, `process_holy_shock_heals`, `process_holy_shock_damage`, and `process_divine_shield` were each registered in only one of the two paths and silently failed in the other mode. See `docs/solutions/implementation-patterns/graphical-mode-missing-system-registration.md` for context.
+
+### Continuous integration (what CI checks — and what it deliberately does not)
+
+`.github/workflows/ci.yaml` runs `cargo build --release --locked` and
+`cargo test --locked` on every push to `main` and every pull request. Before it
+existed, this repo's whole safety story — `registration_audit`,
+`aura_catalog_audit`, `loadout_order_audit`, the `SpellSchool` / `AuraType` /
+dispel-classifier exhaustiveness tests, the movement probes, `determinism_pin`,
+the db2 fixture suite — was **advisory**: each one protected the codebase only
+when a human remembered to run it before pushing. A guard nobody runs claims
+more coverage than it delivers, which is the same shape of defect the guards
+were written to catch.
+
+Three choices in that file are load-bearing; do not "simplify" them away:
+
+- **It runs on `macos-latest` (arm64), not `ubuntu-latest`.**
+  `tests/determinism_pin.rs` compares a match duration by `f32::to_bits`, and
+  `tests/baselines/` hashes whole match logs. Those values were recorded on an
+  arm64 Mac; float results routed through libm are not guaranteed identical on
+  another architecture, so a Linux runner could go red for a reason that is not
+  a regression — and the only way back to green would be to loosen the very
+  bit-exactness that is the guard. Nothing ships on Linux either.
+- **Tests run in the DEV profile**, even though that costs a second dependency
+  compile beside the release build. `debug_assertions` is on there, and `src/`
+  carries ~18 `debug_assert!` invariants that a `--release` test run compiles
+  away entirely.
+- **`python3` is installed explicitly.** `tests/db2_spell_sweep_fixtures.rs`
+  panics when the interpreter is missing rather than skipping, on purpose;
+  provisioning it keeps that choice meaning what it was written to mean instead
+  of leaving it to whatever the runner image preinstalls.
+
+**Not covered by CI — still a local gate:**
+
+- The `#[ignore]`d egui/wgpu **snapshot suites**. They compare PNGs
+  pixel-for-pixel against baselines blessed on a developer's machine; a runner's
+  GPU adapter is a different rasterizer, so green would prove little and red
+  would usually mean "different GPU". Blessing stays part of the commit that
+  changes a `draw_*` function or its mock data (see the egui snapshot loop
+  above). Deriving a fixture makes it correct on the *next* render — only a
+  human running `-- --ignored` ever renders.
+- The other `#[ignore]`d tests: the 98-match determinism sweeps in
+  `headless_tests.rs`, the obstacle-active companion, the recalibration-pending
+  movement probes, `camp_sweep.rs`. CPU-only and they would run, but they are
+  minutes apiece; `determinism_pin` is the cheap always-on sentinel that stands
+  in for them.
+- The **balance sweeps** (`scripts/*_2v2_matrix.sh`, `headtohead_sweep.py`,
+  `--matrix`). Out of scope by design: measurements a human reads, not
+  assertions, and no win-rate threshold belongs in a merge gate.
+
+A red CI check does **not** block merge yet — branch protection is a repository
+setting, not a file in this repo. To make it blocking: repo Settings → Rules →
+Rulesets → New branch ruleset targeting `main`, enable *Require status checks to
+pass* and select `build + test`.

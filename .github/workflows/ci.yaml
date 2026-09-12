@@ -1,0 +1,110 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: CI
+
+# This repo's guards are its safety story: `registration_audit`,
+# `aura_catalog_audit`, `loadout_order_audit`, the exhaustiveness tests on
+# `SpellSchool` / `AuraType` / the dispel classifiers, the movement probes, the
+# determinism pin, the db2 fixture suite. Until this file existed every one of
+# them only protected the codebase when a human remembered to run it — a guard
+# nobody runs claims more coverage than it delivers, which is the same shape of
+# defect the guards exist to catch.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to the same branch makes the older run's verdict stale, so cancel
+# it rather than paying for two answers and reading the wrong one.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: build + test
+    # macos-latest (arm64) rather than the more usual ubuntu-latest, and that is
+    # a correctness choice, not a habit.
+    #
+    # `tests/determinism_pin.rs` asserts a match's duration BIT-EXACTLY
+    # (`f32::to_bits`, deliberately not an epsilon) against values recorded on
+    # an arm64 Mac, and `tests/baselines/` hashes whole match logs the same way.
+    # Float results that route through libm transcendentals are not guaranteed
+    # identical across architecture and libm implementation, so an x86_64 Linux
+    # runner could fail those guards for a reason that is not a regression — and
+    # the only way to get green again would be to loosen the bit-exactness that
+    # is the entire point of the guard. Nothing ships on Linux either: the
+    # release workflow builds macOS and Windows.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # `tests/db2_spell_sweep_fixtures.rs` shells out to `python3` and PANICS
+      # when it is missing, on purpose — a fixture suite that silently does not
+      # run is the same false reassurance the script it tests exists to prevent.
+      # Installing the interpreter explicitly, instead of trusting whatever the
+      # runner image happens to preinstall this month, is what keeps that choice
+      # meaning what it was written to mean.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Bevy's dependency graph dominates the wall clock: a cold compile is many
+      # minutes, a cached one is the time to rebuild this crate alone. The cache
+      # covers both profiles, because the two steps below deliberately use both.
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Toolchain versions
+        run: |
+          rustc --version
+          cargo --version
+          python3 --version
+
+      # `--locked` so a Cargo.lock that no longer matches Cargo.toml fails here
+      # rather than silently resolving to a dependency set nobody has tested.
+      - name: Build (release)
+        run: cargo build --release --locked
+
+      # The DEV profile on purpose, even though it costs a second dependency
+      # compile. `debug_assertions` is on there, and src/ carries ~18
+      # `debug_assert!` invariants (aura bookkeeping, combatant stat clamps)
+      # that a `--release` test run compiles away entirely — running the suite
+      # only in release would quietly drop them from the very set of guards this
+      # workflow exists to make non-optional.
+      - name: Test
+        run: cargo test --locked
+
+# ---------------------------------------------------------------------------
+# WHAT THIS WORKFLOW DOES NOT COVER
+#
+# Stated explicitly because the failure mode this file was written against is a
+# check that implies more coverage than it has.
+#
+#   * The `#[ignore]`d egui/wgpu SNAPSHOT suites (`results_screen_snapshot`,
+#     `main_menu_snapshot`, `encyclopedia_snapshot`, `configure_match_snapshot`,
+#     `team_frames_snapshot`, `animation_sandbox_snapshot`,
+#     `arena_layout_snapshot`). They rasterize on a GPU adapter and compare
+#     PNGs pixel-for-pixel against baselines blessed on a developer's machine;
+#     a runner's adapter is a different rasterizer, so a green run would prove
+#     little and a red one would usually mean "different GPU", not "regression".
+#     SNAPSHOT REGRESSIONS REMAIN A LOCAL GATE. Blessing a baseline is part of
+#     the commit that changes a `draw_*` function or its mock data — see the
+#     egui snapshot loop section of CLAUDE.md. Deriving a fixture makes it
+#     correct on the next render; only a human running `-- --ignored` renders.
+#
+#   * The other `#[ignore]`d tests: the 98-match determinism sweeps in
+#     `headless_tests.rs`, the obstacle-active determinism companion, the
+#     recalibration-pending movement probes, and `camp_sweep.rs`. These are
+#     CPU-only and would run here, but they are minutes of match simulation
+#     apiece; `determinism_pin.rs` is the cheap always-on sentinel that stands
+#     in for them, and the sweeps stay an explicit human step.
+#
+#   * The BALANCE SWEEPS (`scripts/*_2v2_matrix.sh`, `headtohead_sweep.py`,
+#     `--matrix`). Out of scope by design: they are n=100 measurements a human
+#     reads and interprets, not pass/fail assertions, and no threshold on a
+#     win rate belongs in a merge gate.
+# ---------------------------------------------------------------------------
