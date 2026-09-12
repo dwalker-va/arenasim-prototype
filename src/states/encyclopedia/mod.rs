@@ -152,13 +152,19 @@ pub struct EncyclopediaState {
     return_to: GameState,
 }
 
+/// The view a fresh visit starts on.
+///
+/// Classes is the landing tab, matching the blessed mockup: it is the
+/// shallowest way into everything else, because a class page links on to every
+/// ability that class has.
+fn root_view() -> View {
+    View::index(Section::Classes)
+}
+
 impl Default for EncyclopediaState {
     fn default() -> Self {
         Self {
-            // Classes is the landing tab, matching the blessed mockup: it is
-            // the shallowest way into everything else, because a class page
-            // links on to every ability that class has.
-            stack: vec![View::index(Section::Classes)],
+            stack: vec![root_view()],
             search: String::new(),
             item_filters: ItemFilters::default(),
             ability_filters: AbilityFilters::default(),
@@ -176,9 +182,28 @@ impl EncyclopediaState {
     ///
     /// This is the ONE field a new entry point has to set. Call it from
     /// whatever screen links in, immediately before the
-    /// `GameState::Encyclopedia` transition. (Which screens do link in is
-    /// AS-34's call; today only the main menu does.)
+    /// `GameState::Encyclopedia` transition. Use it when the entry point is a
+    /// plain "open the encyclopedia" affordance (the main menu); a LINKED ICON
+    /// wants [`Self::open_at`], which sets the same field and lands on the
+    /// topic.
     pub fn open_from(&mut self, from: GameState) {
+        self.return_to = from;
+    }
+
+    /// Open the encyclopedia DIRECTLY at `topic`, returning to `from` when the
+    /// reader leaves — the deep-link entry point every linked icon outside the
+    /// encyclopedia uses.
+    ///
+    /// The topic becomes the ROOT of the navigation stack rather than a page
+    /// pushed onto a section index. A deep link is entered from somewhere else,
+    /// so "up one level" from it is that somewhere: `Esc` and the named Exit
+    /// button both put the reader straight back in `from`, with no section
+    /// index they never asked for sitting in between. Navigating ONWARD from
+    /// the topic still stacks normally, so Back walks back down to it.
+    pub fn open_at(&mut self, topic: Topic, from: GameState) {
+        self.search.clear();
+        self.stack.clear();
+        self.stack.push(View::topic(topic));
         self.return_to = from;
     }
 
@@ -194,10 +219,16 @@ impl EncyclopediaState {
     /// section index rather than on whatever page — or stale search results —
     /// the last visit ended on. (Round 1 cleared the search on the `Esc` path
     /// only, so exiting by button and re-entering showed stale results.)
+    ///
+    /// The stack is RESET to [`root_view`] rather than truncated to its own
+    /// first entry, because [`Self::open_at`] makes a deep-linked topic the
+    /// root: truncating would strand that page as the landing view of every
+    /// later visit.
     #[must_use]
     pub fn leave(&mut self) -> GameState {
         self.search.clear();
-        self.stack.truncate(1);
+        self.stack.clear();
+        self.stack.push(root_view());
         self.return_to
     }
 
@@ -804,6 +835,38 @@ mod tests {
         state.open_from(GameState::ViewCombatant);
         assert!(state.back_key());
         assert_eq!(state.leave(), GameState::ViewCombatant);
+    }
+
+    /// A deep link lands ON the topic and unwinds straight back to the screen
+    /// that opened it — no section index the reader never asked for in
+    /// between — and leaving does not strand that topic as the landing view of
+    /// the next visit.
+    #[test]
+    fn a_deep_link_opens_on_the_topic_and_unwinds_to_its_caller() {
+        let mut state = EncyclopediaState::default();
+        state.search = "stale".to_string();
+
+        state.open_at(Topic::Class(CharacterClass::Mage), GameState::Results);
+        assert_eq!(state.current(), View::topic(Topic::Class(CharacterClass::Mage)));
+        assert!(state.search.is_empty());
+        assert_eq!(exit_label(state.return_to()), "EXIT TO RESULTS");
+
+        // Onward navigation still stacks, so Back walks back down to the
+        // landing topic rather than leaving from the first page.
+        state.apply(EncyclopediaAction::Navigate(View::topic(Topic::Item(
+            ItemId::WandOfTheInvoker,
+        ))));
+        assert!(state.can_go_back());
+        assert!(!state.apply(EncyclopediaAction::Back));
+        assert_eq!(state.current(), View::topic(Topic::Class(CharacterClass::Mage)));
+
+        // At the landing topic, Back IS the way out — to the caller.
+        assert!(state.back_key());
+        assert_eq!(state.leave(), GameState::Results);
+
+        // ...and the next visit starts fresh at the root, not on the Mage page.
+        assert_eq!(state.current(), View::index(Section::Classes));
+        assert!(!state.can_go_back());
     }
 
     #[test]
