@@ -549,6 +549,11 @@
         // Curse of Agony: Shadow DoT dealing 84 damage over 24 seconds
         // WoW Classic: 25 mana, 30yd range, instant, 24s duration
         // 6 ticks (every 4 seconds), 14 damage per tick = 84 total
+        //
+        // All three curses declare `dispel_type: Curse`. The school cannot say
+        // it — curses are Shadow and so is Corruption — so without the
+        // declaration Curse of Agony would be an ordinary dispellable Shadow
+        // DoT. Curses come off to curse-removal, which no class here has yet.
         CurseOfAgony: (
             name: "Curse of Agony",
             class: Warlock,
@@ -562,6 +567,7 @@
                 duration: 24.0,
                 magnitude: 14.0,
                 tick_interval: 4.0,
+                dispel_type: Curse,
             )),
             spell_school: Shadow,
         ),
@@ -580,6 +586,7 @@
                 aura_type: DamageReduction,
                 duration: 120.0,
                 magnitude: 0.2,  // 20% physical damage reduction
+                dispel_type: Curse,
             )),
             spell_school: Shadow,
         ),
@@ -598,6 +605,7 @@
                 aura_type: CastTimeIncrease,
                 duration: 30.0,
                 magnitude: 0.5,
+                dispel_type: Curse,
             )),
             spell_school: Shadow,
         ),
