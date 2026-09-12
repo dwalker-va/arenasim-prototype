@@ -83,11 +83,13 @@ These are hard-won; ignoring them produces confident-but-wrong conclusions.
    Treat "buff class X" and "nerf class Y" as independent levers; never use a
    global Y-nerf to raise X's overall winrate and expect the aggregate to move.
 
-5. **Respect confidence intervals.** `agg_sweep.py` prints a Wilson 95%
-   interval. A 37.0% +/-3 vs 37.7% +/-3 is *noise*, not a finding. N=5 is a
-   scout; use N>=20 (2v2/3v3) or N=100 (1v1) for conclusions, and bump N on
-   close matchups until the intervals separate. `--compare` only flags a
-   matchup as MOVED when the before/after intervals do not overlap.
+5. **Respect confidence intervals.** `agg_sweep.py` prints each winrate with
+   its Wilson 95% interval — `37.0% [33.9-40.1]`. A 37.0 vs 37.7 whose
+   intervals overlap is *noise*, not a finding. N=5 is a scout; use N>=20
+   (2v2/3v3) or N=100 (1v1) for conclusions, and bump N on close matchups until
+   the intervals separate. `--compare` flags a matchup as MOVED only when the
+   before/after intervals do not overlap — over exactly the intervals it
+   prints, so the flag can be checked by eye from the same line.
 
 6. **The batch harness is the canonical engine.** It is internally
    deterministic, but its absolute winrates differ by a few points from the

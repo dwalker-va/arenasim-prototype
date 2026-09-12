@@ -49,9 +49,32 @@ CLASSES = ["Warrior", "Mage", "Rogue", "Priest", "Warlock", "Paladin", "Hunter",
 HEALERS = {"Priest", "Paladin", "Shaman"}
 
 
+# Fields the generator owns. `--extra` overwriting one of these would leave the
+# label naming a team the config no longer contains, and the aggregation
+# downstream groups by label.
+GENERATED_FIELDS = ("team1", "team2", "random_seed", "label")
+
+
 def expand_t1(template):
-    """Yield concrete team1 lists from a template that may contain one '{p}'."""
+    """Yield concrete team1 lists from a template containing at most one '{p}'.
+
+    A class name that is neither a real class nor the wildcard is an error:
+    silently generating a sweep for a class the simulator will reject is a
+    whole arm of a measurement lost with nothing said.
+    """
     slots = template.split("+")
+    unknown = [s for s in slots if s != "{p}" and s not in CLASSES]
+    if unknown:
+        raise ValueError(
+            "unknown class(es) %s in --t1 %r; known: %s"
+            % (", ".join(unknown), template, ", ".join(CLASSES))
+        )
+    if slots.count("{p}") > 1:
+        raise ValueError(
+            "--t1 %r has %d '{p}' wildcards; only one can be expanded, and the "
+            "rest would stay in the team as a literal class name"
+            % (template, slots.count("{p}"))
+        )
     if "{p}" not in slots:
         yield slots
         return
@@ -75,7 +98,7 @@ def enumerate_opponents(size, exclude_double_healer, exclude_all_healer):
         yield list(combo)
 
 
-def main():
+def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--t1", default=None,
@@ -97,9 +120,23 @@ def main():
                     help="JSON object shallow-merged into every config (strategy vars)")
     ap.add_argument("--label-suffix", default=None,
                     help="appended to each label to keep strategy-var variants distinct")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
-    extra = json.loads(args.extra) if args.extra else {}
+    extra = {}
+    if args.extra:
+        try:
+            extra = json.loads(args.extra)
+        except json.JSONDecodeError as e:
+            sys.exit(f"--extra is not valid JSON: {e}")
+        if not isinstance(extra, dict):
+            sys.exit("--extra must be a JSON object, got %s" % type(extra).__name__)
+        clobbered = [f for f in GENERATED_FIELDS if f in extra]
+        if clobbered:
+            sys.exit(
+                "--extra may not set %s: the generator owns those, and the label "
+                "the aggregation groups by would then name a different team"
+                % ", ".join(clobbered)
+            )
 
     # team1 set: --full enumerates every distinct-class team of SIZE; otherwise
     # expand the --t1 template.
@@ -110,7 +147,10 @@ def main():
     else:
         if not args.t1:
             ap.error("provide --t1 or --full")
-        team1_set = list(expand_t1(args.t1))
+        try:
+            team1_set = list(expand_t1(args.t1))
+        except ValueError as e:
+            sys.exit(str(e))
 
     out = sys.stdout
     count = 0
@@ -137,8 +177,14 @@ def main():
                 cfg.update(extra)
                 out.write(json.dumps(cfg) + "\n")
                 count += 1
+    if count == 0:
+        # An empty sweep is silent all the way downstream: the batch runner
+        # writes an empty CSV, and the first complaint anyone sees is an
+        # aggregation error about a file that looks perfectly fine.
+        sys.exit("no match configs generated (check --n and the team selection)")
     print(f"# wrote {count} match configs", file=sys.stderr)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

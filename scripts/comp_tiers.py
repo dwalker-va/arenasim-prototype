@@ -1,7 +1,22 @@
-import csv, sys, math
+#!/usr/bin/env python3
+"""Class / comp tier lists from an `arenasim --batch` results CSV.
+
+Usage: python3 scripts/comp_tiers.py <results.csv> [--size {2,3}]
+
+Without --size, prints the legacy class tiers plus top/bottom comps. With it,
+prints the fuller report the canonical baselines are written from: all-comps
+and competitive-only class tiers, top/bottom comps, the non-competitive anomaly
+canary, and (3v3) the dominant-shape watch.
+"""
+import argparse
+import csv
+import sys
 from collections import defaultdict
 
-def load(p): return list(csv.DictReader(open(p)))
+
+def load(p):
+    with open(p) as f:
+        return list(csv.DictReader(f))
 
 def class_tiers(rows):
     """Winrate of comps containing the class: for each match, each side's
@@ -31,11 +46,17 @@ def comp_tiers(rows):
     return {c: 100*w/n for c, (w, n) in stats.items()}
 
 def draws(rows):
+    """Draw rate as a percentage, or None when there are no matches.
+
+    No matches has no draw rate. Returning 0.0 would put "draws 0.0%" at the
+    top of a report over an empty sweep, which reads as a finding.
+    """
+    if not rows:
+        return None
     return 100*sum(1 for r in rows if r['winner'] not in ('team1','team2'))/len(rows)
 
-if __name__ == '__main__' and '--size' not in sys.argv:
-    path = sys.argv[1]
-    rows = load(path)
+
+def legacy_report(path, rows):
     print(f"# {path}: {len(rows)} matches, draws {draws(rows):.1f}%")
     print("## class tiers")
     for c, wr in sorted(class_tiers(rows).items(), key=lambda x: -x[1]):
@@ -66,12 +87,16 @@ def competitive_rows(rows):
             out.append(r)
     return out
 
-def noncompetitive_anomalies(rows, size):
+def noncompetitive_anomalies(rows):
     """Non-competitive comps (per is_competitive) that perform like competitive
     ones anyway. Reports winrate vs the FULL field and vs COMPETITIVE opponents
     only — the latter is the real alarm (beating real comps without a healer /
-    with too many healers points at a fundamental balance issue)."""
-    from collections import defaultdict
+    with too many healers points at a fundamental balance issue).
+
+    Each team is judged at its OWN size, exactly as `competitive_rows` judges
+    it. Taking the bracket from the command line instead of from the team
+    scored a row of a different size against the wrong healer rule, and the
+    canary then pointed at comps that are perfectly ordinary."""
     full = defaultdict(lambda: [0, 0])   # comp -> [wins, games] vs anyone
     vs_comp = defaultdict(lambda: [0, 0])  # comp -> [wins, games] vs competitive opponents
     for r in rows:
@@ -79,10 +104,10 @@ def noncompetitive_anomalies(rows, size):
         k1, k2 = '+'.join(sorted(t1)), '+'.join(sorted(t2))
         w = r['winner']
         for team, key, opp, won in [(t1, k1, t2, w == 'team1'), (t2, k2, t1, w == 'team2')]:
-            if is_competitive(team, size):
+            if is_competitive(team, len(team)):
                 continue
             full[key][0] += won; full[key][1] += 1
-            if is_competitive(opp, size):
+            if is_competitive(opp, len(opp)):
                 vs_comp[key][0] += won; vs_comp[key][1] += 1
     out = []
     for key, (w, n) in full.items():
@@ -99,8 +124,8 @@ def noncompetitive_anomalies(rows, size):
 # Used to regenerate docs/design/balance/canonical_baselines_summary.md
 # after a shipped balance change (see the balance-sweep skill).
 # ---------------------------------------------------------------------------
-def report(path, size):
-    rows = load(path)
+def report(path, size, rows=None):
+    rows = load(path) if rows is None else rows
     comp = competitive_rows(rows)
     print(f"# {path}: {len(rows)} matches, draws {draws(rows):.1f}%")
     all_t, comp_t = class_tiers(rows), class_tiers(comp)
@@ -116,7 +141,7 @@ def report(path, size):
     for k, wr in sorted(ct.items(), key=lambda x: -x[1])[-8:]:
         print(f"  {wr:5.1f}  {k}")
     print("## anomaly canary: non-competitive comps (full-field / vs-competitive)")
-    for key, wr, cwr in noncompetitive_anomalies(rows, size)[:5]:
+    for key, wr, cwr in noncompetitive_anomalies(rows)[:5]:
         flag = "  << ANOMALY" if wr >= 50 or (cwr or 0) >= 50 else ""
         print(f"  {wr:5.1f} / {(cwr if cwr is not None else 0):5.1f}  {key}{flag}")
     if size == 3:
@@ -124,7 +149,30 @@ def report(path, size):
         two_h = sum(1 for k, _ in top10 if sum(1 for c in k.split('+') if c in HEALERS) == 2)
         print(f"## dominant-shape watch: {two_h}/10 top-10 comps are double-healer")
 
-if __name__ == '__main__' and '--size' in sys.argv:
-    i = sys.argv.index('--size')
-    report(sys.argv[1], int(sys.argv[i+1]))
-    sys.exit(0)
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("csv", help="batch results CSV")
+    ap.add_argument("--size", type=int, choices=(2, 3),
+                    help="team size; adds the competitive slice, anomaly canary "
+                         "and (3v3) dominant-shape watch")
+    args = ap.parse_args(argv)
+
+    try:
+        rows = load(args.csv)
+    except OSError as e:
+        sys.exit(f"cannot read {args.csv}: {e}")
+    if not rows:
+        # An empty sweep has no tiers, no draw rate and no anomalies. Printing
+        # a report full of zeroes over it would read as a set of findings.
+        sys.exit(f"no matches in {args.csv}")
+
+    if args.size is None:
+        legacy_report(args.csv, rows)
+    else:
+        report(args.csv, args.size, rows)
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

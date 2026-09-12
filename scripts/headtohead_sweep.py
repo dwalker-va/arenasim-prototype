@@ -29,6 +29,8 @@ Example:
         --map PillaredArena --seeds 100 --profile TeamPlan
 """
 
+from __future__ import annotations
+
 import argparse
 import csv
 import json
@@ -40,24 +42,40 @@ from pathlib import Path
 
 
 def wilson(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
+    """Wilson score interval for k successes in n trials.
+
+    With no trials the interval is the whole range: n=0 carries no information,
+    and returning (0, 0) would make an empty cell read as a confident 0% win
+    rate. Bounds are clamped to [0, 1] — the closed form lands a hair below
+    zero at k=0, which would print as "-0.0%".
+    """
     if n == 0:
-        return (0.0, 0.0)
+        return (0.0, 1.0)
     p = k / n
     d = 1 + z * z / n
     centre = (p + z * z / (2 * n)) / d
     half = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d
-    return (centre - half, centre + half)
+    return (max(0.0, centre - half), min(1.0, centre + half))
 
 
-def ztest(k1: int, k2: int, n: int) -> float:
-    """Two-proportion z, pooled, equal n per arm."""
-    p = (k1 + k2) / (2 * n)
+def ztest(k1: int, n1: int, k2: int, n2: int) -> float:
+    """Two-proportion z, pooled.
+
+    Each arm carries its own n, because a sweep's arms need not be the same
+    size: an errored match is excluded from its cell, so the arm it was in has
+    fewer usable matches than the nominal seed count. Assuming equal n there
+    silently misreports both the effect and its significance. With n1 == n2
+    this is the textbook equal-n form.
+    """
+    if n1 == 0 or n2 == 0:
+        return 0.0
+    p = (k1 + k2) / (n1 + n2)
     if p in (0.0, 1.0):
         return 0.0
-    return (k2 - k1) / n / math.sqrt(2 * p * (1 - p) / n)
+    return (k2 / n2 - k1 / n1) / math.sqrt(p * (1 - p) * (1 / n1 + 1 / n2))
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--team1", required=True, help="comma-separated classes, e.g. Warrior,Priest")
     ap.add_argument("--team2", required=True)
@@ -67,7 +85,7 @@ def main() -> int:
     ap.add_argument("--profile", default="TeamPlan", help="profile under test vs Legacy")
     ap.add_argument("--max-duration", type=float, default=300.0)
     ap.add_argument("--keep", metavar="PREFIX", help="keep the JSONL/CSV at this path prefix")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     t1, t2 = args.team1.split(","), args.team2.split(",")
     cells = [
@@ -105,16 +123,17 @@ def main() -> int:
 
     tally: dict[str, dict[str, int]] = {}
     errors = 0
-    for r in csv.DictReader(open(out)):
-        c = tally.setdefault(r["label"], {"t1": 0, "t2": 0, "draw": 0, "n": 0})
-        w = r["winner"].strip()
-        if w not in ("team1", "team2", "draw"):
-            # A failed match is not a draw and must not inflate n — counting it
-            # as one would silently bias every rate in the report.
-            errors += 1
-            continue
-        c["n"] += 1
-        c["t1" if w == "team1" else "t2" if w == "team2" else "draw"] += 1
+    with open(out) as f:
+        for r in csv.DictReader(f):
+            c = tally.setdefault(r["label"], {"t1": 0, "t2": 0, "draw": 0, "n": 0})
+            w = r["winner"].strip()
+            if w not in ("team1", "team2", "draw"):
+                # A failed match is not a draw and must not inflate n — counting
+                # it as one would silently bias every rate in the report.
+                errors += 1
+                continue
+            c["n"] += 1
+            c["t1" if w == "team1" else "t2" if w == "team2" else "draw"] += 1
     if errors:
         print(f"WARNING: {errors} match(es) errored and are excluded from all rates",
               file=sys.stderr)
@@ -122,20 +141,23 @@ def main() -> int:
     if missing:
         sys.exit(f"no successful matches in cell(s) {missing}; cannot analyze")
 
-    n = args.seeds
-    print(f"\n{'cell':6} {'T1':>4} {'T2':>4} {'draw':>5} {'T1%':>5} {'95% CI':>14}")
+    # Every rate below divides by the cell's OWN usable n, never the nominal
+    # seed count: errored matches are excluded from the cell, and dividing a
+    # real win count by a nominal denominator shrinks the effect toward zero
+    # without saying so anywhere in the output.
+    print(f"\n{'cell':6} {'n':>4} {'T1':>4} {'T2':>4} {'draw':>5} {'T1%':>5} {'95% CI':>14}")
     for label, _, _ in cells:
         c = tally[label]
         lo, hi = wilson(c["t1"], c["n"])
-        print(f"{label:6} {c['t1']:>4} {c['t2']:>4} {c['draw']:>5} "
+        print(f"{label:6} {c['n']:>4} {c['t1']:>4} {c['t2']:>4} {c['draw']:>5} "
               f"{100 * c['t1'] / c['n']:>4.0f}% {100 * lo:>6.1f}-{100 * hi:<5.1f}%")
 
     ll, tl, lt = tally["LL"], tally["TL"], tally["LT"]
     print(f"\n--- {args.profile}'s effect (draws excluded from both sides' win counts) ---")
-    print(f"team 1 gets it: {ll['t1']:>3} -> {tl['t1']:<3} wins  "
-          f"({100 * (tl['t1'] - ll['t1']) / n:+.0f}pt, z={ztest(ll['t1'], tl['t1'], n):+.2f})")
-    print(f"team 2 gets it: {ll['t2']:>3} -> {lt['t2']:<3} wins  "
-          f"({100 * (lt['t2'] - ll['t2']) / n:+.0f}pt, z={ztest(ll['t2'], lt['t2'], n):+.2f})")
+    for side, k, base, arm in (("team 1", "t1", ll, tl), ("team 2", "t2", ll, lt)):
+        gain = 100 * (arm[k] / arm["n"] - base[k] / base["n"])
+        print(f"{side} gets it: {base[k]:>3}/{base['n']:<3} -> {arm[k]:>3}/{arm['n']:<3} wins  "
+              f"({gain:+.0f}pt, z={ztest(base[k], base['n'], arm[k], arm['n']):+.2f})")
     print("\n|z| >= 1.96 is the conventional 95% bar; near it, run more seeds "
           "(--seeds, --seed-base) rather than re-rolling.", file=sys.stderr)
     if not args.keep:
