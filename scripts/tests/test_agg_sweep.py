@@ -31,6 +31,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from sweep_fixtures import (  # noqa: E402
     FixtureTestCase,
+    assert_runs_on_min_python,
     install_no_subprocess,
     match_rows,
     run_main,
@@ -240,6 +241,40 @@ class MovedBoundaryTests(AggTestCase):
         self.assertHas(run, "40.4-59.6")
         self.assertHas(run, "60.4-78.1")
 
+    def test_an_unmeasured_cell_prints_no_delta(self):
+        """No measurement is not a 50-point drop.
+
+        A cell whose every match errored has nothing to compare against its
+        baseline, but the delta was still computed off a 0.0 rate, so the
+        line read `n/a ... [was 50.0% [40.4-59.6], -50.0]` -- a finding
+        where there is not even a datum.
+        """
+        before = self.csv_with(
+            match_rows("A_vs_B", "Warrior", "Mage", t1=50, t2=50), name="before.csv"
+        )
+        after = self.csv_with(
+            match_rows("A_vs_B", "Warrior", "Mage", error=100),
+            match_rows("C_vs_D", "Rogue", "Priest", t1=50, t2=50),
+            name="after.csv",
+        )
+        run = self.assertOk(self.agg(after, "--compare", before))
+        self.assertHas(run, "[was 50.0% [40.4-59.6]]")
+        self.assertLacks(run, "-50.0")
+        self.assertLacks(run, "<== MOVED")
+
+    def test_an_unmeasured_baseline_prints_no_delta_either(self):
+        """The suppression is symmetric: a new cell has nothing to move from."""
+        before = self.csv_with(
+            match_rows("A_vs_B", "Warrior", "Mage", error=100), name="before.csv"
+        )
+        after = self.csv_with(
+            match_rows("A_vs_B", "Warrior", "Mage", t1=80, t2=20), name="after.csv"
+        )
+        run = self.assertOk(self.agg(after, "--compare", before))
+        self.assertHas(run, "[was n/a")
+        self.assertLacks(run, "+80.0")
+        self.assertLacks(run, "<== MOVED")
+
 
 class DegenerateInputTests(AggTestCase):
     def test_an_empty_csv_is_an_error(self):
@@ -296,6 +331,27 @@ class DegenerateInputTests(AggTestCase):
         self.assertEqual(run.code, 1)
         self.assertErrHas(run, "no usable matches")
 
+    def test_an_unmeasured_cell_keeps_the_column_aligned(self):
+        """`n/a` occupies the same width as a rate, so the table survives it."""
+        self.assertEqual(len(agg.rate_cell(0, 0)), len(agg.rate_cell(5, 10)))
+        self.assertEqual(len(agg.rate_cell(0, 0)), len(agg.rate_cell(100, 100)))
+
+    def test_a_padded_winner_reads_the_same_here_as_in_headtohead(self):
+        """The two tools read the same CSVs; they must agree on the vocabulary.
+
+        `headtohead_sweep.py` strips the field, so " error" is an error there.
+        Untrimmed, it fell through to the draw branch here and stayed in n.
+        """
+        rows = match_rows("A_vs_B", "Warrior", "Mage", t1=5, t2=0, error=5)
+        for r in rows:
+            if r["winner"] == "error":
+                r["winner"] = " error "
+        path = self.csv_with(rows)
+        run = self.assertOk(self.agg(path))
+        self.assertHas(run, "(5/5)")
+        self.assertHas(run, "(W5 L0 D0)")
+        self.assertHas(run, "5 match(es) errored")
+
     def test_an_unknown_winner_value_counts_as_a_draw(self):
         """Anything that is not team1/team2/error is a non-win, as today."""
         rows = match_rows("A_vs_B", "Warrior", "Mage", t1=5, t2=0, draw=5)
@@ -305,6 +361,13 @@ class DegenerateInputTests(AggTestCase):
         path = self.csv_with(rows)
         run = self.assertOk(self.agg(path))
         self.assertHas(run, "(W5 L0 D5)")
+
+
+class InterpreterFloorTests(unittest.TestCase):
+    """`agg_sweep.py` must still import on the stock system interpreter."""
+
+    def test_the_tool_runs_on_the_minimum_interpreter(self):
+        assert_runs_on_min_python(self, agg)
 
 
 if __name__ == "__main__":

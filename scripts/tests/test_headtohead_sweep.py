@@ -43,6 +43,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sweep_fixtures import (  # noqa: E402
     BATCH_COLUMNS,
     FixtureTestCase,
+    assert_runs_on_min_python,
     install_no_subprocess,
     read_batch_jsonl,
     run_main,
@@ -502,6 +503,13 @@ class ArtifactTests(SweepTestCase):
         self.assertErrHas(run, "artifacts in")
         for name in os.listdir(os.getcwd()):
             self.assertFalse(name.startswith("sweep."), "leaked %s into cwd" % name)
+
+
+class InterpreterFloorTests(unittest.TestCase):
+    """`headtohead_sweep.py` must still import on the stock system interpreter."""
+
+    def test_the_tool_runs_on_the_minimum_interpreter(self):
+        assert_runs_on_min_python(self, h2h)
 
 
 if __name__ == "__main__":

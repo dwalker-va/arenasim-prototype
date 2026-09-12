@@ -28,7 +28,12 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from sweep_fixtures import FixtureTestCase, install_no_subprocess, run_main  # noqa: E402
+from sweep_fixtures import (  # noqa: E402
+    FixtureTestCase,
+    assert_runs_on_min_python,
+    install_no_subprocess,
+    run_main,
+)
 
 import gen_sweep as gen  # noqa: E402
 
@@ -236,6 +241,13 @@ class DegenerateInputTests(GenTestCase):
     def test_a_single_seed_still_generates(self):
         run = self.assertOk(self.gen("--t1", "Hunter", "--t2-size", "1", "--n", "1"))
         self.assertEqual(len(self.configs(run)), 8)
+
+
+class InterpreterFloorTests(unittest.TestCase):
+    """`gen_sweep.py` must still import on the stock system interpreter."""
+
+    def test_the_tool_runs_on_the_minimum_interpreter(self):
+        assert_runs_on_min_python(self, gen)
 
 
 if __name__ == "__main__":

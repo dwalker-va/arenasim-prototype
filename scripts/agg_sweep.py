@@ -66,7 +66,10 @@ def load(path):
             key = row.get("label") or f"{row['team1']}|{row['team2']}"
             g = groups.setdefault(key, {"t1": row["team1"], "t2": row["team2"],
                                         "w1": 0, "w2": 0, "dr": 0, "n": 0, "err": 0})
-            w = row["winner"]
+            # `.strip()` to match `headtohead_sweep.py`, which reads the same
+            # files: stray whitespace must not make one tool see an error
+            # where the other sees a draw.
+            w = row["winner"].strip()
             if w == "error":
                 # A failed match is not a loss. Counting one would inflate n and
                 # drag every rate down, with nothing but a one-line warning to
@@ -88,9 +91,13 @@ def winrate(g):
 
 
 def rate_cell(wins, n, width=5):
-    """`nn.n% [lo-hi]`, or an explicit n/a when there is nothing to rate."""
+    """`nn.n% [lo-hi]`, or an explicit n/a when there is nothing to rate.
+
+    Both branches are the same width, so a row with no usable matches does
+    not shunt the rest of its column out of alignment.
+    """
     if n == 0:
-        return f"{'n/a':>{width}}  (no usable matches)"
+        return f"{'n/a':>{width}}  {'(no matches)':<14}"
     lo, hi = wilson_interval(wins, n)
     span = f"[{100*lo:.1f}-{100*hi:.1f}]"
     return f"{100*wins/n:{width}.1f}% {span:<14}"
@@ -155,17 +162,25 @@ def main(argv=None):
             line += f"  ({g['err']} errored)"
         if base and k in base:
             b = base[k]
-            delta = 100 * (winrate(g) - winrate(b))
-            # MOVED only when the two Wilson intervals -- the ones printed on
-            # this line and in the bracket below -- do not overlap. Comparing
-            # `p +/- halfwidth` instead, as this once did, treats intervals as
-            # centred on the raw rates and so calls borderline pairs separated
-            # when they are not.
-            moved = g["n"] and b["n"] and separated(
-                wilson_interval(g["w1"], g["n"]), wilson_interval(b["w1"], b["n"])
-            )
-            flag = "  <== MOVED" if moved else ""
-            line += f"   [was {rate_cell(b['w1'], b['n']).strip()}, {delta:+.1f}{flag}]"
+            was = rate_cell(b["w1"], b["n"]).strip()
+            if not g["n"] or not b["n"]:
+                # No measurement on one side, so there is no difference to
+                # state. A delta here reads as a real drop -- an empty cell
+                # against a 50% baseline printed "-50.0" -- when the run
+                # simply has nothing to say about this matchup.
+                line += f"   [was {was}]"
+            else:
+                delta = 100 * (winrate(g) - winrate(b))
+                # MOVED only when the two Wilson intervals -- the ones printed
+                # on this line and in the bracket below -- do not overlap.
+                # Comparing `p +/- halfwidth` instead, as this once did, treats
+                # intervals as centred on the raw rates and so calls borderline
+                # pairs separated when they are not.
+                moved = separated(
+                    wilson_interval(g["w1"], g["n"]), wilson_interval(b["w1"], b["n"])
+                )
+                flag = "  <== MOVED" if moved else ""
+                line += f"   [was {was}, {delta:+.1f}{flag}]"
         print(line)
     return 0
 

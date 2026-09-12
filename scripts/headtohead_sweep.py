@@ -29,6 +29,8 @@ Example:
         --map PillaredArena --seeds 100 --profile TeamPlan
 """
 
+from __future__ import annotations
+
 import argparse
 import csv
 import json

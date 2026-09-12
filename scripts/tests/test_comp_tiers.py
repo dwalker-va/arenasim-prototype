@@ -28,7 +28,12 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from sweep_fixtures import FixtureTestCase, install_no_subprocess, run_main  # noqa: E402
+from sweep_fixtures import (  # noqa: E402
+    FixtureTestCase,
+    assert_runs_on_min_python,
+    install_no_subprocess,
+    run_main,
+)
 
 import comp_tiers as ct  # noqa: E402
 
@@ -276,6 +281,13 @@ class ReportTests(FixtureTestCase):
         run = self.report(self.path("nope.csv"), "--size", "2")
         self.assertIsInstance(run.code, str)
         self.assertIn("nope.csv", run.code)
+
+
+class InterpreterFloorTests(unittest.TestCase):
+    """`comp_tiers.py` must still import on the stock system interpreter."""
+
+    def test_the_tool_runs_on_the_minimum_interpreter(self):
+        assert_runs_on_min_python(self, ct)
 
 
 if __name__ == "__main__":

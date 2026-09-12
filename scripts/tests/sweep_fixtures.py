@@ -24,6 +24,7 @@ Not a test file: `unittest` discovery ignores it, and it is imported by
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import csv
 import io
@@ -155,6 +156,68 @@ def run_main(main, argv):
         except SystemExit as exc:
             code = exc.code
     return Run(code, out.getvalue(), err.getvalue())
+
+
+# ---------------------------------------------------------------------------
+# interpreter floor
+# ---------------------------------------------------------------------------
+
+# The stock macOS `/usr/bin/python3`. These tools are run by hand from a shell
+# whose `python3` is often exactly that, so a syntax floor above it breaks the
+# tool for its readers, not just for CI.
+MIN_PYTHON = (3, 9)
+
+
+def assert_runs_on_min_python(testcase, module):
+    """Fail if `module` would not import on `MIN_PYTHON`.
+
+    A `X | None` annotation on a def is EVALUATED at import, so it raises on
+    3.9 unless the module carries `from __future__ import annotations`. That is
+    exactly how `headtohead_sweep.py` briefly acquired a 3.10 floor: green on a
+    pyenv 3.12, `TypeError` at import for anyone on the system interpreter, and
+    invisible to a suite running on the same modern interpreter as the bug.
+    Checked over the source rather than by running a second interpreter, so the
+    guard holds wherever the suite runs.
+    """
+    path = module.__file__
+    with open(path) as f:
+        tree = ast.parse(f.read(), filename=path)
+
+    postponed = any(
+        isinstance(node, ast.ImportFrom)
+        and node.module == "__future__"
+        and any(a.name == "annotations" for a in node.names)
+        for node in tree.body
+    )
+    if postponed:
+        return
+
+    # Only annotations are the hazard -- a real `|` between ints is fine on
+    # every version -- so collect the annotation expressions and look in those.
+    annotations = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            a = node.args
+            annotations.extend(
+                arg.annotation
+                for arg in list(a.posonlyargs) + list(a.args) + list(a.kwonlyargs)
+                if arg.annotation is not None
+            )
+            if node.returns is not None:
+                annotations.append(node.returns)
+        elif isinstance(node, ast.AnnAssign) and node.annotation is not None:
+            annotations.append(node.annotation)
+
+    for annotation in annotations:
+        for sub in ast.walk(annotation):
+            if isinstance(sub, ast.BinOp) and isinstance(sub.op, ast.BitOr):
+                testcase.fail(
+                    "%s uses a PEP 604 `X | Y` annotation at line %d but has no "
+                    "`from __future__ import annotations`, so it raises at import "
+                    "on Python %d.%d (the system interpreter). Add the import, as "
+                    "`scripts/db2_spell_sweep.py` does."
+                    % (os.path.basename(path), sub.lineno, MIN_PYTHON[0], MIN_PYTHON[1])
+                )
 
 
 class FixtureTestCase(unittest.TestCase):
