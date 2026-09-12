@@ -108,6 +108,68 @@ fn dispel_priority_orders_cc_above_dots_above_slows() {
     assert!(dispel_priority(AuraType::MovementSpeedSlow) > 0);
 }
 
+/// AS-44 regression. `try_dispel_ally` is called with exactly two
+/// `min_priority` bars — 90 (urgent) and 50 (maintenance) — so a dispellable
+/// aura scoring below 90 is invisible to a pressured healer and one scoring 0
+/// is invisible to every healer, forever. Freezing Trap's `Incapacitate` and
+/// Unstable Affliction's backlash `Silence` both sat at 0 behind a `_ => 0`
+/// wildcard: classified dispellable, removal path wired, never once removed
+/// across 32 seeded matches carrying 19 dispels and 46 cleanses.
+#[test]
+fn urgent_crowd_control_clears_every_caller_bar() {
+    const URGENT_BAR: i32 = 90;
+    for ty in [
+        AuraType::Polymorph,
+        AuraType::Incapacitate, // Freezing Trap
+        AuraType::Silence,      // Unstable Affliction backlash
+        AuraType::Fear,
+    ] {
+        assert!(
+            dispel_priority(ty) >= URGENT_BAR,
+            "{ty:?} is urgent crowd control and must clear the 90 bar, scored {}",
+            dispel_priority(ty)
+        );
+    }
+}
+
+/// Ordering intent for the two types AS-44 promoted: the complete
+/// incapacitates tie at the top, the silence sits between them and Fear.
+#[test]
+fn dispel_priority_ranks_incapacitates_top_and_silence_above_fear() {
+    assert_eq!(
+        dispel_priority(AuraType::Incapacitate),
+        dispel_priority(AuraType::Polymorph),
+        "Freezing Trap and Polymorph are both complete incapacitates sharing a \
+         DR category — neither outranks the other"
+    );
+    assert!(dispel_priority(AuraType::Polymorph) > dispel_priority(AuraType::Silence));
+    assert!(dispel_priority(AuraType::Silence) > dispel_priority(AuraType::Fear));
+}
+
+/// Structural guard: a type the dispel path can actually remove must be GRADED.
+/// A magic-dispellable type at 0 is unreachable by every caller — a debuff no
+/// healer will ever lift, which is a balance decision, not a default.
+#[test]
+fn every_magic_dispellable_type_is_graded() {
+    for ty in [
+        AuraType::MovementSpeedSlow,
+        AuraType::Root,
+        AuraType::Fear,
+        AuraType::Polymorph,
+        AuraType::Incapacitate,
+        AuraType::Silence,
+    ] {
+        assert!(
+            ty.is_magic_dispellable(),
+            "{ty:?} is listed here as dispellable but is_magic_dispellable() disagrees"
+        );
+        assert!(
+            dispel_priority(ty) > 0,
+            "{ty:?} is dispellable but scores 0 — no caller's min_priority can ever reach it"
+        );
+    }
+}
+
 #[test]
 fn dispel_priority_returns_zero_for_buffs() {
     // Beneficial auras and non-dispellable effects shouldn't score above
@@ -156,6 +218,34 @@ fn purge_priority_orders_defensives_above_offensive_buffs() {
     assert!(purge_priority(AuraType::DamageTakenReduction) >= PURGE_MIN_PRIORITY);
     assert!(purge_priority(AuraType::HealingOverTime) >= PURGE_MIN_PRIORITY);
     assert!(purge_priority(AuraType::AttackPowerIncrease) < PURGE_MIN_PRIORITY);
+}
+
+/// Sibling of `every_magic_dispellable_type_is_graded`, flagged by the AS-41
+/// Tester: a purgeable buff scoring 0 falls below `PURGE_MIN_PRIORITY` and is
+/// never purged by any AI, while reading as fully wired — the aura IS
+/// `can_be_purged` and the removal path DOES exist.
+#[test]
+fn every_purgeable_type_is_graded() {
+    for ty in [
+        AuraType::Absorb,
+        AuraType::MaxHealthIncrease,
+        AuraType::MaxManaIncrease,
+        AuraType::AttackPowerIncrease,
+        AuraType::SpellPowerIncrease,
+        AuraType::HealingOverTime,
+        AuraType::WindfuryBuff,
+        AuraType::DamageTakenReduction,
+        AuraType::CritChanceIncrease,
+        AuraType::ManaRegenIncrease,
+        AuraType::LockoutDurationReduction,
+        AuraType::FrostArmorBuff,
+        AuraType::SpellResistanceBuff,
+    ] {
+        assert!(
+            purge_priority(ty) > 0,
+            "{ty:?} is purgeable but scores 0 — the Shaman can never reach it"
+        );
+    }
 }
 
 #[test]
