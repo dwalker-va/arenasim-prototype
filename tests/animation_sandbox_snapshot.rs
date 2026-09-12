@@ -22,11 +22,21 @@
 //! commit (see CLAUDE.md's snapshot-loop section).
 //!
 //! What the mock itself claims is guarded without a GPU:
-//! `fixture_still_covers_every_row_state` below runs in the default `cargo
+//! `fixture_still_covers_every_row_state` and
+//! `fixture_transport_state_is_reachable` below run in the default `cargo
 //! test`, as does `entry_needs_dummy_pins_the_snapshot_fixture_rows` in
-//! `playback.rs`. Those two exist because a fixture that quietly stops
-//! covering a state — or restates a value that has since changed — moves no
-//! pixels, so the snapshot keeps passing on a lie.
+//! `playback.rs`. Those exist because a fixture that quietly stops covering a
+//! state — or restates a value that has since changed — moves no pixels, so
+//! the snapshot keeps passing on a lie.
+//!
+//! Every VALUE here is derived from the code that produces it. The only
+//! deliberate departures from a panel the running app could serve are the
+//! borrowed Warrior row (the fixture's sole `Unsupported` coverage; the Mage
+//! has none) and the hand-set `needs_dummy` flags, both documented on
+//! `mock_rows` and both guarded elsewhere. Anything else hand-written here is
+//! a defect waiting to be blessed into a baseline — which is exactly how the
+//! panel came to claim a 1.50s Frostbolt pass (AS-62), a 30yd / 24-mana
+//! Frostbolt (AS-50), and a `Cast` Frost Nova (AS-43).
 //!
 //! Fidelity caveats vs the real client: kittest has no Bevy textures, so every
 //! `EntryRow::icon` is `None` here and rows draw their framed empty slot rather
@@ -35,39 +45,44 @@
 //! grouping, and color — not icon or font fidelity.
 
 use arenasim::states::animation_sandbox::playback::{
-    entries_for_class, BodyAnimation, EntryFamily, SandboxEntry,
+    entries_for_class, entry_duration, BodyAnimation, EntryFamily, SandboxEntry, SandboxPlayback,
+    LOOP_TAIL_SECS,
 };
 use arenasim::states::animation_sandbox::ui::{
-    ability_details, draw_sandbox_ui, CameraPreset, EntryRow, SandboxView,
+    ability_details, draw_sandbox_ui, CameraPreset, EntryRow, SandboxView, SPEEDS,
 };
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use egui_kittest::Harness;
 
-/// The real classifier's label and family for one ability, looked up through
-/// the same `entries_for_class` call the live panel builds its rows from.
+/// The real classifier's label and family for one entry, looked up through the
+/// same `entries_for_class` call the live panel builds its rows from.
 ///
 /// Searching EVERY class (not just the Mage) because the fixture deliberately
 /// carries an `Unsupported` row and the Mage has none — the only two
 /// `Unsupported` abilities in the game are Wind Shear and Heroic Strike.
-fn classified(defs: &AbilityDefinitions, ability: AbilityType) -> (String, EntryFamily) {
+fn classified(defs: &AbilityDefinitions, entry: SandboxEntry) -> (String, EntryFamily) {
     CharacterClass::all()
         .iter()
         .flat_map(|class| entries_for_class(*class, defs))
-        .find(|listing| listing.entry == SandboxEntry::Ability(ability))
+        .find(|listing| listing.entry == entry)
         .map(|listing| (listing.label, listing.family))
-        .unwrap_or_else(|| panic!("{ability:?} is not a sandbox entry under any class"))
+        .unwrap_or_else(|| panic!("{entry:?} is not a sandbox entry under any class"))
 }
 
 /// The mock entry list: a Mage's own rows plus one borrowed row, chosen so the
 /// two snapshots between them cover every way the panel can draw an ability —
 /// enabled, `needs dummy`, and `n/a`.
 ///
-/// Family and label are DERIVED, never restated: `classified` asks
-/// `entries_for_class` (hence `mechanism_for`) exactly as the live panel does,
-/// so the mock cannot drift from the classifier the way it did when Frost Nova
-/// sat here hand-labelled `Cast` while the real answer had become `Residue`.
+/// Family and label are DERIVED for every row, ability and body alike:
+/// `classified` asks `entries_for_class` (hence `mechanism_for`) exactly as the
+/// live panel does, so the mock cannot drift from the classifier the way it did
+/// when Frost Nova sat here hand-labelled `Cast` while the real answer had
+/// become `Residue`. The body rows' `EntryFamily::Body` was the last hand-set
+/// classification left; it is tautological today, since `entries_for_class`
+/// stamps `Body` on every `BodyAnimation`, but the fixture now READS that
+/// rather than agreeing with it.
 ///
 /// `needs_dummy` is the one field still set by hand, because
 /// `playback::entry_needs_dummy` is `pub(crate)` and out of reach of an
@@ -88,23 +103,18 @@ fn classified(defs: &AbilityDefinitions, ability: AbilityType) -> (String, Entry
 /// this fixture was rebuilt to remove.
 fn mock_rows() -> Vec<EntryRow> {
     let defs = AbilityDefinitions::default();
-    let ability = |ability, needs_dummy| {
-        let (label, family) = classified(&defs, ability);
+    let row = |entry, needs_dummy| {
+        let (label, family) = classified(&defs, entry);
         EntryRow {
-            entry: SandboxEntry::Ability(ability),
+            entry,
             family,
             label,
             icon: None,
             needs_dummy,
         }
     };
-    let body = |b: BodyAnimation| EntryRow {
-        entry: SandboxEntry::Body(b),
-        family: EntryFamily::Body,
-        label: b.label().to_string(),
-        icon: None,
-        needs_dummy: false,
-    };
+    let ability = |ability, needs_dummy| row(SandboxEntry::Ability(ability), needs_dummy);
+    let body = |b: BodyAnimation| row(SandboxEntry::Body(b), false);
 
     vec![
         // Offensive — greyed with `needs dummy` whenever the dummy is off.
@@ -154,14 +164,58 @@ fn fixture_still_covers_every_row_state() {
     );
 }
 
+/// Where the playhead sits, as a fraction of the pass it is inside.
+///
+/// The one transport quantity with no producing code to derive from — any
+/// position in `0..=duration + LOOP_TAIL_SECS` is reachable, so the fixture
+/// picks one. Expressed as a FRACTION rather than an absolute second count so
+/// it stays inside the pass whatever `entry_duration` returns: an absolute
+/// 0.42s was a 6% sliver of Frostbolt's real 6.76s window, and against a short
+/// entry it could sit past the end of the track entirely.
+const PLAYHEAD_FRACTION: f32 = 0.35;
+
+/// The transport's speed rung, taken FROM the offered set rather than named.
+///
+/// `SandboxAction::SetSpeed` only ever carries a `SPEEDS` member, so a speed
+/// outside the array highlights no chip at all — a transport the running panel
+/// cannot produce. The slowest rung is the one the control exists for (see
+/// `SPEEDS`' own doc comment), and `min` finds it without assuming the array
+/// stays sorted.
+fn watching_speed() -> f32 {
+    SPEEDS.iter().copied().fold(f32::INFINITY, f32::min)
+}
+
 fn view(selected: Option<SandboxEntry>, paused: bool, dummy_enabled: bool) -> SandboxView {
+    let defs = AbilityDefinitions::default();
     // DERIVED, not restated: the same call the Bevy wrapper makes, so the
     // SELECTED readout is whatever `abilities.ron` says today. Hand-written
     // numbers here are what put a 30yd / 24-mana Frostbolt — a panel the
     // shipped UI cannot produce — into the blessed baseline (AS-50).
     let (selected_label, selected_details) = selected
-        .map(|entry| ability_details(entry, &AbilityDefinitions::default()))
+        .map(|entry| ability_details(entry, &defs))
         .unwrap_or((None, Vec::new()));
+
+    // The transport readout, derived the same way — and for the same reason,
+    // one panel lower. `duration: 1.50` was not merely at risk of drifting: it
+    // was already 5.26s short of the Frostbolt pass the screen plays, so the
+    // blessed baseline showed a loop-tail boundary at 71% of a track where the
+    // real one sits at 92%. This is the driver's own chain: `select` stamps the
+    // entry and its family exactly as `SandboxAction::Select` does, and
+    // `entry_duration` is what `drive_playback` assigns to `playback.duration`.
+    // The empty case needs no special-casing either — an unselected `playback`
+    // reaches that function's own `None => 0.0` arm.
+    let mut playback = SandboxPlayback::default();
+    if let Some(entry) = selected {
+        playback.select(entry, classified(&defs, entry).1);
+    }
+    let duration = entry_duration(&playback, &defs);
+
+    // `paused` is not an independent input in the real panel: the wrapper reads
+    // ONE quantity — the virtual clock's relative speed — and derives both
+    // fields from it, pausing BEING a zeroed clock. Modelling the same single
+    // quantity here keeps the pair from disagreeing in a way the app cannot.
+    let relative_speed = if paused { 0.0 } else { watching_speed() };
+
     SandboxView {
         caster_class: CharacterClass::Mage,
         class_icons: CharacterClass::all().iter().map(|c| (*c, None)).collect(),
@@ -173,14 +227,59 @@ fn view(selected: Option<SandboxEntry>, paused: bool, dummy_enabled: bool) -> Sa
         selected_details,
         applied_preset: Some(CameraPreset::ThreeQuarter),
         looping: true,
-        paused,
-        speed: if paused { 0.0 } else { 0.25 },
-        // Nothing selected means no pass, so the track and readout must be
-        // empty — mocking a live duration here would make the snapshot show a
-        // state the real screen cannot reach.
-        elapsed: if selected.is_some() { 0.42 } else { 0.0 },
-        duration: if selected.is_some() { 1.50 } else { 0.0 },
-        loop_tail: 0.6,
+        paused: relative_speed == 0.0,
+        speed: relative_speed,
+        elapsed: duration * PLAYHEAD_FRACTION,
+        duration,
+        loop_tail: LOOP_TAIL_SECS,
+    }
+}
+
+/// The transport half of the same claim `fixture_still_covers_every_row_state`
+/// makes about the rows: that every state this fixture pins is one the running
+/// panel can actually reach. Runs in the default `cargo test`, because a
+/// transport that drifts back into an impossible state moves pixels only in a
+/// snapshot nobody runs without a GPU.
+#[test]
+fn fixture_transport_state_is_reachable() {
+    let playing = view(
+        Some(SandboxEntry::Ability(AbilityType::Frostbolt)),
+        false,
+        true,
+    );
+    let idle = view(None, true, false);
+
+    assert!(
+        playing.duration > 0.0,
+        "a selected entry must have a pass; a zero duration would draw the \
+         empty track the no-selection snapshot already covers"
+    );
+    assert_eq!(
+        idle.duration, 0.0,
+        "nothing selected means no pass, so the track and readout must be empty"
+    );
+
+    for v in [&playing, &idle] {
+        assert!(
+            v.elapsed <= v.duration + v.loop_tail,
+            "playhead ({:.2}s) is past the end of the pass plus its loop tail \
+             ({:.2}s) — a position the transport never reaches, since \
+             `drive_playback` restarts or stops there",
+            v.elapsed,
+            v.duration + v.loop_tail,
+        );
+        assert!(
+            v.speed == 0.0 || SPEEDS.contains(&v.speed),
+            "speed {} is not a rung the panel offers, so the chip row would \
+             highlight nothing — `SetSpeed` only ever carries a `SPEEDS` member",
+            v.speed,
+        );
+        assert_eq!(
+            v.paused,
+            v.speed == 0.0,
+            "`paused` and `speed` disagree; the wrapper derives BOTH from the \
+             virtual clock, so they cannot come apart in the running panel"
+        );
     }
 }
 

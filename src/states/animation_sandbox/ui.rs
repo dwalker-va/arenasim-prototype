@@ -40,7 +40,12 @@ const PANEL_INSET: f32 = 8.0;
 /// A match offers 0.5x as its slowest rung, which is not slow enough to read
 /// the phases of a fast effect. 0.1 and 0.25 are the reason this control exists
 /// at all; 1x is kept so an entry can be judged at real speed.
-const SPEEDS: [f32; 4] = [0.1, 0.25, 0.5, 1.0];
+///
+/// `pub` because `SandboxAction::SetSpeed` only ever carries a member of this
+/// array, so a `SandboxView::speed` outside it highlights NO chip — a state the
+/// running panel cannot reach. The snapshot fixture picks its rung from here
+/// rather than naming one, so it cannot pin that state by accident.
+pub const SPEEDS: [f32; 4] = [0.1, 0.25, 0.5, 1.0];
 
 /// Where the camera can be placed in one action.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -525,7 +525,15 @@ const AURA_HOLD_SECS: f32 = 4.0;
 const IMPACT_TAIL_SECS: f32 = 0.8;
 
 /// Length of one pass of the selected entry.
-fn entry_duration(playback: &SandboxPlayback, defs: &AbilityDefinitions) -> f32 {
+///
+/// `pub` so the snapshot fixture can DERIVE the transport panel's duration
+/// readout through the same call the driver makes, instead of restating a
+/// number. Every other link in that chain — [`SandboxPlayback`], its fields,
+/// [`SandboxPlayback::select`], [`entries_for_class`] — was already public;
+/// this was the last private one, and while it stayed private the fixture's
+/// only option was a literal, which is how the blessed baseline came to show a
+/// Frostbolt pass 5.26s shorter than the one the screen actually plays.
+pub fn entry_duration(playback: &SandboxPlayback, defs: &AbilityDefinitions) -> f32 {
     match playback.selected {
         Some(SandboxEntry::Ability(ability)) => {
             let Some(config) = defs.get(&ability) else {
