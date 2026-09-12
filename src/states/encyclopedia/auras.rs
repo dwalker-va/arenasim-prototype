@@ -50,8 +50,9 @@
 //! The same rule holds for the NUMBERS: every engine entry's break-on-damage
 //! threshold comes from the constant its apply site reads, so no page can print
 //! "Breaks on damage: Never" over an aura the first hit removes. Shadow Sight
-//! is exactly that case and reads `0.0` here, because that is what the
-//! simulation applies.
+//! was exactly that case for a while (a `0.0` typo where its comment claimed
+//! "never"); it reads `SHADOW_SIGHT_BREAK_ON_DAMAGE` here, so the page follows
+//! the value the orb pickup applies rather than a restatement of it.
 
 use bevy_egui::egui;
 
@@ -429,9 +430,10 @@ struct EngineSpec {
     magnitude: f32,
     school: Option<SpellSchool>,
     /// Read from the constant the apply site reads. NOT defaulted: Shadow Sight
-    /// applies `0.0` (breaks on any damage) where every other engine aura
+    /// once applied `0.0` (breaks on any damage) where every other engine aura
     /// applies `-1.0`, and a shared default printed "Never" on a page for an
-    /// aura the first hit removes.
+    /// aura the first hit removed. Every entry names its own value so the page
+    /// can only ever say what the engine does.
     break_on_damage: f32,
     persistence: Persistence,
     provenance: String,
@@ -1408,8 +1410,10 @@ mod tests {
     }
 
     /// Blocker the module doc turns on: the page states what the simulation
-    /// does. Shadow Sight is applied with a 0.0 threshold — it breaks on ANY
-    /// damage — and a hardcoded -1.0 here printed "Never".
+    /// does. Shadow Sight was applied with a 0.0 threshold for a while — it
+    /// broke on ANY damage — while a hardcoded -1.0 here printed "Never". The
+    /// apply site now applies -1.0 and the page must follow THAT constant, not
+    /// a literal of its own.
     #[test]
     fn engine_entries_take_break_on_damage_from_their_apply_site() {
         let entries = catalog(&abilities());
@@ -1419,12 +1423,16 @@ mod tests {
             shadow_sight.sample.break_on_damage_threshold, SHADOW_SIGHT_BREAK_ON_DAMAGE,
             "the page must read the threshold the orb pickup applies"
         );
+        assert!(
+            SHADOW_SIGHT_BREAK_ON_DAMAGE < 0.0,
+            "Shadow Sight runs its full duration; -1.0 is the never-breaks sentinel"
+        );
         let rows = stat_rows(shadow_sight);
         let breaks = rows
             .iter()
             .find(|(key, _)| key == "Breaks on damage")
             .expect("every page states a break-on-damage rule");
-        assert_eq!(breaks.1, "Any damage");
+        assert_eq!(breaks.1, "Never");
     }
 
     /// Power Word: Shield's 25 is a BASE that spell power roughly triples in
