@@ -8,12 +8,32 @@ name: CI
 # them only protected the codebase when a human remembered to run it — a guard
 # nobody runs claims more coverage than it delivers, which is the same shape of
 # defect the guards exist to catch.
+#
+# Not on pull requests, on purpose. A run is 16-18 minutes cached and 39 cold
+# (measured, below) — this is a Bevy crate, not a codebase where running the
+# suite is cheap — and many PRs are docs-only, so a check on every PR would
+# mostly be paying for answers nobody needs. The run that matters is the one
+# on `main` after each merge, and a contributor who wants the verdict on a
+# branch before merging starts one by hand:
+# `gh workflow run ci.yaml --ref <branch>`.
+#
+# `paths-ignore` skips the docs-only pushes. Everything listed is docs or
+# agent-harness config that no cargo step reads; everything NOT listed is left
+# in deliberately — `assets/` is loaded by tests, `scripts/` is exercised by
+# the db2 fixture suite, `examples/` is compiled by `cargo test`, `packaging/`
+# is a build.rs input.
+# GitHub evaluates the filter only on push events, never on a dispatch.
 on:
   push:
     branches: [main]
-  pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - ".claude/**"
+      - "LICENSE"
+  workflow_dispatch:
 
-# A newer push to the same branch makes the older run's verdict stale, so cancel
+# A newer push to the same ref makes the older run's verdict stale, so cancel
 # it rather than paying for two answers and reading the wrong one.
 concurrency:
   group: ci-${{ github.ref }}
@@ -43,8 +63,8 @@ jobs:
     #
     # Measured cold (no cache, the first run of this file): macOS 39m total,
     # 12m build + 26m test; Linux 35m. That margin does not buy off the
-    # reproducibility, and cold is paid only when the cache misses. A cached
-    # run is 16m (31s restore, 7m build, 8m test).
+    # reproducibility, and cold is paid only when the cache misses. Cached
+    # runs measured 16-18m (31-45s restore, 7-8m build, 8-9m test).
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -81,10 +101,10 @@ jobs:
       # `[profile.dev.package."*"] opt-level = 3`, this compiles the whole Bevy
       # graph a SECOND time rather than reusing the release artifacts above.
       # `cargo test --release` would be much cheaper and is the wrong trade —
-      # `debug_assertions` is on only here, and src/ carries ~18 `debug_assert!`
+      # `debug_assertions` is on only here, and src/ carries 16 `debug_assert!`
       # invariants (aura bookkeeping, combatant stat clamps) that a release test
       # run compiles away entirely. Buying back ~15 minutes of cold compile by
-      # silently dropping 18 assertions is exactly the bargain this workflow
+      # silently dropping 16 assertions is exactly the bargain this workflow
       # exists to stop the repo from making.
       #
       # Of the measured 26m cold, only ~2.5m is actually running the 1158
@@ -113,10 +133,11 @@ jobs:
 #
 #   * The other `#[ignore]`d tests: the 98-match determinism sweeps in
 #     `headless_tests.rs`, the obstacle-active determinism companion, the
-#     recalibration-pending movement probes, and `camp_sweep.rs`. These are
-#     CPU-only and would run here, but they are minutes of match simulation
-#     apiece; `determinism_pin.rs` is the cheap always-on sentinel that stands
-#     in for them, and the sweeps stay an explicit human step.
+#     exploratory `scan_*` seed scanners in `movement_probes.rs`, and
+#     `camp_sweep.rs`. These are CPU-only and would run here, but they are
+#     minutes of match simulation apiece; `determinism_pin.rs` is the cheap
+#     always-on sentinel that stands in for them, and the sweeps stay an
+#     explicit human step.
 #
 #   * The BALANCE SWEEPS (`scripts/*_2v2_matrix.sh`, `headtohead_sweep.py`,
 #     `--matrix`). Out of scope by design: they are n=100 measurements a human

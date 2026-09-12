@@ -921,67 +921,36 @@ If you forget to register a new system, `cargo test` fails with the file path, l
 
 The historical bugs this prevents: `process_dispels`, `process_holy_shock_heals`, `process_holy_shock_damage`, and `process_divine_shield` were each registered in only one of the two paths and silently failed in the other mode. See `docs/solutions/implementation-patterns/graphical-mode-missing-system-registration.md` for context.
 
-### Continuous integration (what CI checks — and what it deliberately does not)
+### Continuous integration
 
 `.github/workflows/ci.yaml` runs `cargo build --release --locked` and
-`cargo test --locked` on every push to `main` and every pull request. Before it
-existed, this repo's whole safety story — `registration_audit`,
-`aura_catalog_audit`, `loadout_order_audit`, the `SpellSchool` / `AuraType` /
-dispel-classifier exhaustiveness tests, the movement probes, `determinism_pin`,
-the db2 fixture suite — was **advisory**: each one protected the codebase only
-when a human remembered to run it before pushing. A guard nobody runs claims
-more coverage than it delivers, which is the same shape of defect the guards
-were written to catch.
+`cargo test --locked` on `macos-latest`, on every push to `main` except
+docs-only pushes (`**.md`, `docs/**`, `.claude/**`, `LICENSE` are
+`paths-ignore`d), and on demand on any branch via `workflow_dispatch`
+(`gh workflow run ci.yaml --ref <branch>`). It does **not** run on pull
+requests: a run is 16-18 minutes cached and 39 cold, and many PRs are
+docs-only. Nothing blocks a merge — a red run on `main` is a signal to go and
+look, not a gate.
 
-Three choices in that file are load-bearing; do not "simplify" them away:
+**Covers:** the default `cargo test` set (1158 tests) plus a release build of
+the shipping binary — so `registration_audit`, `aura_catalog_audit`,
+`loadout_order_audit`, the exhaustiveness tests, the movement probes,
+`determinism_pin` and the db2 fixture suite hold on every code push to `main`
+instead of only when someone remembers to run them.
 
-- **It runs on `macos-latest` (arm64), not `ubuntu-latest`** — for
-  reproducibility, and that was measured rather than assumed. A one-off x86_64
-  Linux run of the same workflow built the project and passed the whole suite,
-  `determinism_pin` included, so nothing is platform-dependent today. But that
-  pin compares a match duration by `f32::to_bits` and `tests/baselines/` hashes
-  whole match logs, all recorded on an arm64 Mac; the day one of those does
-  diverge, "CI says the pin moved but it passes locally" is the failure this
-  repo can least afford, because the only route back to green is loosening the
-  bit-exactness that *is* the guard. Nothing ships on Linux either.
-- **Tests run in the DEV profile**, which is the expensive choice: with
-  `[profile.dev.package."*"] opt-level = 3` it compiles the whole Bevy graph a
-  second time instead of reusing the release artifacts. `debug_assertions` is on
-  only there, and `src/` carries ~18 `debug_assert!` invariants that a
-  `--release` test run compiles away — buying back cold-build minutes by
-  silently dropping 18 assertions is the bargain this workflow exists to
-  prevent.
-- **`python3` is installed explicitly.** `tests/db2_spell_sweep_fixtures.rs`
-  panics when the interpreter is missing rather than skipping, on purpose;
-  provisioning it keeps that choice meaning what it was written to mean instead
-  of leaving it to whatever the runner image preinstalls.
+**Deliberately not covered** (each reasoned out in the workflow's own comments):
 
-**Not covered by CI — still a local gate:**
+- the `#[ignore]`d egui/wgpu **snapshot suites** — a runner's GPU is a different
+  rasterizer; blessing stays part of the commit that changes a `draw_*` function
+  or its mock data (see the egui snapshot loop above);
+- the other `#[ignore]`d tests — the 98-match determinism sweeps, the
+  obstacle-active companion, the exploratory `scan_*` seed scanners in
+  `movement_probes.rs`, `camp_sweep` — minutes of simulation apiece;
+  `determinism_pin` is the always-on sentinel that stands in for them;
+- the **balance sweeps** — measurements a human reads, not assertions.
 
-- The `#[ignore]`d egui/wgpu **snapshot suites**. They compare PNGs
-  pixel-for-pixel against baselines blessed on a developer's machine; a runner's
-  GPU adapter is a different rasterizer, so green would prove little and red
-  would usually mean "different GPU". Blessing stays part of the commit that
-  changes a `draw_*` function or its mock data (see the egui snapshot loop
-  above). Deriving a fixture makes it correct on the *next* render — only a
-  human running `-- --ignored` ever renders.
-- The other `#[ignore]`d tests: the 98-match determinism sweeps in
-  `headless_tests.rs`, the obstacle-active companion, the recalibration-pending
-  movement probes, `camp_sweep.rs`. CPU-only and they would run, but they are
-  minutes apiece; `determinism_pin` is the cheap always-on sentinel that stands
-  in for them.
-- The **balance sweeps** (`scripts/*_2v2_matrix.sh`, `headtohead_sweep.py`,
-  `--matrix`). Out of scope by design: measurements a human reads, not
-  assertions, and no win-rate threshold belongs in a merge gate.
-
-**Wall clock**, measured: a cold run (cache miss) is 39 minutes — 12m release
-build, 26m test, of which only ~2.5m is actually running the 1158 tests; the
-rest is compiling. A cached run is **16 minutes** (31s cache restore, 7m build,
-8m test): dependencies come back from the cache, but `arenasim` itself is a
-large crate and is rebuilt in both profiles. A branch reads the cache `main`
-saved, so the expensive run is the one on `main` after a dependency bump.
-
-A red CI check does **not** block merge yet — branch protection is a repository
-setting, not a file in this repo. To make it blocking: repo Settings → Rules →
-Rulesets → New branch ruleset targeting `main`, enable *Require status checks to
-pass* and select `build + test`.
+Three choices in the file are load-bearing and explained in place; do not
+"simplify" them away: `macos-latest` (the machine class every baseline and the
+`f32::to_bits` pin were recorded on), tests in the DEV profile (the only profile
+in which `src/`'s 16 `debug_assert!` invariants exist), and `python3` installed
+explicitly (the db2 fixture suite panics without it, on purpose).
