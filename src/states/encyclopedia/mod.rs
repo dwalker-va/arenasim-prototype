@@ -6,10 +6,13 @@
 //!
 //! 1. **[`Topic`]** addresses every encyclopedia entity. Navigation state is a
 //!    stack of [`View`]s (a section tab plus an optional topic).
-//! 2. **Hierarchical navigation** — section tabs, a breadcrumb trail, and TWO
-//!    always-visible chrome buttons that do different jobs: *Back* pops the
-//!    stack one level, *Exit* leaves the screen entirely. `Esc` walks the same
-//!    ladder as Back (clear search, pop, then exit at the root).
+//! 2. **Hierarchical navigation** — section tabs, a breadcrumb trail, and a
+//!    browser-style cluster of TWO always-visible chrome buttons at the
+//!    top-left, ahead of the title: *Back* is a literal history pointer that
+//!    pops the stack one level (disabled, not hidden, at the root), and *Home*
+//!    leaves the screen for the context that opened it, naming that
+//!    destination. `Esc` walks the same ladder as Back (clear search, pop,
+//!    then exit at the root).
 //! 3. **Search** over an extensible [registry](search::build_registry) that
 //!    each section populates from its own data source. Nothing is hand-authored:
 //!    item N+1 appears in search the moment it exists in `items.ron`.
@@ -177,7 +180,7 @@ impl Default for EncyclopediaState {
 }
 
 impl EncyclopediaState {
-    /// Open the encyclopedia from `from`: the exit button and the `Esc`-at-root
+    /// Open the encyclopedia from `from`: the Home button and the `Esc`-at-root
     /// path both return there.
     ///
     /// This is the ONE field a new entry point has to set. Call it from
@@ -196,7 +199,7 @@ impl EncyclopediaState {
     ///
     /// The topic becomes the ROOT of the navigation stack rather than a page
     /// pushed onto a section index. A deep link is entered from somewhere else,
-    /// so "up one level" from it is that somewhere: `Esc` and the named Exit
+    /// so "up one level" from it is that somewhere: `Esc` and the named Home
     /// button both put the reader straight back in `from`, with no section
     /// index they never asked for sitting in between. Navigating ONWARD from
     /// the topic still stacks normally, so Back walks back down to it.
@@ -207,7 +210,7 @@ impl EncyclopediaState {
         self.return_to = from;
     }
 
-    /// Where the exit affordance will put the player.
+    /// Where the Home affordance will put the player.
     pub fn return_to(&self) -> GameState {
         self.return_to
     }
@@ -273,7 +276,7 @@ impl EncyclopediaState {
     /// and only leave the screen from the root. Returns `true` on exit, at
     /// which point the caller must call [`Self::leave`] for the destination.
     ///
-    /// The always-visible Exit button is the shortcut PAST this ladder, not a
+    /// The always-visible Home button is the shortcut PAST this ladder, not a
     /// replacement for it: `Esc` still unwinds one level at a time, so no depth
     /// traps the user and no depth exits unexpectedly.
     pub fn back_key(&mut self) -> bool {
@@ -388,7 +391,7 @@ pub fn draw_encyclopedia(
     } = state;
     let current = *stack.last().expect("encyclopedia nav stack is never empty");
     let can_go_back = stack.len() > 1;
-    let exit_label = exit_label(*return_to);
+    let home_label = home_label(*return_to);
 
     let mut action = None;
 
@@ -400,23 +403,29 @@ pub fn draw_encyclopedia(
             bottom: 0,
         }))
         .show(ctx, |ui| {
-            // --- Top bar: Back, title, Exit ---
+            // --- Top bar: [Back][Home] title ---
             //
-            // Back and Exit are SEPARATE, ALWAYS-VISIBLE affordances. They
-            // answer different questions — "up one level" and "out of here" —
-            // and collapsing them into one button (round 1 swapped the label
-            // the moment you navigated anywhere) left a reader two pages deep
-            // with no one-click way out. Back is disabled rather than hidden at
-            // the root so the row never reflows under the cursor.
+            // ONE navigation cluster, top-left, ahead of the title — the
+            // browser toolbar the two buttons were already imitating. Back and
+            // Home are SEPARATE, ALWAYS-VISIBLE affordances answering different
+            // questions ("back one page" and "out of here"), and collapsing
+            // them into one button (round 1 swapped the label the moment you
+            // navigated anywhere) left a reader two pages deep with no
+            // one-click way out. But they are ONE JOB — navigation — so they
+            // sit together: Home used to float alone at the far right, which
+            // split the row's two controls across the full screen width and
+            // made neither read as the other's neighbour.
+            //
+            // Back is disabled rather than hidden at the root, exactly like a
+            // browser with no history: the cluster must not reflow under the
+            // cursor when the stack empties.
             //
             // The row is allocated at an EXPLICIT height — the title's own line
-            // height — and laid out with `horizontal_centered`, so Back, the
-            // title and Exit all share one vertical centre. A plain
-            // `ui.horizontal` gives the row only `interact_size.y` (18pt) of
-            // cross-axis space, which the 30pt title overflows: Back ended up
-            // pinned near the top of that band while the title and Exit sat 8px
-            // lower. Two buttons flanking a title read as a pair, so that
-            // offset read as a mistake.
+            // height — and laid out with `horizontal_centered`, so the cluster
+            // and the title share one vertical centre. A plain `ui.horizontal`
+            // gives the row only `interact_size.y` (18pt) of cross-axis space,
+            // which the 30pt title overflows: the buttons ended up pinned near
+            // the top of that band while the title sat 8px lower.
             let title_height = ui
                 .painter()
                 .layout_no_wrap(TITLE.to_owned(), egui::FontId::proportional(TITLE_SIZE), GOLD)
@@ -425,24 +434,29 @@ pub fn draw_encyclopedia(
             let row_height = title_height.max(ui.spacing().interact_size.y);
             ui.allocate_ui(egui::vec2(ui.available_width(), row_height), |ui| {
                 ui.horizontal_centered(|ui| {
-                    let back = ui.add_enabled(
-                        can_go_back,
-                        chrome_button("◀ BACK", if can_go_back { TEXT } else { DIM }),
-                    );
+                    ui.spacing_mut().item_spacing.x = CLUSTER_GAP;
+
+                    let back = ui
+                        .add_enabled(
+                            can_go_back,
+                            chrome_button(BACK_LABEL, if can_go_back { TEXT } else { DIM }),
+                        )
+                        .on_disabled_hover_text("Nothing to go back to");
                     if back.clicked() {
                         action = Some(EncyclopediaAction::Back);
                     }
-                    ui.add_space(10.0);
-                    ui.label(egui::RichText::new(TITLE).size(TITLE_SIZE).color(GOLD));
 
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        // The exit NAMES its destination, because the destination
-                        // is whatever context opened the encyclopedia — not a fixed
-                        // main menu.
-                        if ui.add(chrome_button(&exit_label, TEXT)).clicked() {
-                            action = Some(EncyclopediaAction::Exit);
-                        }
-                    });
+                    // Home NAMES its destination. Position no longer says where
+                    // "out" goes now that the button sits in the cluster rather
+                    // than alone at the far right, so the label has to — and
+                    // the destination is whatever context opened the
+                    // encyclopedia, not a fixed main menu.
+                    if ui.add(chrome_button(&home_label, TEXT)).clicked() {
+                        action = Some(EncyclopediaAction::Exit);
+                    }
+
+                    ui.add_space(CLUSTER_TITLE_GAP);
+                    ui.label(egui::RichText::new(TITLE).size(TITLE_SIZE).color(GOLD));
                 });
             });
 
@@ -580,21 +594,55 @@ pub fn draw_encyclopedia(
 const SEARCH_HEIGHT: f32 = 34.0;
 
 /// The screen's title. Its laid-out height also sets the chrome row's height,
-/// so the title, Back and Exit share a vertical centre no matter what size the
-/// title is given.
+/// so the title and the navigation cluster share a vertical centre no matter
+/// what size the title is given.
 const TITLE: &str = "ENCYCLOPEDIA";
 const TITLE_SIZE: f32 = 30.0;
+
+/// Gap BETWEEN the two cluster buttons — tight, so they read as one control
+/// group rather than two unrelated buttons that happen to be adjacent.
+const CLUSTER_GAP: f32 = 6.0;
+
+/// Gap between the cluster and the title. Wider than [`CLUSTER_GAP`], which is
+/// what makes the pair a cluster: the eye groups by relative spacing.
+const CLUSTER_TITLE_GAP: f32 = 18.0;
+
+/// The Back button's label. The triangle is U+25C0, a GEOMETRIC SHAPE — not an
+/// emoji. egui's font atlas is a single coverage channel, so a colour emoji can
+/// never render as text here (it comes out as tofu or a flat silhouette);
+/// glyphs on this screen must be plain font glyphs or image textures.
+const BACK_LABEL: &str = "\u{25c0} BACK";
+
+/// The Home button's glyph, U+1F3E0 HOUSE BUILDING.
+///
+/// It lives in the emoji block but it is NOT a colour emoji here: egui's
+/// default font stack falls through to NotoEmoji-**Regular**, a MONOCHROME
+/// outline font, so the house arrives as an ordinary single-channel glyph that
+/// tints to the label's colour like any other character. That fallthrough is
+/// the whole reason this codepoint and not U+2302 HOUSE — the "proper"
+/// Miscellaneous Technical one, which nothing in the default stack covers and
+/// which therefore draws as a tofu box (measured, `tests/encyclopedia_snapshot`).
+/// A COLOUR emoji font would still be impossible, per [`BACK_LABEL`]; the
+/// snapshot baselines are what pin the coverage.
+const HOME_GLYPH: &str = "\u{1f3e0}";
 
 /// The search field's absolute egui `Id`. Stable by construction — see the
 /// comment at its `TextEdit`.
 const SEARCH_FIELD_ID: &str = "encyclopedia_search_field";
 
-/// The exit button's label, naming where it will put the player.
-fn exit_label(return_to: GameState) -> String {
-    format!("EXIT TO {}", return_to.screen_name().to_uppercase())
+/// The Home button's label: the house glyph plus the NAME of the screen it
+/// leaves to.
+///
+/// The destination is dynamic — the encyclopedia is an informational context
+/// entered from somewhere, so "out" means the main menu, the match setup, the
+/// results or the combatant sheet depending on who opened it. Naming it is
+/// what makes the button safe to press: in the cluster, position no longer
+/// hints at where it goes.
+fn home_label(return_to: GameState) -> String {
+    format!("{HOME_GLYPH} {}", return_to.screen_name().to_uppercase())
 }
 
-/// A chrome button in the screen's palette — the Back and Exit affordances.
+/// A chrome button in the screen's palette — the Back and Home affordances.
 fn chrome_button(label: &str, color: egui::Color32) -> egui::Button<'static> {
     egui::Button::new(egui::RichText::new(label.to_string()).size(14.0).color(color))
         .fill(PANEL)
@@ -817,15 +865,15 @@ mod tests {
     }
 
     #[test]
-    fn the_exit_returns_to_the_calling_context() {
+    fn the_home_button_returns_to_the_calling_context() {
         let mut state = EncyclopediaState::default();
         // Default entry point.
         assert_eq!(state.return_to(), GameState::MainMenu);
-        assert_eq!(exit_label(state.return_to()), "EXIT TO MAIN MENU");
+        assert_eq!(home_label(state.return_to()), "\u{1f3e0} MAIN MENU");
 
         // A future entry point sets one field and both exit paths follow it.
         state.open_from(GameState::ConfigureMatch);
-        assert_eq!(exit_label(state.return_to()), "EXIT TO MATCH SETUP");
+        assert_eq!(home_label(state.return_to()), "\u{1f3e0} MATCH SETUP");
 
         // ...the button path,
         assert!(state.apply(EncyclopediaAction::Exit));
@@ -835,6 +883,106 @@ mod tests {
         state.open_from(GameState::ViewCombatant);
         assert!(state.back_key());
         assert_eq!(state.leave(), GameState::ViewCombatant);
+    }
+
+    /// Every return context that exists gets a Home label that names it. The
+    /// label is the ONLY thing telling the reader where "out" goes now that the
+    /// button sits in the top-left cluster instead of alone at the far right,
+    /// so a context whose name renders badly here is a real defect — hence the
+    /// exhaustive list rather than a spot check.
+    #[test]
+    fn the_home_label_names_every_return_context() {
+        let expected = [
+            (GameState::MainMenu, "\u{1f3e0} MAIN MENU"),
+            (GameState::ConfigureMatch, "\u{1f3e0} MATCH SETUP"),
+            (GameState::Results, "\u{1f3e0} RESULTS"),
+            (GameState::ViewCombatant, "\u{1f3e0} COMBATANT"),
+        ];
+        for (from, label) in expected {
+            let mut state = EncyclopediaState::default();
+            state.open_from(from);
+            assert_eq!(home_label(state.return_to()), label);
+        }
+    }
+
+    /// The cluster's glyphs are pinned to EXACT codepoints, because whether one
+    /// renders at all is a property of egui's default font stack and not of
+    /// anything in this repo. U+25C0 comes from Ubuntu-Light and U+1F3E0 from
+    /// MONOCHROME NotoEmoji; the more obvious U+2302 HOUSE is covered by nothing
+    /// in the stack and draws a tofu box (measured — it was the first attempt).
+    ///
+    /// That failure is invisible to every behavioural test, so this assertion
+    /// exists to make a glyph swap a deliberate act that re-renders the
+    /// snapshot baselines, which are the thing that actually shows coverage.
+    ///
+    /// A VARIATION SELECTOR-16 is banned outright: it asks for colour
+    /// presentation, and egui's atlas is a single coverage channel that can
+    /// never deliver it whatever font is loaded.
+    #[test]
+    fn the_cluster_glyphs_are_the_codepoints_egui_can_actually_draw() {
+        assert_eq!(BACK_LABEL, "\u{25c0} BACK");
+        assert_eq!(HOME_GLYPH, "\u{1f3e0}");
+
+        for label in [BACK_LABEL.to_string(), home_label(GameState::MainMenu)] {
+            assert!(
+                !label.contains('\u{fe0f}'),
+                "{label:?} asks for colour presentation, which egui cannot render"
+            );
+        }
+    }
+
+    /// Back is a literal history pointer, and the cluster shows it DISABLED —
+    /// never hidden — when there is no history, so the row cannot reflow under
+    /// the cursor. [`EncyclopediaState::can_go_back`] is that enabled flag; the
+    /// draw feeds it straight to `add_enabled`, and the snapshot baselines pin
+    /// the rendering.
+    #[test]
+    fn back_is_disabled_rather_than_absent_when_there_is_no_history() {
+        let mut state = EncyclopediaState::default();
+        assert!(!state.can_go_back(), "a fresh root has no history");
+
+        // A deep link is a FRESH stack, so its landing page has none either.
+        state.open_at(Topic::Class(CharacterClass::Mage), GameState::Results);
+        assert!(!state.can_go_back());
+
+        state.apply(EncyclopediaAction::Navigate(View::topic(Topic::Item(
+            ItemId::WandOfTheInvoker,
+        ))));
+        assert!(state.can_go_back());
+
+        // ...and popping back to the landing page disables it again.
+        assert!(!state.apply(EncyclopediaAction::Back));
+        assert!(!state.can_go_back());
+    }
+
+    /// `Esc` and the Back BUTTON must not diverge: the button is the same
+    /// action the key sends, so at every depth they agree — pop, pop, then
+    /// leave at the root. The one rung `Esc` has that the button does not is
+    /// clearing an active search first (pinned separately above).
+    #[test]
+    fn esc_and_the_back_button_walk_the_same_ladder() {
+        let route = || {
+            let mut state = EncyclopediaState::default();
+            state.open_at(Topic::Class(CharacterClass::Mage), GameState::Results);
+            state.apply(EncyclopediaAction::Navigate(View::topic(Topic::Item(
+                ItemId::WandOfTheInvoker,
+            ))));
+            state
+        };
+
+        let mut by_key = route();
+        let mut by_button = route();
+        for step in 0..2 {
+            assert_eq!(
+                by_key.back_key(),
+                by_button.apply(EncyclopediaAction::Back),
+                "step {step}: the key and the button disagreed about leaving"
+            );
+            assert_eq!(by_key.current(), by_button.current(), "step {step}");
+            assert_eq!(by_key.can_go_back(), by_button.can_go_back(), "step {step}");
+        }
+        assert_eq!(by_key.leave(), GameState::Results);
+        assert_eq!(by_button.leave(), GameState::Results);
     }
 
     /// A deep link lands ON the topic and unwinds straight back to the screen
@@ -849,7 +997,7 @@ mod tests {
         state.open_at(Topic::Class(CharacterClass::Mage), GameState::Results);
         assert_eq!(state.current(), View::topic(Topic::Class(CharacterClass::Mage)));
         assert!(state.search.is_empty());
-        assert_eq!(exit_label(state.return_to()), "EXIT TO RESULTS");
+        assert_eq!(home_label(state.return_to()), "\u{1f3e0} RESULTS");
 
         // Onward navigation still stacks, so Back walks back down to the
         // landing topic rather than leaving from the first page.
@@ -891,7 +1039,7 @@ mod tests {
             !state.can_go_back(),
             "the linked page is the ROOT of the stack — there is nowhere above it"
         );
-        assert_eq!(exit_label(state.return_to()), "EXIT TO COMBATANT");
+        assert_eq!(home_label(state.return_to()), "\u{1f3e0} COMBATANT");
 
         assert!(state.back_key(), "Esc at the root leaves the encyclopedia");
         assert_eq!(state.leave(), GameState::ViewCombatant);
