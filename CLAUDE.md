@@ -134,9 +134,21 @@ properties make an omission or a broken assumption visible in the output:
 4. **Asserts one `SpellVisual` per name at Probability 1**, and exits non-zero
    on a split. Rank collapse is the assumption every client-data doc rests on;
    a name that splits means it has broken for that spell. (Real example: the
-   Priest lines split on Holy Nova and Touch of Weakness.) Under `--name` the
-   assertion covers only the filtered subset, and the block says so — a `HELD`
-   from a filtered run is never a claim about the book.
+   Priest lines split on Holy Nova and Touch of Weakness.) Every knob that
+   narrows the inventory — `--name`, and an `--era-cut` that excluded anything
+   — adds a `SCOPE:` clause under the verdict, so a `HELD` from a narrowed run
+   is never readable as a claim about the book. Splits and off-`Probability`
+   rows are selected by SHAPE, not by the provenance marker, so a row that
+   splits stays fatal even when a higher-priority marker (an unnamed `SpellID`)
+   is what prints on it. `--allow-split` downgrades those two verdicts only: a
+   dangling `SpellVisualID` has no rows to read, so it stays fatal.
+
+The reporting blocks have their own offline fixture suite,
+`scripts/tests/test_db2_spell_sweep.py`, driving `main(argv)` over hand-built
+CSVs with no network round-trip. `cargo test` runs it (via
+`tests/db2_spell_sweep_fixtures.rs`); run it directly while editing it. Add a
+case there for any new claim the script prints — a reporting regression is
+otherwise invisible until a human reads a sweep.
 
 Every output row carries a provenance marker — `RESOLVED`, `NO-VISUAL`
 (passive talents; no joinable row, whether absent or pointing at visual 0),
