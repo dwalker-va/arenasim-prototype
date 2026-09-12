@@ -647,16 +647,93 @@ where
 /// Calculate dispel priority for an aura type.
 /// Higher values = more urgent to dispel.
 /// Used by Priest (Dispel Magic) and Paladin (Cleanse).
+///
+/// The number is only ever compared against a caller's `min_priority`, and the
+/// game has exactly two bars: **90** (urgent — dispel ahead of healing, even
+/// under pressure) and **50** (maintenance — team-healthy only). A `0` here
+/// therefore does not mean "low", it means "no AI will ever remove this".
+///
+/// Priority picks the ALLY to dispel, not the aura: the aura actually removed
+/// is a random draw among that ally's dispellable auras (`process_dispels`,
+/// intentionally). Raising a type buys a dispel CAST aimed at its holder, not a
+/// guaranteed removal — and it spends that GCD, so a promotion here is always
+/// also a demotion of whatever the healer would otherwise have lifted.
+///
+/// **Exhaustive on purpose — do not add a `_ =>` arm.** A wildcard is exactly
+/// how `Incapacitate` (Freezing Trap) and `Silence` (the Unstable Affliction
+/// backlash) sat at 0 for the life of the project: both are
+/// [`AuraType::is_magic_dispellable`], the removal path worked end to end, and
+/// across 32 seeded matches carrying 19 dispels and 46 cleanses neither was
+/// ever removed — not because anyone decided they should not be, but because
+/// they fell through the wildcard. The compiler refusing to build until variant
+/// N+1 is graded is the only guard that holds.
 pub fn dispel_priority(aura_type: AuraType) -> i32 {
     match aura_type {
-        AuraType::Polymorph => 100,       // Complete incapacitate
-        AuraType::Fear => 90,              // Loss of control
-        AuraType::Root => 80,              // Can't move
-        AuraType::DamageOverTime => 50,    // Taking damage
-        AuraType::MovementSpeedSlow => 20, // Minor (typically not worth dispelling)
-        _ => 0,
+        // ---- Urgent band: clears BOTH caller bars (90 and 50). ----
+        // Complete incapacitates. Polymorph (10s) and Freezing Trap (8s) share
+        // `DRCategory::Incapacitates`, both break on ANY damage, and both remove
+        // the holder from the match outright — there is no honest basis for
+        // ranking one above the other, so they tie.
+        AuraType::Polymorph | AuraType::Incapacitate => 100,
+        // Unstable Affliction's backlash silence (5s). Above Fear because it is
+        // the only crowd control in the game that does NOT break on damage
+        // (`break_on_damage_threshold: -1.0`), so a dispel is the sole way it
+        // ends early, where a feared/sheeped/trapped ally is freed by incidental
+        // cleave. Below the incapacitates because it leaves movement and
+        // auto-attacks intact — the holder is disabled, not helpless.
+        AuraType::Silence => 95,
+        // Loss of control; breaks at 100 cumulative damage.
+        AuraType::Fear => 90,
+
+        // ---- Maintenance band: only the team-healthy caller (50) reaches these. ----
+        AuraType::Root => 80,           // Can't move
+        AuraType::DamageOverTime => 50, // Taking damage
+
+        // ---- Below every caller's bar: deliberately never dispelled. ----
+        // A snare is not worth a GCD that could be a heal, and the caster
+        // re-applies it on the next cast anyway.
+        AuraType::MovementSpeedSlow => 20,
+
+        // ---- Graded 0 deliberately: not dispel candidates at all. ----
+        // Undispellable debuffs. `is_magic_dispellable` already rejects these,
+        // so they never reach this function; grading them keeps "make it
+        // dispellable" a two-place decision instead of a silent promotion.
+        AuraType::Stun
+        | AuraType::SpellSchoolLockout
+        | AuraType::HealingReduction
+        | AuraType::AttackPowerReduction
+        | AuraType::AttackSpeedSlow
+        | AuraType::DamageReduction
+        | AuraType::CastTimeIncrease => 0,
+
+        // Mechanical markers, not effects. Lifting `WeakenedSoul` would hand the
+        // Priest a free Power Word: Shield reset.
+        AuraType::WeakenedSoul | AuraType::ShadowSight | AuraType::WeaponPoison => 0,
+
+        // Beneficial auras. This function grades DEBUFFS on allies; stripping an
+        // enemy's buffs is [`purge_priority`]'s job.
+        AuraType::Absorb
+        | AuraType::MaxHealthIncrease
+        | AuraType::MaxManaIncrease
+        | AuraType::AttackPowerIncrease
+        | AuraType::SpellPowerIncrease
+        | AuraType::HealingOverTime
+        | AuraType::WindfuryBuff
+        | AuraType::DamageTakenReduction
+        | AuraType::DamageImmunity
+        | AuraType::CritChanceIncrease
+        | AuraType::ManaRegenIncrease
+        | AuraType::LockoutDurationReduction
+        | AuraType::FrostArmorBuff
+        | AuraType::SpellResistanceBuff
+        | AuraType::FearImmunity => 0,
     }
 }
+
+/// Minimum [`purge_priority`] worth spending a GCD on: only high-value
+/// defensives (Absorb / DamageTakenReduction / HoT-class sustain) clear this
+/// bar, so Purge never wastes a cast stripping cheap re-buffs like Fortitude.
+pub const PURGE_MIN_PRIORITY: i32 = 70;
 
 /// Calculate purge priority for a BENEFICIAL aura on an enemy.
 /// Higher values = more valuable to strip with Purge.
@@ -666,17 +743,18 @@ pub fn dispel_priority(aura_type: AuraType) -> i32 {
 /// buffs (mana regen, lockout reduction, resistances). Mirrors
 /// [`dispel_priority`] but for the offensive (enemy-buff-strip) direction.
 /// Only auras for which [`Aura::can_be_purged`] is true should be passed here.
-/// Minimum [`purge_priority`] worth spending a GCD on: only high-value
-/// defensives (Absorb / DamageTakenReduction / HoT-class sustain) clear this
-/// bar, so Purge never wastes a cast stripping cheap re-buffs like Fortitude.
-pub const PURGE_MIN_PRIORITY: i32 = 70;
-
+///
+/// **Exhaustive on purpose — do not add a `_ =>` arm.** Same hazard class as
+/// [`dispel_priority`] above: a purgeable buff that fell through a wildcard
+/// would score 0, land below [`PURGE_MIN_PRIORITY`], and never be purged by any
+/// AI — while reading as fully wired, because the aura WOULD be
+/// [`Aura::can_be_purged`] and the removal path WOULD exist. Nobody would
+/// notice. Make the compiler force the grading instead.
 pub fn purge_priority(aura_type: AuraType) -> i32 {
     match aura_type {
         // Defensives — most valuable to remove (denies mitigation / sustain).
         AuraType::Absorb => 100,              // PW:Shield / damage absorb
         AuraType::DamageTakenReduction => 90, // flat incoming-damage cut
-        AuraType::MaxHealthIncrease => 15,    // cheap re-buff (PW:Fortitude) — not worth a GCD to strip
         AuraType::HealingOverTime => 70,      // ongoing sustain (Healing Stream)
         // Offensive throughput buffs.
         AuraType::AttackPowerIncrease => 60,
@@ -688,8 +766,34 @@ pub fn purge_priority(aura_type: AuraType) -> i32 {
         AuraType::ManaRegenIncrease => 25,
         AuraType::SpellResistanceBuff => 20,
         AuraType::FrostArmorBuff => 20,
+        AuraType::MaxHealthIncrease => 15, // cheap re-buff (PW:Fortitude) — not worth a GCD to strip
         AuraType::LockoutDurationReduction => 15,
-        _ => 0,
+
+        // ---- Graded 0 deliberately: not purge candidates. ----
+        // Beneficial but unpurgeable by design (see [`Aura::can_be_purged`]):
+        // Divine Shield and Berserker Rage's fear immunity are cooldowns, not
+        // buffs to strip.
+        AuraType::DamageImmunity | AuraType::FearImmunity => 0,
+
+        // Mechanical markers, not buffs.
+        AuraType::ShadowSight | AuraType::WeaponPoison | AuraType::WeakenedSoul => 0,
+
+        // Debuffs and crowd control — the enemy's problem, not something to
+        // remove FOR them. Lifting an ally's debuff is [`dispel_priority`]'s job.
+        AuraType::MovementSpeedSlow
+        | AuraType::Root
+        | AuraType::Stun
+        | AuraType::Fear
+        | AuraType::Polymorph
+        | AuraType::Incapacitate
+        | AuraType::Silence
+        | AuraType::SpellSchoolLockout
+        | AuraType::DamageOverTime
+        | AuraType::HealingReduction
+        | AuraType::DamageReduction
+        | AuraType::CastTimeIncrease
+        | AuraType::AttackPowerReduction
+        | AuraType::AttackSpeedSlow => 0,
     }
 }
 
@@ -700,7 +804,8 @@ pub fn purge_priority(aura_type: AuraType) -> i32 {
 /// selected in process_dispels (WoW Classic behavior).
 ///
 /// The `min_priority` parameter controls which debuffs are considered:
-/// - 90: Only urgent CC (Polymorph, Fear)
+/// - 90: Only urgent CC (Polymorph, Freezing Trap's Incapacitate, the Unstable
+///   Affliction Silence, Fear)
 /// - 50: Include roots and DoTs
 /// - 20: Include slows (not recommended)
 ///

@@ -4,7 +4,7 @@
 //!
 //! ## Priority Order
 //! 1. Power Word: Fortitude (buff all allies pre-combat)
-//! 2. Dispel Magic - Urgent (Polymorph, Fear - complete loss of control)
+//! 2. Dispel Magic - Urgent (Polymorph, Freezing Trap, UA Silence, Fear)
 //! 3. Power Word: Shield (shield low-health allies)
 //! 4. Flash Heal (heal injured allies)
 //! 5. Dispel Magic - Maintenance (Roots, DoTs when team HP is stable)
@@ -129,7 +129,7 @@ pub fn decide_priest_action(
         return true;
     }
 
-    // Priority 2: Dispel Magic - Urgent (Polymorph, Fear)
+    // Priority 2: Dispel Magic - Urgent (Polymorph, Freezing Trap, UA Silence, Fear)
     if try_dispel_magic(
         commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
         90, &mut builder,

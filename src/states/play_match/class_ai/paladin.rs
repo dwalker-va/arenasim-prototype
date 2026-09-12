@@ -5,7 +5,7 @@
 //! ## Priority Order
 //! 1. Paladin Aura (buff all allies pre-combat — Devotion/Shadow Resistance/Concentration)
 //! 1.5. Divine Shield (emergency: self < 30% HP, or CC break for teammate)
-//! 2. Cleanse - Urgent (Polymorph, Fear on allies)
+//! 2. Cleanse - Urgent (Polymorph, Freezing Trap, UA Silence, Fear on allies)
 //! 3. Emergency healing (ally < 40% HP) - Holy Shock (heal)
 //! 4. Hammer of Justice (stun enemy in melee range)
 //! 5. Standard healing (ally < 90% HP) - Flash of Light
@@ -175,7 +175,7 @@ pub fn decide_paladin_action(
         return true;
     }
 
-    // Priority 2: Cleanse - Urgent (Polymorph, Fear).
+    // Priority 2: Cleanse - Urgent (Polymorph, Freezing Trap, UA Silence, Fear).
     if try_cleanse(
         commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx,
         90, &mut builder,
