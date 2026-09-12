@@ -50,11 +50,16 @@ UNRESOLVED in the output instead of being quietly absent:
   UNRESOLVED  a real gap in the data rather than an omission, in one of two
               severities -- the marker is shared, the consequence is not:
                 * a SpellID with no `SpellName` row: REPORTED, not fatal. The
-                  name is unknown, but no downstream claim rests on it, and it
-                  gets its own section in the output.
+                  name is unknown; it gets its own section in the output.
+                  Property 4 still judges the ROW: splits, off-Probability
+                  rows and dangling visual ids are selected by SHAPE, not by
+                  this marker, so an unnamed SpellID that also splits is still
+                  fatal. (The marker is a ladder and this branch sits at the
+                  top of it, so a marker-string check would have missed that.)
                 * a SpellVisualID absent from `SpellVisual`: FATAL. The join
                   produced a visual id that does not exist, so property 4
-                  cannot vouch for that row.
+                  cannot vouch for that row. `--allow-split` does NOT downgrade
+                  this one -- see the flag's help.
 
 Usage
 -----
@@ -481,7 +486,9 @@ def main(argv=None):
         action="store_true",
         help="downgrade the property-4 assertion (exactly one SpellVisual per "
         "name, Probability 1) from fatal to a warning. Use only when you have "
-        "read the split rows and know why they split.",
+        "read the split rows and know why they split. It does NOT cover a "
+        "dangling SpellVisualID -- a visual id with no `SpellVisual` row has "
+        "no rows to read, so it stays fatal.",
     )
     args = p.parse_args(argv)
 
@@ -638,8 +645,18 @@ def main(argv=None):
         print()
 
     # ---- property 4: the assertion --------------------------------------
-    splits = [r for r in results if r["marker"] == "SPLIT"]
-    low = [r for r in results if r["marker"] == "LOW-PROB"]
+    # Select fatals BY SHAPE, never by marker string. The marker is a LADDER
+    # (`resolve()`), so at most one condition survives into it -- an unnamed
+    # SpellID that also splits reads UNRESOLVED, and a marker-string check
+    # would miss the split. Meanwhile the HELD population below is chosen by
+    # shape (`r["visuals"]`), so the two criteria could disagree and count the
+    # same row as both clean and unchecked: HELD, exit 0, over a row that
+    # splits. Nothing in the DATA at 1.15.9.69547 reaches that -- no unnamed
+    # skill-line SpellID carries a visual -- which is exactly why it has to be
+    # closed in the SCRIPT. `tests/db2_spell_sweep_fixtures` builds the world
+    # that reaches it.
+    splits = [r for r in results if len(r["visuals"]) > 1]
+    low = [r for r in results if r["low_prob"]]
     dangle = [r for r in results if r["dangling"]]
     print("### property 4 -- one SpellVisual per name, at Probability 1")
     # The safety claim has to carry its own scope. This is the line a person
@@ -647,22 +664,39 @@ def main(argv=None):
     # three blocks earlier does not travel with it, and "HELD over a subset"
     # read as "HELD over the book" is exactly the false completeness claim
     # (AS-37 round 1) this whole script exists to make structurally hard.
-    scope = None
-    if args.name:
-        scope = (
-            "  SCOPE: --name %s is in effect. This covers the %d filtered name(s)\n"
-            "         ONLY -- NOT the skill-line inventory, which may still split\n"
-            "         elsewhere. Re-run without --name before transcribing anything\n"
-            "         as complete." % (" ".join(args.name), len(results))
+    #
+    # Both knobs that narrow the inventory get a clause, in the order they
+    # apply: the era cut first, then --name. "filtered INVENTORY name(s)" is
+    # deliberate -- the HELD line two lines up counts names WITH A VISUAL, a
+    # different and usually smaller population, and two bare totals that close
+    # together read as a contradiction rather than as two facts.
+    scopes = []
+    if cut:
+        scopes.append(
+            "  SCOPE: --era-cut %d excluded %d inventory name(s) above the cut (all\n"
+            "         listed under 'build-era cut' above). This covers the era-side\n"
+            "         inventory ONLY -- the excluded name(s) were never joined and\n"
+            "         may split. Re-run with --era-cut 0 to judge the whole skill\n"
+            "         line." % (args.era_cut, len(cut))
         )
+    if args.name:
+        scopes.append(
+            "  SCOPE: --name %s is in effect. This covers the %d filtered\n"
+            "         inventory name(s) ONLY -- NOT the skill-line inventory, which\n"
+            "         may still split elsewhere. Re-run without --name before\n"
+            "         transcribing anything as complete." % (" ".join(args.name), len(results))
+        )
+
+    def print_scopes():
+        for s in scopes:
+            print(s)
 
     if not with_visual:
         # Vacuously true is not HELD. An empty result set (an all-above-the-cut
         # inventory, or a --name that matched nothing) must not print a safety
         # claim a reader can take for a clean book.
         print("  VACUOUS: no name in scope resolved to a visual -- this run asserts NOTHING.")
-        if scope:
-            print(scope)
+        print_scopes()
         return 0
 
     if not splits and not low and not dangle:
@@ -671,8 +705,7 @@ def main(argv=None):
             "SpellVisual at Probability 1." % len(with_visual)
         )
         print("  (Rank collapse is intact; a per-name visual is safe to transcribe.)")
-        if scope:
-            print(scope)
+        print_scopes()
         return 0
 
     for r in splits:
@@ -693,9 +726,21 @@ def main(argv=None):
         "built on one -- rests on does NOT hold for the rows above."
     )
     print("  Do not transcribe a single visual for them. Join each rank.")
-    if scope:
-        print(scope)
+    print_scopes()
     if args.allow_split:
+        # A split and an off-Probability row are verdicts a person can OVERRULE
+        # by reading the rows -- that is what this flag is for. A dangling
+        # SpellVisualID is not that: the referenced `SpellVisual` row does not
+        # exist, so there is nothing to read and no reading that makes the row
+        # safe. Usually it means the wrong build or a truncated cache, and
+        # downgrading it would hand back a clean exit over a join the script
+        # cannot vouch for at all.
+        if dangle:
+            print(
+                "  (--allow-split given, but a dangling SpellVisualID is not a split: "
+                "there is\n   no row to read, so it stays fatal. Exiting 1.)"
+            )
+            return 1
         print("  (--allow-split given: exiting 0 anyway.)")
         return 0
     return 1
