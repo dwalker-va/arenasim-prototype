@@ -29,8 +29,8 @@
 use egui_kittest::Harness;
 
 use arenasim::states::encyclopedia::{
-    draw_encyclopedia, AbilityFilters, EncyclopediaData, EncyclopediaState, ItemFilters, Section,
-    Topic, View,
+    draw_encyclopedia, AbilityFilters, AuraId, EncyclopediaData, EncyclopediaState, ItemFilters,
+    Section, Topic, View,
 };
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::ability_config::{load_ability_definitions, AbilityDefinitions};
@@ -158,16 +158,67 @@ fn encyclopedia_search() {
     snapshot("encyclopedia_search", state);
 }
 
-/// The section whose content card has not landed: tab, breadcrumb and
-/// placeholder.
+/// The Buffs & Debuffs index: every named aura, split buff vs debuff, each row
+/// tagged with the mechanic it shares with its siblings.
 #[test]
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
-fn encyclopedia_pending_section() {
+fn encyclopedia_auras_index() {
     let mut state = state_at_root();
     state.apply(arenasim::states::encyclopedia::EncyclopediaAction::Navigate(
         View::index(Section::Auras),
     ));
-    snapshot("encyclopedia_pending_section", state);
+    snapshot("encyclopedia_auras_index", state);
+}
+
+/// A named aura's page. Corruption is the entry that makes the card's point:
+/// it is its own debuff, badged with the Damage over Time mechanic and
+/// cross-linked to the OTHER damage-over-time effects rather than being
+/// collapsed into them. It is also dispellable where its sibling Rend is not,
+/// so the removal badge shows the per-aura rule at work.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn encyclopedia_aura_detail() {
+    let mut state = state_at_root();
+    state.apply(arenasim::states::encyclopedia::EncyclopediaAction::Navigate(
+        View::topic(Topic::Aura(AuraId::Ability(AbilityType::Corruption))),
+    ));
+    snapshot("encyclopedia_aura_detail", state);
+}
+
+/// An aura page with a diminishing-returns section and an engine origin: the
+/// Frost Trap slow is re-applied by a zone, so it has no fixed duration and no
+/// `applies_aura` block behind it.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn encyclopedia_aura_detail_engine() {
+    let mut state = state_at_root();
+    state.apply(arenasim::states::encyclopedia::EncyclopediaAction::Navigate(
+        View::topic(Topic::Aura(AuraId::Engine(
+            arenasim::states::encyclopedia::EngineAura::FrostTrapSlow,
+        ))),
+    ));
+    snapshot("encyclopedia_aura_detail_engine", state);
+}
+
+/// A DISAMBIGUATED aura page. The Rogue's weapon coating and the slow that
+/// coating applies are both called "Crippling Poison" on the actor frames, and
+/// a catalog keyed on name alone gave the player only the debuff's page — wrong
+/// polarity, wrong mechanic, wrong duration, wrong removal rule. This is the
+/// page they should reach from their own gold-bordered buff: a Buff badge, the
+/// Weapon Poison mechanic, no expiry, and a provenance line naming what the
+/// frames call it.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn encyclopedia_aura_detail_name_collision() {
+    let mut state = state_at_root();
+    state.apply(arenasim::states::encyclopedia::EncyclopediaAction::Navigate(
+        View::topic(Topic::Aura(AuraId::Engine(
+            arenasim::states::encyclopedia::EngineAura::WeaponPoisonCoating(
+                arenasim::states::match_config::RoguePoison::Crippling,
+            ),
+        ))),
+    ));
+    snapshot("encyclopedia_aura_detail_name_collision", state);
 }
 
 // ============================================================================

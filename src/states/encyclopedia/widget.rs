@@ -90,17 +90,9 @@ pub fn tooltip(ui: &mut egui::Ui, topic: Topic, data: &EncyclopediaData) {
         // The shared `ability_text` generator — the same prose View Combatant
         // shows for the same ability.
         Topic::Ability(ability) => super::abilities::tooltip(ui, ability, data),
-        // Auras get their real tooltip with the aura catalog, which also
-        // settles what an aura page is addressed by. The hover contract and the
-        // address exist now, so nothing here has to be re-wired then.
-        Topic::Aura(_) => {
-            ui.label(egui::RichText::new(topic.name(data)).size(14.0).color(TEXT).strong());
-            ui.label(
-                egui::RichText::new(topic.section().pending_note())
-                    .size(12.0)
-                    .color(MUTED),
-            );
-        }
+        // The same generated text the aura's own page shows — one builder, one
+        // source of truth.
+        Topic::Aura(id) => super::auras::render_tooltip(ui, id, data),
     }
     ui.add_space(4.0);
     ui.label(

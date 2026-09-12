@@ -465,10 +465,12 @@ pub fn totem_buff_spec(ability: AbilityType) -> Option<(AuraType, f32)> {
     Some((aura_type, magnitude))
 }
 
-/// Per-element totem spec. `pub(crate)` so the Animation Sandbox can spawn a
-/// faithful totem from the SAME data gameplay uses (single source of truth — the
-/// preview can never drift from the real totem). Pure; no behavior change.
-pub(crate) fn totem_spec(element: TotemElement) -> (AbilityType, AuraType, f32, SpellSchool) {
+/// Per-element totem spec. `pub` so the Animation Sandbox can spawn a faithful
+/// totem, the encyclopedia can catalog the pulsed buff, and
+/// `tests/aura_catalog_audit.rs` can check the catalog against it — all from the
+/// SAME data gameplay uses (single source of truth — none of them can drift
+/// from the real totem). Pure; no behavior change.
+pub fn totem_spec(element: TotemElement) -> (AbilityType, AuraType, f32, SpellSchool) {
     match element {
         // Windfury Totem — empowers melee allies' auto-attacks (proc chance 0..1).
         TotemElement::Air => (AbilityType::AirTotem, AuraType::WindfuryBuff, 0.12, SpellSchool::Nature),

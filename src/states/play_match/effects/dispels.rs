@@ -8,7 +8,9 @@ use smallvec::SmallVec;
 
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use crate::states::play_match::components::*;
-use crate::states::play_match::effects::backlash::BacklashPending;
+use crate::states::play_match::effects::backlash::{
+    BacklashPending, DISPEL_BACKLASH_SILENCE_DURATION,
+};
 use crate::states::play_match::utils::combat_log_id_for;
 
 /// Process pending dispels from Dispel Magic, Cleanse, or Devour Magic.
@@ -189,9 +191,10 @@ pub fn process_dispels(
         commands.spawn(BacklashPending {
             dispeller,
             damage,
-            // Hardcoded MVP value. A future iteration can source this from the
-            // ability's DispelBacklashConfig if per-ability tuning is needed.
-            silence_duration: 5.0,
+            // One value for every UA backlash. A future iteration can source
+            // this from the ability's DispelBacklashConfig if per-ability
+            // tuning is needed.
+            silence_duration: DISPEL_BACKLASH_SILENCE_DURATION,
             caster,
         });
     }

@@ -175,6 +175,8 @@ impl Plugin for StatesPlugin {
             // Reuses the item, class and ability icon loaders — each has an
             // internal `loaded: bool` guard, so re-registering them here is
             // idempotent (the same trick the retired Armory screen used).
+            // The ability loader feeds the aura catalog too: a named aura
+            // borrows the icon of the ability that applies it.
             .add_systems(
                 Update,
                 (

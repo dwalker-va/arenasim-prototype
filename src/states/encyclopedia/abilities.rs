@@ -19,6 +19,7 @@ use crate::states::play_match::components::class_base_stats;
 use crate::states::play_match::constants::{GCD, MELEE_RANGE};
 use crate::states::play_match::AbilityType;
 
+use super::auras::AuraId;
 use super::search::SearchEntry;
 use super::widget;
 use super::{EncyclopediaData, Topic, DIM, MUTED, TEXT};
@@ -386,17 +387,16 @@ pub fn render_detail(
 
     // --- The aura it applies ---
     //
-    // A forward link into the Buffs & Debuffs section. The address is the
-    // engine-level `AuraType` today, which lands on that section's placeholder
-    // page — a stub, but never a dead end. The aura catalog (AS-33) owns what
-    // an aura page is addressed BY, so this is deliberately the ONE line that
-    // has to change when it lands; the mechanics sentence above already spells
-    // the effect out in full, so nothing is hidden behind the link meanwhile.
+    // A forward link into the Buffs & Debuffs section, addressed by the NAMED
+    // aura this ability's `applies_aura` block defines — the same `AuraId` the
+    // catalog keys its entry on, so the row lands on that aura's own page and
+    // the page links back here as the applying ability.
     if let Some(aura) = &config.applies_aura {
         widget::section_heading(ui, "APPLIES");
         let trailing = format!("{:.0} sec", aura.duration);
         let width = ui.available_width().min(430.0);
-        if let Some(topic) = widget::row(ui, Topic::Aura(aura.aura_type), &trailing, width, data) {
+        let topic = Topic::Aura(AuraId::Ability(ability));
+        if let Some(topic) = widget::row(ui, topic, &trailing, width, data) {
             clicked = Some(topic);
         }
     }

@@ -159,7 +159,7 @@ pub fn trap_system(
                             owner_team: trap.owner_team,
                             radius: FROST_TRAP_ZONE_RADIUS,
                             duration_remaining: FROST_TRAP_ZONE_DURATION,
-                            slow_magnitude: 0.4, // 60% slow (magnitude = speed multiplier, 0.4 = 40% speed)
+                            slow_magnitude: FROST_TRAP_SLOW_MAGNITUDE,
                         },
                         PlayMatchEntity,
                     ));

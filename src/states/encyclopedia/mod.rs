@@ -41,13 +41,17 @@
 //!
 //! ## Sections
 //!
-//! [`classes`], [`abilities`] and [`items`] are populated. Items subsumes the
-//! old standalone Armory screen (grid, chip-bar filters and tooltips came from
-//! there) and adds the per-item detail pages the Armory never had; classes and
-//! abilities are derived wholly from `class_base_stats` and `abilities.ron`.
-//! Buffs & Debuffs renders a placeholder until the aura catalog lands.
+//! All four sections are populated. Items subsumes the old standalone Armory
+//! screen (grid, chip-bar filters and tooltips came from there) and adds the
+//! per-item detail pages the Armory never had; classes and abilities are
+//! derived wholly from `class_base_stats` and `abilities.ron`.
+//!
+//! Buffs & Debuffs is the catalog of NAMED auras — Rend and Corruption are two
+//! entries, not one "Damage over Time" — with `AuraType` demoted to a mechanic
+//! badge and the basis for sibling cross-links. See [`auras`] for why.
 
 pub mod abilities;
+pub mod auras;
 pub mod classes;
 pub mod items;
 pub mod search;
@@ -64,6 +68,7 @@ use super::view_combatant_ui::{AbilityIcons, ItemIcons};
 use super::GameState;
 
 pub use abilities::AbilityFilters;
+pub use auras::{AuraId, EngineAura};
 pub use items::ItemFilters;
 pub use search::{build_registry, SearchEntry};
 pub use topic::{Section, Topic};
@@ -263,6 +268,8 @@ pub struct EncyclopediaData<'a> {
     pub abilities: &'a AbilityDefinitions,
     pub item_icons: Option<&'a ItemIcons>,
     pub class_icons: Option<&'a ClassIcons>,
+    /// Keyed by ability NAME. Auras borrow the icon of the ability that applies
+    /// them, the same convention the in-match buff bar uses.
     pub ability_icons: Option<&'a AbilityIcons>,
 }
 
@@ -692,10 +699,7 @@ fn render_section_index(
         Section::Classes => classes::render_index(ui, data),
         Section::Abilities => abilities::render_index(ui, ability_filters, data),
         Section::Items => items::render_index(ui, item_filters, data),
-        other => {
-            render_pending_section(ui, other);
-            None
-        }
+        Section::Auras => auras::render_index(ui, data),
     }
 }
 
@@ -706,33 +710,8 @@ fn render_topic_page(ui: &mut egui::Ui, topic: Topic, data: &EncyclopediaData) -
         Topic::Class(class) => classes::render_detail(ui, class, data),
         Topic::Ability(ability) => abilities::render_detail(ui, ability, data),
         Topic::Item(id) => items::render_detail(ui, id, data),
-        other => {
-            render_pending_topic(ui, other, data);
-            None
-        }
+        Topic::Aura(id) => auras::render_detail(ui, id, data),
     }
-}
-
-/// Placeholder for a section whose content card has not landed yet. The tab and
-/// its addresses exist so navigation, breadcrumbs and cross-links can be built
-/// against them now.
-fn render_pending_section(ui: &mut egui::Ui, section: Section) {
-    ui.add_space(60.0);
-    ui.vertical_centered(|ui| {
-        ui.label(egui::RichText::new(section.label()).size(20.0).color(GOLD));
-        ui.add_space(8.0);
-        ui.label(egui::RichText::new(section.pending_note()).size(14.0).color(MUTED));
-    });
-}
-
-fn render_pending_topic(ui: &mut egui::Ui, topic: Topic, data: &EncyclopediaData) {
-    widget::detail_header(ui, topic, &topic.subtitle(data), data);
-    ui.add_space(14.0);
-    ui.label(
-        egui::RichText::new(topic.section().pending_note())
-            .size(14.0)
-            .color(MUTED),
-    );
 }
 
 #[cfg(test)]

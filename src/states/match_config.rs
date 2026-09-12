@@ -51,6 +51,11 @@ pub enum RoguePoison {
 }
 
 impl RoguePoison {
+    /// Every weapon poison, in display order. Mirrors `TotemElement::ALL`:
+    /// the encyclopedia expands this into one catalog entry per poison, so
+    /// poison N+1 gets its marker-buff page for free.
+    pub const ALL: [RoguePoison; 1] = [RoguePoison::Crippling];
+
     /// Get the display name
     pub fn name(&self) -> &'static str {
         match self {
