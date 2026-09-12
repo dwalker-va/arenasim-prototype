@@ -21,7 +21,97 @@ use crate::states::match_config::CharacterClass;
 // ENUMS
 // ============================================================================
 
-/// Equipment slot — 17 slots matching WoW Classic
+/// What KIND of slot an item occupies — a property of the ITEM, declared in
+/// `items.ron` as `slot:`.
+///
+/// Distinct from [`ItemSlot`], which is a socket on a CHARACTER. Most kinds map
+/// to exactly one socket, but `Ring` and `Trinket` each have two, and any item
+/// of that kind fits either of them (see [`ItemSlotType::sockets`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum ItemSlotType {
+    Head,
+    Neck,
+    Shoulders,
+    Back,
+    Chest,
+    Wrists,
+    Hands,
+    Waist,
+    Legs,
+    Feet,
+    Ring,
+    Trinket,
+    MainHand,
+    OffHand,
+    Ranged,
+}
+
+impl ItemSlotType {
+    /// Every slot kind, in the canonical presentation order (mirrors
+    /// [`ItemSlot::all`], with each paired kind appearing once).
+    pub fn all() -> &'static [ItemSlotType] {
+        &[
+            ItemSlotType::Head, ItemSlotType::Neck, ItemSlotType::Shoulders,
+            ItemSlotType::Back, ItemSlotType::Chest, ItemSlotType::Wrists,
+            ItemSlotType::Hands, ItemSlotType::Waist, ItemSlotType::Legs,
+            ItemSlotType::Feet, ItemSlotType::Ring, ItemSlotType::Trinket,
+            ItemSlotType::MainHand, ItemSlotType::OffHand, ItemSlotType::Ranged,
+        ]
+    }
+
+    /// Display name of the slot kind — "Ring", never "Ring 1". This is what
+    /// every item-facing surface (encyclopedia chips, subtitles, tooltips)
+    /// labels an item with.
+    pub fn name(&self) -> &'static str {
+        match self {
+            ItemSlotType::Head => "Head",
+            ItemSlotType::Neck => "Neck",
+            ItemSlotType::Shoulders => "Shoulders",
+            ItemSlotType::Back => "Back",
+            ItemSlotType::Chest => "Chest",
+            ItemSlotType::Wrists => "Wrists",
+            ItemSlotType::Hands => "Hands",
+            ItemSlotType::Waist => "Waist",
+            ItemSlotType::Legs => "Legs",
+            ItemSlotType::Feet => "Feet",
+            ItemSlotType::Ring => "Ring",
+            ItemSlotType::Trinket => "Trinket",
+            ItemSlotType::MainHand => "Main Hand",
+            ItemSlotType::OffHand => "Off Hand",
+            ItemSlotType::Ranged => "Ranged",
+        }
+    }
+
+    /// The character sockets that accept this kind of item. Single-socket kinds
+    /// return one entry; `Ring` and `Trinket` return their two siblings in
+    /// canonical order.
+    pub fn sockets(&self) -> &'static [ItemSlot] {
+        match self {
+            ItemSlotType::Head => &[ItemSlot::Head],
+            ItemSlotType::Neck => &[ItemSlot::Neck],
+            ItemSlotType::Shoulders => &[ItemSlot::Shoulders],
+            ItemSlotType::Back => &[ItemSlot::Back],
+            ItemSlotType::Chest => &[ItemSlot::Chest],
+            ItemSlotType::Wrists => &[ItemSlot::Wrists],
+            ItemSlotType::Hands => &[ItemSlot::Hands],
+            ItemSlotType::Waist => &[ItemSlot::Waist],
+            ItemSlotType::Legs => &[ItemSlot::Legs],
+            ItemSlotType::Feet => &[ItemSlot::Feet],
+            ItemSlotType::Ring => &[ItemSlot::Ring1, ItemSlot::Ring2],
+            ItemSlotType::Trinket => &[ItemSlot::Trinket1, ItemSlot::Trinket2],
+            ItemSlotType::MainHand => &[ItemSlot::MainHand],
+            ItemSlotType::OffHand => &[ItemSlot::OffHand],
+            ItemSlotType::Ranged => &[ItemSlot::Ranged],
+        }
+    }
+}
+
+/// Equip SOCKET on a character — 17 sockets matching WoW Classic.
+///
+/// This is the key of a loadout (`loadouts.ron`, `MatchConfig::teamN_equipment`,
+/// [`resolve_loadout`]): it answers "what is worn HERE". An item never names a
+/// socket; it names an [`ItemSlotType`], and the socket decides which kinds it
+/// accepts via [`ItemSlot::slot_type`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ItemSlot {
     Head,
@@ -81,19 +171,55 @@ impl ItemSlot {
         matches!(self, ItemSlot::MainHand | ItemSlot::OffHand | ItemSlot::Ranged)
     }
 
-    /// Whether two slots accept the same item pool.
-    /// Ring1/Ring2 are interchangeable, Trinket1/Trinket2 are interchangeable,
-    /// all other slots must match exactly.
-    pub fn is_same_slot_type(&self, other: &ItemSlot) -> bool {
-        match (self, other) {
-            (ItemSlot::Ring1, ItemSlot::Ring1 | ItemSlot::Ring2) => true,
-            (ItemSlot::Ring2, ItemSlot::Ring1 | ItemSlot::Ring2) => true,
-            (ItemSlot::Trinket1, ItemSlot::Trinket1 | ItemSlot::Trinket2) => true,
-            (ItemSlot::Trinket2, ItemSlot::Trinket1 | ItemSlot::Trinket2) => true,
-            _ => self == other,
+    /// The kind of item this socket holds. Both ring sockets report `Ring`,
+    /// both trinket sockets report `Trinket`; every other socket is 1:1.
+    pub fn slot_type(&self) -> ItemSlotType {
+        match self {
+            ItemSlot::Head => ItemSlotType::Head,
+            ItemSlot::Neck => ItemSlotType::Neck,
+            ItemSlot::Shoulders => ItemSlotType::Shoulders,
+            ItemSlot::Back => ItemSlotType::Back,
+            ItemSlot::Chest => ItemSlotType::Chest,
+            ItemSlot::Wrists => ItemSlotType::Wrists,
+            ItemSlot::Hands => ItemSlotType::Hands,
+            ItemSlot::Waist => ItemSlotType::Waist,
+            ItemSlot::Legs => ItemSlotType::Legs,
+            ItemSlot::Feet => ItemSlotType::Feet,
+            ItemSlot::Ring1 | ItemSlot::Ring2 => ItemSlotType::Ring,
+            ItemSlot::Trinket1 | ItemSlot::Trinket2 => ItemSlotType::Trinket,
+            ItemSlot::MainHand => ItemSlotType::MainHand,
+            ItemSlot::OffHand => ItemSlotType::OffHand,
+            ItemSlot::Ranged => ItemSlotType::Ranged,
+        }
+    }
+
+    /// Whether an item of the given kind may be equipped in this socket.
+    pub fn accepts(&self, slot_type: ItemSlotType) -> bool {
+        self.slot_type() == slot_type
+    }
+
+    /// The other socket of the same kind, for the kinds that have two
+    /// (rings, trinkets). `None` for every 1:1 socket.
+    ///
+    /// An item is unique-equipped: it may not occupy a socket and its sibling
+    /// at once — see [`enforce_unique_equipped`].
+    pub fn sibling(&self) -> Option<ItemSlot> {
+        match self {
+            ItemSlot::Ring1 => Some(ItemSlot::Ring2),
+            ItemSlot::Ring2 => Some(ItemSlot::Ring1),
+            ItemSlot::Trinket1 => Some(ItemSlot::Trinket2),
+            ItemSlot::Trinket2 => Some(ItemSlot::Trinket1),
+            _ => None,
         }
     }
 }
+
+/// Every pair of sibling sockets, primary first. The primary is the socket a
+/// unique-equipped conflict resolves in favour of.
+const SIBLING_SOCKET_PAIRS: &[(ItemSlot, ItemSlot)] = &[
+    (ItemSlot::Ring1, ItemSlot::Ring2),
+    (ItemSlot::Trinket1, ItemSlot::Trinket2),
+];
 
 /// Armor type restriction
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -338,8 +464,9 @@ pub struct ItemConfig {
     /// Icon asset path (e.g. "icons/items/inv_helmet_36.jpg")
     #[serde(default)]
     pub icon: String,
-    /// Which slot this item equips to
-    pub slot: ItemSlot,
+    /// What KIND of slot this item equips to. `Ring`, not `Ring1` — the socket
+    /// is chosen by the loadout, not baked into the item.
+    pub slot: ItemSlotType,
     /// Armor type restriction
     #[serde(default = "default_armor_type")]
     pub armor_type: ArmorType,
@@ -458,7 +585,7 @@ pub fn validate_class_restrictions(
                     class.name(), item.name, item_id, slot, item.armor_type
                 ));
             }
-            if item.slot != *slot {
+            if !slot.accepts(item.slot) {
                 return Err(format!(
                     "{:?} is a {:?} item but was placed in {:?} slot",
                     item_id, item.slot, slot
@@ -466,6 +593,27 @@ pub fn validate_class_restrictions(
             }
         } else {
             return Err(format!("Unknown item {:?} in {:?} slot", item_id, slot));
+        }
+    }
+    Ok(())
+}
+
+/// Validate that no item occupies both sockets of a sibling pair. Items are
+/// unique-equipped: two ring sockets means two DIFFERENT rings.
+pub fn validate_unique_equipped(
+    loadout: &HashMap<ItemSlot, ItemId>,
+    items: &ItemDefinitions,
+) -> Result<(), String> {
+    for (primary, secondary) in SIBLING_SOCKET_PAIRS {
+        match (loadout.get(primary), loadout.get(secondary)) {
+            (Some(a), Some(b)) if a == b => {
+                let name = items.get(a).map_or("unknown item", |i| i.name.as_str());
+                return Err(format!(
+                    "{} ({:?}) is equipped in both {:?} and {:?} — items are unique-equipped",
+                    name, a, primary, secondary
+                ));
+            }
+            _ => {}
         }
     }
     Ok(())
@@ -533,7 +681,11 @@ pub fn validate_item_budget(name: &str, item: &ItemConfig) -> Result<(), String>
 // LOADOUT RESOLUTION
 // ============================================================================
 
-/// Merge default loadout with optional per-slot overrides
+/// Merge default loadout with optional per-socket overrides.
+///
+/// The merge is a plain overlay; the equip CONSTRAINTS are separate passes the
+/// caller runs afterwards — [`enforce_two_hand_conflicts`] and
+/// [`enforce_unique_equipped`].
 pub fn resolve_loadout(
     class: CharacterClass,
     defaults: &DefaultLoadouts,
@@ -554,6 +706,23 @@ pub fn enforce_two_hand_conflicts(loadout: &mut HashMap<ItemSlot, ItemId>, items
         .map_or(false, |item| item.two_handed);
     if has_2h {
         loadout.remove(&ItemSlot::OffHand);
+    }
+}
+
+/// Strip a duplicate from the secondary of a sibling socket pair (rings,
+/// trinkets) when both hold the same item. Call this after `resolve_loadout`
+/// to enforce the unique-equipped constraint, the same way
+/// `enforce_two_hand_conflicts` enforces the 2H one.
+///
+/// The primary socket keeps the item, mirroring the 2H rule's preference for
+/// the main hand, so the outcome is independent of map iteration order.
+pub fn enforce_unique_equipped(loadout: &mut HashMap<ItemSlot, ItemId>) {
+    for (primary, secondary) in SIBLING_SOCKET_PAIRS {
+        if let (Some(a), Some(b)) = (loadout.get(primary), loadout.get(secondary)) {
+            if a == b {
+                loadout.remove(secondary);
+            }
+        }
     }
 }
 
@@ -606,15 +775,32 @@ impl ItemDefinitions {
         self.definitions.iter()
     }
 
-    /// Return all items valid for a given slot and class, sorted by name.
-    /// Ring1/Ring2 and Trinket1/Trinket2 share item pools.
+    /// Return all items the given socket accepts for a class, sorted by name.
+    /// Both ring sockets share one pool, as do both trinket sockets.
     pub fn items_for_slot(&self, slot: ItemSlot, class: CharacterClass) -> Vec<(ItemId, &ItemConfig)> {
         let mut items: Vec<(ItemId, &ItemConfig)> = self.definitions.iter()
-            .filter(|(_, item)| slot.is_same_slot_type(&item.slot) && can_equip(class, item))
+            .filter(|(_, item)| slot.accepts(item.slot) && can_equip(class, item))
             .map(|(id, item)| (*id, item))
             .collect();
         items.sort_by(|a, b| a.1.name.cmp(&b.1.name));
         items
+    }
+
+    /// The items an equipment picker may offer for `socket`, given what the
+    /// character already wears. Same as [`Self::items_for_slot`] minus anything
+    /// already worn in the sibling socket — items are unique-equipped, so an
+    /// offer that would duplicate one is not selectable in the first place.
+    pub fn selectable_items_for_slot(
+        &self,
+        slot: ItemSlot,
+        class: CharacterClass,
+        loadout: &HashMap<ItemSlot, ItemId>,
+    ) -> Vec<(ItemId, &ItemConfig)> {
+        let worn_in_sibling = slot.sibling().and_then(|s| loadout.get(&s)).copied();
+        self.items_for_slot(slot, class)
+            .into_iter()
+            .filter(|(id, _)| Some(*id) != worn_in_sibling)
+            .collect()
     }
 }
 
@@ -687,6 +873,8 @@ pub fn load_default_loadouts(items: &ItemDefinitions) -> Result<DefaultLoadouts,
                 }
             }
             validate_class_restrictions(*class, loadout, items)?;
+            validate_unique_equipped(loadout, items)
+                .map_err(|e| format!("Default loadout for {}: {}", class.name(), e))?;
         }
     }
 
@@ -770,7 +958,7 @@ mod tests {
     }
 
     /// Build a minimal ItemConfig for a non-weapon armor piece
-    fn armor_item(name: &str, slot: ItemSlot, armor_type: ArmorType) -> ItemConfig {
+    fn armor_item(name: &str, slot: ItemSlotType, armor_type: ArmorType) -> ItemConfig {
         ItemConfig {
             name: name.to_string(),
             item_level: 60,
@@ -803,7 +991,7 @@ mod tests {
     }
 
     /// Build a minimal weapon ItemConfig
-    fn weapon_item(name: &str, slot: ItemSlot, dmg_min: f32, dmg_max: f32, speed: f32) -> ItemConfig {
+    fn weapon_item(name: &str, slot: ItemSlotType, dmg_min: f32, dmg_max: f32, speed: f32) -> ItemConfig {
         ItemConfig {
             name: name.to_string(),
             item_level: 60,
@@ -840,7 +1028,7 @@ mod tests {
     #[test]
     fn apply_equipment_adds_armor_stats() {
         let items = make_item_defs(vec![
-            (ItemId::LionheartHelm, armor_item("Helm", ItemSlot::Head, ArmorType::Plate)),
+            (ItemId::LionheartHelm, armor_item("Helm", ItemSlotType::Head, ArmorType::Plate)),
         ]);
         let mut combatant = super::super::components::combatant::Combatant::new(1, 0, CharacterClass::Warrior);
         let base_health = combatant.max_health;
@@ -873,7 +1061,7 @@ mod tests {
     #[test]
     fn apply_equipment_weapon_replaces_damage_for_melee() {
         let items = make_item_defs(vec![
-            (ItemId::ArcaniteReaper, weapon_item("Reaper", ItemSlot::MainHand, 20.0, 30.0, 0.5)),
+            (ItemId::ArcaniteReaper, weapon_item("Reaper", ItemSlotType::MainHand, 20.0, 30.0, 0.5)),
         ]);
         let mut combatant = super::super::components::combatant::Combatant::new(1, 0, CharacterClass::Warrior);
 
@@ -891,7 +1079,7 @@ mod tests {
     #[test]
     fn apply_equipment_weapon_replaces_damage_for_ranged() {
         let items = make_item_defs(vec![
-            (ItemId::WandOfShadows, weapon_item("Wand", ItemSlot::Ranged, 10.0, 14.0, 0.8)),
+            (ItemId::WandOfShadows, weapon_item("Wand", ItemSlotType::Ranged, 10.0, 14.0, 0.8)),
         ]);
         // Mage is ranged, so Ranged slot is primary weapon slot
         let mut combatant = super::super::components::combatant::Combatant::new(1, 0, CharacterClass::Mage);
@@ -907,7 +1095,7 @@ mod tests {
     #[test]
     fn apply_equipment_offhand_weapon_does_not_replace_damage() {
         let items = make_item_defs(vec![
-            (ItemId::WallOfTheDeadShield, weapon_item("Shield", ItemSlot::OffHand, 100.0, 200.0, 2.0)),
+            (ItemId::WallOfTheDeadShield, weapon_item("Shield", ItemSlotType::OffHand, 100.0, 200.0, 2.0)),
         ]);
         let mut combatant = super::super::components::combatant::Combatant::new(1, 0, CharacterClass::Warrior);
         let base_damage = combatant.attack_damage;
@@ -972,25 +1160,25 @@ mod tests {
 
     #[test]
     fn can_equip_plate_on_warrior() {
-        let item = armor_item("Plate Helm", ItemSlot::Head, ArmorType::Plate);
+        let item = armor_item("Plate Helm", ItemSlotType::Head, ArmorType::Plate);
         assert!(can_equip(CharacterClass::Warrior, &item));
     }
 
     #[test]
     fn can_equip_plate_on_mage_fails() {
-        let item = armor_item("Plate Helm", ItemSlot::Head, ArmorType::Plate);
+        let item = armor_item("Plate Helm", ItemSlotType::Head, ArmorType::Plate);
         assert!(!can_equip(CharacterClass::Mage, &item));
     }
 
     #[test]
     fn can_equip_cloth_on_warrior() {
-        let item = armor_item("Cloth Robe", ItemSlot::Chest, ArmorType::Cloth);
+        let item = armor_item("Cloth Robe", ItemSlotType::Chest, ArmorType::Cloth);
         assert!(can_equip(CharacterClass::Warrior, &item));
     }
 
     #[test]
     fn can_equip_class_restricted_item() {
-        let mut item = armor_item("Warrior Only Helm", ItemSlot::Head, ArmorType::Plate);
+        let mut item = armor_item("Warrior Only Helm", ItemSlotType::Head, ArmorType::Plate);
         item.allowed_classes = Some(vec![CharacterClass::Warrior]);
         assert!(can_equip(CharacterClass::Warrior, &item));
         assert!(!can_equip(CharacterClass::Paladin, &item));
@@ -998,7 +1186,7 @@ mod tests {
 
     #[test]
     fn can_equip_accessory_on_any_class() {
-        let item = armor_item("Ring", ItemSlot::Ring1, ArmorType::None);
+        let item = armor_item("Ring", ItemSlotType::Ring, ArmorType::None);
         assert!(can_equip(CharacterClass::Mage, &item));
         assert!(can_equip(CharacterClass::Warrior, &item));
         assert!(can_equip(CharacterClass::Rogue, &item));
@@ -1016,7 +1204,7 @@ mod tests {
     #[test]
     fn format_loadout_single_item() {
         let items = make_item_defs(vec![
-            (ItemId::LionheartHelm, armor_item("Lionheart Helm", ItemSlot::Head, ArmorType::Plate)),
+            (ItemId::LionheartHelm, armor_item("Lionheart Helm", ItemSlotType::Head, ArmorType::Plate)),
         ]);
         let mut loadout = HashMap::new();
         loadout.insert(ItemSlot::Head, ItemId::LionheartHelm);
@@ -1027,8 +1215,8 @@ mod tests {
     #[test]
     fn format_loadout_respects_slot_order() {
         let items = make_item_defs(vec![
-            (ItemId::ArcaniteReaper, weapon_item("Arcanite Reaper", ItemSlot::MainHand, 20.0, 30.0, 0.5)),
-            (ItemId::LionheartHelm, armor_item("Lionheart Helm", ItemSlot::Head, ArmorType::Plate)),
+            (ItemId::ArcaniteReaper, weapon_item("Arcanite Reaper", ItemSlotType::MainHand, 20.0, 30.0, 0.5)),
+            (ItemId::LionheartHelm, armor_item("Lionheart Helm", ItemSlotType::Head, ArmorType::Plate)),
         ]);
         let mut loadout = HashMap::new();
         loadout.insert(ItemSlot::MainHand, ItemId::ArcaniteReaper);
@@ -1044,7 +1232,7 @@ mod tests {
     #[test]
     fn validate_class_restrictions_passes_for_valid_loadout() {
         let items = make_item_defs(vec![
-            (ItemId::LionheartHelm, armor_item("Helm", ItemSlot::Head, ArmorType::Plate)),
+            (ItemId::LionheartHelm, armor_item("Helm", ItemSlotType::Head, ArmorType::Plate)),
         ]);
         let mut loadout = HashMap::new();
         loadout.insert(ItemSlot::Head, ItemId::LionheartHelm);
@@ -1054,7 +1242,7 @@ mod tests {
     #[test]
     fn validate_class_restrictions_fails_wrong_armor_type() {
         let items = make_item_defs(vec![
-            (ItemId::LionheartHelm, armor_item("Helm", ItemSlot::Head, ArmorType::Plate)),
+            (ItemId::LionheartHelm, armor_item("Helm", ItemSlotType::Head, ArmorType::Plate)),
         ]);
         let mut loadout = HashMap::new();
         loadout.insert(ItemSlot::Head, ItemId::LionheartHelm);
@@ -1064,7 +1252,7 @@ mod tests {
     #[test]
     fn validate_class_restrictions_fails_wrong_slot() {
         let items = make_item_defs(vec![
-            (ItemId::LionheartHelm, armor_item("Helm", ItemSlot::Head, ArmorType::Plate)),
+            (ItemId::LionheartHelm, armor_item("Helm", ItemSlotType::Head, ArmorType::Plate)),
         ]);
         let mut loadout = HashMap::new();
         // Place a Head item in the Chest slot
@@ -1080,32 +1268,66 @@ mod tests {
         assert!(validate_class_restrictions(CharacterClass::Warrior, &loadout, &items).is_err());
     }
 
-    // ---- is_same_slot_type tests ----
+    // ---- socket / slot-type mapping tests ----
 
     #[test]
-    fn is_same_slot_type_exact_match() {
-        assert!(ItemSlot::Head.is_same_slot_type(&ItemSlot::Head));
-        assert!(ItemSlot::MainHand.is_same_slot_type(&ItemSlot::MainHand));
+    fn sockets_and_slot_types_are_inverse() {
+        // Every socket's kind lists that socket among its sockets, and every
+        // kind's sockets all report that kind back.
+        for socket in ItemSlot::all() {
+            assert!(
+                socket.slot_type().sockets().contains(socket),
+                "{:?} is missing from {:?}'s socket list",
+                socket,
+                socket.slot_type()
+            );
+        }
+        for slot_type in ItemSlotType::all() {
+            for socket in slot_type.sockets() {
+                assert_eq!(socket.slot_type(), *slot_type);
+            }
+        }
+        // Every socket is claimed by exactly one kind — no socket is orphaned.
+        let claimed: usize = ItemSlotType::all().iter().map(|t| t.sockets().len()).sum();
+        assert_eq!(claimed, ItemSlot::all().len());
     }
 
     #[test]
-    fn is_same_slot_type_ring_interchangeable() {
-        assert!(ItemSlot::Ring1.is_same_slot_type(&ItemSlot::Ring2));
-        assert!(ItemSlot::Ring2.is_same_slot_type(&ItemSlot::Ring1));
-        assert!(ItemSlot::Ring1.is_same_slot_type(&ItemSlot::Ring1));
+    fn both_ring_sockets_accept_rings() {
+        assert!(ItemSlot::Ring1.accepts(ItemSlotType::Ring));
+        assert!(ItemSlot::Ring2.accepts(ItemSlotType::Ring));
+        assert!(ItemSlot::Trinket1.accepts(ItemSlotType::Trinket));
+        assert!(ItemSlot::Trinket2.accepts(ItemSlotType::Trinket));
     }
 
     #[test]
-    fn is_same_slot_type_trinket_interchangeable() {
-        assert!(ItemSlot::Trinket1.is_same_slot_type(&ItemSlot::Trinket2));
-        assert!(ItemSlot::Trinket2.is_same_slot_type(&ItemSlot::Trinket1));
+    fn sockets_reject_other_slot_types() {
+        assert!(!ItemSlot::Ring1.accepts(ItemSlotType::Neck));
+        assert!(!ItemSlot::Head.accepts(ItemSlotType::Chest));
+        assert!(!ItemSlot::Trinket1.accepts(ItemSlotType::Ring));
     }
 
     #[test]
-    fn is_same_slot_type_different_slots() {
-        assert!(!ItemSlot::Ring1.is_same_slot_type(&ItemSlot::Neck));
-        assert!(!ItemSlot::Head.is_same_slot_type(&ItemSlot::Chest));
-        assert!(!ItemSlot::Trinket1.is_same_slot_type(&ItemSlot::Ring1));
+    fn only_paired_sockets_have_siblings() {
+        assert_eq!(ItemSlot::Ring1.sibling(), Some(ItemSlot::Ring2));
+        assert_eq!(ItemSlot::Ring2.sibling(), Some(ItemSlot::Ring1));
+        assert_eq!(ItemSlot::Trinket1.sibling(), Some(ItemSlot::Trinket2));
+        assert_eq!(ItemSlot::Trinket2.sibling(), Some(ItemSlot::Trinket1));
+        assert_eq!(ItemSlot::Head.sibling(), None);
+        assert_eq!(ItemSlot::MainHand.sibling(), None);
+    }
+
+    #[test]
+    fn slot_type_names_carry_no_socket_number() {
+        for slot_type in ItemSlotType::all() {
+            let name = slot_type.name();
+            assert!(
+                !name.contains('1') && !name.contains('2'),
+                "{:?} labels items with a socket number: {:?}",
+                slot_type,
+                name
+            );
+        }
     }
 
     // ---- items_for_slot tests ----
@@ -1113,8 +1335,8 @@ mod tests {
     #[test]
     fn items_for_slot_filters_by_armor_type() {
         let items = make_item_defs(vec![
-            (ItemId::LionheartHelm, armor_item("Plate Helm", ItemSlot::Head, ArmorType::Plate)),
-            (ItemId::MagistersCrown, armor_item("Cloth Crown", ItemSlot::Head, ArmorType::Cloth)),
+            (ItemId::LionheartHelm, armor_item("Plate Helm", ItemSlotType::Head, ArmorType::Plate)),
+            (ItemId::MagistersCrown, armor_item("Cloth Crown", ItemSlotType::Head, ArmorType::Cloth)),
         ]);
         // Warrior can wear plate; Mage cannot
         let warrior_head = items.items_for_slot(ItemSlot::Head, CharacterClass::Warrior);
@@ -1127,9 +1349,9 @@ mod tests {
     #[test]
     fn items_for_slot_ring2_shows_all_rings() {
         let items = make_item_defs(vec![
-            (ItemId::BandOfAccuria, armor_item("Band of Accuria", ItemSlot::Ring1, ArmorType::None)),
-            (ItemId::RingOfProtection, armor_item("Ring of Protection", ItemSlot::Ring2, ArmorType::None)),
-            (ItemId::SignetOfFocus, armor_item("Signet of Focus", ItemSlot::Ring1, ArmorType::None)),
+            (ItemId::BandOfAccuria, armor_item("Band of Accuria", ItemSlotType::Ring, ArmorType::None)),
+            (ItemId::RingOfProtection, armor_item("Ring of Protection", ItemSlotType::Ring, ArmorType::None)),
+            (ItemId::SignetOfFocus, armor_item("Signet of Focus", ItemSlotType::Ring, ArmorType::None)),
         ]);
         let ring2_items = items.items_for_slot(ItemSlot::Ring2, CharacterClass::Mage);
         assert_eq!(ring2_items.len(), 3); // all ring items available for Ring2
@@ -1138,8 +1360,8 @@ mod tests {
     #[test]
     fn items_for_slot_trinket_shows_all_trinkets() {
         let items = make_item_defs(vec![
-            (ItemId::MarkOfTheChampion, armor_item("Mark of Champion", ItemSlot::Trinket1, ArmorType::None)),
-            (ItemId::EssenceOfEternalLife, armor_item("Essence of Life", ItemSlot::Trinket1, ArmorType::None)),
+            (ItemId::MarkOfTheChampion, armor_item("Mark of Champion", ItemSlotType::Trinket, ArmorType::None)),
+            (ItemId::EssenceOfEternalLife, armor_item("Essence of Life", ItemSlotType::Trinket, ArmorType::None)),
         ]);
         let trinket2_items = items.items_for_slot(ItemSlot::Trinket2, CharacterClass::Warrior);
         assert_eq!(trinket2_items.len(), 2); // both trinkets available for Trinket2
@@ -1147,7 +1369,7 @@ mod tests {
 
     #[test]
     fn items_for_slot_respects_class_restrictions() {
-        let mut warrior_only = armor_item("Warrior Helm", ItemSlot::Head, ArmorType::Plate);
+        let mut warrior_only = armor_item("Warrior Helm", ItemSlotType::Head, ArmorType::Plate);
         warrior_only.allowed_classes = Some(vec![CharacterClass::Warrior]);
         let items = make_item_defs(vec![
             (ItemId::LionheartHelm, warrior_only),
@@ -1161,8 +1383,8 @@ mod tests {
     #[test]
     fn items_for_slot_sorted_by_name() {
         let items = make_item_defs(vec![
-            (ItemId::BandOfAccuria, armor_item("Zebra Ring", ItemSlot::Ring1, ArmorType::None)),
-            (ItemId::SignetOfFocus, armor_item("Alpha Ring", ItemSlot::Ring1, ArmorType::None)),
+            (ItemId::BandOfAccuria, armor_item("Zebra Ring", ItemSlotType::Ring, ArmorType::None)),
+            (ItemId::SignetOfFocus, armor_item("Alpha Ring", ItemSlotType::Ring, ArmorType::None)),
         ]);
         let ring_items = items.items_for_slot(ItemSlot::Ring1, CharacterClass::Warrior);
         assert_eq!(ring_items[0].1.name, "Alpha Ring");
@@ -1172,7 +1394,7 @@ mod tests {
     // ---- enforce_two_hand_conflicts tests ----
 
     fn two_handed_weapon(name: &str) -> ItemConfig {
-        let mut item = weapon_item(name, ItemSlot::MainHand, 20.0, 30.0, 0.9);
+        let mut item = weapon_item(name, ItemSlotType::MainHand, 20.0, 30.0, 0.9);
         item.two_handed = true;
         item
     }
@@ -1181,7 +1403,7 @@ mod tests {
     fn enforce_2h_strips_offhand_when_mainhand_is_2h() {
         let items = make_item_defs(vec![
             (ItemId::ArcaniteReaper, two_handed_weapon("Arcanite Reaper")),
-            (ItemId::WallOfTheDeadShield, armor_item("Shield", ItemSlot::OffHand, ArmorType::None)),
+            (ItemId::WallOfTheDeadShield, armor_item("Shield", ItemSlotType::OffHand, ArmorType::None)),
         ]);
         let mut loadout = HashMap::new();
         loadout.insert(ItemSlot::MainHand, ItemId::ArcaniteReaper);
@@ -1196,8 +1418,8 @@ mod tests {
     #[test]
     fn enforce_2h_keeps_offhand_when_mainhand_is_1h() {
         let items = make_item_defs(vec![
-            (ItemId::FrostbiteBlade, weapon_item("Frostbite", ItemSlot::MainHand, 10.0, 14.0, 1.1)),
-            (ItemId::WallOfTheDeadShield, armor_item("Shield", ItemSlot::OffHand, ArmorType::None)),
+            (ItemId::FrostbiteBlade, weapon_item("Frostbite", ItemSlotType::MainHand, 10.0, 14.0, 1.1)),
+            (ItemId::WallOfTheDeadShield, armor_item("Shield", ItemSlotType::OffHand, ArmorType::None)),
         ]);
         let mut loadout = HashMap::new();
         loadout.insert(ItemSlot::MainHand, ItemId::FrostbiteBlade);
@@ -1211,7 +1433,7 @@ mod tests {
     #[test]
     fn enforce_2h_no_mainhand_is_noop() {
         let items = make_item_defs(vec![
-            (ItemId::WallOfTheDeadShield, armor_item("Shield", ItemSlot::OffHand, ArmorType::None)),
+            (ItemId::WallOfTheDeadShield, armor_item("Shield", ItemSlotType::OffHand, ArmorType::None)),
         ]);
         let mut loadout = HashMap::new();
         loadout.insert(ItemSlot::OffHand, ItemId::WallOfTheDeadShield);
@@ -1221,13 +1443,117 @@ mod tests {
         assert!(loadout.contains_key(&ItemSlot::OffHand), "Off-hand should remain when no main-hand");
     }
 
+    // ---- unique-equipped tests ----
+
+    fn ring_defs() -> ItemDefinitions {
+        make_item_defs(vec![
+            (ItemId::BandOfAccuria, armor_item("Band of Accuria", ItemSlotType::Ring, ArmorType::None)),
+            (ItemId::RingOfProtection, armor_item("Ring of Protection", ItemSlotType::Ring, ArmorType::None)),
+            (ItemId::SignetOfFocus, armor_item("Signet of Focus", ItemSlotType::Ring, ArmorType::None)),
+            (ItemId::MarkOfTheChampion, armor_item("Mark of the Champion", ItemSlotType::Trinket, ArmorType::None)),
+        ])
+    }
+
+    #[test]
+    fn enforce_unique_strips_the_secondary_socket() {
+        let mut loadout = HashMap::new();
+        loadout.insert(ItemSlot::Ring1, ItemId::BandOfAccuria);
+        loadout.insert(ItemSlot::Ring2, ItemId::BandOfAccuria);
+
+        enforce_unique_equipped(&mut loadout);
+
+        assert_eq!(loadout.get(&ItemSlot::Ring1), Some(&ItemId::BandOfAccuria));
+        assert!(!loadout.contains_key(&ItemSlot::Ring2), "the duplicate ring should be stripped");
+    }
+
+    #[test]
+    fn enforce_unique_keeps_two_different_rings() {
+        let mut loadout = HashMap::new();
+        loadout.insert(ItemSlot::Ring1, ItemId::BandOfAccuria);
+        loadout.insert(ItemSlot::Ring2, ItemId::RingOfProtection);
+        loadout.insert(ItemSlot::Trinket1, ItemId::MarkOfTheChampion);
+
+        enforce_unique_equipped(&mut loadout);
+
+        assert_eq!(loadout.len(), 3, "distinct items in sibling sockets are legal");
+    }
+
+    #[test]
+    fn validate_unique_rejects_a_duplicate_and_accepts_distinct_items() {
+        let items = ring_defs();
+
+        let mut duped = HashMap::new();
+        duped.insert(ItemSlot::Ring1, ItemId::BandOfAccuria);
+        duped.insert(ItemSlot::Ring2, ItemId::BandOfAccuria);
+        let err = validate_unique_equipped(&duped, &items).unwrap_err();
+        assert!(err.contains("Band of Accuria"), "error should name the item: {}", err);
+        assert!(err.contains("unique-equipped"));
+
+        let mut fine = HashMap::new();
+        fine.insert(ItemSlot::Ring1, ItemId::BandOfAccuria);
+        fine.insert(ItemSlot::Ring2, ItemId::RingOfProtection);
+        assert!(validate_unique_equipped(&fine, &items).is_ok());
+    }
+
+    #[test]
+    fn picker_hides_the_item_worn_in_the_sibling_socket() {
+        let items = ring_defs();
+        let mut loadout = HashMap::new();
+        loadout.insert(ItemSlot::Ring1, ItemId::BandOfAccuria);
+
+        let ring2 = items.selectable_items_for_slot(ItemSlot::Ring2, CharacterClass::Mage, &loadout);
+        let offered: Vec<ItemId> = ring2.iter().map(|(id, _)| *id).collect();
+        assert!(!offered.contains(&ItemId::BandOfAccuria), "the worn ring is not selectable again");
+        assert_eq!(offered.len(), 2, "the other two rings stay on offer");
+
+        // A 1:1 socket has no sibling, so nothing is ever hidden from it.
+        let trinket = items.selectable_items_for_slot(ItemSlot::Trinket1, CharacterClass::Mage, &loadout);
+        assert_eq!(trinket.len(), items.items_for_slot(ItemSlot::Trinket1, CharacterClass::Mage).len());
+    }
+
+    /// The bug this model replaced: a ring declared `slot: Ring1` was rejected
+    /// by `validate_class_restrictions` in the OTHER ring socket, so half the
+    /// ring pool was inequippable in half the ring sockets. Asserted against the
+    /// real `items.ron`, so a future item that re-bakes a socket fails here.
+    #[test]
+    fn every_item_is_equippable_in_every_socket_of_its_kind() {
+        let items = load_item_definitions().expect("items.ron must load");
+        for (id, item) in items.iter() {
+            let sockets = item.slot.sockets();
+            assert!(!sockets.is_empty(), "{:?} has a slot kind with no socket", id);
+            for socket in sockets {
+                assert!(socket.accepts(item.slot), "{:?} is rejected by {:?}", id, socket);
+                let mut loadout = HashMap::new();
+                loadout.insert(*socket, *id);
+                let class = *CharacterClass::all()
+                    .iter()
+                    .find(|c| can_equip(**c, item))
+                    .unwrap_or_else(|| panic!("{:?} is equippable by no class", id));
+                validate_class_restrictions(class, &loadout, &items)
+                    .unwrap_or_else(|e| panic!("{:?} in {:?}: {}", id, socket, e));
+            }
+        }
+    }
+
+    #[test]
+    fn shipped_default_loadouts_are_unique_equipped() {
+        let items = load_item_definitions().expect("items.ron must load");
+        let defaults = load_default_loadouts(&items).expect("loadouts.ron must load");
+        for class in CharacterClass::all() {
+            if let Some(loadout) = defaults.get(*class) {
+                validate_unique_equipped(loadout, &items)
+                    .unwrap_or_else(|e| panic!("{}: {}", class.name(), e));
+            }
+        }
+    }
+
     // ---- find_one_handed_mainhand tests ----
 
     #[test]
     fn find_1h_returns_first_non_2h_weapon() {
         let items = make_item_defs(vec![
             (ItemId::ArcaniteReaper, two_handed_weapon("Arcanite Reaper")),
-            (ItemId::FrostbiteBlade, weapon_item("Frostbite Blade", ItemSlot::MainHand, 10.0, 14.0, 1.1)),
+            (ItemId::FrostbiteBlade, weapon_item("Frostbite Blade", ItemSlotType::MainHand, 10.0, 14.0, 1.1)),
         ]);
         let result = find_one_handed_mainhand(&items, CharacterClass::Warrior);
         assert_eq!(result, Some(ItemId::FrostbiteBlade));
@@ -1246,7 +1572,7 @@ mod tests {
     // ---- budget validation tests ----
 
     /// Build a minimal item for budget testing with specific stats
-    fn budget_test_item(slot: ItemSlot, item_level: u32) -> ItemConfig {
+    fn budget_test_item(slot: ItemSlotType, item_level: u32) -> ItemConfig {
         ItemConfig {
             name: "Test Item".to_string(),
             item_level,
@@ -1280,7 +1606,7 @@ mod tests {
 
     #[test]
     fn budget_item_within_budget_passes() {
-        let mut item = budget_test_item(ItemSlot::Head, 60);
+        let mut item = budget_test_item(ItemSlotType::Head, 60);
         item.max_health = 10.0;
         item.attack_power = 5.0;
         // usage = 10*1.0 + 5*1.5 = 17.5, budget = 60*0.75*1.0 = 45
@@ -1289,7 +1615,7 @@ mod tests {
 
     #[test]
     fn budget_item_exactly_at_budget_passes() {
-        let mut item = budget_test_item(ItemSlot::Head, 60);
+        let mut item = budget_test_item(ItemSlotType::Head, 60);
         // budget = 60 * 0.75 * 1.0 = 45.0
         item.max_health = 45.0; // usage = 45.0, exactly at budget
         assert!(validate_item_budget("Test Helm", &item).is_ok());
@@ -1297,7 +1623,7 @@ mod tests {
 
     #[test]
     fn budget_item_within_tolerance_passes() {
-        let mut item = budget_test_item(ItemSlot::Head, 60);
+        let mut item = budget_test_item(ItemSlotType::Head, 60);
         // budget = 45.0, max_allowed = 45 * 1.05 = 47.25
         item.max_health = 47.0; // 104.4% of budget, within 5% tolerance
         assert!(validate_item_budget("Test Helm", &item).is_ok());
@@ -1305,7 +1631,7 @@ mod tests {
 
     #[test]
     fn budget_item_over_tolerance_fails() {
-        let mut item = budget_test_item(ItemSlot::Head, 60);
+        let mut item = budget_test_item(ItemSlotType::Head, 60);
         // budget = 45.0, max_allowed = 47.25
         item.max_health = 48.0; // 106.7% of budget, exceeds 5% tolerance
         let result = validate_item_budget("Over Budget Helm", &item);
@@ -1319,7 +1645,7 @@ mod tests {
 
     #[test]
     fn budget_armor_excluded_from_usage() {
-        let mut item = budget_test_item(ItemSlot::Head, 60);
+        let mut item = budget_test_item(ItemSlotType::Head, 60);
         item.armor = 500.0; // high armor, but free
         item.max_health = 10.0;
         // usage = only 10.0 (armor excluded), budget = 45.0
@@ -1329,7 +1655,7 @@ mod tests {
 
     #[test]
     fn budget_weapon_dps_excluded_from_usage() {
-        let mut item = budget_test_item(ItemSlot::MainHand, 60);
+        let mut item = budget_test_item(ItemSlotType::MainHand, 60);
         item.is_weapon = true;
         item.attack_damage_min = 100.0;
         item.attack_damage_max = 200.0;
@@ -1342,7 +1668,7 @@ mod tests {
 
     #[test]
     fn budget_zero_stats_passes() {
-        let item = budget_test_item(ItemSlot::Head, 60);
+        let item = budget_test_item(ItemSlotType::Head, 60);
         // zero budgeted stats, budget > 0
         assert!(validate_item_budget("Empty Item", &item).is_ok());
         assert_eq!(calculate_budget_usage(&item), 0.0);
@@ -1350,7 +1676,7 @@ mod tests {
 
     #[test]
     fn budget_ilvl_zero_fails_with_stats() {
-        let mut item = budget_test_item(ItemSlot::Head, 0);
+        let mut item = budget_test_item(ItemSlotType::Head, 0);
         item.max_health = 1.0;
         let result = validate_item_budget("Zero iLvl", &item);
         assert!(result.is_err());
@@ -1361,7 +1687,7 @@ mod tests {
 
     #[test]
     fn budget_ilvl_zero_fails_even_with_zero_stats() {
-        let item = budget_test_item(ItemSlot::Head, 0);
+        let item = budget_test_item(ItemSlotType::Head, 0);
         let result = validate_item_budget("Zero iLvl Empty", &item);
         assert!(result.is_err());
         let msg = result.unwrap_err();

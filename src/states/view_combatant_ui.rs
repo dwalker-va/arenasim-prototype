@@ -16,7 +16,7 @@ use super::play_match::AbilityType;
 use super::play_match::abilities::SpellSchool;
 use super::play_match::ability_config::{AbilityDefinitions, AbilityConfig};
 use super::play_match::components::{ClassBaseStats, PetType, ResourceType, class_base_stats};
-use super::play_match::equipment::{ItemSlot, ItemId, ItemDefinitions, DefaultLoadouts, resolve_loadout, enforce_two_hand_conflicts, find_one_handed_mainhand};
+use super::play_match::equipment::{ItemSlot, ItemId, ItemDefinitions, DefaultLoadouts, resolve_loadout, enforce_two_hand_conflicts, enforce_unique_equipped, find_one_handed_mainhand};
 // Item presentation lives in the encyclopedia's Items section — the loadout
 // editor renders the same tooltip and stat line so the two never drift.
 use super::encyclopedia::items::{format_item_stats, render_item_tooltip};
@@ -355,6 +355,7 @@ pub fn view_combatant_ui(
     };
     let mut resolved_loadout = resolve_loadout(class, &default_loadouts, &equip_overrides);
     enforce_two_hand_conflicts(&mut resolved_loadout, &item_definitions);
+    enforce_unique_equipped(&mut resolved_loadout);
     let equip_bonuses = EquipmentBonuses::from_loadout(&resolved_loadout, &item_definitions, class);
 
     // Get class color
@@ -1284,8 +1285,10 @@ fn render_equipment_panel(
                     ui.separator();
                 }
 
-                // List valid items for this slot and class
-                let valid_items = items.items_for_slot(open_slot, class);
+                // List valid items for this socket and class. Anything already
+                // worn in the sibling socket is absent — items are
+                // unique-equipped, so it is not selectable here.
+                let valid_items = items.selectable_items_for_slot(open_slot, class, resolved);
                 let current_item = resolved.get(&open_slot);
 
                 egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {

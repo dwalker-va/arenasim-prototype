@@ -15,7 +15,7 @@ use std::collections::HashSet;
 
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::equipment::{
-    can_equip, ArmorType, ItemConfig, ItemDefinitions, ItemId, ItemSlot, WeaponType,
+    can_equip, ArmorType, ItemConfig, ItemDefinitions, ItemId, ItemSlotType, WeaponType,
 };
 
 use super::search::SearchEntry;
@@ -36,7 +36,7 @@ const TILE_WIDTH: f32 = 224.0;
 /// Chip-bar filter state for the Items section (ported from the retired
 /// Armory screen). Persists for the session; resets across launches.
 pub struct ItemFilters {
-    pub selected_slots: HashSet<ItemSlot>,
+    pub selected_slots: HashSet<ItemSlotType>,
     pub selected_armor_types: HashSet<ArmorType>,
     pub item_level_min: u32,
     pub item_level_max: u32,
@@ -87,27 +87,6 @@ impl ItemFilters {
     }
 }
 
-/// Logical slot kinds presented in the chip-bar. `Ring1`/`Ring2` and
-/// `Trinket1`/`Trinket2` collapse to single chips because users see them as
-/// one slot kind.
-const SLOT_CHIPS: &[(&str, &[ItemSlot])] = &[
-    ("Head", &[ItemSlot::Head]),
-    ("Neck", &[ItemSlot::Neck]),
-    ("Shoulders", &[ItemSlot::Shoulders]),
-    ("Back", &[ItemSlot::Back]),
-    ("Chest", &[ItemSlot::Chest]),
-    ("Wrists", &[ItemSlot::Wrists]),
-    ("Hands", &[ItemSlot::Hands]),
-    ("Waist", &[ItemSlot::Waist]),
-    ("Legs", &[ItemSlot::Legs]),
-    ("Feet", &[ItemSlot::Feet]),
-    ("Ring", &[ItemSlot::Ring1, ItemSlot::Ring2]),
-    ("Trinket", &[ItemSlot::Trinket1, ItemSlot::Trinket2]),
-    ("Main Hand", &[ItemSlot::MainHand]),
-    ("Off Hand", &[ItemSlot::OffHand]),
-    ("Ranged", &[ItemSlot::Ranged]),
-];
-
 const ARMOR_TYPE_CHIPS: &[(&str, ArmorType)] = &[
     ("Plate", ArmorType::Plate),
     ("Mail", ArmorType::Mail),
@@ -116,10 +95,10 @@ const ARMOR_TYPE_CHIPS: &[(&str, ArmorType)] = &[
     ("None", ArmorType::None),
 ];
 
-/// Canonical ordering index for slots. Lower values sort first.
-/// Mirrors `ItemSlot::all()` ordering.
-fn slot_order(slot: ItemSlot) -> usize {
-    ItemSlot::all().iter().position(|s| *s == slot).unwrap_or(usize::MAX)
+/// Canonical ordering index for slot kinds. Lower values sort first.
+/// Mirrors `ItemSlotType::all()` ordering.
+fn slot_order(slot: ItemSlotType) -> usize {
+    ItemSlotType::all().iter().position(|s| *s == slot).unwrap_or(usize::MAX)
 }
 
 // ============================================================================
@@ -220,17 +199,15 @@ pub fn render_index(
 fn render_chip_bar(ui: &mut egui::Ui, filters: &mut ItemFilters, total: usize, visible: usize) {
     ui.horizontal_wrapped(|ui| {
         ui.label(egui::RichText::new("SLOT").size(12.0).color(DIM));
-        for (label, slots) in SLOT_CHIPS {
-            // `all` rather than `any` so the chip's active state matches its
-            // toggle semantics — paired slots stay in lockstep.
-            let active = slots.iter().all(|s| filters.selected_slots.contains(s));
-            if ui.selectable_label(active, *label).clicked() {
-                for s in *slots {
-                    if active {
-                        filters.selected_slots.remove(s);
-                    } else {
-                        filters.selected_slots.insert(*s);
-                    }
+        // One chip per slot KIND, straight off `ItemSlotType::all()` — rings and
+        // trinkets are one kind each, so there is nothing to collapse here.
+        for slot_type in ItemSlotType::all() {
+            let active = filters.selected_slots.contains(slot_type);
+            if ui.selectable_label(active, slot_type.name()).clicked() {
+                if active {
+                    filters.selected_slots.remove(slot_type);
+                } else {
+                    filters.selected_slots.insert(*slot_type);
                 }
             }
         }
@@ -517,7 +494,7 @@ mod tests {
         let plate = items.iter().filter(|(_, i)| filters.matches(i, None)).count();
         assert!(plate > 0 && plate < all);
 
-        filters.selected_slots.insert(ItemSlot::Head);
+        filters.selected_slots.insert(ItemSlotType::Head);
         let plate_heads = items.iter().filter(|(_, i)| filters.matches(i, None)).count();
         assert!(plate_heads <= plate, "adding an axis can only narrow the set");
     }

@@ -359,6 +359,12 @@ mcp__wowhead-classic__lookup_spell("Pyroblast")
 
 Items are data-driven via `assets/config/items.ron`. Every item must stay within its **item level budget** — enforced by `cargo test`.
 
+An item's `slot:` is an **`ItemSlotType`** — what KIND of slot it fills (`Ring`,
+`Trinket`, `Head`, …), never a socket number. The character's sockets are the
+separate `ItemSlot` enum and are what `loadouts.ron` keys (`Ring1`, `Ring2`, …);
+any ring fits either ring socket, and the same item may not occupy both
+(unique-equipped, enforced at loadout load and in the equipment picker).
+
 1. **Add entry to `items.ron`**:
    ```ron
    NewItem: (

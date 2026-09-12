@@ -239,7 +239,7 @@ pub const DR_MULTIPLIERS: [f32; 4] = [1.0, 0.5, 0.25, 0.0];
 // Item Budget Validation
 // ============================================================================
 
-use super::equipment::ItemSlot;
+use super::equipment::ItemSlotType;
 
 /// Budget points granted per item level. Effective budget = item_level * BUDGET_PER_ILVL * slot_multiplier.
 /// Calibrated against the current item pool (ilvl 54-60 range).
@@ -279,28 +279,29 @@ pub const WEIGHT_MOVEMENT_SPEED: f32 = 30.0;
 /// Lower than core stats since resist gear trades stat efficiency for specialized protection.
 pub const WEIGHT_RESISTANCE: f32 = 0.4;
 
-/// Returns the WoW Classic-accurate slot budget multiplier for the given item slot.
-/// Higher multiplier = more stat budget available. Head/Chest get the full budget,
-/// while accessories like rings and trinkets get roughly half.
-pub fn slot_budget_multiplier(slot: ItemSlot) -> f32 {
+/// Returns the WoW Classic-accurate slot budget multiplier for the given item
+/// slot kind. Higher multiplier = more stat budget available. Head/Chest get the
+/// full budget, while accessories like rings and trinkets get roughly half.
+///
+/// Keyed on the item's slot KIND, not on a socket: both ring sockets hold the
+/// same kind of item, so a ring's budget cannot depend on which finger it lands on.
+pub fn slot_budget_multiplier(slot: ItemSlotType) -> f32 {
     match slot {
-        ItemSlot::Head => 1.0,
-        ItemSlot::Chest => 1.0,
-        ItemSlot::Legs => 0.875,
-        ItemSlot::Shoulders => 0.75,
-        ItemSlot::Hands => 0.75,
-        ItemSlot::Feet => 0.75,
-        ItemSlot::Waist => 0.625,
-        ItemSlot::Wrists => 0.5,
-        ItemSlot::Neck => 0.5625,
-        ItemSlot::Back => 0.5625,
-        ItemSlot::Ring1 => 0.5625,
-        ItemSlot::Ring2 => 0.5625,
-        ItemSlot::Trinket1 => 0.5625,
-        ItemSlot::Trinket2 => 0.5625,
-        ItemSlot::MainHand => 0.5625,
-        ItemSlot::OffHand => 0.5625,
-        ItemSlot::Ranged => 0.5625,
+        ItemSlotType::Head => 1.0,
+        ItemSlotType::Chest => 1.0,
+        ItemSlotType::Legs => 0.875,
+        ItemSlotType::Shoulders => 0.75,
+        ItemSlotType::Hands => 0.75,
+        ItemSlotType::Feet => 0.75,
+        ItemSlotType::Waist => 0.625,
+        ItemSlotType::Wrists => 0.5,
+        ItemSlotType::Neck => 0.5625,
+        ItemSlotType::Back => 0.5625,
+        ItemSlotType::Ring => 0.5625,
+        ItemSlotType::Trinket => 0.5625,
+        ItemSlotType::MainHand => 0.5625,
+        ItemSlotType::OffHand => 0.5625,
+        ItemSlotType::Ranged => 0.5625,
     }
 }
 
@@ -331,23 +332,21 @@ mod tests {
 
     #[test]
     fn test_slot_budget_multiplier_all_values() {
-        assert_eq!(slot_budget_multiplier(ItemSlot::Head), 1.0);
-        assert_eq!(slot_budget_multiplier(ItemSlot::Chest), 1.0);
-        assert_eq!(slot_budget_multiplier(ItemSlot::Legs), 0.875);
-        assert_eq!(slot_budget_multiplier(ItemSlot::Shoulders), 0.75);
-        assert_eq!(slot_budget_multiplier(ItemSlot::Hands), 0.75);
-        assert_eq!(slot_budget_multiplier(ItemSlot::Feet), 0.75);
-        assert_eq!(slot_budget_multiplier(ItemSlot::Waist), 0.625);
-        assert_eq!(slot_budget_multiplier(ItemSlot::Wrists), 0.5);
-        assert_eq!(slot_budget_multiplier(ItemSlot::Neck), 0.5625);
-        assert_eq!(slot_budget_multiplier(ItemSlot::Back), 0.5625);
-        assert_eq!(slot_budget_multiplier(ItemSlot::Ring1), 0.5625);
-        assert_eq!(slot_budget_multiplier(ItemSlot::Ring2), 0.5625);
-        assert_eq!(slot_budget_multiplier(ItemSlot::Trinket1), 0.5625);
-        assert_eq!(slot_budget_multiplier(ItemSlot::Trinket2), 0.5625);
-        assert_eq!(slot_budget_multiplier(ItemSlot::MainHand), 0.5625);
-        assert_eq!(slot_budget_multiplier(ItemSlot::OffHand), 0.5625);
-        assert_eq!(slot_budget_multiplier(ItemSlot::Ranged), 0.5625);
+        assert_eq!(slot_budget_multiplier(ItemSlotType::Head), 1.0);
+        assert_eq!(slot_budget_multiplier(ItemSlotType::Chest), 1.0);
+        assert_eq!(slot_budget_multiplier(ItemSlotType::Legs), 0.875);
+        assert_eq!(slot_budget_multiplier(ItemSlotType::Shoulders), 0.75);
+        assert_eq!(slot_budget_multiplier(ItemSlotType::Hands), 0.75);
+        assert_eq!(slot_budget_multiplier(ItemSlotType::Feet), 0.75);
+        assert_eq!(slot_budget_multiplier(ItemSlotType::Waist), 0.625);
+        assert_eq!(slot_budget_multiplier(ItemSlotType::Wrists), 0.5);
+        assert_eq!(slot_budget_multiplier(ItemSlotType::Neck), 0.5625);
+        assert_eq!(slot_budget_multiplier(ItemSlotType::Back), 0.5625);
+        assert_eq!(slot_budget_multiplier(ItemSlotType::Ring), 0.5625);
+        assert_eq!(slot_budget_multiplier(ItemSlotType::Trinket), 0.5625);
+        assert_eq!(slot_budget_multiplier(ItemSlotType::MainHand), 0.5625);
+        assert_eq!(slot_budget_multiplier(ItemSlotType::OffHand), 0.5625);
+        assert_eq!(slot_budget_multiplier(ItemSlotType::Ranged), 0.5625);
     }
 
     #[test]
