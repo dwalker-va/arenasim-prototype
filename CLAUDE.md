@@ -83,6 +83,71 @@ Returns: item level, slot, armor type, armor value, damage/speed, bonus stats (s
 Use spell tools when implementing new abilities to get accurate Classic-era values.
 Use item tools when adding items to `items.ron` or downloading equipment icons.
 
+### 3. Client-data DB2 sweep (`scripts/db2_spell_sweep.py`)
+
+**The canonical join for client-data research.** Wowhead gives you gameplay
+numbers; the *visual* research the animation cards run (AS-9, AS-15, AS-19,
+AS-37) comes from the Classic client's own DB2 tables via wago.tools. Use this
+script rather than writing another scratchpad join — every previous session
+wrote its own, and twice the result was a published table containing a row that
+had never actually been joined.
+
+```bash
+# The Warlock book: skill lines 354 Demonology / 355 Affliction / 593 Destruction
+scripts/db2_spell_sweep.py --skill-line 354 355 593
+
+# ...plus the caster-side body-animation chain, grouped by anim signature
+scripts/db2_spell_sweep.py --skill-line 354 355 593 --caster-anims --group-by-anims
+
+# Find skill-line ids (so those aren't hardcoded either)
+scripts/db2_spell_sweep.py --list-skill-lines | grep -i affliction
+
+# Spot-check one spell — still inventory-scoped, so it cannot pick up a
+# same-named spell from another class
+scripts/db2_spell_sweep.py --skill-line 354 355 593 --name Immolate --events
+```
+
+**Why it takes skill lines and not spell IDs.** A curated spell-ID list cannot
+be audited for what is *missing* from it, and that is the exact defect this
+script exists to make impossible:
+
+- AS-15's `as15_chain.py` hardcoded three spells and the rest of its kit table
+  was filled in from an assumed school default — Curse of Weakness was wrong
+  for months, because **the row was never joined at all**.
+- AS-37 round 1 fixed that row, then asserted a completeness claim over a
+  hand-curated 41-ID list that provably omitted era spells (Curse of
+  Exhaustion, Soul Link, the whole stone-creation family).
+
+So the spell set is an **inventory** derived from `SkillLineAbility`. Four
+properties make an omission or a broken assumption visible in the output:
+
+1. **Inventory, not a list** — nothing to forget to add.
+2. **Three counts as a checkable sum** — inventory names, names with no
+   `SpellXSpellVisual` row, names with a visual. The Warlock book prints
+   `114 = 42 + 72`, matching the sweep recorded in §5 of
+   `docs/design/2026-09-06-warlock-dot-client-data.md` (the worked example of
+   what this script produces).
+3. **An explicit `--era-cut`** (default `SpellID >= 400000`) — this build
+   carries Season of Discovery runes on the same skill lines. The script
+   *proves* the cut partitions cleanly (era max 28610 | cut min 403501) and
+   names any spell straddling it, instead of asserting the threshold is safe.
+4. **Asserts one `SpellVisual` per name at Probability 1**, and exits non-zero
+   on a split. Rank collapse is the assumption every client-data doc rests on;
+   a name that splits means it has broken for that spell. (Real example: the
+   Priest lines split on Holy Nova and Touch of Weakness.)
+
+Every output row carries a provenance marker — `RESOLVED`, `NO-VISUAL`
+(passive talents; nothing to join), `SPLIT`, `LOW-PROB`, `UNRESOLVED` — so an
+unjoinable row reads as a gap in the output instead of being quietly absent.
+Resolution is **inventory-scoped, never name-scoped globally**: "Immolate" has
+five visuals across all of `SpellName`, but all eight Warlock-line ranks
+resolve to 46.
+
+CSVs are fetched with `curl` and a browser User-Agent (Python's `urllib` gets
+a 403 from wago.tools) and cached under `.db2-cache/<build>/`. Deeper chains
+the script does not cover — M2/BLP model parsing via CASC, particle tracks —
+are in the `wow-client-data-recipe` project memory and the per-card docs.
+
 ## Project Structure
 
 ```

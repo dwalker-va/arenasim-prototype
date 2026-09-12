@@ -34,3 +34,6 @@ match_logs/
 tests/snapshots/*.new.png
 tests/snapshots/*.old.png
 tests/snapshots/*.diff.png
+
+# DB2 CSV cache for scripts/db2_spell_sweep.py (fetched from wago.tools, not repo content)
+.db2-cache/
