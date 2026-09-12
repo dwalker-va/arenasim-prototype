@@ -13,6 +13,7 @@ pub mod configure_match_ui;
 pub mod encyclopedia;
 pub mod play_match;
 pub mod results_ui;
+pub mod ability_text;
 pub mod view_combatant_ui;
 
 pub use match_config::MatchConfig;
@@ -171,13 +172,14 @@ impl Plugin for StatesPlugin {
                     .run_if(in_state(GameState::ViewCombatant)),
             )
             // Encyclopedia systems (defined in the encyclopedia module).
-            // Reuses the item and class icon loaders — each has an internal
-            // `loaded: bool` guard, so re-registering them here is idempotent
-            // (the same trick the retired Armory screen used).
+            // Reuses the item, class and ability icon loaders — each has an
+            // internal `loaded: bool` guard, so re-registering them here is
+            // idempotent (the same trick the retired Armory screen used).
             .add_systems(
                 Update,
                 (
                     view_combatant_ui::load_item_icons,
+                    view_combatant_ui::load_ability_icons,
                     configure_match_ui::load_class_icons,
                     encyclopedia::encyclopedia_ui,
                 )

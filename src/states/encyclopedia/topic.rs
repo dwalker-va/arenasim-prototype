@@ -55,13 +55,12 @@ impl Section {
         }
     }
 
-    /// What a section that has no content yet tells the reader.
+    /// What a section that has no content yet tells the reader. Empty once a
+    /// section is populated — Buffs & Debuffs is the last one still pending.
     pub fn pending_note(self) -> &'static str {
         match self {
-            Section::Classes => "Class pages arrive with the Classes section.",
-            Section::Abilities => "Ability pages arrive with the Abilities section.",
             Section::Auras => "Buff and debuff pages arrive with the aura catalog.",
-            Section::Items => "",
+            Section::Classes | Section::Abilities | Section::Items => "",
         }
     }
 
@@ -104,11 +103,16 @@ impl Topic {
                 .get(&id)
                 .map(|item| item.name.clone())
                 .unwrap_or_else(|| spaced_debug(&id)),
-            // Abilities and auras carry their display names in `abilities.ron`
-            // and (for auras) nowhere yet. Until those sections land, the
-            // variant name spaced out is the honest fallback — still derived,
-            // still zero-marginal-cost.
-            Topic::Ability(ability) => spaced_debug(&ability),
+            // `abilities.ron`'s `name` field is the only place an ability is
+            // named — the same string View Combatant and the combat log show.
+            Topic::Ability(ability) => data
+                .abilities
+                .get(&ability)
+                .map(|config| config.name.clone())
+                .unwrap_or_else(|| spaced_debug(&ability)),
+            // Auras carry no display name of their own yet. Until the aura
+            // catalog lands, the variant name spaced out is the honest
+            // fallback — still derived, still zero-marginal-cost.
             Topic::Aura(aura) => spaced_debug(&aura),
         }
     }
@@ -122,7 +126,11 @@ impl Topic {
                 Some(item) => super::items::item_subtitle(item),
                 None => String::new(),
             },
-            Topic::Ability(_) | Topic::Aura(_) => String::new(),
+            Topic::Ability(ability) => match data.abilities.get(&ability) {
+                Some(config) => super::abilities::cost_line(config),
+                None => String::new(),
+            },
+            Topic::Aura(_) => String::new(),
         }
     }
 
@@ -136,16 +144,28 @@ impl Topic {
             Topic::Item(id) => data
                 .item_icons
                 .and_then(|icons| icons.textures.get(&id).copied()),
-            // Ability and aura icon resources are keyed by ability NAME, which
-            // needs the ability registry the Abilities section brings with it.
-            Topic::Ability(_) | Topic::Aura(_) => None,
+            // `AbilityIcons` is keyed by the ability's display NAME, so the
+            // lookup goes through `abilities.ron` rather than the enum.
+            Topic::Ability(ability) => {
+                let name = &data.abilities.get(&ability)?.name;
+                data.ability_icons.and_then(|icons| icons.textures.get(name).copied())
+            }
+            // Aura icons are the aura catalog's (AS-33) to resolve: the engine
+            // has a mapping (`rendering::get_aura_icon_key`), but it is keyed
+            // by the SOURCE ability — which is the address that card settles.
+            Topic::Aura(_) => None,
         }
     }
 
-    /// Accent color for the entity's name. Items and classes use the gold /
-    /// class-color conventions the rest of the UI already follows.
-    pub fn accent(self) -> egui::Color32 {
+    /// Accent color for the entity's name. Classes wear their class color and
+    /// abilities their spell school's — both read from the shared authorities
+    /// the rest of the client already uses — and everything else is gold.
+    pub fn accent(self, data: &EncyclopediaData) -> egui::Color32 {
         match self {
+            Topic::Ability(ability) => match data.abilities.get(&ability) {
+                Some(config) => super::abilities::school_color(config.spell_school),
+                None => super::GOLD,
+            },
             Topic::Class(class) => {
                 let c = class.color().to_srgba();
                 egui::Color32::from_rgb(

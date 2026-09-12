@@ -11,6 +11,7 @@
 
 use bevy_egui::egui;
 
+use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::equipment::ItemDefinitions;
 
 use super::{EncyclopediaData, Section, Topic, DIM, GOLD, MUTED};
@@ -41,10 +42,15 @@ impl SearchEntry {
 /// Sections contribute in tab order, and each section's entries are sorted by
 /// name, so results are stable across runs no matter how the underlying maps
 /// iterate.
-pub fn build_registry(items: &ItemDefinitions) -> Vec<SearchEntry> {
+pub fn build_registry(
+    items: &ItemDefinitions,
+    abilities: &AbilityDefinitions,
+) -> Vec<SearchEntry> {
     let mut entries = Vec::new();
-    // Classes / abilities / auras join here as their sections land; each is one
-    // call that reads its own registry.
+    // Auras join here as their section lands; each contributor is one call that
+    // reads its own registry.
+    super::classes::search_entries(&mut entries);
+    super::abilities::search_entries(abilities, &mut entries);
     super::items::search_entries(items, &mut entries);
     entries.sort_by(|a, b| {
         a.topic
@@ -133,31 +139,68 @@ pub fn render_results(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::states::match_config::CharacterClass;
+    use crate::states::play_match::ability_config::load_ability_definitions;
     use crate::states::play_match::equipment::load_item_definitions;
 
+    fn fixtures() -> (ItemDefinitions, AbilityDefinitions) {
+        (
+            load_item_definitions().expect("items.ron must load"),
+            load_ability_definitions().expect("abilities.ron must load"),
+        )
+    }
+
+    /// The whole corpus is searchable and NOTHING in it is hand-authored: the
+    /// registry's size is exactly the size of the data sources behind it.
     #[test]
-    fn every_item_is_searchable_without_a_hand_authored_entry() {
-        let items = load_item_definitions().expect("items.ron must load");
-        let registry = build_registry(&items);
-        assert_eq!(registry.len(), items.item_count());
+    fn every_entity_is_searchable_without_a_hand_authored_entry() {
+        let (items, abilities) = fixtures();
+        let registry = build_registry(&items, &abilities);
+        assert_eq!(
+            registry.len(),
+            CharacterClass::all().len() + abilities.ability_types().count() + items.item_count()
+        );
     }
 
     #[test]
     fn registry_order_is_deterministic() {
-        let items = load_item_definitions().expect("items.ron must load");
-        let a = build_registry(&items);
-        let b = build_registry(&items);
+        let (items, abilities) = fixtures();
+        let a = build_registry(&items, &abilities);
+        let b = build_registry(&items, &abilities);
         let names_a: Vec<&str> = a.iter().map(|e| e.name.as_str()).collect();
         let names_b: Vec<&str> = b.iter().map(|e| e.name.as_str()).collect();
         assert_eq!(names_a, names_b);
-        assert!(names_a.windows(2).all(|w| w[0] <= w[1]), "items sort by name");
+        // Sections stay in tab order, and each section's entries sort by name.
+        for window in a.windows(2) {
+            let (x, y) = (&window[0], &window[1]);
+            let sections = x.topic.section().order().cmp(&y.topic.section().order());
+            assert!(sections.is_le());
+            if sections.is_eq() {
+                assert!(x.name <= y.name, "{} sorted after {}", x.name, y.name);
+            }
+        }
     }
 
     #[test]
     fn matching_is_case_insensitive_substring() {
-        let items = load_item_definitions().expect("items.ron must load");
-        let registry = build_registry(&items);
+        let (items, abilities) = fixtures();
+        let registry = build_registry(&items, &abilities);
         let hits = registry.iter().filter(|e| rank(e, "wand").is_some()).count();
         assert!(hits > 0, "expected at least one item whose name contains 'wand'");
+    }
+
+    /// One query reaching three sections — the reason search groups its results
+    /// at all.
+    #[test]
+    fn a_query_can_hit_several_sections_at_once() {
+        let (items, abilities) = fixtures();
+        let registry = build_registry(&items, &abilities);
+        let sections: Vec<Section> = registry
+            .iter()
+            .filter(|e| rank(e, "sha").is_some())
+            .map(|e| e.topic.section())
+            .collect();
+        assert!(sections.contains(&Section::Classes), "Shaman");
+        assert!(sections.contains(&Section::Abilities), "Shadow Bolt");
     }
 }

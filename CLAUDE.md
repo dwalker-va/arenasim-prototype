@@ -273,7 +273,10 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
    `own_abilities_for_class` / `pet_abilities_for_class`. The display name comes from
    the RON `name` field the same way. There is no hand-maintained list to update, and
    no way to silently drop the ability from a screen — that trap (a `get_class_abilities()`
-   `Vec` that was not exhaustiveness-checked) is retired.
+   `Vec` that was not exhaustiveness-checked) is retired. The encyclopedia also gives it
+   an index entry, a search hit and a full detail page for free; its prose comes from
+   `src/states/ability_text.rs`, generated from the fields you set in step 3, so only an
+   effect the numeric fields cannot express needs a `description` in the RON.
 
 8. **Test with headless simulation**:
    ```bash
@@ -707,8 +710,8 @@ another screen**, refactor its UI system the same way: split the Bevy wrapper
 `draw_*(ctx, &data...) -> Action` function, then drive that function from a
 kittest harness with mock data. `tests/main_menu_snapshot.rs` and
 `tests/encyclopedia_snapshot.rs` follow it; the encyclopedia's harness loads the
-real `items.ron` rather than mock data, so a content change shows up in the
-snapshot.
+real `items.ron` and `abilities.ron` rather than mock data, so a content change
+shows up in the snapshot.
 
 ### Browsing game content in-game (the Encyclopedia)
 
@@ -725,8 +728,22 @@ old standalone Armory. It is a navigation FRAMEWORK plus per-section content:
 - **Search** (`search.rs`) is a registry each section populates from its own
   data source. Adding a section means one call in `build_registry`.
 - **Zero marginal cost:** every list, page and search hit derives from the RON
-  configs / Rust registries. A new item in `items.ron` appears in the grid, the
-  filters, search and its own detail page with no code change.
+  configs / Rust registries. A new item in `items.ron`, or a new ability in
+  `abilities.ron`, appears in its index, the filters, search, its owning class's
+  kit and its own detail page with no code change.
+- **Sections:** `classes.rs` (base stats from `class_base_stats`, kit from
+  `AbilityDefinitions::abilities_for_class`, a subsection per pet), `abilities.rs`
+  (all 70, filterable by class and school, grouped by owning class in the derived
+  kit order — do NOT add a second sort), `items.rs`. Buffs & Debuffs is the one
+  section still rendering a placeholder.
+- **Ability and aura PROSE is `src/states/ability_text.rs`** — one generator, shared
+  with View Combatant, so an ability's description reads the same wherever the
+  player meets it. Totem text wins over a hand-written `abilities.ron`
+  `description`, which wins over the generated text.
+- **`tests/encyclopedia_boot.rs`** enters the state in a real (headless) Bevy app.
+  The snapshot tests drive the PURE draw and so cannot catch a `Res<T>` nothing
+  inserts; this does. Adding a field to `EncyclopediaData` means a new resource in
+  the Bevy wrapper — run this.
 - **Back and Exit are separate, always-visible affordances.** Back pops one
   stack level (disabled at the root); Exit leaves the screen outright, from any
   depth, in one click. `Esc` walks the Back ladder — clear an active search,

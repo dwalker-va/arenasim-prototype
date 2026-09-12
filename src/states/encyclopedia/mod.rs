@@ -41,11 +41,14 @@
 //!
 //! ## Sections
 //!
-//! Items is the first populated section — it subsumes the old standalone Armory
-//! screen (grid, chip-bar filters and tooltips came from there) and adds the
-//! per-item detail pages the Armory never had. The other three tabs render a
-//! placeholder until their content cards land.
+//! [`classes`], [`abilities`] and [`items`] are populated. Items subsumes the
+//! old standalone Armory screen (grid, chip-bar filters and tooltips came from
+//! there) and adds the per-item detail pages the Armory never had; classes and
+//! abilities are derived wholly from `class_base_stats` and `abilities.ron`.
+//! Buffs & Debuffs renders a placeholder until the aura catalog lands.
 
+pub mod abilities;
+pub mod classes;
 pub mod items;
 pub mod search;
 pub mod topic;
@@ -55,10 +58,12 @@ use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
 use super::configure_match_ui::ClassIcons;
+use super::play_match::ability_config::AbilityDefinitions;
 use super::play_match::equipment::ItemDefinitions;
-use super::view_combatant_ui::ItemIcons;
+use super::view_combatant_ui::{AbilityIcons, ItemIcons};
 use super::GameState;
 
+pub use abilities::AbilityFilters;
 pub use items::ItemFilters;
 pub use search::{build_registry, SearchEntry};
 pub use topic::{Section, Topic};
@@ -129,6 +134,8 @@ pub struct EncyclopediaState {
     pub search: String,
     /// Items-section chip-bar filters (ported from the retired Armory screen).
     pub item_filters: ItemFilters,
+    /// Abilities-section chip-bar filters (owning class, spell school).
+    pub ability_filters: AbilityFilters,
     /// Search registry, built once from the data sources. Empty until
     /// [`Self::rebuild_registry`] runs.
     pub registry: Vec<SearchEntry>,
@@ -143,12 +150,13 @@ pub struct EncyclopediaState {
 impl Default for EncyclopediaState {
     fn default() -> Self {
         Self {
-            // Items is the only populated section today, so it is the landing
-            // tab. When the Classes section lands it becomes `Section::Classes`,
-            // matching the blessed mockup's default.
-            stack: vec![View::index(Section::Items)],
+            // Classes is the landing tab, matching the blessed mockup: it is
+            // the shallowest way into everything else, because a class page
+            // links on to every ability that class has.
+            stack: vec![View::index(Section::Classes)],
             search: String::new(),
             item_filters: ItemFilters::default(),
+            ability_filters: AbilityFilters::default(),
             registry: Vec::new(),
             // The main menu is the only entry point today, and the sensible
             // fallback for any caller that forgets to open_from.
@@ -199,7 +207,8 @@ impl EncyclopediaState {
     }
 
     /// Apply a navigation action. Returns `true` when the encyclopedia should
-    /// be left for the main menu.
+    /// be left for [`Self::return_to`] — the context it was opened from, which
+    /// is not necessarily the main menu.
     pub fn apply(&mut self, action: EncyclopediaAction) -> bool {
         match action {
             EncyclopediaAction::Navigate(view) => {
@@ -240,8 +249,8 @@ impl EncyclopediaState {
     }
 
     /// Rebuild the search registry from the live data sources.
-    pub fn rebuild_registry(&mut self, items: &ItemDefinitions) {
-        self.registry = build_registry(items);
+    pub fn rebuild_registry(&mut self, items: &ItemDefinitions, abilities: &AbilityDefinitions) {
+        self.registry = build_registry(items, abilities);
     }
 }
 
@@ -251,8 +260,10 @@ impl EncyclopediaState {
 /// later sections can add fields without re-threading every call site.
 pub struct EncyclopediaData<'a> {
     pub items: &'a ItemDefinitions,
+    pub abilities: &'a AbilityDefinitions,
     pub item_icons: Option<&'a ItemIcons>,
     pub class_icons: Option<&'a ClassIcons>,
+    pub ability_icons: Option<&'a AbilityIcons>,
 }
 
 // ============================================================================
@@ -269,8 +280,10 @@ pub fn encyclopedia_ui(
     keybindings: Res<crate::keybindings::Keybindings>,
     keyboard: Res<ButtonInput<KeyCode>>,
     item_definitions: Res<ItemDefinitions>,
+    ability_definitions: Res<AbilityDefinitions>,
     item_icons: Option<Res<ItemIcons>>,
     class_icons: Option<Res<ClassIcons>>,
+    ability_icons: Option<Res<AbilityIcons>>,
 ) {
     use crate::keybindings::GameAction;
 
@@ -281,7 +294,7 @@ pub fn encyclopedia_ui(
     // The registry is derived purely from the data sources, so building it once
     // per session is enough — nothing hand-authored, nothing to invalidate.
     if state.registry.is_empty() {
-        state.rebuild_registry(&item_definitions);
+        state.rebuild_registry(&item_definitions, &ability_definitions);
     }
 
     if keybindings.action_just_pressed(GameAction::Back, &keyboard) && state.back_key() {
@@ -291,8 +304,10 @@ pub fn encyclopedia_ui(
 
     let data = EncyclopediaData {
         items: &item_definitions,
+        abilities: &ability_definitions,
         item_icons: item_icons.as_deref(),
         class_icons: class_icons.as_deref(),
+        ability_icons: ability_icons.as_deref(),
     };
 
     if let Some(action) = draw_encyclopedia(ctx, &mut state, &data) {
@@ -325,7 +340,14 @@ pub fn draw_encyclopedia(
 
     // Split the borrows up front so the search box can be edited in the same
     // pass that reads the registry.
-    let EncyclopediaState { stack, search, item_filters, registry, return_to } = state;
+    let EncyclopediaState {
+        stack,
+        search,
+        item_filters,
+        ability_filters,
+        registry,
+        return_to,
+    } = state;
     let current = *stack.last().expect("encyclopedia nav stack is never empty");
     let can_go_back = stack.len() > 1;
     let exit_label = exit_label(*return_to);
@@ -422,14 +444,25 @@ pub fn draw_encyclopedia(
                     ui.add_sized(
                         [ui.available_width(), SEARCH_HEIGHT],
                         egui::TextEdit::singleline(search)
-                            // An ABSOLUTE Id, not egui's positional default and
-                            // not `.id_salt` (which is still hashed with the
-                            // widget's sequence number). The search field is the
-                            // one widget on this screen whose focus must survive
-                            // an arbitrary relayout of everything around it —
-                            // the results take over the content area as the
-                            // query changes — so it is pinned to an Id nothing
-                            // else on the screen can move.
+                            // An ABSOLUTE Id, not egui's positional default.
+                            // The search field is the one widget on this screen
+                            // whose focus must survive an arbitrary relayout of
+                            // everything around it — the results take over the
+                            // content area as the query changes — so it is
+                            // pinned to an Id nothing else on the screen can
+                            // move.
+                            //
+                            // `.id_salt` would ALSO have fixed the original
+                            // focus bug: it resolves through
+                            // `ui.make_persistent_id(salt)` = `Ui::id.with(salt)`,
+                            // hashed with the CONTAINING Ui's id and not with
+                            // the widget's position among its siblings. (An
+                            // earlier revision of this comment claimed
+                            // otherwise; it was wrong.) The absolute Id is
+                            // still the better call, because a child Ui's own
+                            // id DOES fold in its position in its parent — so a
+                            // salted Id would stay hostage to anything
+                            // conditional appearing ABOVE this row.
                             .id(egui::Id::new(SEARCH_FIELD_ID))
                             .hint_text(
                                 egui::RichText::new("Search everything…").size(16.0).color(DIM),
@@ -488,7 +521,13 @@ pub fn draw_encyclopedia(
 
                 let nav = match current.topic {
                     Some(topic) => render_topic_page(ui, topic, data),
-                    None => render_section_index(ui, current.section, item_filters, data),
+                    None => render_section_index(
+                        ui,
+                        current.section,
+                        item_filters,
+                        ability_filters,
+                        data,
+                    ),
                 };
                 if let Some(topic) = nav {
                     action = Some(EncyclopediaAction::Navigate(View::topic(topic)));
@@ -646,9 +685,12 @@ fn render_section_index(
     ui: &mut egui::Ui,
     section: Section,
     item_filters: &mut ItemFilters,
+    ability_filters: &mut AbilityFilters,
     data: &EncyclopediaData,
 ) -> Option<Topic> {
     match section {
+        Section::Classes => classes::render_index(ui, data),
+        Section::Abilities => abilities::render_index(ui, ability_filters, data),
         Section::Items => items::render_index(ui, item_filters, data),
         other => {
             render_pending_section(ui, other);
@@ -661,6 +703,8 @@ fn render_section_index(
 /// page was clicked.
 fn render_topic_page(ui: &mut egui::Ui, topic: Topic, data: &EncyclopediaData) -> Option<Topic> {
     match topic {
+        Topic::Class(class) => classes::render_detail(ui, class, data),
+        Topic::Ability(ability) => abilities::render_detail(ui, ability, data),
         Topic::Item(id) => items::render_detail(ui, id, data),
         other => {
             render_pending_topic(ui, other, data);
@@ -696,6 +740,7 @@ mod tests {
     use super::*;
     use crate::states::match_config::CharacterClass;
     use crate::states::play_match::equipment::ItemId;
+    use crate::states::play_match::AbilityType;
 
     #[test]
     fn back_pops_the_stack_and_exits_only_at_the_root() {
@@ -738,7 +783,7 @@ mod tests {
     #[test]
     fn navigating_to_the_current_view_does_not_grow_the_stack() {
         let mut state = EncyclopediaState::default();
-        state.apply(EncyclopediaAction::Navigate(View::index(Section::Items)));
+        state.apply(EncyclopediaAction::Navigate(View::index(Section::Classes)));
         assert!(!state.can_go_back());
     }
 
@@ -758,7 +803,7 @@ mod tests {
 
         assert!(state.search.is_empty());
         assert!(!state.can_go_back());
-        assert_eq!(state.current(), View::index(Section::Items));
+        assert_eq!(state.current(), View::index(Section::Classes));
     }
 
     #[test]
@@ -817,8 +862,10 @@ mod tests {
     fn typing_never_drops_focus_from_the_search_field() {
         let items = crate::states::play_match::equipment::load_item_definitions()
             .expect("items.ron must load");
+        let abilities = crate::states::play_match::ability_config::load_ability_definitions()
+            .expect("abilities.ron must load");
         let mut state = EncyclopediaState::default();
-        state.rebuild_registry(&items);
+        state.rebuild_registry(&items, &abilities);
 
         let ctx = egui::Context::default();
         let field = egui::Id::new(SEARCH_FIELD_ID);
@@ -833,8 +880,13 @@ mod tests {
                 ..Default::default()
             };
             let _ = ctx.run(input, |ctx| {
-                let data =
-                    EncyclopediaData { items: &items, item_icons: None, class_icons: None };
+                let data = EncyclopediaData {
+                    items: &items,
+                    abilities: &abilities,
+                    item_icons: None,
+                    class_icons: None,
+                    ability_icons: None,
+                };
                 let _ = draw_encyclopedia(ctx, state, &data);
             });
         };
@@ -904,6 +956,34 @@ mod tests {
         frame(&mut state, vec![egui::Event::Text("w".to_string())]);
         assert_eq!(state.search, "w");
         assert_eq!(ctx.memory(|m| m.focused()), Some(field));
+    }
+
+    /// The cross-link loop the Classes and Abilities sections exist to make:
+    /// a class page links to an ability, whose page links back to the class.
+    /// The tab follows the topic in both directions, and Back unwinds the
+    /// route the reader actually took rather than snapping to a section index.
+    #[test]
+    fn class_and_ability_pages_link_to_each_other_both_ways() {
+        let mut state = EncyclopediaState::default();
+        assert_eq!(state.current(), View::index(Section::Classes));
+
+        state.apply(EncyclopediaAction::Navigate(View::topic(Topic::Class(
+            CharacterClass::Warlock,
+        ))));
+        // ...out along the kit grid,
+        state.apply(EncyclopediaAction::Navigate(View::topic(Topic::Ability(
+            AbilityType::Corruption,
+        ))));
+        assert_eq!(state.current().section, Section::Abilities);
+        // ...and back along the owning-class chip, which is a forward
+        // navigation to a page already on the stack, not a pop.
+        state.apply(EncyclopediaAction::Navigate(View::topic(Topic::Class(
+            CharacterClass::Warlock,
+        ))));
+        assert_eq!(state.current().section, Section::Classes);
+
+        state.apply(EncyclopediaAction::Back);
+        assert_eq!(state.current(), View::topic(Topic::Ability(AbilityType::Corruption)));
     }
 
     #[test]
