@@ -15,7 +15,10 @@ an open, review-ready PR — nothing more.
 3. **Follow the repo's own guidance.** CLAUDE.md, the design docs it indexes, and
    `docs/solutions/` are binding. For combat-affecting changes, verify with the headless
    simulator and the decision trace; respect byte-identity constraints where CLAUDE.md
-   declares them (BasicArena, `Legacy` profile).
+   declares them (BasicArena, `Legacy` profile). Read *What a byte-identity result
+   proves* in CLAUDE.md before you cite one: report non-vacuity counts alongside the
+   clean diff, attribute any difference positively rather than by elimination, and run
+   a same-binary control before chasing a difference you cannot attribute.
 4. **Verify before you ship.** `cargo build --release` and `cargo test` must pass. Run the
    probe/snapshot suites relevant to your diff. A balance-relevant change gets a headless
    sanity match; a claimed balance *improvement* needs a real sweep, not n=12 anecdotes.

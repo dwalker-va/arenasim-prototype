@@ -531,6 +531,55 @@ cargo run --release -- --headless /tmp/test.json
 cat match_logs/$(ls -t match_logs | head -1)
 ```
 
+### What a byte-identity result proves (read before citing one)
+
+Nearly every sim-adjacent change here is gated on headless byte-identity: run
+the seeded matches before and after, diff the logs or the CSV, and a clean diff
+is read as "the change did nothing". That reading is sound, but it is one step
+weaker than it looks, and it is worth knowing exactly where the step is.
+
+**A clean diff means "the change did nothing observable AND no float wobble
+flipped a roll" — not, strictly, "nothing changed".** The sim is a chain of
+comparisons against RNG draws, so a difference too small to print can still
+flip a roll and cascade through the whole log; equally, a real difference can
+hide inside a comparison's margin and print nothing. Byte-identity is evidence
+about OUTPUT, never a proof about state.
+
+**The known source of run-to-run wobble is fixed (AS-58).** Loadouts were
+`HashMap`s, and applying one sums float stats in iteration order — which the
+default `RandomState` reseeds every process. Measured on one unmodified release
+binary over 40 runs: Rogue `crit_chance` took three distinct bit patterns
+(`0x3e2e147a` / `0x3e2e147b` / `0x3e2e147c`, a 2-ULP spread, ~3e-8). Loadouts
+are now `Loadout = BTreeMap<ItemSlot, ItemId>`, so the order is a property of
+the type; `equipment::tests::loadout_is_ordered` and
+`tests/loadout_order_audit.rs` keep it that way.
+
+**What follows for how you read a diff:**
+
+- **A clean result was never at risk.** This bug could only ever manufacture a
+  FALSE DIFFERENCE — a diff with no code change behind it. It could not
+  manufacture a clean one. Every "byte-identical" result in the project's
+  history therefore still stands.
+- **Attribute a difference positively, never by elimination.** "The only thing
+  I changed was X, so the diff is X" is the reasoning this bug broke. Say what
+  in the diff the change predicts, and check the trace for it — the way
+  `docs/plans/2026-06-12-001-refactor-context-steering-masks-plan.md` R6 does,
+  requiring an all-masked frame in the trace of the entity that actually moved.
+- **When you cannot attribute a difference positively, run a same-binary
+  control** — the identical binary twice — before you spend time on it. That
+  control costs one sweep and is now the first thing to try on any surprising
+  one-row difference, whatever its cause.
+- **Report non-vacuity.** A byte-identity claim over a batch that drew no
+  crits, or ended every match by timeout, proves nothing. Count the decisive
+  events (kills, crits, distinct durations), not just the rows.
+
+**A last-ULP stat change is far below the resolution of an outcome.** Measured
+directly: a build shifting every combatant's `crit_chance` down by exactly the
+2 ULP the wobble spanned produced logs byte-identical to canonical across 48
+Rogue matches — 4295 damage events, 462 crit rolls. `random_f32()` lands on
+multiples of 2^-24 (~6e-8), so a 3e-8 window holds at most one drawable value:
+of order one flip per million matches. The protocol has not been losing signal.
+
 ### Run a 2v2-with-healer balance sweep
 
 `--matrix N` runs the 7×7 1v1 matrix. For 2v2-with-healer validation
