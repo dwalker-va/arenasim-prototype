@@ -14,15 +14,16 @@ touching the network at all, by two independent means:
   * the script's own cache is authoritative -- `fetch()` returns a cached CSV
     without a request -- so each test writes its whole world into a temporary
     `--cache-dir` under a fixture `--build`; and
-  * the module's `subprocess` is replaced by `_NoNetwork`, so a fetch the
-    fixture forgot to provide FAILS the test instead of silently reaching out
-    to wago.tools (and then passing only on a machine with network).
+  * the module's `subprocess` is replaced by the shared harness's no-subprocess
+    stub, so a fetch the fixture forgot to provide FAILS the test instead of
+    silently reaching out to wago.tools (and then passing only on a machine
+    with network).
 
 Fixtures can also express worlds live data does not contain -- an unnamed spell
 that resolves to two visuals is the case AS-57 was written about, unreachable
 at build 1.15.9.69547 purely by accident of the data.
 
-Run directly, or via `cargo test --test db2_spell_sweep_fixtures`:
+Run directly, or via `cargo test --test script_fixture_suites`:
 
     python3 scripts/tests/test_db2_spell_sweep.py
 """
@@ -34,10 +35,16 @@ import csv
 import io
 import os
 import sys
-import tempfile
 import unittest
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from _harness import (  # noqa: E402
+    ScriptTestCase,
+    assert_runs_on_min_python,
+    install_no_subprocess,
+    run_main_in_temp_dir,
+)
 
 import db2_spell_sweep as sweep_mod  # noqa: E402
 
@@ -47,19 +54,7 @@ FIXTURE_BUILD = "0.0.0-fixture"
 LINE = "900"
 LINE_NAME = "Fixture Line"
 
-
-class _NoNetwork:
-    """Stands in for the module's `subprocess`. Any fetch is a test failure."""
-
-    @staticmethod
-    def run(cmd, **kwargs):  # pragma: no cover - only runs when a test is wrong
-        raise AssertionError(
-            "db2_spell_sweep attempted a network fetch (%r) -- the fixture is "
-            "missing a table" % (cmd,)
-        )
-
-
-sweep_mod.subprocess = _NoNetwork
+install_no_subprocess(sweep_mod)
 
 
 # The exact column names the script reads out of each DB2 CSV. Spelled out
@@ -164,6 +159,10 @@ class World:
         """
         build_dir = os.path.join(root, FIXTURE_BUILD)
         os.makedirs(build_dir, exist_ok=True)
+        # The keyword wins over any same-named key in `self.rows`, so the
+        # derived table is always what gets written -- an assignment to
+        # `rows["SpellVisual"]` would be silently overridden here (an append
+        # raises at the call site, which is why `rows` omits the table).
         tables = dict(
             self.rows,
             SpellVisual=[{"ID": str(vid)} for vid in sorted(self._visual_rows)],
@@ -186,71 +185,23 @@ def run_sweep(world, *argv, skill_line=(LINE,)):
     `skill_line=()` passes no `--skill-line` at all, for the flags that do not
     take one (`--list-skill-lines`).
 
-    The fixture cache lives for exactly the length of the sweep: the world is
-    written inside the `with`, `main` reads it inside the `with`, and the
-    directory is gone by the time the caller asserts. That is deliberate --
-    the cache being present for the whole run is what keeps the suite offline
-    (`fetch()` returns a cached CSV without a request), so its lifetime has to
-    enclose `main` rather than merely outlive this call.
+    The fixture cache lives for exactly the length of the sweep -- see
+    `_harness.run_main_in_temp_dir`, which writes the world into the directory,
+    runs `main` over it and removes it before returning. That scoping is what
+    keeps the suite offline (`fetch()` returns a cached CSV without a request),
+    so the cache has to enclose `main` rather than merely outlive this call.
     """
-    with tempfile.TemporaryDirectory(prefix="db2-sweep-fixture-") as tmp:
+
+    def build_argv(tmp):
         world.write(tmp)
         args = ["--build", FIXTURE_BUILD, "--cache-dir", tmp]
         if skill_line:
             args = ["--skill-line", *skill_line] + args
         args.extend(argv)
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            try:
-                code = sweep_mod.main(args)
-            except SystemExit as exc:
-                code = exc.code
-        return code, buf.getvalue()
+        return args
 
-
-class SweepTestCase(unittest.TestCase):
-    def temp_dir(self):
-        """A fixture cache dir, removed when this case ends.
-
-        For the cases that need the written world to outlive a single
-        `run_sweep` -- to delete a table out of it, or to write the same
-        world twice and compare. Cleanup is deferred to `addCleanup`, which
-        runs after the test method, so the directory is still on disk for
-        every assertion the case makes about it.
-        """
-        tmp = tempfile.TemporaryDirectory(prefix="db2-sweep-fixture-")
-        self.addCleanup(tmp.cleanup)
-        return tmp.name
-
-    def assertHas(self, out, needle):
-        self.assertIn(needle, out, "expected in output:\n  %s\n--- got ---\n%s" % (needle, out))
-
-    def assertLacks(self, out, needle):
-        self.assertNotIn(needle, out, "did NOT expect in output:\n  %s\n--- got ---\n%s" % (needle, out))
-
-    def assertUnderHeading(self, out, heading, needle):
-        """Assert `needle` appears in the block `heading` introduces.
-
-        A bare substring like `[42]` can be satisfied by any line anywhere in
-        the report, so an assertion that means "this section lists it" has to
-        say which section. The block is the run of non-blank lines after the
-        heading, which is how every section in the report is printed.
-        """
-        lines = out.splitlines()
-        start = next((i for i, ln in enumerate(lines) if heading in ln), None)
-        if start is None:
-            self.fail("heading not in output:\n  %s\n--- got ---\n%s" % (heading, out))
-        body = []
-        for ln in lines[start + 1 :]:
-            if not ln.strip():
-                break
-            body.append(ln)
-        self.assertIn(
-            needle,
-            "\n".join(body),
-            "expected under %r:\n  %s\n--- section ---\n%s\n--- full output ---\n%s"
-            % (heading, needle, "\n".join(body), out),
-        )
+    run = run_main_in_temp_dir(sweep_mod.main, build_argv, prefix="db2-sweep-fixture-")
+    return run.code, run.out
 
 
 # --------------------------------------------------------------------------
@@ -258,7 +209,7 @@ class SweepTestCase(unittest.TestCase):
 # --------------------------------------------------------------------------
 
 
-class NoNetworkTests(SweepTestCase):
+class NoNetworkTests(ScriptTestCase):
     def test_a_missing_table_fails_rather_than_fetching(self):
         """The offline guarantee is a property of the harness, so pin it."""
         world = World().spell(100, "Fireball", [10])
@@ -273,7 +224,7 @@ class NoNetworkTests(SweepTestCase):
         self.assertIn("attempted a network fetch", str(ctx.exception))
 
 
-class WorldTests(SweepTestCase):
+class WorldTests(ScriptTestCase):
     def test_writing_a_world_twice_writes_the_same_world(self):
         """`World.write` must derive its rows, not accumulate them.
 
@@ -312,7 +263,7 @@ class WorldTests(SweepTestCase):
 # --------------------------------------------------------------------------
 
 
-class CountsTests(SweepTestCase):
+class CountsTests(ScriptTestCase):
     def test_counts_sum_over_the_three_buckets(self):
         world = (
             World()
@@ -356,7 +307,7 @@ class CountsTests(SweepTestCase):
 # --------------------------------------------------------------------------
 
 
-class EraCutTests(SweepTestCase):
+class EraCutTests(ScriptTestCase):
     def test_all_below_the_cut(self):
         world = World().spell(100, "Fireball", [10]).spell(101, "Frostbolt", [11])
         code, out = run_sweep(world)
@@ -434,7 +385,7 @@ class EraCutTests(SweepTestCase):
 # --------------------------------------------------------------------------
 
 
-class PropertyFourTests(SweepTestCase):
+class PropertyFourTests(ScriptTestCase):
     def test_held(self):
         world = World().spell(100, "Fireball", [10]).spell(101, "Frostbolt", [11])
         code, out = run_sweep(world)
@@ -563,7 +514,7 @@ class PropertyFourTests(SweepTestCase):
 # --------------------------------------------------------------------------
 
 
-class AllowSplitTests(SweepTestCase):
+class AllowSplitTests(ScriptTestCase):
     def test_allow_split_downgrades_a_split(self):
         world = World().spell(100, "Holy Nova", [10]).spell(101, "Holy Nova", [20])
         code, out = run_sweep(world, "--allow-split")
@@ -605,7 +556,7 @@ class AllowSplitTests(SweepTestCase):
 # --------------------------------------------------------------------------
 
 
-class ChainTests(SweepTestCase):
+class ChainTests(ScriptTestCase):
     def _world(self):
         return (
             World()
@@ -643,7 +594,7 @@ class ChainTests(SweepTestCase):
 # --------------------------------------------------------------------------
 
 
-class NonReportingFlagTests(SweepTestCase):
+class NonReportingFlagTests(ScriptTestCase):
     """`--list-skill-lines` and `--refresh` assert nothing about the data.
 
     Neither prints a block property 2/3/4 is carried in, so there is no claim
@@ -654,13 +605,15 @@ class NonReportingFlagTests(SweepTestCase):
     """
 
     def test_list_skill_lines_lists_the_ids_and_names(self):
-        world = World(skill_lines={LINE: LINE_NAME, "56": "Holy"}).spell(100, "Fireball", [10])
+        world = World(skill_lines={LINE: LINE_NAME, "1000": "Holy"}).spell(100, "Fireball", [10])
         code, out = run_sweep(world, "--list-skill-lines", skill_line=())
         self.assertEqual(code, 0)
-        self.assertHas(out, "    56  Holy")
+        self.assertHas(out, "  1000  Holy")
         self.assertHas(out, "   900  %s" % LINE_NAME)
-        # Sorted by id as an integer -- the affordance is scanning the list.
-        self.assertLess(out.index("Holy"), out.index(LINE_NAME))
+        # Sorted by id as an INTEGER -- the affordance is scanning the list.
+        # 900 before 1000 numerically, after it lexicographically, so this
+        # distinguishes the two orderings rather than merely catching unsorted.
+        self.assertLess(out.index(LINE_NAME), out.index("Holy"))
         # A listing, not a sweep: it runs without --skill-line (which the
         # script's docstring recommends) and prints none of the report.
         self.assertLacks(out, "DB2 spell-visual sweep")
@@ -676,11 +629,27 @@ class NonReportingFlagTests(SweepTestCase):
         world = World().spell(100, "Fireball", [10])
         self.assertEqual(run_sweep(world)[0], 0)
         with self.assertRaises(AssertionError) as ctx:
-            # `fetch()` narrates to stderr on its way to the guard; swallow it
-            # so a passing run stays quiet.
-            with contextlib.redirect_stderr(io.StringIO()):
-                run_sweep(world, "--refresh")
+            # `fetch()` narrates to stderr on its way to the guard; the driver
+            # captures stderr, so a passing run stays quiet.
+            run_sweep(world, "--refresh")
         self.assertIn("attempted a network fetch", str(ctx.exception))
+
+
+# --------------------------------------------------------------------------
+# the interpreter the tool is actually run with
+# --------------------------------------------------------------------------
+
+
+class InterpreterFloorTests(unittest.TestCase):
+    """`db2_spell_sweep.py` must still import on the stock system interpreter.
+
+    It carries `from __future__ import annotations` today, and this is what
+    keeps it carrying one: the script is run by hand from whatever `python3`
+    the reader has, which on macOS is 3.9.
+    """
+
+    def test_the_tool_runs_on_the_minimum_interpreter(self):
+        assert_runs_on_min_python(self, sweep_mod)
 
 
 if __name__ == "__main__":

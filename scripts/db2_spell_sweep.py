@@ -653,8 +653,8 @@ def main(argv=None):
     # same row as both clean and unchecked: HELD, exit 0, over a row that
     # splits. Nothing in the DATA at 1.15.9.69547 reaches that -- no unnamed
     # skill-line SpellID carries a visual -- which is exactly why it has to be
-    # closed in the SCRIPT. `tests/db2_spell_sweep_fixtures` builds the world
-    # that reaches it.
+    # closed in the SCRIPT. `scripts/tests/test_db2_spell_sweep.py` builds
+    # the world that reaches it.
     splits = [r for r in results if len(r["visuals"]) > 1]
     low = [r for r in results if r["low_prob"]]
     dangle = [r for r in results if r["dangling"]]

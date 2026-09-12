@@ -26,7 +26,7 @@ fixture that fabricates match outcomes, so a full sweep's reporting path runs
 in milliseconds with no `cargo`, no matches and no network. An unexpected
 process launch FAILS the test rather than quietly shelling out.
 
-Run directly, or via `cargo test --test sweep_script_fixtures`:
+Run directly, or via `cargo test --test script_fixture_suites`:
 
     python3 scripts/tests/test_headtohead_sweep.py
 """
@@ -40,14 +40,8 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from sweep_fixtures import (  # noqa: E402
-    BATCH_COLUMNS,
-    FixtureTestCase,
-    assert_runs_on_min_python,
-    install_no_subprocess,
-    read_batch_jsonl,
-    run_main,
-)
+from _harness import assert_runs_on_min_python, install_no_subprocess, run_main  # noqa: E402
+from sweep_fixtures import BATCH_COLUMNS, FixtureTestCase, read_batch_jsonl  # noqa: E402
 
 import headtohead_sweep as h2h  # noqa: E402
 
