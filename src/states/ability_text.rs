@@ -24,7 +24,7 @@
 
 use crate::states::play_match::abilities::ScalingStat;
 use crate::states::play_match::ability_config::{AbilityConfig, AuraEffect};
-use crate::states::play_match::components::{AuraType, ClassBaseStats};
+use crate::states::play_match::components::{class_base_stats, AuraType, ClassBaseStats};
 use crate::states::play_match::AbilityType;
 
 /// What [`build_ability_description`] says when none of an ability's numeric
@@ -71,28 +71,36 @@ pub fn requirement_sentence(config: &AbilityConfig) -> Option<String> {
     config.requires_stealth.then(|| "Must be stealthed.".to_string())
 }
 
-/// Build a description string for an ability based on its config and the
-/// casting class's base stats (damage and healing ranges are shown already
-/// scaled, so the numbers read as what the player will see land).
+/// An ability's EFFECT half, before the aura sentence and the precondition are
+/// composed on top.
 ///
-/// EFFECTS only. The aura sentence and the precondition
-/// ([`requirement_sentence`]) are composed on top by the caller, in that order.
-pub fn build_ability_description(
-    ability: AbilityType,
-    config: &AbilityConfig,
-    stats: &ClassBaseStats,
-) -> String {
+/// Split out of [`build_ability_description`] so the joined string is not the
+/// only thing that knows how many effects an ability has. A summary that wants
+/// to ask "is this ability's effect nothing but its damage line?"
+/// ([`effect_is_damage_only`]) reads the SAME parts the sentence is built from,
+/// so a new effect branch below cannot silently drift the two apart.
+enum Effect {
+    /// A documented override supplies the whole description — the totem spec or
+    /// hand-written prose. There are no separable effect sentences.
+    Authored(String),
+    /// Generated: one sentence per numeric effect the ability has. Empty when
+    /// the numeric fields express nothing.
+    Generated(Vec<String>),
+}
+
+/// The ability's generated effect sentences, in the order they are printed.
+fn effect_parts(ability: AbilityType, config: &AbilityConfig, stats: &ClassBaseStats) -> Effect {
     // Totems: generate the description straight from the gameplay buff spec so
     // the tooltip can never drift from the actual magnitude (single source of
     // truth: `class_ai::shaman::totem_spec`). Wins over everything else.
     if let Some(desc) = totem_description(ability) {
-        return desc;
+        return Effect::Authored(desc);
     }
 
     // Otherwise a hand-written description (abilities.ron) wins over the
     // auto-generated text — for effects the numeric config can't express (Purge).
     if !config.description.is_empty() {
-        return config.description.clone();
+        return Effect::Authored(config.description.clone());
     }
 
     let mut parts = Vec::new();
@@ -153,6 +161,45 @@ pub fn build_ability_description(
     if config.is_dispel {
         parts.push("Removes one magic debuff from an ally.".to_string());
     }
+
+    Effect::Generated(parts)
+}
+
+/// Whether the ability's effect half is NOTHING BUT its damage line.
+///
+/// The question a one-line summary has to ask. For Mortal Strike, Frostbolt or
+/// Frost Nova the damage sentence is the boring half — the healing debuff, the
+/// slow, the root is what you pick the ability for — so a summary that stops
+/// after sentence one stops one sentence early. Aura-only abilities are NOT
+/// this case: their aura sentence already leads, and they stay one line.
+///
+/// Reads [`effect_parts`] rather than re-deriving the branches, so adding an
+/// effect below automatically takes an ability out of this set. Damage is
+/// pushed first, so a single generated part on a damaging ability IS the
+/// damage part.
+pub fn effect_is_damage_only(ability: AbilityType, config: &AbilityConfig) -> bool {
+    let stats = class_base_stats(config.class);
+    matches!(
+        effect_parts(ability, config, &stats),
+        Effect::Generated(parts) if parts.len() == 1 && config.damage_base_max > 0.0
+    )
+}
+
+/// Build a description string for an ability based on its config and the
+/// casting class's base stats (damage and healing ranges are shown already
+/// scaled, so the numbers read as what the player will see land).
+///
+/// EFFECTS only. The aura sentence and the precondition
+/// ([`requirement_sentence`]) are composed on top by the caller, in that order.
+pub fn build_ability_description(
+    ability: AbilityType,
+    config: &AbilityConfig,
+    stats: &ClassBaseStats,
+) -> String {
+    let parts = match effect_parts(ability, config, stats) {
+        Effect::Authored(text) => return text,
+        Effect::Generated(parts) => parts,
+    };
 
     if !parts.is_empty() {
         return parts.join(" ");

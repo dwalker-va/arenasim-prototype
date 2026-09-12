@@ -11,7 +11,9 @@
 
 use bevy_egui::egui;
 
-use crate::states::ability_text::{build_ability_description, build_aura_description, requirement_sentence};
+use crate::states::ability_text::{
+    build_ability_description, build_aura_description, effect_is_damage_only, requirement_sentence,
+};
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::{ScalingStat, SpellSchool};
 use crate::states::play_match::ability_config::{AbilityConfig, AbilityDefinitions};
@@ -217,14 +219,45 @@ pub fn mechanics_text(ability: AbilityType, config: &AbilityConfig) -> String {
     text
 }
 
-/// The one-line gist: the FIRST sentence of the generated mechanics text.
+/// The gist: the opening of the generated mechanics text, cut at the first
+/// sentence — except where that first sentence is only the damage line.
 ///
 /// For a surface that links on to the article instead of being it — the View
-/// Combatant kit list — so the hover says what the ability does without
-/// reprinting the page. Still the shared generator: the sentence shown here is
-/// literally the opening sentence of [`mechanics_text`].
+/// Combatant kit list and its strategic-option panels — so the hover says what
+/// the ability does without reprinting the page. Always a literal PREFIX of
+/// [`mechanics_text`], never a second string: there is one generator.
+///
+/// THE TWO-SENTENCE RULE. When an ability's effect half is nothing but its
+/// damage ([`effect_is_damage_only`]) and it applies an aura, the aura sentence
+/// comes too. "Deals 30-40 damage." is the least interesting true thing about
+/// Mortal Strike; on a loadout-editing screen the healing debuff is the fact
+/// you choose by. The precondition still trails off — it gates the ability, it
+/// does not describe it — so the cut is at the requirement, not at a sentence
+/// count. Aura-only abilities are untouched: their aura sentence is already
+/// sentence one, and they stay one line.
+///
+/// "Damage-only" is strict, and deliberately so: an ability with a SECOND
+/// effect sentence (Holy Shock heals as well as damages, Drain Life drains,
+/// Boar Charge charges) already leads with something more than a damage roll,
+/// so it stays at one. Seven abilities qualify today.
 pub fn summary_sentence(ability: AbilityType, config: &AbilityConfig) -> String {
-    first_sentence(&mechanics_text(ability, config))
+    let full = mechanics_text(ability, config);
+    if config.applies_aura.is_some() && effect_is_damage_only(ability, config) {
+        return strip_requirement(&full, config);
+    }
+    first_sentence(&full)
+}
+
+/// `text` without the trailing precondition sentence [`mechanics_text`] put
+/// there. A slice of the input — nothing is regenerated.
+fn strip_requirement(text: &str, config: &AbilityConfig) -> String {
+    let text = text.trim();
+    if let Some(requirement) = requirement_sentence(config) {
+        if let Some(head) = text.strip_suffix(requirement.as_str()) {
+            return head.trim_end().to_string();
+        }
+    }
+    text.to_string()
 }
 
 /// Cut a generated paragraph at its first sentence.
@@ -633,12 +666,21 @@ mod tests {
     }
 
     /// The slim summary View Combatant shows is a genuine PREFIX of the full
-    /// mechanics text — one sentence of the same generated prose, never a
-    /// second rendering of it. Every ability has one, so ability N+1 gets its
+    /// mechanics text — the same generated prose, cut short, never a second
+    /// rendering of it. Every ability has one, so ability N+1 gets its
     /// one-liner for free.
+    ///
+    /// LENGTH is the two-sentence rule: one sentence, unless the effect half is
+    /// only the damage line and an aura follows it, in which case the aura
+    /// sentence comes too. The negative half is the load-bearing one — an
+    /// aura-only ability must NOT grow a second sentence, because its aura is
+    /// already sentence one and the next sentence would be the precondition.
     #[test]
-    fn every_slim_summary_is_the_first_sentence_of_the_full_text() {
+    fn every_slim_summary_obeys_the_two_sentence_rule() {
+        use crate::states::ability_text::effect_is_damage_only;
+
         let abilities = load_ability_definitions().expect("abilities.ron must load");
+        let mut two_sentence = Vec::new();
         for (ability, config) in abilities.iter() {
             let full = mechanics_text(*ability, config);
             let gist = summary_sentence(*ability, config);
@@ -650,9 +692,82 @@ mod tests {
                 gist,
                 full
             );
+
+            let extended = config.applies_aura.is_some() && effect_is_damage_only(*ability, config);
+            if extended {
+                two_sentence.push(*ability);
+                // The aura is the point of the extension: it must be in there.
+                let aura = build_aura_description(config.applies_aura.as_ref().unwrap());
+                let lead = first_sentence(&aura);
+                assert!(
+                    gist.contains(&lead),
+                    "{:?} summary {:?} dropped its aura sentence {:?}",
+                    ability,
+                    gist,
+                    lead
+                );
+                // The precondition is never part of the gist.
+                if let Some(requirement) = requirement_sentence(config) {
+                    assert!(
+                        !gist.contains(&requirement),
+                        "{:?} summary {:?} kept its precondition",
+                        ability,
+                        gist
+                    );
+                }
+            } else {
+                assert!(
+                    !gist.contains(". "),
+                    "{:?} summary {:?} runs to more than one sentence",
+                    ability,
+                    gist
+                );
+            }
+        }
+        // Non-vacuity: the rule must actually fire. A generator change that
+        // stopped classifying anything as damage-only would leave every
+        // assertion above trivially satisfied, and this file would still pass.
+        //
+        // Seven abilities qualify today — Frostbolt, Frost Nova, Frost Shock,
+        // Mortal Strike, Aimed Shot, Immolate and Death Coil. The floor is set
+        // below that rather than at it: a new damaging ability with an aura
+        // should get its two-liner for free, not fail a test. What must never
+        // happen is the count collapsing.
+        assert!(
+            two_sentence.len() >= 5,
+            "the two-sentence rule fired for only {} abilities ({:?}) — it has stopped working",
+            two_sentence.len(),
+            two_sentence
+        );
+    }
+
+    /// The named cases the rule exists for, and the ones it must leave alone.
+    #[test]
+    fn the_two_sentence_rule_recovers_the_decision_relevant_aura() {
+        let abilities = load_ability_definitions().expect("abilities.ron must load");
+
+        // Damage + aura: the aura is why you press the button.
+        for (ability, expected) in [
+            (AbilityType::MortalStrike, "Reduces healing received"),
+            (AbilityType::FrostNova, "Roots the target"),
+            (AbilityType::Frostbolt, "Slows movement speed"),
+        ] {
+            let gist = summary_sentence(ability, abilities.get_unchecked(&ability));
+            assert!(
+                gist.starts_with("Deals ") && gist.contains(expected),
+                "{:?} summary {:?} must lead with its damage and keep {:?}",
+                ability,
+                gist,
+                expected
+            );
+        }
+
+        // Aura-only: already one good sentence, and it stays one.
+        for ability in [AbilityType::ArcaneIntellect, AbilityType::BattleShout] {
+            let gist = summary_sentence(ability, abilities.get_unchecked(&ability));
             assert!(
                 !gist.contains(". "),
-                "{:?} summary {:?} runs to more than one sentence",
+                "{:?} is aura-only and must stay one sentence, got {:?}",
                 ability,
                 gist
             );
@@ -662,7 +777,7 @@ mod tests {
     /// An ability whose whole effect is its aura summarises as THAT — not as
     /// the generator's filler line.
     ///
-    /// The one-line summary is what exposed this: 34 of the 70 abilities (every
+    /// The one-line summary is what exposed this: 32 of the 70 abilities (every
     /// shout, curse, armor, aura and hard CC) used to lead with "Utility
     /// ability.", so their gist said nothing at all. Fixed in the shared
     /// builder, which fixes the encyclopedia page too.

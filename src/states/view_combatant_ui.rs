@@ -10,10 +10,14 @@
 //! ## Reference lives in the encyclopedia
 //!
 //! This screen EDITS a loadout; it does not document the game. Its reference
-//! surfaces — the class header, the kit list, the equipment picker — are
-//! click-throughs into the encyclopedia's pages for the same entity, and their
-//! hover tooltips say only enough to choose by. Nothing here re-renders prose
-//! the encyclopedia owns.
+//! surfaces — the class header, the kit list, the equipment picker, the
+//! strategic-option panels — are click-throughs into the encyclopedia's pages
+//! for the same entity, and their hover tooltips say only enough to choose by.
+//! Nothing here re-renders prose the encyclopedia owns.
+//!
+//! Where primary click is already the EDIT — equipping an item, picking a
+//! shout — the reference affordance is the SECONDARY click, announced in that
+//! panel's own chrome rather than inside a borrowed tooltip.
 
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
@@ -559,14 +563,15 @@ pub fn view_combatant_ui(
                         egui::vec2(content_width, opener_panel_height),
                         egui::Layout::left_to_right(egui::Align::TOP),
                         |ui| {
-                            render_rogue_opener_panel(
+                            open_topic = open_topic.or(render_rogue_opener_panel(
                                 ui,
                                 content_width,
                                 opener_panel_height,
                                 &view_state,
                                 &mut match_config,
                                 &ability_icons,
-                            );
+                                &encyclopedia_data,
+                            ));
                         },
                     );
                 }
@@ -580,7 +585,7 @@ pub fn view_combatant_ui(
                         egui::vec2(content_width, panel_height),
                         egui::Layout::left_to_right(egui::Align::TOP),
                         |ui| {
-                            render_strategic_option_panel(
+                            open_topic = open_topic.or(render_strategic_option_panel(
                                 ui,
                                 content_width,
                                 panel_height,
@@ -604,7 +609,8 @@ pub fn view_combatant_ui(
                                     if let Some(v) = vec.get_mut(slot) { *v = val; }
                                 },
                                 &mut match_config,
-                            );
+                                &encyclopedia_data,
+                            ));
                         },
                     );
                 }
@@ -618,7 +624,7 @@ pub fn view_combatant_ui(
                         egui::vec2(content_width, panel_height),
                         egui::Layout::left_to_right(egui::Align::TOP),
                         |ui| {
-                            render_strategic_option_panel(
+                            open_topic = open_topic.or(render_strategic_option_panel(
                                 ui,
                                 content_width,
                                 panel_height,
@@ -642,7 +648,8 @@ pub fn view_combatant_ui(
                                     if let Some(v) = vec.get_mut(slot) { *v = val; }
                                 },
                                 &mut match_config,
-                            );
+                                &encyclopedia_data,
+                            ));
                         },
                     );
                 }
@@ -656,7 +663,7 @@ pub fn view_combatant_ui(
                         egui::vec2(content_width, panel_height),
                         egui::Layout::left_to_right(egui::Align::TOP),
                         |ui| {
-                            render_strategic_option_panel(
+                            open_topic = open_topic.or(render_strategic_option_panel(
                                 ui,
                                 content_width,
                                 panel_height,
@@ -680,7 +687,8 @@ pub fn view_combatant_ui(
                                     if let Some(v) = vec.get_mut(slot) { *v = val; }
                                 },
                                 &mut match_config,
-                            );
+                                &encyclopedia_data,
+                            ));
                         },
                     );
                 }
@@ -716,7 +724,7 @@ pub fn view_combatant_ui(
                         egui::vec2(content_width, curse_panel_height),
                         egui::Layout::top_down(egui::Align::LEFT),
                         |ui| {
-                            render_warlock_curse_panel(
+                            open_topic = open_topic.or(render_warlock_curse_panel(
                                 ui,
                                 content_width,
                                 curse_panel_height,
@@ -724,7 +732,8 @@ pub fn view_combatant_ui(
                                 &mut match_config,
                                 &ability_icons,
                                 &class_icons,
-                            );
+                                &encyclopedia_data,
+                            ));
                         },
                     );
                 }
@@ -1114,12 +1123,18 @@ fn render_equipment_panel(
     ui.group(|ui| {
         ui.set_min_width(width - 20.0);
 
-        ui.label(
-            egui::RichText::new("EQUIPMENT")
-                .size(18.0)
-                .color(title_color)
-                .strong(),
-        );
+        // The item tooltips stay as they are (AS-65 decision 4), so the panel's
+        // own chrome is the only place right-click can be announced.
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new("EQUIPMENT")
+                    .size(18.0)
+                    .color(title_color)
+                    .strong(),
+            );
+            ui.add_space(10.0);
+            widget::secondary_click_chrome_hint(ui);
+        });
 
         ui.add_space(12.0);
 
@@ -1265,6 +1280,10 @@ fn render_equipment_panel(
             .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
             .open(&mut keep_open)
             .show(ui.ctx(), |ui| {
+                // The picker is its own window, so it needs the hint of its own.
+                widget::secondary_click_chrome_hint(ui);
+                ui.add_space(4.0);
+
                 // List valid items for this socket and class. Anything already
                 // worn in the sibling socket is absent — items are
                 // unique-equipped, so it is not selectable here.
@@ -1492,7 +1511,12 @@ mod tests {
     }
 }
 
-/// Render the Rogue Stealth Opener selection panel with ability icons
+/// Render the Rogue Stealth Opener selection panel with ability icons.
+///
+/// Its two options ARE abilities, so each icon carries the same reference
+/// contract the kit rows do — with the click that opens the page moved to
+/// SECONDARY, because primary click is the pick. Returns the topic a
+/// right-click asked for.
 fn render_rogue_opener_panel(
     ui: &mut egui::Ui,
     width: f32,
@@ -1500,7 +1524,8 @@ fn render_rogue_opener_panel(
     view_state: &Res<ViewCombatantState>,
     match_config: &mut ResMut<MatchConfig>,
     ability_icons: &Option<Res<AbilityIcons>>,
-) {
+    data: &EncyclopediaData,
+) -> Option<Topic> {
     // Get current opener preference for this combatant
     let current_opener = if view_state.team == 1 {
         match_config.team1_rogue_openers.get(view_state.slot).copied().unwrap_or_default()
@@ -1508,16 +1533,25 @@ fn render_rogue_opener_panel(
         match_config.team2_rogue_openers.get(view_state.slot).copied().unwrap_or_default()
     };
 
+    let mut open_topic: Option<Topic> = None;
+
     ui.group(|ui| {
         ui.set_min_width(width - 20.0);
         ui.set_min_height(height - 20.0);
 
-        ui.label(
-            egui::RichText::new("STEALTH OPENER")
-                .size(18.0)
-                .color(egui::Color32::from_rgb(230, 204, 153))
-                .strong(),
-        );
+        // The hint lives in the panel's CHROME, not in the option tooltips: the
+        // tooltips are the encyclopedia's shared prose, and right-click is this
+        // panel's affordance to announce.
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new("STEALTH OPENER")
+                    .size(18.0)
+                    .color(egui::Color32::from_rgb(230, 204, 153))
+                    .strong(),
+            );
+            ui.add_space(10.0);
+            widget::secondary_click_chrome_hint(ui);
+        });
 
         ui.add_space(12.0);
 
@@ -1578,6 +1612,15 @@ fn render_rogue_opener_panel(
                         clicked_opener = Some(*opener);
                     }
 
+                    // Hover says what the opener does; right-click opens its
+                    // page. Same slim summary the kit rows show — one builder.
+                    let ability = opener.ability();
+                    open_topic = open_topic.or(widget::secondary_link_with(
+                        response,
+                        Topic::Ability(ability),
+                        |ui| encyclopedia_abilities::slim_tooltip(ui, ability, data),
+                    ));
+
                     // Label below icon
                     ui.add_space(4.0);
                     let label_color = if is_selected {
@@ -1618,10 +1661,16 @@ fn render_rogue_opener_panel(
                 .italics(),
         );
     });
+
+    open_topic
 }
 
 /// Generic strategic option selection panel for Warrior Shout, Mage Armor, Paladin Aura.
 /// Follows the same visual pattern as the Rogue Opener panel.
+///
+/// Every option is an ability, so every icon hovers to that ability's slim
+/// summary and right-clicks through to its page. Returns the topic a
+/// right-click asked for.
 fn render_strategic_option_panel<T: Copy + PartialEq>(
     ui: &mut egui::Ui,
     width: f32,
@@ -1633,19 +1682,25 @@ fn render_strategic_option_panel<T: Copy + PartialEq>(
     get_current: impl Fn(&MatchConfig, u8, usize) -> T,
     set_value: impl Fn(&mut MatchConfig, u8, usize, T),
     match_config: &mut ResMut<MatchConfig>,
-) where T: HasNameDescription {
+    data: &EncyclopediaData,
+) -> Option<Topic> where T: HasNameDescription {
     let current = get_current(match_config, view_state.team, view_state.slot);
+    let mut open_topic: Option<Topic> = None;
 
     ui.group(|ui| {
         ui.set_min_width(width - 20.0);
         ui.set_min_height(height - 20.0);
 
-        ui.label(
-            egui::RichText::new(title)
-                .size(18.0)
-                .color(egui::Color32::from_rgb(230, 204, 153))
-                .strong(),
-        );
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new(title)
+                    .size(18.0)
+                    .color(egui::Color32::from_rgb(230, 204, 153))
+                    .strong(),
+            );
+            ui.add_space(10.0);
+            widget::secondary_click_chrome_hint(ui);
+        });
 
         ui.add_space(12.0);
 
@@ -1693,6 +1748,13 @@ fn render_strategic_option_panel<T: Copy + PartialEq>(
                         clicked_index = Some(i);
                     }
 
+                    let ability = option.ability();
+                    open_topic = open_topic.or(widget::secondary_link_with(
+                        response,
+                        Topic::Ability(ability),
+                        |ui| encyclopedia_abilities::slim_tooltip(ui, ability, data),
+                    ));
+
                     ui.add_space(4.0);
                     let label_color = if is_selected {
                         gold
@@ -1722,30 +1784,46 @@ fn render_strategic_option_panel<T: Copy + PartialEq>(
                 .italics(),
         );
     });
+
+    open_topic
 }
 
-/// Trait for strategic option enums that have name() and description() methods.
+/// Trait for strategic option enums that have name() and description() methods,
+/// and that know WHICH ABILITY they select — the last one is what lets the
+/// generic panel link an option through to the encyclopedia without matching on
+/// its display name.
 trait HasNameDescription {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
+    fn ability(&self) -> AbilityType;
 }
 
 impl HasNameDescription for WarriorShout {
     fn name(&self) -> &str { self.name() }
     fn description(&self) -> &str { self.description() }
+    fn ability(&self) -> AbilityType { self.ability() }
 }
 
 impl HasNameDescription for MageArmor {
     fn name(&self) -> &str { self.name() }
     fn description(&self) -> &str { self.description() }
+    fn ability(&self) -> AbilityType { self.ability() }
 }
 
 impl HasNameDescription for PaladinAura {
     fn name(&self) -> &str { self.name() }
     fn description(&self) -> &str { self.description() }
+    fn ability(&self) -> AbilityType { self.ability() }
 }
 
-/// Render the Hunter Pet Type selection panel
+/// Render the Hunter Pet Type selection panel.
+///
+/// DELIBERATELY NOT a reference surface. Alone among the strategic-option
+/// panels its options are not abilities — Spider, Boar and Bird are pets, and
+/// the encyclopedia has no pet topic to link to. The abilities that choice
+/// actually buys (Web, Charge, Master's Call) DO get the contract: picking a
+/// pet here swaps the pet subsection of the Abilities panel, whose rows are
+/// already click-throughs.
 fn render_hunter_pet_panel(
     ui: &mut egui::Ui,
     width: f32,
@@ -1861,7 +1939,12 @@ fn render_hunter_pet_panel(
     });
 }
 
-/// Render the Warlock Curse Preferences panel with ability icons
+/// Render the Warlock Curse Preferences panel with ability icons.
+///
+/// Every curse is an ability, so each icon hovers to that curse's slim summary
+/// and right-clicks through to its page. The hand-written stat lines this panel
+/// used to show on hover are gone — they were a third copy of numbers
+/// `abilities.ron` already owns. Returns the topic a right-click asked for.
 fn render_warlock_curse_panel(
     ui: &mut egui::Ui,
     width: f32,
@@ -1870,7 +1953,8 @@ fn render_warlock_curse_panel(
     match_config: &mut ResMut<MatchConfig>,
     ability_icons: &Option<Res<AbilityIcons>>,
     class_icons: &Res<ClassIcons>,
-) {
+    data: &EncyclopediaData,
+) -> Option<Topic> {
     // Clone enemy team composition to avoid borrow conflicts
     let enemy_team: Vec<Option<CharacterClass>> = if view_state.team == 1 {
         match_config.team2.clone()
@@ -1886,16 +1970,22 @@ fn render_warlock_curse_panel(
         match_config.team2_warlock_curse_prefs.get(view_state.slot).cloned().unwrap_or_default()
     };
 
+    let mut open_topic: Option<Topic> = None;
+
     ui.group(|ui| {
         ui.set_min_width(width - 20.0);
         ui.set_min_height(height - 20.0);
 
-        ui.label(
-            egui::RichText::new("CURSE PREFERENCES")
-                .size(18.0)
-                .color(egui::Color32::from_rgb(230, 204, 153))
-                .strong(),
-        );
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new("CURSE PREFERENCES")
+                    .size(18.0)
+                    .color(egui::Color32::from_rgb(230, 204, 153))
+                    .strong(),
+            );
+            ui.add_space(10.0);
+            widget::secondary_click_chrome_hint(ui);
+        });
 
         ui.add_space(8.0);
 
@@ -2008,15 +2098,16 @@ fn render_warlock_curse_panel(
                             changed_curse = Some((enemy_slot, *curse));
                         }
 
-                        // Tooltip on hover
-                        if response.hovered() {
-                            let tooltip_text = match curse {
-                                WarlockCurse::Agony => "Curse of Agony: DoT - 14 damage per 4s for 24s",
-                                WarlockCurse::Weakness => "Curse of Weakness: -20% physical damage for 2 min",
-                                WarlockCurse::Tongues => "Curse of Tongues: +50% cast time for 30s",
-                            };
-                            response.on_hover_text(tooltip_text);
-                        }
+                        // Hover and right-click, from the shared builders. The
+                        // hand-written stat strings that used to live here said
+                        // "-20% physical damage" next to a config that could
+                        // change underneath them.
+                        let ability = curse.ability();
+                        open_topic = open_topic.or(widget::secondary_link_with(
+                            response,
+                            Topic::Ability(ability),
+                            |ui| encyclopedia_abilities::slim_tooltip(ui, ability, data),
+                        ));
 
                         // Label below icon
                         ui.add_space(4.0);
@@ -2047,4 +2138,6 @@ fn render_warlock_curse_panel(
             match_config.set_curse_pref(view_state.team, view_state.slot, enemy_slot, curse);
         }
     });
+
+    open_topic
 }

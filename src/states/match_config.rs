@@ -36,6 +36,17 @@ impl RogueOpener {
             RogueOpener::CheapShot => "4 sec stun opener",
         }
     }
+
+    /// The ability this option actually casts. Mirrors [`RoguePoison::ability`]:
+    /// a strategic option IS an ability, so the option itself knows which one
+    /// rather than a UI matching on its display name.
+    pub fn ability(&self) -> super::play_match::abilities::AbilityType {
+        use super::play_match::abilities::AbilityType;
+        match self {
+            RogueOpener::Ambush => AbilityType::Ambush,
+            RogueOpener::CheapShot => AbilityType::CheapShot,
+        }
+    }
 }
 
 /// Rogue weapon-poison choice. A strategic lever like the stealth opener — which
@@ -98,6 +109,16 @@ impl WarlockCurse {
             WarlockCurse::Agony => "84 damage over 24s",
             WarlockCurse::Weakness => "-20% physical damage",
             WarlockCurse::Tongues => "+50% cast time",
+        }
+    }
+
+    /// The ability this curse casts.
+    pub fn ability(&self) -> super::play_match::abilities::AbilityType {
+        use super::play_match::abilities::AbilityType;
+        match self {
+            WarlockCurse::Agony => AbilityType::CurseOfAgony,
+            WarlockCurse::Weakness => AbilityType::CurseOfWeakness,
+            WarlockCurse::Tongues => AbilityType::CurseOfTongues,
         }
     }
 }
@@ -164,6 +185,16 @@ impl WarriorShout {
             WarriorShout::CommandingShout => "Increases maximum health of nearby allies",
         }
     }
+
+    /// The ability this shout casts.
+    pub fn ability(&self) -> super::play_match::abilities::AbilityType {
+        use super::play_match::abilities::AbilityType;
+        match self {
+            WarriorShout::BattleShout => AbilityType::BattleShout,
+            WarriorShout::DemoralizingShout => AbilityType::DemoralizingShout,
+            WarriorShout::CommandingShout => AbilityType::CommandingShout,
+        }
+    }
 }
 
 /// Mage armor choice — which armor to self-cast
@@ -196,6 +227,16 @@ impl MageArmor {
             MageArmor::MoltenArmor => "Increases spell critical strike chance",
         }
     }
+
+    /// The ability this armor casts.
+    pub fn ability(&self) -> super::play_match::abilities::AbilityType {
+        use super::play_match::abilities::AbilityType;
+        match self {
+            MageArmor::FrostArmor => AbilityType::FrostArmor,
+            MageArmor::MageArmor => AbilityType::MageArmorSpell,
+            MageArmor::MoltenArmor => AbilityType::MoltenArmor,
+        }
+    }
 }
 
 /// Paladin aura choice — which aura to apply
@@ -226,6 +267,16 @@ impl PaladinAura {
             PaladinAura::DevotionAura => "Reduces damage taken by nearby allies",
             PaladinAura::ShadowResistanceAura => "Increases shadow resistance of nearby allies",
             PaladinAura::ConcentrationAura => "Reduces interrupt lockout duration for nearby allies",
+        }
+    }
+
+    /// The ability this aura casts.
+    pub fn ability(&self) -> super::play_match::abilities::AbilityType {
+        use super::play_match::abilities::AbilityType;
+        match self {
+            PaladinAura::DevotionAura => AbilityType::DevotionAura,
+            PaladinAura::ShadowResistanceAura => AbilityType::ShadowResistanceAura,
+            PaladinAura::ConcentrationAura => AbilityType::ConcentrationAura,
         }
     }
 }

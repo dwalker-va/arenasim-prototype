@@ -129,7 +129,10 @@ fn the_ability_registry_is_available_to_the_screen() {
 /// back intact.
 ///
 /// The item-page variant is the awkward path the card calls out: a right-click
-/// taken MID-PICK. Its resource half is what this covers.
+/// taken MID-PICK. Its resource half is what this covers. The shout variant is
+/// the same right-click affordance taken from a STRATEGIC-OPTION panel, where
+/// primary click is the selection — a different class, so a link that came back
+/// to the wrong combatant would show up as the wrong class too.
 ///
 /// What it CANNOT cover: the click itself. There is no egui context in this
 /// harness (`try_ctx_mut()` returns `None` and every egui system returns
@@ -144,17 +147,25 @@ fn a_deep_link_from_view_combatant_returns_to_the_same_combatant() {
     use arenasim::states::play_match::equipment::ItemId;
     use arenasim::states::view_combatant_ui::ViewCombatantState;
 
-    for topic in [
+    for (class, topic) in [
         // The kit row: an ability page.
-        Topic::Ability(arenasim::states::play_match::AbilityType::AimedShot),
+        (
+            CharacterClass::Hunter,
+            Topic::Ability(arenasim::states::play_match::AbilityType::AimedShot),
+        ),
         // The equipment picker's right-click, taken mid-pick.
-        Topic::Item(ItemId::WandOfTheInvoker),
+        (CharacterClass::Hunter, Topic::Item(ItemId::WandOfTheInvoker)),
+        // A strategic-option panel's right-click: the Warrior's shout choice.
+        (
+            CharacterClass::Warrior,
+            Topic::Ability(arenasim::states::play_match::AbilityType::CommandingShout),
+        ),
     ] {
         let mut app = boot_app();
         app.update();
 
         app.world_mut().insert_resource(ViewCombatantState {
-            class: CharacterClass::Hunter,
+            class,
             team: 2,
             slot: 1,
         });
@@ -212,6 +223,6 @@ fn a_deep_link_from_view_combatant_returns_to_the_same_combatant() {
             .expect("the combatant must survive the round trip");
         assert_eq!(view.team, 2, "{:?}: came back on the wrong team", topic);
         assert_eq!(view.slot, 1, "{:?}: came back on the wrong slot", topic);
-        assert_eq!(view.class, CharacterClass::Hunter);
+        assert_eq!(view.class, class, "{:?}: came back on the wrong class", topic);
     }
 }
