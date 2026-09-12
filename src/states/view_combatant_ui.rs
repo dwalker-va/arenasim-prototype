@@ -1150,6 +1150,7 @@ fn render_equipment_panel(
 
     // Track which slot was clicked to open picker
     let mut clicked_slot: Option<ItemSlot> = None;
+    let mut restore_clicked = false;
 
     ui.group(|ui| {
         ui.set_min_width(width - 20.0);
@@ -1181,7 +1182,7 @@ fn render_equipment_panel(
 
             for slot in *slots {
                 let item_id = resolved.get(slot);
-                let is_override = overrides.contains_key(slot);
+                let is_override = is_effective_override(*slot, overrides, resolved);
 
                 let (item_name, name_color) = if let Some(id) = item_id {
                     if let Some(item) = items.get(id) {
@@ -1253,7 +1254,32 @@ fn render_equipment_panel(
 
             ui.add_space(6.0);
         }
+
+        // One whole-set restore rather than a per-slot reset. Clearing every
+        // override lands on the RON default exactly as a fresh match would,
+        // and that default is validated unique-equipped at load — so unlike a
+        // single-slot reset, a restore can never collide with a sibling
+        // socket's explicit pick and hand the conflict to the resolver.
+        let restore = ui
+            .add_enabled(
+                !overrides.is_empty(),
+                egui::Button::new(
+                    egui::RichText::new("↩ Restore defaults")
+                        .size(13.0)
+                        .color(egui::Color32::from_rgb(255, 180, 100)),
+                ),
+            )
+            .on_hover_text("Clear every equipment override for this combatant");
+        if restore.clicked() {
+            restore_clicked = true;
+        }
     });
+
+    if restore_clicked {
+        if let Some(equip_map) = equipment_overrides_mut(match_config, view_state) {
+            restore_default_equipment(equip_map);
+        }
+    }
 
     // Open picker if a slot was clicked
     if let Some(slot) = clicked_slot {
@@ -1263,7 +1289,7 @@ fn render_equipment_panel(
     // Render the picker window if open
     if let Some(open_slot) = picker_state.open_slot {
         let mut keep_open = true;
-        let mut selection: Option<PickerAction> = None;
+        let mut selection: Option<ItemId> = None;
 
         egui::Window::new(format!("Select: {}", open_slot.name()))
             .collapsible(false)
@@ -1272,19 +1298,6 @@ fn render_equipment_panel(
             .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
             .open(&mut keep_open)
             .show(ui.ctx(), |ui| {
-                // "Reset to Default" option — only when slot has override
-                if overrides.contains_key(&open_slot) {
-                    let reset_response = ui.selectable_label(false,
-                        egui::RichText::new("↩ Reset to Default")
-                            .size(14.0)
-                            .color(egui::Color32::from_rgb(255, 180, 100)),
-                    );
-                    if reset_response.clicked() {
-                        selection = Some(PickerAction::ResetToDefault(open_slot));
-                    }
-                    ui.separator();
-                }
-
                 // List valid items for this socket and class. Anything already
                 // worn in the sibling socket is absent — items are
                 // unique-equipped, so it is not selectable here.
@@ -1327,7 +1340,7 @@ fn render_equipment_panel(
                         }).inner;
 
                         if response.clicked() {
-                            selection = Some(PickerAction::SelectItem(open_slot, *item_id));
+                            selection = Some(*item_id);
                         }
                     }
                 });
@@ -1339,16 +1352,9 @@ fn render_equipment_panel(
         }
 
         // Apply selection
-        match selection {
-            Some(PickerAction::SelectItem(slot, item_id)) => {
-                set_equipment_override(match_config, view_state, slot, Some(item_id), items, defaults, class);
-                keep_open = false;
-            }
-            Some(PickerAction::ResetToDefault(slot)) => {
-                set_equipment_override(match_config, view_state, slot, None, items, defaults, class);
-                keep_open = false;
-            }
-            None => {}
+        if let Some(item_id) = selection {
+            set_equipment_override(match_config, view_state, open_slot, item_id, items, defaults, class);
+            keep_open = false;
         }
 
         if !keep_open {
@@ -1357,89 +1363,155 @@ fn render_equipment_panel(
     }
 }
 
-enum PickerAction {
-    SelectItem(ItemSlot, ItemId),
-    ResetToDefault(ItemSlot),
+/// Whether a slot row is drawn as overridden. True only when the override is
+/// what is actually WORN: the constraint passes (`enforce_two_hand_conflicts`,
+/// `enforce_unique_equipped`) run on the resolved loadout, not the override
+/// map, so an override they strip — a duplicate ring, an off-hand under a
+/// two-hander — is still in the map while the socket resolves empty. Colouring
+/// off the resolved item, not the map key, means a row can never render
+/// green-as-overridden while showing nothing.
+fn is_effective_override(slot: ItemSlot, overrides: &Loadout, resolved: &Loadout) -> bool {
+    overrides
+        .get(&slot)
+        .is_some_and(|chosen| resolved.get(&slot) == Some(chosen))
 }
 
-/// Apply or remove an equipment override for the viewed combatant.
+/// Clear every equipment override so the loadout resolves to the RON default
+/// exactly as a fresh match would. Whole-set on purpose: the default is
+/// validated unique-equipped at load, so restoring all sockets together lands
+/// on a known-good state with nothing for the resolver to reconcile — a
+/// single-socket reset could collide with a sibling's explicit pick and
+/// silently drop it.
+fn restore_default_equipment(overrides: &mut Loadout) {
+    overrides.clear();
+}
+
+/// The viewed combatant's override map, if its slot exists.
+fn equipment_overrides_mut<'a>(
+    match_config: &'a mut ResMut<MatchConfig>,
+    view_state: &Res<ViewCombatantState>,
+) -> Option<&'a mut Loadout> {
+    if view_state.team == 1 {
+        match_config.team1_equipment.get_mut(view_state.slot)
+    } else {
+        match_config.team2_equipment.get_mut(view_state.slot)
+    }
+}
+
+/// Apply an equipment override for the viewed combatant.
 /// Handles 2H/OH conflicts using shared helpers from equipment.rs.
 fn set_equipment_override(
     match_config: &mut ResMut<MatchConfig>,
     view_state: &Res<ViewCombatantState>,
     slot: ItemSlot,
-    item: Option<ItemId>,
+    id: ItemId,
     items: &ItemDefinitions,
     defaults: &DefaultLoadouts,
     class: CharacterClass,
 ) {
-    let equipment = if view_state.team == 1 {
-        match_config.team1_equipment.get_mut(view_state.slot)
-    } else {
-        match_config.team2_equipment.get_mut(view_state.slot)
-    };
-
-    if let Some(equip_map) = equipment {
-        match item {
-            Some(id) => {
-                // Equipping an off-hand while a 2H is in main-hand → swap MH to 1H first
-                if slot == ItemSlot::OffHand {
-                    let mut resolved = resolve_loadout(class, defaults, equip_map);
-                    enforce_two_hand_conflicts(&mut resolved, items);
-                    // Check if *after* enforcement the MH is still 2H (shouldn't be, but check the
-                    // pre-enforcement state to decide whether to swap)
-                    let pre_resolved = resolve_loadout(class, defaults, equip_map);
-                    let mh_is_2h = pre_resolved.get(&ItemSlot::MainHand)
-                        .and_then(|id| items.get(id))
-                        .map_or(false, |item| item.two_handed);
-                    if mh_is_2h {
-                        if let Some(replacement) = find_one_handed_mainhand(items, class) {
-                            equip_map.insert(ItemSlot::MainHand, replacement);
-                        } else {
-                            return; // No 1H exists — prevent the off-hand equip
-                        }
-                    }
-                }
-
-                equip_map.insert(slot, id);
-
-                // Equipping a 2H main-hand → clear off-hand override
-                // (enforce_two_hand_conflicts handles the default off-hand at resolve time)
-                if slot == ItemSlot::MainHand {
-                    if let Some(new_item) = items.get(&id) {
-                        if new_item.two_handed {
-                            equip_map.remove(&ItemSlot::OffHand);
-                        }
-                    }
+    if let Some(equip_map) = equipment_overrides_mut(match_config, view_state) {
+        // Equipping an off-hand while a 2H is in main-hand → swap MH to 1H first
+        if slot == ItemSlot::OffHand {
+            let mut resolved = resolve_loadout(class, defaults, equip_map);
+            enforce_two_hand_conflicts(&mut resolved, items);
+            // Check if *after* enforcement the MH is still 2H (shouldn't be, but check the
+            // pre-enforcement state to decide whether to swap)
+            let pre_resolved = resolve_loadout(class, defaults, equip_map);
+            let mh_is_2h = pre_resolved.get(&ItemSlot::MainHand)
+                .and_then(|id| items.get(id))
+                .map_or(false, |item| item.two_handed);
+            if mh_is_2h {
+                if let Some(replacement) = find_one_handed_mainhand(items, class) {
+                    equip_map.insert(ItemSlot::MainHand, replacement);
+                } else {
+                    return; // No 1H exists — prevent the off-hand equip
                 }
             }
-            None => {
-                equip_map.remove(&slot);
+        }
 
-                // After resetting, check if the default creates a 2H conflict
-                let resolved = resolve_loadout(class, defaults, equip_map);
-                if slot == ItemSlot::MainHand {
-                    // Reset main-hand to default — if default is 2H, clear off-hand override
-                    let mh_is_2h = resolved.get(&ItemSlot::MainHand)
-                        .and_then(|id| items.get(id))
-                        .map_or(false, |item| item.two_handed);
-                    if mh_is_2h {
-                        equip_map.remove(&ItemSlot::OffHand);
-                    }
-                } else if slot == ItemSlot::OffHand {
-                    // Reset off-hand to default — if default OH exists and MH is 2H, swap MH
-                    if resolved.contains_key(&ItemSlot::OffHand) {
-                        let mh_is_2h = resolved.get(&ItemSlot::MainHand)
-                            .and_then(|id| items.get(id))
-                            .map_or(false, |item| item.two_handed);
-                        if mh_is_2h {
-                            if let Some(replacement) = find_one_handed_mainhand(items, class) {
-                                equip_map.insert(ItemSlot::MainHand, replacement);
-                            }
-                        }
-                    }
+        equip_map.insert(slot, id);
+
+        // Equipping a 2H main-hand → clear off-hand override
+        // (enforce_two_hand_conflicts handles the default off-hand at resolve time)
+        if slot == ItemSlot::MainHand {
+            if let Some(new_item) = items.get(&id) {
+                if new_item.two_handed {
+                    equip_map.remove(&ItemSlot::OffHand);
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::play_match::equipment::LoadoutsConfig;
+
+    /// The Warrior's shipped ring defaults: Band of Accuria / Ring of Protection.
+    fn warrior_defaults() -> DefaultLoadouts {
+        let mut warrior = Loadout::new();
+        warrior.insert(ItemSlot::Ring1, ItemId::BandOfAccuria);
+        warrior.insert(ItemSlot::Ring2, ItemId::RingOfProtection);
+        warrior.insert(ItemSlot::MainHand, ItemId::ArcaniteReaper);
+        let mut loadouts = HashMap::new();
+        loadouts.insert(CharacterClass::Warrior, warrior);
+        DefaultLoadouts::new(LoadoutsConfig { loadouts })
+    }
+
+    fn resolve(defaults: &DefaultLoadouts, overrides: &Loadout) -> Loadout {
+        // The two-hand pass needs item definitions; the ring cases here never
+        // touch it, so this mirrors the resolve site minus that pass.
+        let mut resolved = resolve_loadout(CharacterClass::Warrior, defaults, overrides);
+        enforce_unique_equipped(&mut resolved);
+        resolved
+    }
+
+    #[test]
+    fn a_stripped_override_is_never_drawn_as_overridden() {
+        // The AS-64 repro's end state: Ring2 explicitly holds Band of Accuria
+        // while Ring1 resolves to its default, also Band of Accuria. The
+        // resolver strips Ring2, so the socket is EMPTY — and the row must
+        // say so, not draw green over nothing.
+        let defaults = warrior_defaults();
+        let mut overrides = Loadout::new();
+        overrides.insert(ItemSlot::Ring2, ItemId::BandOfAccuria);
+
+        let resolved = resolve(&defaults, &overrides);
+        assert_eq!(resolved.get(&ItemSlot::Ring2), None, "precondition: resolver strips the duplicate");
+        assert!(!is_effective_override(ItemSlot::Ring2, &overrides, &resolved));
+    }
+
+    #[test]
+    fn an_override_that_is_worn_is_drawn_as_overridden() {
+        let defaults = warrior_defaults();
+        let mut overrides = Loadout::new();
+        overrides.insert(ItemSlot::Ring1, ItemId::SignetOfFocus);
+
+        let resolved = resolve(&defaults, &overrides);
+        assert!(is_effective_override(ItemSlot::Ring1, &overrides, &resolved));
+        assert!(!is_effective_override(ItemSlot::Ring2, &overrides, &resolved), "a default is not an override");
+    }
+
+    #[test]
+    fn restore_defaults_lands_on_the_ron_default_exactly() {
+        // The repro's first two clicks, then a restore: both rings must come
+        // back as the default pair with no row left overridden — and there is
+        // no collision to resolve because the default is unique by
+        // construction.
+        let defaults = warrior_defaults();
+        let mut overrides = Loadout::new();
+        overrides.insert(ItemSlot::Ring1, ItemId::SignetOfFocus);
+        overrides.insert(ItemSlot::Ring2, ItemId::BandOfAccuria);
+        overrides.insert(ItemSlot::MainHand, ItemId::FrostbiteBlade);
+
+        restore_default_equipment(&mut overrides);
+
+        assert!(overrides.is_empty());
+        let resolved = resolve(&defaults, &overrides);
+        assert_eq!(&resolved, defaults.get(CharacterClass::Warrior).unwrap());
+        for slot in ItemSlot::all() {
+            assert!(!is_effective_override(*slot, &overrides, &resolved));
         }
     }
 }

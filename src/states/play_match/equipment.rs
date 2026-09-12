@@ -240,10 +240,17 @@ impl ItemSlot {
 
 /// Every pair of sibling sockets, primary first. The primary is the socket a
 /// unique-equipped conflict resolves in favour of.
-const SIBLING_SOCKET_PAIRS: &[(ItemSlot, ItemSlot)] = &[
-    (ItemSlot::Ring1, ItemSlot::Ring2),
-    (ItemSlot::Trinket1, ItemSlot::Trinket2),
-];
+///
+/// Derived from [`ItemSlotType::sockets`] rather than listed by hand, so a
+/// kind that grows a second socket is unique-equipped-enforced the moment it
+/// is — there is no separate list to forget. The primary is the kind's first
+/// socket in canonical order.
+fn sibling_socket_pairs() -> impl Iterator<Item = (ItemSlot, ItemSlot)> {
+    ItemSlotType::all().iter().filter_map(|kind| match kind.sockets() {
+        [primary, secondary] => Some((*primary, *secondary)),
+        _ => None,
+    })
+}
 
 /// Armor type restriction
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -628,8 +635,8 @@ pub fn validate_unique_equipped(
     loadout: &Loadout,
     items: &ItemDefinitions,
 ) -> Result<(), String> {
-    for (primary, secondary) in SIBLING_SOCKET_PAIRS {
-        match (loadout.get(primary), loadout.get(secondary)) {
+    for (primary, secondary) in sibling_socket_pairs() {
+        match (loadout.get(&primary), loadout.get(&secondary)) {
             (Some(a), Some(b)) if a == b => {
                 let name = items.get(a).map_or("unknown item", |i| i.name.as_str());
                 return Err(format!(
@@ -741,10 +748,10 @@ pub fn enforce_two_hand_conflicts(loadout: &mut Loadout, items: &ItemDefinitions
 /// The primary socket keeps the item, mirroring the 2H rule's preference for
 /// the main hand, so the outcome is independent of map iteration order.
 pub fn enforce_unique_equipped(loadout: &mut Loadout) {
-    for (primary, secondary) in SIBLING_SOCKET_PAIRS {
-        if let (Some(a), Some(b)) = (loadout.get(primary), loadout.get(secondary)) {
+    for (primary, secondary) in sibling_socket_pairs() {
+        if let (Some(a), Some(b)) = (loadout.get(&primary), loadout.get(&secondary)) {
             if a == b {
-                loadout.remove(secondary);
+                loadout.remove(&secondary);
             }
         }
     }
@@ -1390,6 +1397,36 @@ mod tests {
         assert_eq!(ItemSlot::Trinket2.sibling(), Some(ItemSlot::Trinket1));
         assert_eq!(ItemSlot::Head.sibling(), None);
         assert_eq!(ItemSlot::MainHand.sibling(), None);
+    }
+
+    #[test]
+    fn sibling_pairs_are_exactly_the_two_socket_kinds() {
+        // The unique-equipped pairing is derived from `sockets()`, so it must
+        // cover every kind with two sockets and nothing else, and it must
+        // agree with `sibling()` in both directions.
+        let pairs: Vec<_> = sibling_socket_pairs().collect();
+        let two_socket_kinds = ItemSlotType::all()
+            .iter()
+            .filter(|kind| kind.sockets().len() == 2)
+            .count();
+        assert_eq!(pairs.len(), two_socket_kinds);
+        assert_eq!(
+            pairs,
+            vec![
+                (ItemSlot::Ring1, ItemSlot::Ring2),
+                (ItemSlot::Trinket1, ItemSlot::Trinket2),
+            ]
+        );
+        for (primary, secondary) in &pairs {
+            assert_eq!(primary.sibling(), Some(*secondary));
+            assert_eq!(secondary.sibling(), Some(*primary));
+            assert_eq!(primary.slot_type(), secondary.slot_type());
+        }
+        // `sibling()` models pairs only; a kind with three sockets would need
+        // both it and the pairing reshaped, so pin the ceiling.
+        for kind in ItemSlotType::all() {
+            assert!(kind.sockets().len() <= 2, "{:?} has more than two sockets", kind);
+        }
     }
 
     #[test]
