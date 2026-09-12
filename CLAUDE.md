@@ -856,8 +856,10 @@ UPDATE_SNAPSHOTS=1 cargo test --release --test results_screen_snapshot -- --igno
 ```
 
 **Blessing is part of the change, not a follow-up.** Every one of these
-harnesses is `#[ignore]`d and `.github/workflows/` carries no test job, so
-nothing anywhere catches a stale baseline. A commit that touches a harnessed
+harnesses is `#[ignore]`d, and CI runs only the default `cargo test` (see the CI
+section at the end of this file — the snapshot suites are deliberately excluded,
+because a runner's GPU adapter is a different rasterizer), so nothing anywhere
+catches a stale baseline. A commit that touches a harnessed
 `draw_*` function — `draw_results_screen`, `draw_sandbox_ui`, any other — **or a
 harness's own MOCK DATA** must re-render and bless in the SAME commit. Read each
 `.new.png` before blessing and confirm every visible difference is one you
@@ -938,3 +940,37 @@ old standalone Armory. It is a navigation FRAMEWORK plus per-section content:
 If you forget to register a new system, `cargo test` fails with the file path, line number, and the three registration paths to choose from. The audit is name-agnostic — it detects systems by signature, so renaming a registered function without updating its registration is also caught.
 
 The historical bugs this prevents: `process_dispels`, `process_holy_shock_heals`, `process_holy_shock_damage`, and `process_divine_shield` were each registered in only one of the two paths and silently failed in the other mode. See `docs/solutions/implementation-patterns/graphical-mode-missing-system-registration.md` for context.
+
+### Continuous integration
+
+`.github/workflows/ci.yaml` runs `cargo build --release --locked` and
+`cargo test --locked` on `macos-latest`, on every push to `main` except
+docs-only pushes (`**.md`, `docs/**`, `.claude/**`, `LICENSE` are
+`paths-ignore`d), and on demand on any branch via `workflow_dispatch`
+(`gh workflow run ci.yaml --ref <branch>`). It does **not** run on pull
+requests: a run is 16-18 minutes cached and 39 cold, and many PRs are
+docs-only. Nothing blocks a merge — a red run on `main` is a signal to go and
+look, not a gate.
+
+**Covers:** the default `cargo test` set (1158 tests) plus a release build of
+the shipping binary — so `registration_audit`, `aura_catalog_audit`,
+`loadout_order_audit`, the exhaustiveness tests, the movement probes,
+`determinism_pin` and the db2 fixture suite hold on every code push to `main`
+instead of only when someone remembers to run them.
+
+**Deliberately not covered** (each reasoned out in the workflow's own comments):
+
+- the `#[ignore]`d egui/wgpu **snapshot suites** — a runner's GPU is a different
+  rasterizer; blessing stays part of the commit that changes a `draw_*` function
+  or its mock data (see the egui snapshot loop above);
+- the other `#[ignore]`d tests — the 98-match determinism sweeps, the
+  obstacle-active companion, the exploratory `scan_*` seed scanners in
+  `movement_probes.rs`, `camp_sweep` — minutes of simulation apiece;
+  `determinism_pin` is the always-on sentinel that stands in for them;
+- the **balance sweeps** — measurements a human reads, not assertions.
+
+Three choices in the file are load-bearing and explained in place; do not
+"simplify" them away: `macos-latest` (the machine class every baseline and the
+`f32::to_bits` pin were recorded on), tests in the DEV profile (the only profile
+in which `src/`'s 16 `debug_assert!` invariants exist), and `python3` installed
+explicitly (the db2 fixture suite panics without it, on purpose).

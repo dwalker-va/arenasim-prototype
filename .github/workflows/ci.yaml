@@ -1,0 +1,146 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: CI
+
+# This repo's guards are its safety story: `registration_audit`,
+# `aura_catalog_audit`, `loadout_order_audit`, the exhaustiveness tests on
+# `SpellSchool` / `AuraType` / the dispel classifiers, the movement probes, the
+# determinism pin, the db2 fixture suite. Until this file existed every one of
+# them only protected the codebase when a human remembered to run it — a guard
+# nobody runs claims more coverage than it delivers, which is the same shape of
+# defect the guards exist to catch.
+#
+# Not on pull requests, on purpose. A run is 16-18 minutes cached and 39 cold
+# (measured, below) — this is a Bevy crate, not a codebase where running the
+# suite is cheap — and many PRs are docs-only, so a check on every PR would
+# mostly be paying for answers nobody needs. The run that matters is the one
+# on `main` after each merge, and a contributor who wants the verdict on a
+# branch before merging starts one by hand:
+# `gh workflow run ci.yaml --ref <branch>`.
+#
+# `paths-ignore` skips the docs-only pushes. Everything listed is docs or
+# agent-harness config that no cargo step reads; everything NOT listed is left
+# in deliberately — `assets/` is loaded by tests, `scripts/` is exercised by
+# the db2 fixture suite, `examples/` is compiled by `cargo test`, `packaging/`
+# is a build.rs input.
+# GitHub evaluates the filter only on push events, never on a dispatch.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - ".claude/**"
+      - "LICENSE"
+  workflow_dispatch:
+
+# A newer push to the same ref makes the older run's verdict stale, so cancel
+# it rather than paying for two answers and reading the wrong one.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: build + test
+    # macos-latest (arm64) rather than the more usual ubuntu-latest. The reason
+    # is REPRODUCIBILITY, and it is not a guess about a Linux break — that part
+    # was measured before this file was settled.
+    #
+    # `tests/determinism_pin.rs` compares a match duration by `f32::to_bits`
+    # (deliberately not an epsilon) and `tests/baselines/` hashes whole match
+    # logs; every one of those values was recorded on an arm64 Mac. A one-off
+    # x86_64 Linux run of this exact workflow built the project and passed the
+    # whole suite, pin included, so nothing here is platform-dependent TODAY.
+    # What macOS buys is that a red check reproduces on the same machine class
+    # the baselines were blessed on. The day something does diverge, "CI says
+    # the pin moved but it passes locally" is the failure this repo can least
+    # afford, because the only route back to green would be loosening the very
+    # bit-exactness that is the guard. Nothing ships on Linux either — the
+    # release workflow builds macOS and Windows.
+    #
+    # Measured cold (no cache, the first run of this file): macOS 39m total,
+    # 12m build + 26m test; Linux 35m. That margin does not buy off the
+    # reproducibility, and cold is paid only when the cache misses. Cached
+    # runs measured 16-18m (31-45s restore, 7-8m build, 8-9m test).
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # `tests/db2_spell_sweep_fixtures.rs` shells out to `python3` and PANICS
+      # when it is missing, on purpose — a fixture suite that silently does not
+      # run is the same false reassurance the script it tests exists to prevent.
+      # Installing the interpreter explicitly, instead of trusting whatever the
+      # runner image happens to preinstall this month, is what keeps that choice
+      # meaning what it was written to mean.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Bevy's dependency graph dominates the wall clock: a cold compile is many
+      # minutes, a cached one is the time to rebuild this crate alone. The cache
+      # covers both profiles, because the two steps below deliberately use both.
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Toolchain versions
+        run: |
+          rustc --version
+          cargo --version
+          python3 --version
+
+      # `--locked` so a Cargo.lock that no longer matches Cargo.toml fails here
+      # rather than silently resolving to a dependency set nobody has tested.
+      - name: Build (release)
+        run: cargo build --release --locked
+
+      # The DEV profile on purpose, and it is the expensive choice: because
+      # `[profile.dev.package."*"] opt-level = 3`, this compiles the whole Bevy
+      # graph a SECOND time rather than reusing the release artifacts above.
+      # `cargo test --release` would be much cheaper and is the wrong trade —
+      # `debug_assertions` is on only here, and src/ carries 16 `debug_assert!`
+      # invariants (aura bookkeeping, combatant stat clamps) that a release test
+      # run compiles away entirely. Buying back ~15 minutes of cold compile by
+      # silently dropping 16 assertions is exactly the bargain this workflow
+      # exists to stop the repo from making.
+      #
+      # Of the measured 26m cold, only ~2.5m is actually running the 1158
+      # tests; the rest is that second compile, which the cache absorbs on
+      # every later run (8m warm).
+      - name: Test
+        run: cargo test --locked
+
+# ---------------------------------------------------------------------------
+# WHAT THIS WORKFLOW DOES NOT COVER
+#
+# Stated explicitly because the failure mode this file was written against is a
+# check that implies more coverage than it has.
+#
+#   * The `#[ignore]`d egui/wgpu SNAPSHOT suites (`results_screen_snapshot`,
+#     `main_menu_snapshot`, `encyclopedia_snapshot`, `configure_match_snapshot`,
+#     `team_frames_snapshot`, `animation_sandbox_snapshot`,
+#     `arena_layout_snapshot`). They rasterize on a GPU adapter and compare
+#     PNGs pixel-for-pixel against baselines blessed on a developer's machine;
+#     a runner's adapter is a different rasterizer, so a green run would prove
+#     little and a red one would usually mean "different GPU", not "regression".
+#     SNAPSHOT REGRESSIONS REMAIN A LOCAL GATE. Blessing a baseline is part of
+#     the commit that changes a `draw_*` function or its mock data — see the
+#     egui snapshot loop section of CLAUDE.md. Deriving a fixture makes it
+#     correct on the next render; only a human running `-- --ignored` renders.
+#
+#   * The other `#[ignore]`d tests: the 98-match determinism sweeps in
+#     `headless_tests.rs`, the obstacle-active determinism companion, the
+#     exploratory `scan_*` seed scanners in `movement_probes.rs`, and
+#     `camp_sweep.rs`. These are CPU-only and would run here, but they are
+#     minutes of match simulation apiece; `determinism_pin.rs` is the cheap
+#     always-on sentinel that stands in for them, and the sweeps stay an
+#     explicit human step.
+#
+#   * The BALANCE SWEEPS (`scripts/*_2v2_matrix.sh`, `headtohead_sweep.py`,
+#     `--matrix`). Out of scope by design: they are n=100 measurements a human
+#     reads and interprets, not pass/fail assertions, and no threshold on a
+#     win rate belongs in a merge gate.
+# ---------------------------------------------------------------------------
