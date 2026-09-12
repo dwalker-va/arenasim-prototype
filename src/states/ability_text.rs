@@ -15,7 +15,9 @@
 //!    shown can never drift from the ones the sim applies.
 //! 2. A **hand-written `description`** in `abilities.ron` wins over the
 //!    generated text, for effects the numeric fields cannot express (Purge,
-//!    Mana Burn). Only 2 of the 70 abilities use it.
+//!    Mana Burn, Heroic Strike, Disengage, Frost Trap). Only 5 of the 70
+//!    abilities use it; `every_ability_and_aura_generates_text` is what
+//!    forces an ability with no expressible effect to carry one.
 //!
 //! Pure functions of plain data — no egui, no Bevy — so any surface can call
 //! them and tests can assert on the strings directly.
@@ -24,6 +26,14 @@ use crate::states::play_match::abilities::ScalingStat;
 use crate::states::play_match::ability_config::{AbilityConfig, AuraEffect};
 use crate::states::play_match::components::{AuraType, ClassBaseStats};
 use crate::states::play_match::AbilityType;
+
+/// What [`build_ability_description`] says when none of an ability's numeric
+/// or flag fields yields a sentence. It is the generator's ONLY empty-ish
+/// output — the function never returns an empty string — so a test that wants
+/// to know whether the effect half was actually generated compares against
+/// this, not against `""`. Only legitimate beside an aura sentence: an ability
+/// with no effect text and no aura would have nothing to show on any surface.
+pub const UTILITY_FALLBACK: &str = "Utility ability.";
 
 /// Totem tooltip text generated from the gameplay buff spec (magnitude +
 /// `TOTEM_DURATION`), so the displayed numbers always match the simulation.
@@ -134,7 +144,7 @@ pub fn build_ability_description(
     }
 
     if parts.is_empty() {
-        "Utility ability.".to_string()
+        UTILITY_FALLBACK.to_string()
     } else {
         parts.join(" ")
     }
@@ -266,10 +276,24 @@ mod tests {
     use crate::states::play_match::ability_config::load_ability_definitions;
     use crate::states::play_match::components::class_base_stats;
 
-    /// Every ability in `abilities.ron` produces non-empty text, and every
-    /// applied aura produces its own sentence — the property the encyclopedia's
+    /// Every ability in `abilities.ron` produces text, and every applied aura
+    /// produces its own sentence — the property the encyclopedia's
     /// zero-marginal-cost rule depends on. Ability N+1 gets prose for free, or
     /// this fails.
+    ///
+    /// "Produces text" is judged against the generator's own filler, not
+    /// against `""`: `build_ability_description` never returns an empty string
+    /// (it falls back to [`UTILITY_FALLBACK`]), so a bare non-empty check
+    /// passes for every ability no matter what broke. The assertions that carry
+    /// weight are the two around the filler:
+    ///
+    /// - an ability whose config declares an effect (damage, healing, an
+    ///   interrupt, …) must NOT fall back. That is the regression that would
+    ///   silently empty the EFFECT half of a two-sentence ability — Frostbolt,
+    ///   Mortal Strike — while its aura sentence kept the tooltip looking
+    ///   populated;
+    /// - an ability that DOES fall back must carry an aura, so the filler is
+    ///   never the whole story on any surface ("never neither").
     #[test]
     fn every_ability_and_aura_generates_text() {
         let abilities = load_ability_definitions().expect("abilities.ron must load");
@@ -277,12 +301,34 @@ mod tests {
             let stats = class_base_stats(config.class);
             let text = build_ability_description(*ability, config, &stats);
             assert!(!text.trim().is_empty(), "{:?} generated no description", ability);
-            if let Some(aura) = &config.applies_aura {
-                assert!(
+
+            // The fields the generator turns into effect sentences.
+            let declares_an_effect = config.damage_base_max > 0.0
+                || config.healing_base_max > 0.0
+                || config.channel_healing_per_tick > 0.0
+                || config.is_interrupt
+                || config.is_charge
+                || config.requires_stealth
+                || config.is_dispel;
+            if declares_an_effect {
+                assert_ne!(
+                    text, UTILITY_FALLBACK,
+                    "{:?} declares an effect but its effect text fell back to the filler",
+                    ability
+                );
+            }
+
+            match &config.applies_aura {
+                Some(aura) => assert!(
                     !build_aura_description(aura).trim().is_empty(),
                     "{:?}'s aura generated no description",
                     ability
-                );
+                ),
+                None => assert_ne!(
+                    text, UTILITY_FALLBACK,
+                    "{:?} applies no aura and generated no effect text — nothing to show",
+                    ability
+                ),
             }
         }
     }

@@ -388,3 +388,117 @@ pub fn stat_rows(ui: &mut egui::Ui, id: &str, rows: &[(String, String)]) {
                 });
         });
 }
+
+#[cfg(test)]
+mod tests {
+    //! The click contract, driven through `egui_kittest` with raw pointer
+    //! events. The widgets are painted rects with no accessibility label, so
+    //! there is nothing for kittest's `get_by_label` to find — the harness
+    //! feeds `PointerMoved` / `PointerButton` events one frame at a time, the
+    //! way a real pointer delivers them, and reads back what the widget
+    //! returned on the release frame.
+
+    use std::cell::Cell;
+
+    use egui_kittest::Harness;
+
+    use super::*;
+    use crate::states::play_match::ability_config::load_ability_definitions;
+    use crate::states::play_match::equipment::load_item_definitions;
+    use crate::states::play_match::AbilityType;
+
+    const TOPIC: Topic = Topic::Ability(AbilityType::Frostbolt);
+
+    /// What one clickable rect wearing [`link`] reported: its screen rect
+    /// (allocated by egui, so the test clicks where the widget actually is) and
+    /// the widget's return value on the most recent frame.
+    struct Probe {
+        rect: Cell<egui::Rect>,
+        out: Cell<Option<Topic>>,
+    }
+
+    /// Press and release `button` on the probe's rect, one frame per event,
+    /// and return what the widget yielded on the release frame and on the idle
+    /// frame after it.
+    fn press_and_release(
+        harness: &mut Harness<'_>,
+        probe: &Probe,
+        button: egui::PointerButton,
+    ) -> (Option<Topic>, Option<Topic>) {
+        // One frame so the rect is allocated and its position known.
+        harness.step();
+        let pos = probe.rect.get().center();
+        let modifiers = egui::Modifiers::NONE;
+        harness.input_mut().events.push(egui::Event::PointerMoved(pos));
+        harness.step();
+        harness.input_mut().events.push(egui::Event::PointerButton {
+            pos,
+            button,
+            pressed: true,
+            modifiers,
+        });
+        harness.step();
+        harness.input_mut().events.push(egui::Event::PointerButton {
+            pos,
+            button,
+            pressed: false,
+            modifiers,
+        });
+        harness.step();
+        let on_release = probe.out.get();
+        harness.step();
+        (on_release, probe.out.get())
+    }
+
+    /// Run [`link`] on a clickable rect under kittest and click it with `button`.
+    fn click_link(button: egui::PointerButton) -> (Option<Topic>, Option<Topic>) {
+        let items = load_item_definitions().expect("items.ron must load");
+        let abilities = load_ability_definitions().expect("abilities.ron must load");
+        let data = EncyclopediaData {
+            items: &items,
+            abilities: &abilities,
+            item_icons: None,
+            class_icons: None,
+            ability_icons: None,
+        };
+        let probe = Probe {
+            rect: Cell::new(egui::Rect::NOTHING),
+            out: Cell::new(None),
+        };
+        let mut harness = Harness::new_ui(|ui| {
+            let (rect, response) =
+                ui.allocate_exact_size(egui::vec2(60.0, 30.0), egui::Sense::click());
+            probe.rect.set(rect);
+            probe.out.set(link(response, TOPIC, &data));
+        });
+        press_and_release(&mut harness, &probe, button)
+    }
+
+    /// A primary click navigates: the widget yields its topic on the frame the
+    /// button is released, and only on that frame — a latched `Some` would
+    /// re-navigate every frame.
+    #[test]
+    fn link_yields_its_topic_on_the_frame_a_primary_click_releases() {
+        let (on_release, frame_after) = click_link(egui::PointerButton::Primary);
+        assert_eq!(on_release, Some(TOPIC));
+        assert_eq!(frame_after, None, "the click must be a one-frame pulse");
+    }
+
+    /// A secondary click must NOT navigate. This is the assertion any caller
+    /// that gives the other button its own meaning rests on — a picker that
+    /// selects on left-click and opens the page on right-click — and it is a
+    /// property of egui rather than of this module: egui 0.31
+    /// `Response::clicked()` (`response.rs:153-155`) is
+    /// `FAKE_PRIMARY_CLICKED || clicked_by(PointerButton::Primary)`, and
+    /// `clicked_by` (`response.rs:166-168`) gates the widget's `CLICKED` flag —
+    /// which egui sets on ANY button's release over the pressed widget — on
+    /// `pointer.button_clicked(button)`. So the secondary release reaches the
+    /// widget, and `clicked()` still says no. The primary test above is the
+    /// positive control proving the same event path does register clicks.
+    #[test]
+    fn link_ignores_a_secondary_click() {
+        let (on_release, frame_after) = click_link(egui::PointerButton::Secondary);
+        assert_eq!(on_release, None, "a secondary click must not navigate");
+        assert_eq!(frame_after, None);
+    }
+}
