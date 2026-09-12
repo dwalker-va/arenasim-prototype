@@ -18,16 +18,16 @@ pub const SHADOW_SIGHT_DURATION: f32 = 15.0;
 
 /// Break-on-damage threshold of the Shadow Sight buff.
 ///
-/// `0.0` means "breaks on ANY damage" (`auras.rs` accumulates against this for
-/// every threshold `>= 0.0`), so in practice the buff ends on the first hit the
-/// holder takes rather than running its full [`SHADOW_SIGHT_DURATION`]. That
-/// looks like a bug — the apply site once carried a comment claiming the
-/// opposite — but changing it changes match outcomes, so it is left alone here
-/// and tracked as its own card.
+/// `-1.0` is this codebase's "never breaks" sentinel (`auras.rs` accumulates
+/// damage against a threshold only when it is `>= 0.0`; `0.0` is the
+/// Polymorph convention, "break on ANY damage"). Shadow Sight runs its full
+/// [`SHADOW_SIGHT_DURATION`] however much damage the holder takes: the orb is
+/// contested in the middle of a fight, so a buff that ended on the first hit
+/// would almost never outlive its pickup.
 ///
-/// The encyclopedia reads THIS, so its Shadow Sight page states what the
-/// simulation does, not what the mechanic was meant to do.
-pub const SHADOW_SIGHT_BREAK_ON_DAMAGE: f32 = 0.0;
+/// The encyclopedia reads THIS, so its Shadow Sight page prints "Never" for
+/// break-on-damage because that is what the orb pickup applies.
+pub const SHADOW_SIGHT_BREAK_ON_DAMAGE: f32 = -1.0;
 
 /// Radius at which a combatant can pick up an orb
 const ORB_PICKUP_RADIUS: f32 = 2.5;
@@ -186,9 +186,8 @@ pub fn check_orb_pickups(
                         effect_type: AuraType::ShadowSight,
                         duration: SHADOW_SIGHT_DURATION,
                         magnitude: 1.0, // Unused for this aura type
-                        // 0.0 = breaks on ANY damage. See the constant's doc:
-                        // almost certainly not the intent, but it is what the
-                        // simulation does today.
+                        // -1.0 = never breaks on damage; the buff runs its full
+                        // duration through a contested pickup.
                         break_on_damage_threshold: SHADOW_SIGHT_BREAK_ON_DAMAGE,
                         accumulated_damage: 0.0,
                         tick_interval: 0.0,
