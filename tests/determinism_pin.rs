@@ -59,7 +59,7 @@ fn seeded_2v2_matches_its_recorded_identity() {
     assert_pinned(
         &result,
         Some(1),
-        1_116_060_578,
+        1_116_060_579, // TEMPORARY: deliberately wrong, proving CI goes red
         "2v2 Mage+Priest vs Warrior+Priest @424242",
     );
 }
