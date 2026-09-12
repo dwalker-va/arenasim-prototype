@@ -1573,36 +1573,67 @@ mod tests {
     }
 
     #[test]
-    fn entry_needs_dummy_pins_the_snapshot_fixture_rows() {
-        // These six pairs are exactly what `mock_rows` in
-        // tests/animation_sandbox_snapshot.rs hand-sets its `needs_dummy` field
-        // to. That fixture cannot call this predicate (`pub(crate)`, and an
-        // integration test is a separate crate), and a stale value there moves
-        // NO pixels — the snapshot would keep passing while pinning a fiction.
-        // So the claim lives here instead, in the DEFAULT `cargo test`: change
-        // the predicate and this fails immediately, rather than at whoever next
-        // re-blesses the PNG.
+    fn entry_needs_dummy_classifies_the_sandbox_rows() {
+        // `entry_needs_dummy` is `pub(crate)`, so this module is the only place
+        // it can be asserted per-ability — and this test runs in the DEFAULT
+        // `cargo test`. That is the whole reason it is worth keeping now that
+        // the animation-sandbox snapshot fixture DERIVES its `needs_dummy`
+        // flags (via `ui::entry_rows`) instead of restating them: the fixture
+        // can no longer hold a stale copy, but it also can no longer ANNOUNCE a
+        // change, because the render that would show the greying is `#[ignore]`d
+        // and only a human ever runs it. A predicate change announces itself
+        // here instead, immediately and without a GPU.
+        //
+        // Each pair below is the RULE stated — damage or a hostile aura aims at
+        // the dummy, a self buff does not — not a value read back off the
+        // implementation. The set is the sandbox's staged class plus the one row
+        // its fixture borrows, and the exhaustiveness assertion underneath keeps
+        // a newly defined Mage spell from slipping past unclassified.
         let defs = AbilityDefinitions::default();
         let needs = |a: AbilityType| entry_needs_dummy(SandboxEntry::Ability(a), &defs);
-        for (ability, expected) in [
+        let pinned = [
             // Offensive: direct damage or a hostile aura aims at the dummy.
             (AbilityType::Frostbolt, true),
-            (AbilityType::Polymorph, true),
             (AbilityType::FrostNova, true),
-            // Self buffs play complete against nothing.
-            (AbilityType::FrostArmor, false),
+            (AbilityType::Polymorph, true),
+            // Self buffs play complete against nothing — including the three
+            // armors and the shield, which the fixture used to omit entirely.
             (AbilityType::ArcaneIntellect, false),
+            (AbilityType::IceBarrier, false),
+            (AbilityType::FrostArmor, false),
+            (AbilityType::MageArmorSpell, false),
+            (AbilityType::MoltenArmor, false),
             // The fixture's `n/a` row, borrowed from the Warrior.
             (AbilityType::HeroicStrike, false),
-        ] {
+        ];
+        for (ability, expected) in pinned {
             assert_eq!(
                 needs(ability),
                 expected,
-                "{ability:?} changed its dummy requirement — update `mock_rows` \
-                 in tests/animation_sandbox_snapshot.rs and re-bless the sandbox \
-                 snapshots in the same commit"
+                "{ability:?} changed its dummy requirement — the sandbox's \
+                 `needs dummy` greying moves with it, so re-bless the animation \
+                 sandbox snapshots in the same commit"
             );
         }
+
+        // Exhaustive over the staged class: a new Mage ability must be
+        // classified here rather than quietly joining the panel unpinned.
+        // Compared against `abilities_for_class` — the exact call
+        // `entries_for_class` makes — so a pet ability would count too.
+        let mut pinned_mage: Vec<AbilityType> = pinned
+            .iter()
+            .map(|(a, _)| *a)
+            .filter(|a| *a != AbilityType::HeroicStrike)
+            .collect();
+        pinned_mage.sort_unstable();
+        let mut panel_abilities = defs.abilities_for_class(CharacterClass::Mage);
+        panel_abilities.sort_unstable();
+        assert_eq!(
+            pinned_mage, panel_abilities,
+            "the Mage's ability list changed; pin the new ability's dummy \
+             requirement above (the sandbox fixture draws her whole kit)"
+        );
+
         // Body entries never need one, and the fixture relies on that.
         assert!(!entry_needs_dummy(
             SandboxEntry::Body(BodyAnimation::WalkBob),
