@@ -234,6 +234,10 @@
             mana_cost: 15.0,
             cooldown: 0.0,
             spell_school: Physical,
+            // Resolved as bonus damage queued onto the next auto-attack
+            // (`class_ai::warrior::try_heroic_strike`), not as a damage field
+            // here, so nothing generates a sentence for it.
+            description: "Empowers your next melee auto-attack to deal bonus weapon damage.",
         ),
 
         Charge: (
@@ -969,6 +973,9 @@
             mana_cost: 17.0,
             cooldown: 25.0,
             spell_school: Physical,
+            // A scripted leap (`DISENGAGE_DISTANCE` / `DISENGAGE_SPEED`), not a
+            // damage or aura field, so nothing generates a sentence for it.
+            description: "Leaps backward, away from the target, to break out of melee range.",
         ),
 
         // Freezing Trap: Incapacitates first enemy contact (like Polymorph but stationary)
@@ -1002,6 +1009,11 @@
             mana_cost: 26.0,
             cooldown: 20.0,
             spell_school: None,
+            // The slow is an engine-applied zone aura, not an `applies_aura`
+            // block, so nothing here generates a sentence for it. Prose carries
+            // no numbers on purpose: the Frost Trap aura page derives the slow
+            // magnitude and zone duration from the constants, so it can't drift.
+            description: "Launches a trap that arms where it lands. The first enemy to step on it opens a frost zone that slows every enemy inside it for as long as the zone lasts.",
         ),
 
         // ============================================================================
