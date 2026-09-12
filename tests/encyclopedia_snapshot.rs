@@ -35,7 +35,7 @@ use arenasim::states::encyclopedia::{
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::ability_config::{load_ability_definitions, AbilityDefinitions};
 use arenasim::states::play_match::equipment::{
-    load_item_definitions, ArmorType, ItemDefinitions, ItemId,
+    load_item_definitions, ArmorType, ItemDefinitions, ItemId, ItemSlotType,
 };
 use arenasim::states::play_match::AbilityType;
 
@@ -135,6 +135,24 @@ fn encyclopedia_items_filtered() {
     filters.item_level_min = 50;
     state.item_filters = filters;
     snapshot("encyclopedia_items_filtered", state);
+}
+
+/// The Items index filtered to the two PAIRED slot kinds. Rings and trinkets
+/// are the only items a character wears two of, so they are the only ones whose
+/// labels could regress to a socket name ("Ring 1"); the full grid cuts off
+/// above them, so this is the view that actually shows them.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn encyclopedia_items_paired_slots() {
+    let mut state = state_at_root();
+    state.apply(arenasim::states::encyclopedia::EncyclopediaAction::Navigate(
+        View::index(Section::Items),
+    ));
+    let mut filters = ItemFilters::default();
+    filters.selected_slots.insert(ItemSlotType::Ring);
+    filters.selected_slots.insert(ItemSlotType::Trinket);
+    state.item_filters = filters;
+    snapshot("encyclopedia_items_paired_slots", state);
 }
 
 /// An item detail page: header, stat block, and the class chips that link on.

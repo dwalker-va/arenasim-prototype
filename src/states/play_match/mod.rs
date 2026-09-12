@@ -99,7 +99,7 @@ use bevy::render::render_asset::RenderAssetUsages;
 use super::match_config::{self, MatchConfig};
 use super::GameState;
 use crate::combat::log::{CombatLog, CombatLogEventType};
-use equipment::{ItemDefinitions, DefaultLoadouts, ItemSlot, ItemId, resolve_loadout, enforce_two_hand_conflicts, format_loadout};
+use equipment::{ItemDefinitions, DefaultLoadouts, ItemSlot, ItemId, resolve_loadout, enforce_two_hand_conflicts, enforce_unique_equipped, format_loadout};
 
 // ============================================================================
 // Helper Functions
@@ -798,6 +798,7 @@ pub fn setup_play_match(
             let equipment_overrides = config.team1_equipment.get(i).cloned().unwrap_or_default();
             let mut loadout = resolve_loadout(*character, &default_loadouts, &equipment_overrides);
             enforce_two_hand_conflicts(&mut loadout, &item_defs);
+            enforce_unique_equipped(&mut loadout);
 
             let position = Vec3::new(team1_spawn_x, 1.0, (i as f32 - 1.0) * 3.0);
             let (entity, combatant) = spawn_combatant(
@@ -890,6 +891,7 @@ pub fn setup_play_match(
             let equipment_overrides = config.team2_equipment.get(i).cloned().unwrap_or_default();
             let mut loadout = resolve_loadout(*character, &default_loadouts, &equipment_overrides);
             enforce_two_hand_conflicts(&mut loadout, &item_defs);
+            enforce_unique_equipped(&mut loadout);
 
             let position = Vec3::new(team2_spawn_x, 1.0, (i as f32 - 1.0) * 3.0);
             let (entity, combatant) = spawn_combatant(
