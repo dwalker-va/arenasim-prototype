@@ -41,12 +41,20 @@ Every output row carries a provenance marker, so an unjoinable row reads as
 UNRESOLVED in the output instead of being quietly absent:
 
   RESOLVED    name -> exactly one SpellVisual, all rows Probability 1
-  NO-VISUAL   name has SpellIDs but no `SpellXSpellVisual` row at all
-              (passive talents, *Effect* helper spells) -- nothing to join
+  NO-VISUAL   name has SpellIDs but no JOINABLE `SpellXSpellVisual` row --
+              either no row at all, or only rows pointing at SpellVisualID 0,
+              which is the client's own "no visual" (passive talents, *Effect*
+              helper spells). Nothing to join either way.
   SPLIT       name resolves to >1 SpellVisual -- rank collapse BROKEN (fatal)
   LOW-PROB    a `SpellXSpellVisual` row with Probability != 1 (fatal)
-  UNRESOLVED  a SpellID with no `SpellName` row, or a SpellVisualID absent
-              from `SpellVisual` -- a real gap in the data, not an omission
+  UNRESOLVED  a real gap in the data rather than an omission, in one of two
+              severities -- the marker is shared, the consequence is not:
+                * a SpellID with no `SpellName` row: REPORTED, not fatal. The
+                  name is unknown, but no downstream claim rests on it, and it
+                  gets its own section in the output.
+                * a SpellVisualID absent from `SpellVisual`: FATAL. The join
+                  produced a visual id that does not exist, so property 4
+                  cannot vouch for that row.
 
 Usage
 -----
@@ -363,8 +371,24 @@ def report_era_cut(era, cut, era_cut):
     era_ids = [i for ids in era.values() for i in ids]
     cut_ids = [i for ids in cut.values() for i in ids]
     print("  cut at SpellID >= %d  (an explicit parameter, not a constant)" % era_cut)
+    # There is no partition to prove when the inventory sits entirely on one
+    # side of the cut, and computing one tracebacks on the empty side. Say
+    # which side it is: an all-cut-side inventory leaves NOTHING to sweep,
+    # which is a very different result from a clean era book.
     if not cut_ids:
-        print("  nothing above the cut -- inventory unaffected.")
+        print("  nothing above the cut -- the inventory is entirely era-side, unaffected.")
+        print()
+        return
+    if not era_ids:
+        print(
+            "  EVERY inventory spell is above the cut (%d name(s), ids %d..%d)."
+            % (len(cut), min(cut_ids), max(cut_ids))
+        )
+        print("  The era-side inventory is EMPTY -- this sweep has nothing to join.")
+        print(
+            "  Nothing below is a statement about this skill line's era book. "
+            "If you\n  expected era spells here, the cut or the skill-line id is wrong."
+        )
         print()
         return
     hi, lo = max(era_ids), min(cut_ids)
@@ -618,12 +642,37 @@ def main(argv=None):
     low = [r for r in results if r["marker"] == "LOW-PROB"]
     dangle = [r for r in results if r["dangling"]]
     print("### property 4 -- one SpellVisual per name, at Probability 1")
+    # The safety claim has to carry its own scope. This is the line a person
+    # transcribing constants reads, often the only line; a filter mentioned
+    # three blocks earlier does not travel with it, and "HELD over a subset"
+    # read as "HELD over the book" is exactly the false completeness claim
+    # (AS-37 round 1) this whole script exists to make structurally hard.
+    scope = None
+    if args.name:
+        scope = (
+            "  SCOPE: --name %s is in effect. This covers the %d filtered name(s)\n"
+            "         ONLY -- NOT the skill-line inventory, which may still split\n"
+            "         elsewhere. Re-run without --name before transcribing anything\n"
+            "         as complete." % (" ".join(args.name), len(results))
+        )
+
+    if not with_visual:
+        # Vacuously true is not HELD. An empty result set (an all-above-the-cut
+        # inventory, or a --name that matched nothing) must not print a safety
+        # claim a reader can take for a clean book.
+        print("  VACUOUS: no name in scope resolved to a visual -- this run asserts NOTHING.")
+        if scope:
+            print(scope)
+        return 0
+
     if not splits and not low and not dangle:
         print(
             "  HELD: all %d name(s) with a visual resolve to exactly one "
             "SpellVisual at Probability 1." % len(with_visual)
         )
         print("  (Rank collapse is intact; a per-name visual is safe to transcribe.)")
+        if scope:
+            print(scope)
         return 0
 
     for r in splits:
@@ -644,6 +693,8 @@ def main(argv=None):
         "built on one -- rests on does NOT hold for the rows above."
     )
     print("  Do not transcribe a single visual for them. Join each rank.")
+    if scope:
+        print(scope)
     if args.allow_split:
         print("  (--allow-split given: exiting 0 anyway.)")
         return 0
