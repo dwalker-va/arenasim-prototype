@@ -318,8 +318,12 @@ class RepoWideFloorTests(unittest.TestCase):
 
     def test_every_tracked_python_file_runs_on_the_minimum_interpreter(self):
         files = tracked_python_files()
-        # Non-vacuity: a `git ls-files` that returned nothing would make this
-        # pass while checking nothing at all.
+        # Non-vacuity: a listing that returned nothing would make this pass
+        # while checking nothing at all. The count is a coarse tripwire only —
+        # it sits below the 14 tracked today so ordinary deletions do not fail
+        # it, and the two `assertIn`s below carry the real weight: they name a
+        # file that has a fixture suite and one that does not, so the walk is
+        # proven to reach past the suites into the rest of the repo.
         self.assertGreaterEqual(len(files), 12, "suspiciously few tracked .py files: %r" % files)
         for path in files:
             self.assertTrue(os.path.isfile(path), path)
