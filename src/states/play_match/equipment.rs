@@ -101,6 +101,18 @@ impl ItemSlotType {
         }
     }
 
+    /// Whether items of this kind are WEAPONS — held in a hand or in the
+    /// ranged socket — and therefore gated by class weapon proficiency rather
+    /// than by armor type. Every weapon carries `armor_type: None`, which sits
+    /// in every class's allowed list, so this is the seam that tells a weapon
+    /// apart from an accessory.
+    pub fn is_weapon_slot(&self) -> bool {
+        matches!(
+            self,
+            ItemSlotType::MainHand | ItemSlotType::OffHand | ItemSlotType::Ranged
+        )
+    }
+
     /// The character sockets that accept this kind of item. Single-socket kinds
     /// return one entry; `Ring` and `Trinket` return their two siblings in
     /// canonical order.
@@ -190,9 +202,11 @@ impl ItemSlot {
         }
     }
 
-    /// Whether this slot holds a weapon (determines stat replacement behavior)
+    /// Whether this socket holds a weapon. One authority, in
+    /// [`ItemSlotType::is_weapon_slot`], so a socket and the item kind it
+    /// accepts can never disagree about what counts as a weapon.
     pub fn is_weapon_slot(&self) -> bool {
-        matches!(self, ItemSlot::MainHand | ItemSlot::OffHand | ItemSlot::Ranged)
+        self.slot_type().is_weapon_slot()
     }
 
     /// The kind of item this socket holds. Both ring sockets report `Ring`,
@@ -263,7 +277,9 @@ pub enum ArmorType {
     None,
 }
 
-/// Weapon type for flavor/naming
+/// What kind of weapon an item is. Gates equipping through
+/// [`weapon_proficiency`]; `OffhandFrill` (a held-in-off-hand tome or orb) and
+/// `None` are the two values that are not weapons and need no proficiency.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum WeaponType {
     Sword,
@@ -281,6 +297,20 @@ pub enum WeaponType {
     Shield,
     OffhandFrill,
     None,
+}
+
+impl WeaponType {
+    /// Every weapon type, in declaration order. Pinned complete by
+    /// `weapon_type_all_lists_every_variant`.
+    pub fn all() -> &'static [WeaponType] {
+        &[
+            WeaponType::Sword, WeaponType::Mace, WeaponType::Axe,
+            WeaponType::Dagger, WeaponType::Staff, WeaponType::Polearm,
+            WeaponType::Fist, WeaponType::Bow, WeaponType::Gun,
+            WeaponType::Crossbow, WeaponType::Wand, WeaponType::Thrown,
+            WeaponType::Shield, WeaponType::OffhandFrill, WeaponType::None,
+        ]
+    }
 }
 
 /// Unique item identifier — each named item in the game
@@ -585,21 +615,167 @@ fn max_armor_type(class: CharacterClass) -> &'static [ArmorType] {
     }
 }
 
-/// Check if a class can equip a specific item
-pub fn can_equip(class: CharacterClass, item: &ItemConfig) -> bool {
+// ============================================================================
+// WEAPON PROFICIENCY
+// ============================================================================
+
+/// How far a class trained in a weapon type.
+///
+/// WoW Classic gates weapons by per-class PROFICIENCY, a set of passive skills
+/// a class may train (`One-Handed Axes` is spell 196, `Wands` is 5009, and so
+/// on through the list). Axes, maces and swords are split into separate
+/// one- and two-handed skills, which is why "trained" is three-valued rather
+/// than a bool: a Rogue wields a one-handed sword and may never wield a
+/// two-handed one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Proficiency {
+    /// Never equippable by this class.
+    Untrained,
+    /// Only the one-handed form. Applies to the three types Classic splits
+    /// (axe, mace, sword); for every other type it is indistinguishable from
+    /// [`Proficiency::Trained`], since those types have a single form.
+    OneHandedOnly,
+    /// Equippable in either form.
+    Trained,
+}
+
+/// Whether `class` may wield `weapon`, and in which form.
+///
+/// The rows are WoW Classic's per-class weapon-skill lists, the ones a weapon
+/// master teaches: a Mage trains daggers, one-handed swords, staves and wands
+/// and nothing else; a Paladin never touches a dagger or a staff; a Hunter
+/// never a mace or a shield; a Shaman never a sword. Held-in-off-hand items
+/// (`OffhandFrill`) require no proficiency in Classic and are open to every
+/// class, as is an item carrying no weapon type at all.
+///
+/// Both matches are wildcard-free on purpose: a new [`CharacterClass`] or
+/// [`WeaponType`] variant fails to compile until every class has an answer for
+/// it. That is the point of the table — see `weapon_proficiency_is_exhaustive`.
+pub fn weapon_proficiency(class: CharacterClass, weapon: WeaponType) -> Proficiency {
+    use Proficiency::{OneHandedOnly, Trained, Untrained};
+    use WeaponType as W;
+
+    match class {
+        // Every melee weapon, every ranged weapon, shields. No wands.
+        CharacterClass::Warrior => match weapon {
+            W::Axe | W::Mace | W::Sword | W::Dagger | W::Staff | W::Polearm | W::Fist
+            | W::Bow | W::Gun | W::Crossbow | W::Thrown | W::Shield => Trained,
+            W::Wand => Untrained,
+            W::OffhandFrill | W::None => Trained,
+        },
+        // Axes, maces, swords (both forms), polearms, shields. No dagger, no
+        // staff, no ranged weapon of any kind.
+        CharacterClass::Paladin => match weapon {
+            W::Axe | W::Mace | W::Sword | W::Polearm | W::Shield => Trained,
+            W::Dagger | W::Staff | W::Fist | W::Bow | W::Gun | W::Crossbow
+            | W::Thrown | W::Wand => Untrained,
+            W::OffhandFrill | W::None => Trained,
+        },
+        // Bows, guns, crossbows, thrown; axes, swords, daggers, staves,
+        // polearms, fist weapons. Never a mace, never a shield.
+        CharacterClass::Hunter => match weapon {
+            W::Axe | W::Sword | W::Dagger | W::Staff | W::Polearm | W::Fist
+            | W::Bow | W::Gun | W::Crossbow | W::Thrown => Trained,
+            W::Mace | W::Wand | W::Shield => Untrained,
+            W::OffhandFrill | W::None => Trained,
+        },
+        // Daggers, fist weapons, one-handed maces and swords, all three
+        // ranged physical types. No two-handers at all, no axes (those came
+        // with the Burning Crusade), no shields.
+        CharacterClass::Rogue => match weapon {
+            W::Dagger | W::Fist | W::Bow | W::Gun | W::Crossbow | W::Thrown => Trained,
+            W::Mace | W::Sword => OneHandedOnly,
+            W::Axe | W::Staff | W::Polearm | W::Wand | W::Shield => Untrained,
+            W::OffhandFrill | W::None => Trained,
+        },
+        // Axes and maces in both forms, daggers, staves, fist weapons,
+        // shields. Never a sword, never a ranged weapon.
+        CharacterClass::Shaman => match weapon {
+            W::Axe | W::Mace | W::Dagger | W::Staff | W::Fist | W::Shield => Trained,
+            W::Sword | W::Polearm | W::Bow | W::Gun | W::Crossbow | W::Thrown
+            | W::Wand => Untrained,
+            W::OffhandFrill | W::None => Trained,
+        },
+        // Daggers, one-handed maces, staves, wands.
+        CharacterClass::Priest => match weapon {
+            W::Dagger | W::Staff | W::Wand => Trained,
+            W::Mace => OneHandedOnly,
+            W::Axe | W::Sword | W::Polearm | W::Fist | W::Bow | W::Gun
+            | W::Crossbow | W::Thrown | W::Shield => Untrained,
+            W::OffhandFrill | W::None => Trained,
+        },
+        // Daggers, one-handed swords, staves, wands.
+        CharacterClass::Mage => match weapon {
+            W::Dagger | W::Staff | W::Wand => Trained,
+            W::Sword => OneHandedOnly,
+            W::Axe | W::Mace | W::Polearm | W::Fist | W::Bow | W::Gun
+            | W::Crossbow | W::Thrown | W::Shield => Untrained,
+            W::OffhandFrill | W::None => Trained,
+        },
+        // Daggers, one-handed swords, staves, wands — the Mage's list.
+        CharacterClass::Warlock => match weapon {
+            W::Dagger | W::Staff | W::Wand => Trained,
+            W::Sword => OneHandedOnly,
+            W::Axe | W::Mace | W::Polearm | W::Fist | W::Bow | W::Gun
+            | W::Crossbow | W::Thrown | W::Shield => Untrained,
+            W::OffhandFrill | W::None => Trained,
+        },
+    }
+}
+
+/// Whether a class may wield a weapon of this type in this form.
+pub fn can_wield(class: CharacterClass, weapon: WeaponType, two_handed: bool) -> bool {
+    match weapon_proficiency(class, weapon) {
+        Proficiency::Untrained => false,
+        Proficiency::OneHandedOnly => !two_handed,
+        Proficiency::Trained => true,
+    }
+}
+
+/// Why a class may not equip an item, or `None` when it may.
+///
+/// Three gates, in order: the item's explicit class list, armor type, and —
+/// for anything in a weapon socket — [`weapon_proficiency`]. The proficiency
+/// gate is the one that makes [`WeaponType`] mean something: armor type cannot
+/// speak for weapons, because every weapon declares `ArmorType::None` and that
+/// sits in every class's allowed list.
+///
+/// The reason is a string rather than a bool so a rejected loadout entry can
+/// name the gate it failed instead of blaming armor type for a proficiency
+/// failure. [`can_equip`] is this predicate.
+pub fn equip_rejection(class: CharacterClass, item: &ItemConfig) -> Option<String> {
     // Check class restriction list
     if let Some(ref allowed) = item.allowed_classes {
         if !allowed.contains(&class) {
-            return false;
+            return Some(format!("{} is not in the item's class list", class.name()));
         }
     }
 
     // Check armor type
     if !max_armor_type(class).contains(&item.armor_type) {
-        return false;
+        return Some(format!(
+            "{} cannot wear {:?} armor",
+            class.name(),
+            item.armor_type
+        ));
     }
 
-    true
+    // Check weapon proficiency
+    if item.slot.is_weapon_slot() && !can_wield(class, item.weapon_type, item.two_handed) {
+        return Some(format!(
+            "{} has no proficiency with {}{:?}",
+            class.name(),
+            if item.two_handed { "two-handed " } else { "" },
+            item.weapon_type
+        ));
+    }
+
+    None
+}
+
+/// Check if a class can equip a specific item. See [`equip_rejection`].
+pub fn can_equip(class: CharacterClass, item: &ItemConfig) -> bool {
+    equip_rejection(class, item).is_none()
 }
 
 /// Validate that all items in a loadout are equippable by the given class
@@ -610,10 +786,10 @@ pub fn validate_class_restrictions(
 ) -> Result<(), String> {
     for (slot, item_id) in loadout {
         if let Some(item) = items.get(item_id) {
-            if !can_equip(class, item) {
+            if let Some(reason) = equip_rejection(class, item) {
                 return Err(format!(
-                    "{} cannot equip {} ({:?}) in {:?} slot — armor type {:?} not allowed",
-                    class.name(), item.name, item_id, slot, item.armor_type
+                    "{} cannot equip {} ({:?}) in {:?} slot — {}",
+                    class.name(), item.name, item_id, slot, reason
                 ));
             }
             if !slot.accepts(item.slot) {
@@ -755,6 +931,50 @@ pub fn enforce_unique_equipped(loadout: &mut Loadout) {
             }
         }
     }
+}
+
+/// Strip anything `class` may not equip from a resolved loadout — an item in a
+/// socket that does not accept its kind, or one that fails [`can_equip`].
+///
+/// The third constraint pass, alongside [`enforce_two_hand_conflicts`] and
+/// [`enforce_unique_equipped`], and it exists for the same reason: an override
+/// map survives edits that invalidate it (change a configured slot's class and
+/// its weapon override stays behind), so the resolver — not its callers — has
+/// to be the one that guarantees a legal loadout.
+pub fn enforce_class_restrictions(
+    loadout: &mut Loadout,
+    class: CharacterClass,
+    items: &ItemDefinitions,
+) {
+    loadout.retain(|slot, item_id| match items.get(item_id) {
+        Some(item) => slot.accepts(item.slot) && can_equip(class, item),
+        // An id with no definition has no stats to apply; drop it rather than
+        // leave a socket that renders as worn and equips nothing.
+        None => false,
+    });
+}
+
+/// The loadout a character actually wears: the class default overlaid with the
+/// user's overrides, with every equip constraint enforced.
+///
+/// The single authority. Graphical spawn, headless spawn and the View
+/// Combatant screen all resolve through it, so what the screen shows is what
+/// the match equips — a constraint that lives in only some of those three is
+/// the "describes but does not constrain" shape this pass exists to remove.
+///
+/// Order matters: class restrictions first, so stripping an illegal two-handed
+/// main-hand leaves a legal off-hand in place rather than taking it down too.
+pub fn resolve_equipped_loadout(
+    class: CharacterClass,
+    defaults: &DefaultLoadouts,
+    overrides: &Loadout,
+    items: &ItemDefinitions,
+) -> Loadout {
+    let mut loadout = resolve_loadout(class, defaults, overrides);
+    enforce_class_restrictions(&mut loadout, class, items);
+    enforce_two_hand_conflicts(&mut loadout, items);
+    enforce_unique_equipped(&mut loadout);
+    loadout
 }
 
 /// Find the first available one-handed main-hand weapon for a class, sorted by name.
@@ -1236,6 +1456,285 @@ mod tests {
         let result = resolve_loadout(CharacterClass::Warrior, &defaults, &overrides);
         assert_eq!(result.len(), 1);
         assert_eq!(result.get(&ItemSlot::Head), Some(&ItemId::LionheartHelm));
+    }
+
+    // ---- weapon proficiency (AS-59) ----
+
+    /// `WeaponType::all()` must list every variant exactly once.
+    ///
+    /// The match below has no wildcard arm, so a NEW variant does not compile
+    /// until it is given a position here — and the position assertion then
+    /// fails until it is added to `all()` too. That is the whole guard: this
+    /// repo's recurring defect is the hand-maintained list that silently omits
+    /// a variant.
+    #[test]
+    fn weapon_type_all_lists_every_variant() {
+        fn position(weapon: WeaponType) -> usize {
+            match weapon {
+                WeaponType::Sword => 0,
+                WeaponType::Mace => 1,
+                WeaponType::Axe => 2,
+                WeaponType::Dagger => 3,
+                WeaponType::Staff => 4,
+                WeaponType::Polearm => 5,
+                WeaponType::Fist => 6,
+                WeaponType::Bow => 7,
+                WeaponType::Gun => 8,
+                WeaponType::Crossbow => 9,
+                WeaponType::Wand => 10,
+                WeaponType::Thrown => 11,
+                WeaponType::Shield => 12,
+                WeaponType::OffhandFrill => 13,
+                WeaponType::None => 14,
+            }
+        }
+
+        let all = WeaponType::all();
+        assert_eq!(
+            all.len(),
+            15,
+            "a WeaponType variant is missing from (or duplicated in) all()"
+        );
+        for (index, weapon) in all.iter().enumerate() {
+            assert_eq!(position(*weapon), index, "{:?} is out of place in all()", weapon);
+        }
+    }
+
+    /// The proficiency table answers for every (class, weapon) pair.
+    ///
+    /// `weapon_proficiency`'s matches are wildcard-free, so coverage is
+    /// actually enforced by the COMPILER — a new `CharacterClass` or
+    /// `WeaponType` variant fails to build until every row handles it. This
+    /// test is the runtime half: it walks the full cross product so a table
+    /// that ever grows a fallible lookup is caught, and pins the invariant
+    /// that a one-handed-only skill denies the two-handed form and nothing
+    /// else.
+    #[test]
+    fn every_class_has_a_proficiency_for_every_weapon_type() {
+        for class in CharacterClass::all() {
+            for weapon in WeaponType::all() {
+                match weapon_proficiency(*class, *weapon) {
+                    Proficiency::Untrained => {
+                        assert!(!can_wield(*class, *weapon, false));
+                        assert!(!can_wield(*class, *weapon, true));
+                    }
+                    Proficiency::OneHandedOnly => {
+                        assert!(can_wield(*class, *weapon, false));
+                        assert!(!can_wield(*class, *weapon, true));
+                    }
+                    Proficiency::Trained => {
+                        assert!(can_wield(*class, *weapon, false));
+                        assert!(can_wield(*class, *weapon, true));
+                    }
+                }
+            }
+        }
+    }
+
+    /// The WoW Classic rows, spot-checked where they bite. Each of these is a
+    /// weapon the class in question could never train.
+    #[test]
+    fn proficiencies_match_wow_classic() {
+        use CharacterClass as C;
+        use Proficiency::{OneHandedOnly, Trained, Untrained};
+        use WeaponType as W;
+
+        // The card's headline case: a Mage may not carry an axe.
+        assert_eq!(weapon_proficiency(C::Mage, W::Axe), Untrained);
+        assert_eq!(weapon_proficiency(C::Mage, W::Sword), OneHandedOnly);
+        assert_eq!(weapon_proficiency(C::Mage, W::Staff), Trained);
+        assert_eq!(weapon_proficiency(C::Mage, W::Wand), Trained);
+
+        // Warriors train everything but wands.
+        assert_eq!(weapon_proficiency(C::Warrior, W::Wand), Untrained);
+        assert_eq!(weapon_proficiency(C::Warrior, W::Axe), Trained);
+
+        // Paladins: no dagger, no staff, nothing ranged.
+        assert_eq!(weapon_proficiency(C::Paladin, W::Dagger), Untrained);
+        assert_eq!(weapon_proficiency(C::Paladin, W::Staff), Untrained);
+        assert_eq!(weapon_proficiency(C::Paladin, W::Bow), Untrained);
+        assert_eq!(weapon_proficiency(C::Paladin, W::Shield), Trained);
+
+        // Hunters: no mace, no shield.
+        assert_eq!(weapon_proficiency(C::Hunter, W::Mace), Untrained);
+        assert_eq!(weapon_proficiency(C::Hunter, W::Shield), Untrained);
+        assert_eq!(weapon_proficiency(C::Hunter, W::Bow), Trained);
+
+        // Rogues: no axes (those arrive with the Burning Crusade), no
+        // two-handers of any kind.
+        assert_eq!(weapon_proficiency(C::Rogue, W::Axe), Untrained);
+        assert_eq!(weapon_proficiency(C::Rogue, W::Sword), OneHandedOnly);
+        assert_eq!(weapon_proficiency(C::Rogue, W::Mace), OneHandedOnly);
+        assert_eq!(weapon_proficiency(C::Rogue, W::Dagger), Trained);
+
+        // Shamans: no sword, ever.
+        assert_eq!(weapon_proficiency(C::Shaman, W::Sword), Untrained);
+        assert_eq!(weapon_proficiency(C::Shaman, W::Axe), Trained);
+        assert_eq!(weapon_proficiency(C::Shaman, W::Shield), Trained);
+
+        // Priests: dagger, one-handed mace, staff, wand — and nothing else.
+        assert_eq!(weapon_proficiency(C::Priest, W::Mace), OneHandedOnly);
+        assert_eq!(weapon_proficiency(C::Priest, W::Shield), Untrained);
+        assert_eq!(weapon_proficiency(C::Priest, W::Sword), Untrained);
+
+        // Warlocks share the Mage's list.
+        for weapon in WeaponType::all() {
+            assert_eq!(
+                weapon_proficiency(C::Warlock, *weapon),
+                weapon_proficiency(C::Mage, *weapon),
+                "{:?} splits the Mage and Warlock lists",
+                weapon
+            );
+        }
+
+        // A held-in-off-hand item is not a weapon and needs no proficiency.
+        for class in CharacterClass::all() {
+            assert_eq!(weapon_proficiency(*class, W::OffhandFrill), Trained);
+            assert_eq!(weapon_proficiency(*class, W::None), Trained);
+        }
+    }
+
+    /// The shipped item set, filtered by the shipped rule. This is the card's
+    /// repro, run against real data rather than fixtures.
+    #[test]
+    fn shipped_weapons_respect_proficiency() {
+        let items = load_item_definitions().expect("items.ron must load");
+        let reaper = items.get(&ItemId::ArcaniteReaper).expect("Arcanite Reaper");
+
+        assert!(!can_equip(CharacterClass::Mage, reaper), "a Mage cannot wield a two-handed axe");
+        assert!(can_equip(CharacterClass::Warrior, reaper));
+
+        let mage_main_hands = items.items_for_slot(ItemSlot::MainHand, CharacterClass::Mage);
+        assert!(!mage_main_hands.is_empty(), "a Mage keeps daggers, one-handed swords and staves");
+        for (id, item) in &mage_main_hands {
+            assert!(
+                matches!(item.weapon_type, WeaponType::Dagger | WeaponType::Sword | WeaponType::Staff),
+                "{:?} is not in the Mage's weapon list",
+                id
+            );
+        }
+
+        // The other half of the card: a Priest may not carry a shield.
+        let shield = items.get(&ItemId::WallOfTheDeadShield).expect("Wall of the Dead");
+        assert!(!can_equip(CharacterClass::Priest, shield));
+        assert!(can_equip(CharacterClass::Paladin, shield));
+
+        // A Hunter's bow stays a Hunter's bow, and stays off a Priest.
+        let bow = items.get(&ItemId::AshwoodBow).expect("Ashwood Bow");
+        assert!(can_equip(CharacterClass::Hunter, bow));
+        assert!(!can_equip(CharacterClass::Priest, bow));
+    }
+
+    /// Weapon-slot items must declare a weapon type, and nothing else may.
+    ///
+    /// The proficiency gate keys off `weapon_type`, so a weapon that forgot to
+    /// declare one would default to `WeaponType::None` and be equippable by
+    /// everybody — the exact hole this card closes, reopened by a data edit.
+    #[test]
+    fn weapon_slot_items_declare_a_weapon_type() {
+        let items = load_item_definitions().expect("items.ron must load");
+        for (id, item) in items.iter() {
+            if item.slot.is_weapon_slot() {
+                assert_ne!(
+                    item.weapon_type,
+                    WeaponType::None,
+                    "{:?} sits in a weapon socket without a weapon_type — every class could equip it",
+                    id
+                );
+            } else {
+                assert_eq!(
+                    item.weapon_type,
+                    WeaponType::None,
+                    "{:?} is not a weapon but declares a weapon_type",
+                    id
+                );
+            }
+        }
+    }
+
+    /// A socket and the item kind it accepts must agree on what a weapon is.
+    #[test]
+    fn socket_and_kind_agree_on_weapons() {
+        for slot in ItemSlot::all() {
+            assert_eq!(slot.is_weapon_slot(), slot.slot_type().is_weapon_slot());
+        }
+        for kind in ItemSlotType::all() {
+            for socket in kind.sockets() {
+                assert_eq!(kind.is_weapon_slot(), socket.is_weapon_slot());
+            }
+        }
+    }
+
+    /// Every shipped default loadout stays equippable under the tightened rule
+    /// — the card's hard constraint. A loadout that stopped resolving would
+    /// silently change a combatant's stats and therefore match outcomes.
+    #[test]
+    fn default_loadouts_are_classic_legal() {
+        let items = load_item_definitions().expect("items.ron must load");
+        let defaults = load_default_loadouts(&items).expect("loadouts.ron must load");
+
+        for class in CharacterClass::all() {
+            let loadout = defaults.get(*class).unwrap_or_else(|| {
+                panic!("{} has no default loadout", class.name())
+            });
+            validate_class_restrictions(*class, loadout, &items)
+                .unwrap_or_else(|e| panic!("{}: {}", class.name(), e));
+
+            // Non-vacuity: the assertion above is only meaningful if these
+            // loadouts actually carry weapons for the rule to judge.
+            let weapons = loadout
+                .iter()
+                .filter(|(slot, _)| slot.is_weapon_slot())
+                .count();
+            assert!(weapons > 0, "{}'s default loadout carries no weapon", class.name());
+
+            // The resolver must not strip anything from a default loadout.
+            let resolved = resolve_equipped_loadout(*class, &defaults, &Loadout::new(), &items);
+            assert_eq!(&resolved, loadout, "{}'s default loadout was altered by the resolver", class.name());
+
+            // Every class keeps a one-handed main-hand to fall back on when an
+            // off-hand displaces a two-hander.
+            assert!(
+                find_one_handed_mainhand(&items, *class).is_some(),
+                "{} has no one-handed main-hand it may wield",
+                class.name()
+            );
+        }
+    }
+
+    /// An override the class may not wear is stripped, not applied.
+    ///
+    /// The live case: configure a Warrior slot with a two-handed axe, then
+    /// change that slot's class to Mage. The override outlives the class it
+    /// was chosen for, so the resolver — not the picker — has to be the thing
+    /// that guarantees a legal loadout.
+    #[test]
+    fn resolver_strips_an_override_the_class_cannot_equip() {
+        let items = load_item_definitions().expect("items.ron must load");
+        let defaults = load_default_loadouts(&items).expect("loadouts.ron must load");
+
+        let mut overrides = Loadout::new();
+        overrides.insert(ItemSlot::MainHand, ItemId::ArcaniteReaper);
+        overrides.insert(ItemSlot::Ring1, ItemId::LionheartHelm); // a helm in a ring socket
+
+        let resolved = resolve_equipped_loadout(CharacterClass::Mage, &defaults, &overrides, &items);
+        assert!(!resolved.contains_key(&ItemSlot::MainHand), "the axe must not survive");
+        assert_ne!(
+            resolved.get(&ItemSlot::Ring1),
+            Some(&ItemId::LionheartHelm),
+            "a helm must not be worn as a ring"
+        );
+        // The rest of the Mage's default kit is untouched.
+        assert_eq!(resolved.get(&ItemSlot::Head), Some(&ItemId::MagistersCrown));
+        assert_eq!(resolved.get(&ItemSlot::Ranged), Some(&ItemId::WandOfShadows));
+
+        // A legal override still lands.
+        let mut legal = Loadout::new();
+        legal.insert(ItemSlot::MainHand, ItemId::CrescentStaff);
+        let resolved = resolve_equipped_loadout(CharacterClass::Mage, &defaults, &legal, &items);
+        assert_eq!(resolved.get(&ItemSlot::MainHand), Some(&ItemId::CrescentStaff));
+        // ...and the two-hand pass still runs after the class pass.
+        assert!(!resolved.contains_key(&ItemSlot::OffHand), "a two-hander clears the off-hand");
     }
 
     // ---- can_equip tests ----

@@ -7,7 +7,9 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::states::match_config::{ArenaMap, CharacterClass, HunterPetType, MageArmor, MatchConfig, PaladinAura, RogueOpener, RoguePoison, WarlockCurse, WarriorShout};
-use crate::states::play_match::equipment::{ItemId, ItemSlot, Loadout};
+use crate::states::play_match::equipment::{
+    load_item_definitions, validate_class_restrictions, ItemId, ItemSlot, Loadout,
+};
 
 /// Headless match configuration loaded from JSON
 ///
@@ -276,6 +278,52 @@ impl HeadlessMatchConfig {
             return Err("max_duration_secs must be positive".to_string());
         }
 
+        // Validate equipment overrides against the class that will wear them
+        self.validate_equipment()?;
+
+        Ok(())
+    }
+
+    /// Check every equipment override against the class in that slot: the item
+    /// must exist, the socket must accept its kind, and the class must be able
+    /// to equip it (armor type, class list, weapon proficiency).
+    ///
+    /// A config file is the one place a human writes a loadout by hand, so an
+    /// illegal entry is REJECTED here with the offending socket named, rather
+    /// than silently dropped at spawn the way a stale in-app override is. The
+    /// rule is the same one the equipment picker enforces — `can_equip` — so
+    /// headless and graphical agree on what is legal; they differ only in what
+    /// they do about it, and only because only one of them has a file to point
+    /// at.
+    ///
+    /// Reads `items.ron` only when an override actually exists, so the
+    /// override-free paths (every matrix and sweep run) pay nothing.
+    fn validate_equipment(&self) -> Result<(), String> {
+        if self.team1_equipment.is_empty() && self.team2_equipment.is_empty() {
+            return Ok(());
+        }
+        let items = load_item_definitions()?;
+        for (team, classes, equipment) in [
+            (1, &self.team1, &self.team1_equipment),
+            (2, &self.team2, &self.team2_equipment),
+        ] {
+            for (slot_index, raw) in equipment.iter().enumerate() {
+                if raw.is_empty() {
+                    continue;
+                }
+                let Some(class_name) = classes.get(slot_index) else {
+                    return Err(format!(
+                        "team{}_equipment has an entry for slot {} but team{} has only {} members",
+                        team, slot_index, team, classes.len()
+                    ));
+                };
+                let class = Self::parse_class(class_name)?;
+                let overrides = Self::parse_equipment_map(raw)?;
+                validate_class_restrictions(class, &overrides, &items).map_err(|e| {
+                    format!("team{} slot {} ({}): {}", team, slot_index, class_name, e)
+                })?;
+            }
+        }
         Ok(())
     }
 
@@ -653,6 +701,7 @@ impl HeadlessMatchConfig {
         team2_paladin_auras.resize(team2.len(), PaladinAura::default());
 
         // Parse equipment overrides, defaulting to empty maps for missing entries
+        self.validate_equipment()?;
         let team1_equipment = Self::parse_equipment_overrides(&self.team1_equipment, team1.len())?;
         let team2_equipment = Self::parse_equipment_overrides(&self.team2_equipment, team2.len())?;
 
@@ -743,5 +792,47 @@ mod tests {
         assert_eq!(config.team1_kill_target, None);
         assert!(config.team1_hunter_pet_types.is_empty());
         config.validate().expect("valid config must still validate");
+    }
+
+    /// A config file is the one place a loadout is written by hand, so an
+    /// illegal override is rejected at load with the socket named — the same
+    /// treatment a bad class name or map name gets.
+    #[test]
+    fn an_override_the_class_cannot_equip_is_rejected() {
+        // The AS-47 Tester's case: a helm in a ring socket.
+        let json = r#"{"team1":["Warrior"],"team2":["Mage"],"team1_equipment":[{"Ring1":"LionheartHelm"}]}"#;
+        let config: HeadlessMatchConfig = serde_json::from_str(json).expect("parses");
+        let err = config
+            .validate()
+            .expect_err("a helm in a ring socket must not validate");
+        assert!(err.contains("Ring1"), "error must name the socket: {}", err);
+        config
+            .to_match_config()
+            .expect_err("the conversion must reject it too");
+
+        // The card's case: a Mage with a two-handed axe.
+        let json = r#"{"team1":["Mage"],"team2":["Warrior"],"team1_equipment":[{"MainHand":"ArcaniteReaper"}]}"#;
+        let config: HeadlessMatchConfig = serde_json::from_str(json).expect("parses");
+        let err = config
+            .validate()
+            .expect_err("a Mage may not wield an axe");
+        assert!(
+            err.contains("proficiency") && err.contains("Axe"),
+            "error must name the failing gate: {}",
+            err
+        );
+    }
+
+    /// A legal override still loads, and lands in the parsed config.
+    #[test]
+    fn a_legal_override_still_loads() {
+        let json = r#"{"team1":["Mage"],"team2":["Warrior"],"team1_equipment":[{"MainHand":"CrescentStaff"}]}"#;
+        let config: HeadlessMatchConfig = serde_json::from_str(json).expect("parses");
+        config.validate().expect("a Mage may wield a staff");
+        let match_config = config.to_match_config().expect("converts");
+        assert_eq!(
+            match_config.team1_equipment[0].get(&ItemSlot::MainHand),
+            Some(&ItemId::CrescentStaff)
+        );
     }
 }

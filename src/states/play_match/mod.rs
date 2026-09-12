@@ -99,7 +99,7 @@ use bevy::render::render_asset::RenderAssetUsages;
 use super::match_config::{self, MatchConfig};
 use super::GameState;
 use crate::combat::log::{CombatLog, CombatLogEventType};
-use equipment::{ItemDefinitions, DefaultLoadouts, Loadout, resolve_loadout, enforce_two_hand_conflicts, enforce_unique_equipped, format_loadout};
+use equipment::{ItemDefinitions, DefaultLoadouts, Loadout, resolve_equipped_loadout, format_loadout};
 
 // ============================================================================
 // Helper Functions
@@ -794,11 +794,10 @@ pub fn setup_play_match(
             let mage_armor = config.team1_mage_armors.get(i).copied().unwrap_or_default();
             let paladin_aura = config.team1_paladin_auras.get(i).copied().unwrap_or_default();
 
-            // Resolve equipment loadout (defaults + overrides), enforcing 2H constraints
+            // Resolve equipment loadout (defaults + overrides), enforcing every
+            // equip constraint — class/proficiency, two-hand, unique-equipped.
             let equipment_overrides = config.team1_equipment.get(i).cloned().unwrap_or_default();
-            let mut loadout = resolve_loadout(*character, &default_loadouts, &equipment_overrides);
-            enforce_two_hand_conflicts(&mut loadout, &item_defs);
-            enforce_unique_equipped(&mut loadout);
+            let loadout = resolve_equipped_loadout(*character, &default_loadouts, &equipment_overrides, &item_defs);
 
             let position = Vec3::new(team1_spawn_x, 1.0, (i as f32 - 1.0) * 3.0);
             let (entity, combatant) = spawn_combatant(
@@ -887,11 +886,10 @@ pub fn setup_play_match(
             let mage_armor = config.team2_mage_armors.get(i).copied().unwrap_or_default();
             let paladin_aura = config.team2_paladin_auras.get(i).copied().unwrap_or_default();
 
-            // Resolve equipment loadout (defaults + overrides), enforcing 2H constraints
+            // Resolve equipment loadout (defaults + overrides), enforcing every
+            // equip constraint — class/proficiency, two-hand, unique-equipped.
             let equipment_overrides = config.team2_equipment.get(i).cloned().unwrap_or_default();
-            let mut loadout = resolve_loadout(*character, &default_loadouts, &equipment_overrides);
-            enforce_two_hand_conflicts(&mut loadout, &item_defs);
-            enforce_unique_equipped(&mut loadout);
+            let loadout = resolve_equipped_loadout(*character, &default_loadouts, &equipment_overrides, &item_defs);
 
             let position = Vec3::new(team2_spawn_x, 1.0, (i as f32 - 1.0) * 3.0);
             let (entity, combatant) = spawn_combatant(

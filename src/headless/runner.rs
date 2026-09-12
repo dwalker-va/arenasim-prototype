@@ -13,7 +13,7 @@ use crate::states::play_match::{AbilityConfigPlugin, MapConfigPlugin, MovementCo
 use crate::states::play_match::ability_config::{AbilityDefinitions, load_ability_definitions};
 use crate::states::play_match::movement_config::{load_movement_config, MovementConfig};
 use crate::states::play_match::map_config::{load_map_geometry_config, MapGeometryConfig};
-use crate::states::play_match::equipment::{EquipmentPlugin, ItemDefinitions, DefaultLoadouts, resolve_loadout, enforce_two_hand_conflicts, enforce_unique_equipped, format_loadout, load_item_definitions, load_default_loadouts};
+use crate::states::play_match::equipment::{EquipmentPlugin, ItemDefinitions, DefaultLoadouts, resolve_equipped_loadout, format_loadout, load_item_definitions, load_default_loadouts};
 // Use the stable systems API instead of importing internal functions directly
 use crate::states::play_match::systems::{
     self, combatant_id, pet_combatant_id, ArenaDampening, Combatant, FloatingTextState, GameRng, MatchCountdown,
@@ -317,9 +317,7 @@ fn headless_setup_match(
             let mage_armor = config.team1_mage_armors.get(i).copied().unwrap_or_default();
             let paladin_aura = config.team1_paladin_auras.get(i).copied().unwrap_or_default();
             let equipment_overrides = config.team1_equipment.get(i).cloned().unwrap_or_default();
-            let mut loadout = resolve_loadout(*character, &default_loadouts, &equipment_overrides);
-            enforce_two_hand_conflicts(&mut loadout, &item_defs);
-            enforce_unique_equipped(&mut loadout);
+            let loadout = resolve_equipped_loadout(*character, &default_loadouts, &equipment_overrides, &item_defs);
             let position = Vec3::new(team1_spawn_x, 1.0, (i as f32 - 1.0) * 3.0);
             let mut combatant = Combatant::new_with_curse_prefs(1, i as u8, *character, rogue_opener, rogue_poison, warlock_curse_prefs);
             combatant.warrior_shout = warrior_shout;
@@ -399,9 +397,7 @@ fn headless_setup_match(
             let mage_armor = config.team2_mage_armors.get(i).copied().unwrap_or_default();
             let paladin_aura = config.team2_paladin_auras.get(i).copied().unwrap_or_default();
             let equipment_overrides = config.team2_equipment.get(i).cloned().unwrap_or_default();
-            let mut loadout = resolve_loadout(*character, &default_loadouts, &equipment_overrides);
-            enforce_two_hand_conflicts(&mut loadout, &item_defs);
-            enforce_unique_equipped(&mut loadout);
+            let loadout = resolve_equipped_loadout(*character, &default_loadouts, &equipment_overrides, &item_defs);
             let position = Vec3::new(team2_spawn_x, 1.0, (i as f32 - 1.0) * 3.0);
             let mut combatant = Combatant::new_with_curse_prefs(2, i as u8, *character, rogue_opener, rogue_poison, warlock_curse_prefs);
             combatant.warrior_shout = warrior_shout;
