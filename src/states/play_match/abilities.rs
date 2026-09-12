@@ -30,6 +30,22 @@ pub enum SpellSchool {
 }
 
 impl SpellSchool {
+    /// Every school, in declaration order. The single source of truth for any
+    /// surface that enumerates schools (the encyclopedia's filter chips), so a
+    /// school added to the enum joins those lists without a second edit.
+    pub const fn all() -> &'static [SpellSchool] {
+        &[
+            SpellSchool::Physical,
+            SpellSchool::Frost,
+            SpellSchool::Holy,
+            SpellSchool::Shadow,
+            SpellSchool::Arcane,
+            SpellSchool::Fire,
+            SpellSchool::Nature,
+            SpellSchool::None,
+        ]
+    }
+
     /// Canonical per-school RGB (sRGB bytes) — the single color authority shared
     /// by the View Combatant UI (as `egui::Color32`) and world-space casting
     /// visuals (as `bevy::Color`). WoW-canonical hues; exhaustive so a new
@@ -268,5 +284,38 @@ pub fn is_spell_school_locked(spell_school: SpellSchool, auras: Option<&ActiveAu
         })
     } else {
         false
+    }
+}
+
+#[cfg(test)]
+mod spell_school_tests {
+    use super::*;
+
+    /// `SpellSchool::all()` must stay exhaustive. The `match` is the guard: a
+    /// new variant fails to compile here, and the count assertion catches a
+    /// variant that was added to the match but forgotten in the slice.
+    #[test]
+    fn all_lists_every_school() {
+        let mut seen = 0;
+        for school in SpellSchool::all() {
+            seen += match school {
+                SpellSchool::Physical
+                | SpellSchool::Frost
+                | SpellSchool::Holy
+                | SpellSchool::Shadow
+                | SpellSchool::Arcane
+                | SpellSchool::Fire
+                | SpellSchool::Nature
+                | SpellSchool::None => 1,
+            };
+        }
+        assert_eq!(seen, 8, "SpellSchool::all() is missing a variant");
+        let mut sorted: Vec<u8> = SpellSchool::all()
+            .iter()
+            .map(|s| s.to_lockout_magnitude() as u8)
+            .collect();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), 8, "SpellSchool::all() lists a school twice");
     }
 }

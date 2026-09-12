@@ -86,20 +86,14 @@ pub fn tooltip(ui: &mut egui::Ui, topic: Topic, data: &EncyclopediaData) {
                 ui.label(egui::RichText::new(topic.name(data)).size(14.0).color(GOLD).strong());
             }
         },
-        Topic::Class(class) => {
-            ui.label(
-                egui::RichText::new(class.name())
-                    .size(14.0)
-                    .color(topic.accent())
-                    .strong(),
-            );
-            ui.label(egui::RichText::new(class.description()).size(12.0).color(MUTED));
-        }
-        // Abilities and auras get their real tooltips (the shared
-        // `build_ability_description` / `build_aura_description` generators)
-        // when their sections land; the address and the hover contract exist
-        // now so nothing has to be re-wired then.
-        Topic::Ability(_) | Topic::Aura(_) => {
+        Topic::Class(class) => super::classes::tooltip(ui, class, data),
+        // The shared `ability_text` generator — the same prose View Combatant
+        // shows for the same ability.
+        Topic::Ability(ability) => super::abilities::tooltip(ui, ability, data),
+        // Auras get their real tooltip with the aura catalog, which also
+        // settles what an aura page is addressed by. The hover contract and the
+        // address exist now, so nothing here has to be re-wired then.
+        Topic::Aura(_) => {
             ui.label(egui::RichText::new(topic.name(data)).size(14.0).color(TEXT).strong());
             ui.label(
                 egui::RichText::new(topic.section().pending_note())
@@ -128,10 +122,18 @@ pub fn link(response: egui::Response, topic: Topic, data: &EncyclopediaData) -> 
 }
 
 /// Compact icon with a wrapped caption underneath — the kit-grid form.
+///
+/// Every cell is the SAME height whether its caption runs to one line or two,
+/// so a kit grid lays out as a lattice instead of a ragged row of differently
+/// tall tiles. Captions wrap to two lines and then ellipsize; the tooltip
+/// always has the full name.
 pub fn icon_link(ui: &mut egui::Ui, topic: Topic, data: &EncyclopediaData) -> Option<Topic> {
-    const W: f32 = 76.0;
-    let galley = fitted(ui, topic.name(data), 11.5, TEXT, W - 4.0, 2);
-    let height = ICON_TILE + 6.0 + galley.size().y + 8.0;
+    const W: f32 = 86.0;
+    const CAPTION_SIZE: f32 = 11.5;
+    let galley = fitted(ui, topic.name(data), CAPTION_SIZE, TEXT, W - 6.0, 2);
+    // Reserve two caption lines unconditionally — the lattice invariant.
+    let two_lines = ui.fonts(|f| f.row_height(&egui::FontId::proportional(CAPTION_SIZE))) * 2.0;
+    let height = ICON_TILE + 6.0 + two_lines + 8.0;
     let (rect, response) = ui.allocate_exact_size(egui::vec2(W, height), egui::Sense::click());
 
     let painter = ui.painter_at(rect);
@@ -184,11 +186,11 @@ pub fn tile(
     let text_left = icon_rect.right() + PAD;
     let text_w = (rect.right() - PAD - badge_w - text_left).max(20.0);
 
-    let name = fitted(ui, topic.name(data), 13.5, topic.accent(), text_w, 2);
+    let name = fitted(ui, topic.name(data), 13.5, topic.accent(data), text_w, 2);
     let sub = fitted(ui, subtitle.to_string(), 11.5, MUTED, text_w, 1);
     let block_h = name.size().y + sub.size().y;
     let mut y = rect.center().y - block_h / 2.0;
-    painter.galley(egui::pos2(text_left, y), name.clone(), topic.accent());
+    painter.galley(egui::pos2(text_left, y), name.clone(), topic.accent(data));
     y += name.size().y;
     painter.galley(egui::pos2(text_left, y), sub, MUTED);
 
@@ -269,7 +271,7 @@ pub fn chip(ui: &mut egui::Ui, topic: Topic, data: &EncyclopediaData) -> Option<
     let galley = ui.painter().layout_no_wrap(
         topic.name(data),
         egui::FontId::proportional(13.0),
-        topic.accent(),
+        topic.accent(data),
     );
     let width = 4.0 + ICON + 6.0 + galley.size().x + PAD;
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, H), egui::Sense::click());
@@ -294,7 +296,7 @@ pub fn chip(ui: &mut egui::Ui, topic: Topic, data: &EncyclopediaData) -> Option<
     painter.galley(
         egui::pos2(icon_rect.right() + 6.0, rect.center().y - galley.size().y / 2.0),
         galley,
-        topic.accent(),
+        topic.accent(data),
     );
 
     link(response, topic, data)
@@ -323,7 +325,7 @@ pub fn detail_header(
             ui.label(
                 egui::RichText::new(topic.name(data))
                     .size(24.0)
-                    .color(topic.accent()),
+                    .color(topic.accent(data)),
             );
             if !subtitle.is_empty() {
                 ui.label(egui::RichText::new(subtitle).size(13.5).color(MUTED));
@@ -337,6 +339,33 @@ pub fn section_heading(ui: &mut egui::Ui, text: &str) {
     ui.add_space(16.0);
     ui.label(egui::RichText::new(text).size(15.0).color(GOLD));
     ui.add_space(6.0);
+}
+
+/// Quieter heading for a subdivision INSIDE a section — the per-pet groups on
+/// a class page. Muted and smaller than [`section_heading`] so the hierarchy
+/// reads at a glance: gold headings are sections, grey ones are their parts.
+pub fn sub_heading(ui: &mut egui::Ui, text: &str) {
+    ui.add_space(12.0);
+    ui.label(egui::RichText::new(text).size(12.5).color(MUTED));
+    ui.add_space(4.0);
+}
+
+/// Panelled block of generated prose — an ability's mechanics text. Wider than
+/// the stat block beside it because it is sentences, not numbers.
+pub fn prose_block(ui: &mut egui::Ui, text: &str) {
+    if text.trim().is_empty() {
+        return;
+    }
+    let width = ui.available_width().min(560.0);
+    egui::Frame::new()
+        .fill(PANEL)
+        .stroke(egui::Stroke::new(1.0, LINE))
+        .corner_radius(6.0)
+        .inner_margin(egui::Margin::symmetric(16, 12))
+        .show(ui, |ui| {
+            ui.set_width(width - 32.0);
+            ui.label(egui::RichText::new(text).size(13.5).color(TEXT));
+        });
 }
 
 /// Panelled two-column key/value block. Values are right-aligned so numbers

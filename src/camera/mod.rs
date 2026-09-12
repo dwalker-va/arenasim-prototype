@@ -75,8 +75,10 @@ fn handle_escape_key(
             }
             GameState::Encyclopedia => {
                 // The Encyclopedia has its own Back handler: the key clears an
-                // active search, then pops the navigation stack, and only
-                // leaves for the main menu once it is at the root.
+                // active search, then pops the navigation stack, and only at
+                // the root leaves for the screen it was opened from
+                // (`EncyclopediaState::return_to`) — which is the main menu
+                // today, but is not hardcoded to be.
             }
             GameState::AnimationSandbox => {
                 next_state.set(GameState::MainMenu);
