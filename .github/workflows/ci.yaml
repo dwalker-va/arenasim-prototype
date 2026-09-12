@@ -41,9 +41,10 @@ jobs:
     # bit-exactness that is the guard. Nothing ships on Linux either — the
     # release workflow builds macOS and Windows.
     #
-    # Measured cold (no cache, first run of this file): macOS 39m total,
+    # Measured cold (no cache, the first run of this file): macOS 39m total,
     # 12m build + 26m test; Linux 35m. That margin does not buy off the
-    # reproducibility, and cold is paid only when Cargo.lock moves.
+    # reproducibility, and cold is paid only when the cache misses. A cached
+    # run is 16m (31s restore, 7m build, 8m test).
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -86,9 +87,9 @@ jobs:
       # silently dropping 18 assertions is exactly the bargain this workflow
       # exists to stop the repo from making.
       #
-      # Of the measured 26m cold, roughly 6m is running the tests; the rest is
-      # that second compile, and the cache absorbs it on every later run.
-      # `headless_tests` (~2.5m) and `movement_probes` (~2m) dominate the 6m.
+      # Of the measured 26m cold, only ~2.5m is actually running the 1158
+      # tests; the rest is that second compile, which the cache absorbs on
+      # every later run (8m warm).
       - name: Test
         run: cargo test --locked
 

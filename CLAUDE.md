@@ -974,11 +974,12 @@ Three choices in that file are load-bearing; do not "simplify" them away:
   `--matrix`). Out of scope by design: measurements a human reads, not
   assertions, and no win-rate threshold belongs in a merge gate.
 
-**Wall clock.** A cold run (no cache, or any `Cargo.lock` change) is ~39
-minutes: 12m release build, 26m test — of which only ~6m is running tests, the
-rest being that second dependency compile. `Swatinem/rust-cache` absorbs the
-compile on every later run. A branch reads the cache `main` saved, so the
-expensive run is the one on `main` after a dependency bump.
+**Wall clock**, measured: a cold run (cache miss) is 39 minutes — 12m release
+build, 26m test, of which only ~2.5m is actually running the 1158 tests; the
+rest is compiling. A cached run is **16 minutes** (31s cache restore, 7m build,
+8m test): dependencies come back from the cache, but `arenasim` itself is a
+large crate and is rebuilt in both profiles. A branch reads the cache `main`
+saved, so the expensive run is the one on `main` after a dependency bump.
 
 A red CI check does **not** block merge yet — branch protection is a repository
 setting, not a file in this repo. To make it blocking: repo Settings → Rules →
