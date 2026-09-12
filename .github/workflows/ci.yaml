@@ -25,18 +25,25 @@ env:
 jobs:
   test:
     name: build + test
-    # macos-latest (arm64) rather than the more usual ubuntu-latest, and that is
-    # a correctness choice, not a habit.
+    # macos-latest (arm64) rather than the more usual ubuntu-latest. The reason
+    # is REPRODUCIBILITY, and it is not a guess about a Linux break — that part
+    # was measured before this file was settled.
     #
-    # `tests/determinism_pin.rs` asserts a match's duration BIT-EXACTLY
-    # (`f32::to_bits`, deliberately not an epsilon) against values recorded on
-    # an arm64 Mac, and `tests/baselines/` hashes whole match logs the same way.
-    # Float results that route through libm transcendentals are not guaranteed
-    # identical across architecture and libm implementation, so an x86_64 Linux
-    # runner could fail those guards for a reason that is not a regression — and
-    # the only way to get green again would be to loosen the bit-exactness that
-    # is the entire point of the guard. Nothing ships on Linux either: the
+    # `tests/determinism_pin.rs` compares a match duration by `f32::to_bits`
+    # (deliberately not an epsilon) and `tests/baselines/` hashes whole match
+    # logs; every one of those values was recorded on an arm64 Mac. A one-off
+    # x86_64 Linux run of this exact workflow built the project and passed the
+    # whole suite, pin included, so nothing here is platform-dependent TODAY.
+    # What macOS buys is that a red check reproduces on the same machine class
+    # the baselines were blessed on. The day something does diverge, "CI says
+    # the pin moved but it passes locally" is the failure this repo can least
+    # afford, because the only route back to green would be loosening the very
+    # bit-exactness that is the guard. Nothing ships on Linux either — the
     # release workflow builds macOS and Windows.
+    #
+    # Measured cold (no cache, first run of this file): macOS 39m total,
+    # 12m build + 26m test; Linux 35m. That margin does not buy off the
+    # reproducibility, and cold is paid only when Cargo.lock moves.
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -69,12 +76,19 @@ jobs:
       - name: Build (release)
         run: cargo build --release --locked
 
-      # The DEV profile on purpose, even though it costs a second dependency
-      # compile. `debug_assertions` is on there, and src/ carries ~18
-      # `debug_assert!` invariants (aura bookkeeping, combatant stat clamps)
-      # that a `--release` test run compiles away entirely — running the suite
-      # only in release would quietly drop them from the very set of guards this
-      # workflow exists to make non-optional.
+      # The DEV profile on purpose, and it is the expensive choice: because
+      # `[profile.dev.package."*"] opt-level = 3`, this compiles the whole Bevy
+      # graph a SECOND time rather than reusing the release artifacts above.
+      # `cargo test --release` would be much cheaper and is the wrong trade —
+      # `debug_assertions` is on only here, and src/ carries ~18 `debug_assert!`
+      # invariants (aura bookkeeping, combatant stat clamps) that a release test
+      # run compiles away entirely. Buying back ~15 minutes of cold compile by
+      # silently dropping 18 assertions is exactly the bargain this workflow
+      # exists to stop the repo from making.
+      #
+      # Of the measured 26m cold, roughly 6m is running the tests; the rest is
+      # that second compile, and the cache absorbs it on every later run.
+      # `headless_tests` (~2.5m) and `movement_probes` (~2m) dominate the 6m.
       - name: Test
         run: cargo test --locked
 

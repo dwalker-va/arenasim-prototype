@@ -935,17 +935,22 @@ were written to catch.
 
 Three choices in that file are load-bearing; do not "simplify" them away:
 
-- **It runs on `macos-latest` (arm64), not `ubuntu-latest`.**
-  `tests/determinism_pin.rs` compares a match duration by `f32::to_bits`, and
-  `tests/baselines/` hashes whole match logs. Those values were recorded on an
-  arm64 Mac; float results routed through libm are not guaranteed identical on
-  another architecture, so a Linux runner could go red for a reason that is not
-  a regression — and the only way back to green would be to loosen the very
-  bit-exactness that is the guard. Nothing ships on Linux either.
-- **Tests run in the DEV profile**, even though that costs a second dependency
-  compile beside the release build. `debug_assertions` is on there, and `src/`
-  carries ~18 `debug_assert!` invariants that a `--release` test run compiles
-  away entirely.
+- **It runs on `macos-latest` (arm64), not `ubuntu-latest`** — for
+  reproducibility, and that was measured rather than assumed. A one-off x86_64
+  Linux run of the same workflow built the project and passed the whole suite,
+  `determinism_pin` included, so nothing is platform-dependent today. But that
+  pin compares a match duration by `f32::to_bits` and `tests/baselines/` hashes
+  whole match logs, all recorded on an arm64 Mac; the day one of those does
+  diverge, "CI says the pin moved but it passes locally" is the failure this
+  repo can least afford, because the only route back to green is loosening the
+  bit-exactness that *is* the guard. Nothing ships on Linux either.
+- **Tests run in the DEV profile**, which is the expensive choice: with
+  `[profile.dev.package."*"] opt-level = 3` it compiles the whole Bevy graph a
+  second time instead of reusing the release artifacts. `debug_assertions` is on
+  only there, and `src/` carries ~18 `debug_assert!` invariants that a
+  `--release` test run compiles away — buying back cold-build minutes by
+  silently dropping 18 assertions is the bargain this workflow exists to
+  prevent.
 - **`python3` is installed explicitly.** `tests/db2_spell_sweep_fixtures.rs`
   panics when the interpreter is missing rather than skipping, on purpose;
   provisioning it keeps that choice meaning what it was written to mean instead
@@ -968,6 +973,12 @@ Three choices in that file are load-bearing; do not "simplify" them away:
 - The **balance sweeps** (`scripts/*_2v2_matrix.sh`, `headtohead_sweep.py`,
   `--matrix`). Out of scope by design: measurements a human reads, not
   assertions, and no win-rate threshold belongs in a merge gate.
+
+**Wall clock.** A cold run (no cache, or any `Cargo.lock` change) is ~39
+minutes: 12m release build, 26m test — of which only ~6m is running tests, the
+rest being that second dependency compile. `Swatinem/rust-cache` absorbs the
+compile on every later run. A branch reads the cache `main` saved, so the
+expensive run is the one on `main` after a dependency bump.
 
 A red CI check does **not** block merge yet — branch protection is a repository
 setting, not a file in this repo. To make it blocking: repo Settings → Rules →
