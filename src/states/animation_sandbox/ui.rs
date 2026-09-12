@@ -682,6 +682,38 @@ pub fn ability_details(
     (Some(config.name.clone()), details)
 }
 
+/// The panel's entry list for one caster class, flattened for drawing.
+///
+/// This is the whole row-building step: [`entries_for_class`] for the entries,
+/// their family and their label; [`entry_needs_dummy`] for the AE3 disable; and
+/// `icon_for` for the texture. The Bevy wrapper below has nothing left to add,
+/// which is the point — it means the snapshot fixture can build a REAL panel's
+/// rows by calling this same function rather than hand-assembling a list beside
+/// it. The fixture passing `|_| None` is the one honest difference: kittest has
+/// no Bevy textures, so it is the only input the harness cannot supply.
+///
+/// Kept here rather than in `playback.rs` because `EntryRow` is a drawing type
+/// (it carries an `egui::TextureId`); `entry_needs_dummy` stays `pub(crate)`
+/// so its per-ability behaviour keeps being pinned by the in-module unit test
+/// that runs in the default `cargo test`, instead of being restated by a
+/// fixture behind `#[ignore]`.
+pub fn entry_rows(
+    class: CharacterClass,
+    defs: &AbilityDefinitions,
+    icon_for: impl Fn(&str) -> Option<egui::TextureId>,
+) -> Vec<EntryRow> {
+    entries_for_class(class, defs)
+        .into_iter()
+        .map(|listing| EntryRow {
+            icon: icon_for(&listing.label),
+            needs_dummy: super::playback::entry_needs_dummy(listing.entry, defs),
+            entry: listing.entry,
+            family: listing.family,
+            label: listing.label,
+        })
+        .collect()
+}
+
 /// Bevy wrapper: gathers the view, draws, applies the actions.
 #[allow(clippy::too_many_arguments)]
 pub fn sandbox_ui(
@@ -695,16 +727,9 @@ pub fn sandbox_ui(
     class_icons: Res<ClassIcons>,
     mut next_state: ResMut<NextState<super::super::GameState>>,
 ) {
-    let rows: Vec<EntryRow> = entries_for_class(config.caster_class, &defs)
-        .into_iter()
-        .map(|listing| EntryRow {
-            icon: spell_icons.textures.get(&listing.label).copied(),
-            needs_dummy: super::playback::entry_needs_dummy(listing.entry, &defs),
-            entry: listing.entry,
-            family: listing.family,
-            label: listing.label,
-        })
-        .collect();
+    let rows = entry_rows(config.caster_class, &defs, |label| {
+        spell_icons.textures.get(label).copied()
+    });
 
     let (selected_label, selected_details) = playback
         .selected

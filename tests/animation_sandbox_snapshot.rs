@@ -22,21 +22,31 @@
 //! commit (see CLAUDE.md's snapshot-loop section).
 //!
 //! What the mock itself claims is guarded without a GPU:
-//! `fixture_still_covers_every_row_state` and
-//! `fixture_transport_state_is_reachable` below run in the default `cargo
-//! test`, as does `entry_needs_dummy_pins_the_snapshot_fixture_rows` in
+//! `fixture_still_covers_every_row_state`, `fixture_rows_are_the_panels_own`
+//! and `fixture_transport_state_is_reachable` below run in the default `cargo
+//! test`, as does `entry_needs_dummy_classifies_the_sandbox_rows` in
 //! `playback.rs`. Those exist because a fixture that quietly stops covering a
-//! state — or restates a value that has since changed — moves no pixels, so
-//! the snapshot keeps passing on a lie.
+//! state — or draws a panel the app cannot serve — moves no pixels, so the
+//! snapshot keeps passing on a lie.
 //!
-//! Every VALUE here is derived from the code that produces it. The only
-//! deliberate departures from a panel the running app could serve are the
-//! borrowed Warrior row (the fixture's sole `Unsupported` coverage; the Mage
-//! has none) and the hand-set `needs_dummy` flags, both documented on
-//! `mock_rows` and both guarded elsewhere. Anything else hand-written here is
-//! a defect waiting to be blessed into a baseline — which is exactly how the
-//! panel came to claim a 1.50s Frostbolt pass (AS-62), a 30yd / 24-mana
-//! Frostbolt (AS-50), and a `Cast` Frost Nova (AS-43).
+//! ## What is hand-set here
+//!
+//! Exactly one fact: `BORROWED_ROW` — WHICH ability is borrowed from a class
+//! the fixture does not stage, so the panel has an `Unsupported` row to draw
+//! (the Mage has none). Its label, family and `needs_dummy` are derived like
+//! every other row's; only the decision to include it is a choice.
+//!
+//! Everything else — the row list, every row's label, family and
+//! `needs_dummy`, the SELECTED readout, the transport's duration and speed —
+//! comes from the code that produces it, through the same calls
+//! `ui::sandbox_ui` makes. The rest of the view is scene-setting the user
+//! picks at runtime (which class is staged, dummy on or off, paused or
+//! playing) plus one free choice with no producing code (`PLAYHEAD_FRACTION`).
+//!
+//! Anything hand-written beyond that is a defect waiting to be blessed into a
+//! baseline — which is exactly how the panel came to claim a 1.50s Frostbolt
+//! pass (AS-62), a 30yd / 24-mana Frostbolt (AS-50), a `Cast` Frost Nova
+//! (AS-43), and a Mage who knew only five of her eight spells (AS-72).
 //!
 //! Fidelity caveats vs the real client: kittest has no Bevy textures, so every
 //! `EntryRow::icon` is `None` here and rows draw their framed empty slot rather
@@ -45,54 +55,55 @@
 //! grouping, and color — not icon or font fidelity.
 
 use arenasim::states::animation_sandbox::playback::{
-    entries_for_class, entry_duration, BodyAnimation, EntryFamily, SandboxEntry, SandboxPlayback,
-    LOOP_TAIL_SECS,
+    entry_duration, EntryFamily, SandboxEntry, SandboxPlayback, LOOP_TAIL_SECS,
 };
 use arenasim::states::animation_sandbox::ui::{
-    ability_details, draw_sandbox_ui, CameraPreset, EntryRow, SandboxView, SPEEDS,
+    ability_details, draw_sandbox_ui, entry_rows, CameraPreset, EntryRow, SandboxView, SPEEDS,
 };
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use egui_kittest::Harness;
 
-/// The real classifier's label and family for one entry, looked up through the
-/// same `entries_for_class` call the live panel builds its rows from.
+/// The class the fixture stages. Its whole kit is drawn, exactly as the panel
+/// would serve it — the fixture picks WHICH class, not which of her spells.
+const FIXTURE_CLASS: CharacterClass = CharacterClass::Mage;
+
+/// The one ability borrowed from a class the fixture does not stage — and the
+/// only fact in this file chosen by hand rather than derived.
 ///
-/// Searching EVERY class (not just the Mage) because the fixture deliberately
-/// carries an `Unsupported` row and the Mage has none — the only two
-/// `Unsupported` abilities in the game are Wind Shear and Heroic Strike.
-fn classified(defs: &AbilityDefinitions, entry: SandboxEntry) -> (String, EntryFamily) {
+/// It is here to cover the `n/a` tag and its "no application code / no distinct
+/// cast visual" hover, which `FIXTURE_CLASS` cannot: the only two `Unsupported`
+/// abilities in the game are Wind Shear and Heroic Strike, and the Mage owns
+/// neither. `fixture_rows_are_the_panels_own` holds it to being exactly one
+/// extra row; `fixture_still_covers_every_row_state` holds it to still being
+/// `Unsupported`.
+const BORROWED_ROW: AbilityType = AbilityType::HeroicStrike;
+
+/// One row built exactly as the panel builds it, searching EVERY class.
+///
+/// `entry_rows` is per-class and the borrowed row belongs to a class the
+/// fixture does not stage, so the lookup spans all of them.
+fn panel_row(defs: &AbilityDefinitions, entry: SandboxEntry) -> EntryRow {
     CharacterClass::all()
         .iter()
-        .flat_map(|class| entries_for_class(*class, defs))
-        .find(|listing| listing.entry == entry)
-        .map(|listing| (listing.label, listing.family))
+        .flat_map(|class| entry_rows(*class, defs, |_| None))
+        .find(|row| row.entry == entry)
         .unwrap_or_else(|| panic!("{entry:?} is not a sandbox entry under any class"))
 }
 
-/// The mock entry list: a Mage's own rows plus one borrowed row, chosen so the
-/// two snapshots between them cover every way the panel can draw an ability —
-/// enabled, `needs dummy`, and `n/a`.
+/// The fixture's entry list: the staged class's ENTIRE list as `ui::entry_rows`
+/// builds it — every ability `abilities.ron` attributes to her, in the panel's
+/// own order, followed by the body rows — plus the single borrowed row.
 ///
-/// Family and label are DERIVED for every row, ability and body alike:
-/// `classified` asks `entries_for_class` (hence `mechanism_for`) exactly as the
-/// live panel does, so the mock cannot drift from the classifier the way it did
-/// when Frost Nova sat here hand-labelled `Cast` while the real answer had
-/// become `Residue`. The body rows' `EntryFamily::Body` was the last hand-set
-/// classification left; it is tautological today, since `entries_for_class`
-/// stamps `Body` on every `BodyAnimation`, but the fixture now READS that
-/// rather than agreeing with it.
-///
-/// `needs_dummy` is the one field still set by hand, because
-/// `playback::entry_needs_dummy` is `pub(crate)` and out of reach of an
-/// integration test. The values below are what that predicate returns today:
-/// direct damage (Frostbolt, Frost Nova) or a hostile aura (Polymorph) targets
-/// the dummy; a self buff does not. That is no longer an untested claim — the
-/// same six pairs are pinned against the real predicate by
-/// `entry_needs_dummy_pins_the_snapshot_fixture_rows` in `playback.rs`, which
-/// runs in the default `cargo test`, so a predicate change fails there rather
-/// than silently surviving here (a stale value moves no pixels).
+/// Nothing in a row is written here. Label, family and `needs_dummy` all come
+/// back from the same `entry_rows` call `sandbox_ui` makes, so the fixture is
+/// not a corrected copy of the panel: it IS the panel, one class's worth, with
+/// `icon_for` returning `None` because kittest has no Bevy textures. The
+/// hand-assembled list this replaced had drifted three ways over three passes —
+/// a `Cast` Frost Nova (AS-43), and then, quietly, a Mage missing Ice Barrier,
+/// Mage Armor and Molten Armor while the module doc said "a Mage's own rows"
+/// (AS-72).
 ///
 /// One row shape has NO representation here and cannot have one: the `soon`
 /// tag needs a family that is non-playable and not `Unsupported`, and
@@ -103,47 +114,80 @@ fn classified(defs: &AbilityDefinitions, entry: SandboxEntry) -> (String, EntryF
 /// this fixture was rebuilt to remove.
 fn mock_rows() -> Vec<EntryRow> {
     let defs = AbilityDefinitions::default();
-    let row = |entry, needs_dummy| {
-        let (label, family) = classified(&defs, entry);
-        EntryRow {
-            entry,
-            family,
-            label,
-            icon: None,
-            needs_dummy,
-        }
-    };
-    let ability = |ability, needs_dummy| row(SandboxEntry::Ability(ability), needs_dummy);
-    let body = |b: BodyAnimation| row(SandboxEntry::Body(b), false);
+    let mut rows = entry_rows(FIXTURE_CLASS, &defs, |_| None);
 
-    vec![
-        // Offensive — greyed with `needs dummy` whenever the dummy is off.
-        ability(AbilityType::Frostbolt, true),
-        ability(AbilityType::Polymorph, true),
-        ability(AbilityType::FrostNova, true),
-        // Self buffs — enabled in both states.
-        ability(AbilityType::FrostArmor, false),
-        ability(AbilityType::ArcaneIntellect, false),
-        // Borrowed from the Warrior: the only coverage of the `n/a` tag and its
-        // "no application code / no distinct cast visual" hover.
-        ability(AbilityType::HeroicStrike, false),
-        body(BodyAnimation::WalkBob),
-        body(BodyAnimation::AutoAttack),
-        body(BodyAnimation::DeathSink),
-        body(BodyAnimation::VictoryBounce),
-    ]
+    // Ahead of the BODY rows, so the borrowed row lands in the ABILITIES
+    // section in the reading order the panel would give a class ability.
+    let first_body = rows
+        .iter()
+        .position(|row| row.family == EntryFamily::Body)
+        .unwrap_or(rows.len());
+    rows.insert(
+        first_body,
+        panel_row(&defs, SandboxEntry::Ability(BORROWED_ROW)),
+    );
+    rows
+}
+
+/// The borrowed row is the fixture's one departure from a panel the app could
+/// serve, so it is worth proving it is still exactly that — one extra row, and
+/// otherwise the staged class's own list, entire and in order.
+///
+/// This is what makes the row list unable to drift back into a silent subset.
+/// The list it replaced showed five of the Mage's eight abilities under a doc
+/// that read as all of them, for three passes, because nothing compared it to
+/// what the class actually has.
+#[test]
+fn fixture_rows_are_the_panels_own() {
+    let defs = AbilityDefinitions::default();
+    let panel: Vec<SandboxEntry> = entry_rows(FIXTURE_CLASS, &defs, |_| None)
+        .iter()
+        .map(|row| row.entry)
+        .collect();
+    let fixture: Vec<SandboxEntry> = mock_rows().iter().map(|row| row.entry).collect();
+    let borrowed = SandboxEntry::Ability(BORROWED_ROW);
+
+    assert!(
+        !panel.contains(&borrowed),
+        "{BORROWED_ROW:?} is now a {FIXTURE_CLASS:?} ability, so it is no longer \
+         borrowed — drop it from `mock_rows` and let the class list carry it"
+    );
+    assert_eq!(
+        fixture.iter().filter(|e| **e == borrowed).count(),
+        1,
+        "the borrowed row must appear exactly once"
+    );
+    assert_eq!(
+        fixture
+            .iter()
+            .copied()
+            .filter(|e| *e != borrowed)
+            .collect::<Vec<_>>(),
+        panel,
+        "the fixture's rows are no longer {FIXTURE_CLASS:?}'s own list plus the \
+         one borrowed row — either a row was dropped (the panel would then draw \
+         a class that cannot cast her own spells) or a second row was added \
+         without being documented as a departure"
+    );
 }
 
 /// The fixture is only worth its render time while it still reaches the row
 /// states it was built to cover. Losing one is otherwise SILENT-ish: the tag
 /// changes, one snapshot fails, someone re-blesses, and the state is uncovered
 /// with nothing left to say so. These run in the default `cargo test`.
+///
+/// Now that the rows are DERIVED, this reads as an assertion about the real
+/// code rather than about a copy of it: the `needs dummy` check, for instance,
+/// fails the moment `entry_needs_dummy` stops marking any of the staged class's
+/// abilities — without a GPU, and without waiting for whoever next renders the
+/// `#[ignore]`d snapshots. That is the coverage the fixture's old hand-set
+/// booleans bought by restating the predicate, bought instead by asking it.
 #[test]
 fn fixture_still_covers_every_row_state() {
     let rows = mock_rows();
     assert!(
         rows.iter().any(|r| r.family == EntryFamily::Unsupported),
-        "no `n/a` row left — the fixture borrowed Heroic Strike solely to \
+        "no `n/a` row left — the fixture borrows {BORROWED_ROW:?} solely to \
          cover the Unsupported tag and its hover; if it gained a visual, \
          borrow the other Unsupported ability (Wind Shear) instead"
     );
@@ -206,7 +250,7 @@ fn view(selected: Option<SandboxEntry>, paused: bool, dummy_enabled: bool) -> Sa
     // reaches that function's own `None => 0.0` arm.
     let mut playback = SandboxPlayback::default();
     if let Some(entry) = selected {
-        playback.select(entry, classified(&defs, entry).1);
+        playback.select(entry, panel_row(&defs, entry).family);
     }
     let duration = entry_duration(&playback, &defs);
 
@@ -217,7 +261,7 @@ fn view(selected: Option<SandboxEntry>, paused: bool, dummy_enabled: bool) -> Sa
     let relative_speed = if paused { 0.0 } else { watching_speed() };
 
     SandboxView {
-        caster_class: CharacterClass::Mage,
+        caster_class: FIXTURE_CLASS,
         class_icons: CharacterClass::all().iter().map(|c| (*c, None)).collect(),
         dummy_enabled,
         dummy_class: CharacterClass::Warrior,
