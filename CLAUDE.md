@@ -134,11 +134,15 @@ properties make an omission or a broken assumption visible in the output:
 4. **Asserts one `SpellVisual` per name at Probability 1**, and exits non-zero
    on a split. Rank collapse is the assumption every client-data doc rests on;
    a name that splits means it has broken for that spell. (Real example: the
-   Priest lines split on Holy Nova and Touch of Weakness.)
+   Priest lines split on Holy Nova and Touch of Weakness.) Under `--name` the
+   assertion covers only the filtered subset, and the block says so — a `HELD`
+   from a filtered run is never a claim about the book.
 
 Every output row carries a provenance marker — `RESOLVED`, `NO-VISUAL`
-(passive talents; nothing to join), `SPLIT`, `LOW-PROB`, `UNRESOLVED` — so an
-unjoinable row reads as a gap in the output instead of being quietly absent.
+(passive talents; no joinable row, whether absent or pointing at visual 0),
+`SPLIT`, `LOW-PROB`, `UNRESOLVED` (a missing `SpellName` row is reported; a
+dangling `SpellVisualID` is fatal) — so an unjoinable row reads as a gap in
+the output instead of being quietly absent.
 Resolution is **inventory-scoped, never name-scoped globally**: "Immolate" has
 five visuals across all of `SpellName`, but all eight Warlock-line ranks
 resolve to 46.
