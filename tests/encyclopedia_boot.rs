@@ -130,9 +130,8 @@ fn the_ability_registry_is_available_to_the_screen() {
 ///
 /// The item-page variant is the awkward path the card calls out: a right-click
 /// taken MID-PICK. Its resource half is what this covers. The shout variant is
-/// the same right-click affordance taken from a STRATEGIC-OPTION panel, where
-/// primary click is the selection — a different class, so a link that came back
-/// to the wrong combatant would show up as the wrong class too.
+/// a kit-row link on a DIFFERENT class, so a link that came back to the wrong
+/// combatant would show up as the wrong class too.
 ///
 /// What it CANNOT cover: the click itself. There is no egui context in this
 /// harness (`try_ctx_mut()` returns `None` and every egui system returns
@@ -155,7 +154,7 @@ fn a_deep_link_from_view_combatant_returns_to_the_same_combatant() {
         ),
         // The equipment picker's right-click, taken mid-pick.
         (CharacterClass::Hunter, Topic::Item(ItemId::WandOfTheInvoker)),
-        // A strategic-option panel's right-click: the Warrior's shout choice.
+        // A kit row on a second class: the Warrior's Commanding Shout.
         (
             CharacterClass::Warrior,
             Topic::Ability(arenasim::states::play_match::AbilityType::CommandingShout),

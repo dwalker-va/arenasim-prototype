@@ -139,33 +139,14 @@ pub fn link_with(
     response.clicked().then_some(topic)
 }
 
-/// [`link_with`] for a widget whose PRIMARY click is already spoken for.
+/// The line a panel whose widgets open a page on SECONDARY click puts in its
+/// own chrome so right-click is discoverable at all.
 ///
-/// A strategic-option icon selects — left-clicking Demoralizing Shout is how a
-/// Warrior picks it — and the equipment picker equips. Those surfaces still owe
-/// the player a way through to the page, so the reference affordance moves to
-/// the SECONDARY click and the primary one is left entirely to the caller.
-/// Hovering shows the caller's tooltip body as usual.
-///
-/// The tooltip carries NO hint here. Announcing right-click belongs in the
-/// panel's own chrome ([`secondary_click_chrome_hint`]) — these surfaces borrow
-/// tooltips the encyclopedia owns, and a hint line is not theirs to add.
-pub fn secondary_link_with(
-    response: egui::Response,
-    topic: Topic,
-    body: impl FnOnce(&mut egui::Ui),
-) -> Option<Topic> {
-    let response = response
-        .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .on_hover_ui(body);
-    response.secondary_clicked().then_some(topic)
-}
-
-/// The line a panel of [`secondary_link_with`] widgets puts in its own chrome
-/// so right-click is discoverable at all.
-///
-/// Written once, like [`click_hint`], so the equipment picker and the
-/// strategic-option panels make the same promise in the same words.
+/// The equipment surfaces are the ones that need it: left-click equips, so the
+/// reference affordance there is the right-click, and the item tooltips are the
+/// encyclopedia's own — not this hint's to annotate. Written once, like
+/// [`click_hint`], so the equipment panel and its picker make the same promise
+/// in the same words.
 pub fn secondary_click_chrome_hint(ui: &mut egui::Ui) {
     ui.label(
         egui::RichText::new("right-click opens the encyclopedia")
