@@ -16,7 +16,10 @@
 //! ```
 //!
 //! `#[ignore]` keeps it out of the default `cargo test` run because it needs a
-//! GPU adapter (wgpu), which CI runners may lack.
+//! GPU adapter (wgpu), which CI runners may lack. That also means NOTHING
+//! catches a change to `draw_sandbox_ui` or to the mock below until someone
+//! runs this by hand — so a commit that touches either must re-bless in the
+//! same commit (see CLAUDE.md's snapshot-loop section).
 //!
 //! Fidelity caveats vs the real client: kittest has no Bevy textures, so every
 //! `EntryRow::icon` is `None` here and rows draw their framed empty slot rather
@@ -24,23 +27,65 @@
 //! installed by the app's Startup system). So this guards layout, spacing,
 //! grouping, and color — not icon or font fidelity.
 
-use arenasim::states::animation_sandbox::playback::{BodyAnimation, EntryFamily, SandboxEntry};
+use arenasim::states::animation_sandbox::playback::{
+    entries_for_class, BodyAnimation, EntryFamily, SandboxEntry,
+};
 use arenasim::states::animation_sandbox::ui::{
     draw_sandbox_ui, CameraPreset, EntryRow, SandboxView,
 };
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::abilities::AbilityType;
+use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use egui_kittest::Harness;
 
-/// Mock rows resembling a Mage's list: a couple of playable hard casts, several
-/// greyed instants, and the body entries.
-fn mage_rows() -> Vec<EntryRow> {
-    let ability = |ability, label: &str, family| EntryRow {
-        entry: SandboxEntry::Ability(ability),
-        family,
-        label: label.to_string(),
-        icon: None,
-        needs_dummy: false,
+/// The real classifier's label and family for one ability, looked up through
+/// the same `entries_for_class` call the live panel builds its rows from.
+///
+/// Searching EVERY class (not just the Mage) because the fixture deliberately
+/// carries an `Unsupported` row and the Mage has none — the only two
+/// `Unsupported` abilities in the game are Wind Shear and Heroic Strike.
+fn classified(defs: &AbilityDefinitions, ability: AbilityType) -> (String, EntryFamily) {
+    CharacterClass::all()
+        .iter()
+        .flat_map(|class| entries_for_class(*class, defs))
+        .find(|listing| listing.entry == SandboxEntry::Ability(ability))
+        .map(|listing| (listing.label, listing.family))
+        .unwrap_or_else(|| panic!("{ability:?} is not a sandbox entry under any class"))
+}
+
+/// The mock entry list: a Mage's own rows plus one borrowed row, chosen so the
+/// two snapshots between them cover every way the panel can draw an ability —
+/// enabled, `needs dummy`, and `n/a`.
+///
+/// Family and label are DERIVED, never restated: `classified` asks
+/// `entries_for_class` (hence `mechanism_for`) exactly as the live panel does,
+/// so the mock cannot drift from the classifier the way it did when Frost Nova
+/// sat here hand-labelled `Cast` while the real answer had become `Residue`.
+///
+/// `needs_dummy` is the one field still set by hand, because
+/// `playback::entry_needs_dummy` is `pub(crate)` and out of reach of an
+/// integration test. The values below are what that predicate returns today:
+/// direct damage (Frostbolt, Frost Nova) or a hostile aura (Polymorph) targets
+/// the dummy; a self buff does not.
+///
+/// One row shape has NO representation here and cannot have one: the `soon`
+/// tag needs a family that is non-playable and not `Unsupported`, and
+/// `EntryFamily::is_playable` is true for every family except `Unsupported`.
+/// That branch is unreachable in the shipped panel too — it is the residue of
+/// the staged mechanism rollout, held for the next unwired mechanism. Faking it
+/// here would pin a state the real UI cannot produce, which is the exact defect
+/// this fixture was rebuilt to remove.
+fn mock_rows() -> Vec<EntryRow> {
+    let defs = AbilityDefinitions::default();
+    let ability = |ability, needs_dummy| {
+        let (label, family) = classified(&defs, ability);
+        EntryRow {
+            entry: SandboxEntry::Ability(ability),
+            family,
+            label,
+            icon: None,
+            needs_dummy,
+        }
     };
     let body = |b: BodyAnimation| EntryRow {
         entry: SandboxEntry::Body(b),
@@ -51,15 +96,16 @@ fn mage_rows() -> Vec<EntryRow> {
     };
 
     vec![
-        ability(AbilityType::Frostbolt, "Frostbolt", EntryFamily::Cast),
-        ability(AbilityType::Polymorph, "Polymorph", EntryFamily::Cast),
-        ability(AbilityType::FrostNova, "Frost Nova", EntryFamily::Cast),
-        ability(AbilityType::FrostArmor, "Frost Armor", EntryFamily::Cast),
-        ability(
-            AbilityType::ArcaneIntellect,
-            "Arcane Intellect",
-            EntryFamily::Cast,
-        ),
+        // Offensive — greyed with `needs dummy` whenever the dummy is off.
+        ability(AbilityType::Frostbolt, true),
+        ability(AbilityType::Polymorph, true),
+        ability(AbilityType::FrostNova, true),
+        // Self buffs — enabled in both states.
+        ability(AbilityType::FrostArmor, false),
+        ability(AbilityType::ArcaneIntellect, false),
+        // Borrowed from the Warrior: the only coverage of the `n/a` tag and its
+        // "no application code / no distinct cast visual" hover.
+        ability(AbilityType::HeroicStrike, false),
         body(BodyAnimation::WalkBob),
         body(BodyAnimation::AutoAttack),
         body(BodyAnimation::DeathSink),
@@ -73,7 +119,7 @@ fn view(selected: Option<SandboxEntry>, paused: bool, dummy_enabled: bool) -> Sa
         class_icons: CharacterClass::all().iter().map(|c| (*c, None)).collect(),
         dummy_enabled,
         dummy_class: CharacterClass::Warrior,
-        rows: mage_rows(),
+        rows: mock_rows(),
         selected,
         selected_label: selected.map(|_| "Frostbolt".to_string()),
         selected_details: if selected.is_none() { Vec::new() } else { vec![
@@ -109,6 +155,7 @@ fn render(name: &str, view: SandboxView) {
 }
 
 /// The ordinary working state: an entry selected and playing, dummy staged.
+/// With the dummy on, only the `n/a` row is greyed.
 #[test]
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
 fn animation_sandbox() {
@@ -123,7 +170,8 @@ fn animation_sandbox() {
 }
 
 /// Paused with nothing selected and no dummy — exercises the disabled `Play`,
-/// the enabled `Step`, and the no-dummy warning that only appears in this state.
+/// the enabled `Step`, the no-dummy warning that only appears in this state,
+/// and AE3's `needs dummy` greying of every offensive row.
 #[test]
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
 fn animation_sandbox_paused_no_selection() {

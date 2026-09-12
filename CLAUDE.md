@@ -764,6 +764,17 @@ cargo test --release --test results_screen_snapshot -- --ignored
 UPDATE_SNAPSHOTS=1 cargo test --release --test results_screen_snapshot -- --ignored
 ```
 
+**Blessing is part of the change, not a follow-up.** Every one of these
+harnesses is `#[ignore]`d and `.github/workflows/` carries no test job, so
+nothing anywhere catches a stale baseline. A commit that touches a harnessed
+`draw_*` function — `draw_results_screen`, `draw_sandbox_ui`, any other — **or a
+harness's own MOCK DATA** must re-render and bless in the SAME commit. Read each
+`.new.png` before blessing and confirm every visible difference is one you
+intended: a rubber-stamped bless converts a loud failure into a silent wrong
+baseline. The animation sandbox's mock drifted that way across four commits and
+about a month, ending up pinning a dummy-off state the shipped panel cannot
+produce (it showed offensive casts enabled where the real panel greys them).
+
 The test is `#[ignore]`d so the default `cargo test` skips it (it needs a GPU
 adapter; CI runners may lack one). `egui_kittest` is a dev-dependency pinned to
 the same egui version as `bevy_egui` (0.31). Fidelity caveat: kittest has no
