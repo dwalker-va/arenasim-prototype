@@ -75,7 +75,8 @@ pub fn paint_icon(
 }
 
 /// The entity's tooltip. Delegates to the existing builder for each kind — the
-/// encyclopedia adds only the "click to open" affordance line.
+/// encyclopedia adds only the "click to open" affordance line, which [`link`]
+/// appends via [`click_hint`] so a caller-supplied body gets it too.
 pub fn tooltip(ui: &mut egui::Ui, topic: Topic, data: &EncyclopediaData) {
     ui.set_max_width(320.0);
     match topic {
@@ -94,6 +95,12 @@ pub fn tooltip(ui: &mut egui::Ui, topic: Topic, data: &EncyclopediaData) {
         // source of truth.
         Topic::Aura(id) => super::auras::render_tooltip(ui, id, data),
     }
+}
+
+/// The affordance line every linked tooltip ends on — the promise that the
+/// thing under the cursor has a page. Written once so a caller that supplies
+/// its OWN tooltip body still makes the same promise in the same words.
+pub fn click_hint(ui: &mut egui::Ui) {
     ui.add_space(4.0);
     ui.label(
         egui::RichText::new("Click to open in the encyclopedia")
@@ -107,10 +114,46 @@ pub fn tooltip(ui: &mut egui::Ui, topic: Topic, data: &EncyclopediaData) {
 /// response. Every widget in this module funnels through it, and so should any
 /// bespoke one a caller draws itself.
 pub fn link(response: egui::Response, topic: Topic, data: &EncyclopediaData) -> Option<Topic> {
+    link_with(response, topic, |ui| tooltip(ui, topic, data))
+}
+
+/// [`link`] with a caller-supplied tooltip BODY.
+///
+/// The contract — pointing-hand cursor, a hover tooltip, the shared
+/// "click to open" hint, and `Some(topic)` on the clicked frame — is identical;
+/// only the text inside differs. This is the seam for a surface whose job is
+/// not to be the article: View Combatant is a loadout editor, so its ability
+/// rows show a one-line gist and link on to the full page rather than
+/// reprinting it in a tooltip.
+pub fn link_with(
+    response: egui::Response,
+    topic: Topic,
+    body: impl FnOnce(&mut egui::Ui),
+) -> Option<Topic> {
     let response = response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .on_hover_ui(|ui| tooltip(ui, topic, data));
+        .on_hover_ui(|ui| {
+            body(ui);
+            click_hint(ui);
+        });
     response.clicked().then_some(topic)
+}
+
+/// The line a panel whose widgets open a page on SECONDARY click puts in its
+/// own chrome so right-click is discoverable at all.
+///
+/// The equipment surfaces are the ones that need it: left-click equips, so the
+/// reference affordance there is the right-click, and the item tooltips are the
+/// encyclopedia's own — not this hint's to annotate. Written once, like
+/// [`click_hint`], so the equipment panel and its picker make the same promise
+/// in the same words.
+pub fn secondary_click_chrome_hint(ui: &mut egui::Ui) {
+    ui.label(
+        egui::RichText::new("right-click opens the encyclopedia")
+            .size(11.0)
+            .color(DIM)
+            .italics(),
+    );
 }
 
 /// Compact icon with a wrapped caption underneath — the kit-grid form.
