@@ -89,7 +89,11 @@ class World:
 
     def __init__(self, skill_lines=None):
         self.skill_lines = dict(skill_lines or {LINE: LINE_NAME})
-        self.rows = {name: [] for name in COLUMNS}
+        # Every table but `SpellVisual`, which `write` DERIVES from the visual
+        # ids the spells claim. It is deliberately absent from `rows` so that
+        # appending to it raises here instead of being silently discarded at
+        # write time.
+        self.rows = {name: [] for name in COLUMNS if name != "SpellVisual"}
         for sl, display in self.skill_lines.items():
             self.rows["SkillLine"].append({"ID": sl, "DisplayName_lang": display})
         self._visual_rows: set[int] = set()
@@ -147,17 +151,30 @@ class World:
         return self
 
     def write(self, root):
+        """Write this world out as CSVs. Idempotent -- the world is unchanged.
+
+        `SpellVisual` is the one table `write` synthesises (from the visual
+        ids the spells actually claim), so it is DERIVED here rather than
+        appended to `self.rows`. Appending made `write` accumulate: a second
+        `run_sweep` over one `World` wrote every `SpellVisual` row twice, and
+        a third three times. Nothing in the report would have shown it -- the
+        script indexes `SpellVisual` into a SET -- so the next author to reuse
+        a world would have been debugging a fixture that had silently changed
+        under them.
+        """
         build_dir = os.path.join(root, FIXTURE_BUILD)
         os.makedirs(build_dir, exist_ok=True)
-        for vid in sorted(self._visual_rows):
-            self.rows["SpellVisual"].append({"ID": str(vid)})
+        tables = dict(
+            self.rows,
+            SpellVisual=[{"ID": str(vid)} for vid in sorted(self._visual_rows)],
+        )
         for table, cols in COLUMNS.items():
             with open(
                 os.path.join(build_dir, table + ".csv"), "w", newline="", encoding="utf-8"
             ) as f:
                 w = csv.DictWriter(f, fieldnames=cols)
                 w.writeheader()
-                w.writerows(self.rows[table])
+                w.writerows(tables[table])
 
 
 def run_sweep(world, *argv, skill_line=(LINE,)):
@@ -165,26 +182,75 @@ def run_sweep(world, *argv, skill_line=(LINE,)):
 
     A `SystemExit` carrying a message (the empty-inventory bail) comes back as
     that message in the code slot, so a test can assert on it directly.
+
+    `skill_line=()` passes no `--skill-line` at all, for the flags that do not
+    take one (`--list-skill-lines`).
+
+    The fixture cache lives for exactly the length of the sweep: the world is
+    written inside the `with`, `main` reads it inside the `with`, and the
+    directory is gone by the time the caller asserts. That is deliberate --
+    the cache being present for the whole run is what keeps the suite offline
+    (`fetch()` returns a cached CSV without a request), so its lifetime has to
+    enclose `main` rather than merely outlive this call.
     """
-    tmp = tempfile.mkdtemp(prefix="db2-sweep-fixture-")
-    world.write(tmp)
-    args = ["--skill-line", *skill_line, "--build", FIXTURE_BUILD, "--cache-dir", tmp]
-    args.extend(argv)
-    buf = io.StringIO()
-    with contextlib.redirect_stdout(buf):
-        try:
-            code = sweep_mod.main(args)
-        except SystemExit as exc:
-            code = exc.code
-    return code, buf.getvalue()
+    with tempfile.TemporaryDirectory(prefix="db2-sweep-fixture-") as tmp:
+        world.write(tmp)
+        args = ["--build", FIXTURE_BUILD, "--cache-dir", tmp]
+        if skill_line:
+            args = ["--skill-line", *skill_line] + args
+        args.extend(argv)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            try:
+                code = sweep_mod.main(args)
+            except SystemExit as exc:
+                code = exc.code
+        return code, buf.getvalue()
 
 
 class SweepTestCase(unittest.TestCase):
+    def temp_dir(self):
+        """A fixture cache dir, removed when this case ends.
+
+        For the cases that need the written world to outlive a single
+        `run_sweep` -- to delete a table out of it, or to write the same
+        world twice and compare. Cleanup is deferred to `addCleanup`, which
+        runs after the test method, so the directory is still on disk for
+        every assertion the case makes about it.
+        """
+        tmp = tempfile.TemporaryDirectory(prefix="db2-sweep-fixture-")
+        self.addCleanup(tmp.cleanup)
+        return tmp.name
+
     def assertHas(self, out, needle):
         self.assertIn(needle, out, "expected in output:\n  %s\n--- got ---\n%s" % (needle, out))
 
     def assertLacks(self, out, needle):
         self.assertNotIn(needle, out, "did NOT expect in output:\n  %s\n--- got ---\n%s" % (needle, out))
+
+    def assertUnderHeading(self, out, heading, needle):
+        """Assert `needle` appears in the block `heading` introduces.
+
+        A bare substring like `[42]` can be satisfied by any line anywhere in
+        the report, so an assertion that means "this section lists it" has to
+        say which section. The block is the run of non-blank lines after the
+        heading, which is how every section in the report is printed.
+        """
+        lines = out.splitlines()
+        start = next((i for i, ln in enumerate(lines) if heading in ln), None)
+        if start is None:
+            self.fail("heading not in output:\n  %s\n--- got ---\n%s" % (heading, out))
+        body = []
+        for ln in lines[start + 1 :]:
+            if not ln.strip():
+                break
+            body.append(ln)
+        self.assertIn(
+            needle,
+            "\n".join(body),
+            "expected under %r:\n  %s\n--- section ---\n%s\n--- full output ---\n%s"
+            % (heading, needle, "\n".join(body), out),
+        )
 
 
 # --------------------------------------------------------------------------
@@ -196,7 +262,7 @@ class NoNetworkTests(SweepTestCase):
     def test_a_missing_table_fails_rather_than_fetching(self):
         """The offline guarantee is a property of the harness, so pin it."""
         world = World().spell(100, "Fireball", [10])
-        tmp = tempfile.mkdtemp(prefix="db2-sweep-fixture-")
+        tmp = self.temp_dir()
         world.write(tmp)
         os.remove(os.path.join(tmp, FIXTURE_BUILD, "SpellVisual.csv"))
         with self.assertRaises(AssertionError) as ctx:
@@ -205,6 +271,40 @@ class NoNetworkTests(SweepTestCase):
                     ["--skill-line", LINE, "--build", FIXTURE_BUILD, "--cache-dir", tmp]
                 )
         self.assertIn("attempted a network fetch", str(ctx.exception))
+
+
+class WorldTests(SweepTestCase):
+    def test_writing_a_world_twice_writes_the_same_world(self):
+        """`World.write` must derive its rows, not accumulate them.
+
+        `SpellVisual` is the table `write` synthesises, and it used to APPEND
+        to `self.rows`: after two `run_sweep` calls over one `World` the third
+        write emitted each visual three times. The script reads `SpellVisual`
+        into a SET, so no report would ever have shown it -- the duplication
+        is visible only in the fixture on disk, which is where this asserts.
+        """
+        world = World().spell(100, "Fireball", [10]).spell(101, "Frostbolt", [11])
+        first = self.temp_dir()
+        world.write(first)
+        self.assertEqual(run_sweep(world)[0], 0)
+        self.assertEqual(run_sweep(world)[0], 0)
+        second = self.temp_dir()
+        world.write(second)
+        self.assertEqual(self._visual_csv(second), self._visual_csv(first))
+        self.assertEqual(self._visual_csv(second), ["10", "11"])
+
+    def test_a_world_sweeps_the_same_way_every_time(self):
+        """The reuse a future case will actually reach for."""
+        world = World().spell(100, "Holy Nova", [10]).spell(101, "Holy Nova", [20])
+        self.assertEqual(run_sweep(world), run_sweep(world))
+        strict, permissive = run_sweep(world), run_sweep(world, "--allow-split")
+        self.assertEqual(strict[0], 1)
+        self.assertEqual(permissive[0], 0)
+
+    def _visual_csv(self, root):
+        path = os.path.join(root, FIXTURE_BUILD, "SpellVisual.csv")
+        with open(path, newline="", encoding="utf-8") as f:
+            return [r["ID"] for r in csv.DictReader(f)]
 
 
 # --------------------------------------------------------------------------
@@ -413,8 +513,9 @@ class PropertyFourTests(SweepTestCase):
         code, out = run_sweep(world)
         self.assertEqual(code, 0)
         self.assertHas(out, "HELD: all 2 name(s) with a visual")
-        self.assertHas(out, "### UNRESOLVED: skill-line SpellIDs with no SpellName row")
-        self.assertHas(out, "[42]")
+        self.assertUnderHeading(
+            out, "### UNRESOLVED: skill-line SpellIDs with no SpellName row", "[42]"
+        )
 
     # ---- B3: two adjacent counts must not read as a contradiction ---------
 
@@ -535,6 +636,51 @@ class ChainTests(SweepTestCase):
         self.assertEqual(code, 0)
         self.assertHas(out, "### grouped by (precast anim, cast anim) -- 1 signatures")
         self.assertHas(out, "--- precast (52,) / cast (54,)   (1)")
+
+
+# --------------------------------------------------------------------------
+# the flags that print no claim
+# --------------------------------------------------------------------------
+
+
+class NonReportingFlagTests(SweepTestCase):
+    """`--list-skill-lines` and `--refresh` assert nothing about the data.
+
+    Neither prints a block property 2/3/4 is carried in, so there is no claim
+    here to regress. They are covered because they are how a person REACHES
+    the claim-bearing runs: the ids every other case hardcodes are discovered
+    with the first, and a stale cache -- the failure mode the second exists to
+    clear -- would silently sweep the wrong build.
+    """
+
+    def test_list_skill_lines_lists_the_ids_and_names(self):
+        world = World(skill_lines={LINE: LINE_NAME, "56": "Holy"}).spell(100, "Fireball", [10])
+        code, out = run_sweep(world, "--list-skill-lines", skill_line=())
+        self.assertEqual(code, 0)
+        self.assertHas(out, "    56  Holy")
+        self.assertHas(out, "   900  %s" % LINE_NAME)
+        # Sorted by id as an integer -- the affordance is scanning the list.
+        self.assertLess(out.index("Holy"), out.index(LINE_NAME))
+        # A listing, not a sweep: it runs without --skill-line (which the
+        # script's docstring recommends) and prints none of the report.
+        self.assertLacks(out, "DB2 spell-visual sweep")
+        self.assertLacks(out, "HELD:")
+
+    def test_refresh_reaches_past_the_cache(self):
+        """--refresh must re-fetch a table that is already cached.
+
+        Offline, a fetch is exactly what the harness forbids -- so the proof
+        that --refresh bypassed the cache is that the identical world, which
+        sweeps to 0 without the flag, now trips the no-network guard.
+        """
+        world = World().spell(100, "Fireball", [10])
+        self.assertEqual(run_sweep(world)[0], 0)
+        with self.assertRaises(AssertionError) as ctx:
+            # `fetch()` narrates to stderr on its way to the guard; swallow it
+            # so a passing run stays quiet.
+            with contextlib.redirect_stderr(io.StringIO()):
+                run_sweep(world, "--refresh")
+        self.assertIn("attempted a network fetch", str(ctx.exception))
 
 
 if __name__ == "__main__":
