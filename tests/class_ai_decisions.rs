@@ -121,19 +121,32 @@ fn dispel_priority_orders_cc_above_dots_above_slows() {
 /// Unstable Affliction's backlash `Silence` both sat at 0 behind a `_ => 0`
 /// wildcard: classified dispellable, removal path wired, never once removed
 /// across 32 seeded matches carrying 19 dispels and 46 cleanses.
+///
+/// Swept over `AuraType::ALL`, so the assertion is two-sided: the four urgent
+/// types must clear the bar, and NOTHING ELSE may — a variant promoted into the
+/// urgent band is a decision about what a pressured healer drops a heal for,
+/// and it should be made here rather than noticed later.
 #[test]
 fn urgent_crowd_control_clears_every_caller_bar() {
     const URGENT_BAR: i32 = 90;
-    for ty in [
+    const URGENT: [AuraType; 4] = [
         AuraType::Polymorph,
         AuraType::Incapacitate, // Freezing Trap
         AuraType::Silence,      // Unstable Affliction backlash
         AuraType::Fear,
-    ] {
-        assert!(
+    ];
+    for ty in AuraType::ALL {
+        let expected = URGENT.contains(&ty);
+        assert_eq!(
             dispel_priority(ty) >= URGENT_BAR,
-            "{ty:?} is urgent crowd control and must clear the 90 bar, scored {}",
-            dispel_priority(ty)
+            expected,
+            "{ty:?} scored {} against the 90 urgent bar, but it is {}",
+            dispel_priority(ty),
+            if expected {
+                "urgent crowd control"
+            } else {
+                "not urgent crowd control"
+            }
         );
     }
 }
@@ -155,25 +168,32 @@ fn dispel_priority_ranks_incapacitates_top_and_silence_above_fear() {
 /// Structural guard: a type the dispel path can actually remove must be GRADED.
 /// A magic-dispellable type at 0 is unreachable by every caller — a debuff no
 /// healer will ever lift, which is a balance decision, not a default.
+///
+/// The domain is `AuraType::ALL`, not a list written out here: a hand-kept copy
+/// of the dispellable set would quietly stop covering whatever it forgot while
+/// still reading as a whole-enum sweep. `is_magic_dispellable` picks the subset.
 #[test]
 fn every_magic_dispellable_type_is_graded() {
-    for ty in [
-        AuraType::MovementSpeedSlow,
-        AuraType::Root,
-        AuraType::Fear,
-        AuraType::Polymorph,
-        AuraType::Incapacitate,
-        AuraType::Silence,
-    ] {
-        assert!(
-            ty.is_magic_dispellable(),
-            "{ty:?} is listed here as dispellable but is_magic_dispellable() disagrees"
-        );
+    let mut swept = 0;
+    for ty in AuraType::ALL {
+        if !ty.is_magic_dispellable() {
+            continue;
+        }
+        swept += 1;
         assert!(
             dispel_priority(ty) > 0,
             "{ty:?} is dispellable but scores 0 — no caller's min_priority can ever reach it"
         );
     }
+    // Non-vacuity: the sweep is only worth anything while the filter admits
+    // something. Six types are dispellable today (the five CC mechanics plus
+    // the Unstable Affliction Silence); a refactor that emptied the filter
+    // would otherwise turn this test green by covering nothing.
+    assert!(
+        swept >= 6,
+        "only {swept} magic-dispellable types found — the filter, not the grading, \
+         is what changed"
+    );
 }
 
 #[test]
@@ -233,44 +253,46 @@ fn purge_priority_orders_defensives_above_offensive_buffs() {
 /// Tester: a purgeable buff scoring 0 falls below `PURGE_MIN_PRIORITY` and is
 /// never purged by any AI, while reading as fully wired — the aura IS
 /// `can_be_purged` and the removal path DOES exist.
+///
+/// Same shape as `every_magic_dispellable_type_is_graded`: the domain is
+/// `AuraType::ALL` and `Aura::can_be_purged` picks the subset, so the test
+/// cannot drift into covering less than it claims.
 #[test]
 fn every_purgeable_type_is_graded() {
-    for ty in [
-        AuraType::Absorb,
-        AuraType::MaxHealthIncrease,
-        AuraType::MaxManaIncrease,
-        AuraType::AttackPowerIncrease,
-        AuraType::SpellPowerIncrease,
-        AuraType::HealingOverTime,
-        AuraType::WindfuryBuff,
-        AuraType::DamageTakenReduction,
-        AuraType::CritChanceIncrease,
-        AuraType::ManaRegenIncrease,
-        AuraType::LockoutDurationReduction,
-        AuraType::FrostArmorBuff,
-        AuraType::SpellResistanceBuff,
-    ] {
+    let mut swept = 0;
+    for ty in AuraType::ALL {
+        if !aura_with(ty, None, -1.0).can_be_purged() {
+            continue;
+        }
+        swept += 1;
         assert!(
             purge_priority(ty) > 0,
             "{ty:?} is purgeable but scores 0 — the Shaman can never reach it"
         );
     }
+    // Non-vacuity: 13 buffs are purgeable today.
+    assert!(
+        swept >= 13,
+        "only {swept} purgeable types found — the filter, not the grading, is \
+         what changed"
+    );
 }
 
+/// The complement of `every_purgeable_type_is_graded`, swept over the same
+/// domain so the two together account for every variant: debuffs and
+/// un-purgeable markers/immunities are never purge targets, so they must score
+/// 0 (below anything `try_purge_enemy` will act on).
 #[test]
 fn purge_priority_returns_zero_for_debuffs_and_unpurgeable() {
-    // Debuffs and un-purgeable markers/immunities are never purge targets, so
-    // they must score 0 (below anything `try_purge_enemy` will act on).
-    for ty in [
-        AuraType::Stun,
-        AuraType::Root,
-        AuraType::DamageOverTime,
-        AuraType::Fear,
-        AuraType::DamageImmunity, // Divine Shield — unpurgeable by design
-        AuraType::ShadowSight,
-        AuraType::WeaponPoison,
-    ] {
-        assert_eq!(purge_priority(ty), 0, "{:?} must not be a purge target", ty);
+    for ty in AuraType::ALL {
+        if aura_with(ty, None, -1.0).can_be_purged() {
+            continue;
+        }
+        assert_eq!(
+            purge_priority(ty),
+            0,
+            "{ty:?} is not purgeable, so it must not be a purge target"
+        );
     }
 }
 

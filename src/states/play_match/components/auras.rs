@@ -244,8 +244,7 @@ impl AuraType {
     ///
     /// Follows `SpellSchool::all()` / `TotemElement::ALL` / `RoguePoison::ALL`.
     /// A `const` array rather than a `fn` returning a slice because every
-    /// caller wants `AuraType` by value (it is `Copy`), and because the array
-    /// LENGTH is then part of the declaration — see the guard below.
+    /// caller wants `AuraType` by value (it is `Copy`).
     ///
     /// **This list is not what keeps the enum safe — the exhaustive matches
     /// are.** `AuraType` is not `#[non_exhaustive]`, so variant N+1 cannot
@@ -1418,20 +1417,14 @@ mod tests {
             DispelType::for_ability(DispelType::Auto, SpellSchool::Physical),
             DispelType::Physical
         );
-        for school in [
-            SpellSchool::None,
-            SpellSchool::Frost,
-            SpellSchool::Holy,
-            SpellSchool::Shadow,
-            SpellSchool::Arcane,
-            SpellSchool::Fire,
-            SpellSchool::Nature,
-        ] {
+        for &school in SpellSchool::all() {
+            if school == SpellSchool::Physical {
+                continue;
+            }
             assert_eq!(
                 DispelType::for_ability(DispelType::Auto, school),
                 DispelType::Auto,
-                "{:?} is not physical",
-                school
+                "{school:?} is not physical"
             );
         }
     }
@@ -1460,16 +1453,7 @@ mod tests {
     /// school, this fails.
     #[test]
     fn no_school_derives_a_curse() {
-        for school in [
-            SpellSchool::None,
-            SpellSchool::Physical,
-            SpellSchool::Frost,
-            SpellSchool::Holy,
-            SpellSchool::Shadow,
-            SpellSchool::Arcane,
-            SpellSchool::Fire,
-            SpellSchool::Nature,
-        ] {
+        for &school in SpellSchool::all() {
             assert_ne!(
                 DispelType::for_ability(DispelType::Auto, school),
                 DispelType::Curse,
@@ -1550,17 +1534,15 @@ mod tests {
     /// on: the SAME mechanic is dispellable as magic and immune as physical.
     /// A frost slow (Frostbolt) comes off; an arrow slow (Concussive Shot)
     /// does not.
+    ///
+    /// Swept over [`AuraType::ALL`] rather than a hand-kept list of the
+    /// dispellable mechanics, because "whatever its mechanic" is the claim: no
+    /// physical instance of ANY mechanic is dispellable. The magic twin is
+    /// counted rather than asserted per type, so the sweep cannot go vacuous.
     #[test]
     fn a_physical_debuff_is_never_dispellable_whatever_its_mechanic() {
-        for ty in [
-            AuraType::MovementSpeedSlow,
-            AuraType::Root,
-            AuraType::Fear,
-            AuraType::Polymorph,
-            AuraType::Incapacitate,
-            AuraType::Silence,
-            AuraType::DamageOverTime,
-        ] {
+        let mut dispellable_as_magic = 0;
+        for ty in AuraType::ALL {
             let magic = Aura {
                 effect_type: ty,
                 spell_school: Some(SpellSchool::Frost),
@@ -1573,18 +1555,22 @@ mod tests {
                 dispel_type: DispelType::Physical,
                 ..Default::default()
             };
-            assert!(
-                magic.can_be_dispelled(),
-                "{:?} as magic must stay dispellable",
-                ty
-            );
+            if magic.can_be_dispelled() {
+                dispellable_as_magic += 1;
+            }
             assert!(
                 !physical.can_be_dispelled(),
-                "{:?} as a PHYSICAL effect must not be dispellable",
-                ty
+                "{ty:?} as a PHYSICAL effect must not be dispellable"
             );
             assert!(physical.is_physical());
         }
+        // The five CC mechanics, the Unstable Affliction Silence, and DoTs
+        // (Corruption, Immolate) — dispellable as magic today.
+        assert!(
+            dispellable_as_magic >= 7,
+            "only {dispellable_as_magic} mechanics are dispellable as magic — \
+             the magic half of this grid has collapsed"
+        );
     }
 
     /// Physical is immune to ORDINARY removal, not permanent: every removal
