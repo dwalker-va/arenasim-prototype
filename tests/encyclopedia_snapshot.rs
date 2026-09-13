@@ -255,6 +255,39 @@ fn encyclopedia_aura_detail_name_collision() {
     snapshot("encyclopedia_aura_detail_name_collision", state);
 }
 
+/// The navigation cluster at a DEEP LINK: entered from the Results screen, so
+/// Back is disabled (a deep link is a fresh stack with no history above it) and
+/// Home names Results rather than the main menu. The two other cluster states —
+/// the root with Back disabled, and a navigated page with both buttons live —
+/// are already shown by `encyclopedia_classes_grid` and the detail snapshots.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn encyclopedia_nav_cluster_deep_link_from_results() {
+    let mut state = state_at_root();
+    state.open_at(
+        Topic::Ability(AbilityType::Frostbolt),
+        arenasim::states::GameState::Results,
+    );
+    snapshot("encyclopedia_nav_cluster_deep_link_from_results", state);
+}
+
+/// The same cluster with BOTH buttons live and a non-main-menu destination:
+/// deep-linked from the View Combatant sheet, then browsed one page onward, so
+/// Back has somewhere to go while Home still names the combatant.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn encyclopedia_nav_cluster_from_view_combatant() {
+    let mut state = state_at_root();
+    state.open_at(
+        Topic::Ability(AbilityType::Frostbolt),
+        arenasim::states::GameState::ViewCombatant,
+    );
+    state.apply(arenasim::states::encyclopedia::EncyclopediaAction::Navigate(
+        View::topic(Topic::Class(CharacterClass::Mage)),
+    ));
+    snapshot("encyclopedia_nav_cluster_from_view_combatant", state);
+}
+
 // ============================================================================
 // Harness
 // ============================================================================
