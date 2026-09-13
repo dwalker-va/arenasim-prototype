@@ -36,6 +36,7 @@ use arenasim::states::encyclopedia::{
     Section, Topic, View,
 };
 use arenasim::states::match_config::CharacterClass;
+use arenasim::states::play_match::abilities::SpellSchool;
 use arenasim::states::play_match::ability_config::{load_ability_definitions, AbilityDefinitions};
 use arenasim::states::play_match::equipment::{
     load_item_definitions, ArmorType, ItemDefinitions, ItemId, ItemSlotType,
@@ -78,8 +79,12 @@ fn encyclopedia_abilities_grid() {
     snapshot("encyclopedia_abilities_grid", state);
 }
 
-/// The same index with both filter axes engaged, proving the chip bar and the
-/// shown/total count line.
+/// The same index with both filter axes engaged, proving the chip bar, the
+/// selected-chip styling on each row, and the shown/total count line.
+///
+/// Mage AND Frost is deliberately narrower than either axis alone — four of the
+/// Mage's eight abilities are Frost — so the baseline would move if the two
+/// chips ever stopped being ANDed and one of them started winning.
 #[test]
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
 fn encyclopedia_abilities_filtered() {
@@ -91,7 +96,7 @@ fn encyclopedia_abilities_filtered() {
     );
     state.ability_filters = AbilityFilters {
         class: Some(CharacterClass::Mage),
-        school: None,
+        school: Some(SpellSchool::Frost),
     };
     snapshot("encyclopedia_abilities_filtered", state);
 }

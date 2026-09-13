@@ -294,9 +294,26 @@ pub fn is_spell_school_locked(spell_school: SpellSchool, auras: Option<&ActiveAu
 mod spell_school_tests {
     use super::*;
 
-    /// `SpellSchool::all()` must stay exhaustive. The `match` is the guard: a
-    /// new variant fails to compile here, and the count assertion catches a
-    /// variant that was added to the match but forgotten in the slice.
+    /// `SpellSchool::all()` must stay exhaustive.
+    ///
+    /// THE EXHAUSTIVE MATCH IS THE ONLY GUARD. A new variant fails to compile
+    /// here, which is what drags whoever added it into this file; the hope is
+    /// that they then also add it to the slice. Neither assertion below can
+    /// enforce that, and it is worth being exact about why, because a comment
+    /// that credits them with it is how the real guard gets deleted as
+    /// redundant:
+    ///
+    /// - `seen == 8` catches the slice growing past the match (a ninth entry
+    ///   makes `seen` 9), but NOT the slice staying at eight while the enum
+    ///   grows. Add the variant to the or-pattern only and `all()` still yields
+    ///   8 items, `seen` is still 8, and this test is green with `all()` stale.
+    /// - `sorted.len() == 8` is a DEDUP check over the eight entries `all()`
+    ///   did list. An omitted school is not in that list, so it cannot be
+    ///   detected as a duplicate of anything. Inert for the omission case.
+    ///
+    /// Both counts are also the literal 8 rather than a derived one, so neither
+    /// moves when the enum does. Adding a school means editing `all()` by hand
+    /// and bumping both — the compile error is the reminder to do it.
     #[test]
     fn all_lists_every_school() {
         let mut seen = 0;
@@ -312,7 +329,11 @@ mod spell_school_tests {
                 | SpellSchool::None => 1,
             };
         }
-        assert_eq!(seen, 8, "SpellSchool::all() is missing a variant");
+        assert_eq!(
+            seen, 8,
+            "SpellSchool::all() no longer lists 8 schools — if a school was added, \
+             bump this count and the dedup count below"
+        );
         let mut sorted: Vec<u8> = SpellSchool::all()
             .iter()
             .map(|s| s.to_lockout_magnitude() as u8)
