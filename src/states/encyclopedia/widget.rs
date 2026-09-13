@@ -449,6 +449,7 @@ mod tests {
     use crate::states::play_match::ability_config::load_ability_definitions;
     use crate::states::play_match::equipment::load_item_definitions;
     use crate::states::play_match::AbilityType;
+    use crate::ui::fonts::install_game_fonts;
 
     const TOPIC: Topic = Topic::Ability(AbilityType::Frostbolt);
 
@@ -509,6 +510,11 @@ mod tests {
             out: Cell::new(None),
         };
         let mut harness = Harness::new_ui(|ui| {
+            // The client's font stack, as every kittest harness installs it:
+            // this probe allocates a fixed-size hit rect, but the fonts are
+            // what a real `link` measures, so the harness renders what the
+            // client renders.
+            install_game_fonts(ui.ctx());
             let (rect, response) =
                 ui.allocate_exact_size(egui::vec2(60.0, 30.0), egui::Sense::click());
             probe.rect.set(rect);
