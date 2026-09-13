@@ -29,6 +29,7 @@ use arenasim::states::play_match::ability_config::{load_ability_definitions, Abi
 use arenasim::states::play_match::equipment::{load_item_definitions, ItemDefinitions};
 use arenasim::states::play_match::{CombatantStats, MatchResults};
 use arenasim::states::results_ui::{class_link_id, draw_results_screen};
+use arenasim::ui::fonts::install_game_fonts;
 
 #[test]
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
@@ -153,6 +154,7 @@ fn sized_harness(results: MatchResults, log: CombatLog, size: [f32; 2]) -> Harne
     Harness::builder()
         .with_size(size)
         .build(move |ctx| {
+            install_game_fonts(ctx);
             let data = EncyclopediaData {
                 items: &items,
                 abilities: &abilities,

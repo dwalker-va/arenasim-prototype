@@ -23,8 +23,11 @@
 //!
 //! Fidelity caveat, shared with the other egui snapshot loops: kittest has no
 //! Bevy textures, so every item, class and ability icon renders as the widget's
-//! placeholder tile and fonts are egui defaults. Layout, spacing, colour and
-//! copy iterate faithfully here; icon and font fidelity still needs the client.
+//! placeholder tile. Fonts are the client's own stack (`install_game_fonts`),
+//! so glyph coverage is real — a codepoint Rajdhani and the egui fallbacks both
+//! miss shows here as the tofu box the player would see. Layout, spacing,
+//! colour, type and copy iterate faithfully; icon fidelity still needs the
+//! client.
 
 use egui_kittest::Harness;
 
@@ -38,6 +41,7 @@ use arenasim::states::play_match::equipment::{
     load_item_definitions, ArmorType, ItemDefinitions, ItemId, ItemSlotType,
 };
 use arenasim::states::play_match::AbilityType;
+use arenasim::ui::fonts::install_game_fonts;
 
 const SIZE: [f32; 2] = [1400.0, 900.0];
 
@@ -321,6 +325,7 @@ fn snapshot(name: &'static str, mut state: EncyclopediaState) {
     let items = items();
     let abilities = abilities();
     let mut harness = Harness::builder().with_size(SIZE).build(move |ctx| {
+        install_game_fonts(ctx);
         let data = EncyclopediaData {
             items: &items,
             abilities: &abilities,

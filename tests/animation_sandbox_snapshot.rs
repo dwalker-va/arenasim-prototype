@@ -50,9 +50,9 @@
 //!
 //! Fidelity caveats vs the real client: kittest has no Bevy textures, so every
 //! `EntryRow::icon` is `None` here and rows draw their framed empty slot rather
-//! than a real spell or class icon. Fonts are egui defaults (Rajdhani is
-//! installed by the app's Startup system). So this guards layout, spacing,
-//! grouping, and color — not icon or font fidelity.
+//! than a real spell or class icon. Fonts ARE the client's: the harness
+//! installs the same Rajdhani stack the app does. So this guards layout,
+//! spacing, grouping, color and type — not icon fidelity.
 
 use arenasim::states::animation_sandbox::playback::{
     entry_duration, EntryFamily, SandboxEntry, SandboxPlayback, LOOP_TAIL_SECS,
@@ -63,6 +63,7 @@ use arenasim::states::animation_sandbox::ui::{
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
+use arenasim::ui::fonts::install_game_fonts;
 use egui_kittest::Harness;
 
 /// The class the fixture stages. Its whole kit is drawn, exactly as the panel
@@ -331,6 +332,7 @@ fn render(name: &str, view: SandboxView) {
     let mut harness = Harness::builder()
         .with_size([1280.0, 800.0])
         .build(move |ctx| {
+            install_game_fonts(ctx);
             let _ = draw_sandbox_ui(ctx, &view);
         });
     harness.run();

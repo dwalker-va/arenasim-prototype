@@ -18,17 +18,18 @@
 //! `#[ignore]` keeps it out of the default `cargo test` run because it needs a
 //! GPU adapter (wgpu), which CI runners may lack.
 //!
-//! Fidelity caveats vs the real client: `egui_kittest` has no Bevy textures, so
-//! the class icons render as class-color fallback squares and fonts are egui
-//! defaults (the app installs Rajdhani via a Startup system). Layout, spacing,
-//! and color iterate faithfully; pixel-exact icon/font fidelity still needs the
-//! real client.
+//! Fidelity caveat vs the real client: `egui_kittest` has no Bevy textures, so
+//! the class icons render as class-color fallback squares. Fonts are the
+//! client's own stack (`install_game_fonts`), so layout, spacing, color and
+//! type iterate faithfully; pixel-exact icon fidelity still needs the real
+//! client.
 
 use egui_kittest::Harness;
 
 use arenasim::states::configure_match_ui::{draw_configure_match, CharacterPickerState, ClassIcons};
 use arenasim::states::match_config::{ArenaMap, CharacterClass, MatchConfig};
 use arenasim::states::play_match::map_config::MapGeometryConfig;
+use arenasim::ui::fonts::install_game_fonts;
 
 /// A representative 2v2 config: Team 1 fully filled (Warrior + Priest), Team 2
 /// with one filled slot (Mage) and one empty slot — so the baseline exercises
@@ -56,6 +57,7 @@ fn configure_match_2v2() {
     let mut harness = Harness::builder()
         .with_size([1500.0, 900.0])
         .build(move |ctx| {
+            install_game_fonts(ctx);
             let _ = draw_configure_match(ctx, &mut config, &mut picker, &icons, &map_geometry, None);
         });
 
@@ -81,6 +83,7 @@ fn configure_match_picker_open() {
     let mut harness = Harness::builder()
         .with_size([1500.0, 900.0])
         .build(move |ctx| {
+            install_game_fonts(ctx);
             let _ = draw_configure_match(ctx, &mut config, &mut picker, &icons, &map_geometry, None);
         });
 
