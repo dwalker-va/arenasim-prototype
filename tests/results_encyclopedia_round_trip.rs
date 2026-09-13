@@ -36,6 +36,7 @@ use arenasim::states::play_match::{
     AbilityConfigPlugin, CombatantStats, MapConfigPlugin, MatchResults, MovementConfigPlugin,
 };
 use arenasim::states::results_ui::{apply_results_action, ResultsAction};
+use arenasim::states::configure_match_ui::ClassIconHandles;
 use arenasim::states::view_combatant_ui::AbilityIconHandles;
 use arenasim::states::{GameState, StatesPlugin};
 
@@ -169,6 +170,32 @@ fn entering_results_cold_loads_the_ability_icons() {
             "no icon handle requested for {expected} — have {names:?}"
         );
     }
+}
+
+/// The CLASS icons must be there on a cold entry too — the second loader the
+/// Results chain registers, pinned exactly as strongly as the first.
+///
+/// `load_class_icons` otherwise runs only under ConfigureMatch, and `--replay`
+/// boots straight into PlayMatch, so a player watching a replay reached the
+/// results screen having never visited the screen that fills them. This
+/// harness never visits ConfigureMatch either, which is what makes it the
+/// right place to assert it.
+///
+/// Same honest scope as the ability-icon test above: with no image codec in
+/// the test app the textures cannot decode, so this keys on the HANDLE request
+/// the loader makes on its first run — which is precisely what goes missing
+/// when the system is absent from the Results schedule.
+#[test]
+fn entering_results_cold_loads_the_class_icons() {
+    let mut app = boot_app();
+    enter_results(&mut app);
+
+    let handles = app.world().resource::<ClassIconHandles>();
+    assert!(
+        !handles.handles.is_empty(),
+        "the class icon loader never ran in the Results state — every class \
+         portrait draws empty until some other screen happens to fill ClassIcons"
+    );
 }
 
 /// Click a linked icon, read the page, come back — and find the same numbers.

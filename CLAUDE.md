@@ -952,6 +952,24 @@ If you forget to register a new system, `cargo test` fails with the file path, l
 
 The historical bugs this prevents: `process_dispels`, `process_holy_shock_heals`, `process_holy_shock_damage`, and `process_divine_shield` were each registered in only one of the two paths and silently failed in the other mode. See `docs/solutions/implementation-patterns/graphical-mode-missing-system-registration.md` for context.
 
+### Reading a lazily-loaded resource from a new screen
+
+The icon resources (`ClassIcons`, `SpellIcons`, `EmojiIcons`, `AbilityIcons`,
+`ItemIcons`, `HunterPetIcons`) are filled LAZILY by a loader system that
+self-guards on an internal `loaded` flag. The rule, enforced by
+`tests/icon_loader_registration_audit.rs`:
+
+> **A state that reads a lazily-loaded resource must register that resource's
+> loader in its own chain.** Never rely on an earlier state having filled it.
+
+`--replay` boots straight into `PlayMatch` (`build_graphical_app(Some(cfg))`
+ends `.insert_state(GameState::PlayMatch)`), so it never passes through
+ConfigureMatch and never runs `load_class_icons` there. Anything that assumed
+"ConfigureMatch ran first" drew blank icons for the whole replay. The loaders
+are idempotent, so the fix is always one line in that state's chain in
+`src/states/mod.rs`. A consumer that provably never paints with the resource
+goes in the audit's `ALLOWLIST` with a justification.
+
 ### Continuous integration
 
 `.github/workflows/ci.yaml` runs `cargo build --release --locked` and
