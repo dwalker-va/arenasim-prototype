@@ -29,7 +29,7 @@ use super::configure_match_ui::ClassIcons;
 use super::play_match::AbilityType;
 use super::play_match::ability_config::AbilityDefinitions;
 use super::play_match::components::{ClassBaseStats, PetType, ResourceType, class_base_stats};
-use super::play_match::equipment::{ItemSlot, ItemId, Loadout, ItemDefinitions, DefaultLoadouts, resolve_loadout, enforce_two_hand_conflicts, enforce_unique_equipped, find_one_handed_mainhand};
+use super::play_match::equipment::{ItemSlot, ItemId, Loadout, ItemDefinitions, DefaultLoadouts, resolve_loadout, resolve_equipped_loadout, enforce_two_hand_conflicts, find_one_handed_mainhand};
 // Item presentation lives in the encyclopedia's Items section — the loadout
 // editor renders the same tooltip and stat line so the two never drift.
 use super::encyclopedia::items::{format_item_stats, render_item_tooltip};
@@ -371,9 +371,8 @@ pub fn view_combatant_ui(
     } else {
         match_config.team2_equipment.get(view_state.slot).cloned().unwrap_or_default()
     };
-    let mut resolved_loadout = resolve_loadout(class, &default_loadouts, &equip_overrides);
-    enforce_two_hand_conflicts(&mut resolved_loadout, &item_definitions);
-    enforce_unique_equipped(&mut resolved_loadout);
+    let resolved_loadout =
+        resolve_equipped_loadout(class, &default_loadouts, &equip_overrides, &item_definitions);
     let equip_bonuses = EquipmentBonuses::from_loadout(&resolved_loadout, &item_definitions, class);
 
     // Everything the shared encyclopedia widgets need to draw a link and its
@@ -1443,7 +1442,7 @@ fn set_equipment_override(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::play_match::equipment::LoadoutsConfig;
+    use super::super::play_match::equipment::{enforce_unique_equipped, LoadoutsConfig};
 
     /// The Warrior's shipped ring defaults: Band of Accuria / Ring of Protection.
     fn warrior_defaults() -> DefaultLoadouts {
