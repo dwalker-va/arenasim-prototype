@@ -4,7 +4,7 @@
 //!
 //! ## Priority Order
 //! 1. Paladin Aura (buff all allies pre-combat — Devotion/Shadow Resistance/Concentration)
-//! 1.5. Divine Shield (emergency: self < 30% HP, or CC break for teammate)
+//!    1.5. Divine Shield (emergency: self < 30% HP, or CC break for teammate)
 //! 2. Cleanse - Urgent (Polymorph, Freezing Trap, UA Silence, Fear on allies)
 //! 3. Emergency healing (ally < 40% HP) - Holy Shock (heal)
 //! 4. Hammer of Justice (stun enemy in melee range)
@@ -339,8 +339,8 @@ pub fn decide_paladin_action(
     }
 
     // Priority 7: Cleanse - Maintenance (team-healthy only).
-    if ctx.is_team_healthy(HEALTHY_HP_THRESHOLD, my_pos) {
-        if try_cleanse(
+    if ctx.is_team_healthy(HEALTHY_HP_THRESHOLD, my_pos)
+        && try_cleanse(
             commands,
             combat_log,
             abilities,
@@ -351,10 +351,10 @@ pub fn decide_paladin_action(
             ctx,
             50,
             &mut builder,
-        ) {
-            builder.finish();
-            return true;
-        }
+        )
+    {
+        builder.finish();
+        return true;
     }
 
     // Priority 8: Holy Shock (damage) — team-healthy only.
@@ -418,7 +418,7 @@ pub fn try_divine_shield(
         return false;
     }
 
-    if auras.map_or(false, |a| {
+    if auras.is_some_and(|a| {
         a.auras
             .iter()
             .any(|aura| aura.effect_type == AuraType::DamageImmunity)
@@ -540,7 +540,7 @@ pub fn try_divine_shield_while_cc(
         return false;
     }
 
-    if auras.map_or(false, |a| {
+    if auras.is_some_and(|a| {
         a.auras
             .iter()
             .any(|aura| aura.effect_type == AuraType::DamageImmunity)

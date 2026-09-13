@@ -886,7 +886,7 @@ mod pet_attribution_tests {
         // Same-ability pet hits accumulate under one labelled key.
         assert_eq!(breakdown.get("Spider: Auto Attack"), Some(&50.0));
         assert_eq!(breakdown.get("Spider: Web"), Some(&5.0));
-        assert!(breakdown.get("Frostbolt").is_none());
+        assert!(!breakdown.contains_key("Frostbolt"));
         // Breakdown total now matches the owner's damage + pet damage.
         let total: f32 = breakdown.values().sum();
         assert_eq!(total, 195.0);
@@ -903,7 +903,7 @@ mod pet_attribution_tests {
         let plain = log.damage_by_ability("Team 1 Hunter");
         assert_eq!(with_pets, plain);
         // Pet damage is absent without a link entry.
-        assert!(with_pets.get("Spider: Auto Attack").is_none());
+        assert!(!with_pets.contains_key("Spider: Auto Attack"));
     }
 
     #[test]

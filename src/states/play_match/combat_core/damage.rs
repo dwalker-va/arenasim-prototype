@@ -152,7 +152,7 @@ pub fn apply_damage_with_absorb(
 
 /// Check if a combatant has an absorb shield active
 pub fn has_absorb_shield(auras: Option<&ActiveAuras>) -> bool {
-    auras.map_or(false, |a| {
+    auras.is_some_and(|a| {
         a.auras
             .iter()
             .any(|aura| aura.effect_type == AuraType::Absorb)
@@ -161,7 +161,7 @@ pub fn has_absorb_shield(auras: Option<&ActiveAuras>) -> bool {
 
 /// Check if a combatant has Weakened Soul (cannot receive Power Word: Shield)
 pub fn has_weakened_soul(auras: Option<&ActiveAuras>) -> bool {
-    auras.map_or(false, |a| {
+    auras.is_some_and(|a| {
         a.auras
             .iter()
             .any(|aura| aura.effect_type == AuraType::WeakenedSoul)
@@ -184,7 +184,7 @@ pub fn get_physical_damage_reduction(auras: Option<&ActiveAuras>) -> f32 {
 
 /// Check if a combatant has damage immunity (Divine Shield active)
 pub fn has_damage_immunity(auras: Option<&ActiveAuras>) -> bool {
-    auras.map_or(false, |a| {
+    auras.is_some_and(|a| {
         a.auras
             .iter()
             .any(|aura| aura.effect_type == AuraType::DamageImmunity)

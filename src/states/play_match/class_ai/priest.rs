@@ -280,8 +280,8 @@ pub fn decide_priest_action(
     }
 
     // Priority 6: Dispel Magic - Maintenance (only when team healthy)
-    if ctx.is_team_healthy(0.70, my_pos) {
-        if try_dispel_magic(
+    if ctx.is_team_healthy(0.70, my_pos)
+        && try_dispel_magic(
             commands,
             combat_log,
             abilities,
@@ -292,10 +292,10 @@ pub fn decide_priest_action(
             ctx,
             50,
             &mut builder,
-        ) {
-            builder.finish();
-            return true;
-        }
+        )
+    {
+        builder.finish();
+        return true;
     }
 
     // Priority 7: Mind Blast
@@ -400,7 +400,7 @@ fn try_psychic_scream(
     // real threat are still feared — this only blocks a pet-only cast.
     let has_real_threat = targets
         .iter()
-        .any(|e| ctx.combatants.get(e).map_or(false, |i| !i.is_pet));
+        .any(|e| ctx.combatants.get(e).is_some_and(|i| !i.is_pet));
     if !has_real_threat {
         builder.reject(scream, RejectionReason::NoValidTarget);
         return false;
@@ -713,12 +713,12 @@ fn try_power_word_shield(
             continue;
         }
         let ally_auras = ctx.active_auras.get(ally_entity);
-        let has_weakened_soul = ally_auras.map_or(false, |auras| {
+        let has_weakened_soul = ally_auras.is_some_and(|auras| {
             auras
                 .iter()
                 .any(|a| a.effect_type == AuraType::WeakenedSoul)
         });
-        let has_pw_shield = ally_auras.map_or(false, |auras| {
+        let has_pw_shield = ally_auras.is_some_and(|auras| {
             auras.iter().any(|a| {
                 a.effect_type == AuraType::Absorb && a.ability_name == "Power Word: Shield"
             })
@@ -1089,7 +1089,7 @@ const MANA_BURN_SURPLUS_HEALTH_FLOOR: f32 = 0.90;
 /// deliberately NOT Root: a rooted caster still casts). Same set as
 /// `CombatContext::enemy_healer_is_cced`.
 fn attack_prevented_by_cc(ctx: &CombatContext, entity: Entity) -> bool {
-    ctx.active_auras.get(&entity).map_or(false, |auras| {
+    ctx.active_auras.get(&entity).is_some_and(|auras| {
         auras.iter().any(|a| {
             matches!(
                 a.effect_type,
@@ -1558,7 +1558,7 @@ fn priest_dip_tick(
     let in_range = ctx
         .combatants
         .get(&target)
-        .map_or(false, |t| my_pos.distance(t.position) <= def.range);
+        .is_some_and(|t| my_pos.distance(t.position) <= def.range);
     if in_range {
         let mut completed = *state;
         completed.posture = Posture::Free;
@@ -1940,9 +1940,9 @@ fn free_tick(
 
     let point_xz = Vec2::new(point.x, point.z);
     let my_xz = Vec2::new(my_pos.x, my_pos.z);
-    let moved = state.last_point.map_or(true, |lp| {
-        lp.distance(point_xz) > movement.priest.formation_shift_threshold
-    });
+    let moved = state
+        .last_point
+        .is_none_or(|lp| lp.distance(point_xz) > movement.priest.formation_shift_threshold);
     let near = my_xz.distance(point_xz) <= movement.priest.formation_deadzone;
 
     let issue = |commands: &mut Commands| {
@@ -1984,9 +1984,7 @@ fn free_tick(
             builder.finish();
         }
     } else if !near
-        && directive.map_or(true, |d| {
-            d.expires - now < movement.priest.directive_refresh_margin
-        })
+        && directive.is_none_or(|d| d.expires - now < movement.priest.directive_refresh_margin)
     {
         // Keep the standing walk alive (post-cast gaps, TTL expiry) without
         // re-scoring or emitting — refreshes are not decisions.

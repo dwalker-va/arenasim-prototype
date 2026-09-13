@@ -13,11 +13,11 @@
 //!
 //! The pipeline runs left to right across the three children:
 //!
-//!  - [`watcher`]   — detects THAT a call moved and which pool that implies.
-//!  - [`resolver`]  — decides WHAT gets said: a pure filter/weight/pick/bind/
-//!                    substitute over plain data, no `World` in sight.
-//!  - [`scheduler`] — owns the Bevy plumbing: drains the watcher, calls the
-//!                    resolver, paces the beats and spawns the bubbles.
+//! - [`watcher`] — detects THAT a call moved and which pool that implies.
+//! - [`resolver`] — decides WHAT gets said: a pure filter/weight/pick/bind/
+//!   substitute over plain data, no `World` in sight.
+//! - [`scheduler`] — owns the Bevy plumbing: drains the watcher, calls the
+//!   resolver, paces the beats and spawns the bubbles.
 
 mod resolver;
 mod scheduler;

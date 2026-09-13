@@ -177,7 +177,7 @@ pub fn is_incapacitating(aura_type: &super::components::AuraType) -> bool {
 /// Check if a combatant is incapacitated by crowd control (Stun, Fear, or Polymorph).
 /// Root does NOT count as incapacitation — it only prevents movement.
 pub fn is_incapacitated(auras: Option<&super::components::ActiveAuras>) -> bool {
-    auras.map_or(false, |a| {
+    auras.is_some_and(|a| {
         a.auras
             .iter()
             .any(|aura| is_incapacitating(&aura.effect_type))

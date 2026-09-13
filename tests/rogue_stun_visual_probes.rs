@@ -303,7 +303,8 @@ fn the_fan_sweeps_across_the_casters_breadth() {
     // to read as body-wide.
     // Kidney Shot only — Cheap Shot is a halo on the VICTIM, not a sweep across
     // the caster, and has its own probe below.
-    for ability in [AbilityType::KidneyShot] {
+    {
+        let ability = AbilityType::KidneyShot;
         let mut h = Harness::new();
         let rogue = h.spawn_rogue();
         // Victim straight ahead on +Z, so "across" is the world X axis.

@@ -450,7 +450,7 @@ pub fn view_combatant_ui(
 
     // Calculate panel dimensions based on screen size
     // Panels take up ~70% of screen width, split between two columns
-    let content_width = (screen_width * 0.7).min(700.0).max(500.0);
+    let content_width = (screen_width * 0.7).clamp(500.0, 700.0);
     let spacing = 20.0;
     let panel_width = (content_width - spacing) / 2.0;
 
@@ -1754,7 +1754,7 @@ fn set_equipment_override(
             let mh_is_2h = pre_resolved
                 .get(&ItemSlot::MainHand)
                 .and_then(|id| items.get(id))
-                .map_or(false, |item| item.two_handed);
+                .is_some_and(|item| item.two_handed);
             if mh_is_2h {
                 if let Some(replacement) = find_one_handed_mainhand(items, class) {
                     equip_map.insert(ItemSlot::MainHand, replacement);
@@ -1774,94 +1774,6 @@ fn set_equipment_override(
                     equip_map.remove(&ItemSlot::OffHand);
                 }
             }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::super::play_match::equipment::{enforce_unique_equipped, LoadoutsConfig};
-    use super::*;
-
-    /// The Warrior's shipped ring defaults: Band of Accuria / Ring of Protection.
-    fn warrior_defaults() -> DefaultLoadouts {
-        let mut warrior = Loadout::new();
-        warrior.insert(ItemSlot::Ring1, ItemId::BandOfAccuria);
-        warrior.insert(ItemSlot::Ring2, ItemId::RingOfProtection);
-        warrior.insert(ItemSlot::MainHand, ItemId::ArcaniteReaper);
-        let mut loadouts = HashMap::new();
-        loadouts.insert(CharacterClass::Warrior, warrior);
-        DefaultLoadouts::new(LoadoutsConfig { loadouts })
-    }
-
-    fn resolve(defaults: &DefaultLoadouts, overrides: &Loadout) -> Loadout {
-        // The two-hand pass needs item definitions; the ring cases here never
-        // touch it, so this mirrors the resolve site minus that pass.
-        let mut resolved = resolve_loadout(CharacterClass::Warrior, defaults, overrides);
-        enforce_unique_equipped(&mut resolved);
-        resolved
-    }
-
-    #[test]
-    fn a_stripped_override_is_never_drawn_as_overridden() {
-        // The AS-64 repro's end state: Ring2 explicitly holds Band of Accuria
-        // while Ring1 resolves to its default, also Band of Accuria. The
-        // resolver strips Ring2, so the socket is EMPTY — and the row must
-        // say so, not draw green over nothing.
-        let defaults = warrior_defaults();
-        let mut overrides = Loadout::new();
-        overrides.insert(ItemSlot::Ring2, ItemId::BandOfAccuria);
-
-        let resolved = resolve(&defaults, &overrides);
-        assert_eq!(
-            resolved.get(&ItemSlot::Ring2),
-            None,
-            "precondition: resolver strips the duplicate"
-        );
-        assert!(!is_effective_override(
-            ItemSlot::Ring2,
-            &overrides,
-            &resolved
-        ));
-    }
-
-    #[test]
-    fn an_override_that_is_worn_is_drawn_as_overridden() {
-        let defaults = warrior_defaults();
-        let mut overrides = Loadout::new();
-        overrides.insert(ItemSlot::Ring1, ItemId::SignetOfFocus);
-
-        let resolved = resolve(&defaults, &overrides);
-        assert!(is_effective_override(
-            ItemSlot::Ring1,
-            &overrides,
-            &resolved
-        ));
-        assert!(
-            !is_effective_override(ItemSlot::Ring2, &overrides, &resolved),
-            "a default is not an override"
-        );
-    }
-
-    #[test]
-    fn restore_defaults_lands_on_the_ron_default_exactly() {
-        // The repro's first two clicks, then a restore: both rings must come
-        // back as the default pair with no row left overridden — and there is
-        // no collision to resolve because the default is unique by
-        // construction.
-        let defaults = warrior_defaults();
-        let mut overrides = Loadout::new();
-        overrides.insert(ItemSlot::Ring1, ItemId::SignetOfFocus);
-        overrides.insert(ItemSlot::Ring2, ItemId::BandOfAccuria);
-        overrides.insert(ItemSlot::MainHand, ItemId::FrostbiteBlade);
-
-        restore_default_equipment(&mut overrides);
-
-        assert!(overrides.is_empty());
-        let resolved = resolve(&defaults, &overrides);
-        assert_eq!(&resolved, defaults.get(CharacterClass::Warrior).unwrap());
-        for slot in ItemSlot::all() {
-            assert!(!is_effective_override(*slot, &overrides, &resolved));
         }
     }
 }
@@ -2024,7 +1936,7 @@ fn render_rogue_opener_panel(
 /// Every option is an ability, so every icon hovers to that ability's slim
 /// summary — the one the kit rows show. Click is the pick; the kit list is
 /// where each of these abilities links on to its page.
-fn render_strategic_option_panel<T: Copy + PartialEq>(
+fn render_strategic_option_panel<T>(
     ui: &mut egui::Ui,
     width: f32,
     height: f32,
@@ -2037,7 +1949,7 @@ fn render_strategic_option_panel<T: Copy + PartialEq>(
     match_config: &mut ResMut<MatchConfig>,
     data: &EncyclopediaData,
 ) where
-    T: HasNameDescription,
+    T: Copy + PartialEq + HasNameDescription,
 {
     let current = get_current(match_config, view_state.team, view_state.slot);
 
@@ -2528,4 +2440,92 @@ fn render_warlock_curse_panel(
             match_config.set_curse_pref(view_state.team, view_state.slot, enemy_slot, curse);
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::play_match::equipment::{enforce_unique_equipped, LoadoutsConfig};
+    use super::*;
+
+    /// The Warrior's shipped ring defaults: Band of Accuria / Ring of Protection.
+    fn warrior_defaults() -> DefaultLoadouts {
+        let mut warrior = Loadout::new();
+        warrior.insert(ItemSlot::Ring1, ItemId::BandOfAccuria);
+        warrior.insert(ItemSlot::Ring2, ItemId::RingOfProtection);
+        warrior.insert(ItemSlot::MainHand, ItemId::ArcaniteReaper);
+        let mut loadouts = HashMap::new();
+        loadouts.insert(CharacterClass::Warrior, warrior);
+        DefaultLoadouts::new(LoadoutsConfig { loadouts })
+    }
+
+    fn resolve(defaults: &DefaultLoadouts, overrides: &Loadout) -> Loadout {
+        // The two-hand pass needs item definitions; the ring cases here never
+        // touch it, so this mirrors the resolve site minus that pass.
+        let mut resolved = resolve_loadout(CharacterClass::Warrior, defaults, overrides);
+        enforce_unique_equipped(&mut resolved);
+        resolved
+    }
+
+    #[test]
+    fn a_stripped_override_is_never_drawn_as_overridden() {
+        // The AS-64 repro's end state: Ring2 explicitly holds Band of Accuria
+        // while Ring1 resolves to its default, also Band of Accuria. The
+        // resolver strips Ring2, so the socket is EMPTY — and the row must
+        // say so, not draw green over nothing.
+        let defaults = warrior_defaults();
+        let mut overrides = Loadout::new();
+        overrides.insert(ItemSlot::Ring2, ItemId::BandOfAccuria);
+
+        let resolved = resolve(&defaults, &overrides);
+        assert_eq!(
+            resolved.get(&ItemSlot::Ring2),
+            None,
+            "precondition: resolver strips the duplicate"
+        );
+        assert!(!is_effective_override(
+            ItemSlot::Ring2,
+            &overrides,
+            &resolved
+        ));
+    }
+
+    #[test]
+    fn an_override_that_is_worn_is_drawn_as_overridden() {
+        let defaults = warrior_defaults();
+        let mut overrides = Loadout::new();
+        overrides.insert(ItemSlot::Ring1, ItemId::SignetOfFocus);
+
+        let resolved = resolve(&defaults, &overrides);
+        assert!(is_effective_override(
+            ItemSlot::Ring1,
+            &overrides,
+            &resolved
+        ));
+        assert!(
+            !is_effective_override(ItemSlot::Ring2, &overrides, &resolved),
+            "a default is not an override"
+        );
+    }
+
+    #[test]
+    fn restore_defaults_lands_on_the_ron_default_exactly() {
+        // The repro's first two clicks, then a restore: both rings must come
+        // back as the default pair with no row left overridden — and there is
+        // no collision to resolve because the default is unique by
+        // construction.
+        let defaults = warrior_defaults();
+        let mut overrides = Loadout::new();
+        overrides.insert(ItemSlot::Ring1, ItemId::SignetOfFocus);
+        overrides.insert(ItemSlot::Ring2, ItemId::BandOfAccuria);
+        overrides.insert(ItemSlot::MainHand, ItemId::FrostbiteBlade);
+
+        restore_default_equipment(&mut overrides);
+
+        assert!(overrides.is_empty());
+        let resolved = resolve(&defaults, &overrides);
+        assert_eq!(&resolved, defaults.get(CharacterClass::Warrior).unwrap());
+        for slot in ItemSlot::all() {
+            assert!(!is_effective_override(*slot, &overrides, &resolved));
+        }
+    }
 }

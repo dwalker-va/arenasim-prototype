@@ -610,6 +610,9 @@ fn swing_param(
 /// [`swing_param`] with the phase durations supplied by a [`SwingProfile`]
 /// instead of the bare consts. The windup branch is unaffected — it is driven
 /// by the sim's attack timer, which a styled stroke does not change.
+// `!(x > 0.0)` is deliberate: a NaN interval or window must fall into the
+// guard, not slip past a `<=` comparison that is false for NaN.
+#[allow(clippy::neg_cmp_op_on_partial_ord)]
 fn swing_param_timed(
     timer: f32,
     interval: f32,
@@ -1179,6 +1182,62 @@ pub fn update_cosmetic_arrows(
     }
 }
 
+/// Update (graphical-only): fade weapon materials with their owner's stealth,
+/// mirroring the body's 40%-alpha darkened tint (`update_stealth_visuals`).
+///
+/// glTF weapon materials are SHARED assets across every spawned instance of a
+/// model, so the fade swaps each weapon-mesh descendant onto a per-instance
+/// clone and remembers the original in [`OriginalWeaponMaterial`]; unstealth
+/// restores the shared original exactly. The scene subtree spawns async, so
+/// this keys off `Changed<Combatant>` (which fires every sim tick — timers
+/// mutate) and converges the first frame the meshes exist; the
+/// already-faded guard makes the steady state cheap.
+pub fn update_weapon_stealth_fade(
+    mut commands: Commands,
+    combatants: Query<(Entity, &Combatant), Changed<Combatant>>,
+    sockets: Query<(Entity, &WeaponSocket)>,
+    children: Query<&Children>,
+    mesh_mats: Query<&MeshMaterial3d<StandardMaterial>>,
+    originals: Query<&OriginalWeaponMaterial>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    for (owner_entity, combatant) in combatants.iter() {
+        for (socket_entity, socket) in sockets.iter() {
+            if socket.owner != owner_entity {
+                continue;
+            }
+            for desc in children.iter_descendants(socket_entity) {
+                if combatant.stealthed {
+                    if originals.get(desc).is_ok() {
+                        continue; // already faded
+                    }
+                    let Ok(mat_handle) = mesh_mats.get(desc) else {
+                        continue;
+                    };
+                    let Some(mat) = materials.get(&mat_handle.0) else {
+                        continue;
+                    };
+                    let mut faded = mat.clone();
+                    let c = faded.base_color.to_srgba();
+                    faded.base_color = Color::srgba(c.red * 0.6, c.green * 0.6, c.blue * 0.6, 0.4);
+                    faded.alpha_mode = bevy::prelude::AlphaMode::Blend;
+                    let original = mat_handle.0.clone();
+                    let faded_handle = materials.add(faded);
+                    commands.entity(desc).insert((
+                        MeshMaterial3d(faded_handle),
+                        OriginalWeaponMaterial(original),
+                    ));
+                } else if let Ok(original) = originals.get(desc) {
+                    commands
+                        .entity(desc)
+                        .insert(MeshMaterial3d(original.0.clone()))
+                        .remove::<OriginalWeaponMaterial>();
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod swing_tests {
     use super::*;
@@ -1733,61 +1792,5 @@ mod swing_tests {
     fn pitch_of(t: Transform) -> f32 {
         let (x, _, _) = t.rotation.to_euler(EulerRot::XYZ);
         x
-    }
-}
-
-/// Update (graphical-only): fade weapon materials with their owner's stealth,
-/// mirroring the body's 40%-alpha darkened tint (`update_stealth_visuals`).
-///
-/// glTF weapon materials are SHARED assets across every spawned instance of a
-/// model, so the fade swaps each weapon-mesh descendant onto a per-instance
-/// clone and remembers the original in [`OriginalWeaponMaterial`]; unstealth
-/// restores the shared original exactly. The scene subtree spawns async, so
-/// this keys off `Changed<Combatant>` (which fires every sim tick — timers
-/// mutate) and converges the first frame the meshes exist; the
-/// already-faded guard makes the steady state cheap.
-pub fn update_weapon_stealth_fade(
-    mut commands: Commands,
-    combatants: Query<(Entity, &Combatant), Changed<Combatant>>,
-    sockets: Query<(Entity, &WeaponSocket)>,
-    children: Query<&Children>,
-    mesh_mats: Query<&MeshMaterial3d<StandardMaterial>>,
-    originals: Query<&OriginalWeaponMaterial>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    for (owner_entity, combatant) in combatants.iter() {
-        for (socket_entity, socket) in sockets.iter() {
-            if socket.owner != owner_entity {
-                continue;
-            }
-            for desc in children.iter_descendants(socket_entity) {
-                if combatant.stealthed {
-                    if originals.get(desc).is_ok() {
-                        continue; // already faded
-                    }
-                    let Ok(mat_handle) = mesh_mats.get(desc) else {
-                        continue;
-                    };
-                    let Some(mat) = materials.get(&mat_handle.0) else {
-                        continue;
-                    };
-                    let mut faded = mat.clone();
-                    let c = faded.base_color.to_srgba();
-                    faded.base_color = Color::srgba(c.red * 0.6, c.green * 0.6, c.blue * 0.6, 0.4);
-                    faded.alpha_mode = bevy::prelude::AlphaMode::Blend;
-                    let original = mat_handle.0.clone();
-                    let faded_handle = materials.add(faded);
-                    commands.entity(desc).insert((
-                        MeshMaterial3d(faded_handle),
-                        OriginalWeaponMaterial(original),
-                    ));
-                } else if let Ok(original) = originals.get(desc) {
-                    commands
-                        .entity(desc)
-                        .insert(MeshMaterial3d(original.0.clone()))
-                        .remove::<OriginalWeaponMaterial>();
-                }
-            }
-        }
     }
 }

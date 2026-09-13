@@ -266,8 +266,8 @@ pub fn decide_warlock_action(
                 RejectionReason::TargetImmune,
             );
         }
-    } else if !ua_attempted {
-        if try_unstable_affliction(
+    } else if !ua_attempted
+        && try_unstable_affliction(
             commands,
             combat_log,
             abilities,
@@ -279,10 +279,10 @@ pub fn decide_warlock_action(
             target_pos,
             ctx,
             &mut builder,
-        ) {
-            builder.finish();
-            return true;
-        }
+        )
+    {
+        builder.finish();
+        return true;
     }
 
     // Priority 1.75: Lock the enemy healer with Fear to open a kill window.

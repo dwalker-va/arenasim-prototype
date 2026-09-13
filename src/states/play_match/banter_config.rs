@@ -329,6 +329,9 @@ impl BanterConfig {
 
     /// Check value and pool sanity. Returns the list of violations on
     /// failure — every offender is named, so one load reports every problem.
+    // `!(x > 0.0)` is deliberate, not a clumsy `<=`: it also rejects NaN,
+    // which is exactly what a config validator must do.
+    #[allow(clippy::neg_cmp_op_on_partial_ord)]
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut issues: Vec<String> = Vec::new();
         let t = &self.timing;
@@ -568,6 +571,26 @@ impl Plugin for BanterConfigPlugin {
             }
         }
     }
+}
+
+/// Every `{emoji:<name>}` referenced by a line.
+///
+/// A tiny scanner rather than a call into `banter::vocab::parse`, so config
+/// validation does not depend on the renderer's span model — the two answer
+/// different questions and should be able to change independently.
+fn emoji_names(text: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("{emoji:") {
+        let after = &rest[start + "{emoji:".len()..];
+        let Some(end) = after.find('}') else { break };
+        let name = &after[..end];
+        if !name.is_empty() {
+            names.push(name.to_string());
+        }
+        rest = &after[end + 1..];
+    }
+    names
 }
 
 #[cfg(test)]
@@ -984,24 +1007,4 @@ mod tests {
             t.beat_start(BanterContext::Opening, 0),
         );
     }
-}
-
-/// Every `{emoji:<name>}` referenced by a line.
-///
-/// A tiny scanner rather than a call into `banter::vocab::parse`, so config
-/// validation does not depend on the renderer's span model — the two answer
-/// different questions and should be able to change independently.
-fn emoji_names(text: &str) -> Vec<String> {
-    let mut names = Vec::new();
-    let mut rest = text;
-    while let Some(start) = rest.find("{emoji:") {
-        let after = &rest[start + "{emoji:".len()..];
-        let Some(end) = after.find('}') else { break };
-        let name = &after[..end];
-        if !name.is_empty() {
-            names.push(name.to_string());
-        }
-        rest = &after[end + 1..];
-    }
-    names
 }

@@ -333,7 +333,7 @@ pub fn update_nova_shards(time: Res<Time>, mut shards: Query<(&mut NovaShard, &m
     for (mut shard, mut transform) in shards.iter_mut() {
         shard.age += dt;
         let since = shard.age - shard.born_at;
-        if since < 0.0 || since > NOVA_CRYSTAL_LIFE {
+        if !(0.0..=NOVA_CRYSTAL_LIFE).contains(&since) {
             transform.scale = Vec3::ZERO;
             continue;
         }

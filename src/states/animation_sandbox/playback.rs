@@ -1502,9 +1502,11 @@ mod tests {
     fn a_projectile_preview_outlasts_its_own_cast() {
         let defs = AbilityDefinitions::default();
         let window = |ability: AbilityType| {
-            let mut playback = SandboxPlayback::default();
-            playback.selected = Some(SandboxEntry::Ability(ability));
-            playback.family = defs.get(&ability).map(|c| mechanism_for(ability, c));
+            let playback = SandboxPlayback {
+                selected: Some(SandboxEntry::Ability(ability)),
+                family: defs.get(&ability).map(|c| mechanism_for(ability, c)),
+                ..Default::default()
+            };
             entry_duration(&playback, &defs)
         };
 
@@ -1935,6 +1937,8 @@ mod tests {
     }
 
     #[test]
+    // Pinning a relationship between constants IS this test; const-folding is the point.
+    #[allow(clippy::assertions_on_constants)]
     fn the_victory_clock_outlasts_a_bounce_pass_without_reaching_its_floor() {
         // `update_victory_celebration` derives the bounce phase from
         // `CELEBRATION_SECS - time_remaining`, and the floor freezes that phase.

@@ -462,6 +462,9 @@ pub struct MovementConfig {
 
 impl MovementConfig {
     /// Check value sanity. Returns the list of violations on failure.
+    // `!(x > 0.0)` is deliberate, not a clumsy `<=`: it also rejects NaN,
+    // which is exactly what a config validator must do.
+    #[allow(clippy::neg_cmp_op_on_partial_ord)]
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut issues: Vec<String> = Vec::new();
         let s = &self.shared;

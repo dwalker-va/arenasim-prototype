@@ -49,20 +49,11 @@ fn default_show_call_display() -> bool {
 }
 
 /// Tracks whether settings have changed and require application restart
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct PendingSettingsRestart {
     pub restart_required: bool,
     /// Store previous settings to detect what changed
     previous_settings: GameSettings,
-}
-
-impl Default for PendingSettingsRestart {
-    fn default() -> Self {
-        Self {
-            restart_required: false,
-            previous_settings: GameSettings::default(),
-        }
-    }
 }
 
 impl PendingSettingsRestart {
@@ -291,6 +282,14 @@ fn apply_runtime_settings(
     }
 }
 
+/// System to keep Keybindings resource in sync with GameSettings
+fn sync_keybindings(settings: Res<GameSettings>, mut keybindings: ResMut<Keybindings>) {
+    if settings.is_changed() && !settings.is_added() {
+        *keybindings = settings.keybindings.clone();
+        info!("Synced keybindings from settings");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -365,13 +364,5 @@ mod tests {
             loaded.show_call_display,
             "missing field falls back to the default"
         );
-    }
-}
-
-/// System to keep Keybindings resource in sync with GameSettings
-fn sync_keybindings(settings: Res<GameSettings>, mut keybindings: ResMut<Keybindings>) {
-    if settings.is_changed() && !settings.is_added() {
-        *keybindings = settings.keybindings.clone();
-        info!("Synced keybindings from settings");
     }
 }

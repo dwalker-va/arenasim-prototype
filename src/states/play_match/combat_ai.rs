@@ -329,7 +329,7 @@ pub fn acquire_targets(
             if let Some((cur_entity, cur_pos, _, _, _, cur_health, _, _)) = combatant
                 .target
                 .and_then(|t| enemy_combatants.iter().find(|(e, ..)| *e == t))
-                .map(|t| *t)
+                .copied()
             {
                 let my_pos = transform.translation;
                 let now = decision_trace.current_sim_time;
@@ -541,6 +541,7 @@ pub fn acquire_targets(
 /// 1. Healer: +100 points - highest CC value (UNLESS we're killing the healer)
 /// 2. Non-kill-target: +50 points - enables outnumbering
 /// 3. Higher HP: +20 points - don't waste CC on dying targets
+///
 /// Required: Not already CC'd
 ///
 /// Special case: If kill_target is a healer, we INVERT healer priority.

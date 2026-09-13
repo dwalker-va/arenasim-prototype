@@ -1061,7 +1061,7 @@ pub fn enforce_two_hand_conflicts(loadout: &mut Loadout, items: &ItemDefinitions
     let has_2h = loadout
         .get(&ItemSlot::MainHand)
         .and_then(|id| items.get(id))
-        .map_or(false, |item| item.two_handed);
+        .is_some_and(|item| item.two_handed);
     if has_2h {
         loadout.remove(&ItemSlot::OffHand);
     }

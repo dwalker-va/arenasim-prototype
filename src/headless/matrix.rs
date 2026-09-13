@@ -99,15 +99,12 @@ pub fn run_matrix(
     // reject TestVerticality explicitly: it parses (the single-match path
     // accepts it for LoS unit-probing) but is a test asset, not a balance
     // arena, so it must never seed a 4900-match sweep.
-    match super::config::HeadlessMatchConfig::parse_map(&matrix_map)? {
-        ArenaMap::TestVerticality => {
-            return Err(format!(
-                "--matrix-map '{}' is a test-only asset and is not a valid matrix map. \
-                 Use BasicArena or PillaredArena.",
-                matrix_map
-            ));
-        }
-        _ => {}
+    if super::config::HeadlessMatchConfig::parse_map(&matrix_map)? == ArenaMap::TestVerticality {
+        return Err(format!(
+            "--matrix-map '{}' is a test-only asset and is not a valid matrix map. \
+             Use BasicArena or PillaredArena.",
+            matrix_map
+        ));
     }
 
     let classes = CharacterClass::all();

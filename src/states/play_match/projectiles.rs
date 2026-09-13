@@ -208,9 +208,9 @@ pub fn process_projectile_hits(
             let target_world_pos = target_transform.translation;
 
             let def = abilities.get_unchecked(&projectile.ability);
-            let ap_bonus = super::combat_core::get_attack_power_bonus(caster_auras.as_deref());
-            let sp_bonus = super::combat_core::get_spell_power_bonus(caster_auras.as_deref());
-            let crit_bonus = super::combat_core::get_crit_chance_bonus(caster_auras.as_deref());
+            let ap_bonus = super::combat_core::get_attack_power_bonus(caster_auras);
+            let sp_bonus = super::combat_core::get_spell_power_bonus(caster_auras);
+            let crit_bonus = super::combat_core::get_crit_chance_bonus(caster_auras);
             let mut ability_damage = caster_combatant.calculate_ability_damage_config(
                 def,
                 &mut game_rng,
@@ -230,8 +230,7 @@ pub fn process_projectile_hits(
             }
 
             // Apply Divine Shield outgoing damage penalty (50%) at impact time
-            let ds_penalty =
-                super::combat_core::get_divine_shield_damage_penalty(caster_auras.as_deref());
+            let ds_penalty = super::combat_core::get_divine_shield_damage_penalty(caster_auras);
             ability_damage = (ability_damage * ds_penalty).max(0.0);
 
             // Resolve the caster's combat-log id once, pet-aware: a Spider's

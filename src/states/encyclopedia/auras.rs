@@ -418,7 +418,7 @@ pub fn siblings(catalog: &[NamedAura], mechanic: AuraType, self_id: AuraId) -> V
         .collect()
 }
 
-pub fn find<'a>(catalog: &'a [NamedAura], id: AuraId) -> Option<&'a NamedAura> {
+pub fn find(catalog: &[NamedAura], id: AuraId) -> Option<&NamedAura> {
     catalog.iter().find(|entry| entry.id == id)
 }
 
@@ -1565,6 +1565,8 @@ mod tests {
     /// apply site now applies -1.0 and the page must follow THAT constant, not
     /// a literal of its own.
     #[test]
+    // Pinning a relationship between constants IS this test; const-folding is the point.
+    #[allow(clippy::assertions_on_constants)]
     fn engine_entries_take_break_on_damage_from_their_apply_site() {
         let entries = catalog(&abilities());
         let shadow_sight = entries

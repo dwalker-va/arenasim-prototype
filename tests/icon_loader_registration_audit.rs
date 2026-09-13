@@ -176,14 +176,12 @@ fn lazy_resources(files: &[PathBuf]) -> std::io::Result<BTreeSet<String>> {
         r"(?m)#\[derive\([^)]*\bResource\b[^)]*\)\]\s*(?:pub\s+)?struct\s+(\w+)\s*\{([^}]*)\}",
     )
     .unwrap();
+    let loaded_re = Regex::new(r"\bloaded\s*:\s*bool\b").unwrap();
     let mut out = BTreeSet::new();
     for path in files {
         let text = strip_comments(&fs::read_to_string(path)?);
         for cap in re.captures_iter(&text) {
-            if Regex::new(r"\bloaded\s*:\s*bool\b")
-                .unwrap()
-                .is_match(&cap[2])
-            {
+            if loaded_re.is_match(&cap[2]) {
                 out.insert(cap[1].to_string());
             }
         }
@@ -323,6 +321,7 @@ fn state_registrations() -> std::io::Result<StateRegistrations> {
     let on_enter_exit_re = Regex::new(r"On(?:Enter|Exit)\s*\(\s*GameState::(\w+)\s*\)").unwrap();
     let run_if_fn_re = Regex::new(r"run_if\s*\(\s*([a-z_][a-z0-9_]*)\s*\)").unwrap();
     let ident_re = Regex::new(r"(?:([a-z_][a-z0-9_]*)\s*::\s*)?([a-z_][a-z0-9_]*)").unwrap();
+    let game_state_re = Regex::new(r"GameState::(\w+)").unwrap();
     let add_systems_re = Regex::new(r"\.add_systems\s*\(").unwrap();
 
     let mut map: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
@@ -346,10 +345,7 @@ fn state_registrations() -> std::io::Result<StateRegistrations> {
             // A named predicate function: read the states out of its body
             // rather than hardcoding what `in_combat_scene` covers today.
             if let Some(body) = find_fn_body(&text, &cap[1]) {
-                for c in Regex::new(r"GameState::(\w+)")
-                    .unwrap()
-                    .captures_iter(&body)
-                {
+                for c in game_state_re.captures_iter(&body) {
                     states.insert(c[1].to_string());
                 }
             }

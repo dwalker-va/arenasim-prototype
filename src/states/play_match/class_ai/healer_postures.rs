@@ -399,7 +399,7 @@ pub(super) fn medic_chase_tick(
     ctx: &CombatContext,
 ) {
     let recommit = state.medic_target != Some(ally.entity)
-        || directive.map_or(true, |d| now >= d.committed_until || now >= d.expires);
+        || directive.is_none_or(|d| now >= d.committed_until || now >= d.expires);
     if !recommit {
         return; // still committed toward this ally — the walk continues, no re-emit
     }
@@ -587,7 +587,7 @@ pub(super) fn healer_pressured_tick_shared(
     // committed window lapses (or the directive died — e.g. expired across a
     // heal cast). The scorer's commitment bonus applies only AT re-evaluation;
     // the two governors never stack.
-    let window_open = directive.map_or(false, |d| now < d.committed_until && now < d.expires);
+    let window_open = directive.is_some_and(|d| now < d.committed_until && now < d.expires);
     if window_open && !transitioned {
         return;
     }
@@ -800,7 +800,7 @@ pub(super) fn healer_pressured_tick_shared(
 
     let direction_changed = state
         .last_direction
-        .map_or(true, |d| d.distance(chosen) > 1e-3);
+        .is_none_or(|d| d.distance(chosen) > 1e-3);
     state.last_direction = Some(chosen);
 
     // Trace (R3): posture transitions and committed direction CHANGES only.

@@ -496,11 +496,9 @@ fn felhunter_ai(
         return;
     }
 
-    if try_devour_magic(
+    try_devour_magic(
         commands, combat_log, abilities, entity, combatant, my_pos, ctx, builder,
-    ) {
-        return;
-    }
+    );
 }
 
 /// Try to interrupt an enemy cast with Spell Lock.
@@ -1096,7 +1094,7 @@ fn bird_autonomous_dispatch(
         return;
     }
 
-    let owner_needs_cleanse = ctx.active_auras.get(&pet.owner).map_or(false, |auras| {
+    let owner_needs_cleanse = ctx.active_auras.get(&pet.owner).is_some_and(|auras| {
         auras
             .iter()
             .any(|a| matches!(a.effect_type, AuraType::Root | AuraType::MovementSpeedSlow,))

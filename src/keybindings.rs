@@ -336,9 +336,9 @@ impl Keybindings {
     pub fn fill_missing_defaults(&mut self) {
         let defaults = Self::create_defaults();
         for action in GameAction::all() {
-            if !self.bindings.contains_key(&action) {
+            if let std::collections::hash_map::Entry::Vacant(e) = self.bindings.entry(action) {
                 if let Some(binding) = defaults.bindings.get(&action) {
-                    self.bindings.insert(action, binding.clone());
+                    e.insert(binding.clone());
                 }
             }
         }
@@ -363,7 +363,7 @@ impl Keybindings {
     pub fn action_pressed(&self, action: GameAction, keyboard: &ButtonInput<KeyCode>) -> bool {
         if let Some(binding) = self.get(action) {
             keyboard.pressed(binding.primary)
-                || binding.secondary.map_or(false, |key| keyboard.pressed(key))
+                || binding.secondary.is_some_and(|key| keyboard.pressed(key))
         } else {
             false
         }
@@ -375,7 +375,7 @@ impl Keybindings {
             keyboard.just_pressed(binding.primary)
                 || binding
                     .secondary
-                    .map_or(false, |key| keyboard.just_pressed(key))
+                    .is_some_and(|key| keyboard.just_pressed(key))
         } else {
             false
         }

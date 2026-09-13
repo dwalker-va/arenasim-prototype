@@ -603,6 +603,8 @@ mod tests {
     }
 
     #[test]
+    // Pinning a relationship between constants IS this test; const-folding is the point.
+    #[allow(clippy::assertions_on_constants)]
     fn sparks_outlive_the_flash() {
         // The debris must still be on screen after the flash collapses, so the
         // last thing the eye reads is the spray, not the glow.

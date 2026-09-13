@@ -262,7 +262,7 @@ pub fn cleanup_ice_blocks(
                     true
                 } else {
                     // Despawn if target no longer has Incapacitate aura
-                    auras.map_or(true, |a| {
+                    auras.is_none_or(|a| {
                         !a.auras
                             .iter()
                             .any(|aura| aura.effect_type == AuraType::Incapacitate)

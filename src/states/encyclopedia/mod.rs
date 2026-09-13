@@ -870,8 +870,10 @@ mod tests {
 
     #[test]
     fn back_key_clears_an_active_search_before_it_pops() {
-        let mut state = EncyclopediaState::default();
-        state.search = "bulwark".to_string();
+        let mut state = EncyclopediaState {
+            search: "bulwark".to_string(),
+            ..Default::default()
+        };
 
         assert!(!state.back_key());
         assert!(state.search.is_empty());
@@ -1032,8 +1034,10 @@ mod tests {
     /// the next visit.
     #[test]
     fn a_deep_link_opens_on_the_topic_and_unwinds_to_its_caller() {
-        let mut state = EncyclopediaState::default();
-        state.search = "stale".to_string();
+        let mut state = EncyclopediaState {
+            search: "stale".to_string(),
+            ..Default::default()
+        };
 
         state.open_at(Topic::Class(CharacterClass::Mage), GameState::Results);
         assert_eq!(
@@ -1296,8 +1300,10 @@ mod tests {
 
     #[test]
     fn navigating_clears_an_active_search() {
-        let mut state = EncyclopediaState::default();
-        state.search = "wand".to_string();
+        let mut state = EncyclopediaState {
+            search: "wand".to_string(),
+            ..Default::default()
+        };
         state.apply(EncyclopediaAction::Navigate(View::topic(Topic::Item(
             ItemId::WandOfTheInvoker,
         ))));

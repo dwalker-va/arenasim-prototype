@@ -478,10 +478,6 @@ pub fn cleanup_holy_justice(
 mod tests {
     use super::*;
 
-    fn alpha_of(img: &Image, x: usize, y: usize, size: usize) -> u8 {
-        img.data.as_ref().unwrap()[(y * size + x) * 4 + 3]
-    }
-
     #[test]
     fn the_wave_rolls_forward_rather_than_closing_a_ring() {
         // The question this settles: ring or wave? The source model's bbox runs
@@ -536,6 +532,8 @@ mod tests {
     }
 
     #[test]
+    // Pinning a relationship between constants IS this test; const-folding is the point.
+    #[allow(clippy::assertions_on_constants)]
     fn the_starburst_reaches_past_the_ring() {
         // The bug this pins: the rays reach HOJ_RAY_REACH times the ring's
         // radius, but a sprite only extends to 1.0 along its axes. With the ring
@@ -648,6 +646,8 @@ mod tests {
     }
 
     #[test]
+    // Pinning a relationship between constants IS this test; const-folding is the point.
+    #[allow(clippy::assertions_on_constants)]
     fn the_wave_settles_before_it_fades() {
         // It must reach full length while still bright, or the connection to
         // the victim is never actually drawn.
@@ -659,6 +659,8 @@ mod tests {
     }
 
     #[test]
+    // Pinning a relationship between constants IS this test; const-folding is the point.
+    #[allow(clippy::assertions_on_constants)]
     fn the_rune_outlasts_the_wave() {
         // Cause then consequence: the wave arrives, the rune holds after it.
         assert!(

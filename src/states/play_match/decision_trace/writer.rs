@@ -78,8 +78,7 @@ impl TraceWriter {
         let count = events.len();
         let result = (|| -> std::io::Result<()> {
             for event in events {
-                serde_json::to_writer(&mut self.inner, &event)
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                serde_json::to_writer(&mut self.inner, &event).map_err(std::io::Error::other)?;
                 self.inner.write_all(b"\n")?;
             }
             self.inner.flush()?;

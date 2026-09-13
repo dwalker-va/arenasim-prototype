@@ -341,6 +341,8 @@ fn the_crackle_fires_at_cycle_end_not_on_apply() {
 /// The stacking design's period contrast is a constant, so a retune that
 /// collapses the two rhythms into one fails here.
 #[test]
+// Pinning a relationship between constants IS this test; const-folding is the point.
+#[allow(clippy::assertions_on_constants)]
 fn the_two_sustained_pulses_run_on_different_periods() {
     assert!(
         (PULSE_PERIOD - UA_PULSE_PERIOD).abs() > 1.0,
@@ -369,9 +371,8 @@ fn coa_skull_hangs_above_the_head_and_dissolves_while_the_curse_runs_on() {
     let craniums: Vec<Vec3> = h
         .sprites()
         .into_iter()
-        .filter_map(|(role, g)| {
-            matches!(role, DotSpriteRole::SkullCranium).then(|| g.translation())
-        })
+        .filter(|(role, _)| matches!(role, DotSpriteRole::SkullCranium))
+        .map(|(_, g)| g.translation())
         .collect();
     assert_eq!(craniums.len(), 1, "one skull cranium");
     let cranium = craniums[0];
@@ -667,6 +668,8 @@ fn stacked_ua_crackle_pop_reads_outside_corruptions_shroud() {
 /// sorts in front and dims the flash besides. Asserted in WORLD SPACE off
 /// the propagated `GlobalTransform`s, per the geometry-not-bookkeeping rule.
 #[test]
+// Pinning a relationship between constants IS this test; const-folding is the point.
+#[allow(clippy::assertions_on_constants)]
 fn ua_glow_and_pop_lift_toward_the_camera_past_body_and_shroud() {
     // The lift clears BOTH occluders — derived from the constants so a
     // retune keeps the band honest.
@@ -695,7 +698,8 @@ fn ua_glow_and_pop_lift_toward_the_camera_past_body_and_shroud() {
         let placed: Vec<Vec3> = h
             .sprites()
             .into_iter()
-            .filter_map(|(r, g)| (r == role).then(|| g.translation()))
+            .filter(|(r, _)| *r == role)
+            .map(|(_, g)| g.translation())
             .collect();
         assert_eq!(placed.len(), 1, "one {role:?}");
         let lift = placed[0] - rig_pos;
@@ -836,9 +840,8 @@ fn pet_dots_use_the_pet_stature_correction() {
     let craniums: Vec<Vec3> = h
         .sprites()
         .into_iter()
-        .filter_map(|(role, g)| {
-            matches!(role, DotSpriteRole::SkullCranium).then(|| g.translation())
-        })
+        .filter(|(role, _)| matches!(role, DotSpriteRole::SkullCranium))
+        .map(|(_, g)| g.translation())
         .collect();
     assert_eq!(craniums.len(), 1);
     let cranium = craniums[0];
@@ -865,7 +868,8 @@ fn pet_dots_use_the_pet_stature_correction() {
     let shells: Vec<Vec3> = h
         .sprites()
         .into_iter()
-        .filter_map(|(role, g)| matches!(role, DotSpriteRole::ShroudShell).then(|| g.translation()))
+        .filter(|(role, _)| matches!(role, DotSpriteRole::ShroudShell))
+        .map(|(_, g)| g.translation())
         .collect();
     assert_eq!(shells.len(), 1);
     assert!(
@@ -894,7 +898,8 @@ fn cow_apparition_hangs_above_the_head_with_its_bone() {
     let placed = |h: &mut Harness, role: DotSpriteRole| -> Vec<Vec3> {
         h.sprites()
             .into_iter()
-            .filter_map(|(r, g)| (r == role).then(|| g.translation()))
+            .filter(|(r, _)| *r == role)
+            .map(|(_, g)| g.translation())
             .collect()
     };
     let craniums = placed(&mut h, DotSpriteRole::SkullCranium);

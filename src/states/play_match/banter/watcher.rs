@@ -416,8 +416,10 @@ mod tests {
 
     #[test]
     fn take_pending_drains_the_queue() {
-        let mut watcher = CallWatcher::default();
-        watcher.pending = detect_call_changes(FRESH, [Some(0), Some(0)], false);
+        let mut watcher = CallWatcher {
+            pending: detect_call_changes(FRESH, [Some(0), Some(0)], false),
+            ..Default::default()
+        };
 
         let drained = watcher.take_pending();
         assert_eq!(drained.len(), 2);
@@ -439,9 +441,11 @@ mod tests {
 
     fn world_with(kill_targets: (Option<usize>, Option<usize>), gates_opened: bool) -> World {
         let mut world = World::new();
-        let mut config = MatchConfig::default();
-        config.team1_kill_target = kill_targets.0;
-        config.team2_kill_target = kill_targets.1;
+        let config = MatchConfig {
+            team1_kill_target: kill_targets.0,
+            team2_kill_target: kill_targets.1,
+            ..Default::default()
+        };
         world.insert_resource(config);
         world.insert_resource(MatchCountdown {
             time_remaining: if gates_opened { 0.0 } else { 10.0 },

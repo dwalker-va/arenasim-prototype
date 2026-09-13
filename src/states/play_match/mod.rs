@@ -1442,8 +1442,6 @@ pub(crate) fn spawn_pet(
     ));
 }
 
-/// Handle camera input for mode switching, zoom, rotation, and drag
-
 /// Cleanup system: Despawns all Play Match entities when exiting the state.
 pub fn cleanup_play_match(mut commands: Commands, query: Query<Entity, With<PlayMatchEntity>>) {
     for entity in query.iter() {
@@ -1477,20 +1475,6 @@ pub fn cleanup_play_match(mut commands: Commands, query: Query<Entity, With<Play
 // Update & Input Systems
 // ============================================================================
 
-/// Countdown system: Manage pre-combat countdown and gate opening.
-///
-/// During countdown (10 seconds):
-/// - Mana is restored to 100% every second (encourages pre-buffing)
-/// - Combatants can cast buffs but cannot move or attack
-/// - Countdown timer ticks down
-///
-/// When countdown reaches 0:
-/// - Gates open (sets gates_opened flag)
-/// - Combat begins normally
-
-/// Render time control UI panel in the top-right corner.
-///
-/// Shows current speed and clickable buttons for speed control.
 /// Handle player input during the match.
 /// Currently only handles ESC key to return to main menu.
 pub fn update_play_match(

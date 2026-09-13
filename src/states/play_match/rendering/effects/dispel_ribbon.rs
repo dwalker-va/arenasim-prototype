@@ -119,7 +119,7 @@ const SPARK_RADIUS: f32 = 0.09;
 /// showed. An opaque ribbon writes depth and sits in front of the body where it
 /// is in front of the body. Pinned by `the_ribbon_writes_depth`. It cannot
 /// fade by alpha, which is why it plays out instead.
-
+///
 /// Ignition: the emissive spikes to `1 + IGNITE_BOOST` times its resting
 /// value at spawn and decays with this time constant. This is what marks the
 /// INSTANT of the dispel, in place of the flash-and-band beat that used to.

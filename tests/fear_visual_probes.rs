@@ -199,16 +199,6 @@ impl Harness {
             .count()
     }
 
-    /// The set of live fear-flash entities — lets a probe prove a NEW flash was
-    /// spawned by a transition, independent of whether older flashes have expired.
-    fn flash_entities(&mut self) -> std::collections::HashSet<Entity> {
-        self.app
-            .world_mut()
-            .query_filtered::<Entity, With<FearFlash>>()
-            .iter(self.app.world())
-            .collect()
-    }
-
     /// Live shatter-shard count across the whole world.
     fn shards(&mut self) -> usize {
         self.app

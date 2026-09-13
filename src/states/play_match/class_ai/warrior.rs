@@ -941,7 +941,7 @@ pub fn try_berserker_rage_while_cc(
 
     // Hard-CC'd in a non-fear way: cannot act at all. Horror also fully locks
     // the Warrior out — only a real Fear leaves the "break out" window open.
-    let hard_locked = ctx.self_auras().map_or(false, |auras| {
+    let hard_locked = ctx.self_auras().is_some_and(|auras| {
         auras.iter().any(|a| {
             matches!(
                 a.effect_type,
@@ -961,7 +961,7 @@ pub fn try_berserker_rage_while_cc(
     }
 
     // Only worth pressing if there's a breakable Fear on us.
-    let has_breakable_fear = ctx.self_auras().map_or(false, |auras| {
+    let has_breakable_fear = ctx.self_auras().is_some_and(|auras| {
         auras
             .iter()
             .any(|a| a.effect_type == AuraType::Fear && a.dr_category() != Some(DRCategory::Horror))
@@ -1030,7 +1030,7 @@ pub fn try_berserker_rage_while_cc(
 /// Fear is excluded: a feared warrior already runs, so there is no stalled "go"
 /// to reset. Pure over the aura list for unit testing.
 pub fn under_movement_cc(auras: Option<&ActiveAuras>) -> bool {
-    auras.map_or(false, |a| {
+    auras.is_some_and(|a| {
         a.auras.iter().any(|aura| {
             matches!(
                 aura.effect_type,
@@ -1125,7 +1125,7 @@ pub fn evaluate_warrior_reset(
     let out_of_melee = combatant
         .target
         .and_then(|t| ctx.combatants.get(&t))
-        .map_or(false, |i| my_pos.distance(i.position) > MELEE_RANGE);
+        .is_some_and(|i| my_pos.distance(i.position) > MELEE_RANGE);
     let healer_pos = nearest_healer_ally(ctx, my_pos);
 
     let active = melee_reset_active(

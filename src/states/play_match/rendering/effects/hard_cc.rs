@@ -186,9 +186,9 @@ const STUN_BOB_PERIOD: f32 = 1.6;
 /// emissive is only added inside `apply_pbr_lighting`. An unlit bead is
 /// therefore LDR white with nothing for `Bloom::NATURAL` to bloom, which is
 /// exactly the flat, un-shining look this treatment must not have. Every
-/// glowing effect in this codebase (trap discs, the fear shroud) uses emissive
-/// + `AlphaMode::Add` with no `unlit`; `unlit: true` is for things wanting a
-/// FLAT colour regardless of arena lighting, like the berserk mask.
+/// glowing effect in this codebase (trap discs, the fear shroud) uses
+/// emissive + `AlphaMode::Add` with no `unlit`; `unlit: true` is for things
+/// wanting a FLAT colour regardless of arena lighting, like the berserk mask.
 const STUN_BEAD_COLOR: Color = Color::srgba(0.95, 0.97, 1.00, 0.90);
 const STUN_BEAD_EMISSIVE: LinearRgba = LinearRgba::new(3.0, 3.3, 4.2, 1.0);
 

@@ -1086,7 +1086,7 @@ pub fn process_channeling(
     let immunity_info: std::collections::HashSet<Entity> = combatants
         .iter()
         .filter(|(_, _, _, _, auras)| {
-            auras.as_ref().map_or(false, |a| {
+            auras.as_ref().is_some_and(|a| {
                 a.auras
                     .iter()
                     .any(|aura| aura.effect_type == AuraType::DamageImmunity)

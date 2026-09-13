@@ -229,9 +229,10 @@ pub fn evaluate_hunter_dip(
         }
 
         // Arrival: within point-blank plant range → command the cast.
-        let plant_close = ctx.combatants.get(&target).map_or(false, |t| {
-            my_pos.distance(t.position) <= HUNTER_TRAP_PLANT_RANGE
-        });
+        let plant_close = ctx
+            .combatants
+            .get(&target)
+            .is_some_and(|t| my_pos.distance(t.position) <= HUNTER_TRAP_PLANT_RANGE);
         if plant_close {
             let mut completed = *state;
             completed.dip_target = None;
@@ -275,9 +276,10 @@ pub fn evaluate_hunter_dip(
 
     // Already point-blank → no dip needed; the opportunistic placement in the
     // ability pass drops it on the healer this tick.
-    let plant_close = ctx.combatants.get(&target).map_or(false, |t| {
-        my_pos.distance(t.position) <= HUNTER_TRAP_PLANT_RANGE
-    });
+    let plant_close = ctx
+        .combatants
+        .get(&target)
+        .is_some_and(|t| my_pos.distance(t.position) <= HUNTER_TRAP_PLANT_RANGE);
     if plant_close {
         return HunterDipPlan::Rotation;
     }

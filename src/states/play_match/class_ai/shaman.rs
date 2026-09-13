@@ -50,6 +50,7 @@ const SHAMAN_TOTEM_REFRESH_MANA_FLOOR: f32 = 60.0;
 
 /// Per-tick output of [`evaluate_shaman_posture`] (mirrors `PriestMovementPlan`
 /// minus the dip: the Shaman has no Hammer-of-Justice / Psychic-Scream dip).
+#[derive(Default)]
 pub struct ShamanMovementPlan {
     /// `Some(urgency_hp_threshold)` while an ESCAPE window is live: the heal
     /// ladder defers non-critical movement-locking casts (Lesser Healing Wave
@@ -58,15 +59,6 @@ pub struct ShamanMovementPlan {
     /// The live PRESSURED trigger this tick (`compound_pressure_trigger`),
     /// kept for parity with the Priest plan.
     pub pressured: bool,
-}
-
-impl Default for ShamanMovementPlan {
-    fn default() -> Self {
-        Self {
-            escape_defer: None,
-            pressured: false,
-        }
-    }
 }
 
 /// Shaman AI: decides and executes abilities for a Shaman combatant.
@@ -340,7 +332,7 @@ fn frost_shock_target(
             my_pos.distance(info.position) <= range
                 && !ctx.entity_is_immune(**e)
                 && (info.target == Some(entity)
-                    || info.target.map_or(false, |t| low_allies.contains(&t)))
+                    || info.target.is_some_and(|t| low_allies.contains(&t)))
         })
         .min_by(|(ea, a), (eb, b)| {
             my_pos
@@ -356,7 +348,7 @@ fn frost_shock_target(
 
     // Fallback: the kill target, if alive, in range, and not immune.
     combatant.target.filter(|t| {
-        ctx.combatants.get(t).map_or(false, |i| {
+        ctx.combatants.get(t).is_some_and(|i| {
             i.is_alive && my_pos.distance(i.position) <= range && !ctx.entity_is_immune(*t)
         })
     })
@@ -364,9 +356,9 @@ fn frost_shock_target(
 
 /// Try to cast Frost Shock — instant Frost nuke that applies a non-breaking
 /// slow (a peel). Routed through `CastingState` with the ability's 0.0 cast
-/// time so the generic completion path applies BOTH the damage (correct school
-/// + spell-power scaling) and the slow aura (`def.applies_aura`) — the same
-/// generic path Lightning Bolt and Lesser Healing Wave use. The 6s cooldown
+/// time so the generic completion path applies BOTH the damage (correct
+/// school + spell-power scaling) and the slow aura (`def.applies_aura`) — the
+/// same generic path Lightning Bolt and Lesser Healing Wave use. The 6s cooldown
 /// (enforced by `pre_cast_ok`) prevents spam; mana is consumed at completion.
 fn try_frost_shock(
     commands: &mut Commands,
@@ -1088,9 +1080,9 @@ fn shaman_free_tick(
 
     let point_xz = Vec2::new(point.x, point.z);
     let my_xz = Vec2::new(my_pos.x, my_pos.z);
-    let moved = state.last_point.map_or(true, |lp| {
-        lp.distance(point_xz) > movement.shaman.formation_shift_threshold
-    });
+    let moved = state
+        .last_point
+        .is_none_or(|lp| lp.distance(point_xz) > movement.shaman.formation_shift_threshold);
     let near = my_xz.distance(point_xz) <= movement.shaman.formation_deadzone;
 
     let issue = |commands: &mut Commands| {
@@ -1125,9 +1117,7 @@ fn shaman_free_tick(
             builder.finish();
         }
     } else if !near
-        && directive.map_or(true, |d| {
-            d.expires - now < movement.shaman.directive_refresh_margin
-        })
+        && directive.is_none_or(|d| d.expires - now < movement.shaman.directive_refresh_margin)
     {
         issue(commands);
     }

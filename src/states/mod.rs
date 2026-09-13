@@ -1429,7 +1429,7 @@ fn keybindings_ui(
                         for action in GameAction::all() {
                             actions_by_category
                                 .entry(action.category())
-                                .or_insert_with(Vec::new)
+                                .or_default()
                                 .push(action);
                         }
 
@@ -1451,10 +1451,9 @@ fn keybindings_ui(
 
                                     // Render each action in this category
                                     for action in actions {
-                                        let rebinding = rebinding_state
-                                            .as_ref()
-                                            .and_then(|rs| rs.action)
-                                            .map_or(false, |a| a == *action);
+                                        let rebinding =
+                                            rebinding_state.as_ref().and_then(|rs| rs.action)
+                                                == Some(*action);
 
                                         ui.horizontal(|ui| {
                                             // Action name

@@ -129,7 +129,7 @@ pub fn decide_hunter_action(
 
     // === DEAD ZONE (<8 yards) — Escape priority ===
     if nearest_dist < HUNTER_DEAD_ZONE {
-        let is_rooted = auras.map_or(false, |a| {
+        let is_rooted = auras.is_some_and(|a| {
             a.auras
                 .iter()
                 .any(|aura| aura.effect_type == AuraType::Root)
@@ -322,8 +322,9 @@ pub fn decide_hunter_action(
     // order, so non-CC frames are untouched. This is the complement to the trap
     // rework: the trap creates the healer-down window, this converts it.
     let burst_window = ctx.enemy_healer_is_cced() && ctx.enemy_healer() != Some(target_entity);
-    if burst_window && distance_to_target >= 20.0 {
-        if try_aimed_shot(
+    if burst_window
+        && distance_to_target >= 20.0
+        && try_aimed_shot(
             commands,
             combat_log,
             abilities,
@@ -335,10 +336,10 @@ pub fn decide_hunter_action(
             auras,
             ctx,
             &mut builder,
-        ) {
-            builder.finish();
-            return true;
-        }
+        )
+    {
+        builder.finish();
+        return true;
     }
 
     let conc_max = abilities
@@ -567,7 +568,7 @@ fn find_nearest_enemy(
             continue;
         }
         let dist = my_pos.distance(info.position);
-        if nearest.map_or(true, |(_, d)| dist < d) {
+        if nearest.is_none_or(|(_, d)| dist < d) {
             nearest = Some((*entity, dist));
         }
     }
@@ -596,6 +597,7 @@ fn slow_remaining(target: Entity, ctx: &CombatContext) -> Option<f32> {
 ///  2. **Otherwise the kill target, but only while it is actually moving** — a
 ///     slow is wasted on a stationary/casting caster (uses the snapshot
 ///     `velocity`, which is zero while casting/channeling).
+///
 /// A candidate is skipped if it is out of range, already slowed with more than
 /// `CONCUSSIVE_REFRESH_WINDOW` left (hold; refresh only just before it expires so
 /// there's no uptime gap), or under a friendly break-on-damage CC (a no-op here
@@ -609,13 +611,13 @@ fn concussive_target(
     max_range: f32,
 ) -> Option<Entity> {
     let castable = |e: Entity| {
-        ctx.combatants.get(&e).map_or(false, |i| {
+        ctx.combatants.get(&e).is_some_and(|i| {
             let d = my_pos.distance(i.position);
             i.is_alive
                 && d >= min_range
                 && d <= max_range
                 && !ctx.has_friendly_breakable_cc(e)
-                && slow_remaining(e, ctx).map_or(true, |r| r <= CONCUSSIVE_REFRESH_WINDOW)
+                && slow_remaining(e, ctx).is_none_or(|r| r <= CONCUSSIVE_REFRESH_WINDOW)
         })
     };
     // 1. Nearest melee kite-threat — peel it, moving or not.
@@ -629,7 +631,7 @@ fn concussive_target(
         && ctx
             .combatants
             .get(&kill_target)
-            .map_or(false, |i| i.velocity.length() > 0.5)
+            .is_some_and(|i| i.velocity.length() > 0.5)
     {
         return Some(kill_target);
     }
@@ -813,7 +815,7 @@ fn try_concussive_shot(
 
     // Hold if already slowed with real time left; allow a refresh just before
     // expiry (no uptime gap, no wasted GCD re-slowing).
-    if slow_remaining(target_entity, ctx).map_or(false, |r| r > CONCUSSIVE_REFRESH_WINDOW) {
+    if slow_remaining(target_entity, ctx).is_some_and(|r| r > CONCUSSIVE_REFRESH_WINDOW) {
         builder.reject(ability, RejectionReason::AlreadyApplied);
         return false;
     }
@@ -1399,7 +1401,7 @@ fn try_dispatch_masters_call(
 
     // Find a cleanse target: Hunter first (uses live auras since that's the
     // freshest view); then scan allies in the snapshot.
-    let owner_needs_cleanse = hunter_auras.map_or(false, |a| {
+    let owner_needs_cleanse = hunter_auras.is_some_and(|a| {
         a.auras.iter().any(|aura| {
             matches!(
                 aura.effect_type,

@@ -316,9 +316,11 @@ fn clicks_are_ignored_while_the_affordance_is_hidden() {
     assert!(clicks.is_empty(), "a hidden affordance senses nothing");
 
     // ...and the stored calls stay exactly as they were.
-    let mut config = MatchConfig::default();
-    config.team1_kill_target = Some(0);
-    config.team2_kill_target = Some(1);
+    let mut config = MatchConfig {
+        team1_kill_target: Some(0),
+        team2_kill_target: Some(1),
+        ..Default::default()
+    };
     for click in &clicks {
         apply_call_click(&mut config, *click);
     }

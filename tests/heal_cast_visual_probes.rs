@@ -549,6 +549,8 @@ fn nature_hands_shed_drifting_leaves() {
 /// after the flare window. Flash of Light takes the same flare (the blessed
 /// FLASH_OF_LIGHT_HAS_LAUNCH_FLASH override of the source's silence).
 #[test]
+// Pinning a relationship between constants IS this test; const-folding is the point.
+#[allow(clippy::assertions_on_constants)]
 fn holy_launch_reflares_the_same_glow_then_retires() {
     for ability in [AbilityType::FlashHeal, AbilityType::FlashOfLight] {
         assert!(FLASH_OF_LIGHT_HAS_LAUNCH_FLASH, "blessed spec: FoL flares");

@@ -620,8 +620,8 @@ pub fn evaluate_dps_posture(
         // Hold the committed direction for the anti-zigzag window; re-score on
         // transition or when the window/directive expired. Shared by the direct
         // chase and the orbit-seek scorer below.
-        let recommit = transitioned
-            || directive.map_or(true, |d| now >= d.committed_until || now >= d.expires);
+        let recommit =
+            transitioned || directive.is_none_or(|d| now >= d.committed_until || now >= d.expires);
         if !recommit {
             if needs_insert {
                 commands.entity(entity).try_insert(*state);
@@ -687,7 +687,7 @@ pub fn evaluate_dps_posture(
             });
             let direction_changed = state
                 .last_direction
-                .map_or(true, |d| d.distance(chosen) > 1e-3);
+                .is_none_or(|d| d.distance(chosen) > 1e-3);
             state.last_direction = Some(chosen);
             if transitioned || direction_changed {
                 if let Some(info) = ctx.combatants.get(&entity) {
@@ -721,7 +721,7 @@ pub fn evaluate_dps_posture(
     // KITE: re-score only on transition or when the commit window expired, to
     // hold a direction for the anti-zigzag window.
     let recommit =
-        transitioned || directive.map_or(true, |d| now >= d.committed_until || now >= d.expires);
+        transitioned || directive.is_none_or(|d| now >= d.committed_until || now >= d.expires);
     if !recommit {
         if needs_insert {
             commands.entity(entity).try_insert(*state);
@@ -758,7 +758,7 @@ pub fn evaluate_dps_posture(
 
     let direction_changed = state
         .last_direction
-        .map_or(true, |d| d.distance(chosen) > 1e-3);
+        .is_none_or(|d| d.distance(chosen) > 1e-3);
     state.last_direction = Some(chosen);
 
     if transitioned || direction_changed {

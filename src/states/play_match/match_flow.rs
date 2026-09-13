@@ -476,6 +476,8 @@ mod tests {
     }
 
     #[test]
+    // Pinning a relationship between constants IS this test; const-folding is the point.
+    #[allow(clippy::assertions_on_constants)]
     fn dampening_full_before_match_cap() {
         // Matches time out at 300s of combat; full dampening must land well
         // before that so zero-healing attrition has time to resolve the match.

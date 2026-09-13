@@ -192,12 +192,9 @@ impl BanterScheduler {
         let mut due: Vec<PendingBeat> = Vec::new();
 
         for index in 0..self.queues.len() {
-            loop {
-                // Queues hold at most a handful of beats, so the front-removal
-                // cost of a `Vec` is not worth a `VecDeque`'s extra type noise.
-                let Some(beat) = self.queues[index].first() else {
-                    break;
-                };
+            // Queues hold at most a handful of beats, so the front-removal
+            // cost of a `Vec` is not worth a `VecDeque`'s extra type noise.
+            while let Some(beat) = self.queues[index].first() {
                 if beat.at > self.clock {
                     break;
                 }

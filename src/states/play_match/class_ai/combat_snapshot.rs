@@ -187,7 +187,7 @@ impl CombatSnapshot {
         for (entity, combatant, transform, auras_opt, _, _) in aura_query.iter() {
             insert_combatant(
                 entity,
-                &combatant,
+                combatant,
                 transform,
                 None,
                 &mut combatants,

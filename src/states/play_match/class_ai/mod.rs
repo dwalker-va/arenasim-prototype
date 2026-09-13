@@ -286,7 +286,7 @@ impl<'a> CombatContext<'a> {
         let Some(healer) = self.enemy_healer() else {
             return false;
         };
-        self.active_auras.get(&healer).map_or(false, |auras| {
+        self.active_auras.get(&healer).is_some_and(|auras| {
             auras.iter().any(|a| {
                 matches!(
                     a.effect_type,
@@ -920,7 +920,7 @@ pub fn try_dispel_ally(
         // Find highest priority dispellable debuff on this ally
         let mut highest_priority = -1;
         for aura in ally_auras {
-            if !aura.can_be_dispelled() && !(removes_poison && aura.is_cleansable_poison()) {
+            if !(aura.can_be_dispelled() || removes_poison && aura.is_cleansable_poison()) {
                 continue;
             }
 

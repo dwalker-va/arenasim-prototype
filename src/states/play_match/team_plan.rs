@@ -1035,6 +1035,8 @@ mod tests {
     /// only emerges at half health has to chain-cast while exposed, which is the
     /// losing shape — topping up earlier keeps each exposure short.
     #[test]
+    // Pinning a relationship between constants IS this test; const-folding is the point.
+    #[allow(clippy::assertions_on_constants)]
     fn poke_threshold_is_above_the_urgency_mark() {
         assert!(
             CAMP_POKE_HP > 0.5,
@@ -1325,7 +1327,7 @@ mod tests {
             "call the owner, not the pet"
         );
         assert_eq!(
-            choose_kill_target(2, &units[..2].to_vec()),
+            choose_kill_target(2, &units[..2]),
             None,
             "no enemies visible"
         );

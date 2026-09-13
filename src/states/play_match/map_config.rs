@@ -417,6 +417,9 @@ fn validate_bounds(map: &str, bounds: &ArenaBounds, issues: &mut Vec<String>) {
 }
 
 /// Validate one map's bounds, volumes, and cover anchors, pushing every violation.
+// `!(x > 0.0)` is deliberate, not a clumsy `<=`: it also rejects NaN,
+// which is exactly what a geometry validator must do.
+#[allow(clippy::neg_cmp_op_on_partial_ord)]
 fn validate_map(map: &str, def: &MapDef, issues: &mut Vec<String>) {
     let bounds = &def.bounds;
     validate_bounds(map, bounds, issues);

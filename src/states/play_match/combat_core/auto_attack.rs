@@ -234,7 +234,7 @@ pub fn combat_auto_attack(
                 // Skip if target is dead (will be retargeted next frame)
                 if !combatant_info
                     .get(&target_entity)
-                    .map_or(false, |info| info.4)
+                    .is_some_and(|info| info.4)
                 {
                     continue;
                 }
@@ -643,15 +643,14 @@ pub fn combat_auto_attack(
     // Only apply if the attacker doesn't already have a Frost Armor slow (prevents DR escalation)
     for attacker_entity in frost_armor_procs {
         // Check if attacker already has the Frost Armor slow active
-        let already_has_frost_slow = if let Ok((_, _, _, _, _, Some(ref attacker_auras))) =
-            combatants.get(attacker_entity)
-        {
-            attacker_auras.auras.iter().any(|a| {
-                a.effect_type == AuraType::MovementSpeedSlow && a.ability_name == "Frost Armor"
-            })
-        } else {
-            false
-        };
+        let already_has_frost_slow =
+            if let Ok((_, _, _, _, _, Some(attacker_auras))) = combatants.get(attacker_entity) {
+                attacker_auras.auras.iter().any(|a| {
+                    a.effect_type == AuraType::MovementSpeedSlow && a.ability_name == "Frost Armor"
+                })
+            } else {
+                false
+            };
         if already_has_frost_slow {
             continue;
         }

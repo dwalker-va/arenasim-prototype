@@ -1273,12 +1273,12 @@ mod escape_windows {
                     && v["actor"]["class"] == "Priest"
             })
             .filter(|v| {
-                v["candidates"].as_array().map_or(false, |cands| {
+                v["candidates"].as_array().is_some_and(|cands| {
                     cands.iter().any(|c| {
                         c["ability"] == "FlashHeal"
                             && c["reason"]["PreconditionUnmet"]["note"]
                                 .as_str()
-                                .map_or(false, |n| n.starts_with("escape window"))
+                                .is_some_and(|n| n.starts_with("escape window"))
                     })
                 })
             })
@@ -3418,7 +3418,7 @@ mod psychic_scream {
                     && v["actor"]["class"] == "Priest"
             })
             .filter(|v| {
-                v["candidates"].as_array().map_or(false, |c| {
+                v["candidates"].as_array().is_some_and(|c| {
                     c.iter().any(|cand| {
                         cand["ability"] == "PsychicScream" && cand["status"] == "chosen"
                     })
@@ -6605,7 +6605,7 @@ mod warrior_pillar_pathing {
                 }
                 let speed = p0.distance(p1) / dt;
                 let near = shell_clearance(p1, &pillars) <= NEAR_BAND;
-                let chasing = gap_at(t1, p1).map_or(false, |g| g > CHASING_GAP);
+                let chasing = gap_at(t1, p1).is_some_and(|g| g > CHASING_GAP);
 
                 if near && chasing {
                     near_chase_speeds.push(speed);
@@ -7144,8 +7144,8 @@ mod nagrand_teamplan {
     /// soft weight (4.0, deliberately below `flee`'s 6.0 — escaping still
     /// wins), so any single seed can spend real time out of reach. Calibrated
     /// on seeds {2, 3, 10}: with the leash the total is 18.2s; without it
-    /// (Legacy) 119.2s. The 60s bound sits between the distributions with a
-    /// >3x margin either way. `scan_nagrand_teamplan` re-prints both
+    /// (Legacy) 119.2s. The 60s bound sits between the distributions with
+    /// a >3x margin either way. `scan_nagrand_teamplan` re-prints both
     /// distributions when pins need re-choosing.
     #[test]
     fn teamplan_hunter_stays_within_its_priests_reach() {

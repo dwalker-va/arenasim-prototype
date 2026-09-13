@@ -724,7 +724,7 @@ pub fn apply_pending_auras(
             // This prevents multiple insert() calls from overwriting each other
             new_auras_map
                 .entry(pending.target)
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(aura_to_add);
         }
 
@@ -1474,7 +1474,7 @@ mod tests {
         reflect_instant_cc_in_snapshot(target, &aura, &mut auras_map, &mut dr_map);
 
         // Target should have no auras — DR immune
-        assert!(auras_map.get(&target).is_none());
+        assert!(!auras_map.contains_key(&target));
     }
 
     #[test]

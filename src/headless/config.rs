@@ -379,10 +379,8 @@ impl HeadlessMatchConfig {
     }
 
     /// Parse a rogue poison name string into RoguePoison
-    fn parse_rogue_poison(name: &str) -> RoguePoison {
-        match name {
-            _ => RoguePoison::Crippling, // Only Crippling for now
-        }
+    fn parse_rogue_poison(_name: &str) -> RoguePoison {
+        RoguePoison::Crippling
     }
 
     /// Parse a hunter pet type name string into HunterPetType

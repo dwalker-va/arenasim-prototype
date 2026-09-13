@@ -525,7 +525,7 @@ fn paladin_dip_tick(
     let in_range = ctx
         .combatants
         .get(&target)
-        .map_or(false, |t| my_pos.distance(t.position) <= def.range);
+        .is_some_and(|t| my_pos.distance(t.position) <= def.range);
     if in_range {
         let mut completed = *state;
         completed.posture = Posture::Free;

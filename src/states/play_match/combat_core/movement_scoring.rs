@@ -777,8 +777,8 @@ mod tests {
 
                 let masks: Vec<u16> = dirs.iter().map(|&d| candidate_mask(d, &inputs)).collect();
                 let survivors = masks.iter().filter(|&&m| m == 0).count();
-                let boundary_only = masks.iter().any(|&m| m == MASK_BOUNDARY);
-                let anchor_only = masks.iter().any(|&m| m == MASK_ANCHOR);
+                let boundary_only = masks.contains(&MASK_BOUNDARY);
+                let anchor_only = masks.contains(&MASK_ANCHOR);
                 if boundary_only {
                     saw_boundary_only += 1;
                 }

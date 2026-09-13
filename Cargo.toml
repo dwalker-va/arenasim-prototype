@@ -53,3 +53,13 @@ opt-level = 1
 lto = "thin"
 codegen-units = 16
 
+# Two clippy lints are disabled crate-wide because every site that trips them
+# is the Bevy system signature itself, not code we could restructure. Each is
+# named and justified individually — nothing else is silenced.
+[lints.clippy]
+# Bevy queries are `Query<(A, B, C), (With<D>, Without<E>)>` by construction;
+# 106 sites, all of them system parameters, with no actionable alternative.
+type_complexity = "allow"
+# A Bevy system takes one argument per SystemParam, so the count is dictated by
+# how much world state the system reads; 59 sites, nearly all system fns.
+too_many_arguments = "allow"

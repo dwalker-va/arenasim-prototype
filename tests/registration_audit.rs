@@ -246,6 +246,7 @@ const SCHEDULE_AND_KEYWORDS: &[&str] = &[
 ///   1. `.add_systems(SCHEDULE, single_system)` — one system
 ///   2. `.add_systems(SCHEDULE, (a, b, c).chain())` — tuple of systems
 ///   3. `.add_systems(SCHEDULE, (a, b.after(x), c).chain())` — chained methods
+///
 /// The line-based extraction is permissive (catches identifiers from anywhere
 /// inside the call), filtered by an exclude list of Rust idioms.
 fn collect_registered_identifiers(body: &str) -> BTreeSet<String> {

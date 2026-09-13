@@ -162,7 +162,7 @@ fn reflect_instant_cc_skips_target_with_damage_immunity() {
     let auras = snapshot.active_auras.get(&target).expect("auras present");
     assert_eq!(auras.len(), 1);
     assert_eq!(auras[0].effect_type, AuraType::DamageImmunity);
-    assert!(snapshot.dr_trackers.get(&target).is_none());
+    assert!(!snapshot.dr_trackers.contains_key(&target));
 }
 
 #[test]
@@ -187,7 +187,7 @@ fn reflect_instant_cc_respects_existing_dr_immunity() {
     assert!(snapshot
         .active_auras
         .get(&target)
-        .map_or(true, |a| a.is_empty()));
+        .is_none_or(|a| a.is_empty()));
 }
 
 // ---------------------------------------------------------------------------

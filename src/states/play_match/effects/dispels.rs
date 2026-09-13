@@ -119,15 +119,15 @@ pub fn process_dispels(
                 // to mirror the pattern used elsewhere (e.g., Corruption / try_corruption).
                 // The ability_name field is the canonical source of truth for which
                 // ability spawned the aura, even if the same AuraType is reused.
-                if removed_aura.ability_name == "Unstable Affliction"
-                    && removed_aura.caster.is_some()
-                {
-                    // Snapshot data needed after the borrow is released.
-                    deferred_backlashes.push((
-                        pending.dispeller,
-                        removed_aura.caster.unwrap(),
-                        removed_aura.backlash_damage.unwrap_or(0.0),
-                    ));
+                if removed_aura.ability_name == "Unstable Affliction" {
+                    if let Some(caster) = removed_aura.caster {
+                        // Snapshot data needed after the borrow is released.
+                        deferred_backlashes.push((
+                            pending.dispeller,
+                            caster,
+                            removed_aura.backlash_damage.unwrap_or(0.0),
+                        ));
+                    }
                 }
             }
         }

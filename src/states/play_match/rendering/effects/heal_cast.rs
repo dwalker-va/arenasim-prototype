@@ -235,6 +235,8 @@ fn holy_wisp_color(index: u32) -> Color {
 }
 
 /// The three Nature star-thread tints (transcribed).
+// 0.318 is a transcribed green channel, not an approximation of 1/PI.
+#[allow(clippy::approx_constant)]
 fn nature_wisp_color(index: u32) -> Color {
     match index % 3 {
         0 => Color::srgb(0.235, 1.0, 0.0),

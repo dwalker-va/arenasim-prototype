@@ -201,7 +201,7 @@ fn the_ribbon_climbs_the_body_and_never_floats_off_it() {
         let start = ribbon_origin(class, Vec3::ZERO, 1.0).y;
         let end = ribbon_origin(class, Vec3::ZERO, 0.0).y;
         assert!(
-            start >= -HALF_HEIGHT - 1e-3 && start < HALF_HEIGHT,
+            (-HALF_HEIGHT - 1e-3..HALF_HEIGHT).contains(&start),
             "{class:?}: helix bottom starts at {start}, off the capsule (-1.25..1.25)"
         );
         assert!(
@@ -377,7 +377,7 @@ fn the_ribbon_ignites_then_settles() {
 /// meshes are sorted by distance without depth writes, so a blended ribbon
 /// lost the draw-order fight and was painted over even where it was in front
 /// of the body. It cannot fade, so it plays out instead.
-
+///
 /// The play-out: the climb completes, then the TOP end holds still in world
 /// space while the BOTTOM end rises through the strip until nothing is left —
 /// and sparks stream off the fixed top the whole time, and only then.

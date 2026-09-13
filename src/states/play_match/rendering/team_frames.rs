@@ -987,9 +987,11 @@ mod tests {
 
     #[test]
     fn clicking_a_column_sets_the_opposing_teams_call() {
-        let mut config = MatchConfig::default();
-        config.team1_kill_target = None;
-        config.team2_kill_target = None;
+        let mut config = MatchConfig {
+            team1_kill_target: None,
+            team2_kill_target: None,
+            ..Default::default()
+        };
 
         // Clicking a Team 2 frame is Team 1 calling that target.
         apply_call_click(
@@ -1021,9 +1023,11 @@ mod tests {
     fn a_click_marks_the_column_it_was_made_in() {
         // The click flip and the marker flip must agree, or a call would light
         // up the wrong column.
-        let mut config = MatchConfig::default();
-        config.team1_kill_target = None;
-        config.team2_kill_target = None;
+        let mut config = MatchConfig {
+            team1_kill_target: None,
+            team2_kill_target: None,
+            ..Default::default()
+        };
 
         apply_call_click(
             &mut config,
@@ -1046,8 +1050,10 @@ mod tests {
 
     #[test]
     fn clicking_the_called_frame_clears_the_call() {
-        let mut config = MatchConfig::default();
-        config.team1_kill_target = Some(2);
+        let mut config = MatchConfig {
+            team1_kill_target: Some(2),
+            ..Default::default()
+        };
 
         apply_call_click(
             &mut config,
@@ -1071,8 +1077,10 @@ mod tests {
 
     #[test]
     fn clicking_a_different_frame_replaces_the_call_rather_than_clearing() {
-        let mut config = MatchConfig::default();
-        config.team1_kill_target = Some(0);
+        let mut config = MatchConfig {
+            team1_kill_target: Some(0),
+            ..Default::default()
+        };
 
         apply_call_click(
             &mut config,
