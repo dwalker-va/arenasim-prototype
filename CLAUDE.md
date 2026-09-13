@@ -877,16 +877,21 @@ produce (it showed offensive casts enabled where the real panel greys them).
 The test is `#[ignore]`d so the default `cargo test` skips it (it needs a GPU
 adapter; CI runners may lack one). `egui_kittest` is a dev-dependency pinned to
 the same egui version as `bevy_egui` (0.31). Fidelity caveat: kittest has no
-Bevy textures, so class icons render as class-color fallback squares and fonts
-are egui defaults — layout/spacing/color iterate faithfully; pixel-exact icon
-and font fidelity still needs the real client. **To extend this pattern to
-another screen**, refactor its UI system the same way: split the Bevy wrapper
-(grabs `EguiContexts` + resources, applies actions) from a pure
-`draw_*(ctx, &data...) -> Action` function, then drive that function from a
-kittest harness with mock data. `tests/main_menu_snapshot.rs` and
-`tests/encyclopedia_snapshot.rs` follow it; the encyclopedia's harness loads the
-real `items.ron` and `abilities.ron` rather than mock data, so a content change
-shows up in the snapshot.
+Bevy textures, so class icons render as class-color fallback squares —
+layout/spacing/color iterate faithfully; pixel-exact icon fidelity still needs
+the real client. Fonts are NOT a gap: every harness installs the client's own
+stack by calling `arenasim::ui::fonts::install_game_fonts(ctx)` at the top of
+its app closure (the single definition the client's Startup system also uses),
+so glyph coverage and text metrics match the game. A new harness must call it
+too, or its baselines picture a screen nobody plays —
+`tests/snapshot_font_audit.rs` fails the default `cargo test` if one forgets.
+**To extend this pattern to another screen**, refactor its UI system the same
+way: split the Bevy wrapper (grabs `EguiContexts` + resources, applies
+actions) from a pure `draw_*(ctx, &data...) -> Action` function, then drive
+that function from a kittest harness with mock data.
+`tests/main_menu_snapshot.rs` and `tests/encyclopedia_snapshot.rs` follow it;
+the encyclopedia's harness loads the real `items.ron` and `abilities.ron`
+rather than mock data, so a content change shows up in the snapshot.
 
 ### Browsing game content in-game (the Encyclopedia)
 

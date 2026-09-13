@@ -5,7 +5,7 @@
 
 use bevy::prelude::*;
 use bevy::window::PresentMode;
-use bevy_egui::{egui, EguiContexts, EguiPlugin};
+use bevy_egui::{EguiContexts, EguiPlugin};
 
 use arenasim::camera::CameraPlugin;
 use arenasim::cli;
@@ -17,6 +17,7 @@ use arenasim::states::play_match::{
 };
 use arenasim::states::play_match::equipment::EquipmentPlugin;
 use arenasim::states::{GameState, StatesPlugin};
+use arenasim::ui::fonts::install_game_fonts;
 use arenasim::ui::UiPlugin;
 
 fn main() {
@@ -220,36 +221,9 @@ fn setup_custom_font(
     // system — silently skipping would permanently lose the custom font.
     // A missing context here should fail loudly.
     let ctx = contexts.ctx_mut();
-    
-    // Load font data
-    let mut fonts = egui::FontDefinitions::default();
-    
-    // Load Rajdhani Bold
-    fonts.font_data.insert(
-        "rajdhani_bold".to_owned(),
-        egui::FontData::from_static(include_bytes!("../assets/fonts/Rajdhani-Bold.ttf")).into(),
-    );
 
-    // Load Rajdhani Regular
-    fonts.font_data.insert(
-        "rajdhani_regular".to_owned(),
-        egui::FontData::from_static(include_bytes!("../assets/fonts/Rajdhani-Regular.ttf")).into(),
-    );
-    
-    // Set Rajdhani Bold as the primary proportional font for headings
-    fonts
-        .families
-        .entry(egui::FontFamily::Proportional)
-        .or_default()
-        .insert(0, "rajdhani_bold".to_owned());
-    
-    // Set Rajdhani Regular as secondary
-    fonts
-        .families
-        .entry(egui::FontFamily::Proportional)
-        .or_default()
-        .insert(1, "rajdhani_regular".to_owned());
-    
-    ctx.set_fonts(fonts);
+    // The stack itself lives in `arenasim::ui::fonts` so the offscreen egui
+    // snapshot harnesses install the SAME fonts the player sees.
+    install_game_fonts(ctx);
 }
 

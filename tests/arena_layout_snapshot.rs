@@ -30,6 +30,7 @@ use arenasim::states::match_config::ArenaMap;
 use arenasim::states::play_match::arena_bounds::ArenaBounds;
 use arenasim::states::play_match::map_config::{load_map_geometry_config, MapGeometryConfig};
 use arenasim::states::play_match::map_geometry::ObstacleVolume;
+use arenasim::ui::fonts::install_game_fonts;
 
 /// Load the shipped `assets/config/maps.ron`.
 ///
@@ -48,7 +49,10 @@ fn render(map: ArenaMap, name: &str) {
     let geometry = shipped_geometry();
     let mut harness = Harness::builder()
         .with_size([1100.0, 900.0])
-        .build(move |ctx| draw_arena_layout_screen(ctx, map, &geometry));
+        .build(move |ctx| {
+            install_game_fonts(ctx);
+            draw_arena_layout_screen(ctx, map, &geometry)
+        });
     harness.run();
     harness.snapshot(name);
 }
