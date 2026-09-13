@@ -74,6 +74,11 @@ fn results_screen_class_tooltip() {
 /// a link to its page, and the rows that name no ability (auto attacks, wands)
 /// keep the reserved slot empty rather than stepping their labels in and out.
 ///
+/// The Warlock's breakdown is the one that shows BOTH shapes at once — named
+/// spells, a "Wand Shot" line, and a pet line folded in under its
+/// `"<Pet>: <ability>"` prefix — so the alignment claim above is something the
+/// image demonstrates rather than something it merely happens to satisfy.
+///
 /// The expanders are opened by CLICKING them through the harness, so the
 /// snapshot is of a state a reader can actually reach.
 #[test]
@@ -178,6 +183,11 @@ fn cs(class: CharacterClass, slot: u8, dmg: f32, heal: f32, tkn: f32, survived: 
 }
 
 /// Representative 2v2 result: Rogue+Priest beat Warlock+Priest.
+///
+/// The Warlock owns a Felhunter, so `pet_damage_links` folds the pet's combat
+/// log into its owner's breakdown exactly as `match_flow` builds it at match
+/// end — that is what gives the expanded-breakdown snapshot a real
+/// `"<Pet>: <ability>"` row.
 fn mock_results() -> MatchResults {
     MatchResults {
         winner: Some(1),
@@ -218,9 +228,18 @@ fn mock_results() -> MatchResults {
                 survived: false,
             },
         ],
-        pet_damage_links: Default::default(),
+        pet_damage_links: [(
+            FELHUNTER.to_string(),
+            ("Team 2 Warlock #1".to_string(), "Felhunter".to_string()),
+        )]
+        .into_iter()
+        .collect(),
     }
 }
+
+/// The Warlock's pet, as `pet_combatant_id` spells it: pets are logged under
+/// their OWNER's slot, so the Felhunter of the slot-0 Warlock is `#1`.
+const FELHUNTER: &str = "Team 2 Felhunter #1";
 
 /// Small but representative event log so the K column, ability-breakdown
 /// expanders, and CC lines have real data.
@@ -248,6 +267,24 @@ fn mock_combat_log() -> CombatLog {
         ("Eviscerate", 156.0, true),
     ] {
         log.log_damage(rogue.clone(), t2_priest.clone(), ability.to_string(), amount, kb, false, String::new());
+    }
+    // The Warlock's own output, summing (with its pet's below) to the 612 its
+    // `CombatantStats` reports. "Wand Shot" is the row shape that names no
+    // ability: it must render with the icon slot reserved but empty, and stay
+    // unlinked.
+    for (ability, amount) in [
+        ("Shadow Bolt", 180.0),
+        ("Shadow Bolt", 168.0),
+        ("Corruption", 96.0),
+        ("Wand Shot", 30.0),
+        ("Wand Shot", 30.0),
+    ] {
+        log.log_damage(warlock.clone(), rogue.clone(), ability.to_string(), amount, false, false, String::new());
+    }
+    // Pet damage is logged under the PET's id and folded into the owner's
+    // breakdown as "Felhunter: Auto Attack" via `pet_damage_links`.
+    for amount in [54.0, 54.0] {
+        log.log_damage(FELHUNTER.to_string(), rogue.clone(), "Auto Attack".to_string(), amount, false, false, String::new());
     }
     for (ability, amount) in [
         ("Flash Heal", 420.0),
