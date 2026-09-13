@@ -313,9 +313,65 @@ impl WeaponType {
     }
 }
 
-/// Unique item identifier — each named item in the game
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum ItemId {
+/// Declare [`ItemId`] and everything derived from it: [`ItemId::all`],
+/// [`ItemId::as_str`] and its [`FromStr`](std::str::FromStr) impl.
+///
+/// The variant list is written ONCE. Every derived form expands from the same
+/// tokens as the enum, so an item cannot exist without also being enumerable
+/// and parseable from its own name. The recurring defect this closes is the
+/// hand-maintained `&str -> ItemId` match the headless config parser used to
+/// carry, which silently omitted every tier-1 item: a config could name an item
+/// that `items.ron` defines and the client equips, and be rejected for the NAME.
+///
+/// Section comments inside the invocation are ordinary line comments — they
+/// organise the list for a reader and never reach the expansion.
+macro_rules! item_ids {
+    ($( $(#[$meta:meta])* $variant:ident ),* $(,)?) => {
+        /// Unique item identifier — each named item in the game.
+        ///
+        /// The variant name is the item's canonical string form: the key
+        /// `items.ron` stores the item under, what serde round-trips it as, and
+        /// what a headless config names it by. Declared via [`item_ids!`].
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        pub enum ItemId {
+            $( $(#[$meta])* $variant, )*
+        }
+
+        impl ItemId {
+            /// Every item id, in declaration order. Generated from the enum's
+            /// own token list, so it cannot fall behind it.
+            pub fn all() -> &'static [ItemId] {
+                &[ $( ItemId::$variant, )* ]
+            }
+
+            /// The item's canonical string form — its variant name. Pinned
+            /// equal to the serde form by `item_id_as_str_is_the_serde_form`,
+            /// which is what makes this agree with `items.ron`'s keys by
+            /// construction rather than by maintenance.
+            pub fn as_str(&self) -> &'static str {
+                match self {
+                    $( ItemId::$variant => stringify!($variant), )*
+                }
+            }
+        }
+
+        impl std::str::FromStr for ItemId {
+            type Err = String;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                match s {
+                    $( stringify!($variant) => Ok(ItemId::$variant), )*
+                    _ => Err(format!(
+                        "Unknown item: '{}'. Valid item ids are the keys of assets/config/items.ron",
+                        s
+                    )),
+                }
+            }
+        }
+    };
+}
+
+item_ids! {
     // === Plate Armor — DPS (Warrior) ===
     LionheartHelm,
     OnslaughtHeadGuard,
@@ -2343,5 +2399,91 @@ mod tests {
             missing.len(),
             missing.join("\n")
         );
+    }
+}
+
+// ============================================================================
+// ITEM ID: DERIVED FORMS
+// ============================================================================
+//
+// `ItemId::all`, `as_str` and `FromStr` all expand from the enum's own token
+// list, so they cannot omit a variant. These tests pin the remaining claim —
+// that the generated string form is the SAME string `items.ron` and serde use,
+// which is what lets a config name an item without a second list existing.
+
+#[cfg(test)]
+mod item_id_string_form_tests {
+    use super::*;
+    use std::str::FromStr;
+
+    /// `as_str` is the serde form. Proved through `ron`, the exact
+    /// deserializer `load_item_definitions` keys `items.ron` with — so
+    /// agreeing with it here is agreeing with the file by construction.
+    #[test]
+    fn item_id_as_str_is_the_serde_form() {
+        for id in ItemId::all() {
+            let serialized = ron::to_string(id).expect("an ItemId serializes");
+            assert_eq!(
+                serialized,
+                id.as_str(),
+                "{:?} serializes as {} but as_str says {}",
+                id,
+                serialized,
+                id.as_str()
+            );
+            let round_tripped: ItemId =
+                ron::from_str(id.as_str()).expect("as_str deserializes back");
+            assert_eq!(round_tripped, *id);
+        }
+    }
+
+    /// Every variant parses from its own canonical name. The regression: a
+    /// hand-maintained parser omitted all 40-odd tier-1 items, so naming one
+    /// failed on the NAME before any equip rule was consulted.
+    #[test]
+    fn every_item_id_round_trips_through_from_str() {
+        for id in ItemId::all() {
+            assert_eq!(
+                ItemId::from_str(id.as_str()),
+                Ok(*id),
+                "{:?} does not parse from its own name",
+                id
+            );
+        }
+        assert!(ItemId::all().len() >= 136, "the item list should not shrink silently");
+    }
+
+    #[test]
+    fn from_str_rejects_a_name_no_item_has() {
+        let err = ItemId::from_str("BloodlordsBattleaxeOfNothing")
+            .expect_err("a made-up name must not parse");
+        assert!(err.contains("items.ron"), "error should point at the source: {}", err);
+    }
+
+    /// Every id written in `items.ron` parses, read from the file's literal
+    /// text rather than from the already-typed map — the direction a human
+    /// actually travels when they copy an id out of the file into a config.
+    #[test]
+    fn every_id_written_in_items_ron_parses() {
+        let path = crate::paths::asset_path_str("config/items.ron");
+        let contents = std::fs::read_to_string(&path).expect("items.ron must be readable");
+        let key_pattern = regex::Regex::new(r"(?m)^\s{8}([A-Za-z][A-Za-z0-9]*):\s*\($")
+            .expect("valid pattern");
+        let keys: Vec<&str> = key_pattern
+            .captures_iter(&contents)
+            .map(|c| c.get(1).expect("group 1").as_str())
+            .collect();
+        assert!(keys.len() >= 136, "found only {} ids in items.ron", keys.len());
+        for key in &keys {
+            ItemId::from_str(key)
+                .unwrap_or_else(|e| panic!("items.ron defines '{}' but it does not parse: {}", key, e));
+        }
+        // ...and nothing in the enum lacks a definition, so the two lists are
+        // the same list seen from two sides.
+        let items = load_item_definitions().expect("items.ron must load");
+        for id in ItemId::all() {
+            assert!(items.get(id).is_some(), "{:?} has no definition in items.ron", id);
+        }
+        assert_eq!(items.item_count(), ItemId::all().len());
     }
 }

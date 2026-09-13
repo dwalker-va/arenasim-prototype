@@ -560,15 +560,11 @@ fn render_character_picker_modal(
 
                 // Handle click - assign character to slot
                 if response.clicked() {
-                    if picker.team == 1 {
-                        if picker.slot < config.team1.len() {
-                            config.team1[picker.slot] = Some(*class);
-                        }
-                    } else {
-                        if picker.slot < config.team2.len() {
-                            config.team2[picker.slot] = Some(*class);
-                        }
-                    }
+                    // Through `set_class`, not a direct slot write: changing a
+                    // slot's class drops its equipment overrides, so the new
+                    // class arrives wearing its own defaults instead of the
+                    // previous class's picks silently stripped at resolve.
+                    config.set_class(picker.team, picker.slot, *class);
                     picker.active = false;
                 }
 
