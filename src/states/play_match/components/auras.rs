@@ -237,6 +237,58 @@ impl DispelType {
 }
 
 impl AuraType {
+    /// Every variant, in declaration order. The single source of truth for any
+    /// surface that needs to sweep the whole enum — today the structural
+    /// grading guards over `dispel_priority` and `purge_priority`, which used
+    /// to carry hand-written copies of this list.
+    ///
+    /// Follows `SpellSchool::all()` / `TotemElement::ALL` / `RoguePoison::ALL`.
+    /// A `const` array rather than a `fn` returning a slice because every
+    /// caller wants `AuraType` by value (it is `Copy`), and because the array
+    /// LENGTH is then part of the declaration — see the guard below.
+    ///
+    /// **This list is not what keeps the enum safe — the exhaustive matches
+    /// are.** `AuraType` is not `#[non_exhaustive]`, so variant N+1 cannot
+    /// compile until it is classified and graded everywhere that matters, and
+    /// a stale list here cannot hide an ungraded variant. What a stale list
+    /// DOES cost is coverage: a guard that sweeps `ALL` quietly stops covering
+    /// whatever `ALL` forgot, while still reading like a whole-enum sweep.
+    /// `aura_type_tests::all_lists_every_aura_type` is what stops that.
+    pub const ALL: [AuraType; 32] = [
+        AuraType::MovementSpeedSlow,
+        AuraType::Root,
+        AuraType::Stun,
+        AuraType::MaxHealthIncrease,
+        AuraType::DamageOverTime,
+        AuraType::SpellSchoolLockout,
+        AuraType::HealingReduction,
+        AuraType::Fear,
+        AuraType::MaxManaIncrease,
+        AuraType::AttackPowerIncrease,
+        AuraType::ShadowSight,
+        AuraType::Absorb,
+        AuraType::WeakenedSoul,
+        AuraType::Polymorph,
+        AuraType::DamageReduction,
+        AuraType::CastTimeIncrease,
+        AuraType::DamageTakenReduction,
+        AuraType::DamageImmunity,
+        AuraType::Incapacitate,
+        AuraType::SpellResistanceBuff,
+        AuraType::AttackPowerReduction,
+        AuraType::CritChanceIncrease,
+        AuraType::ManaRegenIncrease,
+        AuraType::AttackSpeedSlow,
+        AuraType::LockoutDurationReduction,
+        AuraType::FrostArmorBuff,
+        AuraType::Silence,
+        AuraType::WeaponPoison,
+        AuraType::SpellPowerIncrease,
+        AuraType::HealingOverTime,
+        AuraType::WindfuryBuff,
+        AuraType::FearImmunity,
+    ];
+
     /// Player-facing name of this MECHANIC, as the encyclopedia's mechanic
     /// badge renders it and as the catalog groups siblings by.
     ///
@@ -1112,6 +1164,106 @@ impl DRTracker {
 // ============================================================================
 // Tests
 // ============================================================================
+
+#[cfg(test)]
+mod aura_type_tests {
+    use super::AuraType;
+    use serde::de::Visitor;
+    use serde::{Deserialize, Deserializer};
+
+    /// A deserializer that deserializes nothing. It exists to intercept the
+    /// `variants` argument that serde's DERIVED `Deserialize` hands to
+    /// `deserialize_enum` — the enum's own variant list, expanded from the same
+    /// tokens as the enum itself and therefore incapable of drifting from it.
+    ///
+    /// This is the whole point of the guard below. A hand-written second list
+    /// (or a hardcoded count) is the defect being fixed, one layer up: it goes
+    /// stale in the same edit that adds the variant, and then reads like
+    /// coverage it no longer has.
+    struct CaptureVariants<'a>(&'a mut Vec<&'static str>);
+
+    impl<'de> Deserializer<'de> for CaptureVariants<'_> {
+        type Error = serde::de::value::Error;
+
+        fn deserialize_enum<V: Visitor<'de>>(
+            self,
+            _name: &'static str,
+            variants: &'static [&'static str],
+            _visitor: V,
+        ) -> Result<V::Value, Self::Error> {
+            self.0.extend_from_slice(variants);
+            Err(serde::de::Error::custom("variants captured"))
+        }
+
+        fn deserialize_any<V: Visitor<'de>>(self, _visitor: V) -> Result<V::Value, Self::Error> {
+            Err(serde::de::Error::custom(
+                "CaptureVariants only answers deserialize_enum",
+            ))
+        }
+
+        serde::forward_to_deserialize_any! {
+            bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
+            bytes byte_buf option unit unit_struct newtype_struct seq tuple
+            tuple_struct map struct identifier ignored_any
+        }
+    }
+
+    /// Every `AuraType` variant name, straight from the enum definition.
+    fn variants_of_the_enum() -> Vec<&'static str> {
+        let mut captured = Vec::new();
+        // Always an `Err` — the value is the side effect.
+        let _ = AuraType::deserialize(CaptureVariants(&mut captured));
+        assert!(
+            !captured.is_empty(),
+            "serde's derive stopped routing AuraType through deserialize_enum — \
+             this guard no longer sees the enum and must be rewritten, not deleted"
+        );
+        captured
+    }
+
+    /// [`AuraType::ALL`] must list every variant.
+    ///
+    /// The compiler already stops an UNGRADED variant: `dispel_priority`,
+    /// `purge_priority`, `is_magic_dispellable` and friends are exhaustive and
+    /// `AuraType` is not `#[non_exhaustive]`, so variant N+1 cannot build until
+    /// someone decides about it. What the compiler does NOT stop is `ALL` going
+    /// stale, which quietly shrinks the domain of every sweep written over it
+    /// while those sweeps still read as whole-enum coverage.
+    ///
+    /// So the guard compares `ALL` against the variant list serde's derive
+    /// builds from the enum — not against a count, and not against a second
+    /// hand-written list. A count would go stale in the same edit that adds the
+    /// variant; a second list is the defect itself.
+    #[test]
+    fn all_lists_every_aura_type() {
+        let declared = variants_of_the_enum();
+        let listed: Vec<String> = AuraType::ALL.iter().map(|ty| format!("{ty:?}")).collect();
+
+        for name in &declared {
+            assert!(
+                listed.iter().any(|entry| entry == name),
+                "AuraType::{name} is a variant of the enum but is missing from \
+                 AuraType::ALL — every sweep over ALL silently stops covering it"
+            );
+        }
+
+        let mut deduped = listed.clone();
+        deduped.sort();
+        deduped.dedup();
+        assert_eq!(
+            deduped.len(),
+            listed.len(),
+            "AuraType::ALL lists a variant twice"
+        );
+        assert_eq!(
+            listed.len(),
+            declared.len(),
+            "AuraType::ALL has {} entries for {} variants",
+            listed.len(),
+            declared.len()
+        );
+    }
+}
 
 #[cfg(test)]
 mod tests {
