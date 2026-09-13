@@ -166,6 +166,12 @@ impl Plugin for StatesPlugin {
                     view_combatant_ui::load_ability_icons,
                     view_combatant_ui::load_item_icons,
                     view_combatant_ui::load_hunter_pet_icons,
+                    // `view_combatant_ui` takes `Res<ClassIcons>` too. It only
+                    // ever drew icons because ConfigureMatch — its sole
+                    // entrance — happens to have filled them first. Registering
+                    // the loader here makes the screen self-sufficient instead
+                    // of dependent on its predecessor.
+                    configure_match_ui::load_class_icons,
                     view_combatant_ui::view_combatant_ui,
                 )
                     .chain()
@@ -901,6 +907,17 @@ impl Plugin for StatesPlugin {
                 (
                     play_match::load_spell_icons,
                     play_match::load_emoji_icons,
+                    // Class icons are painted by the team frames, the
+                    // countdown roster and the speech bubbles, and until now
+                    // NOTHING filled them on the way into a match:
+                    // `load_class_icons` ran only under ConfigureMatch, which
+                    // `--replay` skips entirely (it boots straight into
+                    // PlayMatch). A replay therefore ran the whole match with
+                    // class-less frames. Self-guards on an internal `loaded`
+                    // flag — and `ClassIcons` is owned for the app lifetime, so
+                    // that flag never goes back to false — making this free on
+                    // the normal path.
+                    configure_match_ui::load_class_icons,
                     play_match::render_time_controls,
                     play_match::render_camera_controls,
                     play_match::render_combat_panel,
