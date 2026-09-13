@@ -69,7 +69,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # `tests/db2_spell_sweep_fixtures.rs` shells out to `python3` and PANICS
+      # `tests/script_fixture_suites.rs` shells out to `python3` and PANICS
       # when it is missing, on purpose — a fixture suite that silently does not
       # run is the same false reassurance the script it tests exists to prevent.
       # Installing the interpreter explicitly, instead of trusting whatever the

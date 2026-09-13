@@ -145,10 +145,16 @@ properties make an omission or a broken assumption visible in the output:
 
 The reporting blocks have their own offline fixture suite,
 `scripts/tests/test_db2_spell_sweep.py`, driving `main(argv)` over hand-built
-CSVs with no network round-trip. `cargo test` runs it (via
-`tests/db2_spell_sweep_fixtures.rs`); run it directly while editing it. Add a
-case there for any new claim the script prints — a reporting regression is
-otherwise invisible until a human reads a sweep.
+CSVs with no network round-trip. `cargo test` runs it, with the four balance
+sweep suites and the harness's own, via `tests/script_fixture_suites.rs`; run
+it directly while editing it. Add a case there for any new claim the script
+prints — a reporting regression is otherwise invisible until a human reads a
+sweep. The scaffolding all five share — the no-subprocess guard that keeps
+them offline, the `main(argv)` driver, the scratch directory, the output
+assertions and the Python 3.9 interpreter floor — lives in
+`scripts/tests/_harness.py` and is itself pinned by
+`scripts/tests/test_harness.py`, which also holds the repo-wide check that
+every tracked `.py` still imports on the stock system interpreter.
 
 Every output row carries a provenance marker — `RESOLVED`, `NO-VISUAL`
 (passive talents; no joinable row, whether absent or pointing at visual 0),

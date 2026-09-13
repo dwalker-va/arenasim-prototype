@@ -16,7 +16,7 @@ Everything here is file I/O over hand-built CSVs, and the module's `subprocess`
 is replaced with a guard, so an offline run is a property of the harness rather
 than a hope.
 
-Run directly, or via `cargo test --test sweep_script_fixtures`:
+Run directly, or via `cargo test --test script_fixture_suites`:
 
     python3 scripts/tests/test_agg_sweep.py
 """
@@ -29,13 +29,8 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from sweep_fixtures import (  # noqa: E402
-    FixtureTestCase,
-    assert_runs_on_min_python,
-    install_no_subprocess,
-    match_rows,
-    run_main,
-)
+from _harness import assert_runs_on_min_python, install_no_subprocess, run_main  # noqa: E402
+from sweep_fixtures import FixtureTestCase, match_rows  # noqa: E402
 
 import agg_sweep as agg  # noqa: E402
 

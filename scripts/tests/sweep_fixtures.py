@@ -1,21 +1,15 @@
 #!/usr/bin/env python3
-"""Shared scaffolding for the offline fixture suites over `scripts/`' sweep tools.
+"""Fixture builders for the offline suites over `scripts/`' sweep tools.
 
 `agg_sweep.py`, `comp_tiers.py`, `gen_sweep.py` and `headtohead_sweep.py` all
 speak the same two file formats -- the batch JSONL that `arenasim --batch`
-consumes and the per-match CSV it emits -- so the fixture builders for those
-live here once instead of four times.
+consumes and the per-match CSV it emits -- so the builders for those live here
+once instead of four times.
 
-Two properties this module exists to guarantee:
-
-* **Offline by construction.** `install_no_subprocess` replaces a module's
-  `subprocess` with a stand-in that FAILS the test if anything is executed.
-  `headtohead_sweep.py` really does shell out to `cargo run`, so its suite swaps
-  in a `FakeBatchRunner` that fabricates results instead; every other suite gets
-  the hard no-op guard, which also pins that those tools stay pure file I/O.
-* **Driving `main(argv)`, not a subprocess.** Each tool's `main` is called in
-  process with an explicit argv, so a test asserts on the real exit code and the
-  real stdout rather than on a shell's idea of them.
+The scaffolding that is not specific to those two formats -- the no-subprocess
+guard, the `main(argv)` driver, the scratch directory, the shared output
+assertions, the interpreter floor -- lives in `_harness.py`, which the
+`db2_spell_sweep.py` suite shares.
 
 Not a test file: `unittest` discovery ignores it, and it is imported by
 `test_agg_sweep.py`, `test_comp_tiers.py`, `test_gen_sweep.py` and
@@ -24,45 +18,11 @@ Not a test file: `unittest` discovery ignores it, and it is imported by
 
 from __future__ import annotations
 
-import ast
-import contextlib
 import csv
-import io
 import json
 import os
-import sys
-import tempfile
-import unittest
 
-SCRIPTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
-if SCRIPTS_DIR not in sys.path:
-    sys.path.insert(0, SCRIPTS_DIR)
-
-
-# ---------------------------------------------------------------------------
-# offline guarantee
-# ---------------------------------------------------------------------------
-
-
-class _NoSubprocess:
-    """Stands in for a module's `subprocess`. Running anything is a failure."""
-
-    @staticmethod
-    def run(cmd, **kwargs):  # pragma: no cover - only reached when a test is wrong
-        raise AssertionError(
-            "the tool under test tried to execute %r -- these fixtures are "
-            "offline by construction" % (cmd,)
-        )
-
-    check_call = run
-    check_output = run
-    Popen = run
-
-
-def install_no_subprocess(module):
-    """Make any process launch from `module` fail the test."""
-    module.subprocess = _NoSubprocess
-
+from _harness import ScriptTestCase
 
 # ---------------------------------------------------------------------------
 # the two file formats
@@ -119,112 +79,11 @@ def read_batch_jsonl(path):
         return [json.loads(line) for line in f if line.strip()]
 
 
-# ---------------------------------------------------------------------------
-# driving main(argv)
-# ---------------------------------------------------------------------------
-
-
-class Run:
-    """The result of one `main(argv)` call."""
-
-    def __init__(self, code, out, err):
-        # `code` is whatever reached the caller: main's return value, or the
-        # payload of a SystemExit (an int status, or argparse/sys.exit's
-        # message string -- which a test can then assert on directly).
-        self.code = code
-        self.out = out
-        self.err = err
-
-    @property
-    def ok(self):
-        return self.code in (0, None)
-
-    def __repr__(self):  # pragma: no cover - failure messages only
-        return "Run(code=%r)\n--- stdout ---\n%s\n--- stderr ---\n%s" % (
-            self.code,
-            self.out,
-            self.err,
-        )
-
-
-def run_main(main, argv):
-    """Call `main(argv)`, capturing stdout, stderr and the exit code."""
-    out, err = io.StringIO(), io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        try:
-            code = main(argv)
-        except SystemExit as exc:
-            code = exc.code
-    return Run(code, out.getvalue(), err.getvalue())
-
-
-# ---------------------------------------------------------------------------
-# interpreter floor
-# ---------------------------------------------------------------------------
-
-# The stock macOS `/usr/bin/python3`. These tools are run by hand from a shell
-# whose `python3` is often exactly that, so a syntax floor above it breaks the
-# tool for its readers, not just for CI.
-MIN_PYTHON = (3, 9)
-
-
-def assert_runs_on_min_python(testcase, module):
-    """Fail if `module` would not import on `MIN_PYTHON`.
-
-    A `X | None` annotation on a def is EVALUATED at import, so it raises on
-    3.9 unless the module carries `from __future__ import annotations`. That is
-    exactly how `headtohead_sweep.py` briefly acquired a 3.10 floor: green on a
-    pyenv 3.12, `TypeError` at import for anyone on the system interpreter, and
-    invisible to a suite running on the same modern interpreter as the bug.
-    Checked over the source rather than by running a second interpreter, so the
-    guard holds wherever the suite runs.
-    """
-    path = module.__file__
-    with open(path) as f:
-        tree = ast.parse(f.read(), filename=path)
-
-    postponed = any(
-        isinstance(node, ast.ImportFrom)
-        and node.module == "__future__"
-        and any(a.name == "annotations" for a in node.names)
-        for node in tree.body
-    )
-    if postponed:
-        return
-
-    # Only annotations are the hazard -- a real `|` between ints is fine on
-    # every version -- so collect the annotation expressions and look in those.
-    annotations = []
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            a = node.args
-            annotations.extend(
-                arg.annotation
-                for arg in list(a.posonlyargs) + list(a.args) + list(a.kwonlyargs)
-                if arg.annotation is not None
-            )
-            if node.returns is not None:
-                annotations.append(node.returns)
-        elif isinstance(node, ast.AnnAssign) and node.annotation is not None:
-            annotations.append(node.annotation)
-
-    for annotation in annotations:
-        for sub in ast.walk(annotation):
-            if isinstance(sub, ast.BinOp) and isinstance(sub.op, ast.BitOr):
-                testcase.fail(
-                    "%s uses a PEP 604 `X | Y` annotation at line %d but has no "
-                    "`from __future__ import annotations`, so it raises at import "
-                    "on Python %d.%d (the system interpreter). Add the import, as "
-                    "`scripts/db2_spell_sweep.py` does."
-                    % (os.path.basename(path), sub.lineno, MIN_PYTHON[0], MIN_PYTHON[1])
-                )
-
-
-class FixtureTestCase(unittest.TestCase):
-    """Assertions shared by the four suites."""
+class FixtureTestCase(ScriptTestCase):
+    """The shared base, plus the batch formats these four suites are built on."""
 
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="sweep-fixture-")
+        self.tmp = self.temp_dir(prefix="sweep-fixture-")
 
     def path(self, name):
         return os.path.join(self.tmp, name)
@@ -235,17 +94,6 @@ class FixtureTestCase(unittest.TestCase):
         for r in rows:
             flat.extend(r)
         return write_batch_csv(self.path(name), flat)
-
-    def assertHas(self, run, needle):
-        self.assertIn(needle, run.out, "expected in stdout:\n  %s\n--- got ---\n%r" % (needle, run))
-
-    def assertLacks(self, run, needle):
-        self.assertNotIn(
-            needle, run.out, "did NOT expect in stdout:\n  %s\n--- got ---\n%r" % (needle, run)
-        )
-
-    def assertErrHas(self, run, needle):
-        self.assertIn(needle, run.err, "expected in stderr:\n  %s\n--- got ---\n%r" % (needle, run))
 
     def assertOk(self, run):
         self.assertTrue(run.ok, "expected success, got %r" % (run,))

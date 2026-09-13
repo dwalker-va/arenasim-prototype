@@ -14,7 +14,7 @@ comparable).
 
 Pure stdout and argv; the module's `subprocess` is replaced with a guard.
 
-Run directly, or via `cargo test --test sweep_script_fixtures`:
+Run directly, or via `cargo test --test script_fixture_suites`:
 
     python3 scripts/tests/test_gen_sweep.py
 """
@@ -28,12 +28,8 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from sweep_fixtures import (  # noqa: E402
-    FixtureTestCase,
-    assert_runs_on_min_python,
-    install_no_subprocess,
-    run_main,
-)
+from _harness import assert_runs_on_min_python, install_no_subprocess, run_main  # noqa: E402
+from sweep_fixtures import FixtureTestCase  # noqa: E402
 
 import gen_sweep as gen  # noqa: E402
 
