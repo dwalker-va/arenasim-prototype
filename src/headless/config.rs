@@ -5,6 +5,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
+use std::str::FromStr;
 
 use crate::states::match_config::{ArenaMap, CharacterClass, HunterPetType, MageArmor, MatchConfig, PaladinAura, RogueOpener, RoguePoison, WarlockCurse, WarriorShout};
 use crate::states::play_match::equipment::{
@@ -455,86 +456,16 @@ impl HeadlessMatchConfig {
         }
     }
 
-    /// Parse an item ID name string into ItemId
-    fn parse_item_id(name: &str) -> Result<ItemId, String> {
-        match name {
-            // Plate Armor
-            "LionheartHelm" => Ok(ItemId::LionheartHelm),
-            "OnslaughtHeadGuard" => Ok(ItemId::OnslaughtHeadGuard),
-            "ConquerorsChestplate" => Ok(ItemId::ConquerorsChestplate),
-            "LegplatesOfWrath" => Ok(ItemId::LegplatesOfWrath),
-            "GauntletsOfMight" => Ok(ItemId::GauntletsOfMight),
-            "SabatonsBattleBorn" => Ok(ItemId::SabatonsBattleBorn),
-            "WaistguardOfHeroism" => Ok(ItemId::WaistguardOfHeroism),
-            "WristguardsOfStability" => Ok(ItemId::WristguardsOfStability),
-            "ShoulderplatesOfValor" => Ok(ItemId::ShoulderplatesOfValor),
-            // Mail Armor
-            "BeaststalkerHelm" => Ok(ItemId::BeaststalkerHelm),
-            "BeaststalkerTunic" => Ok(ItemId::BeaststalkerTunic),
-            "BeaststalkerLegs" => Ok(ItemId::BeaststalkerLegs),
-            "BeaststalkerGloves" => Ok(ItemId::BeaststalkerGloves),
-            "BeaststalkerBoots" => Ok(ItemId::BeaststalkerBoots),
-            "BeaststalkerBelt" => Ok(ItemId::BeaststalkerBelt),
-            "BeaststalkerBracers" => Ok(ItemId::BeaststalkerBracers),
-            "BeaststalkerMantle" => Ok(ItemId::BeaststalkerMantle),
-            // Leather Armor
-            "NightstalkerCowl" => Ok(ItemId::NightstalkerCowl),
-            "NightstalkerTunic" => Ok(ItemId::NightstalkerTunic),
-            "NightstalkerLegs" => Ok(ItemId::NightstalkerLegs),
-            "NightstalkerGloves" => Ok(ItemId::NightstalkerGloves),
-            "NightstalkerBoots" => Ok(ItemId::NightstalkerBoots),
-            "NightstalkerBelt" => Ok(ItemId::NightstalkerBelt),
-            "NightstalkerBracers" => Ok(ItemId::NightstalkerBracers),
-            "NightstalkerMantle" => Ok(ItemId::NightstalkerMantle),
-            // Cloth Armor
-            "MagistersCrown" => Ok(ItemId::MagistersCrown),
-            "MagistersRobes" => Ok(ItemId::MagistersRobes),
-            "MagistersLeggings" => Ok(ItemId::MagistersLeggings),
-            "MagistersGloves" => Ok(ItemId::MagistersGloves),
-            "MagistersBoots" => Ok(ItemId::MagistersBoots),
-            "MagistersBelt" => Ok(ItemId::MagistersBelt),
-            "MagistersBracers" => Ok(ItemId::MagistersBracers),
-            "MagistersMantle" => Ok(ItemId::MagistersMantle),
-            // Cloaks
-            "CloakOfTheShieldWall" => Ok(ItemId::CloakOfTheShieldWall),
-            "CloakOfConcentration" => Ok(ItemId::CloakOfConcentration),
-            // Necklaces
-            "AmuletOfPower" => Ok(ItemId::AmuletOfPower),
-            "AmuletOfResilience" => Ok(ItemId::AmuletOfResilience),
-            // Rings
-            "BandOfAccuria" => Ok(ItemId::BandOfAccuria),
-            "SignetOfFocus" => Ok(ItemId::SignetOfFocus),
-            "RingOfProtection" => Ok(ItemId::RingOfProtection),
-            // Trinkets
-            "MarkOfTheChampion" => Ok(ItemId::MarkOfTheChampion),
-            "EssenceOfEternalLife" => Ok(ItemId::EssenceOfEternalLife),
-            // Melee Weapons
-            "ArcaniteReaper" => Ok(ItemId::ArcaniteReaper),
-            "FrostbiteBlade" => Ok(ItemId::FrostbiteBlade),
-            "SerpentFangDagger" => Ok(ItemId::SerpentFangDagger),
-            "HammerOfTheRighteous" => Ok(ItemId::HammerOfTheRighteous),
-            "CrescentStaff" => Ok(ItemId::CrescentStaff),
-            // Ranged Weapons
-            "WandOfShadows" => Ok(ItemId::WandOfShadows),
-            "StaffOfDominance" => Ok(ItemId::StaffOfDominance),
-            "AshwoodBow" => Ok(ItemId::AshwoodBow),
-            "SniperScope" => Ok(ItemId::SniperScope),
-            // Off Hand
-            "TomeOfKnowledge" => Ok(ItemId::TomeOfKnowledge),
-            "WallOfTheDeadShield" => Ok(ItemId::WallOfTheDeadShield),
-            _ => Err(format!(
-                "Unknown item: '{}'. Valid items: LionheartHelm, OnslaughtHeadGuard, ConquerorsChestplate, LegplatesOfWrath, GauntletsOfMight, SabatonsBattleBorn, WaistguardOfHeroism, WristguardsOfStability, ShoulderplatesOfValor, BeaststalkerHelm, BeaststalkerTunic, BeaststalkerLegs, BeaststalkerGloves, BeaststalkerBoots, BeaststalkerBelt, BeaststalkerBracers, BeaststalkerMantle, NightstalkerCowl, NightstalkerTunic, NightstalkerLegs, NightstalkerGloves, NightstalkerBoots, NightstalkerBelt, NightstalkerBracers, NightstalkerMantle, MagistersCrown, MagistersRobes, MagistersLeggings, MagistersGloves, MagistersBoots, MagistersBelt, MagistersBracers, MagistersMantle, CloakOfTheShieldWall, CloakOfConcentration, AmuletOfPower, AmuletOfResilience, BandOfAccuria, SignetOfFocus, RingOfProtection, MarkOfTheChampion, EssenceOfEternalLife, ArcaniteReaper, FrostbiteBlade, SerpentFangDagger, HammerOfTheRighteous, CrescentStaff, WandOfShadows, StaffOfDominance, AshwoodBow, SniperScope, TomeOfKnowledge, WallOfTheDeadShield",
-                name
-            )),
-        }
-    }
-
     /// Parse a string-keyed equipment map into typed ItemSlot/ItemId map
     fn parse_equipment_map(map: &HashMap<String, String>) -> Result<Loadout, String> {
         let mut result = Loadout::new();
         for (slot_str, item_str) in map {
             let slot = Self::parse_item_slot(slot_str)?;
-            let item = Self::parse_item_id(item_str)?;
+            // `ItemId`'s own `FromStr`, not a parser local to this module: the
+            // variant name is the id's canonical string form, so this accepts
+            // exactly the keys `items.ron` defines. A hand-maintained match
+            // here is what let every tier-1 item be unnameable from a config.
+            let item = ItemId::from_str(item_str)?;
             result.insert(slot, item);
         }
         Ok(result)
@@ -821,6 +752,49 @@ mod tests {
             "error must name the failing gate: {}",
             err
         );
+    }
+
+    /// The card's regression: a tier-1 item that `items.ron` defines and the
+    /// client equips used to be rejected on its NAME, before any equip rule
+    /// ran, because the parser carried its own list of items.
+    #[test]
+    fn a_tier_one_item_parses_and_reaches_the_equip_gates() {
+        let json = r#"{"team1":["Warrior"],"team2":["Mage"],"team1_equipment":[{"MainHand":"BloodlordsBattleaxe"}]}"#;
+        let config: HeadlessMatchConfig = serde_json::from_str(json).expect("parses");
+        config.validate().expect("a Warrior may wield a tier-1 axe");
+        let match_config = config.to_match_config().expect("converts");
+        assert_eq!(
+            match_config.team1_equipment[0].get(&ItemSlot::MainHand),
+            Some(&ItemId::BloodlordsBattleaxe)
+        );
+    }
+
+    /// And when a tier-1 item IS illegal, the error is now about the item
+    /// rather than about the name — the AS-59 gates get to speak at all.
+    #[test]
+    fn an_illegal_tier_one_item_fails_on_the_gate_not_the_name() {
+        let json = r#"{"team1":["Mage"],"team2":["Warrior"],"team1_equipment":[{"MainHand":"BloodlordsBattleaxe"}]}"#;
+        let config: HeadlessMatchConfig = serde_json::from_str(json).expect("parses");
+        let err = config.validate().expect_err("a Mage may not wield an axe");
+        assert!(
+            err.contains("proficiency") && err.contains("Axe"),
+            "error must name the failing gate, not the item name: {}",
+            err
+        );
+    }
+
+    /// Every item the game defines is nameable from a config. The parser has
+    /// no list of its own, so this can only fail if `ItemId`'s string form
+    /// stops matching the enum — which is the point.
+    #[test]
+    fn every_item_id_is_nameable_from_a_config() {
+        for id in ItemId::all() {
+            let mut map = HashMap::new();
+            map.insert("Head".to_string(), id.as_str().to_string());
+            let parsed = HeadlessMatchConfig::parse_equipment_map(&map)
+                .unwrap_or_else(|e| panic!("{:?} is not nameable from a config: {}", id, e));
+            assert_eq!(parsed.get(&ItemSlot::Head), Some(id));
+        }
     }
 
     /// A legal override still loads, and lands in the parsed config.

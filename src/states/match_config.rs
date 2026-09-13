@@ -613,6 +613,43 @@ impl MatchConfig {
             && self.team2.iter().all(|slot| slot.is_some())
     }
 
+    /// Assign a class to a team slot, dropping that slot's equipment overrides
+    /// when the class actually changes.
+    ///
+    /// Equipment overrides are a socket -> item map with no class in them, so a
+    /// Warrior's Arcanite Reaper survives the slot becoming a Mage and reads as
+    /// worn right up until the resolver strips it. `resolve_equipped_loadout`
+    /// does strip it, so nothing illegal reaches the sim either way — but a
+    /// screen that shows a weapon the character will not carry is lying, and a
+    /// main-hand override stripped at resolve leaves the hand EMPTY rather than
+    /// falling back to the new class's default weapon. Clearing at the point the
+    /// class changes is what makes both of those unreachable: the new class gets
+    /// its own default loadout, exactly as if the slot had been filled fresh.
+    ///
+    /// The other per-slot preferences (rogue opener, warrior shout, mage armor,
+    /// paladin aura, hunter pet, warlock curses) are deliberately left alone.
+    /// Each is a typed per-class enum that only its own class reads, so a stale
+    /// one is inert and comes back intact if the user changes their mind;
+    /// equipment is the only per-slot state where one class's choice occupies a
+    /// socket another class can see.
+    pub fn set_class(&mut self, team: u8, slot: usize, class: CharacterClass) {
+        let (classes, equipment) = if team == 1 {
+            (&mut self.team1, &mut self.team1_equipment)
+        } else {
+            (&mut self.team2, &mut self.team2_equipment)
+        };
+        let Some(current) = classes.get_mut(slot) else {
+            return;
+        };
+        if *current == Some(class) {
+            return;
+        }
+        *current = Some(class);
+        if let Some(overrides) = equipment.get_mut(slot) {
+            overrides.clear();
+        }
+    }
+
     /// Get the curse preference for a specific warlock slot and enemy target
     pub fn get_curse_pref(&self, team: u8, slot: usize, enemy_target: usize) -> WarlockCurse {
         let prefs = if team == 1 {
@@ -647,3 +684,50 @@ impl MatchConfig {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::play_match::equipment::{ItemId, ItemSlot};
+
+    /// Changing a slot's class drops its equipment overrides, so the new class
+    /// arrives wearing its own defaults rather than the previous class's picks
+    /// silently stripped at resolve (and, for a main hand, stripped to nothing).
+    #[test]
+    fn changing_a_slots_class_clears_its_equipment_overrides() {
+        let mut config = MatchConfig::default();
+        config.set_class(1, 0, CharacterClass::Warrior);
+        config.team1_equipment[0].insert(ItemSlot::MainHand, ItemId::BloodlordsBattleaxe);
+
+        config.set_class(1, 0, CharacterClass::Mage);
+
+        assert_eq!(config.team1[0], Some(CharacterClass::Mage));
+        assert!(
+            config.team1_equipment[0].is_empty(),
+            "a Warrior axe must not survive the slot becoming a Mage"
+        );
+    }
+
+    /// Re-picking the class already in the slot is not a change, so it must not
+    /// throw away a loadout the user just built.
+    #[test]
+    fn re_picking_the_same_class_keeps_the_loadout() {
+        let mut config = MatchConfig::default();
+        config.set_class(2, 0, CharacterClass::Warrior);
+        config.team2_equipment[0].insert(ItemSlot::MainHand, ItemId::BloodlordsBattleaxe);
+
+        config.set_class(2, 0, CharacterClass::Warrior);
+
+        assert_eq!(
+            config.team2_equipment[0].get(&ItemSlot::MainHand),
+            Some(&ItemId::BloodlordsBattleaxe)
+        );
+    }
+
+    /// A slot index past the team's size is a no-op, not a panic.
+    #[test]
+    fn setting_a_class_out_of_range_does_nothing() {
+        let mut config = MatchConfig::default();
+        config.set_class(1, 7, CharacterClass::Mage);
+        assert_eq!(config.team1, vec![None]);
+    }
+}

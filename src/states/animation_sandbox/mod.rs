@@ -39,7 +39,7 @@ use super::play_match::components::{
     ShadowSightState, SimulationSpeed, VictoryCelebration,
 };
 use super::play_match::equipment::{
-    enforce_two_hand_conflicts, enforce_unique_equipped, resolve_loadout, DefaultLoadouts, ItemDefinitions, Loadout,
+    resolve_equipped_loadout, DefaultLoadouts, ItemDefinitions, Loadout,
 };
 use super::play_match::map_config::{ActiveMapGeometry, MapGeometryConfig};
 use super::play_match::team_plan::TeamPlans;
@@ -310,12 +310,11 @@ fn spawn_staged_unit(
     item_defs: &ItemDefinitions,
     default_loadouts: &DefaultLoadouts,
 ) -> Entity {
-    // The same three-step resolve as every match spawn site. The overrides
-    // are empty here, so both constraint passes are no-ops on the validated
-    // defaults — but this is the site a future edit copies from.
-    let mut loadout: Loadout = resolve_loadout(class, default_loadouts, &Loadout::new());
-    enforce_two_hand_conflicts(&mut loadout, item_defs);
-    enforce_unique_equipped(&mut loadout);
+    // Through the one resolver every match spawn site uses, rather than a
+    // local restatement of its passes — a restatement here fell behind the
+    // day `resolve_equipped_loadout` grew the class-restriction pass.
+    let loadout: Loadout =
+        resolve_equipped_loadout(class, default_loadouts, &Loadout::new(), item_defs);
 
     let (entity, _combatant) = spawn_combatant(
         commands,
