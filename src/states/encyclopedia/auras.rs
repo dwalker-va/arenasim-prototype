@@ -1113,6 +1113,13 @@ mod tests {
         load_ability_definitions().expect("abilities.ron must load")
     }
 
+    /// A CARDINALITY check, and only that: the ron half of the catalog is the
+    /// same SIZE as the set of abilities carrying an `applies_aura` block, and
+    /// the catalog is the two sources concatenated. It never asks WHICH
+    /// ability an entry addresses, so an entry that resolves under the wrong
+    /// [`AuraId`] — the drift a reader meets as a dead link on an ability
+    /// page — leaves it green. That direction is
+    /// `every_ability_page_link_resolves_to_its_own_aura_entry` below.
     #[test]
     fn every_ability_with_an_applies_aura_becomes_an_entry() {
         let abilities = abilities();
@@ -1134,6 +1141,71 @@ mod tests {
             from_ron + EngineAura::all(&abilities).len(),
             "every engine-registry aura must also produce an entry"
         );
+    }
+
+    /// The ability page's FORWARD ADDRESS into this catalog.
+    ///
+    /// `encyclopedia::abilities` builds `Topic::Aura(AuraId::Ability(ability))`
+    /// for every ability whose config carries an `applies_aura` block. It does
+    /// so in a module that shares no code with [`entry_of`], which is what
+    /// decides whether that address resolves and what it resolves TO. The two
+    /// agree today because `ron_entry` returns an entry keyed on the same
+    /// literal, but nothing holds them together — and the symptom of them
+    /// drifting is a DEAD or MISADDRESSED link, which no count over the
+    /// catalog can see.
+    #[test]
+    fn every_ability_page_link_resolves_to_its_own_aura_entry() {
+        let abilities = abilities();
+        let mut checked = 0;
+        for (ability, def) in abilities.iter() {
+            if def.applies_aura.is_none() {
+                continue;
+            }
+            checked += 1;
+            let entry = entry_of(AuraId::Ability(*ability), &abilities).unwrap_or_else(|| {
+                panic!(
+                    "{:?}'s ability page links to Topic::Aura(AuraId::Ability({:?})), \
+                     which resolves to nothing — a dead link",
+                    ability, ability
+                )
+            });
+            assert_eq!(
+                entry.id,
+                AuraId::Ability(*ability),
+                "{:?}'s aura entry answers to a different address",
+                ability
+            );
+            assert_eq!(
+                entry.source,
+                Some(*ability),
+                "{:?}'s aura entry links back to the wrong ability",
+                ability
+            );
+        }
+        assert!(
+            checked > 0,
+            "no ability carries an `applies_aura` block — the walk went vacuous"
+        );
+    }
+
+    /// The same address check for the other half of the catalog. [`entry_of`]
+    /// is infallible for an engine aura today; this pins that every registered
+    /// [`EngineAura`] stays reachable if it ever stops being.
+    #[test]
+    fn every_engine_aura_address_resolves() {
+        let abilities = abilities();
+        let engine = EngineAura::all(&abilities);
+        assert!(!engine.is_empty(), "the engine registry went empty");
+        for aura in engine {
+            let entry = entry_of(AuraId::Engine(aura), &abilities)
+                .unwrap_or_else(|| panic!("{:?} has no catalog entry — a dead link", aura));
+            assert_eq!(
+                entry.id,
+                AuraId::Engine(aura),
+                "{:?}'s entry answers to a different address",
+                aura
+            );
+        }
     }
 
     #[test]
