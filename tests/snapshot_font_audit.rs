@@ -29,12 +29,14 @@
 //!
 //! # Self-reported limitations
 //!
-//! This is a lexical scan of raw source text, so it is a drift guard and not a
-//! proof. Known, accepted gaps:
+//! This is a lexical scan of source text, so it is a drift guard and not a
+//! proof. The reading is shared with the repo's other lexical audits
+//! (`tests/common/source_audit.rs`), which is where three gaps this file used
+//! to list were closed: comments and string literals are blanked before
+//! anything is counted, `use egui_kittest::Harness as H;` is resolved back to
+//! `Harness`, and every pattern below tolerates whitespace a formatter would
+//! never leave. What remains:
 //!
-//! * **Raw source text.** A constructor written inside a comment or a string
-//!   literal counts as real, and whitespace spellings rustfmt normalises away
-//!   (`Harness :: new (`) do not count at all.
 //! * **Counts, not pairing.** The comparison is a per-file COUNT of harnesses
 //!   against a count of `install_game_fonts(` call sites, so a two-harness file
 //!   whose first closure installed twice and whose second installed not at all
@@ -44,14 +46,15 @@
 //!   the constructor that takes it. That false positive would block honest
 //!   refactors, while this false negative needs two harnesses in one file plus
 //!   a doubled install to appear at all. The counts stay.
-//! * **Aliased imports.** `use egui_kittest::Harness as H; H::new(..)` is a
-//!   silent miss — the pattern matches the type's real name.
-//! * **Nested-generic turbofish.** `Harness::<Vec<u8>>::new_state(` is a silent
-//!   miss: the turbofish arm stops at the first `>`.
+//! * **A harness built somewhere else.** A helper in one file that returns a
+//!   built `Harness` to another counts against the file that builds it, which
+//!   is the file that must install the fonts — but a harness reached through a
+//!   trait object or a macro-generated call site is not text this scan can see.
 
+mod common;
+
+use common::source_audit::{load_sources, SourceFile, TypeAliases};
 use regex::Regex;
-use std::fs;
-use std::path::{Path, PathBuf};
 
 /// Every `egui_kittest` call that hands back a live `Harness`, matched by
 /// SHAPE rather than by name — a hand-maintained list of constructors goes
@@ -61,7 +64,7 @@ use std::path::{Path, PathBuf};
 /// Two shapes cover the crate's whole harness-producing surface:
 ///
 /// * `Harness::new*(` — the inherent constructors, with an optional turbofish
-///   (`Harness::<State>::new_state(`).
+///   (`Harness::<State>::new_state(`, nested generics included).
 /// * `.build*(` — the terminal `HarnessBuilder` methods. `Harness::builder()`
 ///   is deliberately NOT matched, since counting it would double-count every
 ///   `Harness::builder().build(..)` chain, and the leading `\.` is what
@@ -80,60 +83,52 @@ use std::path::{Path, PathBuf};
 fn harness_constructors() -> Regex {
     Regex::new(
         r"(?x)
-          Harness (?: :: < [^>]* > )? :: new \w* \(   # Harness::new(, Harness::<S>::new_state(
-        | \. build (?: _ \w+ )? \(                    # .build(, .build_eframe( — not .builder()
+          Harness \s* (?: :: \s* < (?: [^<>] | < [^<>]* > )* > \s* )? :: \s* new \w* \s* \(
+        | \. \s* build (?: _ \w+ )? \s* \(
         ",
     )
     .expect("harness-constructor pattern must compile")
 }
 
-/// Every `.rs` file under `root`, recursively.
-fn rust_sources(root: &Path, out: &mut Vec<PathBuf>) {
-    let dir =
-        fs::read_dir(root).unwrap_or_else(|e| panic!("{} must be readable: {e}", root.display()));
-    for entry in dir {
-        let path = entry.expect("readable dir entry").path();
-        if path.is_dir() {
-            rust_sources(&path, out);
-        } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
-            out.push(path);
-        }
-    }
+/// `install_game_fonts(` as a CALL — the `use` line carries no parenthesis, so
+/// an import is not an installation.
+fn install_calls() -> Regex {
+    Regex::new(r"\binstall_game_fonts\s*\(").expect("install-call pattern must compile")
 }
 
 #[test]
 fn every_egui_harness_installs_the_client_fonts() {
     let constructors = harness_constructors();
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let installs_re = install_calls();
 
-    let mut sources = Vec::new();
-    for root in ["src", "tests"] {
-        rust_sources(&manifest.join(root), &mut sources);
-    }
-    sources.sort();
+    let sources = load_sources(&["src", "tests"]).expect("src/ and tests/ must be readable");
 
     let mut checked = 0;
     let mut total_harnesses = 0;
     let mut failures = Vec::new();
 
-    for path in sources {
+    for file in &sources {
         // This file names the builders it looks for, so it would flag itself.
-        if path.file_name().and_then(|n| n.to_str()) == Some("snapshot_font_audit.rs") {
+        if file.path.file_name().and_then(|n| n.to_str()) == Some("snapshot_font_audit.rs") {
             continue;
         }
-        let src = fs::read_to_string(&path).expect("source must be readable");
-        if !src.contains("egui_kittest") {
+        // A file that never names the harness crate cannot build a harness, and
+        // the full read below is not worth paying for on every file in the tree.
+        if !file.code.contains("egui_kittest") {
             continue;
         }
+        // Comments and string literals are blanked, and aliases resolved, so a
+        // constructor discussed in prose is not counted and one spelled through
+        // an alias is.
+        let code = readable_code(file);
         checked += 1;
 
-        let harnesses = constructors.find_iter(&src).count();
+        let harnesses = constructors.find_iter(&code).count();
         total_harnesses += harnesses;
-        // The `use` line carries no parenthesis, so this counts call sites only.
-        let installs = src.matches("install_game_fonts(").count();
+        let installs = installs_re.find_iter(&code).count();
 
         if installs < harnesses {
-            let name = path.strip_prefix(manifest).unwrap_or(&path).display();
+            let name = file.rel_display();
             failures.push(format!(
                 "{name}: builds {harnesses} egui_kittest harness(es) but calls \
                  install_game_fonts {installs} time(s)"
@@ -157,9 +152,18 @@ fn every_egui_harness_installs_the_client_fonts() {
     );
 }
 
+/// The text this audit counts in: comments and literal contents blanked, type
+/// aliases resolved back to what they alias.
+fn readable_code(file: &SourceFile) -> String {
+    let code = common::source_audit::blank_comments_and_strings(&file.raw);
+    let aliases = TypeAliases::from_source(&code);
+    aliases.expand(&code)
+}
+
 /// The audit is only as good as its detector, so pin the detector itself:
 /// every harness-returning call egui_kittest 0.31.1 offers must be counted,
-/// and the non-terminal `Harness::builder()` must not be.
+/// the non-terminal `Harness::builder()` must not be, and neither a spelling
+/// rustfmt would reject nor an aliased import may slip through.
 #[test]
 fn the_detector_counts_every_kittest_constructor() {
     let constructors = harness_constructors();
@@ -176,6 +180,11 @@ fn the_detector_counts_every_kittest_constructor() {
         "Harness::builder().build_ui(|ui| {})",
         "Harness::builder().build_ui_state(|ui, s| {}, 0)",
         "Harness::builder().build_eframe(|cc| App::new(cc))",
+        // Spellings a formatter would never produce, which used to be silent
+        // misses: loose whitespace, and a nested-generic turbofish.
+        "Harness :: new (|ctx| {})",
+        "Harness::<Vec<u8>>::new_state(|ctx, s| {}, vec![])",
+        "harness . build (|ctx| {})",
     ] {
         assert_eq!(
             constructors.find_iter(call).count(),
@@ -191,5 +200,53 @@ fn the_detector_counts_every_kittest_constructor() {
             .find_iter("let b = Harness::builder();")
             .count(),
         0
+    );
+}
+
+/// The reading the count depends on: an aliased import is resolved, and a
+/// constructor that appears only in prose or in a string literal is not a
+/// harness. Both were silent misses before the reading moved into
+/// `tests/common/source_audit.rs`.
+#[test]
+fn the_reading_resolves_aliases_and_ignores_prose() {
+    let constructors = harness_constructors();
+    let installs_re = install_calls();
+
+    let aliased = SourceFile {
+        path: std::path::PathBuf::from("aliased.rs"),
+        raw: r#"
+            use egui_kittest::Harness as H;
+            fn t() {
+                let mut h = H::new(|ctx| { install_game_fonts(ctx); });
+            }
+        "#
+        .to_string(),
+        code: String::new(),
+    };
+    let code = readable_code(&aliased);
+    assert_eq!(
+        constructors.find_iter(&code).count(),
+        1,
+        "`H::new(` through `use egui_kittest::Harness as H` is a harness"
+    );
+    assert_eq!(installs_re.find_iter(&code).count(), 1);
+
+    let prose = SourceFile {
+        path: std::path::PathBuf::from("prose.rs"),
+        raw: r#"
+            //! Talks about Harness::new(|ctx| ..) in a doc comment.
+            /* and Harness::new( in a block comment */
+            fn t() {
+                let sample = "Harness::new(|ctx| {})";
+                let _ = sample;
+            }
+        "#
+        .to_string(),
+        code: String::new(),
+    };
+    assert_eq!(
+        constructors.find_iter(&readable_code(&prose)).count(),
+        0,
+        "a constructor in a comment or a string literal is prose, not a harness"
     );
 }
