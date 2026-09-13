@@ -1010,7 +1010,7 @@ fn options_ui(
     // Use try_ctx_mut to gracefully handle window close (the context
     // dies with the primary window; ctx_mut panics on the final frame)
     let Some(ctx) = contexts.try_ctx_mut() else { return; };
-    
+
     // Configure style for a dark theme
     let mut style = (*ctx.style()).clone();
     style.visuals.window_fill = egui::Color32::from_rgb(20, 20, 30);
@@ -1030,7 +1030,7 @@ fn options_ui(
         )
         .show(ctx, |ui| {
             ui.add_space(10.0);
-            
+
             // Back button - positioned in top-left
             let back_rect = egui::Rect::from_min_size(
                 egui::pos2(20.0, 20.0),
@@ -1041,7 +1041,7 @@ fn options_ui(
                     next_state.set(GameState::MainMenu);
                 }
             });
-            
+
             // Title - centered relative to full width
             ui.vertical_centered(|ui| {
                 ui.heading(
@@ -1064,23 +1064,23 @@ fn options_ui(
                         ui.group(|ui| {
                             ui.set_min_width(580.0);
                             ui.add_space(10.0);
-                            
+
                             ui.label(
                                 egui::RichText::new("Window Mode")
                                     .size(24.0)
                                     .color(egui::Color32::from_rgb(230, 204, 153)),
                             );
-                            
+
                             ui.add_space(5.0);
-                            
+
                             ui.label(
                                 egui::RichText::new("(Requires restart)")
                                     .size(14.0)
                                     .color(egui::Color32::from_rgb(150, 150, 150)),
                             );
-                            
+
                             ui.add_space(10.0);
-                            
+
                             ui.horizontal(|ui| {
                                 for mode in crate::settings::WindowModeOption::all() {
                                     let is_selected = settings.window_mode == mode;
@@ -1105,7 +1105,7 @@ fn options_ui(
                                     }
                                 }
                             });
-                            
+
                             ui.add_space(10.0);
                         });
 
@@ -1115,23 +1115,23 @@ fn options_ui(
                         ui.group(|ui| {
                             ui.set_min_width(580.0);
                             ui.add_space(10.0);
-                            
+
                             ui.label(
                                 egui::RichText::new("Resolution")
                                     .size(24.0)
                                     .color(egui::Color32::from_rgb(230, 204, 153)),
                             );
-                            
+
                             ui.add_space(5.0);
-                            
+
                             ui.label(
                                 egui::RichText::new("(Requires restart • Only applies in Windowed mode)")
                                     .size(14.0)
                                     .color(egui::Color32::from_rgb(150, 150, 150)),
                             );
-                            
+
                             ui.add_space(10.0);
-                            
+
                             ui.horizontal(|ui| {
                                 for resolution in crate::settings::ResolutionOption::all() {
                                     let is_selected = settings.resolution == resolution;
@@ -1156,7 +1156,7 @@ fn options_ui(
                                     }
                                 }
                             });
-                            
+
                             ui.add_space(10.0);
                         });
 
@@ -1166,16 +1166,16 @@ fn options_ui(
                         ui.group(|ui| {
                             ui.set_min_width(580.0);
                             ui.add_space(10.0);
-                            
+
                             ui.horizontal(|ui| {
                                 ui.label(
                                     egui::RichText::new("VSync")
                                         .size(24.0)
                                         .color(egui::Color32::from_rgb(230, 204, 153)),
                                 );
-                                
+
                                 ui.add_space(20.0);
-                                
+
                                 // Toggle switch
                                 let vsync_label = if settings.vsync { "On" } else { "Off" };
                                 if ui.add(
@@ -1188,18 +1188,18 @@ fn options_ui(
                                     info!("VSync toggled to: {}", settings.vsync);
                                 }
                             });
-                            
+
                             ui.add_space(5.0);
-                            
+
                             ui.label(
                                 egui::RichText::new("Prevents screen tearing but may reduce performance • Applied immediately")
                                     .size(14.0)
                                     .color(egui::Color32::from_rgb(150, 150, 150)),
                             );
-                            
+
                             ui.add_space(10.0);
                         });
-                        
+
                         ui.add_space(20.0);
 
                         // Aura Icons Setting
@@ -1281,20 +1281,20 @@ fn options_ui(
                         // Restart notification
                         if pending_restart.restart_required {
                             ui.add_space(30.0);
-                            
+
                             ui.group(|ui| {
                                 ui.set_min_width(580.0);
                                 ui.add_space(10.0);
-                                
+
                                 ui.horizontal(|ui| {
                                     ui.label(
                                         egui::RichText::new("⚠")
                                             .size(24.0)
                                             .color(egui::Color32::from_rgb(230, 170, 80)),
                                     );
-                                    
+
                                     ui.add_space(10.0);
-                                    
+
                                     ui.vertical(|ui| {
                                         ui.label(
                                             egui::RichText::new("Restart Required")
@@ -1308,7 +1308,7 @@ fn options_ui(
                                         );
                                     });
                                 });
-                                
+
                                 ui.add_space(10.0);
                             });
                         }
@@ -1335,22 +1335,22 @@ fn keybindings_ui(
     mut keys_just_pressed: Local<Vec<KeyCode>>,
 ) {
     use crate::keybindings::{GameAction, Keybindings};
-    
+
     // Initialize rebinding state if needed
     if rebinding_state.is_none() {
         *rebinding_state = Some(RebindingState::default());
     }
-    
+
     // Collect all keys just pressed this frame (for rebinding)
     keys_just_pressed.clear();
     for key in keyboard.get_just_pressed() {
         keys_just_pressed.push(*key);
     }
-    
+
     // Use try_ctx_mut to gracefully handle window close (the context
     // dies with the primary window; ctx_mut panics on the final frame)
     let Some(ctx) = contexts.try_ctx_mut() else { return; };
-    
+
     // Configure style for a dark theme
     let mut style = (*ctx.style()).clone();
     style.visuals.window_fill = egui::Color32::from_rgb(20, 20, 30);
@@ -1370,7 +1370,7 @@ fn keybindings_ui(
         )
         .show(ctx, |ui| {
             ui.add_space(10.0);
-            
+
             // Back button - positioned in top-left
             let back_rect = egui::Rect::from_min_size(
                 egui::pos2(20.0, 20.0),
@@ -1381,7 +1381,7 @@ fn keybindings_ui(
                     next_state.set(GameState::Options);
                 }
             });
-            
+
             // Title - centered relative to full width
             ui.vertical_centered(|ui| {
                 ui.heading(
@@ -1392,7 +1392,7 @@ fn keybindings_ui(
             });
 
             ui.add_space(30.0);
-            
+
             // Reset to defaults button
             ui.vertical_centered(|ui| {
                 if ui.add(
@@ -1416,16 +1416,16 @@ fn keybindings_ui(
                     egui::Layout::top_down(egui::Align::LEFT),
                     |ui| {
                         // Group actions by category
-                        let mut actions_by_category: std::collections::HashMap<&str, Vec<GameAction>> = 
+                        let mut actions_by_category: std::collections::HashMap<&str, Vec<GameAction>> =
                             std::collections::HashMap::new();
-                        
+
                         for action in GameAction::all() {
                             actions_by_category
                                 .entry(action.category())
                                 .or_insert_with(Vec::new)
                                 .push(action);
                         }
-                        
+
                         // Render each category
                         let categories = vec!["Navigation", "Camera", "Simulation", "Display"];
                         for category in categories {
@@ -1433,21 +1433,21 @@ fn keybindings_ui(
                                 ui.group(|ui| {
                                     ui.set_min_width(780.0);
                                     ui.add_space(10.0);
-                                    
+
                                     ui.label(
                                         egui::RichText::new(category)
                                             .size(28.0)
                                             .color(egui::Color32::from_rgb(230, 204, 153)),
                                     );
-                                    
+
                                     ui.add_space(10.0);
-                                    
+
                                     // Render each action in this category
                                     for action in actions {
                                         let rebinding = rebinding_state.as_ref()
                                             .and_then(|rs| rs.action)
                                             .map_or(false, |a| a == *action);
-                                        
+
                                         ui.horizontal(|ui| {
                                             // Action name
                                             ui.label(
@@ -1455,9 +1455,9 @@ fn keybindings_ui(
                                                     .size(18.0)
                                                     .color(egui::Color32::from_rgb(200, 200, 200))
                                             );
-                                            
+
                                             ui.add_space(20.0);
-                                            
+
                                             // Spacer to push buttons to the right
                                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                                 // Secondary key button
@@ -1466,10 +1466,10 @@ fn keybindings_ui(
                                                     .and_then(|b| b.secondary)
                                                     .map(|k| Keybindings::key_name(k).to_string())
                                                     .unwrap_or_else(|| "-".to_string());
-                                                
-                                                let secondary_rebinding = rebinding && 
+
+                                                let secondary_rebinding = rebinding &&
                                                     !rebinding_state.as_ref().unwrap().is_primary;
-                                                
+
                                                 let secondary_button = egui::Button::new(
                                                     egui::RichText::new(if secondary_rebinding {
                                                         "Press key..."
@@ -1489,24 +1489,24 @@ fn keybindings_ui(
                                                 } else {
                                                     egui::Color32::from_rgb(40, 40, 50)
                                                 });
-                                                
+
                                                 if ui.add(secondary_button).clicked() {
                                                     if let Some(rs) = rebinding_state.as_mut() {
                                                         rs.action = Some(*action);
                                                         rs.is_primary = false;
                                                     }
                                                 }
-                                                
+
                                                 ui.add_space(10.0);
-                                                
+
                                                 // Primary key button
                                                 let primary_text = binding
                                                     .map(|b| Keybindings::key_name(b.primary).to_string())
                                                     .unwrap_or_else(|| "Unbound".to_string());
-                                                
-                                                let primary_rebinding = rebinding && 
+
+                                                let primary_rebinding = rebinding &&
                                                     rebinding_state.as_ref().unwrap().is_primary;
-                                                
+
                                                 let primary_button = egui::Button::new(
                                                     egui::RichText::new(if primary_rebinding {
                                                         "Press key..."
@@ -1526,7 +1526,7 @@ fn keybindings_ui(
                                                 } else {
                                                     egui::Color32::from_rgb(60, 60, 80)
                                                 });
-                                                
+
                                                 if ui.add(primary_button).clicked() {
                                                     if let Some(rs) = rebinding_state.as_mut() {
                                                         rs.action = Some(*action);
@@ -1535,13 +1535,13 @@ fn keybindings_ui(
                                                 }
                                             });
                                         });
-                                        
+
                                         ui.add_space(8.0);
                                     }
-                                    
+
                                     ui.add_space(10.0);
                                 });
-                                
+
                                 ui.add_space(20.0);
                             }
                         }
@@ -1549,19 +1549,19 @@ fn keybindings_ui(
                 );
             });
         });
-    
+
     // Handle key press for rebinding
     if let Some(ref mut rs) = rebinding_state.as_mut() {
         if let Some(action) = rs.action {
             if !keys_just_pressed.is_empty() {
                 let new_key = keys_just_pressed[0];
-                
+
                 // Check for conflicts
                 if let Some(conflicting_action) = settings.keybindings.is_key_bound(new_key, Some(action)) {
                     info!("Key {:?} is already bound to {:?}", new_key, conflicting_action);
                     // For now, just warn. In a full implementation, you'd show a conflict dialog
                 }
-                
+
                 // Update the binding
                 if let Some(mut binding) = settings.keybindings.get(action).cloned() {
                     if rs.is_primary {
@@ -1571,7 +1571,7 @@ fn keybindings_ui(
                     }
                     settings.keybindings.set(action, binding);
                 }
-                
+
                 // Clear rebinding state
                 rs.action = None;
             }
